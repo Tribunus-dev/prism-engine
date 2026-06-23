@@ -14,6 +14,15 @@
 
 use std::path::PathBuf;
 use clap::{Parser, Subcommand};
+/// Detect if Metal GPU is available.
+fn has_metal() -> bool {
+    #[cfg(feature = "metal-dispatch")]
+    {
+        metal::Device::system_default().is_some()
+    }
+    #[cfg(not(feature = "metal-dispatch"))]
+    { false }
+}
 
 pub const PRISM_HOME: &str = ".prism";
 pub const MODELS_DIR: &str = "models";
@@ -259,7 +268,7 @@ fn pull(repo: &str) {
     eprintln!("  [4/4] compiling... ");
     let out_cimage = cimage_path(&name);
     if let Err(e) = prism_engine::lut::compiler::compile_to_cimage(
-        &graph, &safetensors_dir, &out_cimage,
+        &graph, &safetensors_dir, &out_cimage, has_metal(),
     ) {
         eprintln!("Compilation failed: {e}");
         std::process::exit(1);
@@ -300,7 +309,7 @@ fn compile_model(name: &str) {
 
     let out = cimage_path(name);
     eprintln!("[prism:compile] Compiling to {}...", out.display());
-    match prism_engine::lut::compiler::compile_to_cimage(&graph, &safetensors_dir, &out) {
+    match prism_engine::lut::compiler::compile_to_cimage(&graph, &safetensors_dir, &out, has_metal()) {
         Ok(()) => {
             let size = std::fs::metadata(&out).map(|m| m.len() / (1024 * 1024)).unwrap_or(0);
             eprintln!("[prism:compile] Done — {name} ({size} MB)");

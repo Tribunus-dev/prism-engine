@@ -54,6 +54,9 @@ pub struct TensorRecord {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct CImageHeader {
     pub tensors: HashMap<String, TensorRecord>,
+    /// Compile-time execution plan (JSON-serialized).
+    #[serde(default)]
+    pub execution_plan: Option<String>,
 }
 
 // ── Writer ──────────────────────────────────────────────────────────────
@@ -159,6 +162,11 @@ impl CImageWriter {
             },
         );
         Ok(())
+    }
+
+    /// Set the execution plan JSON stored in the header.
+    pub fn set_execution_plan(&mut self, json: &str) {
+        self.header.execution_plan = Some(json.to_string());
     }
 
     /// Finalize: write magic + header to the first 16 KB block.

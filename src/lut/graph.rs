@@ -471,6 +471,106 @@ impl ModelGraph {
     }
 }
 
+// ── Execution plan ──────────────────────────────────────────────────────
+
+/// Compile-time execution plan: predetermined backend for each operation.
+/// Generated during `prism pull`, stored in .cimage header.
+/// Runtime dispatches per plan — no feature gates or runtime probing.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ExecutionPlan {
+    pub version: u32,
+    pub architecture: String,
+    pub num_layers: u32,
+    /// Per-node backend assignments (one per graph node).
+    pub node_backends: Vec<BackendAssignment>,
+    pub kv_cache: KVCacheConfig,
+    pub attention_strategy: AttentionBackend,
+    pub lm_head_backend: String,
+}
+
+/// Which backend runs a given node.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum BackendAssignment {
+    MetalGemm,       // LUT GEMV on GPU via palettized_gemv kernel
+    MetalAttention,  // Attention on GPU via attention_decode kernel
+    CpuGemm,         // LUT GEMV on CPU via lut_gemv_cpu
+    CpuNorm,         // RMS norm on CPU
+    CpuRope,         // RoPE on CPU
+    CpuActivation,   // SiLU/GELU on CPU
+    CpuSoftmaxAttn,  // Attention on CPU via attention_cpu
+    AnePrefill,      // ANE chunked prefill
+    Skip,            // No-op node (e.g. TokenEmbedding at decode)
+}
+
+/// KV cache storage format.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum KVCacheConfig {
+    Int8,   // INT8 per-token with inline scale (CPU attention)
+    Fp16,   // FP16 (Metal attention kernel)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum AttentionBackend {
+    MetalKernel,
+    CpuSoftmax,
+}
+
+/// Generate an execution plan from a ModelGraph and available hardware.
+pub fn generate_plan(
+    graph: &ModelGraph,
+    has_metal: bool,
+    has_ane: bool,
+) -> ExecutionPlan {
+    let mut node_backends = Vec::with_capacity(graph.nodes.len());
+    for node in &graph.nodes {
+        match node {
+            ComputeNode::TokenEmbedding { .. } => node_backends.push(BackendAssignment::Skip),
+            ComputeNode::Norm { .. } => node_backends.push(BackendAssignment::CpuNorm),
+            ComputeNode::PalettizedMatmul { .. } => {
+                if has_metal {
+                    node_backends.push(BackendAssignment::MetalGemm)
+                } else {
+                    node_backends.push(BackendAssignment::CpuGemm)
+                }
+            }
+            ComputeNode::RotaryEmbedding { .. } | ComputeNode::MRoPE { .. } => {
+                node_backends.push(BackendAssignment::CpuRope)
+            }
+            ComputeNode::ScaledDotProductAttention { .. } | ComputeNode::LinearAttention { .. } => {
+                if has_metal {
+                    node_backends.push(BackendAssignment::MetalAttention)
+                } else {
+                    node_backends.push(BackendAssignment::CpuSoftmaxAttn)
+                }
+            }
+            ComputeNode::AttentionOutputGate { .. } | ComputeNode::SharedKVProjection { .. } => {
+                if has_metal {
+                    node_backends.push(BackendAssignment::MetalGemm)
+                } else {
+                    node_backends.push(BackendAssignment::CpuGemm)
+                }
+            }
+            ComputeNode::Activation { .. } => node_backends.push(BackendAssignment::CpuActivation),
+            ComputeNode::LanguageModelHead { .. } | ComputeNode::MultiTokenPredictionHead { .. } => {
+                if has_metal {
+                    node_backends.push(BackendAssignment::MetalGemm)
+                } else {
+                    node_backends.push(BackendAssignment::CpuGemm)
+                }
+            }
+        }
+    }
+    ExecutionPlan {
+        version: 1,
+        architecture: "prism-engine".into(),
+        num_layers: graph.num_layers,
+        node_backends,
+        kv_cache: if has_metal { KVCacheConfig::Fp16 } else { KVCacheConfig::Int8 },
+        attention_strategy: if has_metal { AttentionBackend::MetalKernel } else { AttentionBackend::CpuSoftmax },
+        lm_head_backend: if has_metal { "metal".into() } else { "cpu".into() },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

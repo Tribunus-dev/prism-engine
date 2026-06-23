@@ -141,6 +141,8 @@ struct AneBackend {
 pub struct PrismEngine {
     graph: ModelGraph,
     tensors: HashMap<String, CompiledTensor>,
+    /// Compile-time execution plan (loaded from .cimage header).
+    pub plan: Option<crate::lut::graph::ExecutionPlan>,
     #[cfg(feature = "metal-dispatch")] metal: Option<metal_backend::MetalBackend>,
     #[cfg(all(target_os = "macos", feature = "ane"))] ane: Option<AneBackend>,
 }
@@ -189,6 +191,15 @@ fn dequant_inline(data: &[u8], kv_dim: usize) -> Vec<u16> {
     out
 }
 
+/// KVCache config from execution plan: Int8 (CPU attention) or Fp16 (Metal attention).
+#[derive(Clone)]
+enum KVCacheMode {
+    /// INT8 per-token with inline scale (default for CPU attention).
+    Int8 { k: Vec<Vec<u8>>, v: Vec<Vec<u8>> },
+    /// FP16 buffer for Metal attention (K/V stored as u16 on CPU, uploaded to GPU).
+    Fp16 { k: Vec<Vec<u16>>, v: Vec<Vec<u16>> },
+}
+
 impl PrismEngine {
     pub fn load(path: &Path, graph: ModelGraph) -> Result<Self, String> {
         let reader = crate::quantization::cimage::CImageReader::open(path)?;
@@ -214,13 +225,19 @@ impl PrismEngine {
                 break;
             }
         }
+        // Load execution plan from .cimage header.
+        let plan = reader.header.execution_plan.as_ref().and_then(|json| {
+            serde_json::from_str::<crate::lut::graph::ExecutionPlan>(json).ok()
+        });
         Ok(PrismEngine { graph, tensors,
+            plan,
             #[cfg(feature = "metal-dispatch")] metal: None,
             #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
         })
     }
     pub fn from_memory(graph: ModelGraph, tensors: HashMap<String, CompiledTensor>) -> Self {
         PrismEngine { graph, tensors,
+            plan: None,
             #[cfg(feature = "metal-dispatch")] metal: None,
             #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
         }
@@ -815,6 +832,7 @@ mod tests {
                 m.insert("t".into(), CompiledTensor { key: "t".into(), dim_m: 2, dim_n: 8, payload: p, effective_bpp: 4.0 });
                 m
             },
+            plan: None,
             #[cfg(feature = "metal-dispatch")] metal: None,
             #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
         };

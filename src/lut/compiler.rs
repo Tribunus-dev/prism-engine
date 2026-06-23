@@ -24,8 +24,14 @@ pub fn compile_to_cimage(
     graph: &ModelGraph,
     safetensors_dir: &Path,
     output_path: &Path,
+    has_metal: bool,
 ) -> Result<(), String> {
+    // Generate execution plan before compiling weights.
+    let plan = crate::lut::graph::generate_plan(graph, has_metal, false);
+    let plan_json = serde_json::to_string(&plan).map_err(|e| format!("serialize plan: {e}"))?;
+
     let mut cimage = CImageWriter::new(output_path)?;
+    cimage.set_execution_plan(&plan_json);
     let pal_tensors = graph.palettized_tensors();
 
     let shards = discover_safetensors(safetensors_dir)?;
