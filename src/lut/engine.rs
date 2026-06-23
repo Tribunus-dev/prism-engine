@@ -229,10 +229,31 @@ impl PrismEngine {
         let plan = reader.header.execution_plan.as_ref().and_then(|json| {
             serde_json::from_str::<crate::lut::graph::ExecutionPlan>(json).ok()
         });
+
+        #[cfg(all(target_os = "macos", feature = "ane"))]
+        let mut ane: Option<AneBackend> = None;
+        // Extract and load ANE prefill model from .cimage blob.
+        #[cfg(all(target_os = "macos", feature = "ane"))]
+        if let Ok(blob) = reader.read_blob("_ane_prefill") {
+            let tmp = tempfile::tempdir().map_err(|e| format!("tmpdir: {e}"))?;
+            let mlmodelc_dir = tmp.path().join("ane_prefill.mlmodelc");
+            if crate::ane::unpack_mlmodelc(&blob, &mlmodelc_dir).is_ok() {
+                let model_path = mlmodelc_dir.to_string_lossy().to_string();
+                let model = crate::ane::coreml_bridge::CoreMlModel::load(&model_path);
+                if let Ok(model) = model {
+                    let ctx = crate::ane::coreml_state::StatefulPrefillContext::new(model.ptr);
+                    if let Ok(ctx) = ctx {
+                        ane = Some(AneBackend { model, ctx, chunk_size: 32 });
+                        eprintln!("[prism] ANE prefill loaded");
+                    }
+                }
+            }
+        }
+
         Ok(PrismEngine { graph, tensors,
             plan,
             #[cfg(feature = "metal-dispatch")] metal: None,
-            #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
+            #[cfg(all(target_os = "macos", feature = "ane"))] ane,
         })
     }
     pub fn from_memory(graph: ModelGraph, tensors: HashMap<String, CompiledTensor>) -> Self {

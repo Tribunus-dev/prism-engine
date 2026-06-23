@@ -287,6 +287,49 @@ impl CImageReader {
     }
 }
 
+
+/// Append a blob payload to an already-finalized .cimage file.
+pub fn cimage_append_blob(
+    path: &std::path::Path,
+    name: &str,
+    payload: &[u8],
+) -> Result<(), String> {
+    use std::io::{Read, Seek, Write};
+    let reader = CImageReader::open(path)?;
+    let end_offset = reader.header.tensors.values()
+        .map(|r| r.offset + r.size)
+        .max()
+        .unwrap_or(HEADER_PAGES * PAGE_SIZE);
+    let aligned = (end_offset + PAGE_SIZE - 1) / PAGE_SIZE * PAGE_SIZE;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true).write(true).open(path)
+        .map_err(|e| format!("open: {e}"))?;
+    file.seek(SeekFrom::Start(aligned))
+        .map_err(|e| format!("seek: {e}"))?;
+    file.write_all(payload)
+        .map_err(|e| format!("write blob: {e}"))?;
+    let mut header = reader.header;
+    header.tensors.insert(name.to_string(), TensorRecord {
+        tensor_type: TensorType::Blob,
+        offset: aligned,
+        size: payload.len() as u64,
+        dim_m: 0, dim_n: 0,
+    });
+    let hdr_json = serde_json::to_string(&header)
+        .map_err(|e| format!("serialize: {e}"))?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|e| format!("seek: {e}"))?;
+    file.write_all(MAGIC)
+        .map_err(|e| format!("write magic: {e}"))?;
+    let hdr_size = hdr_json.len() as u64;
+    file.write_all(&hdr_size.to_le_bytes())
+        .map_err(|e| format!("write size: {e}"))?;
+    file.write_all(hdr_json.as_bytes())
+        .map_err(|e| format!("write json: {e}"))?;
+    file.flush().map_err(|e| format!("flush: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

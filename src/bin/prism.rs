@@ -62,6 +62,9 @@ enum Commands {
         /// Server port.
         #[arg(long, default_value = "8080")]
         port: u16,
+        /// Interactive chat mode (readline REPL).
+        #[arg(long)]
+        chat: bool,
     },
     /// List available models.
     List,
@@ -80,7 +83,9 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Run { model, port } => run(model, port),
+        Commands::Run { model, port, chat } => {
+            if chat { run_chat(model) } else { run(model, port) }
+        },
         Commands::List => list(),
         Commands::Pull { repo } => pull(&repo),
         Commands::Compile { model } => compile_model(&model),
@@ -122,6 +127,58 @@ fn list() {
     if !found {
         eprintln!("No models found.");
     }
+}
+
+
+/// Interactive chat mode — stdin readline REPL.
+fn run_chat(model: Option<String>) {
+    let model_path = match &model {
+        Some(name) => find_model(name).unwrap_or_else(|| {
+            eprintln!("Model '{name}' not found. Pull one: prism pull <repo>");
+            std::process::exit(1);
+        }),
+        None => {
+            let dir = models_dir();
+            let mut candidates: Vec<_> = std::fs::read_dir(&dir).ok()
+                .into_iter().flatten().flatten()
+                .filter(|e| e.path().join("model.cimage").exists())
+                .collect();
+            candidates.sort_by_key(|e| e.file_name().to_os_string());
+            candidates.into_iter().next().map(|e| e.path())
+                .unwrap_or_else(|| { eprintln!("No models found"); std::process::exit(1); })
+        }
+    };
+    let cfg = prism_engine::lut::graph::UnifiedConfig::from_file(
+        &model_path.join("config.json"))
+        .unwrap_or_else(|e| { eprintln!("config: {e}"); std::process::exit(1); });
+    let graph = prism_engine::lut::graph::ModelGraph::build(&cfg);
+    let mut engine = prism_engine::lut::engine::PrismEngine::load(
+        &model_path.join("model.cimage"), graph)
+        .unwrap_or_else(|e| { eprintln!("load: {e}"); std::process::exit(1); });
+    #[cfg(feature = "metal-dispatch")]
+    if let Err(e) = engine.with_metal() { eprintln!("Metal: {e}"); }
+    let tok = prism_engine::tokenizer::TribunusTokenizer::from_dir(&model_path)
+        .unwrap_or_else(|e| { eprintln!("tokenizer: {e}"); std::process::exit(1); });
+    eprintln!("Prism Engine ready — interactive mode (Ctrl+C to exit)\n");
+    use std::io::{BufRead, Write};
+    let stdin = std::io::stdin();
+    loop {
+        print!(">> "); std::io::stdout().flush().ok();
+        let mut line = String::new();
+        if stdin.lock().read_line(&mut line).is_err() || line.trim().is_empty() { break; }
+        let line = line.trim().to_string();
+        if line == "exit" || line == "/exit" || line == "quit" { break; }
+        let ids = tok.encode(&line).unwrap_or_else(|e| { eprintln!("encode: {e}"); vec![] });
+        if ids.is_empty() || ids.len() > 2048 { continue; }
+        match engine.generate(&ids, 128) {
+            Ok(stats) => {
+                let text = tok.decode(&stats.generated_tokens).unwrap_or_default();
+                println!("{}\n", text);
+            }
+            Err(e) => eprintln!("error: {e}"),
+        }
+    }
+    eprintln!("Bye!");
 }
 
 fn run(model: Option<String>, port: u16) {
