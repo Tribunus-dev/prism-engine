@@ -69,12 +69,12 @@ mod metal_backend {
     }
 }
 
-// ── ANE backend (macOS + mlx-backend) ───────────────────────────────────
+// ── ANE backend (macOS only) ────────────────────────────────────────────
 
-#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
+#[cfg(all(target_os = "macos", feature = "ane"))]
 struct AneBackend {
-    model: crate::coreml_bridge::CoreMlModel,
-    ctx: crate::coreml_state::StatefulPrefillContext,
+    model: crate::ane::coreml_bridge::CoreMlModel,
+    ctx: crate::ane::coreml_state::StatefulPrefillContext,
     chunk_size: u32,
 }
 
@@ -84,7 +84,7 @@ pub struct PrismEngine {
     graph: ModelGraph,
     tensors: HashMap<String, CompiledTensor>,
     #[cfg(feature = "metal-dispatch")] metal: Option<metal_backend::MetalBackend>,
-    #[cfg(all(target_os = "macos", feature = "mlx-backend"))] ane: Option<AneBackend>,
+    #[cfg(all(target_os = "macos", feature = "ane"))] ane: Option<AneBackend>,
 }
 
 /// INT8 KV cache with per-token inline scale.
@@ -158,13 +158,13 @@ impl PrismEngine {
         }
         Ok(PrismEngine { graph, tensors,
             #[cfg(feature = "metal-dispatch")] metal: None,
-            #[cfg(all(target_os = "macos", feature = "mlx-backend"))] ane: None,
+            #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
         })
     }
     pub fn from_memory(graph: ModelGraph, tensors: HashMap<String, CompiledTensor>) -> Self {
         PrismEngine { graph, tensors,
             #[cfg(feature = "metal-dispatch")] metal: None,
-            #[cfg(all(target_os = "macos", feature = "mlx-backend"))] ane: None,
+            #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
         }
     }
     #[cfg(feature = "metal-dispatch")]
@@ -176,11 +176,11 @@ impl PrismEngine {
         self.metal = Some(metal_backend::MetalBackend::new(&self.tensors, mx, mx)?);
         eprintln!("[prism] Metal enabled"); Ok(())
     }
-    #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
+    #[cfg(all(target_os = "macos", feature = "ane"))]
     pub fn with_ane(&mut self, mc_dir: &str, cs: u32) -> Result<(), String> {
         let mp = format!("{}/k_cache_{}.mlmodelc", mc_dir, cs);
-        let model = crate::coreml_bridge::CoreMlModel::load(&mp)?;
-        let ctx = crate::coreml_state::StatefulPrefillContext::new(model.ptr)?;
+        let model = crate::ane::coreml_bridge::CoreMlModel::load(&mp)?;
+        let ctx = crate::ane::coreml_state::StatefulPrefillContext::new(model.ptr)?;
         self.ane = Some(AneBackend { model, ctx, chunk_size: cs });
         eprintln!("[prism] ANE enabled (chunk={cs})"); Ok(())
     }
@@ -196,10 +196,10 @@ impl PrismEngine {
         }).unwrap_or(896);
         let mut kv = KVCache::new(nl, kd);
         let mut pos = 0i64;
-        #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
+        #[cfg(all(target_os = "macos", feature = "ane"))]
         // TODO: call self.ane_prefill() when .mlmodelc files are compiled
         self.prefill_cpu(prompt, &mut kv, &mut pos)?;
-        #[cfg(not(all(target_os = "macos", feature = "mlx-backend")))]
+        #[cfg(not(all(target_os = "macos", feature = "ane")))]
         self.prefill_cpu(prompt, &mut kv, &mut pos)?;
 
         let mut li = 0usize;
@@ -479,7 +479,7 @@ mod tests {
                 m
             },
             #[cfg(feature = "metal-dispatch")] metal: None,
-            #[cfg(all(target_os = "macos", feature = "mlx-backend"))] ane: None,
+            #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
         };
         assert_eq!(e.embed(0).unwrap().len(), 8);
         assert_eq!(e.embed(5).unwrap().len(), 8);
