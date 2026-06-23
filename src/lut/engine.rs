@@ -409,6 +409,7 @@ impl PrismEngine {
         let mut h = self.embed(token)?;
         let mut hr = h.clone();
         let mut q: Option<Vec<u16>> = None;
+        let mut fused_qkv: Option<Vec<u16>> = None;
         let mut gate: Option<Vec<u16>> = None;
         let mut up: Option<Vec<u16>> = None;
         *li = 0;
@@ -422,6 +423,7 @@ impl PrismEngine {
                     let out = self.gemv(&h, tensor, &ct.payload);
                     match role {
                         TensorRole::QProj => q = Some(out),
+                        TensorRole::FusedQkvProj => fused_qkv = Some(out),
                         TensorRole::KProj => kv.append(*li, &out, &[]),
                         TensorRole::VProj => {
                             // INT8 KV: quantize V token via same q() used in append
@@ -459,6 +461,85 @@ impl PrismEngine {
                         if sl > 0 && kc.len() >= sl * kv.kv_dim {
                             h = attention_cpu(&qv, &kc, &vc, *num_heads as usize, *num_kv_heads as usize, *hd as usize, sl);
                         } else { h = qv; }
+                    }
+                }
+                ComputeNode::MRoPE { head_dim, rope_theta, .. } => {
+                    if let Some(ref mut qv) = q {
+                        rope_inplace(qv, pos, *head_dim as usize, *rope_theta);
+                    }
+                    if let Some(ref mut fqkv) = fused_qkv {
+                        let q_dim = *head_dim as usize;
+                        // Apply RoPE to Q and K portions of fused QKV
+                        if fqkv.len() >= q_dim * 3 {
+                            rope_inplace(&mut fqkv[..q_dim], pos, q_dim, *rope_theta);
+                            rope_inplace(&mut fqkv[q_dim..q_dim*2], pos, q_dim, *rope_theta);
+                        }
+                    }
+                }
+                ComputeNode::LinearAttention { num_heads, num_kv_heads, head_dim: hd } => {
+                    if let Some(fqkv) = fused_qkv.take() {
+                        let nh = *num_heads as usize;
+                        let nkv = *num_kv_heads as usize;
+                        let hdm = *hd as usize;
+                        let q_dim = nh * hdm;
+                        // Linear attention uses separate K/V head dims from config.
+                        // For Qwen3.5: linear_num_kv_heads=16, linear_key_head_dim=128
+                        // The fused QKV is Q + K + V where Q uses self-attention dims.
+                        // Infer KV dim from remaining fused output.
+                        let kv_dim = if fqkv.len() > q_dim { (fqkv.len() - q_dim) / 2 } else { q_dim };
+                        if fqkv.len() < q_dim + 2 * kv_dim { continue; }
+                        // Split fused QKV into Q, K, V slices (already RoPE'd by MRoPE handler)
+                        let q = fqkv[..q_dim].to_vec();
+                        let k = fqkv[q_dim..q_dim + kv_dim].to_vec();
+                        let v = fqkv[q_dim + kv_dim..q_dim + 2*kv_dim].to_vec();
+                        // Store K and V in INT8 cache
+                        kv.append(*li, &k, &[]);
+                        let max_abs = v.iter().fold(0.0f32, |a, &val|
+                            a.max(half::f16::from_bits(val).to_f32().abs()));
+                        let scale = if max_abs > 1e-10 { 127.0 / max_abs } else { 1.0 };
+                        kv.v[*li].extend_from_slice(&scale.to_le_bytes());
+                        for &val in &v {
+                            let f = half::f16::from_bits(val).to_f32();
+                            kv.v[*li].push(((f * scale).round().clamp(-128.0, 127.0) as i8) as u8);
+                        }
+                        kv.seq_lens[*li] = kv.k[*li].len() / (kv.kv_dim + 4).max(1);
+                        // Softmax attention with cache
+                        let sl = kv.seq_len(*li);
+                        let kc = kv.get_k(*li);
+                        let vc = kv.get_v(*li);
+                        if sl > 0 && kc.len() >= sl * kv.kv_dim {
+                            h = attention_cpu(&q, &kc, &vc, nh, nkv, hdm, sl);
+                        } else { h = q; }
+                    }
+                }
+                ComputeNode::AttentionOutputGate { key, dim } => {
+                    if let Some(ct) = self.tensors.get(key) {
+                        if h.len() == *dim as usize {
+                            let out = self.gemv(&h, &crate::lut::graph::TensorBlueprint {
+                                key: key.clone(), dim_m: *dim, dim_n: h.len() as u32,
+                            }, &ct.payload);
+                            // Same residual pattern as OProj
+                            h = out;
+                            vec_add_inplace(&mut h, &hr);
+                            hr = h.clone();
+                        }
+                    }
+                }
+                ComputeNode::SharedKVProjection { tensor } => {
+                    if let Some(ct) = self.tensors.get(&tensor.key) {
+                        if h.len() == tensor.dim_n as usize {
+                            let out = self.gemv(&h, tensor, &ct.payload);
+                            // Shared K/V: store same values for both K and V
+                            kv.append(*li, &out, &out);
+                        }
+                    }
+                }
+                ComputeNode::MultiTokenPredictionHead { tensor, depth: _ } => {
+                    if let Some(ct) = self.tensors.get(&tensor.key) {
+                        if h.len() == tensor.dim_n as usize {
+                            // MTP head: separate LM head for MTP depth, produce logits
+                            h = self.gemv(&h, tensor, &ct.payload);
+                        }
                     }
                 }
                 ComputeNode::Activation { func } => match func {

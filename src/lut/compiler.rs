@@ -60,6 +60,29 @@ pub fn compile_to_cimage(
         eprintln!("bpp={bpp:.3} {:.2}s", elapsed.as_secs_f64());
     }
 
+    // Also compile the embedding tensor (not in palettized_tensors).
+    for node in &graph.nodes {
+        if let crate::lut::graph::ComputeNode::TokenEmbedding { key, vocab_size, hidden_dim } = node {
+            let tb = TensorBlueprint { key: key.clone(), dim_m: *vocab_size, dim_n: *hidden_dim };
+            let t0 = std::time::Instant::now();
+            let f32_vals = load_weight_f32(&shards, &tb)?;
+            let out_dim = *vocab_size as usize;
+            let in_dim = *hidden_dim as usize;
+            eprint!("  [prism] {} ({}×{})... ", key, out_dim, in_dim);
+            let pal = palettize_matrix(&f32_vals, out_dim, in_dim, 16, 50);
+            let mut payload = Vec::with_capacity(pal.rows.len() * 16 * 2 + out_dim * in_dim / 8 * 4);
+            for row in &pal.rows {
+                for &cb_f32 in &row.codebook {
+                    payload.extend_from_slice(&half::f16::from_f32(cb_f32).to_bits().to_le_bytes());
+                }
+            }
+            for row in &pal.rows { payload.extend_from_slice(&row.indices); }
+            cimage.append_palettized(key, &payload, *vocab_size, *hidden_dim)?;
+            eprintln!("bpp={:.3} {:.2}s", pal.effective_bpp(), t0.elapsed().as_secs_f64());
+            break;
+        }
+    }
+
     cimage.finalize()?;
     eprintln!("[prism:compile] Done -> {}", output_path.display());
     Ok(())

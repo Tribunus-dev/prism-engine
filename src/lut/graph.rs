@@ -58,7 +58,7 @@ pub enum ComputeNode {
     /// Full softmax attention (standard transformer).
     ScaledDotProductAttention { num_heads: u32, num_kv_heads: u32, head_dim: u32 },
     /// Gated DeltaNet linear attention (SSM hybrid).
-    LinearAttention { num_heads: u32, state_dim: u32, head_dim: u32, decay_factor: f32 },
+    LinearAttention { num_heads: u32, num_kv_heads: u32, head_dim: u32 },
     /// Attention output gate (SiLU-gated O projection).
     AttentionOutputGate { key: String, dim: u32 },
     /// Multi-resolution RoPE for vision-language tokens.
@@ -84,6 +84,10 @@ pub struct HfConfigBlock {
     pub rms_norm_eps: Option<f32>,
     pub layer_norm_eps: Option<f32>,
     pub rope_theta: Option<f32>,
+    pub linear_num_key_heads: Option<u32>,
+    pub linear_key_head_dim: Option<u32>,
+    pub linear_num_value_heads: Option<u32>,
+    pub linear_value_head_dim: Option<u32>,
     #[serde(default)]
     pub rope_parameters: Option<serde_json::Value>,
     pub hidden_act: Option<String>,
@@ -135,6 +139,11 @@ pub struct UnifiedConfig {
     pub layer_types: Vec<String>,
     pub mrope_section: Vec<u32>,
     pub mtp_depth: u32,
+    /// Linear (MLA) attention dimensions (Qwen3.5).
+    pub linear_num_key_heads: u32,
+    pub linear_key_head_dim: u32,
+    pub linear_num_value_heads: u32,
+    pub linear_value_head_dim: u32,
     /// Weight key prefix (varies: "model" for Qwen, "language_model.model" for Gemma4/Qwen3_5).
     pub key_prefix: String,
 }
@@ -195,9 +204,8 @@ impl UnifiedConfig {
         };
 
         let key_prefix = match family {
-            ArchitectureFamily::Qwen3_5 | ArchitectureFamily::Gemma4 => {
-                "language_model.model".to_string()
-            }
+            ArchitectureFamily::Qwen3_5 => "model.language_model".to_string(),
+            ArchitectureFamily::Gemma4 => "language_model.model".to_string(),
             _ => "model".to_string(),
         };
 
@@ -222,6 +230,10 @@ impl UnifiedConfig {
             layer_types,
             mrope_section: resolve_cfg!(raw, mrope_section).unwrap_or_default(),
             mtp_depth: resolve_cfg!(raw, mtp_num_hidden_layers).unwrap_or(0),
+            linear_num_key_heads: resolve_cfg!(raw, linear_num_key_heads).unwrap_or(num_kv),
+            linear_key_head_dim: resolve_cfg!(raw, linear_key_head_dim).unwrap_or(head_dim),
+            linear_num_value_heads: resolve_cfg!(raw, linear_num_value_heads).unwrap_or(num_kv),
+            linear_value_head_dim: resolve_cfg!(raw, linear_value_head_dim).unwrap_or(head_dim),
             key_prefix,
         })
     }
@@ -266,30 +278,53 @@ impl ModelGraph {
 
             if is_linear {
                 // Linear attention layer (SSM hybrid)
-                // QKV fused projection for Gated DeltaNet
+                let q_dim = config.num_heads * config.head_dim;
+                let fused_qkv_dim = q_dim
+                    + config.linear_num_key_heads * config.linear_key_head_dim
+                    + config.linear_num_value_heads * config.linear_value_head_dim;
+
+                // QKV fused projection
                 nodes.push(ComputeNode::PalettizedMatmul {
                     role: TensorRole::FusedQkvProj,
                     tensor: TensorBlueprint {
-                        key: format!("{prefix}.self_attn.q_proj.weight"),
-                        dim_m: config.hidden_size,      // Fused QKV output
+                        key: format!("{prefix}.linear_attn.in_proj_qkv.weight"),
+                        dim_m: fused_qkv_dim,
                         dim_n: config.hidden_size,
                     },
                 });
+
+                // RoPE (Qwen3.5 applies it to Q and K in linear layers too)
+                if config.mrope_section.is_empty() {
+                    nodes.push(ComputeNode::RotaryEmbedding {
+                        head_dim: config.head_dim,
+                        rope_theta: config.rope_theta,
+                    });
+                } else {
+                    nodes.push(ComputeNode::MRoPE {
+                        head_dim: config.head_dim,
+                        rope_theta: config.rope_theta,
+                        mrope_section: config.mrope_section.clone(),
+                    });
+                }
+
                 nodes.push(ComputeNode::LinearAttention {
                     num_heads: config.num_heads,
+                    num_kv_heads: config.num_kv_heads,
                     head_dim: config.head_dim,
-                    state_dim: 128, // typical linear attention state
-                    decay_factor: 0.95,
                 });
 
-                // Attention output gate (Qwen 3.5)
+                // Attention output gate (Qwen3.5 uses softmax attn with gate)
                 nodes.push(ComputeNode::AttentionOutputGate {
-                    key: format!("{prefix}.self_attn.o_proj.weight"), // same as O proj
+                    key: format!("{prefix}.linear_attn.out_proj.weight"),
                     dim: config.hidden_size,
                 });
             } else {
                 // Standard full attention layer
                 let q_dim = config.num_heads * config.head_dim;
+                // Qwen3.5 full attention layers double Q dim (QK-norm: 512→256 per head)
+                let q_proj_dim = if config.family == ArchitectureFamily::Qwen3_5 {
+                    q_dim * 2  // q_proj outputs 512/head, q_norm reduces to 256
+                } else { q_dim };
                 let kv_dim = config.num_kv_heads * config.head_dim;
 
                 // Q/K/V projections (or shared K/V)
@@ -297,7 +332,7 @@ impl ModelGraph {
                     role: TensorRole::QProj,
                     tensor: TensorBlueprint {
                         key: format!("{prefix}.self_attn.q_proj.weight"),
-                        dim_m: q_dim, dim_n: config.hidden_size,
+                        dim_m: q_proj_dim, dim_n: config.hidden_size,
                     },
                 });
 
@@ -400,7 +435,12 @@ impl ModelGraph {
         if config.mtp_depth > 0 {
             nodes.push(ComputeNode::MultiTokenPredictionHead {
                 tensor: TensorBlueprint {
-                    key: format!("{p}.lm_head.weight"),
+                    // MTP head uses same weight source as LM head
+                    key: if config.tie_word_embeddings {
+                        format!("{p}.embed_tokens.weight")
+                    } else {
+                        format!("{p}.lm_head.weight")
+                    },
                     dim_m: config.vocab_size,
                     dim_n: config.hidden_size,
                 },
