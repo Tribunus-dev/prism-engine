@@ -19,6 +19,7 @@ mod metal_backend {
     use metal::*;
     use std::collections::HashMap;
     include!(concat!(env!("OUT_DIR"), "/embedded_metallib.rs"));
+    const MAX_SEQ: u64 = 4096;
     pub struct MetalBackend {
         pub device: Device,
         pub library: Library,
@@ -27,10 +28,13 @@ mod metal_backend {
         pub attn_pipeline: ComputePipelineState,
         pub weight_bufs: HashMap<String, (Buffer, u32, u32)>,
         pub scratch: Buffer,
+    pub kv_bufs: Vec<(Buffer, Buffer)>,
+    pub kv_stride: u64,
+    pub kv_offsets: Vec<u64>,
     }
     impl MetalBackend {
         pub fn new(tensors: &HashMap<String, crate::lut::compiler::CompiledTensor>,
-            mh: u64, _mi: u64) -> Result<Self, String> {
+            mh: u64, _mi: u64, num_layers: u32, kv_stride: u64) -> Result<Self, String> {
             let device = Device::system_default().ok_or("No Metal device")?;
             let library = device.new_library_with_data(KERNEL_BYTES)
                 .map_err(|e| format!("embedded lib: {e:?}"))?;
@@ -44,6 +48,15 @@ mod metal_backend {
                 .map_err(|e| format!("attn ps: {e:?}"))?;
             let cq = device.new_command_queue();
             let scratch = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
+            let layer_cap = MAX_SEQ * kv_stride;
+            let mut kv_bufs = Vec::with_capacity(num_layers as usize);
+            for _ in 0..num_layers {
+                kv_bufs.push((
+                    device.new_buffer(layer_cap, MTLResourceOptions::StorageModePrivate),
+                    device.new_buffer(layer_cap, MTLResourceOptions::StorageModePrivate),
+                ));
+            }
+            let kv_offsets = vec![0u64; num_layers as usize];
             let mut wb = HashMap::new();
             for (k, ct) in tensors.iter() {
                 let b = unsafe { device.new_buffer_with_data(ct.payload.as_ptr() as *const std::ffi::c_void,
@@ -51,7 +64,7 @@ mod metal_backend {
                 wb.insert(k.clone(), (b, ct.dim_m, ct.dim_n));
             }
 
-            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, weight_bufs: wb, scratch })
+            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, weight_bufs: wb, scratch, kv_bufs, kv_stride, kv_offsets })
         }
         pub fn gemv(&self, key: &str, inp: &[u16], out: &mut [u16]) -> Result<(), String> {
             let (wb, dm, dn) = self.weight_bufs.get(key).ok_or_else(|| format!("miss {key}"))?;
@@ -115,6 +128,8 @@ mod metal_backend {
             enc.set_bytes(5, 4, &nh as *const u32 as *const _);
             enc.set_bytes(6, 4, &nkv as *const u32 as *const _);
             enc.set_bytes(7, 4, &hd as *const u32 as *const _);
+            let stride = (self.kv_stride / 2) as u32; // elements per token in buffer
+            enc.set_bytes(8, 4, &stride as *const u32 as *const _);
             enc.dispatch_thread_groups(MTLSize::new(num_heads as u64, 1, 1), MTLSize::new(1, 1, 1));
             enc.end_encoding(); cb.commit(); cb.wait_until_completed();
             let mut out = vec![0u16; out_len];
@@ -125,8 +140,31 @@ mod metal_backend {
             }
             out
         }
+
+        /// Copy FP16 K/V for one token to the GPU cache.
+        pub fn append_kv(&self, layer: usize, k: &[u16], v: &[u16], token_idx: u64) {
+            if layer >= self.kv_bufs.len() || self.kv_stride == 0 { return; }
+            let off = token_idx * self.kv_stride;
+            if off + self.kv_stride > MAX_SEQ * self.kv_stride { return; }
+            let (ref k_buf, ref v_buf) = self.kv_bufs[layer];
+            let kb = k.len() as u64 * 2;
+            unsafe {
+                std::ptr::copy_nonoverlapping(k.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8, kb as usize);
+                std::ptr::copy_nonoverlapping(v.as_ptr() as *const u8,
+                    (self.scratch.contents() as *mut u8).add(kb as usize), kb as usize);
+            }
+            let cb = self.command_queue.new_command_buffer();
+            let blit = cb.new_blit_command_encoder();
+            blit.copy_from_buffer(&self.scratch, 0, k_buf, off, kb);
+            blit.copy_from_buffer(&self.scratch, kb, v_buf, off, kb);
+            blit.end_encoding();
+            cb.commit(); cb.wait_until_completed();
+        }
     }
 }
+
+
 
 
 #[cfg(all(target_os = "macos", feature = "ane"))]
@@ -269,7 +307,15 @@ impl PrismEngine {
             ComputeNode::PalettizedMatmul { tensor, .. } => Some(tensor.dim_n.max(tensor.dim_m)),
             _ => None,
         }).max().unwrap_or(4096) as u64;
-        self.metal = Some(metal_backend::MetalBackend::new(&self.tensors, mx, mx)?);
+                let nl = self.graph.num_layers as u32;
+        let max_kvd = self.graph.nodes.iter().filter_map(|n| match n {
+            ComputeNode::ScaledDotProductAttention { num_kv_heads, head_dim, .. } =>
+                Some((*num_kv_heads * *head_dim) as u64),
+            ComputeNode::LinearAttention { num_heads, head_dim, .. } =>
+                Some((*num_heads * *head_dim) as u64),
+            _ => None,
+        }).max().unwrap_or(2048);
+        self.metal = Some(metal_backend::MetalBackend::new(&self.tensors, mx, mx, nl, max_kvd * 2)?);
         eprintln!("[prism] Metal enabled"); Ok(())
     }
     #[cfg(all(target_os = "macos", feature = "ane"))]
@@ -508,6 +554,7 @@ impl PrismEngine {
         let mut fused_qkv: Option<Vec<u16>> = None;
         let mut gate: Option<Vec<u16>> = None;
         let mut up: Option<Vec<u16>> = None;
+        let mut last_k: Option<Vec<u16>> = None;
         *li = 0;
         for node in &self.graph.nodes {
             match node {
@@ -520,7 +567,7 @@ impl PrismEngine {
                     match role {
                         TensorRole::QProj => q = Some(out),
                         TensorRole::FusedQkvProj => fused_qkv = Some(out),
-                        TensorRole::KProj => kv.append(*li, &out, &[]),
+                        TensorRole::KProj => { kv.append(*li, &out, &[]); last_k = Some(out); },
                         TensorRole::VProj => {
                             // INT8 KV: quantize V token via same q() used in append
                             let max_abs = out.iter().fold(0.0f32, |a, &v| a.max(half::f16::from_bits(v).to_f32().abs()));
@@ -531,6 +578,10 @@ impl PrismEngine {
                                 kv.v[*li].push(((f * scale).round().clamp(-128.0, 127.0) as i8) as u8);
                             }
                             kv.seq_lens[*li] = kv.k[*li].len() / (kv.kv_dim + 4).max(1);
+                            #[cfg(feature = "metal-dispatch")]
+                            if let (Some(ref k_gpu), Some(ref m)) = (last_k.take(), self.metal.as_ref()) {
+                                m.append_kv(*li, k_gpu, &out, kv.seq_lens[*li] as u64);
+                            }
                         }
                         TensorRole::OProj => { h = out; vec_add_inplace(&mut h, &hr); hr = h.clone(); }
                         TensorRole::GateProj => gate = Some(out),
