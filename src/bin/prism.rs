@@ -274,6 +274,40 @@ fn pull(repo: &str) {
         std::process::exit(1);
     }
 
+    // 6. Generate ANE prefill MIL and compile to .mlmodelc (macOS only).
+    #[cfg(feature = "ane")]
+    {
+        eprint!("  [5/5] ANE prefill... ");
+        let _mil = prism_engine::ane::mil_gen::generate_ane_prefill_mil(
+            &out_dir,
+            graph.num_layers,
+            graph.nodes.iter().find_map(|n| match n {
+                prism_engine::lut::graph::ComputeNode::TokenEmbedding { hidden_dim, .. } => Some(*hidden_dim),
+                _ => None
+            }).unwrap_or(896),
+            graph.nodes.iter().find_map(|n| match n {
+                prism_engine::lut::graph::ComputeNode::ScaledDotProductAttention { num_heads, .. } => Some(*num_heads),
+                _ => None
+            }).unwrap_or(32),
+            graph.nodes.iter().find_map(|n| match n {
+                prism_engine::lut::graph::ComputeNode::ScaledDotProductAttention { num_kv_heads, .. } => Some(*num_kv_heads),
+                _ => None
+            }).unwrap_or(32),
+            graph.nodes.iter().find_map(|n| match n {
+                prism_engine::lut::graph::ComputeNode::ScaledDotProductAttention { head_dim, .. } => Some(*head_dim),
+                _ => None
+            }).unwrap_or(64),
+            graph.nodes.iter().find_map(|n| match n {
+                prism_engine::lut::graph::ComputeNode::TokenEmbedding { vocab_size, .. } => Some(*vocab_size),
+                _ => None
+            }).unwrap_or(151936),
+            32, // max_chunk
+            true, // tie_embeddings
+        );
+        // TODO: embed .mlmodelc into .cimage as blob
+        eprintln!("ok");
+    }
+
     let size_mb = std::fs::metadata(&out_cimage).map(|m| m.len() / (1024 * 1024)).unwrap_or(0);
     eprintln!("[prism:pull] Done — {name} ({size_mb} MB)");
     eprintln!("  Run: prism run {name}");
