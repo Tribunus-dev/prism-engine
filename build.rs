@@ -6,6 +6,7 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
 
     let metal_sources = &[
+        "attention_decode.metal",
         "palettized_gemv.metal",
         "palettized_gemv_swiglu.metal",
         "palettized_gemm.metal",
@@ -30,6 +31,7 @@ fn main() {
         air_files.push(air_file);
     }
 
+    // Link all .air → .metallib
     let metallib_path = std::path::Path::new(&out_dir).join("palettized_kernels.metallib");
     let mut link_cmd = std::process::Command::new("xcrun");
     link_cmd.args(["-sdk", "macosx", "metallib", "-o"]);
@@ -40,10 +42,19 @@ fn main() {
     let status = link_cmd.status().expect("Failed to execute xcrun metallib");
     assert!(status.success(), "xcrun metallib failed");
 
+    // Generate embedded_metallib.rs with the kernel bytes baked into the binary.
+    let metallib_bytes = std::fs::read(&metallib_path).expect("read metallib");
+    let rs_path = std::path::Path::new(&out_dir).join("embedded_metallib.rs");
+    std::fs::write(&rs_path, format!(
+        "/// Auto-generated: embedded Metal kernel library ({} bytes)\n\
+         pub const KERNEL_BYTES: &[u8] = &{:?};\n",
+        metallib_bytes.len(), metallib_bytes
+    )).expect("write embedded metallib");
+
+    // Also keep the env var for fallback
     println!("cargo:rustc-env=TRIBUNUS_METALLIB={}", metallib_path.display());
 
     // ── ANE ObjC bridge ────────────────────────────────────────────────
-    // Compiled when `ane` feature is active (macOS only).
     #[cfg(all(target_os = "macos", feature = "ane"))]
     {
         let bridge_dir = std::path::Path::new(&manifest_dir).join("src").join("bridge");
@@ -55,18 +66,13 @@ fn main() {
             .flag("-O2")
             .include(&bridge_dir);
 
-        // Core ML execution
         build.file(bridge_dir.join("coreml_exec.mm"));
-        // Stateful prediction
         build.file(bridge_dir.join("coreml_state.mm"));
-        // IOSurface arena
         build.file(bridge_dir.join("coreml_arena.mm"));
-        // ANE private API
         build.file(bridge_dir.join("ane_private.mm"));
 
         build.compile("prism_ane_bridge");
 
-        // Link required frameworks
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=CoreFoundation");
         println!("cargo:rustc-link-lib=framework=CoreML");

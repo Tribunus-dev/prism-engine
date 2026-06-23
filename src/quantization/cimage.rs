@@ -34,6 +34,8 @@ const MAGIC: &[u8; 8] = b"TRB_CIMG";
 pub enum TensorType {
     StandardFP16,
     Palettized4Bit,
+    /// Arbitrary byte blob (e.g. compiled CoreML model).
+    Blob,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -137,6 +139,28 @@ impl CImageWriter {
         Ok(())
     }
 
+    /// Write an arbitrary byte blob (CoreML model, etc.).
+    pub fn append_blob(
+        &mut self,
+        name: &str,
+        payload: &[u8],
+    ) -> Result<(), String> {
+        self.align_to_page()?;
+        let offset = self.current_pos()?;
+        self.file.write_all(payload).map_err(|e| format!("write blob: {e}"))?;
+        self.header.tensors.insert(
+            name.to_string(),
+            TensorRecord {
+                tensor_type: TensorType::Blob,
+                offset,
+                size: payload.len() as u64,
+                dim_m: 0,
+                dim_n: 0,
+            },
+        );
+        Ok(())
+    }
+
     /// Finalize: write magic + header to the first 16 KB block.
     pub fn finalize(mut self) -> Result<(), String> {
         let header_json =
@@ -195,6 +219,7 @@ impl CImageWriter {
 pub struct CImageReader {
     pub header: CImageHeader,
     pub(crate) _file: File,
+    file_path: std::path::PathBuf,
 }
 
 impl CImageReader {
@@ -225,10 +250,30 @@ impl CImageReader {
         let header: CImageHeader = serde_json::from_slice(&hdr_buf)
             .map_err(|e| format!("parse header: {e}"))?;
 
-        Ok(CImageReader { header, _file: file })
+        let file_path = path.to_path_buf();
+        Ok(CImageReader { header, _file: file, file_path })
     }
 
+    /// Return the offset + size for a named tensor/blob.
+
+    /// Read a blob payload from disk into memory.
+    pub fn read_blob(&self, name: &str) -> Result<Vec<u8>, String> {
+        let rec = self.tensor(name).ok_or_else(|| format!("blob {name} not found"))?;
+        if !matches!(rec.tensor_type, TensorType::Blob) {
+            return Err(format!("{name} is not a blob"));
+        }
+        use std::io::{Read, Seek};
+        let mut f = std::fs::File::open(&self.file_path)
+            .map_err(|e| format!("re-open: {e}"))?;
+        f.seek(SeekFrom::Start(rec.offset))
+            .map_err(|e| format!("seek: {e}"))?;
+        let mut buf = vec![0u8; rec.size as usize];
+        f.read_exact(&mut buf).map_err(|e| format!("read blob: {e}"))?;
+        Ok(buf)
+    }
     /// Return the offset + size for a named tensor.
+
+/// Return the offset + size for a named tensor.
     pub fn tensor(&self, name: &str) -> Option<&TensorRecord> {
         self.header.tensors.get(name)
     }

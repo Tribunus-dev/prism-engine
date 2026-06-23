@@ -18,11 +18,13 @@ pub struct InferenceStats {
 mod metal_backend {
     use metal::*;
     use std::collections::HashMap;
+    include!(concat!(env!("OUT_DIR"), "/embedded_metallib.rs"));
     pub struct MetalBackend {
         pub device: Device,
         pub library: Library,
         pub command_queue: CommandQueue,
         pub pipeline: ComputePipelineState,
+        pub attn_pipeline: ComputePipelineState,
         pub weight_bufs: HashMap<String, (Buffer, u32, u32)>,
         pub scratch: Buffer,
     }
@@ -30,12 +32,16 @@ mod metal_backend {
         pub fn new(tensors: &HashMap<String, crate::lut::compiler::CompiledTensor>,
             mh: u64, _mi: u64) -> Result<Self, String> {
             let device = Device::system_default().ok_or("No Metal device")?;
-            let mp = std::path::Path::new(option_env!("TRIBUNUS_METALLIB").ok_or("TRIBUNUS_METALLIB")?);
-            let library = device.new_library_with_file(mp).map_err(|e| format!("lib: {e:?}"))?;
+            let library = device.new_library_with_data(KERNEL_BYTES)
+                .map_err(|e| format!("embedded lib: {e:?}"))?;
             let function = library.get_function("palettized_gemv", None).map_err(|e| format!("fn: {e:?}"))?;
             let pipeline = device.new_compute_pipeline_state_with_function(
                 &function)
                 .map_err(|e| format!("ps: {e:?}"))?;
+            let attn_fn = library.get_function("attention_decode", None).map_err(|e| format!("attn fn: {e:?}"))?;
+            let attn_pipeline = device.new_compute_pipeline_state_with_function(
+                &attn_fn)
+                .map_err(|e| format!("attn ps: {e:?}"))?;
             let cq = device.new_command_queue();
             let scratch = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
             let mut wb = HashMap::new();
@@ -44,7 +50,8 @@ mod metal_backend {
                     ct.payload.len() as u64, MTLResourceOptions::StorageModeShared) };
                 wb.insert(k.clone(), (b, ct.dim_m, ct.dim_n));
             }
-            Ok(MetalBackend { device, library, command_queue: cq, pipeline, weight_bufs: wb, scratch })
+
+            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, weight_bufs: wb, scratch })
         }
         pub fn gemv(&self, key: &str, inp: &[u16], out: &mut [u16]) -> Result<(), String> {
             let (wb, dm, dn) = self.weight_bufs.get(key).ok_or_else(|| format!("miss {key}"))?;
@@ -66,10 +73,61 @@ mod metal_backend {
                 (self.scratch.contents() as *const u8).add(il), out.as_mut_ptr() as *mut u8, ol); }
             Ok(())
         }
+
+        /// GPU-accelerated GQA attention: Q@K^T→softmax→@V
+        /// Each thread handles one head. Q, K, V are FP16 Vec<u16> slices.
+        pub fn attention(
+            &self,
+            q: &[u16],
+            k: &[u16],
+            v: &[u16],
+            seq_len: usize,
+            num_heads: usize,
+            kv_heads: usize,
+            head_dim: usize,
+        ) -> Vec<u16> {
+            let kv_dim = kv_heads * head_dim;
+            let out_len = num_heads * head_dim;
+            if k.len() < seq_len * kv_dim || v.len() < seq_len * kv_dim {
+                return vec![0u16; out_len];
+            }
+            let qb = q.len() * 2;
+            let kb = k.len() * 2;
+            let vb = v.len() * 2;
+            let ob = out_len * 2;
+            let needed = qb + kb + vb + ob;
+            if self.scratch.length() < needed as u64 { return vec![0u16; out_len]; }
+            unsafe {
+                let ptr = self.scratch.contents() as *mut u8;
+                std::ptr::copy_nonoverlapping(q.as_ptr() as *const u8, ptr, qb);
+                std::ptr::copy_nonoverlapping(k.as_ptr() as *const u8, ptr.add(qb), kb);
+                std::ptr::copy_nonoverlapping(v.as_ptr() as *const u8, ptr.add(qb + kb), vb);
+            }
+            let cb = self.command_queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&self.attn_pipeline);
+            enc.set_buffer(0, Some(&self.scratch), 0);
+            enc.set_buffer(1, Some(&self.scratch), qb as u64);
+            enc.set_buffer(2, Some(&self.scratch), (qb + kb) as u64);
+            enc.set_buffer(3, Some(&self.scratch), (qb + kb + vb) as u64);
+            let sl = seq_len as u32; let nh = num_heads as u32; let nkv = kv_heads as u32; let hd = head_dim as u32;
+            enc.set_bytes(4, 4, &sl as *const u32 as *const _);
+            enc.set_bytes(5, 4, &nh as *const u32 as *const _);
+            enc.set_bytes(6, 4, &nkv as *const u32 as *const _);
+            enc.set_bytes(7, 4, &hd as *const u32 as *const _);
+            enc.dispatch_thread_groups(MTLSize::new(num_heads as u64, 1, 1), MTLSize::new(1, 1, 1));
+            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            let mut out = vec![0u16; out_len];
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    (self.scratch.contents() as *const u8).add(qb + kb + vb),
+                    out.as_mut_ptr() as *mut u8, ob);
+            }
+            out
+        }
     }
 }
 
-// ── ANE backend (macOS only) ────────────────────────────────────────────
 
 #[cfg(all(target_os = "macos", feature = "ane"))]
 struct AneBackend {
@@ -459,7 +517,7 @@ impl PrismEngine {
                         let sl = kv.seq_len(*li);
                         let kc = kv.get_k(*li); let vc = kv.get_v(*li);
                         if sl > 0 && kc.len() >= sl * kv.kv_dim {
-                            h = attention_cpu(&qv, &kc, &vc, *num_heads as usize, *num_kv_heads as usize, *hd as usize, sl);
+                            h = self.attention(&qv, &kc, &vc, *num_heads as usize, *num_kv_heads as usize, *hd as usize, sl);
                         } else { h = qv; }
                     }
                 }
@@ -508,7 +566,7 @@ impl PrismEngine {
                         let kc = kv.get_k(*li);
                         let vc = kv.get_v(*li);
                         if sl > 0 && kc.len() >= sl * kv.kv_dim {
-                            h = attention_cpu(&q, &kc, &vc, nh, nkv, hdm, sl);
+                            h = self.attention(&q, &kc, &vc, nh, nkv, hdm, sl);
                         } else { h = q; }
                     }
                 }
@@ -627,6 +685,17 @@ impl PrismEngine {
         #[cfg(feature = "metal-dispatch")]
         if let Some(ref m) = self.metal { if m.gemv(&tensor.key, input, &mut out).is_ok() { return out; } }
         lut_gemv_cpu(input, _payload, tensor.dim_m, tensor.dim_n)
+    }
+
+    /// GPU-accelerated attention with CPU fallback.
+    fn attention(&self, q: &[u16], k: &[u16], v: &[u16], nh: usize, nkv: usize, hd: usize, sl: usize) -> Vec<u16> {
+        #[cfg(feature = "metal-dispatch")]
+        if let Some(ref m) = self.metal {
+            if sl <= 4096 {
+                return m.attention(q, k, v, sl, nh, nkv, hd);
+            }
+        }
+        attention_cpu(q, k, v, nh, nkv, hd, sl)
     }
 }
 
