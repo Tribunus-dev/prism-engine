@@ -1,0 +1,54 @@
+[package]
+name = "prism-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Palettized LUT inference runtime with Metal GPU acceleration"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Tribunus-dev/prism-engine"
+
+[lib]
+name = "prism_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "prism"
+path = "src/bin/prism.rs"
+
+[[bin]]
+name = "prism-server"
+path = "src/bin/prism_server.rs"
+
+[dependencies]
+metal = { version = "0.29", optional = true }
+objc = { version = "0.2", optional = true }
+half = "2"
+safetensors = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+axum = { version = "0.8", optional = true }
+tower-http = { version = "0.6", optional = true, features = ["cors"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "signal"] }
+hf-hub = "0.4"
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+rayon = "1"
+rand = "0.8"
+sha2 = { version = "0.10", features = ["asm"] }
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+bytemuck = { version = "1", features = ["derive"] }
+parking_lot = "0.12"
+
+[features]
+default = []
+metal-dispatch = ["dep:metal", "dep:objc"]
+server = ["dep:axum", "dep:tower-http"]
+full = ["metal-dispatch", "server"]
+
+[build-dependencies]
+cc = "1.2"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
