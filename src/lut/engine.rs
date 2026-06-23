@@ -185,6 +185,140 @@ impl PrismEngine {
         eprintln!("[prism] ANE enabled (chunk={cs})"); Ok(())
     }
 
+    #[cfg(all(target_os = "macos", feature = "ane"))]
+    /// Standalone embedding lookup for ANE prefill (no &self needed).
+    fn ane_embed(
+        token: u32,
+        tensors: &HashMap<String, crate::lut::compiler::CompiledTensor>,
+    ) -> Result<Vec<u16>, String> {
+        // Find embedding tensor by matching known key patterns.
+        let (key, ct) = tensors.iter().find(|(k, _)| {
+            k.as_str().contains("embed") || k.as_str().contains("tok_embeddings") || k.as_str().contains("wte") || k.as_str() == "t"
+        }).ok_or_else(|| "no embedding tensor in ANE path".to_string())?;
+        let hd = ct.dim_n as usize;
+        let t = token as usize;
+        if t >= ct.dim_m as usize { return Ok(vec![0u16; hd]); }
+        let cb = ct.dim_m as usize * 16 * 2;
+        let mut c = [0u16; 16];
+        for i in 0..16 { c[i] = u16::from_le_bytes([ct.payload[t*32+i*2], ct.payload[t*32+i*2+1]]); }
+        let io = cb + t * (hd / 2);
+        let mut v = Vec::with_capacity(hd);
+        for wi in 0..hd / 8 {
+            let o = io + wi * 4;
+            let pw = u32::from_le_bytes([ct.payload[o], ct.payload[o+1], ct.payload[o+2], ct.payload[o+3]]);
+            for j in 0..8 { v.push(c[((pw >> (j*4)) & 0x0F) as usize]); }
+        }
+        Ok(v)
+    }
+
+    #[cfg(all(target_os = "macos", feature = "ane"))]
+    fn ane_prefill(
+        prompt: &[u32],
+        ane: &mut AneBackend,
+        graph: &ModelGraph,
+        tensors: &HashMap<String, crate::lut::compiler::CompiledTensor>,
+    ) -> Result<Vec<u16>, String> {
+        use crate::ane::arena::{Arena, Dtype};
+
+        let cs = ane.chunk_size as usize;
+        let ed = graph.nodes.iter().find_map(|n| match n {
+            ComputeNode::TokenEmbedding { hidden_dim, .. } => Some(*hidden_dim as usize),
+            _ => None,
+        }).unwrap_or(896);
+        let hd = graph.nodes.iter().find_map(|n| match n {
+            ComputeNode::ScaledDotProductAttention { head_dim, .. } => Some(*head_dim as usize),
+            _ => None,
+        }).unwrap_or(64);
+        let nh = graph.nodes.iter().find_map(|n| match n {
+            ComputeNode::ScaledDotProductAttention { num_heads, .. } => Some(*num_heads as usize),
+            _ => None,
+        }).unwrap_or(32);
+        let nkv = graph.nodes.iter().find_map(|n| match n {
+            ComputeNode::ScaledDotProductAttention { num_kv_heads, .. } => Some(*num_kv_heads as usize),
+            _ => None,
+        }).unwrap_or(nh);
+        let kd = nkv * hd;
+
+        let t0 = std::time::Instant::now();
+        eprintln!("[prism:ane] Prefill {} tokens (chunk={}, ed={}, kd={})",
+            prompt.len(), cs, ed, kd);
+
+        // Phase 1: Embed all prompt tokens on CPU for ANE input.
+        let embeddings: Vec<Vec<u16>> = prompt.iter()
+            .map(|&t| Self::ane_embed(t, tensors))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut last_hidden = vec![0u16; ed.max(1)];
+
+        // Phase 2: Run ANE prefill in chunks.
+        for ci in (0..prompt.len()).step_by(cs) {
+            let ce = (ci + cs).min(prompt.len());
+            let nt = ce - ci;
+
+            // Build IOSurface input arena with FP16 embeddings.
+            let in_arena = Arena::new(nt as u32, ed as u32, Dtype::Float16)?;
+            in_arena.lock()?;
+            unsafe {
+                let dst = in_arena.info.base_address as *mut u16;
+                for (i, emb) in embeddings[ci..ce].iter().enumerate() {
+                    std::ptr::copy_nonoverlapping(emb.as_ptr(), dst.add(i * ed), ed);
+                }
+            }
+            in_arena.unlock()?;
+
+            // Output arena: last token's hidden state.
+            let mut out_arena = Arena::new(1, ed as u32, Dtype::Float16)?;
+
+            // Run ANE stateful prefill for this chunk.
+            ane.ctx.prefill_chunk(
+                ane.model.ptr,
+                &in_arena.info,
+                &mut out_arena.info,
+                nt as u32,
+                ed as u32,
+                ed as u32,
+            )?;
+
+            // Extract last hidden state from IOSurface output arena.
+            out_arena.lock()?;
+            unsafe {
+                let src = out_arena.info.base_address as *const u16;
+                last_hidden = std::slice::from_raw_parts(src, ed).to_vec();
+            }
+            out_arena.unlock()?;
+
+            eprintln!("  [prism:ane] chunk {}: {} tokens ({:.1}s)",
+                ci / cs, nt, t0.elapsed().as_secs_f64());
+        }
+
+        eprintln!("[prism:ane] Done ({:.1}s)", t0.elapsed().as_secs_f64());
+        Ok(last_hidden)
+    }
+
+    /// Apply LM head projection to get logits from hidden state.
+    /// Tied embeddings: `hidden @ embed^T = logits` via GEMV.
+    fn lm_head_projection(&self, h: &[u16]) -> Vec<u16> {
+        for node in &self.graph.nodes {
+            if let ComputeNode::LanguageModelHead { tensor } = node {
+                if let Some(ct) = self.tensors.get(&tensor.key) {
+                    if h.len() == tensor.dim_n as usize {
+                        return self.gemv(h, tensor, &ct.payload);
+                    }
+                }
+            }
+        }
+        // Tied embedding head: find embedding tensor and GEMV hidden @ embed^T.
+        if let Some(k) = self.graph.nodes.iter().find_map(|n| match n {
+            ComputeNode::TokenEmbedding { key, .. } => Some(key.clone()), _ => None
+        }) {
+            if let Some(ct) = self.tensors.get(&k) {
+                let tb = crate::lut::graph::TensorBlueprint { key: k, dim_m: ct.dim_m, dim_n: ct.dim_n };
+                return self.gemv(h, &tb, &ct.payload);
+            }
+        }
+        vec![]
+    }
+
     pub fn generate(&mut self, prompt: &[u32], mt: usize) -> Result<InferenceStats, String> {
         let t0 = std::time::Instant::now();
         let nl = self.graph.num_layers as usize;
@@ -196,15 +330,68 @@ impl PrismEngine {
         }).unwrap_or(896);
         let mut kv = KVCache::new(nl, kd);
         let mut pos = 0i64;
+
         #[cfg(all(target_os = "macos", feature = "ane"))]
-        // TODO: call self.ane_prefill() when .mlmodelc files are compiled
-        self.prefill_cpu(prompt, &mut kv, &mut pos)?;
+        let last_h: Option<Vec<u16>> = {
+            // Isolate ANE borrow to this block — dropped before KV fill.
+            let ane = self.ane.as_mut();
+            if let Some(ane) = ane {
+                let lh = Self::ane_prefill(prompt, ane, &self.graph, &self.tensors)?;
+                pos = prompt.len() as i64;
+                Some(lh)
+            } else { None }
+        };
+
         #[cfg(not(all(target_os = "macos", feature = "ane")))]
         self.prefill_cpu(prompt, &mut kv, &mut pos)?;
+
+        #[cfg(all(target_os = "macos", feature = "ane"))]
+        if last_h.is_some() {
+            // KV cache fill: recompute K/V projections for all prompt tokens.
+            for &token in prompt {
+                let h = self.embed(token)?;
+                let mut li = 0usize;
+                for node in &self.graph.nodes {
+                    if let ComputeNode::PalettizedMatmul { role, tensor } = node {
+                        if let Some(ct) = self.tensors.get(&tensor.key) {
+                            if h.len() != tensor.dim_n as usize { continue; }
+                            let out = self.gemv(&h, tensor, &ct.payload);
+                            match role {
+                                TensorRole::KProj => kv.append(li, &out, &[]),
+                                TensorRole::VProj => {
+                                    let max_abs = out.iter().fold(0.0f32, |a, &v|
+                                        a.max(half::f16::from_bits(v).to_f32().abs()));
+                                    let scale = if max_abs > 1e-10 { 127.0 / max_abs } else { 1.0 };
+                                    kv.v[li].extend_from_slice(&scale.to_le_bytes());
+                                    for &v in &out {
+                                        let f = half::f16::from_bits(v).to_f32();
+                                        kv.v[li].push(((f * scale).round().clamp(-128.0, 127.0) as i8) as u8);
+                                    }
+                                    kv.seq_lens[li] = kv.k[li].len() / (kv.kv_dim + 4).max(1);
+                                }
+                                TensorRole::DownProj => li += 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         let mut li = 0usize;
         let mut nt = *prompt.last().unwrap_or(&0);
         let mut gen = Vec::with_capacity(mt);
+        // First token: use last hidden from ANE prefill directly (avoids redundant forward pass).
+        #[cfg(all(target_os = "macos", feature = "ane"))]
+        if let Some(ref lh) = last_h {
+            // Apply LM head to ANE's last hidden state to get logits.
+            let lm_head = self.lm_head_projection(lh);
+            nt = self.argmax(&lm_head)?;
+            gen.push(nt);
+            pos += 1;
+            if gen.len() >= mt { return Ok(InferenceStats { prompt_tokens: prompt.len(), generated_tokens: gen,
+                total_time_ms: t0.elapsed().as_secs_f64() * 1000.0 }); }
+        }
         for _ in 0..mt {
             let h = self.step(nt, pos, &mut li, &mut kv)?; pos += 1;
             nt = self.argmax(&h)?; gen.push(nt);
