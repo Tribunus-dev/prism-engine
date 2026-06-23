@@ -1536,6 +1536,8 @@ dependencies = [
  "metal",
  "objc",
  "parking_lot",
+ "prost",
+ "prost-types",
  "rand 0.8.6",
  "rayon",
  "safetensors",

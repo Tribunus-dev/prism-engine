@@ -35,6 +35,8 @@ rayon = "1"
 rand = "0.8"
 sha2 = { version = "0.10", features = ["asm"] }
 uuid = { version = "1", features = ["v4"] }
+prost = "0.14"
+prost-types = "0.14"
 thiserror = "2"
 bytemuck = { version = "1", features = ["derive"] }
 parking_lot = "0.12"
