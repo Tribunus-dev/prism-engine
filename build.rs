@@ -7,6 +7,9 @@ fn main() {
 
     let metal_sources = &[
         "attention_decode.metal",
+        "rms_norm.metal",
+        "rope_fp16.metal",
+        "softmax_fp16.metal",
         "palettized_gemv.metal",
         "palettized_gemv_swiglu.metal",
         "palettized_gemm.metal",

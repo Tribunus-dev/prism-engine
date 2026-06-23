@@ -26,6 +26,9 @@ mod metal_backend {
         pub command_queue: CommandQueue,
         pub pipeline: ComputePipelineState,
         pub attn_pipeline: ComputePipelineState,
+        pub norm_pipeline: ComputePipelineState,
+        pub rope_pipeline: ComputePipelineState,
+        pub softmax_pipeline: ComputePipelineState,
         pub weight_bufs: HashMap<String, (Buffer, u32, u32)>,
         pub scratch: Buffer,
     pub kv_bufs: Vec<(Buffer, Buffer)>,
@@ -46,6 +49,18 @@ mod metal_backend {
             let attn_pipeline = device.new_compute_pipeline_state_with_function(
                 &attn_fn)
                 .map_err(|e| format!("attn ps: {e:?}"))?;
+            let norm_fn = library.get_function("rms_norm", None).map_err(|e| format!("norm fn: {e:?}"))?;
+            let norm_pipeline = device.new_compute_pipeline_state_with_function(
+                &norm_fn)
+                .map_err(|e| format!("norm ps: {e:?}"))?;
+            let rope_fn = library.get_function("rope_fp16", None).map_err(|e| format!("rope fn: {e:?}"))?;
+            let rope_pipeline = device.new_compute_pipeline_state_with_function(
+                &rope_fn)
+                .map_err(|e| format!("rope ps: {e:?}"))?;
+            let softmax_fn = library.get_function("softmax_fp16", None).map_err(|e| format!("softmax fn: {e:?}"))?;
+            let softmax_pipeline = device.new_compute_pipeline_state_with_function(
+                &softmax_fn)
+                .map_err(|e| format!("softmax ps: {e:?}"))?;
             let cq = device.new_command_queue();
             let scratch = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
             let layer_cap = MAX_SEQ * kv_stride;
@@ -64,7 +79,7 @@ mod metal_backend {
                 wb.insert(k.clone(), (b, ct.dim_m, ct.dim_n));
             }
 
-            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, weight_bufs: wb, scratch, kv_bufs, kv_stride, kv_offsets })
+            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, norm_pipeline, rope_pipeline, softmax_pipeline, weight_bufs: wb, scratch, kv_bufs, kv_stride, kv_offsets })
         }
         pub fn gemv(&self, key: &str, inp: &[u16], out: &mut [u16]) -> Result<(), String> {
             let (wb, dm, dn) = self.weight_bufs.get(key).ok_or_else(|| format!("miss {key}"))?;
@@ -161,6 +176,75 @@ mod metal_backend {
             blit.end_encoding();
             cb.commit(); cb.wait_until_completed();
         }
+
+        /// GPU RMS norm.
+        pub fn norm_metal(&self, input: &[u16], output: &mut [u16], eps: f32) {
+            let dim = input.len() as u32;
+            let cb = self.command_queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&self.norm_pipeline);
+            enc.set_buffer(0, Some(&self.scratch), 0);
+            enc.set_buffer(1, Some(&self.scratch), 0);
+            enc.set_bytes(2, 4, &dim as *const u32 as *const _);
+            enc.set_bytes(3, 4, &eps as *const f32 as *const _);
+            unsafe {
+                std::ptr::copy_nonoverlapping(input.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8, input.len() * 2);
+            }
+            enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(32, 1, 1));
+            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    self.scratch.contents() as *const u8,
+                    output.as_mut_ptr() as *mut u8, output.len() * 2);
+            }
+        }
+
+        /// GPU RoPE in-place.
+        pub fn rope_metal(&self, x: &mut [u16], pos: i64, hd: u32, theta: f32) {
+            let len = x.len() as u32;
+            let cb = self.command_queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&self.rope_pipeline);
+            unsafe {
+                std::ptr::copy_nonoverlapping(x.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8, x.len() * 2);
+            }
+            enc.set_buffer(0, Some(&self.scratch), 0);
+            enc.set_bytes(1, 8, &pos as *const i64 as *const _);
+            enc.set_bytes(2, 4, &hd as *const u32 as *const _);
+            enc.set_bytes(3, 4, &theta as *const f32 as *const _);
+            enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(len as u64, 1, 1));
+            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    self.scratch.contents() as *const u8,
+                    x.as_mut_ptr() as *mut u8, x.len() * 2);
+            }
+        }
+
+        /// GPU softmax.
+        pub fn softmax_metal(&self, input: &[u16], output: &mut [u16]) {
+            let dim = input.len() as u32;
+            let cb = self.command_queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&self.softmax_pipeline);
+            unsafe {
+                std::ptr::copy_nonoverlapping(input.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8, input.len() * 2);
+            }
+            enc.set_buffer(0, Some(&self.scratch), 0);
+            enc.set_buffer(1, Some(&self.scratch), 0);
+            enc.set_bytes(2, 4, &dim as *const u32 as *const _);
+            enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(32, 1, 1));
+            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    self.scratch.contents() as *const u8,
+                    output.as_mut_ptr() as *mut u8, output.len() * 2);
+            }
+        }
+
     }
 }
 
@@ -547,6 +631,28 @@ impl PrismEngine {
         for &t in p { self.step(t, *pos, &mut li, kv)?; *pos += 1; }
         Ok(())
     }
+
+    /// GPU-accelerated RMS norm with CPU fallback.
+    fn norm(&self, x: &mut [u16], eps: f32) {
+        #[cfg(feature = "metal-dispatch")]
+        if let Some(ref m) = self.metal {
+            let mut tmp = vec![0u16; x.len()];
+            m.norm_metal(x, &mut tmp, eps);
+            x.copy_from_slice(&tmp);
+            return;
+        }
+        rms_norm_inplace(x, eps);
+    }
+
+    /// GPU-accelerated RoPE with CPU fallback.
+    fn rope(&self, x: &mut [u16], pos: i64, hd: usize, theta: f32) {
+        #[cfg(feature = "metal-dispatch")]
+        if let Some(ref m) = self.metal {
+            m.rope_metal(x, pos, hd as u32, theta);
+            return;
+        }
+        rope_inplace(x, pos, hd, theta);
+    }
     fn step(&self, token: u32, pos: i64, li: &mut usize, kv: &mut KVCache) -> Result<Vec<u16>, String> {
         let mut h = self.embed(token)?;
         let mut hr = h.clone();
@@ -559,7 +665,7 @@ impl PrismEngine {
         for node in &self.graph.nodes {
             match node {
                 ComputeNode::TokenEmbedding { .. } => {}
-                ComputeNode::Norm { eps, .. } => rms_norm_inplace(&mut h, *eps),
+                ComputeNode::Norm { eps, .. } => self.norm(&mut h, *eps),
                 ComputeNode::PalettizedMatmul { role, tensor } => {
                     let Some(ct) = self.tensors.get(&tensor.key) else { continue; };
                     if h.len() != tensor.dim_n as usize { continue; }
@@ -599,7 +705,7 @@ impl PrismEngine {
                     }
                 }
                 ComputeNode::RotaryEmbedding { head_dim, rope_theta } => {
-                    if let Some(ref mut qv) = q { rope_inplace(qv, pos, *head_dim as usize, *rope_theta); }
+                    if let Some(ref mut qv) = q { self.rope(qv, pos, *head_dim as usize, *rope_theta); }
                 }
                 ComputeNode::ScaledDotProductAttention { num_heads, num_kv_heads, head_dim: hd } => {
                     if let Some(qv) = q.take() {
@@ -612,14 +718,14 @@ impl PrismEngine {
                 }
                 ComputeNode::MRoPE { head_dim, rope_theta, .. } => {
                     if let Some(ref mut qv) = q {
-                        rope_inplace(qv, pos, *head_dim as usize, *rope_theta);
+                        self.rope(qv, pos, *head_dim as usize, *rope_theta);
                     }
                     if let Some(ref mut fqkv) = fused_qkv {
                         let q_dim = *head_dim as usize;
                         // Apply RoPE to Q and K portions of fused QKV
                         if fqkv.len() >= q_dim * 3 {
-                            rope_inplace(&mut fqkv[..q_dim], pos, q_dim, *rope_theta);
-                            rope_inplace(&mut fqkv[q_dim..q_dim*2], pos, q_dim, *rope_theta);
+                            self.rope(&mut fqkv[..q_dim], pos, q_dim, *rope_theta);
+                            self.rope(&mut fqkv[q_dim..q_dim*2], pos, q_dim, *rope_theta);
                         }
                     }
                 }
