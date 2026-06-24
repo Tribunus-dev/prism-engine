@@ -42,7 +42,7 @@ fn warmup(
     max_tokens: u32,
 ) -> Result<(), String> {
     let prompt_ids = tokenize(prompt);
-    let mut sess = session.try_lock().map_err(|e| e.to_string())?;
+    let mut sess = session.try_lock().map_err(|_| "Lock error".to_string())?;
     let first = sess
         .prefill(&prompt_ids, model)
         .map_err(|e| format!("warmup prefill: {:?}", e))?;
@@ -83,7 +83,7 @@ pub fn measure_throughput(
     let mut latencies: Vec<f64> = Vec::with_capacity(max_tokens as usize);
     let start = Instant::now();
 
-    let mut sess = session.try_lock().map_err(|e| e.to_string())?;
+    let mut sess = session.try_lock().map_err(|_| "Lock error".to_string())?;
 
     // Prefill — TTFT
     let ttft_start = Instant::now();
@@ -165,7 +165,7 @@ pub fn measure_ttft(
     let mut ttft_values = Vec::new();
     for _ in 0..3 {
         let start = Instant::now();
-        let mut sess = session.try_lock().map_err(|e| e.to_string())?;
+        let mut sess = session.try_lock().map_err(|_| "Lock error".to_string())?;
         let _first = sess
             .prefill(&prompt_ids, model)
             .map_err(|e| format!("ttft prefill: {:?}", e))?;
@@ -212,7 +212,7 @@ pub fn measure_latency_distribution(
     let mut latencies: Vec<f64> = Vec::with_capacity(max_tokens as usize);
     let start = Instant::now();
 
-    let mut sess = session.try_lock().map_err(|e| e.to_string())?;
+    let mut sess = session.try_lock().map_err(|_| "Lock error".to_string())?;
 
     let ttft_start = Instant::now();
     let first = sess

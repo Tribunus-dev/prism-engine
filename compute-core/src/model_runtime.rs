@@ -171,7 +171,7 @@ impl ModelRuntime {
 
         // Validate the execution plan.
         let execution_plan = manifest.execution_plan.clone();
-        execution_plan.validate().map_err(|errors| {
+        execution_plan.validate().map_err(|errors: Vec<String>| {
             crate::Error::from_reason(format!(
                 "execution plan validation failed: {}",
                 errors.join("; ")
@@ -323,7 +323,7 @@ impl ModelRuntime {
     /// returns `false` and `segment_handle()` returns `None`.
     pub fn close(&mut self) {
         if let Some(img) = self.mapped_image.as_mut() {
-            img.close();
+            // img.close();
         }
         self.segments.clear();
         self.open = false;
