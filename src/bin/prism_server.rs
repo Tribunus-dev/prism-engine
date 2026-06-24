@@ -24,8 +24,19 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+// When prism-backend is enabled, use compute-core's engine (same code, shared maintenance)
+// Otherwise, use Prism's own copy.
+#[cfg(feature = "prism-backend")]
+use tribunus_compute_core::lut::engine::PrismEngine;
+#[cfg(not(feature = "prism-backend"))]
 use prism_engine::lut::engine::PrismEngine;
+
+// Import ModelGraph from the same source as PrismEngine to avoid type conflicts
+#[cfg(feature = "prism-backend")]
+use tribunus_compute_core::lut::graph::{ModelGraph, UnifiedConfig};
+#[cfg(not(feature = "prism-backend"))]
 use prism_engine::lut::graph::{ModelGraph, UnifiedConfig};
+
 use prism_engine::tokenizer::TribunusTokenizer;
 
 // ── CLI ─────────────────────────────────────────────────────────────────

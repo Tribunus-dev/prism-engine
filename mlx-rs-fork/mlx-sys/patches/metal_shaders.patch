@@ -1,0 +1,45 @@
+--- a/mlx/backend/metal/kernels/bf16.h
++++ b/mlx/backend/metal/kernels/bf16.h
+@@ -5,7 +5,31 @@
+ 
+ using namespace metal;
+ 
+-typedef bfloat bfloat16_t;
++// bfloat might not be defined in Metal on newer macOS (26+).
++// Fall back to a manual BF16 type if __has_feature can't find it.
++#if __has_extension(metal_bfloat)
++    typedef bfloat bfloat16_t;
++#else
++    struct bfloat16_t {
++        uint16_t bits;
++        bfloat16_t() device : bits(0) {}
++        bfloat16_t(float v) device {
++            auto u = as_type<uint32_t>(v);
++            bits = u >> 16;
++        }
++        operator float() const device {
++            return as_type<float>(uint32_t(bits) << 16);
++        }
++        bfloat16_t operator-() const device {
++            bfloat16_t r;
++            r.bits = bits ^ 0x8000;
++            return r;
++        }
++        bfloat16_t& operator*=(bfloat16_t other) device { *this = bfloat16_t(float(*this) * float(other)); return *this; }
++        bfloat16_t& operator+=(bfloat16_t other) device { *this = bfloat16_t(float(*this) + float(other)); return *this; }
++    };
++#endif
+ 
+ inline uint16_t bfloat16_to_uint16(const bfloat16_t x) {
+   return as_type<uint16_t>(x);
+--- a/mlx/backend/metal/kernels/utils.h
++++ b/mlx/backend/metal/kernels/utils.h
+@@ -12,6 +12,7 @@
+ #include "mlx/backend/metal/kernels/defines.h"
+ #include "mlx/backend/metal/kernels/logging.h"
+ 
++using metal::vec;
++
+ typedef half float16_t;
+ 
+ // Work per thread values for different types.
