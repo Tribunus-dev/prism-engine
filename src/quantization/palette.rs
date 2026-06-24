@@ -293,14 +293,6 @@ fn vdsp_squared_distances(channel: &[f32], value: f32, out: &mut [f32]) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn vdsp_squared_distances(channel: &[f32], value: f32, out: &mut [f32]) {
-    for (i, &x) in channel.iter().enumerate() {
-        let d = x - value;
-        out[i] = d * d;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

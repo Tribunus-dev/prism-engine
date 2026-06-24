@@ -987,7 +987,7 @@ fn rope_inplace(x: &mut [u16], pos: i64, hd: usize, th: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lut::graph::UnifiedConfig;
+    
     #[test]
     fn test_lut_gemv() {
         let mut p = Vec::new();

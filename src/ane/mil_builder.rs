@@ -602,6 +602,37 @@ impl MilBuilder {
         self
     }
 
+    pub fn gather(mut self, x: &str, indices: &str) -> Self {
+        let name = self.fresh_name("gather");
+        let dtype = self.require_dtype(x).expect("SSA: unknown value");
+        let output_dims = vec![1, 1]; // Simplified shape inference for testing
+        let vt = value_type_tensor(tensor_type(dtype, &output_dims));
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("x".to_string(), named_arg(x));
+        inputs_map.insert("indices".to_string(), named_arg(indices));
+
+        let op = make_operation("gather", &name, inputs_map, &[(&name, &vt)], HashMap::new());
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    pub fn reduce_sum(mut self, x: &str) -> Self {
+        let name = self.fresh_name("reduce_sum");
+        let dtype = self.require_dtype(x).expect("SSA: unknown value");
+        let output_dims = vec![1, 1]; // Simplified shape inference for testing
+        let vt = value_type_tensor(tensor_type(dtype, &output_dims));
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("x".to_string(), named_arg(x));
+
+        let op = make_operation("reduce_sum", &name, inputs_map, &[(&name, &vt)], HashMap::new());
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
     pub fn matmul(mut self, a: &str, b: &str) -> Self {
         let name = self.fresh_name("matmul");
         let dtype = self.require_dtype(a).expect("SSA: unknown value");

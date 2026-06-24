@@ -1,3 +1,4 @@
+pub mod diffusion_ane;
 pub mod coreml_bridge;
 pub mod coreml_state;
 pub mod coreml_audit;
