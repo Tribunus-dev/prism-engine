@@ -27,7 +27,7 @@ use tokio::sync::Mutex;
 // When prism-backend is enabled, use compute-core's engine (same code, shared maintenance)
 // Otherwise, use Prism's own copy.
 #[cfg(feature = "prism-backend")]
-use tribunus_compute_core::lut::engine::PrismEngine;
+use prism_engine::lut::cimage_engine::cimage_engine::CimageEngine as PrismEngine;
 #[cfg(not(feature = "prism-backend"))]
 use prism_engine::lut::engine::PrismEngine;
 
