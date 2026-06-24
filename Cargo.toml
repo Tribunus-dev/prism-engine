@@ -113,7 +113,7 @@ default = []
 metal-dispatch = ["dep:metal", "dep:objc"]
 server = ["dep:axum", "dep:tower-http"]
 ane = ["dep:coreml-proto"]
-full = ["metal-dispatch", "server"]
+full = ["metal-dispatch", "server", "ane"]
 prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "dep:mlx-rs"]
 
 [build-dependencies]
