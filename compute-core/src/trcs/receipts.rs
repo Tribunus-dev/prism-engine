@@ -102,3 +102,41 @@ pub struct AnalysisExecutionReceipt {
     pub backend_fault: Option<BackendFaultReceipt>,
     pub determinism_hash: u64,
 }
+
+// Phase 2 Concrete Receipts
+#[derive(Debug, Clone)]
+pub struct BulkLoadReceipt {
+    pub relation_id: RelationId,
+    pub input_rows: u64,
+    pub consolidated_rows: u64,
+    pub visible_rows: u64,
+    pub base_run_id: crate::trcs::relation::RunId,
+    pub bulk_load_used: bool,
+    pub determinism_hash: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeltaApplyReceipt {
+    pub relation_id: RelationId,
+    pub frontier: RevisionFrontierId,
+    pub input_rows: u64,
+    pub consolidated_rows: u64,
+    pub visible_insertions: u64,
+    pub visible_retractions: u64,
+    pub support_only_updates: u64,
+    pub recent_run_id: crate::trcs::relation::RunId,
+    pub determinism_hash: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompactionReceipt {
+    pub relation_id: RelationId,
+    pub input_run_ids: Vec<crate::trcs::relation::RunId>,
+    pub output_run_id: crate::trcs::relation::RunId,
+    pub rows_before: u64,
+    pub rows_after: u64,
+    pub dead_rows_removed: u64,
+    pub published_generation: u64,
+    pub determinism_hash_before: u64,
+    pub determinism_hash_after: u64,
+}

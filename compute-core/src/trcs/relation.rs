@@ -44,14 +44,7 @@ pub type Cost = u64;
 #[derive(Debug, Clone, Copy)]
 pub struct BulkLoadEligibility {
     pub full_relation_empty: bool,
-    pub delta_to_full_ratio: f32,
+    pub delta_to_full_ratio: f64,
     pub input_fact_count: u64,
     pub estimated_incremental_overhead: Cost,
-}
-
-impl BulkLoadEligibility {
-    pub fn should_bulk_load(&self) -> bool {
-        self.full_relation_empty
-            && self.estimated_incremental_overhead > (self.input_fact_count / 100)
-    }
 }

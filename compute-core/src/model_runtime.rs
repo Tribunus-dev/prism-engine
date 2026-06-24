@@ -323,7 +323,7 @@ impl ModelRuntime {
     /// returns `false` and `segment_handle()` returns `None`.
     pub fn close(&mut self) {
         if let Some(img) = self.mapped_image.as_mut() {
-            // img.close();
+            crate::mapped_image::MappedImage::close(img);
         }
         self.segments.clear();
         self.open = false;
