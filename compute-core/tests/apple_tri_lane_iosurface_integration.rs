@@ -293,11 +293,33 @@ fn test_iosurface_mutation_detected() {
         layout_digest: arena.layout_digest.clone(),
     };
     consumer.add_input(input_binding);
+    // Validate — creates and caches R16Uint texture from IOSurface
     let result = consumer.validate(&arena, 0).unwrap();
     assert!(result.matched, "CPU and Metal checksums must match on same bytes");
-    // Both digests limit to 256 elements — match that bound
-    let max_u32s = (out_len / 4).min(256);
-    let bounded_checksum: u64 = (0..max_u32s).map(|i| unsafe { (out_ptr as *const u32).add(i).read() } as u64).sum();
+    // Both digests limit to 512 u16 elements (1024 bytes) — verify manually
+    let max_u16s = (out_len / 2).min(512);
+    let bounded_checksum: u64 = (0..max_u16s).map(|i| unsafe { (out_ptr as *const u16).add(i).read() } as u64).sum();
     assert_eq!(result.metal_digest, bounded_checksum,
-        "Metal digest ({}) must match bounded checksum ({})", result.metal_digest, bounded_checksum);
+        "Metal digest ({}) must match bounded u16 checksum ({})", result.metal_digest, bounded_checksum);
+
+    // ── Persistence mutation test ──────────────────────────────────────────
+    // After caching the texture (above), mutate the IOSurface bytes in-place,
+    // then re-validate with the same cached texture. The texture shares the
+    // IOSurface memory, so the checksum must change.
+
+    // Baseline checksum from the first validation
+    let baseline_digest = result.metal_digest;
+
+    // Mutate slot bytes with a different pattern
+    let out_slice_mut = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u32, out_len / 4) };
+    for (i, v) in out_slice_mut.iter_mut().enumerate() {
+        *v = (i * 5 % 256) as u32;
+    }
+
+    // Re-validate with the SAME consumer — texture cache hit, same MTLTexture
+    let result2 = consumer.validate(&arena, 0).unwrap();
+    assert!(result2.matched, "second validation must still produce matching CPU/Metal digest");
+    assert_ne!(result2.metal_digest, baseline_digest,
+        "persistent Metal texture must detect IOSurface content changes: before={}, after={}",
+        baseline_digest, result2.metal_digest);
 }

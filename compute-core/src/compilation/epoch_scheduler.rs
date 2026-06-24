@@ -389,7 +389,7 @@ impl EpochScheduler {
         &mut self,
         arena: &mut AppleSharedArena,
         coreml_exec: &mut CoreMlIOSurfaceExecutable,
-        metal_consumer: &MetalConsumer,
+        metal_consumer: &mut MetalConsumer,
     ) -> Result<AppleTriLaneExecutionReceipt, String> {
         let epoch = self.current_epoch;
         let start = std::time::Instant::now();
@@ -1054,7 +1054,7 @@ mod tests {
         });
 
         let receipt = sched
-            .execute_epoch(&mut arena, &mut coreml_exec, &metal_consumer)
+            .execute_epoch(&mut arena, &mut coreml_exec, &mut metal_consumer)
             .expect("execute_epoch should not panic on failing backend");
 
         // Prediction failed because model file doesn't exist

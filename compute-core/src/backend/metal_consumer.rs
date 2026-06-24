@@ -13,6 +13,8 @@ use crate::compute_image::apple_shared_arena::SlotState;
 use metal;
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 use objc::{msg_send, sel, sel_impl};
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+use std::collections::HashMap;
 
 /// Result of a Metal validation execution.
 ///
@@ -57,6 +59,9 @@ pub struct MetalConsumer {
     /// Metal device handle for GPU dispatch
     #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
     pub device: Option<metal::Device>,
+    /// Cached IOSurface-backed Metal textures, keyed by slot_id
+    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+    pub texture_cache: HashMap<u32, metal::Texture>,
 }
 
 impl MetalConsumer {
@@ -70,6 +75,8 @@ impl MetalConsumer {
             pipeline_digest: String::new(),
             #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
             device: metal::Device::system_default(),
+            #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+            texture_cache: HashMap::new(),
         }
     }
 
@@ -90,7 +97,7 @@ impl MetalConsumer {
     /// matches the arena's recorded digest, then computes stubs for the
     /// Metal and CPU checksums.
     pub fn validate(
-        &self,
+        &mut self,
         arena: &crate::compute_image::apple_shared_arena::AppleSharedArena,
         _expected_epoch: u64,
     ) -> Result<MetalValidationResult, String> {
@@ -138,7 +145,7 @@ impl MetalConsumer {
     /// which indicates Core ML has completed writing and the buffer is safe
     /// for Metal to consume.
     pub fn verify_coreml_output_accessible(
-        &self,
+        &mut self,
         slot_id: u32,
         arena: &crate::compute_image::apple_shared_arena::AppleSharedArena,
     ) -> Result<bool, String> {
@@ -182,15 +189,23 @@ impl MetalConsumer {
 
     /// Same checksum computation as Metal kernel would use
 
-        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u32, (byte_len / 4).max(1).min(256)) };
+        // Read u16 values (2 bytes each) to match R16Uint texture texel size
+        let element_count = (byte_len / 2).max(1).min(512);
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u16, element_count) };
         let checksum: u64 = slice.iter().map(|&v| v as u64).sum();
         Ok(checksum)
     }
 
-    /// Compute a Metal checksum by creating an MTLBuffer from the IOSurface
-    /// bytes and returning a zero-copy digest of the slot contents.
     #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-    fn compute_metal_digest(&self, arena: &crate::compute_image::apple_shared_arena::AppleSharedArena, _epoch: u64) -> Result<u64, String> {
+    /// Compute a Metal checksum via documented IOSurface-backed MTLTexture API.
+    ///
+    /// Uses [MTLDevice newTextureWithDescriptor:iosurface:plane:] to create a texture
+    /// that shares memory with the IOSurface (zero-copy), then dispatches a compute
+    /// kernel that sums R16Uint texel values. Textures are cached by slot_id so
+    /// repeated validation on the same slot reuses the same texture object — the
+    /// IOSurface content is updated in place and the texture sees changes without
+    /// recreation.
+    fn compute_metal_digest(&mut self, arena: &crate::compute_image::apple_shared_arena::AppleSharedArena, _epoch: u64) -> Result<u64, String> {
         let slot_id = self.input_slots.first()
             .map(|s| s.slot_id)
             .ok_or("no input slots")?;
@@ -203,37 +218,46 @@ impl MetalConsumer {
         }
 
         let byte_len = slot.manifest.byte_length as usize;
-        let offset = slot.manifest.byte_offset as usize;
 
-        // 1. Get Metal device
-        let device = metal::Device::system_default()
+        // 1. Use cached Metal device from the consumer
+        let device = self.device.clone()
             .ok_or("no Metal device available")?;
 
-        // 2. Create MTLBuffer from the IOSurface memory (zero-copy)
-        // Get the IOSurface handle from the backing arena — this is the actual
-        // IOSurface object that Core ML wrote to, not a CPU copy of its bytes.
+        // 2. Get IOSurface handle
         let io_surface = arena.backing_arena.as_ref()
             .map(|a| a.info.io_surface)
             .ok_or("no IOSurface backing arena")?;
-        // Create a Metal buffer directly backed by the IOSurface — zero copy,
-        // no CPU readback, no data copy. Metal reads the same physical bytes
-        // that Core ML produced.
-        let buffer: metal::Buffer = unsafe {
-            msg_send![device,
-                newBufferWithIOSurface:io_surface
-                offset:offset as u64
-                length:byte_len as u64
-                options:metal::MTLResourceOptions::StorageModeShared]
-        };
 
-        // 3. Dispatch a Metal compute kernel that sums the buffer contents
+        // 3. Check texture cache — create if missing
+        // Use the documented public API: [MTLDevice newTextureWithDescriptor:iosurface:plane:]
+        let texture = self.texture_cache.entry(slot_id).or_insert_with(|| {
+            // Create a 2D texture descriptor: R16Uint texels (2 bytes each),
+            // width spans the full byte length, height = 1 (linear layout)
+            let desc = metal::TextureDescriptor::new();
+            // Each R16Uint texel is 2 bytes, so width = total bytes / 2
+            let texel_count = (byte_len / 2) as u64;
+            desc.set_width(texel_count);
+            desc.set_height(1);
+            desc.set_pixel_format(metal::MTLPixelFormat::R16Uint);
+            desc.set_usage(metal::MTLTextureUsage::ShaderRead);
+            desc.set_storage_mode(metal::MTLStorageMode::Shared);
+
+            unsafe {
+                msg_send![device.as_ref(),
+                    newTextureWithDescriptor:&*desc
+                    iosurface:io_surface
+                    plane:0u64]
+            }
+        });
+
+        // 4. Dispatch a Metal compute kernel that sums R16Uint texel values
         let shader_src = r#"
 #include <metal_stdlib>
 using namespace metal;
-kernel void checksum(device const uint* in  [[buffer(0)]],
-                     device atomic_ulong* out [[buffer(1)]],
+kernel void checksum(texture2d<uint, access::read> in  [[texture(0)]],
+                     device atomic_ulong* out [[buffer(0)]],
                      uint tid [[thread_position_in_grid]]) {
-    atomic_fetch_add_explicit(out, (ulong)in[tid], memory_order_relaxed);
+    atomic_fetch_add_explicit(out, (ulong)in.read(uint2(tid, 0)).r, memory_order_relaxed);
 }
 "#;
         let library = device.new_library_with_source(shader_src, &metal::CompileOptions::new())
@@ -243,18 +267,19 @@ kernel void checksum(device const uint* in  [[buffer(0)]],
         let pipeline = device.new_compute_pipeline_state_with_function(&func)
             .map_err(|e| format!("pipeline: {:?}", e))?;
 
-        // 4. Allocate 8-byte result buffer (StorageModeShared for CPU readback)
-        // Allocate 8-byte result buffer with u64 accumulation to avoid overflow
+        // 5. Allocate 8-byte result buffer (StorageModeShared for CPU readback)
         let result = device.new_buffer(8u64, metal::MTLResourceOptions::StorageModeShared);
 
-        // 5. Dispatch kernel
+        // 6. Dispatch kernel with texture at index 0 and result buffer at index 0
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let encoder = cmd_buf.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&pipeline);
-        encoder.set_buffer(0, Some(&buffer), 0);
-        encoder.set_buffer(1, Some(&result), 0);
-        let thread_count = (byte_len / 4).min(256) as u64;
+        // Texture at index 0 for reads
+        encoder.set_texture(0, Some(&*texture));
+        // Result buffer at buffer index 0
+        encoder.set_buffer(0, Some(&result), 0);
+        let thread_count = (byte_len / 2).min(512) as u64;
         encoder.dispatch_threads(
             metal::MTLSize { width: thread_count, height: 1, depth: 1 },
             metal::MTLSize { width: thread_count, height: 1, depth: 1 });
@@ -262,7 +287,7 @@ kernel void checksum(device const uint* in  [[buffer(0)]],
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
 
-        // 6. Read GPU-computed checksum result
+        // 7. Read GPU-computed checksum result
         let gpu_sum = unsafe { *(result.contents() as *const u64) };
         Ok(gpu_sum)
     }
@@ -365,7 +390,7 @@ mod tests {
     /// correctly rejected.
     #[test]
     fn test_verify_coreml_output_slot_state() {
-        let consumer = MetalConsumer::new("test_consumer");
+        let mut consumer = MetalConsumer::new("test_consumer");
 
         // Slot in Writing state -- not ready
         let arena_writing = make_arena_with_slot(1, "abc123", SlotState::Writing {
