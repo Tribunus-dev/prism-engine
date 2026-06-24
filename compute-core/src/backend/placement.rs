@@ -5,7 +5,7 @@
 use crate::backend::unified_arena::ArenaView;
 
 /// Identifies an execution lane.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ExecutionLane {
     MlxGpu,
     AccelerateCpu,

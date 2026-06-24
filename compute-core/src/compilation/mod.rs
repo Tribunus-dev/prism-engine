@@ -9,4 +9,6 @@ pub mod admission;
 pub mod ane_lane;
 pub mod staging;
 pub mod evidence_probe;
+pub mod tri_lane;
+pub mod qualification_gate;
 pub mod profitability;
