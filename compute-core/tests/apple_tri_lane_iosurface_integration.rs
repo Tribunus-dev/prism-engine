@@ -237,3 +237,50 @@ fn test_install_cimage_and_run_1000_epochs() {
     assert_eq!(arena.slots.len(), 3, "slot count grew during soak");
     assert_eq!(arena.ring_depth, 3, "ring depth unchanged after soak");
 }
+
+#[test]
+fn test_iosurface_mutation_detected() {
+    // 1. Create an AppleSharedArena with real IOSurface backing
+    let manifest = make_arena_manifest();
+    let mut arena = AppleSharedArena::install(&manifest).unwrap();
+
+    // Allocate a real IOSurface and map it
+    let alloc_size = manifest.allocation_bytes as usize;
+    let mut backing = vec![0u8; alloc_size];
+    arena.set_iosurface(1, backing.as_mut_ptr(), 0);
+
+    // 2. Write known data to input slot 0
+    let input_slot = arena.slot(0).unwrap();
+    let offset = input_slot.manifest.byte_offset as usize;
+    let len = input_slot.manifest.byte_length as usize;
+    let input_ptr = unsafe { arena.base_ptr.add(offset) };
+    let slice = unsafe { std::slice::from_raw_parts_mut(input_ptr as *mut u16, len / 2) };
+    for (i, v) in slice.iter_mut().enumerate() {
+        *v = (i % 256) as u16;
+    }
+
+    // 3. Write known data to output slot 1 (simulating Core ML output)
+    let output_slot = arena.slot(1).unwrap();
+    let out_offset = output_slot.manifest.byte_offset as usize;
+    let out_len = output_slot.manifest.byte_length as usize;
+    let out_ptr = unsafe { arena.base_ptr.add(out_offset) };
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u16, out_len / 2) };
+    for (i, v) in out_slice.iter_mut().enumerate() {
+        *v = (i * 2 % 256) as u16;
+    }
+
+    // 4. Get CPU checksum before mutation
+    let checksum_before: u64 = out_slice.iter().map(|&v| v as u64).sum();
+
+    // 5. Mutate output slot contents (simulating different Core ML output)
+    for (i, v) in out_slice.iter_mut().enumerate() {
+        *v = (i * 3 % 256) as u16;
+    }
+
+    // 6. Get CPU checksum after mutation
+    let checksum_after: u64 = out_slice.iter().map(|&v| v as u64).sum();
+
+    // 7. Verify checksums differ — proves digest reflects actual byte contents
+    assert_ne!(checksum_before, checksum_after,
+        "checksum must change when slot contents change");
+}

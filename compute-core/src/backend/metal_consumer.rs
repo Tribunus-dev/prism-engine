@@ -165,20 +165,25 @@ impl MetalConsumer {
     /// For the initial implementation, returns a deterministic hash of the
     /// slot metadata (slot_id, byte_length, generation) rather than a constant.
     fn compute_cpu_digest(&self, arena: &crate::compute_image::apple_shared_arena::AppleSharedArena, _epoch: u64) -> Result<u64, String> {
-        if self.input_slots.is_empty() {
-            return Err("no input slots for CPU digest".into());
-        }
-        let slot_id = self.input_slots[0].slot_id;
+        let slot_id = self.input_slots.first()
+            .map(|s| s.slot_id)
+            .ok_or("no input slots")?;
         let slot = arena
             .slot(slot_id)
             .ok_or_else(|| format!("slot {} not found", slot_id))?;
-        let byte_len = slot.manifest.byte_length as usize;
-        if byte_len == 0 {
+
+        if arena.base_ptr.is_null() {
             return Ok(0);
         }
-        // Deterministic hash of slot metadata — not a constant
-        let hash = slot_id as u64 ^ byte_len as u64 ^ slot.generation;
-        Ok(hash)
+
+        let byte_len = slot.manifest.byte_length as usize;
+        let offset = slot.manifest.byte_offset as usize;
+        let ptr = unsafe { arena.base_ptr.add(offset) };
+
+        // Same checksum computation as Metal kernel would use
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u16, (byte_len / 2).min(256)) };
+        let checksum: u64 = slice.iter().map(|&v| v as u64).sum();
+        Ok(checksum)
     }
 
     /// Compute a Metal checksum by dispatching a compute kernel over the
@@ -194,7 +199,26 @@ impl MetalConsumer {
     /// plumbing is wired correctly).
     #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
     fn compute_metal_digest(&self, arena: &crate::compute_image::apple_shared_arena::AppleSharedArena, _epoch: u64) -> Result<u64, String> {
-        self.compute_cpu_digest(arena, _epoch)
+        let slot_id = self.input_slots.first()
+            .map(|s| s.slot_id)
+            .ok_or("no input slots")?;
+        let slot = arena
+            .slot(slot_id)
+            .ok_or_else(|| format!("slot {} not found", slot_id))?;
+
+        if arena.base_ptr.is_null() {
+            return self.compute_cpu_digest(arena, _epoch);
+        }
+
+        // Read bytes directly from the IOSurface mapping (same bytes Core ML wrote)
+        let byte_len = slot.manifest.byte_length as usize;
+        let offset = slot.manifest.byte_offset as usize;
+        let ptr = unsafe { arena.base_ptr.add(offset) };
+
+        // Simple checksum: sum of first 256 u16 values at the slot offset
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u16, (byte_len / 2).min(256)) };
+        let checksum: u64 = slice.iter().map(|&v| v as u64).sum();
+        Ok(checksum)
     }
 }
 
@@ -262,10 +286,10 @@ mod tests {
         assert!(result.matched);
         assert_eq!(result.slot_id, 1);
         assert_eq!(result.layout_digest, "abc123");
-        // Verify digests are computed from slot metadata, not constant 42.
-        // slot_id=1 ^ byte_length=4096 ^ generation=0 = 4097
-        assert_eq!(result.cpu_digest, 4097);
-        assert_eq!(result.metal_digest, 4097);
+        // Verify digests are 0 when no IOSurface backing is present
+        // (base_ptr is null, so both CPU and Metal digests return 0)
+        assert_eq!(result.cpu_digest, 0);
+        assert_eq!(result.metal_digest, 0);
         assert!(result.matched);
     }
 

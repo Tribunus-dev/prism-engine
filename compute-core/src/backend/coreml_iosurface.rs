@@ -114,7 +114,13 @@ impl CoreMlIOSurfaceExecutable {
         let compute_units = match self.compute_policy {
             CoreMlComputePolicy::CpuAndNeuralEngine => CoreMlComputeUnits::CpuAndNeuralEngine,
             CoreMlComputePolicy::CpuOnly => CoreMlComputeUnits::CpuOnly,
-            CoreMlComputePolicy::NeuralEngineOnly => CoreMlComputeUnits::All,
+            CoreMlComputePolicy::NeuralEngineOnly => {
+                // Apple does not expose a public MLComputeUnits value
+                // that guarantees exclusive ANE execution. Map to
+                // CpuAndNeuralEngine with a comment documenting this
+                // limitation.
+                CoreMlComputeUnits::CpuAndNeuralEngine
+            }
             CoreMlComputePolicy::GpuOnly => CoreMlComputeUnits::CpuAndGpu,
             CoreMlComputePolicy::All => CoreMlComputeUnits::All,
         };

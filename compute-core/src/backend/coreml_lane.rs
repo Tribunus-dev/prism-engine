@@ -484,20 +484,46 @@ impl CoreMlLane {
 
         for i in 0..warmup_count {
             // Build ArenaInfo from binding contracts
-            // In production: construct ArenaInfo from IOSurface base + byte_offset
-            let input_info = crate::arena_info::ArenaInfo {
-                width: 1,
-                height: 1,
-                logical_dim0: 1,
-                logical_dim1: 1,
-                pixel_format: 0,
-                byte_size: 0,
-                bytes_per_row: 0,
-                base_address: std::ptr::null_mut(),
-                cv_buffer: std::ptr::null_mut(),
-                io_surface: std::ptr::null_mut(),
-            };
-            let output_info = input_info.clone();
+            // Build ArenaInfo from the IOSurface-backed arena
+            let input_slot_id = binding.input_bindings.first()
+                .map(|b| b.slot_id)
+                .ok_or("no input bindings")?;
+            let output_slot_id = binding.output_bindings.first()
+                .map(|b| b.slot_id)
+                .ok_or("no output bindings")?;
+
+            let input_info = arena.arena_info_for_slot(input_slot_id)
+                .unwrap_or_else(|| {
+                    // Fallback: CPU-backed ArenaInfo (no IOSurface) for test environments
+                    crate::arena_info::ArenaInfo {
+                        width: 1,
+                        height: 1,
+                        logical_dim0: 1,
+                        logical_dim1: 1,
+                        pixel_format: 0,
+                        byte_size: 0,
+                        bytes_per_row: 0,
+                        base_address: std::ptr::null_mut(),
+                        cv_buffer: std::ptr::null_mut(),
+                        io_surface: std::ptr::null_mut(),
+                    }
+                });
+            let output_info = arena.arena_info_for_slot(output_slot_id)
+                .unwrap_or_else(|| {
+                    // Fallback: CPU-backed ArenaInfo (no IOSurface) for test environments
+                    crate::arena_info::ArenaInfo {
+                        width: 1,
+                        height: 1,
+                        logical_dim0: 1,
+                        logical_dim1: 1,
+                        pixel_format: 0,
+                        byte_size: 0,
+                        bytes_per_row: 0,
+                        base_address: std::ptr::null_mut(),
+                        cv_buffer: std::ptr::null_mut(),
+                        io_surface: std::ptr::null_mut(),
+                    }
+                });
 
             let start = std::time::Instant::now();
 
