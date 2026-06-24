@@ -65,7 +65,6 @@ fn main() {
             metallib_path.display()
         );
     }
-
     // Forward git SHA and branch for artifact provenance.
     if std::env::var("VERGEN_GIT_SHA").is_err() {
         if let Ok(out) = std::process::Command::new("git")
