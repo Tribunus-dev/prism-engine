@@ -327,4 +327,109 @@ mod tests {
         assert!(exec.output_bindings.is_empty());
         assert!(!exec.loaded);
     }
+
+    #[test]
+    fn test_coreml_iosurface_warmup_with_arena() {
+        use crate::backend::coreml_lane::{CoreMlLane, CoreMlSubgraph, CoreMlSubgraphStatus};
+        use crate::compute_image::apple_shared_arena::{
+            AppleSharedArena, LiveIOSurfaceSlot, IOSurfaceSlotManifest, SlotReuseClass,
+        };
+        use crate::backend::placement::ExecutionLane;
+        use crate::compilation::tri_lane::{CoreMlWarmupContract, AneLaneLifecycle};
+
+        // Create arena with input/output slots
+        let mut arena = AppleSharedArena::new("test-arena".into(), 1);
+
+        arena.add_slot(LiveIOSurfaceSlot {
+            manifest: IOSurfaceSlotManifest {
+                slot_id: 0,
+                tensor_id: "input".into(),
+                byte_offset: 0,
+                byte_length: 4096,
+                dtype: "float32".into(),
+                logical_shape: vec![1, 1],
+                physical_shape: vec![1, 1],
+                strides_bytes: vec![4, 4],
+                layout: "NHWC".into(),
+                producer: ExecutionLane::CoreMlAne,
+                consumer: ExecutionLane::MlxGpu,
+                reuse_class: SlotReuseClass::Exclusive,
+                required_alignment: 64,
+            },
+            state: crate::compute_image::apple_shared_arena::SlotState::Free,
+            generation: 0,
+            layout_digest: "digest-00000000".into(),
+            metal_view: None,
+            coreml_view: None,
+        });
+
+        arena.add_slot(LiveIOSurfaceSlot {
+            manifest: IOSurfaceSlotManifest {
+                slot_id: 1,
+                tensor_id: "output".into(),
+                byte_offset: 4096,
+                byte_length: 4096,
+                dtype: "float32".into(),
+                logical_shape: vec![1, 1],
+                physical_shape: vec![1, 1],
+                strides_bytes: vec![4, 4],
+                layout: "NHWC".into(),
+                producer: ExecutionLane::CoreMlAne,
+                consumer: ExecutionLane::MlxGpu,
+                reuse_class: SlotReuseClass::Exclusive,
+                required_alignment: 64,
+            },
+            state: crate::compute_image::apple_shared_arena::SlotState::Free,
+            generation: 0,
+            layout_digest: "digest-00000000".into(),
+            metal_view: None,
+            coreml_view: None,
+        });
+
+        // Create executable with input/output bindings matching arena slots
+        let mut exec = CoreMlIOSurfaceExecutable::new(
+            "warmup_test",
+            "/tmp/warmup.mlmodelc",
+            CoreMlComputePolicy::CpuAndNeuralEngine,
+        );
+
+        exec.add_input_binding(CoreMlIOSurfaceBinding {
+            tensor_id: "input".into(),
+            slot_id: 0,
+            io_surface_id: 1,
+            byte_offset: 0,
+            contract_digest: String::new(),
+        }).unwrap();
+
+        exec.add_output_binding(CoreMlIOSurfaceBinding {
+            tensor_id: "output".into(),
+            slot_id: 1,
+            io_surface_id: 2,
+            byte_offset: 4096,
+            contract_digest: String::new(),
+        }).unwrap();
+
+        // Create lane with a compiled subgraph
+        let mut lane = CoreMlLane::new();
+        let mut sg = CoreMlSubgraph::new("test_subgraph");
+        sg.status = CoreMlSubgraphStatus::Compiled {
+            model_path: "/tmp/warmup.mlmodelc".into(),
+        };
+        lane.add_subgraph(sg);
+
+        let contract = CoreMlWarmupContract {
+            min_warmup_predictions: 3,
+            max_warmup_latency_ms: 1000,
+            tolerance: 0.01,
+        };
+
+        // Call warmup_with_arena
+        let result = lane.warmup_with_arena("test_subgraph", &contract, &mut arena, &mut exec);
+
+        assert!(result.is_ok(), "warmup_with_arena should succeed: {:?}", result);
+        let record = result.unwrap();
+        assert!(record.warmup_success, "warmup_success should be true");
+        assert_eq!(lane.lifecycle, AneLaneLifecycle::Warmed, "lifecycle should be Warmed");
+        assert!(exec.loaded, "binding should be marked as loaded");
+    }
 }

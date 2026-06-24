@@ -38,6 +38,8 @@ pub mod coreml_iosurface;
 pub mod coreml_lane;
 /// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
 pub mod metal_iosurface;
+/// Metal consumer — validates Core ML output slots against CPU references.
+pub mod metal_consumer;
 /// CPU attention scheduler — L2-cache-aware work partition + work-stealing
 /// (ported from vLLM's cpu_attn_impl.hpp).
 #[cfg(feature = "candle-cpu")]

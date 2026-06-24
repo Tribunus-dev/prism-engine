@@ -201,6 +201,16 @@ pub fn ane_assignment_meets_threshold(
     ane_time_ns <= max_allowed
 }
 
+/// Use calibration evidence to check ANE assignment.
+pub fn evidence_based_ane_assignment(
+    calibration: &crate::evidence::apple_tri_lane_calibration::CalibrationStore,
+    hardware_fingerprint: &str,
+    region_fingerprint: &str,
+    threshold: f64,
+) -> bool {
+    calibration.ane_assignment_justified(hardware_fingerprint, region_fingerprint, threshold)
+}
+
 // ── Analyzer ────────────────────────────────────────────────────────────────
 
 pub struct ProfitabilityAnalyzer;

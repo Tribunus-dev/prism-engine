@@ -98,7 +98,7 @@ pub enum CoreMlComputeUnitPolicy {
 // ── ANE admission ────────────────────────────────────────────────────────
 
 /// Result of the compile-time ANE admission gate.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AneAdmission {
     /// Region admitted for ANE compilation.
     Admitted,
@@ -109,7 +109,7 @@ pub enum AneAdmission {
 }
 
 /// Reasons an ANE candidate region was rejected.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AneRejectionReason {
     /// Required operator cannot be lowered to Core ML MIL.
     UnsupportedOperatorLowering(String),
@@ -136,7 +136,7 @@ pub enum AneRejectionReason {
 }
 
 /// Reasons a region was admitted on an experimental basis.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AneExperimentalReason {
     /// Only a subset of output ops have been qualified.
     PartialQualification,

@@ -126,6 +126,11 @@ pub mod compilation;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+pub mod evidence;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod compute_image;
 pub mod compute_image_v0;
 pub mod compute_ir;

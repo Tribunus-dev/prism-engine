@@ -24,6 +24,7 @@ pub mod content_store;
 pub mod diag;
 pub mod executable;
 pub mod execution_shape;
+pub mod fallback_plan;
 pub mod fusion_abi;
 pub mod fusion_plan;
 pub mod fusion_receipts;
