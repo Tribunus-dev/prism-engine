@@ -179,13 +179,14 @@ impl MetalConsumer {
             .slot(slot_id)
             .ok_or_else(|| format!("slot {} not found", slot_id))?;
 
-        if arena.base_ptr.is_null() {
-            return Ok(0);
-        }
+        let backing = match slot.backing_arena.as_ref() {
+            Some(b) => b,
+            None => return Ok(0),
+        };
+
+        let ptr = unsafe { backing.base_ptr() } as *mut u8;
 
         let byte_len = slot.manifest.byte_length as usize;
-        let offset = slot.manifest.byte_offset as usize;
-        let ptr = unsafe { arena.base_ptr.add(offset) };
 
     /// Same checksum computation as Metal kernel would use
 
@@ -213,10 +214,10 @@ impl MetalConsumer {
             .slot(slot_id)
             .ok_or_else(|| format!("slot {} not found", slot_id))?;
 
-        if arena.base_ptr.is_null() {
-            return self.compute_cpu_digest(arena, _epoch);
-        }
-
+        let backing = match slot.backing_arena.as_ref() {
+            Some(b) => b,
+            None => return self.compute_cpu_digest(arena, _epoch),
+        };
         let byte_len = slot.manifest.byte_length as usize;
 
         // 1. Use cached Metal device from the consumer
@@ -224,9 +225,7 @@ impl MetalConsumer {
             .ok_or("no Metal device available")?;
 
         // 2. Get IOSurface handle
-        let io_surface = arena.backing_arena.as_ref()
-            .map(|a| a.info.io_surface)
-            .ok_or("no IOSurface backing arena")?;
+        let io_surface = backing.info.io_surface;
 
         // 3. Check texture cache — create if missing
         // Use the documented public API: [MTLDevice newTextureWithDescriptor:iosurface:plane:]
@@ -234,11 +233,17 @@ impl MetalConsumer {
             // Create a 2D texture descriptor: R16Uint texels (2 bytes each),
             // width spans the full byte length, height = 1 (linear layout)
             let desc = metal::TextureDescriptor::new();
-            // Each R16Uint texel is 2 bytes, so width = total bytes / 2
-            let texel_count = (byte_len / 2) as u64;
-            desc.set_width(texel_count);
-            desc.set_height(1);
-            desc.set_pixel_format(metal::MTLPixelFormat::R16Uint);
+            // Use manifest dimensions
+            let width = slot.manifest.physical_shape.first().copied().unwrap_or(1) as u64;
+            let height = slot.manifest.physical_shape.get(1).copied().unwrap_or(1) as u64;
+            desc.set_width(width);
+            desc.set_height(height);
+            // Use manifest dtype to determine pixel format
+            let pixel_format = match slot.manifest.dtype.as_str() {
+                "float16" | "fp16" => metal::MTLPixelFormat::R16Float,
+                _ => metal::MTLPixelFormat::R16Uint,
+            };
+            desc.set_pixel_format(pixel_format);
             desc.set_usage(metal::MTLTextureUsage::ShaderRead);
             desc.set_storage_mode(metal::MTLStorageMode::Shared);
 
@@ -323,6 +328,7 @@ mod tests {
             layout_digest: "abc123".into(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         }
     }
 

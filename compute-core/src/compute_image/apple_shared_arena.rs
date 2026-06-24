@@ -81,6 +81,8 @@ pub struct LiveIOSurfaceSlot {
     pub layout_digest: String,
     pub metal_view: Option<String>,   // Metal resource view descriptor
     pub coreml_view: Option<String>, // Core ML IOSurface view descriptor
+    /// Per-slot IOSurface backing (None when mocked)
+    pub backing_arena: Option<crate::arena::Arena>,
 }
 
 impl LiveIOSurfaceSlot {
@@ -154,14 +156,6 @@ pub struct AppleSharedArena {
     pub slots: HashMap<SlotId, LiveIOSurfaceSlot>,
     pub generation: u64,
     pub ring_depth: u8,
-    /// The IOSurface backing the arena allocation (0 if not allocated)
-    pub io_surface_id: u32,
-    /// Mapped base pointer into the IOSurface allocation
-    pub base_ptr: *mut u8,
-    /// Pixel format for IOSurface (e.g. 'L008' for float16)
-    pub pixel_format: u32,
-    /// The backing IOSurface arena allocation (None when mocking).
-    pub backing_arena: Option<crate::arena::Arena>,
 }
 
 impl AppleSharedArena {
@@ -173,10 +167,6 @@ impl AppleSharedArena {
             slots: HashMap::new(),
             generation: 0,
             ring_depth,
-            io_surface_id: 0,
-            base_ptr: std::ptr::null_mut(),
-            pixel_format: 0,
-            backing_arena: None,
         }
     }
 
@@ -250,17 +240,20 @@ impl AppleSharedArena {
                 layout_digest: manifest.arena_layout_digest.clone(),
                 metal_view: None,
                 coreml_view: None,
+                backing_arena: None,
             };
             arena.add_slot(slot);
         }
         // Allocate the IOSurface backing the full arena.
-        if manifest.allocation_bytes > 0 {
-            let backing = crate::arena::Arena::new_bytes(manifest.allocation_bytes as u32)
-                .map_err(|e| format!("failed to allocate backing arena: {}", e))?;
-            arena.io_surface_id = backing.io_surface_id() as u32;
-            arena.base_ptr = unsafe { backing.base_ptr() } as *mut u8;
-            arena.pixel_format = backing.info.pixel_format as u32;
-            arena.backing_arena = Some(backing);
+        // Allocate per-slot IOSurface backing.
+        for slot_entry in arena.slots.values_mut() {
+            let byte_count = slot_entry.manifest.byte_length;
+            if byte_count > 0 {
+                let backing = crate::arena::Arena::new_bytes(byte_count as u32)
+                    .map_err(|e| format!("failed to allocate backing for slot {}: {}",
+                        slot_entry.manifest.slot_id, e))?;
+                slot_entry.backing_arena = Some(backing);
+            }
         }
         Ok(arena)
     }
@@ -269,30 +262,23 @@ impl AppleSharedArena {
     /// Returns None if the arena has no base_ptr or IOSurface backing.
     pub fn arena_info_for_slot(&self, slot_id: SlotId) -> Option<crate::arena_info::ArenaInfo> {
         let slot = self.slots.get(&slot_id)?;
-        let base = self.base_ptr;
-        if base.is_null() {
-            return None;
-        }
+        let backing = slot.backing_arena.as_ref()?;
+        let base = unsafe { backing.base_ptr() } as *mut u8;
         let byte_size = slot.manifest.byte_length as i32;
         let bytes_per_row = *slot.manifest.strides_bytes.first().unwrap_or(&0) as i32;
         let logical_dim0 = *slot.manifest.logical_shape.first().unwrap_or(&1) as i32;
         let logical_dim1 = *slot.manifest.logical_shape.get(1).unwrap_or(&1) as i32;
-        // The offset into the IOSurface allocation
-        let address = unsafe { base.add(slot.manifest.byte_offset as usize) } as *mut std::ffi::c_void;
         Some(crate::arena_info::ArenaInfo {
             width: logical_dim0,
             height: logical_dim1,
             logical_dim0,
             logical_dim1,
-            pixel_format: self.pixel_format as i32,
+            pixel_format: backing.info.pixel_format as i32,
             byte_size,
             bytes_per_row,
-            base_address: address,
+            base_address: base as *mut std::ffi::c_void,
             cv_buffer: std::ptr::null_mut(),
-            
-            io_surface: self.backing_arena.as_ref()
-                .map(|a| a.info.io_surface)
-                .unwrap_or(std::ptr::null_mut()),
+            io_surface: backing.info.io_surface,
         })
     }
 
@@ -332,6 +318,7 @@ mod tests {
             layout_digest: "abc123".into(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         }
     }
 

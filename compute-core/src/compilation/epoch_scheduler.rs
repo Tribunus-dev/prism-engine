@@ -1008,6 +1008,7 @@ mod tests {
             layout_digest: "abc".into(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         });
 
         // Build a Core ML executable with no real model file — load_model() will fail
@@ -1176,6 +1177,7 @@ mod tests {
             layout_digest: "abc".into(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         });
 
         AppleTriLaneExecutor::new(plan, arena, false)

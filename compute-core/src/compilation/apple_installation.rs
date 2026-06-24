@@ -95,6 +95,7 @@ pub fn install_apple_tri_lane(
             layout_digest: manifest.arena.arena_layout_digest.clone(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         };
         arena.add_slot(live_slot);
     }

@@ -245,24 +245,21 @@ fn test_iosurface_mutation_detected() {
     let manifest = make_arena_manifest();
     let mut arena = AppleSharedArena::install(&manifest).unwrap();
 
-    // IOSurface is already allocated by install() — use base_ptr directly
-    assert!(!arena.base_ptr.is_null(), "install() must allocate IOSurface backing");
-
-    // 2. Write known data to input slot 0
+    // 2. Write known data to input slot 0 (using per-slot backing)
     let input_slot = arena.slot(0).unwrap();
-    let offset = input_slot.manifest.byte_offset as usize;
+    let input_backing = input_slot.backing_arena.as_ref().expect("input slot 0 must have backing");
     let len = input_slot.manifest.byte_length as usize;
-    let input_ptr = unsafe { arena.base_ptr.add(offset) };
+    let input_ptr = unsafe { input_backing.base_ptr() } as *mut u8;
     let slice = unsafe { std::slice::from_raw_parts_mut(input_ptr as *mut u32, len / 4) };
     for (i, v) in slice.iter_mut().enumerate() {
         *v = (i % 256) as u32;
     }
 
-    // 3. Write known data to output slot 1 (simulating Core ML output)
+    // 3. Write known data to output slot 1 (simulating Core ML output, using per-slot backing)
     let output_slot = arena.slot(1).unwrap();
-    let out_offset = output_slot.manifest.byte_offset as usize;
+    let output_backing = output_slot.backing_arena.as_ref().expect("output slot 1 must have backing");
     let out_len = output_slot.manifest.byte_length as usize;
-    let out_ptr = unsafe { arena.base_ptr.add(out_offset) };
+    let out_ptr = unsafe { output_backing.base_ptr() } as *mut u8;
     let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u32, out_len / 4) };
     for (i, v) in out_slice.iter_mut().enumerate() {
         *v = (i * 2 % 256) as u32;

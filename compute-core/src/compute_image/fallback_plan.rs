@@ -215,6 +215,7 @@ mod tests {
             layout_digest: String::new(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         });
 
         // Slot 1: Poisoned — layout mismatch
@@ -231,6 +232,7 @@ mod tests {
             layout_digest: "abc".into(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         });
 
         // Slot 2: Ready (healthy)
@@ -244,6 +246,7 @@ mod tests {
             layout_digest: "def".into(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         });
 
         // Slot 3: Poisoned — Core ML failure
@@ -257,6 +260,7 @@ mod tests {
             layout_digest: "xyz".into(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         });
 
         // Slot 4: Retired (already cleaned up)
@@ -267,6 +271,7 @@ mod tests {
             layout_digest: String::new(),
             metal_view: None,
             coreml_view: None,
+            backing_arena: None,
         });
 
         arena
