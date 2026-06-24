@@ -47,6 +47,18 @@ half = "2"
 clap = { version = "4", features = ["derive"] }
 
 [features]
+cpu-backend = []
+cuda-backend = []
+hip-backend = []
+level-zero-backend = []
+vulkan-backend = []
+linux-device-islands = [
+  "cpu-backend",
+  "cuda-backend",
+  "hip-backend",
+  "level-zero-backend",
+  "vulkan-backend"
+]
 default = []
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "dep:coreml-proto", "server", "metal-dispatch"]
 prism-backend = ["dep:mlx-rs", "dep:mlx-sys", "dep:coreml-proto", "server", "metal-dispatch"]
