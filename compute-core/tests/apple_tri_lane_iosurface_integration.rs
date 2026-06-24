@@ -1,5 +1,13 @@
 //! ANE-TRI-LANE-REALIZATION-0001 Phase 7: IOSurface integration soak.
 //!
+//! ```
+//! This test does NOT exercise real Core ML or Metal hardware paths.
+//! It validates the scheduling model, slot state machine, and manifest
+//! contracts using in-memory simulation.
+//! For real hardware execution, see `cargo test --features prism-backend`
+//! on macOS Apple Silicon.
+//! ```
+//!
 //! Installs a CImage manifest into the IOSurface shared arena, verifies
 //! all three slots begin in Free state, then runs 1000 simulated epochs
 //! cycling slot state through the full state machine:

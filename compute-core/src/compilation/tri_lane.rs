@@ -629,6 +629,8 @@ pub struct OverlapMetrics {
 pub enum NumericalStatus {
     /// All outputs matched the reference within tolerance.
     Pass,
+    /// Not yet validated (epoch completed but no verification run).
+    NotValidated,
     /// Some outputs exceeded tolerance (logged).
     Warning(String),
     /// Numerical divergence detected.

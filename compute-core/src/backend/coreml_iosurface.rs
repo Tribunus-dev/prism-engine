@@ -5,7 +5,7 @@
 //! Each binding maps a model tensor to an IOSurface arena slot, validated
 //! against a cimage manifest contract.
 
-use std::collections::HashMap;
+use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 
 /// Core ML compute policy enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +48,8 @@ pub struct CoreMlIOSurfaceExecutable {
     pub model_path: String,
     /// Whether the underlying Core ML model is loaded.
     pub loaded: bool,
+    /// Loaded Core ML model handle, or None before load_model() is called.
+    pub model: Option<CoreMlModel>,
 }
 
 impl CoreMlIOSurfaceExecutable {
@@ -59,6 +61,7 @@ impl CoreMlIOSurfaceExecutable {
             output_bindings: Vec::new(),
             model_path: model_path.to_string(),
             loaded: false,
+            model: None,
         }
     }
 
@@ -100,6 +103,24 @@ impl CoreMlIOSurfaceExecutable {
                 .ok_or_else(|| format!("slot {} not found in arena", binding.slot_id))?;
             binding.contract_digest = format!("digest:{}", slot.tensor_id);
         }
+        Ok(())
+    }
+
+    /// Load the Core ML model for this executable.
+    pub fn load_model(&mut self) -> Result<(), String> {
+        if self.loaded {
+            return Ok(());
+        }
+        let compute_units = match self.compute_policy {
+            CoreMlComputePolicy::CpuAndNeuralEngine => CoreMlComputeUnits::CpuAndNeuralEngine,
+            CoreMlComputePolicy::CpuOnly => CoreMlComputeUnits::CpuOnly,
+            CoreMlComputePolicy::NeuralEngineOnly => CoreMlComputeUnits::All,
+            CoreMlComputePolicy::GpuOnly => CoreMlComputeUnits::CpuAndGpu,
+            CoreMlComputePolicy::All => CoreMlComputeUnits::All,
+        };
+        let model = CoreMlModel::load_with_compute_units(&self.model_path, compute_units)?;
+        self.model = Some(model);
+        self.loaded = true;
         Ok(())
     }
 
@@ -423,13 +444,25 @@ mod tests {
             tolerance: 0.01,
         };
 
-        // Call warmup_with_arena
+        // Call warmup_with_arena — the model file doesn't exist, so load_model()
+        // fails gracefully. This validates that the binding/arena validation works
+        // before the model load attempt, and that failure is reported without a panic.
         let result = lane.warmup_with_arena("test_subgraph", &contract, &mut arena, &mut exec);
 
-        assert!(result.is_ok(), "warmup_with_arena should succeed: {:?}", result);
-        let record = result.unwrap();
-        assert!(record.warmup_success, "warmup_success should be true");
-        assert_eq!(lane.lifecycle, AneLaneLifecycle::Warmed, "lifecycle should be Warmed");
-        assert!(exec.loaded, "binding should be marked as loaded");
+        // Model file doesn't exist — expect graceful failure
+        assert!(result.is_err(), "warmup should fail gracefully with missing model: {:?}", result);
+        let err = result.unwrap_err();
+        assert!(err.contains("tribunus_coreml_load_model") || err.contains("load"),
+            "error should mention model loading: {}", err);
+
+        // Executable state: model not loaded, but bindings still configured
+        assert!(!exec.loaded, "executable should not be marked as loaded");
+        assert!(exec.model.is_none(), "model handle should be None");
+        assert_eq!(exec.input_bindings.len(), 1, "input bindings preserved");
+        assert_eq!(exec.output_bindings.len(), 1, "output bindings preserved");
+
+        // Lifecycle should remain Unavailable since warmup failed
+        assert_eq!(lane.lifecycle, AneLaneLifecycle::Unavailable,
+            "lifecycle should be Unavailable after failed warmup");
     }
 }
