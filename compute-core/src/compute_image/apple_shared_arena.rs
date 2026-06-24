@@ -244,14 +244,26 @@ impl AppleSharedArena {
             };
             arena.add_slot(slot);
         }
-        // Allocate the IOSurface backing the full arena.
         // Allocate per-slot IOSurface backing.
         for slot_entry in arena.slots.values_mut() {
             let byte_count = slot_entry.manifest.byte_length;
             if byte_count > 0 {
-                let backing = crate::arena::Arena::new_bytes(byte_count as u32)
+                let mut backing = crate::arena::Arena::new_bytes(byte_count as u32)
                     .map_err(|e| format!("failed to allocate backing for slot {}: {}",
                         slot_entry.manifest.slot_id, e))?;
+                // Set IOSurface pixel format to match the slot's dtype
+                let pix_fmt = match slot_entry.manifest.dtype.as_str() {
+                    "float16" | "fp16" => 0x4C303068u32, // 'L00h' = half-float
+                    _ => 0u32,
+                };
+                backing.set_pixel_format(pix_fmt);
+                // Set dimensions from manifest so the IOSurface layout matches the texture descriptor
+                let pw = slot_entry.manifest.physical_shape.first().copied().unwrap_or(1);
+                let ph = slot_entry.manifest.physical_shape.get(1).copied().unwrap_or(1);
+                let bpr = slot_entry.manifest.strides_bytes.first()
+                .copied()
+                .unwrap_or(pw as u64 * 2) as u32;
+                backing.set_dimensions(pw, ph, bpr);
                 slot_entry.backing_arena = Some(backing);
             }
         }
@@ -259,7 +271,7 @@ impl AppleSharedArena {
     }
 
     /// Build an ArenaInfo pointing to this slot within the IOSurface.
-    /// Returns None if the arena has no base_ptr or IOSurface backing.
+    /// Returns None if the slot has no IOSurface backing.
     pub fn arena_info_for_slot(&self, slot_id: SlotId) -> Option<crate::arena_info::ArenaInfo> {
         let slot = self.slots.get(&slot_id)?;
         let backing = slot.backing_arena.as_ref()?;

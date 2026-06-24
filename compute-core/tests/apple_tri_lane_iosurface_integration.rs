@@ -320,3 +320,62 @@ fn test_iosurface_mutation_detected() {
         "persistent Metal texture must detect IOSurface content changes: before={}, after={}",
         baseline_digest, result2.metal_digest);
 }
+
+#[test]
+fn test_two_slot_isolation() {
+    // Create arena with 2 slots, write distinct data to each.
+    let manifest = make_arena_manifest();
+    let arena = AppleSharedArena::install(&manifest).unwrap();
+
+    // Write distinct patterns to slot 0 and slot 1
+    let offset0 = arena.slot(0).unwrap().manifest.byte_offset as usize;
+    let len0 = arena.slot(0).unwrap().manifest.byte_length as usize;
+    let ptr0 = unsafe { arena.slot(0).unwrap().backing_arena.as_ref().unwrap().base_ptr() } as *mut u32;
+    let slice0 = unsafe { std::slice::from_raw_parts_mut(ptr0, len0 / 4) };
+    for (i, v) in slice0.iter_mut().enumerate() {
+        *v = (i * 7 % 256) as u32;  // pattern A
+    }
+
+    let ptr1 = unsafe { arena.slot(1).unwrap().backing_arena.as_ref().unwrap().base_ptr() } as *mut u32;
+    let len1 = arena.slot(1).unwrap().manifest.byte_length as usize;
+    let slice1 = unsafe { std::slice::from_raw_parts_mut(ptr1, len1 / 4) };
+    for (i, v) in slice1.iter_mut().enumerate() {
+        *v = (i * 11 % 256) as u32;  // pattern B (distinct from A)
+    }
+
+    // Validate both slots — creates and caches textures
+    let mut consumer0 = MetalConsumer::new("slot0");
+    consumer0.add_input(MetalSlotBinding {
+        slot_id: 0, tensor_name: "input".into(),
+        byte_offset: 0, byte_length: len0 as u64,
+        layout_digest: arena.layout_digest.clone(),
+    });
+    let mut consumer1 = MetalConsumer::new("slot1");
+    consumer1.add_input(MetalSlotBinding {
+        slot_id: 1, tensor_name: "output".into(),
+        byte_offset: 0, byte_length: len1 as u64,
+        layout_digest: arena.layout_digest.clone(),
+    });
+
+    let baseline0 = consumer0.validate(&arena, 0).unwrap();
+    let baseline1 = consumer1.validate(&arena, 0).unwrap();
+    assert!(baseline0.matched);
+    assert!(baseline1.matched);
+    assert_ne!(baseline0.metal_digest, baseline1.metal_digest,
+        "two slots with distinct data must produce different digests");
+
+    // Mutate slot 0 only
+    for (i, v) in slice0.iter_mut().enumerate() {
+        *v = (i * 13 % 256) as u32;  // pattern C (different from A)
+    }
+
+    // Re-validate both — slot 0 digest must change, slot 1 must NOT
+    let after0 = consumer0.validate(&arena, 0).unwrap();
+    let after1 = consumer1.validate(&arena, 0).unwrap();
+    assert!(after0.matched);
+    assert!(after1.matched);
+    assert_ne!(after0.metal_digest, baseline0.metal_digest,
+        "slot 0 digest must change after mutating slot 0");
+    assert_eq!(after1.metal_digest, baseline1.metal_digest,
+        "slot 1 digest must remain unchanged when only slot 0 mutated");
+}

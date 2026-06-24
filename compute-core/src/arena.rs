@@ -148,6 +148,20 @@ impl Arena {
     }
 
     /// Return the physical byte size.
+    /// Set the IOSurface pixel format for this arena (e.g. 0x4C303068 = 'L00h' = half-float).
+    /// Must be called after allocation and before creating a Metal texture.
+    pub fn set_pixel_format(&mut self, fmt: u32) {
+        self.info.pixel_format = fmt as i32;
+    }
+
+    /// Set the IOSurface dimensions and bytes-per-row for this arena.
+    /// Must be called after allocation and before creating a Metal texture.
+    pub fn set_dimensions(&mut self, width: u32, height: u32, bytes_per_row: u32) {
+        self.info.width = width as i32;
+        self.info.height = height as i32;
+        self.info.bytes_per_row = bytes_per_row as i32;
+    }
+
     pub fn byte_len(&self) -> usize {
         self.info.byte_size as usize
     }

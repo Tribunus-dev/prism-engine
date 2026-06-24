@@ -188,8 +188,6 @@ impl MetalConsumer {
 
         let byte_len = slot.manifest.byte_length as usize;
 
-    /// Same checksum computation as Metal kernel would use
-
         // Read u16 values (2 bytes each) to match R16Uint texture texel size
         let element_count = (byte_len / 2).max(1).min(512);
         let slice = unsafe { std::slice::from_raw_parts(ptr as *const u16, element_count) };
@@ -230,8 +228,6 @@ impl MetalConsumer {
         // 3. Check texture cache — create if missing
         // Use the documented public API: [MTLDevice newTextureWithDescriptor:iosurface:plane:]
         let texture = self.texture_cache.entry(slot_id).or_insert_with(|| {
-            // Create a 2D texture descriptor: R16Uint texels (2 bytes each),
-            // width spans the full byte length, height = 1 (linear layout)
             let desc = metal::TextureDescriptor::new();
             // Use manifest dimensions
             let width = slot.manifest.physical_shape.first().copied().unwrap_or(1) as u64;
@@ -256,15 +252,32 @@ impl MetalConsumer {
         });
 
         // 4. Dispatch a Metal compute kernel that sums R16Uint texel values
-        let shader_src = r#"
+        // Select shader based on slot pixel format — R16Float and R16Uint require
+        // different texture access types
+        let is_float = matches!(slot.manifest.dtype.as_str(), "float16" | "fp16");
+        let shader_src = if is_float {
+            r#"
 #include <metal_stdlib>
 using namespace metal;
-kernel void checksum(texture2d<uint, access::read> in  [[texture(0)]],
+kernel void checksum(texture2d<half, access::read> in  [[texture(0)]],
+                     device atomic_ulong* out [[buffer(0)]],
+                     uint tid [[thread_position_in_grid]]) {
+    half4 v = in.read(uint2(tid, 0));
+    uint bits = as_type<uint>(v.r);
+    atomic_fetch_add_explicit(out, (ulong)bits, memory_order_relaxed);
+}
+"#
+        } else {
+            r#"
+#include <metal_stdlib>
+using namespace metal;
+kernel void checksum(texture2d<ushort, access::read> in  [[texture(0)]],
                      device atomic_ulong* out [[buffer(0)]],
                      uint tid [[thread_position_in_grid]]) {
     atomic_fetch_add_explicit(out, (ulong)in.read(uint2(tid, 0)).r, memory_order_relaxed);
 }
-"#;
+"#
+        };
         let library = device.new_library_with_source(shader_src, &metal::CompileOptions::new())
             .map_err(|e| format!("shader compile failed: {:?}", e))?;
         let func = library.get_function("checksum", None::<metal::FunctionConstantValues>)
