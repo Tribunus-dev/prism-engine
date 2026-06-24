@@ -9,6 +9,7 @@
 //! Routing constants: MLX(GPU)=0, Accelerate(CPU)=1, ANE=3.
 
 use crate::config::{LayerPlan, ModelExecutionPlan};
+use crate::compilation::tri_lane::{TriLaneCostModel, LaneCostEstimate};
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,140 @@ pub struct ProfitabilityReport {
     pub assignments: Vec<AneAssignment>,
     pub total_gpu_time_saved_ns: u64,
     pub total_ane_time_ns: u64,
+}
+
+use serde::{Deserialize, Serialize};
+
+/// Device-specific cost evidence for a single operation on a specific device.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceCostEvidence {
+    /// Apple Silicon SoC family: "M1", "M2", "M3", "M4"
+    pub soc_family: String,
+    /// macOS version at measurement time, e.g. "14.5"
+    pub macos_version: String,
+    /// Core ML runtime version, e.g. "7.2.0"
+    pub coreml_version: String,
+    /// Operation name, e.g. "q_proj", "matmul", "rms_norm"
+    pub operation: String,
+    /// Shape descriptor, e.g. "1x4096x4096"
+    pub shape_desc: String,
+    /// GPU (MLX/Metal) latency in nanoseconds
+    pub gpu_latency_ns: u64,
+    /// ANE (Core ML) latency in nanoseconds
+    pub ane_latency_ns: u64,
+    /// Accelerate (CPU vDSP) latency in nanoseconds
+    pub accel_latency_ns: u64,
+    /// ISO-8601 timestamp of measurement
+    pub measured_at: String,
+}
+
+/// Build a TriLaneCostModel from per-backend operation costs.
+///
+/// Aggregates individual OpCost entries into a total cost estimate per lane,
+/// and applies the GPU/CPU contention penalties. The `gpu_contention_ns` and
+/// `cpu_contention_ns` represent estimated contention overhead from shared
+/// memory bandwidth or concurrent workload interference.
+pub fn build_tri_lane_cost_model(
+    costs: &[OpCost],
+    gpu_contention_ns: u64,
+    cpu_contention_ns: u64,
+) -> crate::compilation::tri_lane::TriLaneCostModel {
+    
+
+    let total_gpu: u64 = costs.iter().map(|c| c.gpu_estimate_ns).sum();
+    let total_ane: u64 = costs.iter().map(|c| c.ane_estimate_ns).sum();
+    let total_cpu: u64 = costs.iter().map(|c| c.accel_estimate_ns).sum();
+
+    // Estimate memory proportion: element-wise ops are memory-bound (~70%
+    // memory), matmuls are compute-bound (~30% memory). Use arithmetic
+    // intensity as the fraction spent on compute; the rest is memory.
+    let gpu_memory: u64 = costs
+        .iter()
+        .map(|c| (c.gpu_estimate_ns as f64 * (1.0 - c.arithmetic_intensity as f64)) as u64)
+        .sum();
+    let gpu_compute: u64 = total_gpu.saturating_sub(gpu_memory);
+
+    let ane_memory: u64 = costs
+        .iter()
+        .map(|c| (c.ane_estimate_ns as f64 * (1.0 - c.arithmetic_intensity as f64)) as u64)
+        .sum();
+    let ane_compute: u64 = total_ane.saturating_sub(ane_memory);
+
+    let cpu_memory: u64 = costs
+        .iter()
+        .map(|c| (c.accel_estimate_ns as f64 * (1.0 - c.arithmetic_intensity as f64)) as u64)
+        .sum();
+    let cpu_compute: u64 = total_cpu.saturating_sub(cpu_memory);
+
+    let gpu_estimate = LaneCostEstimate {
+        compute_ns: gpu_compute,
+        memory_ns: gpu_memory,
+        boundary_ns: 0,
+        sync_ns: 5_000,
+    };
+    let ane_estimate = LaneCostEstimate {
+        compute_ns: ane_compute,
+        memory_ns: ane_memory,
+        boundary_ns: 20_000,
+        sync_ns: 10_000,
+    };
+    let cpu_estimate = LaneCostEstimate {
+        compute_ns: cpu_compute,
+        memory_ns: cpu_memory,
+        boundary_ns: 0,
+        sync_ns: 2_000,
+    };
+
+    // Critical path: the shortest possible completion time assuming maximal
+    // lane overlap. For simplicity, approximate as the minimum of the three
+    // total lane times plus the largest single sync cost.
+    let critical_path_ns = total_gpu
+        .min(total_ane)
+        .min(total_cpu)
+        .saturating_add(10_000);
+
+    TriLaneCostModel {
+        gpu: gpu_estimate,
+        ane: ane_estimate,
+        cpu: cpu_estimate,
+        critical_path_ns,
+        gpu_contention_penalty_ns: gpu_contention_ns,
+        cpu_contention_penalty_ns: cpu_contention_ns,
+        numerical_risk_penalty: 0.0,
+        fallback_risk_penalty: 0.0,
+    }
+}
+
+/// Check whether assigning a layer's operation to ANE meets the speedup
+/// threshold.
+///
+/// Returns true if ANE time <= (1 - threshold) * best_other_time.  The
+/// threshold defaults to 0.10 (10%) but is configurable via `threshold`.
+///
+/// # Arguments
+/// * `ane_time_ns` — measured or estimated ANE execution time.
+/// * `gpu_time_ns` — measured or estimated GPU execution time.
+/// * `accel_time_ns` — measured or estimated Accelerate execution time.
+/// * `threshold` — optional fractional speedup threshold (default 0.10).
+///
+/// # Example
+/// ```ignore
+/// assert!(ane_assignment_meets_threshold(80, 100, 120, Some(0.15)));
+/// assert!(!ane_assignment_meets_threshold(95, 100, 120, Some(0.10)));
+/// ```
+pub fn ane_assignment_meets_threshold(
+    ane_time_ns: u64,
+    gpu_time_ns: u64,
+    accel_time_ns: u64,
+    threshold: Option<f64>,
+) -> bool {
+    let threshold = threshold.unwrap_or(0.10);
+    if !(0.0..=1.0).contains(&threshold) {
+        return false;
+    }
+    let best_other = gpu_time_ns.min(accel_time_ns);
+    let max_allowed = (best_other as f64 * (1.0 - threshold)) as u64;
+    ane_time_ns <= max_allowed
 }
 
 // ── Analyzer ────────────────────────────────────────────────────────────────
@@ -1326,5 +1461,71 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── ANE Threshold Gate ──────────────────────────────────────────────
+
+    #[test]
+    fn test_ane_meets_15_percent_threshold() {
+        // ANE=80ns vs GPU=100ns: 20% faster, so 15% threshold passes.
+        assert!(ane_assignment_meets_threshold(80, 100, 150, Some(0.15)));
+    }
+
+    #[test]
+    fn test_ane_fails_10_percent_threshold() {
+        // ANE=95ns vs GPU=100ns: only 5% faster, so 10% threshold rejects.
+        assert!(!ane_assignment_meets_threshold(95, 100, 150, Some(0.10)));
+    }
+
+    #[test]
+    fn test_ane_default_threshold() {
+        // Default is 10%. ANE=95 vs GPU=100 is 5% → rejected.
+        assert!(!ane_assignment_meets_threshold(95, 100, 150, None));
+        // ANE=85 vs GPU=100 is 15% → passes default 10%.
+        assert!(ane_assignment_meets_threshold(85, 100, 150, None));
+    }
+
+    #[test]
+    fn test_ane_exact_boundary() {
+        // ANE=90 vs GPU=100: exactly 10% faster. Boundary: <= means passes.
+        assert!(ane_assignment_meets_threshold(90, 100, 150, Some(0.10)));
+    }
+
+    #[test]
+    fn test_ane_best_other_is_accel() {
+        // GPU=200, Accel=110, ANE=90. Best other is Accel at 110.
+        // 90 <= 110 * (1 - 0.10) = 99? Yes, 90 <= 99 → passes.
+        assert!(ane_assignment_meets_threshold(90, 200, 110, Some(0.10)));
+
+        // ANE=100 vs best_other=110: 100 <= 99? No → fails.
+        assert!(!ane_assignment_meets_threshold(100, 200, 110, Some(0.10)));
+    }
+
+    #[test]
+    fn test_ane_gpu_faster_than_ane() {
+        // GPU=80, ANE=100, Accel=120. ANE is slower than GPU on critical path.
+        // best_other = 80 (GPU). 100 <= 80 * 0.9 = 72? No → fails.
+        assert!(!ane_assignment_meets_threshold(100, 80, 120, Some(0.10)));
+    }
+
+    #[test]
+    fn test_ane_equal_times() {
+        // ANE=100, GPU=100, Accel=100: equal. 100 <= 100 * 0.9 = 90? No.
+        assert!(!ane_assignment_meets_threshold(100, 100, 100, Some(0.10)));
+    }
+
+    #[test]
+    fn test_ane_threshold_edge_values() {
+        // Threshold of 0.0 means must be strictly <= best_other (any improvement).
+        assert!(ane_assignment_meets_threshold(100, 100, 120, Some(0.0)));
+        // ANE equal to best_other with 0 threshold: passes.
+        assert!(ane_assignment_meets_threshold(100, 100, 120, Some(0.0)));
+        // ANE worse fails even with 0 threshold.
+        assert!(!ane_assignment_meets_threshold(110, 100, 120, Some(0.0)));
+        // Threshold of 1.0 means ANE must be 0 → impossible if non-zero.
+        assert!(!ane_assignment_meets_threshold(1, 100, 120, Some(1.0)));
+        // Threshold outside [0,1] is invalid → returns false.
+        assert!(!ane_assignment_meets_threshold(80, 100, 120, Some(-0.1)));
+        assert!(!ane_assignment_meets_threshold(80, 100, 120, Some(1.5)));
     }
 }

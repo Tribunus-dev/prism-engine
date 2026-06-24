@@ -460,6 +460,30 @@ pub struct TriLaneCostModel {
     pub fallback_risk_penalty: f64,
 }
 
+impl TriLaneCostModel {
+    /// Construct a TriLaneCostModel from per-lane cost estimates and
+    /// contention penalties.
+    pub fn new(
+        gpu: LaneCostEstimate,
+        ane: LaneCostEstimate,
+        cpu: LaneCostEstimate,
+        critical_path_ns: u64,
+        gpu_contention_penalty_ns: u64,
+        cpu_contention_penalty_ns: u64,
+    ) -> Self {
+        Self {
+            gpu,
+            ane,
+            cpu,
+            critical_path_ns,
+            gpu_contention_penalty_ns,
+            cpu_contention_penalty_ns,
+            numerical_risk_penalty: 0.0,
+            fallback_risk_penalty: 0.0,
+        }
+    }
+}
+
 // ── Evidence requirements ────────────────────────────────────────────────
 
 /// Evidence requirements for tri-lane execution qualification.
@@ -508,7 +532,7 @@ pub struct BoundaryMaterializationReceipt {
 }
 
 /// Overlap metrics for an epoch.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OverlapMetrics {
     /// Wall-clock time for the epoch (ns).
     pub epoch_wall_ns: u64,
@@ -518,12 +542,13 @@ pub struct OverlapMetrics {
     pub total_sync_ns: u64,
     /// Useful overlap time (compute in parallel, ns).
     pub overlap_ns: u64,
-    /// Fraction of wall time that was productively overlapped.
+    /// Useful overlap time (compute in parallel, ns).
     pub overlap_fraction: f64,
 }
 
 /// Numerical status for an epoch.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NumericalStatus {
     /// All outputs matched the reference within tolerance.
     Pass,

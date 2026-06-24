@@ -12,3 +12,4 @@ pub mod evidence_probe;
 pub mod tri_lane;
 pub mod qualification_gate;
 pub mod profitability;
+pub mod epoch_scheduler;
