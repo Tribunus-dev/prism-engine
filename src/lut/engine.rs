@@ -250,6 +250,34 @@ mod metal_backend {
             }
         }
 
+        /// Fused palettized GEMV for gate+up + SwiGLU.
+        /// Reads input once, writes swiglu(gate, up) = silu(gate) * up.
+        pub fn fused_gate_up(&self, gate_key: &str, up_key: &str, input: &[u16], output: &mut [u16]) -> Result<(), String> {
+            let (gate_buf, _, dm) = self.weight_bufs.get(gate_key).ok_or_else(|| format!("miss {gate_key}"))?;
+            let (up_buf, _, _) = self.weight_bufs.get(up_key).ok_or_else(|| format!("miss {up_key}"))?;
+            let il = (input.len() as u64) * 2;
+            let ol = (output.len() as u64) * 2;
+            unsafe { std::ptr::copy_nonoverlapping(input.as_ptr() as *const u8, self.scratch.contents() as *mut u8, il as usize); }
+            let cb = self.command_queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&self.gateup_pipeline);
+            enc.set_buffer(0, Some(gate_buf), 0);
+            enc.set_buffer(1, Some(up_buf), 0);
+            enc.set_buffer(2, Some(&self.scratch), 0);
+            enc.set_buffer(3, Some(&self.scratch), il);
+            let dims: [u32; 2] = [input.len() as u32, *dm];
+            enc.set_bytes(4, 8, dims.as_ptr() as *const std::ffi::c_void);
+            enc.dispatch_thread_groups(MTLSize::new(*dm as u64, 1, 1), MTLSize::new(64, 1, 1));
+            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    (self.scratch.contents() as *const u8).add(il as usize),
+                    output.as_mut_ptr() as *mut u8, ol as usize);
+            }
+            Ok(())
+        }
+
+
     }
 }
 
