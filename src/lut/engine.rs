@@ -29,6 +29,7 @@ mod metal_backend {
         pub norm_pipeline: ComputePipelineState,
         pub rope_pipeline: ComputePipelineState,
         pub softmax_pipeline: ComputePipelineState,
+        pub gateup_pipeline: ComputePipelineState,
         pub weight_bufs: HashMap<String, (Buffer, u32, u32)>,
         pub scratch: Buffer,
     pub kv_bufs: Vec<(Buffer, Buffer)>,
@@ -61,6 +62,10 @@ mod metal_backend {
             let softmax_pipeline = device.new_compute_pipeline_state_with_function(
                 &softmax_fn)
                 .map_err(|e| format!("softmax ps: {e:?}"))?;
+            let gateup_fn = library.get_function("palettized_gemv_swiglu", None).map_err(|e| format!("gateup fn: {e:?}"))?;
+            let gateup_pipeline = device.new_compute_pipeline_state_with_function(
+                &gateup_fn)
+                .map_err(|e| format!("gateup ps: {e:?}"))?;
             let cq = device.new_command_queue();
             let scratch = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
             let layer_cap = MAX_SEQ * kv_stride;
@@ -79,7 +84,7 @@ mod metal_backend {
                 wb.insert(k.clone(), (b, ct.dim_m, ct.dim_n));
             }
 
-            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, norm_pipeline, rope_pipeline, softmax_pipeline, weight_bufs: wb, scratch, kv_bufs, kv_stride, kv_offsets })
+            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, norm_pipeline, rope_pipeline, softmax_pipeline, gateup_pipeline, weight_bufs: wb, scratch, kv_bufs, kv_stride, kv_offsets })
         }
         pub fn gemv(&self, key: &str, inp: &[u16], out: &mut [u16]) -> Result<(), String> {
             let (wb, dm, dn) = self.weight_bufs.get(key).ok_or_else(|| format!("miss {key}"))?;
