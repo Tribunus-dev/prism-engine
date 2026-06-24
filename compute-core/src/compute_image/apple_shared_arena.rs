@@ -296,12 +296,6 @@ impl AppleSharedArena {
         })
     }
 
-    /// Set the IOSurface backing for this arena.
-    pub fn set_iosurface(&mut self, io_surface_id: u32, base_ptr: *mut u8, pixel_format: u32) {
-        self.io_surface_id = io_surface_id;
-        self.base_ptr = base_ptr;
-        self.pixel_format = pixel_format;
-    }
 }
 
 /// SlotEpoch for generation tracking.

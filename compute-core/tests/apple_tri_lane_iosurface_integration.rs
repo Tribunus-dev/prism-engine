@@ -26,6 +26,7 @@ use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     CoreMlArtifactManifest, CpuArtifactManifest, IOSurfaceSlotManifest, MetalArtifactManifest,
 };
 use tribunus_compute_core::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
+use tribunus_compute_core::backend::metal_consumer::{MetalConsumer, MetalSlotBinding};
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -240,23 +241,21 @@ fn test_install_cimage_and_run_1000_epochs() {
 
 #[test]
 fn test_iosurface_mutation_detected() {
-    // 1. Create an AppleSharedArena with real IOSurface backing
+    // 1. Create an AppleSharedArena via install() — allocates real IOSurface backing
     let manifest = make_arena_manifest();
     let mut arena = AppleSharedArena::install(&manifest).unwrap();
 
-    // Allocate a real IOSurface and map it
-    let alloc_size = manifest.allocation_bytes as usize;
-    let mut backing = vec![0u8; alloc_size];
-    arena.set_iosurface(1, backing.as_mut_ptr(), 0);
+    // IOSurface is already allocated by install() — use base_ptr directly
+    assert!(!arena.base_ptr.is_null(), "install() must allocate IOSurface backing");
 
     // 2. Write known data to input slot 0
     let input_slot = arena.slot(0).unwrap();
     let offset = input_slot.manifest.byte_offset as usize;
     let len = input_slot.manifest.byte_length as usize;
     let input_ptr = unsafe { arena.base_ptr.add(offset) };
-    let slice = unsafe { std::slice::from_raw_parts_mut(input_ptr as *mut u16, len / 2) };
+    let slice = unsafe { std::slice::from_raw_parts_mut(input_ptr as *mut u32, len / 4) };
     for (i, v) in slice.iter_mut().enumerate() {
-        *v = (i % 256) as u16;
+        *v = (i % 256) as u32;
     }
 
     // 3. Write known data to output slot 1 (simulating Core ML output)
@@ -264,9 +263,9 @@ fn test_iosurface_mutation_detected() {
     let out_offset = output_slot.manifest.byte_offset as usize;
     let out_len = output_slot.manifest.byte_length as usize;
     let out_ptr = unsafe { arena.base_ptr.add(out_offset) };
-    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u16, out_len / 2) };
+    let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u32, out_len / 4) };
     for (i, v) in out_slice.iter_mut().enumerate() {
-        *v = (i * 2 % 256) as u16;
+        *v = (i * 2 % 256) as u32;
     }
 
     // 4. Get CPU checksum before mutation
@@ -274,7 +273,7 @@ fn test_iosurface_mutation_detected() {
 
     // 5. Mutate output slot contents (simulating different Core ML output)
     for (i, v) in out_slice.iter_mut().enumerate() {
-        *v = (i * 3 % 256) as u16;
+        *v = (i * 3 % 256) as u32;
     }
 
     // 6. Get CPU checksum after mutation
@@ -283,4 +282,22 @@ fn test_iosurface_mutation_detected() {
     // 7. Verify checksums differ — proves digest reflects actual byte contents
     assert_ne!(checksum_before, checksum_after,
         "checksum must change when slot contents change");
+
+    // 5. Verify Metal consumer can read the same bytes
+    let mut consumer = MetalConsumer::new("validation");
+    let input_binding = MetalSlotBinding {
+        slot_id: 1,
+        tensor_name: "output".into(),
+        byte_offset: arena.slot(1).unwrap().manifest.byte_offset,
+        byte_length: arena.slot(1).unwrap().manifest.byte_length,
+        layout_digest: arena.layout_digest.clone(),
+    };
+    consumer.add_input(input_binding);
+    let result = consumer.validate(&arena, 0).unwrap();
+    assert!(result.matched, "CPU and Metal checksums must match on same bytes");
+    // Both digests limit to 256 elements — match that bound
+    let max_u32s = (out_len / 4).min(256);
+    let bounded_checksum: u64 = (0..max_u32s).map(|i| unsafe { (out_ptr as *const u32).add(i).read() } as u64).sum();
+    assert_eq!(result.metal_digest, bounded_checksum,
+        "Metal digest ({}) must match bounded checksum ({})", result.metal_digest, bounded_checksum);
 }

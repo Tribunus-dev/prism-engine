@@ -493,37 +493,9 @@ impl CoreMlLane {
                 .ok_or("no output bindings")?;
 
             let input_info = arena.arena_info_for_slot(input_slot_id)
-                .unwrap_or_else(|| {
-                    // Fallback: CPU-backed ArenaInfo (no IOSurface) for test environments
-                    crate::arena_info::ArenaInfo {
-                        width: 1,
-                        height: 1,
-                        logical_dim0: 1,
-                        logical_dim1: 1,
-                        pixel_format: 0,
-                        byte_size: 0,
-                        bytes_per_row: 0,
-                        base_address: std::ptr::null_mut(),
-                        cv_buffer: std::ptr::null_mut(),
-                        io_surface: std::ptr::null_mut(),
-                    }
-                });
+                .ok_or_else(|| "IOSurface backing required for production warmup: input slot {input_slot_id} has no backing".to_string())?;
             let output_info = arena.arena_info_for_slot(output_slot_id)
-                .unwrap_or_else(|| {
-                    // Fallback: CPU-backed ArenaInfo (no IOSurface) for test environments
-                    crate::arena_info::ArenaInfo {
-                        width: 1,
-                        height: 1,
-                        logical_dim0: 1,
-                        logical_dim1: 1,
-                        pixel_format: 0,
-                        byte_size: 0,
-                        bytes_per_row: 0,
-                        base_address: std::ptr::null_mut(),
-                        cv_buffer: std::ptr::null_mut(),
-                        io_surface: std::ptr::null_mut(),
-                    }
-                });
+                .ok_or_else(|| "IOSurface backing required for production warmup: output slot {output_slot_id} has no backing".to_string())?;
 
             let start = std::time::Instant::now();
 
