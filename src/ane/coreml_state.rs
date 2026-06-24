@@ -256,7 +256,8 @@ impl StatefulPrefillContext {
         }
 
         // Predict: model writes attention output + statefully updates K/V cache
-        self.state.predict_stateful(model_ptr, "input", input_arena, "output", output_arena)?;
+        self.state
+            .predict_stateful(model_ptr, "input", input_arena, "output", output_arena)?;
 
         // Extract K and V chunks as separate model outputs
         if let Some(k_arena) = &self.k_arena {

@@ -15,11 +15,20 @@ pub fn dispatch_fused_kernel(
     let start = std::time::Instant::now();
 
     // Compile library and create pipeline state from the loaded metallib data.
-    let lib = device.new_library_with_data(kernel.library_data())
+    let lib = device
+        .new_library_with_data(kernel.library_data())
         .map_err(|e| format!("failed to create Metal library: {:?}", e))?;
-    let function = lib.get_function(kernel.function_name(), None)
-        .map_err(|e| format!("failed to get entry point '{}': {:?}", kernel.function_name(), e))?;
-    let pipeline_state = device.new_compute_pipeline_state_with_function(&function)
+    let function = lib
+        .get_function(kernel.function_name(), None)
+        .map_err(|e| {
+            format!(
+                "failed to get entry point '{}': {:?}",
+                kernel.function_name(),
+                e
+            )
+        })?;
+    let pipeline_state = device
+        .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| format!("failed to create compute pipeline state: {:?}", e))?;
 
     let encoder = command_buffer.new_compute_command_encoder();

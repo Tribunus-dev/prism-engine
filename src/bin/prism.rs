@@ -12,8 +12,8 @@
 //!   tokenizer.json     HuggingFace tokenizer
 //!   tokenizer_config.json
 
-use std::path::PathBuf;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 /// Detect if Metal GPU is available.
 fn has_metal() -> bool {
     #[cfg(feature = "metal-dispatch")]
@@ -21,15 +21,22 @@ fn has_metal() -> bool {
         metal::Device::system_default().is_some()
     }
     #[cfg(not(feature = "metal-dispatch"))]
-    { false }
+    {
+        false
+    }
 }
 
 pub const PRISM_HOME: &str = ".prism";
 pub const MODELS_DIR: &str = "models";
 
 fn prism_home() -> PathBuf {
-    let home = std::env::var("PRISM_HOME")
-        .unwrap_or_else(|_| format!("{}/{}", std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()), PRISM_HOME));
+    let home = std::env::var("PRISM_HOME").unwrap_or_else(|_| {
+        format!(
+            "{}/{}",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+            PRISM_HOME
+        )
+    });
     PathBuf::from(home)
 }
 
@@ -84,8 +91,12 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Run { model, port, chat } => {
-            if chat { run_chat(model) } else { run(model, port) }
-        },
+            if chat {
+                run_chat(model)
+            } else {
+                run(model, port)
+            }
+        }
         Commands::List => list(),
         Commands::Pull { repo } => pull(&repo),
         Commands::Compile { model } => compile_model(&model),
@@ -94,7 +105,11 @@ fn main() {
 
 fn find_model(name: &str) -> Option<PathBuf> {
     let path = models_dir().join(name);
-    if path.join("model.cimage").exists() { Some(path) } else { None }
+    if path.join("model.cimage").exists() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 fn list() {
@@ -108,17 +123,29 @@ fn list() {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if !p.is_dir() { continue; }
-            let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let cim = p.join("model.cimage");
             if cim.exists() {
-                let size = std::fs::metadata(&cim).map(|m| m.len() / (1024 * 1024)).unwrap_or(0);
+                let size = std::fs::metadata(&cim)
+                    .map(|m| m.len() / (1024 * 1024))
+                    .unwrap_or(0);
                 println!("  {:<24} {} MB  (compiled)", name, size);
             } else {
-                let has_src = p.join("config.json").exists() && p.join("model.safetensors").exists();
+                let has_src =
+                    p.join("config.json").exists() && p.join("model.safetensors").exists();
                 let has_shards = p.join("model.safetensors.index.json").exists();
                 if has_src || has_shards {
-                    println!("  {:<24}           (source — run `prism compile {}`)", name, name);
+                    println!(
+                        "  {:<24}           (source — run `prism compile {}`)",
+                        name, name
+                    );
                 }
             }
             found = true;
@@ -129,7 +156,6 @@ fn list() {
     }
 }
 
-
 /// Interactive chat mode — stdin readline REPL.
 fn run_chat(model: Option<String>) {
     let model_path = match &model {
@@ -139,37 +165,66 @@ fn run_chat(model: Option<String>) {
         }),
         None => {
             let dir = models_dir();
-            let mut candidates: Vec<_> = std::fs::read_dir(&dir).ok()
-                .into_iter().flatten().flatten()
+            let mut candidates: Vec<_> = std::fs::read_dir(&dir)
+                .ok()
+                .into_iter()
+                .flatten()
+                .flatten()
                 .filter(|e| e.path().join("model.cimage").exists())
                 .collect();
             candidates.sort_by_key(|e| e.file_name().to_os_string());
-            candidates.into_iter().next().map(|e| e.path())
-                .unwrap_or_else(|| { eprintln!("No models found"); std::process::exit(1); })
+            candidates
+                .into_iter()
+                .next()
+                .map(|e| e.path())
+                .unwrap_or_else(|| {
+                    eprintln!("No models found");
+                    std::process::exit(1);
+                })
         }
     };
-    let cfg = prism_engine::lut::graph::UnifiedConfig::from_file(
-        &model_path.join("config.json"))
-        .unwrap_or_else(|e| { eprintln!("config: {e}"); std::process::exit(1); });
+    let cfg = prism_engine::lut::graph::UnifiedConfig::from_file(&model_path.join("config.json"))
+        .unwrap_or_else(|e| {
+            eprintln!("config: {e}");
+            std::process::exit(1);
+        });
     let graph = prism_engine::lut::graph::ModelGraph::build(&cfg);
-    let mut engine = prism_engine::lut::engine::PrismEngine::load(
-        &model_path.join("model.cimage"), graph)
-        .unwrap_or_else(|e| { eprintln!("load: {e}"); std::process::exit(1); });
+    let mut engine =
+        prism_engine::lut::engine::PrismEngine::load(&model_path.join("model.cimage"), graph)
+            .unwrap_or_else(|e| {
+                eprintln!("load: {e}");
+                std::process::exit(1);
+            });
     #[cfg(feature = "metal-dispatch")]
-    if let Err(e) = engine.with_metal() { eprintln!("Metal: {e}"); }
-    let tok = prism_engine::tokenizer::TribunusTokenizer::from_dir(&model_path)
-        .unwrap_or_else(|e| { eprintln!("tokenizer: {e}"); std::process::exit(1); });
+    if let Err(e) = engine.with_metal() {
+        eprintln!("Metal: {e}");
+    }
+    let tok =
+        prism_engine::tokenizer::TribunusTokenizer::from_dir(&model_path).unwrap_or_else(|e| {
+            eprintln!("tokenizer: {e}");
+            std::process::exit(1);
+        });
     eprintln!("Prism Engine ready — interactive mode (Ctrl+C to exit)\n");
     use std::io::{BufRead, Write};
     let stdin = std::io::stdin();
     loop {
-        print!(">> "); std::io::stdout().flush().ok();
+        print!(">> ");
+        std::io::stdout().flush().ok();
         let mut line = String::new();
-        if stdin.lock().read_line(&mut line).is_err() || line.trim().is_empty() { break; }
+        if stdin.lock().read_line(&mut line).is_err() || line.trim().is_empty() {
+            break;
+        }
         let line = line.trim().to_string();
-        if line == "exit" || line == "/exit" || line == "quit" { break; }
-        let ids = tok.encode(&line).unwrap_or_else(|e| { eprintln!("encode: {e}"); vec![] });
-        if ids.is_empty() || ids.len() > 2048 { continue; }
+        if line == "exit" || line == "/exit" || line == "quit" {
+            break;
+        }
+        let ids = tok.encode(&line).unwrap_or_else(|e| {
+            eprintln!("encode: {e}");
+            vec![]
+        });
+        if ids.is_empty() || ids.len() > 2048 {
+            continue;
+        }
         match engine.generate(&ids, 128) {
             Ok(stats) => {
                 let text = tok.decode(&stats.generated_tokens).unwrap_or_default();
@@ -189,13 +244,18 @@ fn run(model: Option<String>, port: u16) {
         }),
         None => {
             let dir = models_dir();
-            let mut candidates: Vec<_> = std::fs::read_dir(&dir).ok()
-                .into_iter().flatten()
+            let mut candidates: Vec<_> = std::fs::read_dir(&dir)
+                .ok()
+                .into_iter()
+                .flatten()
                 .flatten()
                 .filter(|e| e.path().join("model.cimage").exists())
                 .collect();
             candidates.sort_by_key(|e| e.file_name().to_os_string());
-            candidates.into_iter().next().map(|e| e.path())
+            candidates
+                .into_iter()
+                .next()
+                .map(|e| e.path())
                 .unwrap_or_else(|| {
                     eprintln!("No models found. Pull one: prism pull <repo>");
                     std::process::exit(1);
@@ -209,9 +269,12 @@ fn run(model: Option<String>, port: u16) {
         .unwrap_or_else(|| "prism-server".into());
 
     let status = std::process::Command::new(&server)
-        .arg("--cimage").arg(model_path.join("model.cimage"))
-        .arg("--model-dir").arg(&model_path)
-        .arg("--port").arg(port.to_string())
+        .arg("--cimage")
+        .arg(model_path.join("model.cimage"))
+        .arg("--model-dir")
+        .arg(&model_path)
+        .arg("--port")
+        .arg(port.to_string())
         .spawn()
         .and_then(|mut c| c.wait());
 
@@ -244,19 +307,34 @@ fn pull(repo: &str) {
     eprint!("  [1/4] config.json... ");
     let cfg_path = match repo_api.get("config.json") {
         Ok(p) => p,
-        Err(e) => { eprintln!("failed: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("failed: {e}");
+            std::process::exit(1);
+        }
     };
     std::fs::copy(&cfg_path, out_dir.join("config.json")).ok();
     eprintln!("ok");
 
     let cfg = prism_engine::lut::graph::UnifiedConfig::from_file(&out_dir.join("config.json"))
-        .unwrap_or_else(|e| { eprintln!("config: {e}"); std::process::exit(1); });
+        .unwrap_or_else(|e| {
+            eprintln!("config: {e}");
+            std::process::exit(1);
+        });
     let graph = prism_engine::lut::graph::ModelGraph::build(&cfg);
-    eprintln!("  Graph: {} layers, {} nodes", graph.num_layers, graph.nodes.len());
+    eprintln!(
+        "  Graph: {} layers, {} nodes",
+        graph.num_layers,
+        graph.nodes.len()
+    );
 
     // 3. Download tokenizer files.
     eprint!("  [2/4] tokenizer... ");
-    for f in &["tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt"] {
+    for f in &[
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt",
+    ] {
         if let Ok(p) = repo_api.get(f) {
             std::fs::copy(&p, out_dir.join(f)).ok();
         }
@@ -282,13 +360,16 @@ fn pull(repo: &str) {
     }
     // Check for sharded index.
     if let Ok(index_path) = repo_api.get("model.safetensors.index.json") {
-        std::fs::copy(&index_path, safetensors_dir.join("model.safetensors.index.json")).ok();
+        std::fs::copy(
+            &index_path,
+            safetensors_dir.join("model.safetensors.index.json"),
+        )
+        .ok();
         let index_text = std::fs::read_to_string(&index_path).unwrap_or_default();
         if let Ok(index) = serde_json::from_str::<serde_json::Value>(&index_text) {
             if let Some(weight_map) = index.get("weight_map").and_then(|m| m.as_object()) {
-                let mut shard_set: Vec<&str> = weight_map.values()
-                    .filter_map(|v| v.as_str())
-                    .collect();
+                let mut shard_set: Vec<&str> =
+                    weight_map.values().filter_map(|v| v.as_str()).collect();
                 shard_set.sort();
                 shard_set.dedup();
                 for shard_name in &shard_set {
@@ -325,7 +406,10 @@ fn pull(repo: &str) {
     eprintln!("  [4/4] compiling... ");
     let out_cimage = cimage_path(&name);
     if let Err(e) = prism_engine::lut::compiler::compile_to_cimage(
-        &graph, &safetensors_dir, &out_cimage, has_metal(),
+        &graph,
+        &safetensors_dir,
+        &out_cimage,
+        has_metal(),
     ) {
         eprintln!("Compilation failed: {e}");
         std::process::exit(1);
@@ -346,7 +430,9 @@ fn pull(repo: &str) {
         }
     }
 
-    let size_mb = std::fs::metadata(&out_cimage).map(|m| m.len() / (1024 * 1024)).unwrap_or(0);
+    let size_mb = std::fs::metadata(&out_cimage)
+        .map(|m| m.len() / (1024 * 1024))
+        .unwrap_or(0);
     eprintln!("[prism:pull] Done — {name} ({size_mb} MB)");
     eprintln!("  Run: prism run {name}");
 }
@@ -355,7 +441,10 @@ fn pull(repo: &str) {
 fn compile_model(name: &str) {
     let dir = model_dir(name);
     if !dir.join("config.json").exists() {
-        eprintln!("No config.json in {}. First: prism pull <repo>", dir.display());
+        eprintln!(
+            "No config.json in {}. First: prism pull <repo>",
+            dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -365,25 +454,49 @@ fn compile_model(name: &str) {
         dir.clone()
     };
 
-    if !safetensors_dir.read_dir().ok()
-        .map(|rd| rd.flatten().any(|e| e.path().extension().map_or(false, |ext| ext == "safetensors")))
+    if !safetensors_dir
+        .read_dir()
+        .ok()
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                e.path()
+                    .extension()
+                    .map_or(false, |ext| ext == "safetensors")
+            })
+        })
         .unwrap_or(false)
     {
-        eprintln!("No safetensors found in {}. Re-pull the model.", safetensors_dir.display());
+        eprintln!(
+            "No safetensors found in {}. Re-pull the model.",
+            safetensors_dir.display()
+        );
         std::process::exit(1);
     }
 
-    eprint!("[prism:compile] Building graph from {}... ", dir.join("config.json").display());
+    eprint!(
+        "[prism:compile] Building graph from {}... ",
+        dir.join("config.json").display()
+    );
     let cfg = prism_engine::lut::graph::UnifiedConfig::from_file(&dir.join("config.json"))
-        .unwrap_or_else(|e| { eprintln!("config error: {e}"); std::process::exit(1); });
+        .unwrap_or_else(|e| {
+            eprintln!("config error: {e}");
+            std::process::exit(1);
+        });
     let graph = prism_engine::lut::graph::ModelGraph::build(&cfg);
     eprintln!("{} layers, {} nodes", graph.num_layers, graph.nodes.len());
 
     let out = cimage_path(name);
     eprintln!("[prism:compile] Compiling to {}...", out.display());
-    match prism_engine::lut::compiler::compile_to_cimage(&graph, &safetensors_dir, &out, has_metal()) {
+    match prism_engine::lut::compiler::compile_to_cimage(
+        &graph,
+        &safetensors_dir,
+        &out,
+        has_metal(),
+    ) {
         Ok(()) => {
-            let size = std::fs::metadata(&out).map(|m| m.len() / (1024 * 1024)).unwrap_or(0);
+            let size = std::fs::metadata(&out)
+                .map(|m| m.len() / (1024 * 1024))
+                .unwrap_or(0);
             eprintln!("[prism:compile] Done — {name} ({size} MB)");
             eprintln!("  Run: prism run {name}");
         }

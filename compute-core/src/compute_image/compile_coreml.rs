@@ -20,11 +20,11 @@ use coreml_proto::proto::mil_spec;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::compute_image::compile::SourceTensor;
 use crate::compute_image::hw_assessment::ConcurrencyPlan;
 use crate::coreml_pipeline;
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
-use crate::compute_image::compile::SourceTensor;
 
 // ── Known subgraph catalog ──────────────────────────────────────────────────
 
@@ -221,14 +221,27 @@ pub fn compile_subgraph(
                 .get("n")
                 .and_then(|s| s.first().copied())
                 .unwrap_or(64) as u32;
-            let weight_values = weights.get("weight_values").map_or(&[] as &[f32], |v| v.as_slice());
+            let weight_values = weights
+                .get("weight_values")
+                .map_or(&[] as &[f32], |v| v.as_slice());
             super::subgraph_mil::build_matmul_mil("x", "w", "out", 1, k, n, weight_values)?
         }
         "mlp_block" => {
-            let gate_w = weights.get("gate_w").map_or(&[] as &[f32], |v| v.as_slice());
+            let gate_w = weights
+                .get("gate_w")
+                .map_or(&[] as &[f32], |v| v.as_slice());
             let up_w = weights.get("up_w").map_or(&[] as &[f32], |v| v.as_slice());
-            let down_w = weights.get("down_w").map_or(&[] as &[f32], |v| v.as_slice());
-            super::subgraph_mil::build_mlp_block_mil("x", hidden_dim, intermediate_dim, gate_w, up_w, down_w)?
+            let down_w = weights
+                .get("down_w")
+                .map_or(&[] as &[f32], |v| v.as_slice());
+            super::subgraph_mil::build_mlp_block_mil(
+                "x",
+                hidden_dim,
+                intermediate_dim,
+                gate_w,
+                up_w,
+                down_w,
+            )?
         }
         "rmsnorm_qkv" => {
             let rms_w = weights.get("rms_w").map_or(&[] as &[f32], |v| v.as_slice());
@@ -240,16 +253,31 @@ pub fn compile_subgraph(
             )?
         }
         "output_proj" => {
-            let weight_values = weights.get("weight_values").map_or(&[] as &[f32], |v| v.as_slice());
+            let weight_values = weights
+                .get("weight_values")
+                .map_or(&[] as &[f32], |v| v.as_slice());
             super::subgraph_mil::build_output_proj_mil("x", hidden_dim, vocab_dim, weight_values)?
         }
         "ffn_output" => {
-            let gate_w = weights.get("gate_w").map_or(&[] as &[f32], |v| v.as_slice());
+            let gate_w = weights
+                .get("gate_w")
+                .map_or(&[] as &[f32], |v| v.as_slice());
             let up_w = weights.get("up_w").map_or(&[] as &[f32], |v| v.as_slice());
-            let down_w = weights.get("down_w").map_or(&[] as &[f32], |v| v.as_slice());
-            let lm_head_w = weights.get("lm_head_w").map_or(&[] as &[f32], |v| v.as_slice());
+            let down_w = weights
+                .get("down_w")
+                .map_or(&[] as &[f32], |v| v.as_slice());
+            let lm_head_w = weights
+                .get("lm_head_w")
+                .map_or(&[] as &[f32], |v| v.as_slice());
             super::subgraph_mil::build_ffn_output_mil(
-                "x", hidden_dim, intermediate_dim, vocab_dim, gate_w, up_w, down_w, lm_head_w,
+                "x",
+                hidden_dim,
+                intermediate_dim,
+                vocab_dim,
+                gate_w,
+                up_w,
+                down_w,
+                lm_head_w,
             )?
         }
         "qkv_bundle" => {
@@ -452,29 +480,38 @@ pub fn compile_ane_islands(
         source_tensors: &std::collections::HashMap<String, SourceTensor>,
         key: &str,
     ) -> Vec<f32> {
-        source_tensors.get(key).map(|st| {
-            let ptr = st.data.as_ptr() as *const f32;
-            let len = st.data.len() / 4;
-            unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec()
-        }).unwrap_or_default()
+        source_tensors
+            .get(key)
+            .map(|st| {
+                let ptr = st.data.as_ptr() as *const f32;
+                let len = st.data.len() / 4;
+                unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec()
+            })
+            .unwrap_or_default()
     }
     /// Compile all ANE fused islands
-
     for island in &execution_plan.fused_ane_islands {
         let idx = island.layer_indices.first().copied().unwrap_or(0);
         let ns = &namespace.root;
 
         // ── Build weights HashMap ──────────────────────────────────────
-        let mut weights: std::collections::HashMap<String, Vec<f32>> = std::collections::HashMap::new();
+        let mut weights: std::collections::HashMap<String, Vec<f32>> =
+            std::collections::HashMap::new();
 
         match island.subgraph_kind.as_str() {
             "mlp_block" => {
                 let gate_k = format!("{ns}.layers.{idx}.mlp.gate_proj.weight");
                 let up_k = format!("{ns}.layers.{idx}.mlp.up_proj.weight");
                 let down_k = format!("{ns}.layers.{idx}.mlp.down_proj.weight");
-                weights.insert("gate_w".to_string(), get_weight_values(source_tensors, &gate_k));
+                weights.insert(
+                    "gate_w".to_string(),
+                    get_weight_values(source_tensors, &gate_k),
+                );
                 weights.insert("up_w".to_string(), get_weight_values(source_tensors, &up_k));
-                weights.insert("down_w".to_string(), get_weight_values(source_tensors, &down_k));
+                weights.insert(
+                    "down_w".to_string(),
+                    get_weight_values(source_tensors, &down_k),
+                );
             }
             "qkv_bundle" | "rmsnorm_qkv" => {
                 let q_k = format!("{ns}.layers.{idx}.self_attn.q_proj.weight");
@@ -489,17 +526,29 @@ pub fn compile_ane_islands(
             }
             "output_proj" => {
                 let lm_k = format!("{ns}.lm_head.weight");
-                weights.insert("lm_head_w".to_string(), get_weight_values(source_tensors, &lm_k));
+                weights.insert(
+                    "lm_head_w".to_string(),
+                    get_weight_values(source_tensors, &lm_k),
+                );
             }
             "ffn_output" => {
                 let gate_k = format!("{ns}.layers.{idx}.mlp.gate_proj.weight");
                 let up_k = format!("{ns}.layers.{idx}.mlp.up_proj.weight");
                 let down_k = format!("{ns}.layers.{idx}.mlp.down_proj.weight");
                 let lm_k = format!("{ns}.lm_head.weight");
-                weights.insert("gate_w".to_string(), get_weight_values(source_tensors, &gate_k));
+                weights.insert(
+                    "gate_w".to_string(),
+                    get_weight_values(source_tensors, &gate_k),
+                );
                 weights.insert("up_w".to_string(), get_weight_values(source_tensors, &up_k));
-                weights.insert("down_w".to_string(), get_weight_values(source_tensors, &down_k));
-                weights.insert("lm_head_w".to_string(), get_weight_values(source_tensors, &lm_k));
+                weights.insert(
+                    "down_w".to_string(),
+                    get_weight_values(source_tensors, &down_k),
+                );
+                weights.insert(
+                    "lm_head_w".to_string(),
+                    get_weight_values(source_tensors, &lm_k),
+                );
             }
             "matmul" => {
                 // No named weight — uses input activations only.
@@ -515,17 +564,27 @@ pub fn compile_ane_islands(
         // Add rms weight for rmsnorm_qkv
         if island.subgraph_kind == "rmsnorm_qkv" {
             let rms_k = format!("{ns}.layers.{idx}.input_layernorm.weight");
-            weights.insert("rms_w".to_string(), get_weight_values(source_tensors, &rms_k));
+            weights.insert(
+                "rms_w".to_string(),
+                get_weight_values(source_tensors, &rms_k),
+            );
         }
 
         // ── Build input_shapes ────────────────────────────────────────
-        let mut shapes: std::collections::HashMap<String, Vec<i64>> = std::collections::HashMap::new();
+        let mut shapes: std::collections::HashMap<String, Vec<i64>> =
+            std::collections::HashMap::new();
         shapes.insert("hidden".to_string(), vec![arch.hidden_size as i64]);
-        shapes.insert("intermediate".to_string(), vec![arch.intermediate_size as i64]);
+        shapes.insert(
+            "intermediate".to_string(),
+            vec![arch.intermediate_size as i64],
+        );
         shapes.insert("vocab".to_string(), vec![arch.vocab_size as i64]);
         shapes.insert("head_dim".to_string(), vec![arch.head_dim as i64]);
         shapes.insert("n_heads".to_string(), vec![arch.num_attention_heads as i64]);
-        shapes.insert("n_kv_heads".to_string(), vec![arch.num_key_value_heads as i64]);
+        shapes.insert(
+            "n_kv_heads".to_string(),
+            vec![arch.num_key_value_heads as i64],
+        );
 
         // ── Build ops from subgraph_kind ───────────────────────────────
         let ops: Vec<String> = match island.subgraph_kind.as_str() {
@@ -561,13 +620,7 @@ pub fn compile_ane_islands(
         };
 
         // ── Compile subgraph with weights ──────────────────────────────
-        let modelc_path = compile_subgraph(
-            &island.island_id,
-            &ops,
-            &shapes,
-            &weights,
-            output_dir,
-        )?;
+        let modelc_path = compile_subgraph(&island.island_id, &ops, &shapes, &weights, output_dir)?;
         eprintln!(
             "[compile_coreml] compiled {} → {}/{}",
             island.island_id,

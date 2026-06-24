@@ -7,12 +7,12 @@
 //! ([`shape_class`]), compatibility checking ([`compatibility`]),
 //! selection logic ([`selection`]), and coverage analysis ([`coverage`]).
 
-pub mod shape_class;
 pub mod compatibility;
-pub mod selection;
 pub mod coverage;
+pub mod selection;
+pub mod shape_class;
 
-pub use shape_class::*;
 pub use compatibility::*;
-pub use selection::*;
 pub use coverage::*;
+pub use selection::*;
+pub use shape_class::*;

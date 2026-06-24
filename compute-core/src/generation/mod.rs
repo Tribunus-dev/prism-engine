@@ -5,9 +5,9 @@
 //! diffusion language model for parallel text generation, image understanding,
 //! function calling, code generation, and reasoning.
 
-#[cfg(not(feature = "prism-backend"))]
+#[cfg(feature = "generation-image")]
 pub mod text_to_image;
-#[cfg(not(feature = "prism-backend"))]
+#[cfg(feature = "generation-image")]
 pub use text_to_image::TextToImageGenerator;
 
 pub mod diffusiongemma;
@@ -16,16 +16,16 @@ pub use diffusiongemma::{
     DiffusionSampler, FunctionCall, ToolDefinition, UsageInfo,
 };
 
-#[cfg(not(feature = "prism-backend"))]
+#[cfg(feature = "generation-asr")]
 pub mod audio_to_text;
-#[cfg(not(feature = "prism-backend"))]
+#[cfg(feature = "generation-asr")]
 pub use audio_to_text::AudioToTextGenerator;
 
 pub mod image_to_image;
 
 pub mod audio_to_audio;
 
-#[cfg(not(feature = "prism-backend"))]
+#[cfg(feature = "generation-tts")]
 pub mod text_to_speech;
 
 pub mod video_generation;

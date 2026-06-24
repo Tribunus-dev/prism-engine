@@ -230,8 +230,6 @@ impl PrefetchScheduleBuilder {
                 .then_with(|| a.priority.priority_rank().cmp(&b.priority.priority_rank()))
         });
     }
-
-
 }
 
 // ── Priority ordering helpers ────────────────────────────────────────

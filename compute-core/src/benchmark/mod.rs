@@ -12,9 +12,9 @@
 //! * [`perf`] — throughput, TTFT, prompt-length sweep, latency distribution.
 //! * [`intel`] — accuracy/intelligence benchmarks (MMLU, GSM8K, etc.).
 
-pub mod perf;
-pub mod intel;
 pub mod admission;
+pub mod intel;
+pub mod perf;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -159,8 +159,7 @@ impl BenchmarkHarness {
 
         // Latency distribution
         if let Some(pl) = self.config.prompt_lengths.first() {
-            let lat_result =
-                self.measure_latency_distribution(*pl, self.config.max_tokens)?;
+            let lat_result = self.measure_latency_distribution(*pl, self.config.max_tokens)?;
             results.push(lat_result);
         }
 
@@ -349,8 +348,7 @@ impl BenchmarkHarness {
             ttft_values.push(elapsed);
         }
 
-        let avg_ttft =
-            ttft_values.iter().sum::<f64>() / ttft_values.len() as f64;
+        let avg_ttft = ttft_values.iter().sum::<f64>() / ttft_values.len() as f64;
 
         Ok(BenchmarkResult::new(
             format!("ttft/prompt_len={prompt_len}"),
@@ -440,11 +438,7 @@ impl BenchmarkHarness {
 
     /// Run a complete inference cycle (prefill + decode) and return the
     /// generated text.  Used by accuracy benchmarks.
-    pub fn run_inference_for_text(
-        &self,
-        prompt: &str,
-        max_tokens: u32,
-    ) -> Result<String, String> {
+    pub fn run_inference_for_text(&self, prompt: &str, max_tokens: u32) -> Result<String, String> {
         let prompt_ids = self.tokenize(prompt);
         let mut sess = self.session.try_lock().map_err(|e| e.to_string())?;
 
@@ -483,5 +477,9 @@ impl BenchmarkHarness {
 /// Detect a short hardware label for benchmark metadata.
 fn hardware_label() -> String {
     let hw = crate::scheduling::HardwareConfig::detect();
-    format!("{}gpu {} cores", if hw.gpu_cores > 0 { "" } else { "" }, hw.gpu_cores)
+    format!(
+        "{}gpu {} cores",
+        if hw.gpu_cores > 0 { "" } else { "" },
+        hw.gpu_cores
+    )
 }

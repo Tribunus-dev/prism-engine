@@ -11,13 +11,12 @@
 
 use crate::arena::Arena;
 use crate::compute_image::phase_dag::EmittedPhaseGraph;
-use crate::external_array::{ExternalStorage, new_external_array};
-use crate::external_array;
-use crate::external_array::BorrowedStorage;
-use std::cell::RefCell;
 use crate::compute_image::{CompiledImageReader, CopyClassification, TensorEntry};
 use crate::config::{ModelExecutionPlan, TextArchitecture, VisionArchitecture};
 use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::external_array;
+use crate::external_array::BorrowedStorage;
+use crate::external_array::{new_external_array, ExternalStorage};
 use crate::heterogeneous::SharedMemoryIsland;
 use crate::mapped_image::MappedImage;
 use crate::vision::encoder::VisionEncoder;
@@ -25,6 +24,7 @@ use crate::worker_dispatch::LoadedMetalKernel;
 use crate::worker_dispatch::MetalKernelRegistry;
 use crate::worker_memory;
 use mlx_rs::Array;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
@@ -65,7 +65,8 @@ fn storage_dtype_to_mlx(dtype: &str) -> crate::Result<mlx_rs::Dtype> {
         "I8" | "Int8" => Ok(mlx_rs::Dtype::Int8),
         "U32" | "Uint32" => Ok(mlx_rs::Dtype::Uint32),
         other => Err(crate::Error::from_reason(format!(
-            "unsupported storage dtype: {}", other
+            "unsupported storage dtype: {}",
+            other
         ))),
     }
 }
@@ -375,8 +376,6 @@ pub struct LoadedProfiledModel {
     pub copied_weight_bytes: u64,
     pub materialized_bytes: u64,
     pub handle_baseline: usize,
-    /// Compiled ANE programs for layers routed to Orion.
-    pub ane_cache: Option<crate::memory::ane_program_cache::AneProgramCache>,
     /// Pre-loaded CoreML models for ANE-routed attention layers, indexed by
     /// layer index. Fused islands replicate their model (via Arc) across
     /// all covered layer slots.
@@ -639,12 +638,12 @@ impl LoadedProfiledModel {
         // and KV cache headroom for the current sequence. Model weights
         // are MLX-managed and separate from this pool.
         let arch = &reader.manifest.architecture;
-        let scratch_bytes = arch.hidden_size as u64 * 10 * 4;  // 10 f32 scratch tensors
+        let scratch_bytes = arch.hidden_size as u64 * 10 * 4; // 10 f32 scratch tensors
         let attn_scores = (arch.max_position_embeddings as u64).min(4096)  // chunk cap
             * arch.num_attention_heads as u64 * arch.head_dim as u64 * 4;
-        let kv_per_token = 2 * arch.num_key_value_heads as u64 * arch.head_dim as u64 * 2;  // FP16
-        let kv_headroom = kv_per_token * 4096;  // room for 4K tokens
-        let computed_pool = (scratch_bytes + attn_scores + kv_headroom) * 125 / 100;  // +25% margin
+        let kv_per_token = 2 * arch.num_key_value_heads as u64 * arch.head_dim as u64 * 2; // FP16
+        let kv_headroom = kv_per_token * 4096; // room for 4K tokens
+        let computed_pool = (scratch_bytes + attn_scores + kv_headroom) * 125 / 100; // +25% margin
         let total_ram = system_memory_bytes();
         let max_pool = if total_ram > 0 {
             // Truthful: model need capped at 25% of RAM, min 16 MB
@@ -652,8 +651,12 @@ impl LoadedProfiledModel {
         } else {
             computed_pool.max(16 * 1024 * 1024)
         };
-        eprintln!("[memory] IOSurface pool: {} MB (model estimate: {} MB, RAM: {} MB)",
-            max_pool / (1024 * 1024), computed_pool / (1024 * 1024), total_ram / (1024 * 1024));
+        eprintln!(
+            "[memory] IOSurface pool: {} MB (model estimate: {} MB, RAM: {} MB)",
+            max_pool / (1024 * 1024),
+            computed_pool / (1024 * 1024),
+            total_ram / (1024 * 1024)
+        );
         let memory_island = SharedMemoryIsland::with_limit(max_pool);
 
         // ── Load ANE CoreML models for ANE-routed attention layers ─────
@@ -759,8 +762,7 @@ impl LoadedProfiledModel {
             }
         } else {
             None
-        }
-        ;
+        };
 
         // ── Load compiled Metal kernel artifacts ──────────────────────────
         // Load .metallib files from the compute image, create pipeline states.
@@ -778,7 +780,10 @@ impl LoadedProfiledModel {
                         Arc::new(vec)
                     }
                     Err(e) => {
-                        eprintln!("[profiled-model] WARNING: failed to load Metal kernels: {}", e);
+                        eprintln!(
+                            "[profiled-model] WARNING: failed to load Metal kernels: {}",
+                            e
+                        );
                         Arc::new(Vec::new())
                     }
                 }
@@ -804,7 +809,6 @@ impl LoadedProfiledModel {
             copied_weight_bytes,
             materialized_bytes,
             handle_baseline,
-            ane_cache: None,
             ane_coreml_models,
             memory_island,
             scheduled_module,

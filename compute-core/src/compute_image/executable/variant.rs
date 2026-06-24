@@ -1,7 +1,7 @@
 //! Shape-specialized program variant.
 
-use crate::integration::ContentHash;
 use crate::compute_image::program::phase_program::SerializedPhaseProgram;
+use crate::integration::ContentHash;
 use serde::{Deserialize, Serialize};
 
 pub type ShapeSpecializedVariantId = String;

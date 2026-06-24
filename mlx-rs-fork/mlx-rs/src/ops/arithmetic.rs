@@ -2500,7 +2500,7 @@ mod tests {
             Array::full::<f32>(&[3, 3], array!(4.0)).unwrap(),
             None,
             None
-                    )
+        )
         .unwrap()
         .item::<bool>());
     }
@@ -2517,7 +2517,7 @@ mod tests {
             Array::full::<f32>(&[3, 3], array!(3.0)).unwrap(),
             None,
             None
-                    )
+        )
         .unwrap()
         .item::<bool>());
 
@@ -2542,7 +2542,7 @@ mod tests {
             Array::full::<f32>(&[3, 3], array!(0.5)).unwrap(),
             None,
             None
-                    )
+        )
         .unwrap()
         .item::<bool>());
     }

@@ -114,9 +114,7 @@ impl LaneArtifactRegistry {
 
     /// Total number of artifacts across all lanes.
     pub fn total_artifacts(&self) -> usize {
-        self.metal_artifacts.len()
-            + self.coreml_artifacts.len()
-            + self.accelerate_artifacts.len()
+        self.metal_artifacts.len() + self.coreml_artifacts.len() + self.accelerate_artifacts.len()
     }
 }
 
@@ -278,7 +276,8 @@ mod tests {
     ) -> SerializedPhase {
         SerializedPhase {
             phase_id: phase_id.into(),
-            semantic_operation: crate::compute_image::program::phase_program::SemanticOperation::RmsNorm,
+            semantic_operation:
+                crate::compute_image::program::phase_program::SemanticOperation::RmsNorm,
             lane,
             artifact_identity: CanonicalArtifactIdentity {
                 artifact_id: artifact_id.into(),
@@ -303,10 +302,7 @@ mod tests {
         }
     }
 
-    fn make_program(
-        program_id: &str,
-        phases: Vec<SerializedPhase>,
-    ) -> SerializedPhaseProgram {
+    fn make_program(program_id: &str, phases: Vec<SerializedPhase>) -> SerializedPhaseProgram {
         SerializedPhaseProgram {
             program_id: program_id.into(),
             program_hash: ContentHash(0),
@@ -387,7 +383,10 @@ mod tests {
         assert!(registry.metal_artifacts.is_empty());
         assert!(registry.coreml_artifacts.is_empty());
         assert_eq!(registry.accelerate_artifacts.len(), 1);
-        assert_eq!(registry.accelerate_artifacts[0].artifact_id, "accel_layout_1");
+        assert_eq!(
+            registry.accelerate_artifacts[0].artifact_id,
+            "accel_layout_1"
+        );
     }
 
     #[test]

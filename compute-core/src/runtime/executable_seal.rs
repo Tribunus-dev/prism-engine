@@ -176,7 +176,11 @@ impl std::fmt::Display for SealVerificationError {
                     expected.0, computed.0
                 )
             }
-            Self::ProfileHashMismatch { index, expected, computed } => {
+            Self::ProfileHashMismatch {
+                index,
+                expected,
+                computed,
+            } => {
                 write!(
                     f,
                     "seal profile hash mismatch at index {}: expected {:?}, computed {:?}",
@@ -234,8 +238,12 @@ mod tests {
     fn test_seal_fails_on_manifest_mismatch() {
         let verifier = SealVerifier::new();
         let seal = make_valid_seal();
-        let result =
-            verifier.verify(&seal, ContentHash(0xDEAD), &[ContentHash(2)], ContentHash(3));
+        let result = verifier.verify(
+            &seal,
+            ContentHash(0xDEAD),
+            &[ContentHash(2)],
+            ContentHash(3),
+        );
         assert!(result.is_err());
         match result {
             Err(SealVerificationError::ManifestHashMismatch { expected, computed }) => {
@@ -250,8 +258,7 @@ mod tests {
     fn test_seal_fails_on_profile_hash_mismatch() {
         let verifier = SealVerifier::new();
         let seal = make_valid_seal();
-        let result =
-            verifier.verify(&seal, ContentHash(1), &[ContentHash(0xBE)], ContentHash(3));
+        let result = verifier.verify(&seal, ContentHash(1), &[ContentHash(0xBE)], ContentHash(3));
         assert!(result.is_err());
         match result {
             Err(SealVerificationError::ProfileHashMismatch { index, .. }) => {
@@ -265,8 +272,7 @@ mod tests {
     fn test_seal_fails_on_receipt_mismatch() {
         let verifier = SealVerifier::new();
         let seal = make_valid_seal();
-        let result =
-            verifier.verify(&seal, ContentHash(1), &[ContentHash(2)], ContentHash(0xEF));
+        let result = verifier.verify(&seal, ContentHash(1), &[ContentHash(2)], ContentHash(0xEF));
         assert!(result.is_err());
         match result {
             Err(SealVerificationError::ReceiptHashMismatch { expected, computed }) => {

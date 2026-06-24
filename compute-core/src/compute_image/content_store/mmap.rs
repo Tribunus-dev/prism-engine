@@ -1,7 +1,7 @@
 //! Mmap loader — segment file mapping (stub, file read fallback).
 
-use std::path::Path;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MappedSegment {
@@ -42,13 +42,16 @@ impl std::error::Error for MmapLoadError {}
 pub struct MmapLoader;
 
 impl MmapLoader {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn open_segment(path: &Path) -> Result<MappedSegment, MmapLoadError> {
         if !path.exists() {
             return Err(MmapLoadError::FileNotFound(path.display().to_string()));
         }
-        let file_name = path.file_name()
+        let file_name = path
+            .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
         let metadata = std::fs::metadata(path)

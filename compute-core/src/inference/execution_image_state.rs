@@ -1,6 +1,6 @@
 use crate::compute_image::manifest::{
-    AliasEntry, CompilationAuthority, CompileReceipt, CompiledImage, ImageBuilder,
-    Manifest, ManifestVerification, Segment, TensorEntry,
+    AliasEntry, CompilationAuthority, CompileReceipt, CompiledImage, ImageBuilder, Manifest,
+    ManifestVerification, Segment, TensorEntry,
 };
 use crate::compute_image::phase_dag::EmittedPhaseGraph;
 use crate::config::LayerPlan;

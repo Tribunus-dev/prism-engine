@@ -54,6 +54,7 @@ fn make_region(
             vec![]
         },
         fusions: vec![],
+        fusion_regions: vec![],
         state_effects: vec![],
         temp_memory_bytes: 49152, // ANE minimum surface
         is_fence: false,
@@ -471,6 +472,7 @@ fn fusion_plan_reduces_mlmodel_calls() {
             post_ffw_layernorm_tensor_id: None,
             layer_scalar_ids: vec![],
             quantization_ids: vec![],
+            fused_operations: vec![],
         }
     }
 

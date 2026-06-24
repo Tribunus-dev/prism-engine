@@ -13,8 +13,8 @@
 //! | `num_key_value_heads != num_attention_heads` | GQA detected — warn, validate KV projection handling |
 //! | `hidden_size != n_heads × head_dim` | Architecture inconsistency — hard error |
 
-use serde::Serialize;
 use crate::config::{CompileQuantMode, HardwareTarget, TextArchitecture};
+use serde::Serialize;
 
 // ---------------------------------------------------------------------------
 // CompileDecision
@@ -142,7 +142,9 @@ impl CompatibilityMatrix {
 
         // Fallthrough: nothing compatible (shouldn't happen since "none" is always safe).
         receipt.valid = true;
-        receipt.warnings.push("all quantization options exhausted, using FP16".to_string());
+        receipt
+            .warnings
+            .push("all quantization options exhausted, using FP16".to_string());
         CompileDecision {
             quant_mode: None,
             validation: receipt,
@@ -347,9 +349,9 @@ mod tests {
         let arch = make_qwen2_arch();
         assert!(
             CompatibilityMatrix::is_quant_compatible(
-            &arch,
-            Some(CompileQuantMode::Nf4 { group_size: 64 })
-        )
+                &arch,
+                Some(CompileQuantMode::Nf4 { group_size: 64 })
+            )
             .is_err(),
             "Qwen2 GQA should be incompatible with NF4"
         );
@@ -394,7 +396,10 @@ mod tests {
         );
         assert!(decision.validation.valid);
         // Qwen2 GQA → NF4 blocked → should fall to 8bit
-        assert_eq!(decision.quant_mode, Some(CompileQuantMode::Af8 { group_size: 64 }));
+        assert_eq!(
+            decision.quant_mode,
+            Some(CompileQuantMode::Af8 { group_size: 64 })
+        );
     }
 
     #[test]
@@ -409,13 +414,22 @@ mod tests {
         );
         assert!(decision.validation.valid);
         // Both NF4 variants blocked by Qwen GQA rule → should fall to 8bit
-        assert_eq!(decision.quant_mode, Some(CompileQuantMode::Af8 { group_size: 64 }));
-        assert!(decision.validation.fallback_chain.len() >= 3,
-            "expected at least 3 fallback attempts (nf4-128, nf4-64, 8bit)");
+        assert_eq!(
+            decision.quant_mode,
+            Some(CompileQuantMode::Af8 { group_size: 64 })
+        );
+        assert!(
+            decision.validation.fallback_chain.len() >= 3,
+            "expected at least 3 fallback attempts (nf4-128, nf4-64, 8bit)"
+        );
         // All NF4 attempts should be recorded as failed.
         for attempt in &decision.validation.fallback_chain {
             if attempt.quant_label.starts_with("nf4") {
-                assert!(!attempt.compatible, "{} should be incompatible", attempt.quant_label);
+                assert!(
+                    !attempt.compatible,
+                    "{} should be incompatible",
+                    attempt.quant_label
+                );
             }
         }
     }
@@ -466,6 +480,10 @@ mod tests {
         // GQA warning should be present in evaluate
         let target = HardwareTarget::M2Ultra;
         let decision = CompatibilityMatrix::evaluate(&arch, &target, None);
-        assert!(decision.validation.warnings.iter().any(|w| w.contains("GQA")));
+        assert!(decision
+            .validation
+            .warnings
+            .iter()
+            .any(|w| w.contains("GQA")));
     }
 }

@@ -26,6 +26,6 @@ pub mod report;
 pub mod shape_profiles;
 pub mod statistics;
 pub mod suite_manifest;
-pub mod timer_calibration;
 #[cfg(feature = "tensix")]
 pub mod tensix_decode_plan;
+pub mod timer_calibration;

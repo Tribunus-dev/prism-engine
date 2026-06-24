@@ -9,38 +9,38 @@
 //! v0 is the copied, runtime-ready image. It proves canonicalization,
 //! bounded residency, and output parity. No-copy Metal buffers remain v2.
 
-pub mod compile;
-#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
-pub mod compile_coreml;
+pub mod adapter;
 pub mod compatibility;
+pub mod compile;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
+pub mod compile_coreml;
 pub mod compile_hw;
-pub mod diag;
 pub mod content_store;
-pub mod execution_shape;
+pub mod diag;
 pub mod executable;
+pub mod execution_shape;
 pub mod fusion_abi;
 pub mod fusion_plan;
 pub mod fusion_receipts;
 pub mod fusion_sealing;
-pub mod kernel_selection;
-pub mod metal_codegen;
-#[cfg(test)]
-pub mod metal_codegen_model_test;
-pub mod metal_pipeline;
-pub mod program;
-pub mod residency;
-pub mod variants;
-pub mod verification;
 #[cfg(feature = "tensix")]
 pub mod fusion_tensix;
 pub mod hf;
 pub mod hw_assessment;
 pub mod hw_bench_suite;
 pub mod kernel_provider;
+pub mod kernel_selection;
 pub mod kv_plan;
 #[cfg(feature = "tensix")]
 pub mod layout_tensix;
 pub mod manifest;
+pub mod metal_codegen;
+#[cfg(test)]
+pub mod metal_codegen_model_test;
+pub mod metal_pipeline;
 pub mod phase_dag;
 pub mod phase_fallback;
 pub mod phase_graph;
@@ -50,12 +50,16 @@ pub mod phase_graph_validation;
 pub mod phase_program_version;
 pub mod pipeline;
 pub mod plan;
+pub mod program;
 pub mod quant;
+pub mod residency;
 pub mod segment;
 pub mod source;
 pub mod subgraph_mil;
 #[cfg(feature = "tensix")]
 pub mod tensix;
+pub mod variants;
+pub mod verification;
 pub mod verify;
 
 #[cfg(feature = "tensix")]
@@ -93,13 +97,13 @@ pub use verify::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::{Serialize, Deserialize};
-    use crate::model::TensorLookup;
     use crate::compute_image::manifest::SourceIdentity;
+    use crate::model::TensorLookup;
     use mlx_rs::Array;
-    use std::path::Path;
     use safetensors::tensor::{serialize_to_file, Dtype, TensorView};
+    use serde::{Deserialize, Serialize};
     use std::fs;
+    use std::path::Path;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 

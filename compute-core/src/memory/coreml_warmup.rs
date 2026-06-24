@@ -2,9 +2,8 @@
 //! (which has the `com.apple.private.ane.compile` entitlement) and executes
 //! it on the ANE via the existing Core ML ObjC bridge.
 //!
-//! The resulting `_ANEInMemoryModel` is the same IR as `orion_compile_mil()`
-//! would produce — identical ANE performance.  The difference is only *who*
-//! authorises the compilation XPC call (Core ML framework vs direct caller).
+//! The resulting `_ANEInMemoryModel` provides identical ANE performance
+//! through the Core ML compilation path.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -166,8 +165,7 @@ pub fn prewarm_ane_via_coreml() -> bool {
 
     // Cleanup — the ANE compiler daemon was contacted via Core ML's entitlement.
     // This warms the ANE compiler infrastructure.  For firmware pre-warm (faster
-    // subsequent ANE execution), follow up with `orion_eval` using a pre-compiled
-    // program or use the Core ML prediction API once `run_mlmodelc` is available.
+    // subsequent ANE execution), use the Core ML prediction API.
     let _ = std::fs::remove_dir_all(&tmp_dir);
     true
 }

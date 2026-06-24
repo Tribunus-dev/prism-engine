@@ -80,15 +80,17 @@ impl BindingManager {
         // once, regardless of how many objects it contains.
         let mut objects_by_segment: HashMap<&str, Vec<&ContentObjectEntry>> = HashMap::new();
         for obj in &store.objects {
-            objects_by_segment.entry(obj.segment_id.as_str()).or_default().push(obj);
+            objects_by_segment
+                .entry(obj.segment_id.as_str())
+                .or_default()
+                .push(obj);
         }
 
         for seg in &store.segments {
             let path = base_path.join(format!("{}.bin", seg.segment_id));
 
-            let file = std::fs::File::open(&path).map_err(|_| {
-                MmapLoadError::PermissionDenied(path.display().to_string())
-            })?;
+            let file = std::fs::File::open(&path)
+                .map_err(|_| MmapLoadError::PermissionDenied(path.display().to_string()))?;
 
             // mutable borrow needed for pread-style seek+read
             let mut file = file;
@@ -120,7 +122,8 @@ impl BindingManager {
                 // Deserialize structured objects based on content kind
                 match &obj.object_kind {
                     ContentObjectKind::PhaseProgramPayload => {
-                        if let Ok(program) = serde_json::from_slice::<SerializedPhaseProgram>(&buf) {
+                        if let Ok(program) = serde_json::from_slice::<SerializedPhaseProgram>(&buf)
+                        {
                             programs.push(program);
                         }
                     }
@@ -161,8 +164,8 @@ impl BindingManager {
 mod tests {
     use super::*;
     use crate::compute_image::content_store::index::{
-        ContentAddressedContentStore, ContentObjectEntry, ContentObjectKind,
-        ContentStoreVersion, ImmutableSegment, ArtifactConsumerRef, ResidencyClass,
+        ArtifactConsumerRef, ContentAddressedContentStore, ContentObjectEntry, ContentObjectKind,
+        ContentStoreVersion, ImmutableSegment, ResidencyClass,
     };
 
     // ------------------------------------------------------------------
@@ -240,10 +243,8 @@ mod tests {
 
     #[test]
     fn test_load_segments_with_objects() {
-        let dir = std::env::temp_dir().join(format!(
-            "executable_bindings_test_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("executable_bindings_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp dir");
 
@@ -343,10 +344,7 @@ mod tests {
             .load_segments(&store, &dir)
             .expect("load_segments should succeed");
 
-        assert_eq!(
-            manager.view_object(&bindings, "obj"),
-            Some(&obj_data[..]),
-        );
+        assert_eq!(manager.view_object(&bindings, "obj"), Some(&obj_data[..]),);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

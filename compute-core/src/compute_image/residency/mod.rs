@@ -14,13 +14,13 @@ pub mod receipts;
 
 pub use self::plan::PeakMemoryAnalyzer;
 pub use self::prefetch::PrefetchScheduleBuilder;
+pub use admission::{ResidencyAdmission, ResidencyAdmissionResult, ResidencyRefusalReason};
 pub use plan::{
     ActivationArenaRequirements, CompiledResidencyPlan, EvictableWeightObject, EvictionPolicy,
     KvCacheRequirements, MemoryAdmissionContract, PeakMemoryEstimate, PrefetchAction,
     PrefetchPriority, RequiredWeightObject, RequiredWeightObjectId, ResidencyClass,
     ResidencyPlanId,
 };
-pub use admission::{ResidencyAdmission, ResidencyAdmissionResult, ResidencyRefusalReason};
 pub use receipts::{ResidencyAdmissionReceipt, ResidencyExecutionReceipt};
 
 pub mod plan;

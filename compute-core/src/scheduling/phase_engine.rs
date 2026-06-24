@@ -2,19 +2,21 @@
 //! phase runners.  The engine is the bridge between the typed DAG and the
 //! actual backend dispatch.
 
+use crate::backend::accelerate_lane::AccelerateLane;
+use crate::backend::coreml_lane::CoreMlLane;
 use crate::compute_image::phase_dag::{EmittedPhase, EmittedPhaseGraph, PhaseCompletionStatus};
+use crate::inference::execution_image_state::ComputeImageState;
+use crate::inference::inference_session_state::InferenceSessionState;
+use crate::inference::inference_step_state::{
+    InferenceMode, InferenceStepOutput, InferenceStepState,
+};
+use crate::mlx_executor::MlxExecutor;
+use crate::runtime::executable_session::RuntimeBackends;
 use crate::scheduling::execution_context::ExecutionContext;
+use crate::scheduling::phase_engine_state::{PhaseLifecycleState, PhaseLifecycleTracker};
 use crate::scheduling::phase_runner::{PhaseResult, PhaseRunnerRegistry};
 use crate::scheduling::ready_queue::ReadyQueue;
 use crate::scheduling::receipts::PhaseReceipt;
-use crate::scheduling::phase_engine_state::{PhaseLifecycleState, PhaseLifecycleTracker};
-use crate::inference::execution_image_state::ComputeImageState;
-use crate::inference::inference_session_state::InferenceSessionState;
-use crate::inference::inference_step_state::{InferenceStepState, InferenceStepOutput, InferenceMode};
-use crate::runtime::executable_session::RuntimeBackends;
-use crate::backend::accelerate_lane::AccelerateLane;
-use crate::backend::coreml_lane::CoreMlLane;
-use crate::mlx_executor::MlxExecutor;
 use mlx_rs::Array;
 use std::sync::{Arc, Mutex};
 
@@ -79,23 +81,20 @@ impl PhaseEngine {
                         completed.insert(phase_id);
                     }
                     PhaseCompletionStatus::Failed(ref reason) => {
-                        eprintln!(
-                            "[phase-engine] phase '{}' failed: {}",
-                            phase_id, reason
-                        );
+                        eprintln!("[phase-engine] phase '{}' failed: {}", phase_id, reason);
                         // Mark as completed so downstream can attempt fallback.
                         completed.insert(phase_id);
                     }
                     PhaseCompletionStatus::FallbackUsed(ref reason) => {
-                        eprintln!(
-                            "[phase-engine] phase '{}' fallback: {}",
-                            phase_id, reason
-                        );
+                        eprintln!("[phase-engine] phase '{}' fallback: {}", phase_id, reason);
                         completed.insert(phase_id);
                     }
                     PhaseCompletionStatus::Pending => {
                         // Should not happen after execution.
-                        eprintln!("[phase-engine] phase '{}' still pending after execution", phase_id);
+                        eprintln!(
+                            "[phase-engine] phase '{}' still pending after execution",
+                            phase_id
+                        );
                     }
                 }
             }
@@ -117,13 +116,11 @@ impl PhaseEngine {
         let start = std::time::Instant::now();
 
         let result: PhaseResult = match self.runners.dispatch(phase, ctx) {
-            Ok(()) => {
-                PhaseResult {
+            Ok(()) => PhaseResult {
                 phase_id: phase.phase_id.clone(),
                 status: PhaseCompletionStatus::Complete,
                 duration_us: start.elapsed().as_micros() as u64,
                 fused_evidence: None,
-            }
             },
             Err(e) => {
                 // Attempt fallback decomposition.
@@ -140,14 +137,17 @@ impl PhaseEngine {
                 if !fallback_edges.is_empty() {
                     PhaseResult {
                         phase_id: phase.phase_id.clone(),
-                    status: PhaseCompletionStatus::FallbackUsed(format!("runner error: {}", e)),
+                        status: PhaseCompletionStatus::FallbackUsed(format!("runner error: {}", e)),
                         duration_us: start.elapsed().as_micros() as u64,
                         fused_evidence: None,
                     }
                 } else {
-                PhaseResult {
+                    PhaseResult {
                         phase_id: phase.phase_id.clone(),
-                        status: PhaseCompletionStatus::Failed(format!("runner error (no fallback): {}", e)),
+                        status: PhaseCompletionStatus::Failed(format!(
+                            "runner error (no fallback): {}",
+                            e
+                        )),
                         duration_us: start.elapsed().as_micros() as u64,
                         fused_evidence: None,
                     }
@@ -192,16 +192,25 @@ impl PhaseEngine {
 
         // Build one execution context from real session/image/step state.
         let placeholder_arr = Arc::new(Array::from_slice::<f32>(&[0.0], &[1]));
-                let mut ctx = ExecutionContext {
-                    request_id: step.request_id.0,
-                    token_position: step.token_position,
+        let mut ctx = ExecutionContext {
+            request_id: step.request_id.0,
+            token_position: step.token_position,
             is_prefill: step.mode == InferenceMode::Prefill,
-                    token_ids: step.input_tokens.token_ids.iter().map(|&t| t as i32).collect(),
+            token_ids: step
+                .input_tokens
+                .token_ids
+                .iter()
+                .map(|&t| t as i32)
+                .collect(),
             hidden_state: step.current_activation.as_ref().and_then(|ca| {
                 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-                { ca.mlx_compatibility_view.clone() }
+                {
+                    ca.mlx_compatibility_view.clone()
+                }
                 #[cfg(not(any(feature = "mlx-backend", feature = "prism-backend")))]
-                { None::<Array> }
+                {
+                    None::<Array>
+                }
             }),
             // TODO: live kv_caches once LiveKvCache derives Clone or we build them per-layer
             kv_caches: Vec::new(),
@@ -256,33 +265,37 @@ impl PhaseEngine {
                 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
                 if let Some(ref mut ca) = step.current_activation.as_mut() {
                     if let Some(ref hidden) = ctx.hidden_state {
-                    ca.mlx_compatibility_view = Some(hidden.clone());
-                }
+                        ca.mlx_compatibility_view = Some(hidden.clone());
+                    }
                 }
 
                 // 5. Record receipt.
                 let (status, fused_evidence) = match run_result {
                     Ok(()) => (PhaseCompletionStatus::Complete, None),
-            Err(e) => {
+                    Err(e) => {
                         eprintln!("[phase-engine] phase '{}' failed: {}", phase_id, e);
                         (PhaseCompletionStatus::Failed(e), None)
                     }
-        };
+                };
 
                 let receipt = PhaseReceipt {
                     phase_id: phase_id.clone(),
                     status: status.clone(),
                     duration_us,
                     fused_evidence,
-        };
+                };
                 step.receipt_ledger.push(receipt);
 
                 // 6. Update lifecycle and completed set.
-                if matches!(status, PhaseCompletionStatus::Complete | PhaseCompletionStatus::FallbackUsed(_)) {
+                if matches!(
+                    status,
+                    PhaseCompletionStatus::Complete | PhaseCompletionStatus::FallbackUsed(_)
+                ) {
                     let _ = lifecycle.transition(&phase_id, PhaseLifecycleState::Complete);
                     completed.insert(phase_id);
                 } else {
-                    let _ = lifecycle.transition(&phase_id, PhaseLifecycleState::FailedBeforePublication);
+                    let _ = lifecycle
+                        .transition(&phase_id, PhaseLifecycleState::FailedBeforePublication);
                     completed.insert(phase_id);
                 }
             }
@@ -293,7 +306,7 @@ impl PhaseEngine {
             token: None,
             logits: None,
             receipts: step.receipt_ledger.take(),
-                    })
+        })
     }
 }
 
@@ -307,8 +320,8 @@ impl Default for PhaseEngine {
 mod tests {
     use super::*;
     use crate::compute_image::phase_dag::{
-        ComputeLane, EmittedArenaPlan, EmittedConcurrencyPlan, EmittedPhase,
-        EmittedPhaseEdge, PhaseKind, SemanticKind,
+        ComputeLane, EmittedArenaPlan, EmittedConcurrencyPlan, EmittedPhase, EmittedPhaseEdge,
+        PhaseKind, SemanticKind,
     };
     use crate::scheduling::execution_context::ExecutionContext;
     use std::collections::HashMap;

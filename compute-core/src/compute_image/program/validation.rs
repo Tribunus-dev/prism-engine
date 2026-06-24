@@ -59,7 +59,9 @@ mod tests {
             edges: vec![],
             arena_plan_id: "arena_0".into(),
             residency_plan_id: "res_0".into(),
-            default_artifact_selection: ProgramArtifactSelection { artifact_ids: vec![] },
+            default_artifact_selection: ProgramArtifactSelection {
+                artifact_ids: vec![],
+            },
             fallback_chains: vec![],
             proof_receipt_ids: vec![],
             program_bytes: vec![],
@@ -81,9 +83,18 @@ mod tests {
             },
             input_bindings: vec![],
             output_bindings: vec![],
-            dependency_contract: PhaseDependencyContract { dependencies_satisfied: false },
-            completion_contract: PhaseCompletionContract { must_emit_receipt: false, must_release_regions: false, must_advance_epoch: false },
-            resource_reservation: PhaseResourceReservation { threadgroup_memory: 0, register_count: 0 },
+            dependency_contract: PhaseDependencyContract {
+                dependencies_satisfied: false,
+            },
+            completion_contract: PhaseCompletionContract {
+                must_emit_receipt: false,
+                must_release_regions: false,
+                must_advance_epoch: false,
+            },
+            resource_reservation: PhaseResourceReservation {
+                threadgroup_memory: 0,
+                register_count: 0,
+            },
             state_domain: None,
         };
         let program = SerializedPhaseProgram {
@@ -95,7 +106,9 @@ mod tests {
             edges: vec![],
             arena_plan_id: "arena_0".into(),
             residency_plan_id: "res_0".into(),
-            default_artifact_selection: ProgramArtifactSelection { artifact_ids: vec![] },
+            default_artifact_selection: ProgramArtifactSelection {
+                artifact_ids: vec![],
+            },
             fallback_chains: vec![],
             proof_receipt_ids: vec![],
             program_bytes: vec![],

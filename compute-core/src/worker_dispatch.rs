@@ -129,7 +129,6 @@ impl MetalKernelRegistry {
     }
 }
 
-
 impl MetalKernelRegistry {
     /// Consume the registry and return the loaded kernels as a Vec.
     pub fn into_vec(self) -> Vec<LoadedMetalKernel> {

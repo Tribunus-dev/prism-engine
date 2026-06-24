@@ -74,21 +74,26 @@ pub struct TextArchitecture {
 
 /// Vision encoder configuration from a model's vision_config.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct VisionArchitecture {
+    #[serde(alias = "hiddenSize")]
     pub hidden_size: u32,
+    #[serde(alias = "num_heads")]
     pub num_attention_heads: u32,
+    #[serde(alias = "depth")]
     pub num_hidden_layers: u32,
     pub intermediate_size: u32,
+    #[serde(default)]
     pub image_size: u32,
+    #[serde(default)]
     pub patch_size: u32,
+    #[serde(default)]
     pub num_channels: u32,
+    #[serde(default)]
     pub projection_dim: u32,
 }
 
 /// Audio encoder configuration from a model's audio_config.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AudioArchitecture {
     pub hidden_size: u32,
     pub num_attention_heads: u32,
@@ -799,21 +804,22 @@ impl ModelExecutionPlan {
                 // Determine subgraph kind from the first layer's ops
                 let first_idx = layer_indices[0] as usize;
                 let first_ops = self.layers[first_idx].operation_names();
-                let subgraph_kind = if first_ops.contains(&"gate_proj") && first_ops.contains(&"down_proj") {
-                    "mlp_block".to_string()
-                } else if first_ops.contains(&"q_proj")
-                    && first_ops.contains(&"k_proj")
-                    && first_ops.contains(&"v_proj")
-                    && !first_ops.contains(&"rms_norm")
-                {
-                    "qkv_bundle".to_string()
-                } else if first_ops.contains(&"rms_norm") && first_ops.contains(&"q_proj") {
-                    "rmsnorm_qkv".to_string()
-                } else if first_ops.contains(&"lm_head") {
-                    "output_proj".to_string()
-                } else {
-                    "mlp_block".to_string()
-                };
+                let subgraph_kind =
+                    if first_ops.contains(&"gate_proj") && first_ops.contains(&"down_proj") {
+                        "mlp_block".to_string()
+                    } else if first_ops.contains(&"q_proj")
+                        && first_ops.contains(&"k_proj")
+                        && first_ops.contains(&"v_proj")
+                        && !first_ops.contains(&"rms_norm")
+                    {
+                        "qkv_bundle".to_string()
+                    } else if first_ops.contains(&"rms_norm") && first_ops.contains(&"q_proj") {
+                        "rmsnorm_qkv".to_string()
+                    } else if first_ops.contains(&"lm_head") {
+                        "output_proj".to_string()
+                    } else {
+                        "mlp_block".to_string()
+                    };
                 islands.push(AneFusedIsland {
                     island_id,
                     modelc_relpath: modelc_path,
@@ -1526,10 +1532,13 @@ struct RawConfig {
     top_k_experts: Option<u32>,
     #[serde(default)]
     num_kv_shared_layers: Option<u32>,
+    #[serde(alias = "text_config")]
     text_config: Option<RawTextConfig>,
     #[serde(default)]
+    #[serde(alias = "vision_config")]
     vision_config: Option<VisionArchitecture>,
     #[serde(default)]
+    #[serde(alias = "audio_config")]
     audio_config: Option<AudioArchitecture>,
     #[serde(default)]
     #[serde(alias = "quantization_config")]
@@ -1553,7 +1562,7 @@ impl RawConfig {
             num_global_key_value_heads: self.num_global_key_value_heads,
             num_hidden_layers: self.num_hidden_layers.unwrap_or(24),
             vocab_size: self.vocab_size.unwrap_or(32768),
-            sliding_window: self.sliding_window.unwrap_or(32768),
+            sliding_window: self.sliding_window,
             max_position_embeddings: self.max_position_embeddings,
             rms_norm_eps: self.rms_norm_eps.unwrap_or(1e-6),
             tie_word_embeddings: self.tie_word_embeddings,
@@ -1578,7 +1587,7 @@ struct RawTextConfig {
     num_global_key_value_heads: Option<u32>,
     num_hidden_layers: u32,
     vocab_size: u32,
-    sliding_window: u32,
+    sliding_window: Option<u32>,
     max_position_embeddings: Option<u32>,
     rms_norm_eps: f64,
     tie_word_embeddings: Option<bool>,
@@ -1639,7 +1648,7 @@ pub fn parse_config(
         .layer_types
         .iter()
         .map(|s| match s.as_str() {
-            "full_attention" => AttentionKind::FullAttention,
+            "full_attention" | "full" => AttentionKind::FullAttention,
             _ => AttentionKind::SlidingAttention,
         })
         .collect();
@@ -1717,7 +1726,7 @@ pub fn parse_config(
         num_global_key_value_heads: text.num_global_key_value_heads,
         num_hidden_layers: text.num_hidden_layers,
         vocab_size: text.vocab_size,
-        sliding_window: text.sliding_window,
+        sliding_window: text.sliding_window.unwrap_or(4096),
         max_position_embeddings: max_pos,
         rms_norm_eps: text.rms_norm_eps,
         tie_word_embeddings: text.tie_word_embeddings.unwrap_or(true),

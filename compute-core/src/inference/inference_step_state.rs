@@ -3,9 +3,9 @@
 //! Created fresh for each prefill chunk or decode step. Tracks activation,
 //! phase completion, receipts, sampling, and the final output token.
 
-use crate::scheduling::receipts::PhaseReceipt;
-use crate::scheduling::activation_binding::{CurrentActivation, ActivationGeneration};
 use crate::compute_image::phase_graph::TensorId;
+use crate::scheduling::activation_binding::{ActivationGeneration, CurrentActivation};
+use crate::scheduling::receipts::PhaseReceipt;
 use mlx_rs::Array;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -1,9 +1,9 @@
 //! Prism Engine — unified inference runtime for `.cimage` models.
 
-use std::collections::HashMap;
-use std::path::Path;
 use crate::lut::compiler::CompiledTensor;
 use crate::lut::graph::{ActivationFunction, ComputeNode, ModelGraph, TensorRole};
+use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Default)]
 pub struct InferenceStats {
@@ -35,51 +35,74 @@ mod metal_backend {
         pub weight_bufs: HashMap<String, (Buffer, u32, u32)>,
         pub scratch: Buffer,
         pub scratch2: Buffer,
-    pub kv_bufs: Vec<(Buffer, Buffer)>,
-    pub kv_stride: u64,
-    pub kv_offsets: Vec<u64>,
+        pub kv_bufs: Vec<(Buffer, Buffer)>,
+        pub kv_stride: u64,
+        pub kv_offsets: Vec<u64>,
     }
     impl MetalBackend {
-        pub fn new(tensors: &HashMap<String, crate::lut::compiler::CompiledTensor>,
-            mh: u64, _mi: u64, num_layers: u32, kv_stride: u64) -> Result<Self, String> {
+        pub fn new(
+            tensors: &HashMap<String, crate::lut::compiler::CompiledTensor>,
+            mh: u64,
+            _mi: u64,
+            num_layers: u32,
+            kv_stride: u64,
+        ) -> Result<Self, String> {
             let device = Device::system_default().ok_or("No Metal device")?;
-            let library = device.new_library_with_data(KERNEL_BYTES)
+            let library = device
+                .new_library_with_data(KERNEL_BYTES)
                 .map_err(|e| format!("embedded lib: {e:?}"))?;
-            let function = library.get_function("palettized_gemv", None).map_err(|e| format!("fn: {e:?}"))?;
-            let pipeline = device.new_compute_pipeline_state_with_function(
-                &function)
+            let function = library
+                .get_function("palettized_gemv", None)
+                .map_err(|e| format!("fn: {e:?}"))?;
+            let pipeline = device
+                .new_compute_pipeline_state_with_function(&function)
                 .map_err(|e| format!("ps: {e:?}"))?;
-            let attn_fn = library.get_function("attention_decode", None).map_err(|e| format!("attn fn: {e:?}"))?;
-            let attn_pipeline = device.new_compute_pipeline_state_with_function(
-                &attn_fn)
+            let attn_fn = library
+                .get_function("attention_decode", None)
+                .map_err(|e| format!("attn fn: {e:?}"))?;
+            let attn_pipeline = device
+                .new_compute_pipeline_state_with_function(&attn_fn)
                 .map_err(|e| format!("attn ps: {e:?}"))?;
-            let norm_fn = library.get_function("rms_norm", None).map_err(|e| format!("norm fn: {e:?}"))?;
-            let norm_pipeline = device.new_compute_pipeline_state_with_function(
-                &norm_fn)
+            let norm_fn = library
+                .get_function("rms_norm", None)
+                .map_err(|e| format!("norm fn: {e:?}"))?;
+            let norm_pipeline = device
+                .new_compute_pipeline_state_with_function(&norm_fn)
                 .map_err(|e| format!("norm ps: {e:?}"))?;
-            let rope_fn = library.get_function("rope_fp16", None).map_err(|e| format!("rope fn: {e:?}"))?;
-            let rope_pipeline = device.new_compute_pipeline_state_with_function(
-                &rope_fn)
+            let rope_fn = library
+                .get_function("rope_fp16", None)
+                .map_err(|e| format!("rope fn: {e:?}"))?;
+            let rope_pipeline = device
+                .new_compute_pipeline_state_with_function(&rope_fn)
                 .map_err(|e| format!("rope ps: {e:?}"))?;
-            let softmax_fn = library.get_function("softmax_fp16", None).map_err(|e| format!("softmax fn: {e:?}"))?;
-            let softmax_pipeline = device.new_compute_pipeline_state_with_function(
-                &softmax_fn)
+            let softmax_fn = library
+                .get_function("softmax_fp16", None)
+                .map_err(|e| format!("softmax fn: {e:?}"))?;
+            let softmax_pipeline = device
+                .new_compute_pipeline_state_with_function(&softmax_fn)
                 .map_err(|e| format!("softmax ps: {e:?}"))?;
-            let gateup_fn = library.get_function("palettized_gemv_swiglu", None).map_err(|e| format!("gateup fn: {e:?}"))?;
-            let gateup_pipeline = device.new_compute_pipeline_state_with_function(
-                &gateup_fn)
+            let gateup_fn = library
+                .get_function("palettized_gemv_swiglu", None)
+                .map_err(|e| format!("gateup fn: {e:?}"))?;
+            let gateup_pipeline = device
+                .new_compute_pipeline_state_with_function(&gateup_fn)
                 .map_err(|e| format!("gateup ps: {e:?}"))?;
-            let silu_fn = library.get_function("silu_fp16", None).map_err(|e| format!("silu fn: {e:?}"))?;
-            let silu_pipeline = device.new_compute_pipeline_state_with_function(
-                &silu_fn)
+            let silu_fn = library
+                .get_function("silu_fp16", None)
+                .map_err(|e| format!("silu fn: {e:?}"))?;
+            let silu_pipeline = device
+                .new_compute_pipeline_state_with_function(&silu_fn)
                 .map_err(|e| format!("silu ps: {e:?}"))?;
-            let vec_add_fn = library.get_function("vec_add_fp16", None).map_err(|e| format!("vec_add fn: {e:?}"))?;
-            let vec_add_pipeline = device.new_compute_pipeline_state_with_function(
-                &vec_add_fn)
+            let vec_add_fn = library
+                .get_function("vec_add_fp16", None)
+                .map_err(|e| format!("vec_add fn: {e:?}"))?;
+            let vec_add_pipeline = device
+                .new_compute_pipeline_state_with_function(&vec_add_fn)
                 .map_err(|e| format!("vec_add ps: {e:?}"))?;
             let cq = device.new_command_queue();
             let scratch = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
-            let scratch2 = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
+            let scratch2 =
+                device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
             let layer_cap = MAX_SEQ * kv_stride;
             let mut kv_bufs = Vec::with_capacity(num_layers as usize);
             for _ in 0..num_layers {
@@ -91,18 +114,50 @@ mod metal_backend {
             let kv_offsets = vec![0u64; num_layers as usize];
             let mut wb = HashMap::new();
             for (k, ct) in tensors.iter() {
-                let b = unsafe { device.new_buffer_with_data(ct.payload.as_ptr() as *const std::ffi::c_void,
-                    ct.payload.len() as u64, MTLResourceOptions::StorageModeShared) };
+                let b = unsafe {
+                    device.new_buffer_with_data(
+                        ct.payload.as_ptr() as *const std::ffi::c_void,
+                        ct.payload.len() as u64,
+                        MTLResourceOptions::StorageModeShared,
+                    )
+                };
                 wb.insert(k.clone(), (b, ct.dim_m, ct.dim_n));
             }
 
-            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, norm_pipeline, rope_pipeline, softmax_pipeline, gateup_pipeline, silu_pipeline, vec_add_pipeline, weight_bufs: wb, scratch, scratch2, kv_bufs, kv_stride, kv_offsets })
+            Ok(MetalBackend {
+                device,
+                library,
+                command_queue: cq,
+                pipeline,
+                attn_pipeline,
+                norm_pipeline,
+                rope_pipeline,
+                softmax_pipeline,
+                gateup_pipeline,
+                silu_pipeline,
+                vec_add_pipeline,
+                weight_bufs: wb,
+                scratch,
+                scratch2,
+                kv_bufs,
+                kv_stride,
+                kv_offsets,
+            })
         }
         pub fn gemv(&self, key: &str, inp: &[u16], out: &mut [u16]) -> Result<(), String> {
-            let (wb, dm, dn) = self.weight_bufs.get(key).ok_or_else(|| format!("miss {key}"))?;
+            let (wb, dm, dn) = self
+                .weight_bufs
+                .get(key)
+                .ok_or_else(|| format!("miss {key}"))?;
             let il = inp.len() * 2;
             let ol = out.len() * 2;
-            unsafe { std::ptr::copy_nonoverlapping(inp.as_ptr() as *const u8, self.scratch.contents() as *mut u8, il); }
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    inp.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8,
+                    il,
+                );
+            }
             let cb = self.command_queue.new_command_buffer();
             let enc = cb.new_compute_command_encoder();
             enc.set_compute_pipeline_state(&self.pipeline);
@@ -113,9 +168,16 @@ mod metal_backend {
             enc.set_bytes(4, 4, dn as *const u32 as *const _);
             enc.set_bytes(5, 4, dm as *const u32 as *const _);
             enc.dispatch_thread_groups(MTLSize::new(*dm as u64, 1, 1), MTLSize::new(64, 1, 1));
-            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
-            unsafe { std::ptr::copy_nonoverlapping(
-                (self.scratch.contents() as *const u8).add(il), out.as_mut_ptr() as *mut u8, ol); }
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    (self.scratch.contents() as *const u8).add(il),
+                    out.as_mut_ptr() as *mut u8,
+                    ol,
+                );
+            }
             Ok(())
         }
 
@@ -141,7 +203,9 @@ mod metal_backend {
             let vb = v.len() * 2;
             let ob = out_len * 2;
             let needed = qb + kb + vb + ob;
-            if self.scratch.length() < needed as u64 { return vec![0u16; out_len]; }
+            if self.scratch.length() < needed as u64 {
+                return vec![0u16; out_len];
+            }
             unsafe {
                 let ptr = self.scratch.contents() as *mut u8;
                 std::ptr::copy_nonoverlapping(q.as_ptr() as *const u8, ptr, qb);
@@ -155,7 +219,10 @@ mod metal_backend {
             enc.set_buffer(1, Some(&self.scratch), qb as u64);
             enc.set_buffer(2, Some(&self.scratch), (qb + kb) as u64);
             enc.set_buffer(3, Some(&self.scratch), (qb + kb + vb) as u64);
-            let sl = seq_len as u32; let nh = num_heads as u32; let nkv = kv_heads as u32; let hd = head_dim as u32;
+            let sl = seq_len as u32;
+            let nh = num_heads as u32;
+            let nkv = kv_heads as u32;
+            let hd = head_dim as u32;
             enc.set_bytes(4, 4, &sl as *const u32 as *const _);
             enc.set_bytes(5, 4, &nh as *const u32 as *const _);
             enc.set_bytes(6, 4, &nkv as *const u32 as *const _);
@@ -163,35 +230,50 @@ mod metal_backend {
             let stride = (self.kv_stride / 2) as u32; // elements per token in buffer
             enc.set_bytes(8, 4, &stride as *const u32 as *const _);
             enc.dispatch_thread_groups(MTLSize::new(num_heads as u64, 1, 1), MTLSize::new(1, 1, 1));
-            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
             let mut out = vec![0u16; out_len];
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     (self.scratch.contents() as *const u8).add(qb + kb + vb),
-                    out.as_mut_ptr() as *mut u8, ob);
+                    out.as_mut_ptr() as *mut u8,
+                    ob,
+                );
             }
             out
         }
 
         /// Copy FP16 K/V for one token to the GPU cache.
         pub fn append_kv(&self, layer: usize, k: &[u16], v: &[u16], token_idx: u64) {
-            if layer >= self.kv_bufs.len() || self.kv_stride == 0 { return; }
+            if layer >= self.kv_bufs.len() || self.kv_stride == 0 {
+                return;
+            }
             let off = token_idx * self.kv_stride;
-            if off + self.kv_stride > MAX_SEQ * self.kv_stride { return; }
+            if off + self.kv_stride > MAX_SEQ * self.kv_stride {
+                return;
+            }
             let (ref k_buf, ref v_buf) = self.kv_bufs[layer];
             let kb = k.len() as u64 * 2;
             unsafe {
-                std::ptr::copy_nonoverlapping(k.as_ptr() as *const u8,
-                    self.scratch.contents() as *mut u8, kb as usize);
-                std::ptr::copy_nonoverlapping(v.as_ptr() as *const u8,
-                    (self.scratch.contents() as *mut u8).add(kb as usize), kb as usize);
+                std::ptr::copy_nonoverlapping(
+                    k.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8,
+                    kb as usize,
+                );
+                std::ptr::copy_nonoverlapping(
+                    v.as_ptr() as *const u8,
+                    (self.scratch.contents() as *mut u8).add(kb as usize),
+                    kb as usize,
+                );
             }
             let cb = self.command_queue.new_command_buffer();
             let blit = cb.new_blit_command_encoder();
             blit.copy_from_buffer(&self.scratch, 0, k_buf, off, kb);
             blit.copy_from_buffer(&self.scratch, kb, v_buf, off, kb);
             blit.end_encoding();
-            cb.commit(); cb.wait_until_completed();
+            cb.commit();
+            cb.wait_until_completed();
         }
 
         /// GPU RMS norm.
@@ -205,15 +287,22 @@ mod metal_backend {
             enc.set_bytes(2, 4, &dim as *const u32 as *const _);
             enc.set_bytes(3, 4, &eps as *const f32 as *const _);
             unsafe {
-                std::ptr::copy_nonoverlapping(input.as_ptr() as *const u8,
-                    self.scratch.contents() as *mut u8, input.len() * 2);
+                std::ptr::copy_nonoverlapping(
+                    input.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8,
+                    input.len() * 2,
+                );
             }
             enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(32, 1, 1));
-            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     self.scratch2.contents() as *const u8,
-                    output.as_mut_ptr() as *mut u8, output.len() * 2);
+                    output.as_mut_ptr() as *mut u8,
+                    output.len() * 2,
+                );
             }
         }
 
@@ -224,19 +313,26 @@ mod metal_backend {
             let enc = cb.new_compute_command_encoder();
             enc.set_compute_pipeline_state(&self.rope_pipeline);
             unsafe {
-                std::ptr::copy_nonoverlapping(x.as_ptr() as *const u8,
-                    self.scratch.contents() as *mut u8, x.len() * 2);
+                std::ptr::copy_nonoverlapping(
+                    x.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8,
+                    x.len() * 2,
+                );
             }
             enc.set_buffer(0, Some(&self.scratch), 0);
             enc.set_bytes(1, 8, &pos as *const i64 as *const _);
             enc.set_bytes(2, 4, &hd as *const u32 as *const _);
             enc.set_bytes(3, 4, &theta as *const f32 as *const _);
             enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(len as u64, 1, 1));
-            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     self.scratch.contents() as *const u8,
-                    x.as_mut_ptr() as *mut u8, x.len() * 2);
+                    x.as_mut_ptr() as *mut u8,
+                    x.len() * 2,
+                );
             }
         }
 
@@ -247,18 +343,25 @@ mod metal_backend {
             let enc = cb.new_compute_command_encoder();
             enc.set_compute_pipeline_state(&self.softmax_pipeline);
             unsafe {
-                std::ptr::copy_nonoverlapping(input.as_ptr() as *const u8,
-                    self.scratch.contents() as *mut u8, input.len() * 2);
+                std::ptr::copy_nonoverlapping(
+                    input.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8,
+                    input.len() * 2,
+                );
             }
             enc.set_buffer(0, Some(&self.scratch), 0);
             enc.set_buffer(1, Some(&self.scratch2), 0);
             enc.set_bytes(2, 4, &dim as *const u32 as *const _);
             enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(32, 1, 1));
-            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     self.scratch2.contents() as *const u8,
-                    output.as_mut_ptr() as *mut u8, output.len() * 2);
+                    output.as_mut_ptr() as *mut u8,
+                    output.len() * 2,
+                );
             }
         }
 
@@ -269,18 +372,25 @@ mod metal_backend {
             let enc = cb.new_compute_command_encoder();
             enc.set_compute_pipeline_state(&self.silu_pipeline);
             unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr() as *const u8,
-                    self.scratch.contents() as *mut u8, data.len() * 2);
+                std::ptr::copy_nonoverlapping(
+                    data.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8,
+                    data.len() * 2,
+                );
             }
             enc.set_buffer(0, Some(&self.scratch), 0);
             enc.set_bytes(1, 4, &len as *const u32 as *const _);
             let tg = ((len as u64) + 255) / 256;
             enc.dispatch_thread_groups(MTLSize::new(tg, 1, 1), MTLSize::new(256, 1, 1));
-            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     self.scratch.contents() as *const u8,
-                    data.as_mut_ptr() as *mut u8, data.len() * 2);
+                    data.as_mut_ptr() as *mut u8,
+                    data.len() * 2,
+                );
             }
         }
 
@@ -292,32 +402,60 @@ mod metal_backend {
             enc.set_compute_pipeline_state(&self.vec_add_pipeline);
             // Copy both to scratch
             unsafe {
-                std::ptr::copy_nonoverlapping(a.as_ptr() as *const u8,
-                    self.scratch.contents() as *mut u8, a.len() * 2);
-                std::ptr::copy_nonoverlapping(b.as_ptr() as *const u8,
-                    (self.scratch.contents() as *mut u8).add(a.len() * 2), b.len() * 2);
+                std::ptr::copy_nonoverlapping(
+                    a.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8,
+                    a.len() * 2,
+                );
+                std::ptr::copy_nonoverlapping(
+                    b.as_ptr() as *const u8,
+                    (self.scratch.contents() as *mut u8).add(a.len() * 2),
+                    b.len() * 2,
+                );
             }
             enc.set_buffer(0, Some(&self.scratch), 0);
             enc.set_buffer(1, Some(&self.scratch), a.len() as u64 * 2);
             enc.set_bytes(2, 4, &len as *const u32 as *const _);
             let tg = ((len as u64) + 255) / 256;
             enc.dispatch_thread_groups(MTLSize::new(tg, 1, 1), MTLSize::new(256, 1, 1));
-            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     self.scratch.contents() as *const u8,
-                    a.as_mut_ptr() as *mut u8, a.len() * 2);
+                    a.as_mut_ptr() as *mut u8,
+                    a.len() * 2,
+                );
             }
         }
 
         /// Fused palettized GEMV for gate+up + SwiGLU.
         /// Reads input once, writes swiglu(gate, up) = silu(gate) * up.
-        pub fn fused_gate_up(&self, gate_key: &str, up_key: &str, input: &[u16], output: &mut [u16]) -> Result<(), String> {
-            let (gate_buf, _, dm) = self.weight_bufs.get(gate_key).ok_or_else(|| format!("miss {gate_key}"))?;
-            let (up_buf, _, _) = self.weight_bufs.get(up_key).ok_or_else(|| format!("miss {up_key}"))?;
+        pub fn fused_gate_up(
+            &self,
+            gate_key: &str,
+            up_key: &str,
+            input: &[u16],
+            output: &mut [u16],
+        ) -> Result<(), String> {
+            let (gate_buf, _, dm) = self
+                .weight_bufs
+                .get(gate_key)
+                .ok_or_else(|| format!("miss {gate_key}"))?;
+            let (up_buf, _, _) = self
+                .weight_bufs
+                .get(up_key)
+                .ok_or_else(|| format!("miss {up_key}"))?;
             let il = (input.len() as u64) * 2;
             let ol = (output.len() as u64) * 2;
-            unsafe { std::ptr::copy_nonoverlapping(input.as_ptr() as *const u8, self.scratch.contents() as *mut u8, il as usize); }
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    input.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8,
+                    il as usize,
+                );
+            }
             let cb = self.command_queue.new_command_buffer();
             let enc = cb.new_compute_command_encoder();
             enc.set_compute_pipeline_state(&self.gateup_pipeline);
@@ -330,21 +468,20 @@ mod metal_backend {
             enc.set_bytes(4, 4, &in_dim as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(5, 4, &out_dim as *const u32 as *const std::ffi::c_void);
             enc.dispatch_thread_groups(MTLSize::new(*dm as u64, 1, 1), MTLSize::new(64, 1, 1));
-            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     (self.scratch.contents() as *const u8).add(il as usize),
-                    output.as_mut_ptr() as *mut u8, ol as usize);
+                    output.as_mut_ptr() as *mut u8,
+                    ol as usize,
+                );
             }
             Ok(())
         }
-
-
     }
 }
-
-
-
 
 #[cfg(all(target_os = "macos", feature = "ane"))]
 struct AneBackend {
@@ -360,47 +497,77 @@ pub struct PrismEngine {
     tensors: HashMap<String, CompiledTensor>,
     /// Compile-time execution plan (loaded from .cimage header).
     pub plan: Option<crate::lut::graph::ExecutionPlan>,
-    #[cfg(feature = "metal-dispatch")] metal: Option<metal_backend::MetalBackend>,
-    #[cfg(all(target_os = "macos", feature = "ane"))] ane: Option<AneBackend>,
+    #[cfg(feature = "metal-dispatch")]
+    metal: Option<metal_backend::MetalBackend>,
+    #[cfg(all(target_os = "macos", feature = "ane"))]
+    ane: Option<AneBackend>,
 }
 
 /// INT8 KV cache with per-token inline scale.
 /// Each token block = [scale_f32: 4 bytes LE][kv_dim × i8 packed as u8].
-struct KVCache { k: Vec<Vec<u8>>, v: Vec<Vec<u8>>, seq_lens: Vec<usize>, kv_dim: usize }
+struct KVCache {
+    k: Vec<Vec<u8>>,
+    v: Vec<Vec<u8>>,
+    seq_lens: Vec<usize>,
+    kv_dim: usize,
+}
 
 impl KVCache {
     fn new(nl: usize, kd: usize) -> Self {
-        KVCache { k: vec![Vec::new(); nl], v: vec![Vec::new(); nl], seq_lens: vec![0; nl], kv_dim: kd }
+        KVCache {
+            k: vec![Vec::new(); nl],
+            v: vec![Vec::new(); nl],
+            seq_lens: vec![0; nl],
+            kv_dim: kd,
+        }
     }
     fn append(&mut self, l: usize, kc: &[u16], vc: &[u16]) {
         fn q(data: &[u16]) -> Vec<u8> {
             let token_size = data.len() + 4;
             let mut out = Vec::with_capacity(token_size);
-            if data.is_empty() { return out; }
-            let max_abs = data.iter().fold(0.0f32, |a, &v| a.max(half::f16::from_bits(v).to_f32().abs()));
-            let scale = if max_abs > 1e-10 { 127.0 / max_abs } else { 1.0 };
+            if data.is_empty() {
+                return out;
+            }
+            let max_abs = data.iter().fold(0.0f32, |a, &v| {
+                a.max(half::f16::from_bits(v).to_f32().abs())
+            });
+            let scale = if max_abs > 1e-10 {
+                127.0 / max_abs
+            } else {
+                1.0
+            };
             out.extend_from_slice(&scale.to_le_bytes());
-            for &v in data { let f = half::f16::from_bits(v).to_f32();
-                out.push(((f * scale).round().clamp(-128.0, 127.0) as i8) as u8); }
+            for &v in data {
+                let f = half::f16::from_bits(v).to_f32();
+                out.push(((f * scale).round().clamp(-128.0, 127.0) as i8) as u8);
+            }
             out
         }
         self.k[l].extend_from_slice(&q(kc));
         self.v[l].extend_from_slice(&q(vc));
         self.seq_lens[l] += 1;
     }
-    fn get_k(&self, l: usize) -> Vec<u16> { dequant_inline(&self.k[l], self.kv_dim) }
-    fn get_v(&self, l: usize) -> Vec<u16> { dequant_inline(&self.v[l], self.kv_dim) }
-    fn seq_len(&self, l: usize) -> usize { self.seq_lens[l] }
+    fn get_k(&self, l: usize) -> Vec<u16> {
+        dequant_inline(&self.k[l], self.kv_dim)
+    }
+    fn get_v(&self, l: usize) -> Vec<u16> {
+        dequant_inline(&self.v[l], self.kv_dim)
+    }
+    fn seq_len(&self, l: usize) -> usize {
+        self.seq_lens[l]
+    }
 }
 
 fn dequant_inline(data: &[u8], kv_dim: usize) -> Vec<u16> {
     let ts = kv_dim + 4;
-    if data.len() < ts { return Vec::new(); }
+    if data.len() < ts {
+        return Vec::new();
+    }
     let nt = data.len() / ts;
     let mut out = Vec::with_capacity(nt * kv_dim);
     for t in 0..nt {
         let o = t * ts;
-        let s = f32::from_le_bytes([data[o], data[o+1], data[o+2], data[o+3]]);
+        let s = f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
         for j in 0..kv_dim {
             out.push(half::f16::from_f32(((data[o + 4 + j] as i8) as f32) * (1.0 / s)).to_bits());
         }
@@ -410,6 +577,7 @@ fn dequant_inline(data: &[u8], kv_dim: usize) -> Vec<u16> {
 
 /// KVCache config from execution plan: Int8 (CPU attention) or Fp16 (Metal attention).
 #[derive(Clone)]
+#[allow(dead_code)]
 enum KVCacheMode {
     /// INT8 per-token with inline scale (default for CPU attention).
     Int8 { k: Vec<Vec<u8>>, v: Vec<Vec<u8>> },
@@ -426,8 +594,16 @@ impl PrismEngine {
         for tb in &pal {
             if let Some(rec) = reader.tensor(&tb.key) {
                 let p = data[rec.offset as usize..][..rec.size as usize].to_vec();
-                tensors.insert(tb.key.clone(), CompiledTensor { key: tb.key.clone(),
-                    dim_m: tb.dim_m, dim_n: tb.dim_n, payload: p, effective_bpp: 0.0 });
+                tensors.insert(
+                    tb.key.clone(),
+                    CompiledTensor {
+                        key: tb.key.clone(),
+                        dim_m: tb.dim_m,
+                        dim_n: tb.dim_n,
+                        payload: p,
+                        effective_bpp: 0.0,
+                    },
+                );
             }
         }
         for node in &graph.nodes {
@@ -435,17 +611,26 @@ impl PrismEngine {
                 if !tensors.contains_key(key) {
                     if let Some(rec) = reader.tensor(key) {
                         let p = data[rec.offset as usize..][..rec.size as usize].to_vec();
-                        tensors.insert(key.clone(), CompiledTensor { key: key.clone(),
-                            dim_m: rec.dim_m, dim_n: rec.dim_n, payload: p, effective_bpp: 0.0 });
+                        tensors.insert(
+                            key.clone(),
+                            CompiledTensor {
+                                key: key.clone(),
+                                dim_m: rec.dim_m,
+                                dim_n: rec.dim_n,
+                                payload: p,
+                                effective_bpp: 0.0,
+                            },
+                        );
                     }
                 }
                 break;
             }
         }
         // Load execution plan from .cimage header.
-        let plan = reader.header.execution_plan.as_ref().and_then(|json| {
-            serde_json::from_str::<crate::lut::graph::ExecutionPlan>(json).ok()
-        });
+        let plan =
+            reader.header.execution_plan.as_ref().and_then(|json| {
+                serde_json::from_str::<crate::lut::graph::ExecutionPlan>(json).ok()
+            });
 
         #[cfg(all(target_os = "macos", feature = "ane"))]
         let mut ane: Option<AneBackend> = None;
@@ -460,50 +645,94 @@ impl PrismEngine {
                 if let Ok(model) = model {
                     let ctx = crate::ane::coreml_state::StatefulPrefillContext::new(model.ptr);
                     if let Ok(ctx) = ctx {
-                        ane = Some(AneBackend { model, ctx, chunk_size: 32 });
+                        ane = Some(AneBackend {
+                            model,
+                            ctx,
+                            chunk_size: 32,
+                        });
                         eprintln!("[prism] ANE prefill loaded");
                     }
                 }
             }
         }
 
-        Ok(PrismEngine { graph, tensors,
+        Ok(PrismEngine {
+            graph,
+            tensors,
             plan,
-            #[cfg(feature = "metal-dispatch")] metal: None,
-            #[cfg(all(target_os = "macos", feature = "ane"))] ane,
+            #[cfg(feature = "metal-dispatch")]
+            metal: None,
+            #[cfg(all(target_os = "macos", feature = "ane"))]
+            ane,
         })
     }
     pub fn from_memory(graph: ModelGraph, tensors: HashMap<String, CompiledTensor>) -> Self {
-        PrismEngine { graph, tensors,
+        PrismEngine {
+            graph,
+            tensors,
             plan: None,
-            #[cfg(feature = "metal-dispatch")] metal: None,
-            #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
+            #[cfg(feature = "metal-dispatch")]
+            metal: None,
+            #[cfg(all(target_os = "macos", feature = "ane"))]
+            ane: None,
         }
     }
     #[cfg(feature = "metal-dispatch")]
     pub fn with_metal(&mut self) -> Result<(), String> {
-        let mx = self.graph.nodes.iter().filter_map(|n| match n {
-            ComputeNode::PalettizedMatmul { tensor, .. } => Some(tensor.dim_n.max(tensor.dim_m)),
-            _ => None,
-        }).max().unwrap_or(4096) as u64;
-                let nl = self.graph.num_layers as u32;
-        let max_kvd = self.graph.nodes.iter().filter_map(|n| match n {
-            ComputeNode::ScaledDotProductAttention { num_kv_heads, head_dim, .. } =>
-                Some((*num_kv_heads * *head_dim) as u64),
-            ComputeNode::LinearAttention { num_heads, head_dim, .. } =>
-                Some((*num_heads * *head_dim) as u64),
-            _ => None,
-        }).max().unwrap_or(2048);
-        self.metal = Some(metal_backend::MetalBackend::new(&self.tensors, mx, mx, nl, max_kvd * 2)?);
-        eprintln!("[prism] Metal enabled"); Ok(())
+        let mx = self
+            .graph
+            .nodes
+            .iter()
+            .filter_map(|n| match n {
+                ComputeNode::PalettizedMatmul { tensor, .. } => {
+                    Some(tensor.dim_n.max(tensor.dim_m))
+                }
+                _ => None,
+            })
+            .max()
+            .unwrap_or(4096) as u64;
+        let nl = self.graph.num_layers as u32;
+        let max_kvd = self
+            .graph
+            .nodes
+            .iter()
+            .filter_map(|n| match n {
+                ComputeNode::ScaledDotProductAttention {
+                    num_kv_heads,
+                    head_dim,
+                    ..
+                } => Some((*num_kv_heads * *head_dim) as u64),
+                ComputeNode::LinearAttention {
+                    num_heads,
+                    head_dim,
+                    ..
+                } => Some((*num_heads * *head_dim) as u64),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(2048);
+        self.metal = Some(metal_backend::MetalBackend::new(
+            &self.tensors,
+            mx,
+            mx,
+            nl,
+            max_kvd * 2,
+        )?);
+        eprintln!("[prism] Metal enabled");
+        Ok(())
     }
     #[cfg(all(target_os = "macos", feature = "ane"))]
     pub fn with_ane(&mut self, mc_dir: &str, cs: u32) -> Result<(), String> {
         let mp = format!("{}/k_cache_{}.mlmodelc", mc_dir, cs);
         let model = crate::ane::coreml_bridge::CoreMlModel::load(&mp)?;
         let ctx = crate::ane::coreml_state::StatefulPrefillContext::new(model.ptr)?;
-        self.ane = Some(AneBackend { model, ctx, chunk_size: cs });
-        eprintln!("[prism] ANE enabled (chunk={cs})"); Ok(())
+        self.ane = Some(AneBackend {
+            model,
+            ctx,
+            chunk_size: cs,
+        });
+        eprintln!("[prism] ANE enabled (chunk={cs})");
+        Ok(())
     }
 
     #[cfg(all(target_os = "macos", feature = "ane"))]
@@ -513,21 +742,38 @@ impl PrismEngine {
         tensors: &HashMap<String, crate::lut::compiler::CompiledTensor>,
     ) -> Result<Vec<u16>, String> {
         // Find embedding tensor by matching known key patterns.
-        let (key, ct) = tensors.iter().find(|(k, _)| {
-            k.as_str().contains("embed") || k.as_str().contains("tok_embeddings") || k.as_str().contains("wte") || k.as_str() == "t"
-        }).ok_or_else(|| "no embedding tensor in ANE path".to_string())?;
+        let (key, ct) = tensors
+            .iter()
+            .find(|(k, _)| {
+                k.as_str().contains("embed")
+                    || k.as_str().contains("tok_embeddings")
+                    || k.as_str().contains("wte")
+                    || k.as_str() == "t"
+            })
+            .ok_or_else(|| "no embedding tensor in ANE path".to_string())?;
         let hd = ct.dim_n as usize;
         let t = token as usize;
-        if t >= ct.dim_m as usize { return Ok(vec![0u16; hd]); }
+        if t >= ct.dim_m as usize {
+            return Ok(vec![0u16; hd]);
+        }
         let cb = ct.dim_m as usize * 16 * 2;
         let mut c = [0u16; 16];
-        for i in 0..16 { c[i] = u16::from_le_bytes([ct.payload[t*32+i*2], ct.payload[t*32+i*2+1]]); }
+        for i in 0..16 {
+            c[i] = u16::from_le_bytes([ct.payload[t * 32 + i * 2], ct.payload[t * 32 + i * 2 + 1]]);
+        }
         let io = cb + t * (hd / 2);
         let mut v = Vec::with_capacity(hd);
         for wi in 0..hd / 8 {
             let o = io + wi * 4;
-            let pw = u32::from_le_bytes([ct.payload[o], ct.payload[o+1], ct.payload[o+2], ct.payload[o+3]]);
-            for j in 0..8 { v.push(c[((pw >> (j*4)) & 0x0F) as usize]); }
+            let pw = u32::from_le_bytes([
+                ct.payload[o],
+                ct.payload[o + 1],
+                ct.payload[o + 2],
+                ct.payload[o + 3],
+            ]);
+            for j in 0..8 {
+                v.push(c[((pw >> (j * 4)) & 0x0F) as usize]);
+            }
         }
         Ok(v)
     }
@@ -542,30 +788,56 @@ impl PrismEngine {
         use crate::ane::arena::{Arena, Dtype};
 
         let cs = ane.chunk_size as usize;
-        let ed = graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::TokenEmbedding { hidden_dim, .. } => Some(*hidden_dim as usize),
-            _ => None,
-        }).unwrap_or(896);
-        let hd = graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::ScaledDotProductAttention { head_dim, .. } => Some(*head_dim as usize),
-            _ => None,
-        }).unwrap_or(64);
-        let nh = graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::ScaledDotProductAttention { num_heads, .. } => Some(*num_heads as usize),
-            _ => None,
-        }).unwrap_or(32);
-        let nkv = graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::ScaledDotProductAttention { num_kv_heads, .. } => Some(*num_kv_heads as usize),
-            _ => None,
-        }).unwrap_or(nh);
+        let ed = graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                ComputeNode::TokenEmbedding { hidden_dim, .. } => Some(*hidden_dim as usize),
+                _ => None,
+            })
+            .unwrap_or(896);
+        let hd = graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                ComputeNode::ScaledDotProductAttention { head_dim, .. } => Some(*head_dim as usize),
+                _ => None,
+            })
+            .unwrap_or(64);
+        let nh = graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                ComputeNode::ScaledDotProductAttention { num_heads, .. } => {
+                    Some(*num_heads as usize)
+                }
+                _ => None,
+            })
+            .unwrap_or(32);
+        let nkv = graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                ComputeNode::ScaledDotProductAttention { num_kv_heads, .. } => {
+                    Some(*num_kv_heads as usize)
+                }
+                _ => None,
+            })
+            .unwrap_or(nh);
         let kd = nkv * hd;
 
         let t0 = std::time::Instant::now();
-        eprintln!("[prism:ane] Prefill {} tokens (chunk={}, ed={}, kd={})",
-            prompt.len(), cs, ed, kd);
+        eprintln!(
+            "[prism:ane] Prefill {} tokens (chunk={}, ed={}, kd={})",
+            prompt.len(),
+            cs,
+            ed,
+            kd
+        );
 
         // Phase 1: Embed all prompt tokens on CPU for ANE input.
-        let embeddings: Vec<Vec<u16>> = prompt.iter()
+        let embeddings: Vec<Vec<u16>> = prompt
+            .iter()
             .map(|&t| Self::ane_embed(t, tensors))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -608,8 +880,12 @@ impl PrismEngine {
             }
             out_arena.unlock()?;
 
-            eprintln!("  [prism:ane] chunk {}: {} tokens ({:.1}s)",
-                ci / cs, nt, t0.elapsed().as_secs_f64());
+            eprintln!(
+                "  [prism:ane] chunk {}: {} tokens ({:.1}s)",
+                ci / cs,
+                nt,
+                t0.elapsed().as_secs_f64()
+            );
         }
 
         eprintln!("[prism:ane] Done ({:.1}s)", t0.elapsed().as_secs_f64());
@@ -618,6 +894,7 @@ impl PrismEngine {
 
     /// Apply LM head projection to get logits from hidden state.
     /// Tied embeddings: `hidden @ embed^T = logits` via GEMV.
+    #[allow(dead_code)]
     fn lm_head_projection(&self, h: &[u16]) -> Vec<u16> {
         for node in &self.graph.nodes {
             if let ComputeNode::LanguageModelHead { tensor } = node {
@@ -630,10 +907,15 @@ impl PrismEngine {
         }
         // Tied embedding head: find embedding tensor and GEMV hidden @ embed^T.
         if let Some(k) = self.graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::TokenEmbedding { key, .. } => Some(key.clone()), _ => None
+            ComputeNode::TokenEmbedding { key, .. } => Some(key.clone()),
+            _ => None,
         }) {
             if let Some(ct) = self.tensors.get(&k) {
-                let tb = crate::lut::graph::TensorBlueprint { key: k, dim_m: ct.dim_m, dim_n: ct.dim_n };
+                let tb = crate::lut::graph::TensorBlueprint {
+                    key: k,
+                    dim_m: ct.dim_m,
+                    dim_n: ct.dim_n,
+                };
                 return self.gemv(h, &tb, &ct.payload);
             }
         }
@@ -643,12 +925,23 @@ impl PrismEngine {
     pub fn generate(&mut self, prompt: &[u32], mt: usize) -> Result<InferenceStats, String> {
         let t0 = std::time::Instant::now();
         let nl = self.graph.num_layers as usize;
-        let kd = self.graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::ScaledDotProductAttention { num_kv_heads, head_dim, .. } =>
-                Some((*num_kv_heads * *head_dim) as usize),
-            ComputeNode::PalettizedMatmul { role: TensorRole::KProj, tensor } => Some(tensor.dim_m as usize),
-            _ => None,
-        }).unwrap_or(896);
+        let kd = self
+            .graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                ComputeNode::ScaledDotProductAttention {
+                    num_kv_heads,
+                    head_dim,
+                    ..
+                } => Some((*num_kv_heads * *head_dim) as usize),
+                ComputeNode::PalettizedMatmul {
+                    role: TensorRole::KProj,
+                    tensor,
+                } => Some(tensor.dim_m as usize),
+                _ => None,
+            })
+            .unwrap_or(896);
         let mut kv = KVCache::new(nl, kd);
         let mut pos = 0i64;
 
@@ -660,7 +953,9 @@ impl PrismEngine {
                 let lh = Self::ane_prefill(prompt, ane, &self.graph, &self.tensors)?;
                 pos = prompt.len() as i64;
                 Some(lh)
-            } else { None }
+            } else {
+                None
+            }
         };
 
         #[cfg(not(all(target_os = "macos", feature = "ane")))]
@@ -675,18 +970,27 @@ impl PrismEngine {
                 for node in &self.graph.nodes {
                     if let ComputeNode::PalettizedMatmul { role, tensor } = node {
                         if let Some(ct) = self.tensors.get(&tensor.key) {
-                            if h.len() != tensor.dim_n as usize { continue; }
+                            if h.len() != tensor.dim_n as usize {
+                                continue;
+                            }
                             let out = self.gemv(&h, tensor, &ct.payload);
                             match role {
                                 TensorRole::KProj => kv.append(li, &out, &[]),
                                 TensorRole::VProj => {
-                                    let max_abs = out.iter().fold(0.0f32, |a, &v|
-                                        a.max(half::f16::from_bits(v).to_f32().abs()));
-                                    let scale = if max_abs > 1e-10 { 127.0 / max_abs } else { 1.0 };
+                                    let max_abs = out.iter().fold(0.0f32, |a, &v| {
+                                        a.max(half::f16::from_bits(v).to_f32().abs())
+                                    });
+                                    let scale = if max_abs > 1e-10 {
+                                        127.0 / max_abs
+                                    } else {
+                                        1.0
+                                    };
                                     kv.v[li].extend_from_slice(&scale.to_le_bytes());
                                     for &v in &out {
                                         let f = half::f16::from_bits(v).to_f32();
-                                        kv.v[li].push(((f * scale).round().clamp(-128.0, 127.0) as i8) as u8);
+                                        kv.v[li].push(
+                                            ((f * scale).round().clamp(-128.0, 127.0) as i8) as u8,
+                                        );
                                     }
                                     kv.seq_lens[li] = kv.k[li].len() / (kv.kv_dim + 4).max(1);
                                 }
@@ -710,20 +1014,33 @@ impl PrismEngine {
             nt = self.argmax(&lm_head)?;
             gen.push(nt);
             pos += 1;
-            if gen.len() >= mt { return Ok(InferenceStats { prompt_tokens: prompt.len(), generated_tokens: gen,
-                total_time_ms: t0.elapsed().as_secs_f64() * 1000.0 }); }
+            if gen.len() >= mt {
+                return Ok(InferenceStats {
+                    prompt_tokens: prompt.len(),
+                    generated_tokens: gen,
+                    total_time_ms: t0.elapsed().as_secs_f64() * 1000.0,
+                });
+            }
         }
         for _ in 0..mt {
-            let h = self.step(nt, pos, &mut li, &mut kv)?; pos += 1;
-            nt = self.argmax(&h)?; gen.push(nt);
+            let h = self.step(nt, pos, &mut li, &mut kv)?;
+            pos += 1;
+            nt = self.argmax(&h)?;
+            gen.push(nt);
         }
-        Ok(InferenceStats { prompt_tokens: prompt.len(), generated_tokens: gen,
-            total_time_ms: t0.elapsed().as_secs_f64() * 1000.0 })
+        Ok(InferenceStats {
+            prompt_tokens: prompt.len(),
+            generated_tokens: gen,
+            total_time_ms: t0.elapsed().as_secs_f64() * 1000.0,
+        })
     }
 
     fn prefill_cpu(&self, p: &[u32], kv: &mut KVCache, pos: &mut i64) -> Result<(), String> {
         let mut li = 0usize;
-        for &t in p { self.step(t, *pos, &mut li, kv)?; *pos += 1; }
+        for &t in p {
+            self.step(t, *pos, &mut li, kv)?;
+            *pos += 1;
+        }
         Ok(())
     }
 
@@ -748,61 +1065,112 @@ impl PrismEngine {
         }
         rope_inplace(x, pos, hd, theta);
     }
-    fn step(&self, token: u32, pos: i64, li: &mut usize, kv: &mut KVCache) -> Result<Vec<u16>, String> {
+    fn step(
+        &self,
+        token: u32,
+        pos: i64,
+        li: &mut usize,
+        kv: &mut KVCache,
+    ) -> Result<Vec<u16>, String> {
         let mut h = self.embed(token)?;
         let mut hr = h.clone();
         let mut q: Option<Vec<u16>> = None;
         let mut fused_qkv: Option<Vec<u16>> = None;
         let mut gate: Option<Vec<u16>> = None;
         let mut up: Option<Vec<u16>> = None;
-        let mut last_k: Option<Vec<u16>> = None;
+        let mut _last_k: Option<Vec<u16>> = None;
         *li = 0;
         let nodes = &self.graph.nodes;
         // Pre-compute consecutive GateProj+UpProj indices for fused dispatch
-        let fused_set: std::collections::HashSet<usize> = (0..nodes.len().saturating_sub(1))
-            .filter(|&i| matches!(&nodes[i], ComputeNode::PalettizedMatmul { role: TensorRole::GateProj, .. })
-                && matches!(&nodes[i+1], ComputeNode::PalettizedMatmul { role: TensorRole::UpProj, .. }))
+        let _fused_set: std::collections::HashSet<usize> = (0..nodes.len().saturating_sub(1))
+            .filter(|&i| {
+                matches!(
+                    &nodes[i],
+                    ComputeNode::PalettizedMatmul {
+                        role: TensorRole::GateProj,
+                        ..
+                    }
+                ) && matches!(
+                    &nodes[i + 1],
+                    ComputeNode::PalettizedMatmul {
+                        role: TensorRole::UpProj,
+                        ..
+                    }
+                )
+            })
             .collect();
         let mut skip = 0usize;
         let mut fused_mlp = false;
-        for (ni, node) in nodes.iter().enumerate() {
-            if skip > 0 { skip -= 1; continue; }
+        for (_ni, node) in nodes.iter().enumerate() {
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
             match node {
                 ComputeNode::TokenEmbedding { .. } => {}
                 ComputeNode::Norm { eps, .. } => self.norm(&mut h, *eps),
                 ComputeNode::PalettizedMatmul { role, tensor } => {
-                    let Some(ct) = self.tensors.get(&tensor.key) else { continue; };
-                    if h.len() != tensor.dim_n as usize { continue; }
+                    let Some(ct) = self.tensors.get(&tensor.key) else {
+                        continue;
+                    };
+                    if h.len() != tensor.dim_n as usize {
+                        continue;
+                    }
                     let out = self.gemv(&h, tensor, &ct.payload);
                     match role {
                         TensorRole::QProj => q = Some(out),
                         TensorRole::FusedQkvProj => fused_qkv = Some(out),
-                        TensorRole::KProj => { kv.append(*li, &out, &[]); last_k = Some(out); },
+                        TensorRole::KProj => {
+                            kv.append(*li, &out, &[]);
+                        }
                         TensorRole::VProj => {
                             // INT8 KV: quantize V token via same q() used in append
-                            let max_abs = out.iter().fold(0.0f32, |a, &v| a.max(half::f16::from_bits(v).to_f32().abs()));
-                            let scale = if max_abs > 1e-10 { 127.0 / max_abs } else { 1.0 };
+                            let max_abs = out.iter().fold(0.0f32, |a, &v| {
+                                a.max(half::f16::from_bits(v).to_f32().abs())
+                            });
+                            let scale = if max_abs > 1e-10 {
+                                127.0 / max_abs
+                            } else {
+                                1.0
+                            };
                             kv.v[*li].extend_from_slice(&scale.to_le_bytes());
                             for &v in &out {
                                 let f = half::f16::from_bits(v).to_f32();
-                                kv.v[*li].push(((f * scale).round().clamp(-128.0, 127.0) as i8) as u8);
+                                kv.v[*li]
+                                    .push(((f * scale).round().clamp(-128.0, 127.0) as i8) as u8);
                             }
                             kv.seq_lens[*li] = kv.k[*li].len() / (kv.kv_dim + 4).max(1);
                             #[cfg(feature = "metal-dispatch")]
-                            if let (Some(ref k_gpu), Some(ref m)) = (last_k.take(), self.metal.as_ref()) {
+                            if let (Some(ref k_gpu), Some(ref m)) =
+                                (_last_k.take(), self.metal.as_ref())
+                            {
                                 m.append_kv(*li, k_gpu, &out, kv.seq_lens[*li] as u64);
                             }
                         }
-                        TensorRole::OProj => { h = out; vec_add_inplace(&mut h, &hr); hr = h.clone(); }
+                        TensorRole::OProj => {
+                            h = out;
+                            vec_add_inplace(&mut h, &hr);
+                            hr = h.clone();
+                        }
                         TensorRole::GateProj => {
-                            let mut did_fuse = false;
+                            let did_fuse = false;
                             #[cfg(feature = "metal-dispatch")]
-                            if fused_set.contains(&ni) {
+                            if _fused_set.contains(&_ni) {
                                 if let Some(ref m) = self.metal {
-                                    if let Some(next) = nodes.get(ni + 1) {
-                                        if let ComputeNode::PalettizedMatmul { tensor: up_tb, .. } = next {
+                                    if let Some(next) = nodes.get(_ni + 1) {
+                                        if let ComputeNode::PalettizedMatmul {
+                                            tensor: up_tb, ..
+                                        } = next
+                                        {
                                             let mut fused_out = vec![0u16; tensor.dim_m as usize];
-                                            if m.fused_gate_up(&tensor.key, &up_tb.key, &h, &mut fused_out).is_ok() {
+                                            if m.fused_gate_up(
+                                                &tensor.key,
+                                                &up_tb.key,
+                                                &h,
+                                                &mut fused_out,
+                                            )
+                                            .is_ok()
+                                            {
                                                 gate = Some(fused_out);
                                                 fused_mlp = true;
                                                 skip = 1;
@@ -812,34 +1180,63 @@ impl PrismEngine {
                                     }
                                 }
                             }
-                            if !did_fuse { gate = Some(out); }
-                        },
+                            if !did_fuse {
+                                gate = Some(out);
+                            }
+                        }
                         TensorRole::UpProj => up = Some(out),
                         TensorRole::DownProj => {
                             if let Some(ref act) = gate {
                                 if act.len() == tensor.dim_n as usize {
                                     h = self.gemv(act, tensor, &ct.payload);
-                                    vec_add_inplace(&mut h, &hr); hr = h.clone();
+                                    vec_add_inplace(&mut h, &hr);
+                                    hr = h.clone();
                                 }
                             }
-                            gate = None; up = None; *li += 1;
+                            gate = None;
+                            up = None;
+                            *li += 1;
                         }
                         _ => {}
                     }
                 }
-                ComputeNode::RotaryEmbedding { head_dim, rope_theta } => {
-                    if let Some(ref mut qv) = q { self.rope(qv, pos, *head_dim as usize, *rope_theta); }
-                }
-                ComputeNode::ScaledDotProductAttention { num_heads, num_kv_heads, head_dim: hd } => {
-                    if let Some(qv) = q.take() {
-                        let sl = kv.seq_len(*li);
-                        let kc = kv.get_k(*li); let vc = kv.get_v(*li);
-                        if sl > 0 && kc.len() >= sl * kv.kv_dim {
-                            h = self.attention(&qv, &kc, &vc, *num_heads as usize, *num_kv_heads as usize, *hd as usize, sl);
-                        } else { h = qv; }
+                ComputeNode::RotaryEmbedding {
+                    head_dim,
+                    rope_theta,
+                } => {
+                    if let Some(ref mut qv) = q {
+                        self.rope(qv, pos, *head_dim as usize, *rope_theta);
                     }
                 }
-                ComputeNode::MRoPE { head_dim, rope_theta, .. } => {
+                ComputeNode::ScaledDotProductAttention {
+                    num_heads,
+                    num_kv_heads,
+                    head_dim: hd,
+                } => {
+                    if let Some(qv) = q.take() {
+                        let sl = kv.seq_len(*li);
+                        let kc = kv.get_k(*li);
+                        let vc = kv.get_v(*li);
+                        if sl > 0 && kc.len() >= sl * kv.kv_dim {
+                            h = self.attention(
+                                &qv,
+                                &kc,
+                                &vc,
+                                *num_heads as usize,
+                                *num_kv_heads as usize,
+                                *hd as usize,
+                                sl,
+                            );
+                        } else {
+                            h = qv;
+                        }
+                    }
+                }
+                ComputeNode::MRoPE {
+                    head_dim,
+                    rope_theta,
+                    ..
+                } => {
                     if let Some(ref mut qv) = q {
                         self.rope(qv, pos, *head_dim as usize, *rope_theta);
                     }
@@ -848,11 +1245,15 @@ impl PrismEngine {
                         // Apply RoPE to Q and K portions of fused QKV
                         if fqkv.len() >= q_dim * 3 {
                             self.rope(&mut fqkv[..q_dim], pos, q_dim, *rope_theta);
-                            self.rope(&mut fqkv[q_dim..q_dim*2], pos, q_dim, *rope_theta);
+                            self.rope(&mut fqkv[q_dim..q_dim * 2], pos, q_dim, *rope_theta);
                         }
                     }
                 }
-                ComputeNode::LinearAttention { num_heads, num_kv_heads, head_dim: hd } => {
+                ComputeNode::LinearAttention {
+                    num_heads,
+                    num_kv_heads,
+                    head_dim: hd,
+                } => {
                     if let Some(fqkv) = fused_qkv.take() {
                         let nh = *num_heads as usize;
                         let nkv = *num_kv_heads as usize;
@@ -862,17 +1263,28 @@ impl PrismEngine {
                         // For Qwen3.5: linear_num_kv_heads=16, linear_key_head_dim=128
                         // The fused QKV is Q + K + V where Q uses self-attention dims.
                         // Infer KV dim from remaining fused output.
-                        let kv_dim = if fqkv.len() > q_dim { (fqkv.len() - q_dim) / 2 } else { q_dim };
-                        if fqkv.len() < q_dim + 2 * kv_dim { continue; }
+                        let kv_dim = if fqkv.len() > q_dim {
+                            (fqkv.len() - q_dim) / 2
+                        } else {
+                            q_dim
+                        };
+                        if fqkv.len() < q_dim + 2 * kv_dim {
+                            continue;
+                        }
                         // Split fused QKV into Q, K, V slices (already RoPE'd by MRoPE handler)
                         let q = fqkv[..q_dim].to_vec();
                         let k = fqkv[q_dim..q_dim + kv_dim].to_vec();
-                        let v = fqkv[q_dim + kv_dim..q_dim + 2*kv_dim].to_vec();
+                        let v = fqkv[q_dim + kv_dim..q_dim + 2 * kv_dim].to_vec();
                         // Store K and V in INT8 cache
                         kv.append(*li, &k, &[]);
-                        let max_abs = v.iter().fold(0.0f32, |a, &val|
-                            a.max(half::f16::from_bits(val).to_f32().abs()));
-                        let scale = if max_abs > 1e-10 { 127.0 / max_abs } else { 1.0 };
+                        let max_abs = v.iter().fold(0.0f32, |a, &val| {
+                            a.max(half::f16::from_bits(val).to_f32().abs())
+                        });
+                        let scale = if max_abs > 1e-10 {
+                            127.0 / max_abs
+                        } else {
+                            1.0
+                        };
                         kv.v[*li].extend_from_slice(&scale.to_le_bytes());
                         for &val in &v {
                             let f = half::f16::from_bits(val).to_f32();
@@ -885,15 +1297,23 @@ impl PrismEngine {
                         let vc = kv.get_v(*li);
                         if sl > 0 && kc.len() >= sl * kv.kv_dim {
                             h = self.attention(&q, &kc, &vc, nh, nkv, hdm, sl);
-                        } else { h = q; }
+                        } else {
+                            h = q;
+                        }
                     }
                 }
                 ComputeNode::AttentionOutputGate { key, dim } => {
                     if let Some(ct) = self.tensors.get(key) {
                         if h.len() == *dim as usize {
-                            let out = self.gemv(&h, &crate::lut::graph::TensorBlueprint {
-                                key: key.clone(), dim_m: *dim, dim_n: h.len() as u32,
-                            }, &ct.payload);
+                            let out = self.gemv(
+                                &h,
+                                &crate::lut::graph::TensorBlueprint {
+                                    key: key.clone(),
+                                    dim_m: *dim,
+                                    dim_n: h.len() as u32,
+                                },
+                                &ct.payload,
+                            );
                             // Same residual pattern as OProj
                             h = out;
                             vec_add_inplace(&mut h, &hr);
@@ -919,39 +1339,56 @@ impl PrismEngine {
                     }
                 }
                 ComputeNode::Activation { func } => {
-                        if fused_mlp { fused_mlp = false; continue; }
-                        match func {
-                    ActivationFunction::Silu => {
-                        if let Some(ref mut g) = gate {
-                            silu_inplace(g);
-                            if let Some(ref u) = up {
-                                // gate * up element-wise (CPU — tiny, not bandwidth-bound)
-                                for i in 0..g.len().min(u.len()) {
-                                    let a = half::f16::from_bits(g[i]).to_f32();
-                                    let b = half::f16::from_bits(u[i]).to_f32();
-                                    g[i] = half::f16::from_f32(a * b).to_bits();
+                    if fused_mlp {
+                        fused_mlp = false;
+                        continue;
+                    }
+                    match func {
+                        ActivationFunction::Silu => {
+                            if let Some(ref mut g) = gate {
+                                silu_inplace(g);
+                                if let Some(ref u) = up {
+                                    // gate * up element-wise (CPU — tiny, not bandwidth-bound)
+                                    for i in 0..g.len().min(u.len()) {
+                                        let a = half::f16::from_bits(g[i]).to_f32();
+                                        let b = half::f16::from_bits(u[i]).to_f32();
+                                        g[i] = half::f16::from_f32(a * b).to_bits();
+                                    }
                                 }
                             }
                         }
+                        ActivationFunction::Gelu => {
+                            if let Some(ref mut g) = gate {
+                                gelu_inplace(g);
+                            }
+                        }
                     }
-                    ActivationFunction::Gelu => { if let Some(ref mut g) = gate { gelu_inplace(g); } }
                 }
-            },
                 ComputeNode::LanguageModelHead { tensor } => {
                     if let Some(ct) = self.tensors.get(&tensor.key) {
-                        if h.len() == tensor.dim_n as usize { h = self.gemv(&h, tensor, &ct.payload); }
+                        if h.len() == tensor.dim_n as usize {
+                            h = self.gemv(&h, tensor, &ct.payload);
+                        }
                     }
                 }
-                _ => {}
             }
         }
-        let has_lm = self.graph.nodes.iter().any(|n| matches!(n, ComputeNode::LanguageModelHead { .. }));
+        let has_lm = self
+            .graph
+            .nodes
+            .iter()
+            .any(|n| matches!(n, ComputeNode::LanguageModelHead { .. }));
         if !has_lm {
             if let Some(k) = self.graph.nodes.iter().find_map(|n| match n {
-                ComputeNode::TokenEmbedding { key, .. } => Some(key.clone()), _ => None
+                ComputeNode::TokenEmbedding { key, .. } => Some(key.clone()),
+                _ => None,
             }) {
                 if let Some(ct) = self.tensors.get(&k) {
-                    let tb = crate::lut::graph::TensorBlueprint { key: k.clone(), dim_m: ct.dim_m, dim_n: ct.dim_n };
+                    let tb = crate::lut::graph::TensorBlueprint {
+                        key: k.clone(),
+                        dim_m: ct.dim_m,
+                        dim_n: ct.dim_n,
+                    };
                     h = self.gemv(&h, &tb, &ct.payload);
                 }
             }
@@ -960,57 +1397,115 @@ impl PrismEngine {
     }
 
     fn embed(&self, token: u32) -> Result<Vec<u16>, String> {
-        let ek = self.graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::TokenEmbedding { key, .. } => Some(key.clone()), _ => None
-        }).ok_or("no emb")?;
-        let ct = self.tensors.get(&ek).ok_or_else(|| format!("emb miss: {ek}"))?;
-        let hd = ct.dim_n as usize; let t = token as usize;
-        if t >= ct.dim_m as usize { return Ok(vec![0u16; hd]); }
+        let ek = self
+            .graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                ComputeNode::TokenEmbedding { key, .. } => Some(key.clone()),
+                _ => None,
+            })
+            .ok_or("no emb")?;
+        let ct = self
+            .tensors
+            .get(&ek)
+            .ok_or_else(|| format!("emb miss: {ek}"))?;
+        let hd = ct.dim_n as usize;
+        let t = token as usize;
+        if t >= ct.dim_m as usize {
+            return Ok(vec![0u16; hd]);
+        }
         let cb = ct.dim_m as usize * 16 * 2;
         let mut c = [0u16; 16];
-        for i in 0..16 { c[i] = u16::from_le_bytes([ct.payload[t*32+i*2], ct.payload[t*32+i*2+1]]); }
+        for i in 0..16 {
+            c[i] = u16::from_le_bytes([ct.payload[t * 32 + i * 2], ct.payload[t * 32 + i * 2 + 1]]);
+        }
         let io = cb + t * (hd / 2);
         let mut v = Vec::with_capacity(hd);
         for wi in 0..hd / 8 {
             let o = io + wi * 4;
-            let pw = u32::from_le_bytes([ct.payload[o], ct.payload[o+1], ct.payload[o+2], ct.payload[o+3]]);
-            for j in 0..8 { v.push(c[((pw >> (j*4)) & 0x0F) as usize]); }
+            let pw = u32::from_le_bytes([
+                ct.payload[o],
+                ct.payload[o + 1],
+                ct.payload[o + 2],
+                ct.payload[o + 3],
+            ]);
+            for j in 0..8 {
+                v.push(c[((pw >> (j * 4)) & 0x0F) as usize]);
+            }
         }
         Ok(v)
     }
 
     fn argmax(&self, logits: &[u16]) -> Result<u32, String> {
-        let mut b = 0u32; let mut bv = f32::NEG_INFINITY;
+        let mut b = 0u32;
+        let mut bv = f32::NEG_INFINITY;
         for (i, &v) in logits.iter().enumerate() {
             let f = half::f16::from_bits(v).to_f32();
-            if f > bv { bv = f; b = i as u32; }
+            if f > bv {
+                bv = f;
+                b = i as u32;
+            }
         }
         Ok(b)
     }
 
-    pub fn graph(&self) -> &ModelGraph { &self.graph }
-    pub fn tensor(&self, key: &str) -> Option<&CompiledTensor> { self.tensors.get(key) }
+    pub fn graph(&self) -> &ModelGraph {
+        &self.graph
+    }
+    pub fn tensor(&self, key: &str) -> Option<&CompiledTensor> {
+        self.tensors.get(key)
+    }
     pub fn embedding_dim(&self) -> u32 {
-        self.graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::TokenEmbedding { hidden_dim, .. } => Some(*hidden_dim), _ => None
-        }).unwrap_or(896)
+        self.graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                ComputeNode::TokenEmbedding { hidden_dim, .. } => Some(*hidden_dim),
+                _ => None,
+            })
+            .unwrap_or(896)
     }
     pub fn head_dim(&self) -> u32 {
-        self.graph.nodes.iter().find_map(|n| match n {
-            ComputeNode::ScaledDotProductAttention { head_dim, .. } => Some(*head_dim),
-            ComputeNode::RotaryEmbedding { head_dim, .. } => Some(*head_dim), _ => None
-        }).unwrap_or(64)
+        self.graph
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                ComputeNode::ScaledDotProductAttention { head_dim, .. } => Some(*head_dim),
+                ComputeNode::RotaryEmbedding { head_dim, .. } => Some(*head_dim),
+                _ => None,
+            })
+            .unwrap_or(64)
     }
 
-    fn gemv(&self, input: &[u16], tensor: &crate::lut::graph::TensorBlueprint, _payload: &[u8]) -> Vec<u16> {
+    fn gemv(
+        &self,
+        input: &[u16],
+        tensor: &crate::lut::graph::TensorBlueprint,
+        _payload: &[u8],
+    ) -> Vec<u16> {
+        #[allow(unused_mut, unused_variables)]
         let mut out = vec![0u16; tensor.dim_m as usize];
         #[cfg(feature = "metal-dispatch")]
-        if let Some(ref m) = self.metal { if m.gemv(&tensor.key, input, &mut out).is_ok() { return out; } }
+        if let Some(ref m) = self.metal {
+            if m.gemv(&tensor.key, input, &mut out).is_ok() {
+                return out;
+            }
+        }
         lut_gemv_cpu(input, _payload, tensor.dim_m, tensor.dim_n)
     }
 
     /// GPU-accelerated attention with CPU fallback.
-    fn attention(&self, q: &[u16], k: &[u16], v: &[u16], nh: usize, nkv: usize, hd: usize, sl: usize) -> Vec<u16> {
+    fn attention(
+        &self,
+        q: &[u16],
+        k: &[u16],
+        v: &[u16],
+        nh: usize,
+        nkv: usize,
+        hd: usize,
+        sl: usize,
+    ) -> Vec<u16> {
         #[cfg(feature = "metal-dispatch")]
         if let Some(ref m) = self.metal {
             if sl <= 4096 {
@@ -1024,18 +1519,23 @@ impl PrismEngine {
 // ── CPU operations ──────────────────────────────────────────────────────
 
 fn lut_gemv_cpu(inp: &[u16], p: &[u8], dm: u32, dn: u32) -> Vec<u16> {
-    let m = dm as usize; let n = dn as usize; let cbb = m * 16 * 2;
+    let m = dm as usize;
+    let n = dn as usize;
+    let cbb = m * 16 * 2;
     let mut o = vec![0u16; m];
     for r in 0..m {
         let mut cb = [0u16; 16];
-        for i in 0..16 { cb[i] = u16::from_le_bytes([p[r*32+i*2], p[r*32+i*2+1]]); }
+        for i in 0..16 {
+            cb[i] = u16::from_le_bytes([p[r * 32 + i * 2], p[r * 32 + i * 2 + 1]]);
+        }
         let io = cbb + r * (n / 2);
         let mut acc = 0.0f32;
         for wi in 0..n / 8 {
             let o2 = io + wi * 4;
-            let pw = u32::from_le_bytes([p[o2], p[o2+1], p[o2+2], p[o2+3]]);
+            let pw = u32::from_le_bytes([p[o2], p[o2 + 1], p[o2 + 2], p[o2 + 3]]);
             for j in 0..8 {
-                acc += half::f16::from_bits(inp[wi*8+j]).to_f32() * half::f16::from_bits(cb[((pw>>(j*4))&0x0F) as usize]).to_f32();
+                acc += half::f16::from_bits(inp[wi * 8 + j]).to_f32()
+                    * half::f16::from_bits(cb[((pw >> (j * 4)) & 0x0F) as usize]).to_f32();
             }
         }
         o[r] = half::f16::from_f32(acc).to_bits();
@@ -1044,9 +1544,20 @@ fn lut_gemv_cpu(inp: &[u16], p: &[u8], dm: u32, dn: u32) -> Vec<u16> {
 }
 
 fn rms_norm_inplace(x: &mut [u16], eps: f32) {
-    let inv = 1.0 / (x.iter().map(|&v| { let f = half::f16::from_bits(v).to_f32(); f*f }).sum::<f32>()
-        / x.len() as f32 + eps).sqrt();
-    for v in x.iter_mut() { let f = half::f16::from_bits(*v).to_f32(); *v = half::f16::from_f32(f * inv).to_bits(); }
+    let inv = 1.0
+        / (x.iter()
+            .map(|&v| {
+                let f = half::f16::from_bits(v).to_f32();
+                f * f
+            })
+            .sum::<f32>()
+            / x.len() as f32
+            + eps)
+            .sqrt();
+    for v in x.iter_mut() {
+        let f = half::f16::from_bits(*v).to_f32();
+        *v = half::f16::from_f32(f * inv).to_bits();
+    }
 }
 
 fn vec_add_inplace(a: &mut [u16], b: &[u16]) {
@@ -1058,50 +1569,76 @@ fn vec_add_inplace(a: &mut [u16], b: &[u16]) {
 }
 
 fn silu_inplace(x: &mut [u16]) {
-    for v in x.iter_mut() { let f = half::f16::from_bits(*v).to_f32();
-        *v = half::f16::from_f32(f / (1.0 + (-f).exp())).to_bits(); }
+    for v in x.iter_mut() {
+        let f = half::f16::from_bits(*v).to_f32();
+        *v = half::f16::from_f32(f / (1.0 + (-f).exp())).to_bits();
+    }
 }
 
 fn gelu_inplace(x: &mut [u16]) {
     let s = (2.0 / std::f32::consts::PI).sqrt();
-    for v in x.iter_mut() { let f = half::f16::from_bits(*v).to_f32();
-        *v = half::f16::from_f32(0.5 * f * (1.0 + (s * (f + 0.044715 * f * f * f)).tanh())).to_bits(); }
+    for v in x.iter_mut() {
+        let f = half::f16::from_bits(*v).to_f32();
+        *v = half::f16::from_f32(0.5 * f * (1.0 + (s * (f + 0.044715 * f * f * f)).tanh()))
+            .to_bits();
+    }
 }
 
-fn attention_cpu(q: &[u16], kc: &[u16], vc: &[u16], nh: usize, nkv: usize, hd: usize, sl: usize) -> Vec<u16> {
-    let g = nh / nkv.max(1); let kvd = nkv * hd; let mut o = vec![0u16; nh * hd];
+fn attention_cpu(
+    q: &[u16],
+    kc: &[u16],
+    vc: &[u16],
+    nh: usize,
+    nkv: usize,
+    hd: usize,
+    sl: usize,
+) -> Vec<u16> {
+    let g = nh / nkv.max(1);
+    let kvd = nkv * hd;
+    let mut o = vec![0u16; nh * hd];
     for h in 0..nh {
-        let kh = h / g; let qb = h * hd;
+        let kh = h / g;
+        let qb = h * hd;
         let mut sc = vec![0.0f32; sl];
         for p in 0..sl {
             let kb = p * kvd + kh * hd;
             let mut s = 0.0f32;
-            for d in 0..hd { s += half::f16::from_bits(q[qb+d]).to_f32() * half::f16::from_bits(kc[kb+d]).to_f32(); }
+            for d in 0..hd {
+                s += half::f16::from_bits(q[qb + d]).to_f32()
+                    * half::f16::from_bits(kc[kb + d]).to_f32();
+            }
             sc[p] = s / (hd as f32).sqrt();
         }
         let mx = sc.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let mut ex = vec![0.0f32; sl]; let mut es = 0.0f32;
-        for (i, &s) in sc.iter().enumerate() { let e = (s - mx).exp(); ex[i] = e; es += e; }
+        let mut ex = vec![0.0f32; sl];
+        let mut es = 0.0f32;
+        for (i, &s) in sc.iter().enumerate() {
+            let e = (s - mx).exp();
+            ex[i] = e;
+            es += e;
+        }
         let inv = 1.0 / (es + 1e-10);
         for d in 0..hd {
             let mut ac = 0.0f32;
-            for p in 0..sl { ac += ex[p] * half::f16::from_bits(vc[p * kvd + kh * hd + d]).to_f32() * inv; }
+            for p in 0..sl {
+                ac += ex[p] * half::f16::from_bits(vc[p * kvd + kh * hd + d]).to_f32() * inv;
+            }
             o[qb + d] = half::f16::from_f32(ac).to_bits();
         }
     }
     o
 }
 
-fn rope_inplace(x: &mut [u16], pos: i64, hd: usize, th: f32) {
+fn rope_inplace(x: &mut [u16], pos: i64, hd: usize, _th: f32) {
     for i in (0..x.len()).step_by(hd) {
         let h = hd / 2;
         for j in 0..h {
-            let a = half::f16::from_bits(x[i+j]).to_f32();
-            let b = half::f16::from_bits(x[i+j+h]).to_f32();
+            let a = half::f16::from_bits(x[i + j]).to_f32();
+            let b = half::f16::from_bits(x[i + j + h]).to_f32();
             let ang = (pos as f32) * (10000.0f32).powf(-2.0 * j as f32 / hd as f32);
             let (sa, ca) = ang.sin_cos();
-            x[i+j] = half::f16::from_f32(a*ca - b*sa).to_bits();
-            x[i+j+h] = half::f16::from_f32(a*sa + b*ca).to_bits();
+            x[i + j] = half::f16::from_f32(a * ca - b * sa).to_bits();
+            x[i + j + h] = half::f16::from_f32(a * sa + b * ca).to_bits();
         }
     }
 }
@@ -1109,37 +1646,68 @@ fn rope_inplace(x: &mut [u16], pos: i64, hd: usize, th: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_lut_gemv() {
         let mut p = Vec::new();
-        for _ in 0..16 { p.extend_from_slice(&0x3c00u16.to_le_bytes()); }
-        for _ in 0..16 { p.extend_from_slice(&0x4000u16.to_le_bytes()); }
-        for _ in 0..2 { p.extend_from_slice(&[0x00; 4]); }
+        for _ in 0..16 {
+            p.extend_from_slice(&0x3c00u16.to_le_bytes());
+        }
+        for _ in 0..16 {
+            p.extend_from_slice(&0x4000u16.to_le_bytes());
+        }
+        for _ in 0..2 {
+            p.extend_from_slice(&[0x00; 4]);
+        }
         let o = lut_gemv_cpu(&[0x3c00u16; 8], &p, 2, 8);
         let v = half::f16::from_bits(o[0]).to_f32();
         assert!((v - 8.0).abs() < 0.01);
     }
     #[test]
     fn test_rms() {
-        let mut x = vec![0x3c00u16; 4]; rms_norm_inplace(&mut x, 1e-6);
-        for &v in &x { assert!((half::f16::from_bits(v).to_f32() - 1.0).abs() < 1e-4); }
+        let mut x = vec![0x3c00u16; 4];
+        rms_norm_inplace(&mut x, 1e-6);
+        for &v in &x {
+            assert!((half::f16::from_bits(v).to_f32() - 1.0).abs() < 1e-4);
+        }
     }
     #[test]
     fn test_embed_oob() {
         let e = PrismEngine {
-            graph: ModelGraph { nodes: vec![ComputeNode::TokenEmbedding { key: "t".into(), vocab_size: 10, hidden_dim: 8 }], num_layers: 0 },
+            graph: ModelGraph {
+                nodes: vec![ComputeNode::TokenEmbedding {
+                    key: "t".into(),
+                    vocab_size: 10,
+                    hidden_dim: 8,
+                }],
+                num_layers: 0,
+            },
             tensors: {
                 let mut m = HashMap::new();
                 let mut p = Vec::new();
-                for _ in 0..2*16 { p.extend_from_slice(&0x3c00u16.to_le_bytes()); }
-                for _ in 0..2*(8/2) { p.push(0); }
-                m.insert("t".into(), CompiledTensor { key: "t".into(), dim_m: 2, dim_n: 8, payload: p, effective_bpp: 4.0 });
+                for _ in 0..2 * 16 {
+                    p.extend_from_slice(&0x3c00u16.to_le_bytes());
+                }
+                for _ in 0..2 * (8 / 2) {
+                    p.push(0);
+                }
+                m.insert(
+                    "t".into(),
+                    CompiledTensor {
+                        key: "t".into(),
+                        dim_m: 2,
+                        dim_n: 8,
+                        payload: p,
+                        effective_bpp: 4.0,
+                    },
+                );
                 m
             },
             plan: None,
-            #[cfg(feature = "metal-dispatch")] metal: None,
-            #[cfg(all(target_os = "macos", feature = "ane"))] ane: None,
+            #[cfg(feature = "metal-dispatch")]
+            metal: None,
+            #[cfg(all(target_os = "macos", feature = "ane"))]
+            ane: None,
         };
         assert_eq!(e.embed(0).unwrap().len(), 8);
         assert_eq!(e.embed(5).unwrap().len(), 8);

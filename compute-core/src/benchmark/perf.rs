@@ -31,7 +31,11 @@ fn build_prompt(prompt_len: u32) -> String {
 
 fn hardware_label() -> String {
     let hw = crate::scheduling::HardwareConfig::detect();
-    format!("{}gpu {} cores", if hw.gpu_cores > 0 { "" } else { "" }, hw.gpu_cores)
+    format!(
+        "{}gpu {} cores",
+        if hw.gpu_cores > 0 { "" } else { "" },
+        hw.gpu_cores
+    )
 }
 
 /// Run a full warmup cycle (prefill + decode).

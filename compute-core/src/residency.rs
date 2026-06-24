@@ -373,10 +373,9 @@ mod tests {
     }
 }
 
-
-use std::collections::VecDeque;
-use std::collections::HashMap;
 use crate::backend::residency::TensorResidency;
+use std::collections::HashMap;
+use std::collections::VecDeque;
 
 // ── Weight Cache ───────────────────────────────────────────────────────────
 
@@ -400,7 +399,7 @@ pub struct WeightCache {
     pub current_dram_bytes: u64,
     pub entries: HashMap<WeightCacheKey, WeightCacheEntry>,
     pub lru_order: VecDeque<WeightCacheKey>,
-    
+
     pub hits: u64,
     pub misses: u64,
     pub upload_avoidance_bytes: u64,
@@ -423,7 +422,7 @@ impl WeightCache {
         if let Some(pos) = self.lru_order.iter().position(|k| k == key) {
             let k = self.lru_order.remove(pos).unwrap();
             self.lru_order.push_back(k);
-            
+
             let entry = self.entries.get(key).unwrap();
             self.hits += 1;
             self.upload_avoidance_bytes += entry.residency.byte_size;
@@ -434,9 +433,14 @@ impl WeightCache {
         }
     }
 
-    pub fn insert(&mut self, key: WeightCacheKey, residency: TensorResidency, session_id: Option<String>) {
+    pub fn insert(
+        &mut self,
+        key: WeightCacheKey,
+        residency: TensorResidency,
+        session_id: Option<String>,
+    ) {
         let size = residency.byte_size;
-        
+
         // Remove existing key if present
         if let Some(old_entry) = self.entries.remove(&key) {
             self.current_dram_bytes -= old_entry.residency.byte_size;
@@ -464,7 +468,13 @@ impl WeightCache {
             }
         }
 
-        self.entries.insert(key.clone(), WeightCacheEntry { residency, session_id });
+        self.entries.insert(
+            key.clone(),
+            WeightCacheEntry {
+                residency,
+                session_id,
+            },
+        );
         self.lru_order.push_back(key);
         self.current_dram_bytes += size;
     }

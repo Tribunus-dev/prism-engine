@@ -48,14 +48,26 @@ impl ContentDedupTable {
         }
     }
 
-    pub fn register_object(&mut self, object_id: &str, content_hash: ContentHash, storage_bytes: u64) {
+    pub fn register_object(
+        &mut self,
+        object_id: &str,
+        content_hash: ContentHash,
+        storage_bytes: u64,
+    ) {
         let hash_key = content_hash.0;
         if let Some(canonical_id) = self.hash_to_canonical.get(&hash_key).cloned() {
-            self.add_alias(object_id, &canonical_id, content_hash, AliasKind::ContentHashCollision);
+            self.add_alias(
+                object_id,
+                &canonical_id,
+                content_hash,
+                AliasKind::ContentHashCollision,
+            );
             return;
         }
-        self.hash_to_canonical.insert(hash_key, object_id.to_string());
-        self.object_to_canonical.insert(object_id.to_string(), object_id.to_string());
+        self.hash_to_canonical
+            .insert(hash_key, object_id.to_string());
+        self.object_to_canonical
+            .insert(object_id.to_string(), object_id.to_string());
         self.entries.push(DedupEntry {
             content_hash,
             canonical_object_id: object_id.to_string(),
@@ -65,15 +77,26 @@ impl ContentDedupTable {
         });
     }
 
-    pub fn add_alias(&mut self, alias: &str, canonical_object_id: &str, content_hash: ContentHash, kind: AliasKind) {
-        self.object_to_canonical.insert(alias.to_string(), canonical_object_id.to_string());
+    pub fn add_alias(
+        &mut self,
+        alias: &str,
+        canonical_object_id: &str,
+        content_hash: ContentHash,
+        kind: AliasKind,
+    ) {
+        self.object_to_canonical
+            .insert(alias.to_string(), canonical_object_id.to_string());
         self.aliases.push(ContentAliasEntry {
             alias: alias.to_string(),
             canonical_object_id: canonical_object_id.to_string(),
             canonical_content_hash: content_hash,
             alias_kind: kind,
         });
-        if let Some(entry) = self.entries.iter_mut().find(|e| e.canonical_object_id == canonical_object_id) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.canonical_object_id == canonical_object_id)
+        {
             entry.ref_count += 1;
             entry.dedup_savings_bytes += entry.total_storage_bytes;
         }
@@ -84,14 +107,24 @@ impl ContentDedupTable {
     }
 
     pub fn dedup_ratio(&self) -> f64 {
-        let total: u64 = self.entries.iter().map(|e| e.total_storage_bytes * e.ref_count).sum();
+        let total: u64 = self
+            .entries
+            .iter()
+            .map(|e| e.total_storage_bytes * e.ref_count)
+            .sum();
         let unique: u64 = self.entries.iter().map(|e| e.total_storage_bytes).sum();
-        if total == 0 { return 0.0; }
+        if total == 0 {
+            return 0.0;
+        }
         (total - unique) as f64 / total as f64
     }
 
-    pub fn entry_count(&self) -> usize { self.entries.len() }
-    pub fn alias_count(&self) -> usize { self.aliases.len() }
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+    pub fn alias_count(&self) -> usize {
+        self.aliases.len()
+    }
 }
 
 #[cfg(test)]

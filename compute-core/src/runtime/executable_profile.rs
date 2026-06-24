@@ -384,10 +384,7 @@ mod tests {
     fn test_is_profile_compatible_missing_coreml() {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("m1");
-        profile
-            .runtime_contract
-            .feature_flags
-            .push("coreml".into());
+        profile.runtime_contract.feature_flags.push("coreml".into());
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", false, true);
         assert!(!selector.is_profile_compatible(&profile, &caps));
     }
@@ -396,14 +393,8 @@ mod tests {
     fn test_is_profile_compatible_all_feature_flags_present() {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("m1");
-        profile
-            .runtime_contract
-            .feature_flags
-            .push("coreml".into());
-        profile
-            .runtime_contract
-            .feature_flags
-            .push("metal".into());
+        profile.runtime_contract.feature_flags.push("coreml".into());
+        profile.runtime_contract.feature_flags.push("metal".into());
         profile.runtime_contract.feature_flags.push("ane".into());
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", true, true);
         assert!(selector.is_profile_compatible(&profile, &caps));
@@ -490,22 +481,13 @@ mod tests {
     #[test]
     fn test_compare_semver_less() {
         assert_eq!(compare_semver("13.0", "14.0"), std::cmp::Ordering::Less);
-        assert_eq!(
-            compare_semver("14.0", "15.2"),
-            std::cmp::Ordering::Less
-        );
-        assert_eq!(
-            compare_semver("14.5", "14.10"),
-            std::cmp::Ordering::Less
-        );
+        assert_eq!(compare_semver("14.0", "15.2"), std::cmp::Ordering::Less);
+        assert_eq!(compare_semver("14.5", "14.10"), std::cmp::Ordering::Less);
     }
 
     #[test]
     fn test_compare_semver_greater() {
-        assert_eq!(
-            compare_semver("15.0", "14.0"),
-            std::cmp::Ordering::Greater
-        );
+        assert_eq!(compare_semver("15.0", "14.0"), std::cmp::Ordering::Greater);
         assert_eq!(
             compare_semver("15.2.1", "15.2.0"),
             std::cmp::Ordering::Greater
@@ -515,31 +497,16 @@ mod tests {
     #[test]
     fn test_compare_semver_missing_components() {
         // "15" is treated as "15.0.0", "15.0" as "15.0.0"
-        assert_eq!(
-            compare_semver("15", "15.0"),
-            std::cmp::Ordering::Equal
-        );
-        assert_eq!(
-            compare_semver("14", "15.0"),
-            std::cmp::Ordering::Less
-        );
-        assert_eq!(
-            compare_semver("16", "15.0"),
-            std::cmp::Ordering::Greater
-        );
+        assert_eq!(compare_semver("15", "15.0"), std::cmp::Ordering::Equal);
+        assert_eq!(compare_semver("14", "15.0"), std::cmp::Ordering::Less);
+        assert_eq!(compare_semver("16", "15.0"), std::cmp::Ordering::Greater);
     }
 
     #[test]
     fn test_compare_semver_malformed() {
         // Non-numeric components are ignored; empty -> all zeros.
-        assert_eq!(
-            compare_semver("", "0"),
-            std::cmp::Ordering::Equal
-        );
-        assert_eq!(
-            compare_semver("abc", "0.0"),
-            std::cmp::Ordering::Equal
-        );
+        assert_eq!(compare_semver("", "0"), std::cmp::Ordering::Equal);
+        assert_eq!(compare_semver("abc", "0.0"), std::cmp::Ordering::Equal);
         assert_eq!(
             compare_semver("15.alpha", "15.0"),
             std::cmp::Ordering::Equal
@@ -565,10 +532,7 @@ mod tests {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("test");
         for flag in &["coreml", "metal", "ane", "unified_memory"] {
-            profile
-                .runtime_contract
-                .feature_flags
-                .push((*flag).into());
+            profile.runtime_contract.feature_flags.push((*flag).into());
         }
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", true, true);
         assert!(selector.is_profile_compatible(&profile, &caps));

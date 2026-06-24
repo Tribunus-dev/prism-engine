@@ -31,7 +31,7 @@ pub struct ArtifactHash {
 /// Quantization contract — what format the weights use.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuantizationContract {
-    pub scheme: String,       // "nf4", "int8", "fp16"
+    pub scheme: String, // "nf4", "int8", "fp16"
     pub group_size: u32,
     pub bits: u8,
 }
@@ -104,7 +104,11 @@ mod tests {
             bits: 16,
         };
         let artifact = SealedMetalFusionArtifact::new(
-            "qkv_proj", MetalFusionFamily::QkvProj, hash, launch, Some(qc),
+            "qkv_proj",
+            MetalFusionFamily::QkvProj,
+            hash,
+            launch,
+            Some(qc),
         );
         assert_eq!(artifact.seal_version, 1);
         assert_eq!(artifact.family, MetalFusionFamily::QkvProj);
@@ -116,7 +120,10 @@ mod tests {
         let a = SealedMetalFusionArtifact::new(
             "test",
             MetalFusionFamily::SiluMul,
-            ArtifactHash { sha256: "aabb".into(), byte_length: 64 },
+            ArtifactHash {
+                sha256: "aabb".into(),
+                byte_length: 64,
+            },
             MetalLaunchContract {
                 entry_point: "kernel".into(),
                 threads_per_threadgroup: [1, 1, 1],

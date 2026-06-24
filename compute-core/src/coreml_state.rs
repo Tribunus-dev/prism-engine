@@ -263,17 +263,20 @@ impl StatefulPrefillContext {
         }
 
         // Predict: model writes attention output + statefully updates K/V cache
-        self.state.predict_stateful(model_ptr, "input", input_arena, "output", output_arena)?;
+        self.state
+            .predict_stateful(model_ptr, "input", input_arena, "output", output_arena)?;
 
         // Extract K and V chunks as separate model outputs (model emits these
         // alongside the attention output for the zero-copy handoff)
         if let Some(k_arena) = &self.k_arena {
             let mut k_info = k_arena.info.clone();
-            self.state.predict_stateful(model_ptr, "input", input_arena, "k_chunk", &mut k_info)?;
+            self.state
+                .predict_stateful(model_ptr, "input", input_arena, "k_chunk", &mut k_info)?;
         }
         if let Some(v_arena) = &self.v_arena {
             let mut v_info = v_arena.info.clone();
-            self.state.predict_stateful(model_ptr, "input", input_arena, "v_chunk", &mut v_info)?;
+            self.state
+                .predict_stateful(model_ptr, "input", input_arena, "v_chunk", &mut v_info)?;
         }
 
         Ok(())
@@ -282,4 +285,3 @@ impl StatefulPrefillContext {
 
 unsafe impl Send for StatefulPrefillContext {}
 unsafe impl Sync for StatefulPrefillContext {}
-

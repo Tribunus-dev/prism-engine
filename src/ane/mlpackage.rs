@@ -257,7 +257,7 @@ fn deterministic_uuid(seed: &str, counter: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mil_builder::MilBuilder;
+    use crate::ane::mil_builder::MilBuilder;
 
     #[test]
     fn write_simple_matmul_roundtrip() {

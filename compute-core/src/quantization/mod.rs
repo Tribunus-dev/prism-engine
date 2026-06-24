@@ -6,7 +6,7 @@
 //! Reference implementations in `ref/omlx/oq.py` and `ref/omlx/turboquant_kv.py`.
 //! Design docs in `docs/omlx-oq-quantization.md` and `docs/omlx-turboquant-kv.md`.
 
-pub mod palette;
 pub mod cimage;
 pub mod oq;
+pub mod palette;
 pub mod turboquant_kv;

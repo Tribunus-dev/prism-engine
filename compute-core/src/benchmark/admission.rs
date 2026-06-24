@@ -62,7 +62,10 @@ mod tests {
         let mut a = SealedMetalFusionArtifact::new(
             "test",
             MetalFusionFamily::SiluMul,
-            ArtifactHash { sha256: "".into(), byte_length: 0 },
+            ArtifactHash {
+                sha256: "".into(),
+                byte_length: 0,
+            },
             MetalLaunchContract {
                 entry_point: "k".into(),
                 threads_per_threadgroup: [1, 1, 1],
@@ -85,9 +88,7 @@ mod tests {
         // computes the hash from the bytes we pass. We passed b"MTLBvalid_metallib".
         // So we need to pass the same bytes to verify.
         let metallib_bytes = b"MTLBvalid_metallib";
-        let verdict = check_fused_metal_benchmark_admission(
-            &artifact, metallib_bytes, "m1",
-        );
+        let verdict = check_fused_metal_benchmark_admission(&artifact, metallib_bytes, "m1");
         assert_eq!(verdict, AdmissionVerdict::Admitted);
     }
 
@@ -95,18 +96,14 @@ mod tests {
     fn test_admission_rejects_tampered_bytes() {
         let artifact = make_artifact();
         let tampered = b"MTLBtampered_metallib";
-        let verdict = check_fused_metal_benchmark_admission(
-            &artifact, tampered, "m1",
-        );
+        let verdict = check_fused_metal_benchmark_admission(&artifact, tampered, "m1");
         assert_eq!(verdict, AdmissionVerdict::Rejected("seal mismatch".into()));
     }
 
     #[test]
     fn test_admission_rejects_short_bytes() {
         let artifact = make_artifact();
-        let verdict = check_fused_metal_benchmark_admission(
-            &artifact, b"", "m1",
-        );
+        let verdict = check_fused_metal_benchmark_admission(&artifact, b"", "m1");
         assert!(matches!(verdict, AdmissionVerdict::Rejected(_)));
     }
 }

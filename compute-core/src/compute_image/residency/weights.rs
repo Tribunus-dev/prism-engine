@@ -8,7 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::compute_image::content_store::index::{ArtifactConsumerRef, ContentObjectEntry, ResidencyClass};
+use crate::compute_image::content_store::index::{
+    ArtifactConsumerRef, ContentObjectEntry, ResidencyClass,
+};
 use crate::integration::ContentHash;
 
 /// Descriptor for a weight tensor whose residency has been classified.
@@ -125,11 +127,7 @@ impl ResidencyClassifier {
 
                 let consumer_phases: Vec<String> = all_phase_ids
                     .iter()
-                    .filter(|phase_id| {
-                        obj.consumers
-                            .iter()
-                            .any(|c| &c.consumer_stage == *phase_id)
-                    })
+                    .filter(|phase_id| obj.consumers.iter().any(|c| &c.consumer_stage == *phase_id))
                     .cloned()
                     .collect();
 
@@ -160,10 +158,7 @@ impl Default for ResidencyClassifier {
 /// For other classes the lifetime spans from the first consuming phase
 /// to the last consuming phase (inclusive), matching the order in
 /// `all_phase_ids`.
-fn estimate_lifetime(
-    consumer_phases: &[String],
-    all_phase_ids: &[String],
-) -> Vec<String> {
+fn estimate_lifetime(consumer_phases: &[String], all_phase_ids: &[String]) -> Vec<String> {
     if consumer_phases.is_empty() || all_phase_ids.is_empty() {
         return vec![];
     }
@@ -199,7 +194,8 @@ mod tests {
         ContentObjectEntry {
             object_id: object_id.into(),
             content_hash: ContentHash(0),
-            object_kind: crate::compute_image::content_store::index::ContentObjectKind::CanonicalWeight,
+            object_kind:
+                crate::compute_image::content_store::index::ContentObjectKind::CanonicalWeight,
             target_layout_id: "layout_1".into(),
             segment_id: "seg_0".into(),
             segment_offset: 0,
@@ -222,15 +218,18 @@ mod tests {
         let phases = vec!["phase_a".into(), "phase_b".into(), "phase_c".into()];
         let obj = make_object("w1", vec![]);
         let classifier = ResidencyClassifier::new();
-        assert_eq!(
-            classifier.classify(&obj, &phases),
-            ResidencyClass::DiskOnly
-        );
+        assert_eq!(classifier.classify(&obj, &phases), ResidencyClass::DiskOnly);
     }
 
     #[test]
     fn test_mandatory_at_session_start_when_every_phase_references() {
-        let phases = vec!["p1".into(), "p2".into(), "p3".into(), "p4".into(), "p5".into()];
+        let phases = vec![
+            "p1".into(),
+            "p2".into(),
+            "p3".into(),
+            "p4".into(),
+            "p5".into(),
+        ];
         // All 5 phases reference the object (>80% of 5 = >4 → all 5 qualifies)
         let consumers = vec![
             make_consumer("p1"),
@@ -251,8 +250,12 @@ mod tests {
     fn test_mandatory_at_session_start_when_above_threshold() {
         // 6 phases, 5 reference → 5/6 ≈ 83.3% > 80%
         let phases = vec![
-            "p1".into(), "p2".into(), "p3".into(),
-            "p4".into(), "p5".into(), "p6".into(),
+            "p1".into(),
+            "p2".into(),
+            "p3".into(),
+            "p4".into(),
+            "p5".into(),
+            "p6".into(),
         ];
         let consumers = vec![
             make_consumer("p1"),
@@ -271,9 +274,7 @@ mod tests {
 
     #[test]
     fn test_mandatory_before_phase_when_exactly_one_phase() {
-        let phases = vec![
-            "p1".into(), "p2".into(), "p3".into(), "p4".into(),
-        ];
+        let phases = vec!["p1".into(), "p2".into(), "p3".into(), "p4".into()];
         let consumers = vec![make_consumer("p3")];
         let obj = make_object("w4", consumers);
         let classifier = ResidencyClassifier::new();
@@ -287,10 +288,7 @@ mod tests {
     fn test_reusable_pinned_when_used_in_other_variants() {
         // Object referenced by p3 in current variant AND by phases outside.
         let phases = vec!["p1".into(), "p2".into(), "p3".into()];
-        let consumers = vec![
-            make_consumer("p3"),
-            make_consumer("other_variant_phase"),
-        ];
+        let consumers = vec![make_consumer("p3"), make_consumer("other_variant_phase")];
         let obj = make_object("w5", consumers);
         let classifier = ResidencyClassifier::new();
         assert_eq!(
@@ -318,11 +316,14 @@ mod tests {
         let objects = vec![
             make_object("o1", vec![]),
             make_object("o2", vec![make_consumer("p1")]),
-            make_object("o3", vec![
-                make_consumer("p1"),
-                make_consumer("p2"),
-                make_consumer("outside"),
-            ]),
+            make_object(
+                "o3",
+                vec![
+                    make_consumer("p1"),
+                    make_consumer("p2"),
+                    make_consumer("outside"),
+                ],
+            ),
         ];
         let classifier = ResidencyClassifier::new();
         let results = classifier.classify_all(&objects, &phases);
@@ -330,15 +331,21 @@ mod tests {
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].object_id, "o1");
         assert_eq!(results[0].residency_class, ResidencyClass::DiskOnly);
-        assert_eq!(results[1].residency_class, ResidencyClass::MandatoryBeforePhase);
+        assert_eq!(
+            results[1].residency_class,
+            ResidencyClass::MandatoryBeforePhase
+        );
         assert_eq!(results[2].residency_class, ResidencyClass::ReusablePinned);
     }
 
     #[test]
     fn test_lifetime_spans_first_to_last_consumer() {
         let phases = vec![
-            "p1".into(), "p2".into(), "p3".into(),
-            "p4".into(), "p5".into(),
+            "p1".into(),
+            "p2".into(),
+            "p3".into(),
+            "p4".into(),
+            "p5".into(),
         ];
         let consumers = vec!["p2".into(), "p4".into()];
         let lifetime = estimate_lifetime(&consumers, &phases);

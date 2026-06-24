@@ -3,21 +3,21 @@
 //! Each phase kind maps to a concrete runner.  The [`PhaseRunnerRegistry`]
 //! provides dispatch-by-kind lookup.
 
+use crate::benchmark::admission::{check_fused_metal_benchmark_admission, AdmissionVerdict};
 use crate::compute_image::fusion_abi::{
     ArtifactHash, MetalFusionFamily, MetalLaunchContract, SealedMetalFusionArtifact,
 };
 use crate::compute_image::fusion_receipts::FusedMetalExecutionEvidence;
 use crate::compute_image::phase_dag::{EmittedPhase, PhaseCompletionStatus, PhaseKind};
-use crate::runtime::executable_session::RuntimeBackends;
-use crate::scheduling::execution_context::ExecutionContext;
-use crate::benchmark::admission::{check_fused_metal_benchmark_admission, AdmissionVerdict};
-use crate::config::LayerPlan;
 use crate::config::operation_route::OperationRoute;
+use crate::config::LayerPlan;
 use crate::executor;
 use crate::executor::SinkState;
-use crate::projection_identity::{ProjectionContext, Phase, AttentionKind};
-use mlx_rs::Array;
 use crate::primitives;
+use crate::projection_identity::{AttentionKind, Phase, ProjectionContext};
+use crate::runtime::executable_session::RuntimeBackends;
+use crate::scheduling::execution_context::ExecutionContext;
+use mlx_rs::Array;
 
 /// Result of running a single phase.
 pub struct PhaseResult {
@@ -68,14 +68,13 @@ impl PhaseRunnerRegistry {
     }
 
     /// Dispatch a phase to its registered runner.
-    pub fn dispatch(
-        &self,
-        phase: &EmittedPhase,
-        ctx: &mut ExecutionContext,
-    ) -> Result<(), String> {
+    pub fn dispatch(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         match self.runners.get(&phase.kind) {
             Some(runner) => runner.run(phase, ctx),
-            None => Err(format!("no runner registered for phase kind {:?}", phase.kind)),
+            None => Err(format!(
+                "no runner registered for phase kind {:?}",
+                phase.kind
+            )),
         }
     }
 }
@@ -91,16 +90,30 @@ impl Default for PhaseRunnerRegistry {
 /// MLX decode phase — forward to MLX backend.
 pub struct MlxDecodeRunner;
 impl PhaseRunner for MlxDecodeRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::MlxDecode }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::MlxDecode
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         if let Some(backend) = &ctx.backend {
-            if let Some(rb) = backend.downcast_ref::<crate::runtime::executable_session::RuntimeBackends>() {
-                let exec = rb.mlx_executor.lock().map_err(|e| format!("mlx lock: {}", e))?;
-                eprintln!("[runner] MlxDecode: {} dispatching on {}", phase.phase_id, exec.device_str());
+            if let Some(rb) =
+                backend.downcast_ref::<crate::runtime::executable_session::RuntimeBackends>()
+            {
+                let exec = rb
+                    .mlx_executor
+                    .lock()
+                    .map_err(|e| format!("mlx lock: {}", e))?;
+                eprintln!(
+                    "[runner] MlxDecode: {} dispatching on {}",
+                    phase.phase_id,
+                    exec.device_str()
+                );
                 return Ok(());
             }
         }
-        eprintln!("[runner] MlxDecode: {} — no backend context, logging only", phase.phase_id);
+        eprintln!(
+            "[runner] MlxDecode: {} — no backend context, logging only",
+            phase.phase_id
+        );
         Ok(())
     }
 }
@@ -108,33 +121,50 @@ impl PhaseRunner for MlxDecodeRunner {
 /// Fused Metal kernel phase — dispatch compiled .metallib kernel.
 pub struct MetalFusedKernelRunner;
 impl PhaseRunner for MetalFusedKernelRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::MetalFusedKernel }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::MetalFusedKernel
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let region = phase.metadata.get("fusion_region")
+        let region = phase
+            .metadata
+            .get("fusion_region")
             .cloned()
             .unwrap_or_else(|| phase.phase_id.clone());
 
         // Resolve runtime backends.
-        let backends = ctx.backend.as_ref()
+        let backends = ctx
+            .backend
+            .as_ref()
             .and_then(|b| b.downcast_ref::<RuntimeBackends>())
             .ok_or_else(|| "no runtime backends".to_string())?;
 
         // Find the matching loaded kernel.
-        let kernel = backends.metal_kernels.iter()
+        let kernel = backends
+            .metal_kernels
+            .iter()
             .find(|k| k.artifact.artifact_id == region)
             .ok_or_else(|| format!("fused kernel '{}' not loaded", region))?;
 
         // Read .metallib bytes from the image directory.
         let metallib_path = std::path::PathBuf::from(&kernel.artifact.metallib_relpath);
-        let metallib_bytes = std::fs::read(&metallib_path)
-            .map_err(|e| format!("failed to read metallib at {}: {}", metallib_path.display(), e))?;
+        let metallib_bytes = std::fs::read(&metallib_path).map_err(|e| {
+            format!(
+                "failed to read metallib at {}: {}",
+                metallib_path.display(),
+                e
+            )
+        })?;
 
         // Build a minimal SealedMetalFusionArtifact for the admission gate.
         let launch_contract = MetalLaunchContract {
             entry_point: kernel.artifact.dispatch.entry_point.clone(),
             threads_per_threadgroup: kernel.artifact.dispatch.threads_per_threadgroup,
             threadgroups_per_grid: kernel.artifact.dispatch.threadgroups_per_grid,
-            buffer_bindings: kernel.artifact.dispatch.buffer_slot_map.iter()
+            buffer_bindings: kernel
+                .artifact
+                .dispatch
+                .buffer_slot_map
+                .iter()
                 .map(|(k, v)| (*v, k.clone()))
                 .collect(),
         };
@@ -151,9 +181,8 @@ impl PhaseRunner for MetalFusedKernelRunner {
         );
 
         // Admission gate.
-        let verdict = check_fused_metal_benchmark_admission(
-            &minimal_artifact, &metallib_bytes, "m1",
-        );
+        let verdict =
+            check_fused_metal_benchmark_admission(&minimal_artifact, &metallib_bytes, "m1");
         if let AdmissionVerdict::Rejected(reason) = verdict {
             return Err(format!("admission rejected: {}", reason));
         }
@@ -163,18 +192,19 @@ impl PhaseRunner for MetalFusedKernelRunner {
         let duration_us = {
             use std::time::Instant;
 
-            let device = metal::Device::system_default()
-                .ok_or_else(|| "no Metal device".to_string())?;
+            let device =
+                metal::Device::system_default().ok_or_else(|| "no Metal device".to_string())?;
 
-            let metal_library = device.new_library_with_data(&metallib_bytes)
+            let metal_library = device
+                .new_library_with_data(&metallib_bytes)
                 .map_err(|e| format!("Metal library error: {}", e))?;
 
-            let function = metal_library.get_function(
-                &kernel.artifact.dispatch.entry_point,
-                None,
-            ).map_err(|e| format!("Metal function error: {}", e))?;
+            let function = metal_library
+                .get_function(&kernel.artifact.dispatch.entry_point, None)
+                .map_err(|e| format!("Metal function error: {}", e))?;
 
-            let pipeline_state = device.new_compute_pipeline_state_with_function(&function)
+            let pipeline_state = device
+                .new_compute_pipeline_state_with_function(&function)
                 .map_err(|e| format!("Metal pipeline error: {}", e))?;
 
             let command_queue = device.new_command_queue();
@@ -212,7 +242,10 @@ impl PhaseRunner for MetalFusedKernelRunner {
         // Record evidence.
         let _evidence = FusedMetalExecutionEvidence::from_artifact(&minimal_artifact, duration_us);
 
-        eprintln!("[runner] MetalFusedKernel: {} dispatched in {}us", region, duration_us);
+        eprintln!(
+            "[runner] MetalFusedKernel: {} dispatched in {}us",
+            region, duration_us
+        );
         Ok(())
     }
 }
@@ -220,23 +253,36 @@ impl PhaseRunner for MetalFusedKernelRunner {
 /// Core ML graph phase — execute a compiled Core ML subgraph on ANE.
 pub struct CoreMlGraphRunner;
 impl PhaseRunner for CoreMlGraphRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::CoreMlGraph }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::CoreMlGraph
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         if let Some(backend) = &ctx.backend {
             if let Some(rb) = backend.downcast_ref::<RuntimeBackends>() {
-                let subgraph_name = phase.metadata.get("subgraph")
+                let subgraph_name = phase
+                    .metadata
+                    .get("subgraph")
                     .cloned()
                     .unwrap_or_else(|| phase.phase_id.clone());
                 let available = rb.coreml_state.can_execute(&subgraph_name);
                 if available {
-                    eprintln!("[runner] CoreMlGraph: {} subgraph='{}' available, dispatched", phase.phase_id, subgraph_name);
+                    eprintln!(
+                        "[runner] CoreMlGraph: {} subgraph='{}' available, dispatched",
+                        phase.phase_id, subgraph_name
+                    );
                 } else {
-                    eprintln!("[runner] CoreMlGraph: {} subgraph='{}' not found", phase.phase_id, subgraph_name);
+                    eprintln!(
+                        "[runner] CoreMlGraph: {} subgraph='{}' not found",
+                        phase.phase_id, subgraph_name
+                    );
                 }
                 return Ok(());
             }
         }
-        eprintln!("[runner] CoreMlGraph: {} — no backend context, logging only", phase.phase_id);
+        eprintln!(
+            "[runner] CoreMlGraph: {} — no backend context, logging only",
+            phase.phase_id
+        );
         Ok(())
     }
 }
@@ -244,24 +290,40 @@ impl PhaseRunner for CoreMlGraphRunner {
 /// Accelerate matmul phase — CPU SIMD matrix multiply.
 pub struct AccelMatMulRunner;
 impl PhaseRunner for AccelMatMulRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::AccelMatMul }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::AccelMatMul
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let backend = ctx.backend.as_ref()
+        let backend = ctx
+            .backend
+            .as_ref()
             .ok_or_else(|| "AccelMatMul: no backend context".to_string())?;
-        let rb = backend.downcast_ref::<RuntimeBackends>()
+        let rb = backend
+            .downcast_ref::<RuntimeBackends>()
             .ok_or_else(|| "AccelMatMul: backend is not RuntimeBackends".to_string())?;
 
-        let dim: usize = phase.metadata.get("dim")
-            .and_then(|v| v.parse().ok()).unwrap_or(0);
-        let k: usize = phase.metadata.get("k")
-            .and_then(|v| v.parse().ok()).unwrap_or(0);
+        let dim: usize = phase
+            .metadata
+            .get("dim")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let k: usize = phase
+            .metadata
+            .get("k")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
 
         if dim == 0 || k == 0 {
-            return Err(format!("AccelMatMul: missing dim/k metadata on {}", phase.phase_id));
+            return Err(format!(
+                "AccelMatMul: missing dim/k metadata on {}",
+                phase.phase_id
+            ));
         }
 
         // Get input from hidden_state
-        let hidden = ctx.hidden_state.as_ref()
+        let hidden = ctx
+            .hidden_state
+            .as_ref()
             .ok_or_else(|| "AccelMatMul: hidden_state is None".to_string())?;
 
         // Extract f32 slice from the MLX array
@@ -279,8 +341,10 @@ impl PhaseRunner for AccelMatMulRunner {
             k,
         )?;
 
-        eprintln!("[runner] AccelMatMul: {} dim={} k={} dispatched via AccelerateLane::matmul",
-            phase.phase_id, dim, k);
+        eprintln!(
+            "[runner] AccelMatMul: {} dim={} k={} dispatched via AccelerateLane::matmul",
+            phase.phase_id, dim, k
+        );
         Ok(())
     }
 }
@@ -288,39 +352,62 @@ impl PhaseRunner for AccelMatMulRunner {
 /// Accelerate element-wise phase — CPU SIMD element-wise ops.
 pub struct AccelElementWiseRunner;
 impl PhaseRunner for AccelElementWiseRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::AccelElementWise }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::AccelElementWise
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let backend = ctx.backend.as_ref()
+        let backend = ctx
+            .backend
+            .as_ref()
             .ok_or_else(|| "AccelElementWise: no backend context".to_string())?;
-        let rb = backend.downcast_ref::<RuntimeBackends>()
+        let rb = backend
+            .downcast_ref::<RuntimeBackends>()
             .ok_or_else(|| "AccelElementWise: backend is not RuntimeBackends".to_string())?;
 
         let op = phase.ops.first().map(|s| s.as_str()).unwrap_or("add");
-        let dim: usize = phase.metadata.get("dim")
-            .and_then(|v| v.parse().ok()).unwrap_or(0);
+        let dim: usize = phase
+            .metadata
+            .get("dim")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
 
-        let hidden = ctx.hidden_state.as_ref()
+        let hidden = ctx
+            .hidden_state
+            .as_ref()
             .ok_or_else(|| "AccelElementWise: hidden_state is None".to_string())?;
         let slice = hidden.as_slice::<f32>();
 
         match op {
             "mul" | "multiply" => {
                 let mut out = vec![0.0f32; slice.len()];
-                rb.accelerate_state.mul(slice, &vec![1.0f32; slice.len()], &mut out)?;
-                eprintln!("[runner] AccelElementWise: {} mul (len={})", phase.phase_id, slice.len());
+                rb.accelerate_state
+                    .mul(slice, &vec![1.0f32; slice.len()], &mut out)?;
+                eprintln!(
+                    "[runner] AccelElementWise: {} mul (len={})",
+                    phase.phase_id,
+                    slice.len()
+                );
             }
             "rms_norm" => {
                 // Use AccelerateLane::rms_norm
-                let eps: f32 = phase.metadata.get("eps").and_then(|v| v.parse().ok()).unwrap_or(1e-6);
+                let eps: f32 = phase
+                    .metadata
+                    .get("eps")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1e-6);
                 let weight = &vec![1.0f32; dim]; // placeholder weight
                 let mut out = vec![0.0f32; slice.len()];
                 rb.accelerate_state.rms_norm(slice, weight, &mut out, eps)?;
-                eprintln!("[runner] AccelElementWise: {} rms_norm (dim={})", phase.phase_id, dim);
+                eprintln!(
+                    "[runner] AccelElementWise: {} rms_norm (dim={})",
+                    phase.phase_id, dim
+                );
             }
             _ => {
                 // Default: add
                 let mut out = vec![0.0f32; slice.len()];
-                rb.accelerate_state.add(slice, &vec![0.0f32; slice.len()], &mut out)?;
+                rb.accelerate_state
+                    .add(slice, &vec![0.0f32; slice.len()], &mut out)?;
                 eprintln!("[runner] AccelElementWise: {} add dispatch", phase.phase_id);
             }
         }
@@ -331,18 +418,28 @@ impl PhaseRunner for AccelElementWiseRunner {
 /// Arena allocation phase — reserve IOSurface/Metal memory.
 pub struct ArenaAllocRunner;
 impl PhaseRunner for ArenaAllocRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::ArenaAlloc }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::ArenaAlloc
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let byte_size: u64 = phase.metadata.get("byte_size")
+        let byte_size: u64 = phase
+            .metadata
+            .get("byte_size")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         if let Some(backend) = &ctx.backend {
             if let Some(rb) = backend.downcast_ref::<RuntimeBackends>() {
-                eprintln!("[runner] ArenaAlloc: {} reserve {} bytes", phase.phase_id, byte_size);
+                eprintln!(
+                    "[runner] ArenaAlloc: {} reserve {} bytes",
+                    phase.phase_id, byte_size
+                );
                 return Ok(());
             }
         }
-        eprintln!("[runner] ArenaAlloc: {} reserve {} bytes (no backend context, logging only)", phase.phase_id, byte_size);
+        eprintln!(
+            "[runner] ArenaAlloc: {} reserve {} bytes (no backend context, logging only)",
+            phase.phase_id, byte_size
+        );
         Ok(())
     }
 }
@@ -350,7 +447,9 @@ impl PhaseRunner for ArenaAllocRunner {
 /// Synchronization barrier — ensures all prior phases on this lane complete.
 pub struct SyncBarrierRunner;
 impl PhaseRunner for SyncBarrierRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::SyncBarrier }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::SyncBarrier
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         if let Some(backend) = &ctx.backend {
             if let Some(_rb) = backend.downcast_ref::<RuntimeBackends>() {
@@ -358,7 +457,10 @@ impl PhaseRunner for SyncBarrierRunner {
                 return Ok(());
             }
         }
-        eprintln!("[runner] SyncBarrier: {} — no backend context, logging only", phase.phase_id);
+        eprintln!(
+            "[runner] SyncBarrier: {} — no backend context, logging only",
+            phase.phase_id
+        );
         Ok(())
     }
 }
@@ -366,18 +468,28 @@ impl PhaseRunner for SyncBarrierRunner {
 /// Transfer phase — move data between lanes or memory pools.
 pub struct TransferRunner;
 impl PhaseRunner for TransferRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::Transfer }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::Transfer
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let byte_size: u64 = phase.metadata.get("byte_size")
+        let byte_size: u64 = phase
+            .metadata
+            .get("byte_size")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         if let Some(backend) = &ctx.backend {
             if let Some(_rb) = backend.downcast_ref::<RuntimeBackends>() {
-                eprintln!("[runner] Transfer: {} transfer {} bytes", phase.phase_id, byte_size);
+                eprintln!(
+                    "[runner] Transfer: {} transfer {} bytes",
+                    phase.phase_id, byte_size
+                );
                 return Ok(());
             }
         }
-        eprintln!("[runner] Transfer: {} transfer {} bytes (no backend context, logging only)", phase.phase_id, byte_size);
+        eprintln!(
+            "[runner] Transfer: {} transfer {} bytes (no backend context, logging only)",
+            phase.phase_id, byte_size
+        );
         Ok(())
     }
 }
@@ -385,21 +497,37 @@ impl PhaseRunner for TransferRunner {
 /// Residual + RMS norm fused phase.
 pub struct ResidualRmsNormRunner;
 impl PhaseRunner for ResidualRmsNormRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::ResidualRmsNorm }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::ResidualRmsNorm
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let backend = ctx.backend.as_ref()
+        let backend = ctx
+            .backend
+            .as_ref()
             .ok_or_else(|| "ResidualRmsNorm: no backend context".to_string())?;
-        let rb = backend.downcast_ref::<RuntimeBackends>()
+        let rb = backend
+            .downcast_ref::<RuntimeBackends>()
             .ok_or_else(|| "ResidualRmsNorm: backend is not RuntimeBackends".to_string())?;
 
-        let dim: usize = phase.metadata.get("dim")
+        let dim: usize = phase
+            .metadata
+            .get("dim")
             .and_then(|v| v.parse().ok())
-            .ok_or_else(|| format!("ResidualRmsNorm: missing dim metadata on {}", phase.phase_id))?;
-        let eps: f32 = phase.metadata.get("eps")
+            .ok_or_else(|| {
+                format!(
+                    "ResidualRmsNorm: missing dim metadata on {}",
+                    phase.phase_id
+                )
+            })?;
+        let eps: f32 = phase
+            .metadata
+            .get("eps")
             .and_then(|v| v.parse().ok())
             .unwrap_or(1e-6);
 
-        let hidden = ctx.hidden_state.as_ref()
+        let hidden = ctx
+            .hidden_state
+            .as_ref()
             .ok_or_else(|| "ResidualRmsNorm: hidden_state is None".to_string())?;
         let hidden_slice = hidden.as_slice::<f32>();
 
@@ -409,13 +537,18 @@ impl PhaseRunner for ResidualRmsNormRunner {
         // RMSNorm: out[i] = x[i] / sqrt(mean(x^2) + eps) * weight[i]
         let weight = vec![1.0f32; dim]; // placeholder — load from metadata in real impl
         let mut rms_out = vec![0.0f32; hidden_slice.len()];
-        rb.accelerate_state.rms_norm(hidden_slice, &weight, &mut rms_out, eps)?;
+        rb.accelerate_state
+            .rms_norm(hidden_slice, &weight, &mut rms_out, eps)?;
 
         // Element-wise add residual back: output = rms_norm(x) + x
         let mut final_out = vec![0.0f32; hidden_slice.len()];
-        rb.accelerate_state.add(&rms_out, &residual, &mut final_out)?;
+        rb.accelerate_state
+            .add(&rms_out, &residual, &mut final_out)?;
 
-        eprintln!("[runner] ResidualRmsNorm: {} rms_norm+residual (dim={})", phase.phase_id, dim);
+        eprintln!(
+            "[runner] ResidualRmsNorm: {} rms_norm+residual (dim={})",
+            phase.phase_id, dim
+        );
         Ok(())
     }
 }
@@ -423,21 +556,37 @@ impl PhaseRunner for ResidualRmsNormRunner {
 /// Legacy MLX layer runner — executes one layer via run_layer_with_sinks().
 pub struct LegacyMlxLayerRunner;
 impl PhaseRunner for LegacyMlxLayerRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::MlxDecode }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::MlxDecode
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         // Extract layer index from phase metadata.
-        let layer_idx: usize = phase.metadata.get("layer_index")
+        let layer_idx: usize = phase
+            .metadata
+            .get("layer_index")
             .and_then(|v| v.parse().ok())
-            .ok_or_else(|| format!("LegacyMlxLayer: missing layer_index metadata on {}", phase.phase_id))?;
+            .ok_or_else(|| {
+                format!(
+                    "LegacyMlxLayer: missing layer_index metadata on {}",
+                    phase.phase_id
+                )
+            })?;
 
         // Unwrap hidden state.
-        let hidden = ctx.hidden_state.as_ref()
+        let hidden = ctx
+            .hidden_state
+            .as_ref()
             .ok_or_else(|| "LegacyMlxLayer: hidden_state is None".to_string())?;
 
         // Unwrap weights.
         let weights = &ctx.layer_weights;
-        let lw = weights.get(layer_idx)
-            .ok_or_else(|| format!("LegacyMlxLayer: layer index {} out of bounds ({} layers)", layer_idx, weights.len()))?;
+        let lw = weights.get(layer_idx).ok_or_else(|| {
+            format!(
+                "LegacyMlxLayer: layer index {} out of bounds ({} layers)",
+                layer_idx,
+                weights.len()
+            )
+        })?;
 
         // Unwrap KV cache — mutably via Vec API (single-threaded ctx).
         // Get KV cache entry — safe access (no panic on OOB).
@@ -449,41 +598,91 @@ impl PhaseRunner for LegacyMlxLayerRunner {
         };
 
         // Unwrap backend.
-        let backend = ctx.backend.as_ref()
+        let backend = ctx
+            .backend
+            .as_ref()
             .ok_or_else(|| "LegacyMlxLayer: no backend context".to_string())?;
-        let rb = backend.downcast_ref::<RuntimeBackends>()
+        let rb = backend
+            .downcast_ref::<RuntimeBackends>()
             .ok_or_else(|| "LegacyMlxLayer: backend is not RuntimeBackends".to_string())?;
 
         // Build a minimal LayerPlan from metadata (or reconstruct from phase name).
-        let n_heads: u32 = phase.metadata.get("n_heads")
-            .and_then(|v| v.parse().ok()).unwrap_or(8);
-        let n_kv_heads: u32 = phase.metadata.get("n_kv_heads")
-            .and_then(|v| v.parse().ok()).unwrap_or(4);
-        let head_dim: u32 = phase.metadata.get("head_dim")
-            .and_then(|v| v.parse().ok()).unwrap_or(128);
-        let hidden_size: u32 = phase.metadata.get("hidden_size")
-            .and_then(|v| v.parse().ok()).unwrap_or(4096);
-        let sliding_window: u32 = phase.metadata.get("sliding_window")
-            .and_then(|v| v.parse().ok()).unwrap_or(8192);
-        let attention_kind = phase.metadata.get("attention_kind")
-            .cloned().unwrap_or_else(|| "full_attention".to_string());
+        let n_heads: u32 = phase
+            .metadata
+            .get("n_heads")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8);
+        let n_kv_heads: u32 = phase
+            .metadata
+            .get("n_kv_heads")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4);
+        let head_dim: u32 = phase
+            .metadata
+            .get("head_dim")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(128);
+        let hidden_size: u32 = phase
+            .metadata
+            .get("hidden_size")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4096);
+        let sliding_window: u32 = phase
+            .metadata
+            .get("sliding_window")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8192);
+        let attention_kind = phase
+            .metadata
+            .get("attention_kind")
+            .cloned()
+            .unwrap_or_else(|| "full_attention".to_string());
 
         let plan = LayerPlan {
             layer_index: layer_idx as u32,
             attention_kind: attention_kind.clone(),
-            segment_id: phase.metadata.get("segment_id").cloned().unwrap_or_default(),
+            segment_id: phase
+                .metadata
+                .get("segment_id")
+                .cloned()
+                .unwrap_or_default(),
             hidden_size,
             n_heads,
             n_kv_heads,
             head_dim,
-            global_head_dim: phase.metadata.get("global_head_dim").and_then(|v| v.parse().ok()),
-            n_global_kv_heads: phase.metadata.get("n_global_kv_heads").and_then(|v| v.parse().ok()),
+            global_head_dim: phase
+                .metadata
+                .get("global_head_dim")
+                .and_then(|v| v.parse().ok()),
+            n_global_kv_heads: phase
+                .metadata
+                .get("n_global_kv_heads")
+                .and_then(|v| v.parse().ok()),
             sliding_window,
-            rope_theta: phase.metadata.get("rope_theta").and_then(|v| v.parse().ok()).unwrap_or(10000.0),
-            partial_rotary_factor: phase.metadata.get("partial_rotary_factor").and_then(|v| v.parse().ok()),
-            attention_k_eq_v: phase.metadata.get("attention_k_eq_v").and_then(|v| v.parse::<bool>().ok()).unwrap_or(false),
-            q_norm_enabled: phase.metadata.get("q_norm_enabled").and_then(|v| v.parse::<bool>().ok()).unwrap_or(false),
-            k_norm_enabled: phase.metadata.get("k_norm_enabled").and_then(|v| v.parse::<bool>().ok()).unwrap_or(false),
+            rope_theta: phase
+                .metadata
+                .get("rope_theta")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10000.0),
+            partial_rotary_factor: phase
+                .metadata
+                .get("partial_rotary_factor")
+                .and_then(|v| v.parse().ok()),
+            attention_k_eq_v: phase
+                .metadata
+                .get("attention_k_eq_v")
+                .and_then(|v| v.parse::<bool>().ok())
+                .unwrap_or(false),
+            q_norm_enabled: phase
+                .metadata
+                .get("q_norm_enabled")
+                .and_then(|v| v.parse::<bool>().ok())
+                .unwrap_or(false),
+            k_norm_enabled: phase
+                .metadata
+                .get("k_norm_enabled")
+                .and_then(|v| v.parse::<bool>().ok())
+                .unwrap_or(false),
             q_proj_tensor_id: 0,
             k_proj_tensor_id: 0,
             v_proj_tensor_id: 0,
@@ -515,11 +714,23 @@ impl PhaseRunner for LegacyMlxLayerRunner {
         let is_decode = ctx.is_prefill;
         let proj_ctx = ProjectionContext {
             run_id: format!("phase:{}", phase.phase_id),
-            phase: if is_decode { Phase::Decode } else { Phase::Prefill },
+            phase: if is_decode {
+                Phase::Decode
+            } else {
+                Phase::Prefill
+            },
             forward_pass_index: 0,
-            token_step: Some(if is_decode { ctx.token_position as u32 } else { 0 }),
+            token_step: Some(if is_decode {
+                ctx.token_position as u32
+            } else {
+                0
+            }),
             layer_index: layer_idx as usize,
-            attention_kind: if is_global { AttentionKind::Full } else { AttentionKind::Sliding },
+            attention_kind: if is_global {
+                AttentionKind::Full
+            } else {
+                AttentionKind::Sliding
+            },
         };
 
         // Create a mutable sink state for the callback.  The caller should
@@ -566,14 +777,20 @@ impl PhaseRunner for LegacyMlxLayerRunner {
             &proj_ctx,
             &mut sink_state,
             !ctx.is_prefill, // is_decode = true during decode, false during prefill
-        ).map_err(|e| format!("LegacyMlxLayer layer {}: {:?}", layer_idx, e))?;
+        )
+        .map_err(|e| format!("LegacyMlxLayer layer {}: {:?}", layer_idx, e))?;
 
-        new_hidden.eval().map_err(|e| format!("LegacyMlxLayer layer {} eval: {}", layer_idx, e))?;
+        new_hidden
+            .eval()
+            .map_err(|e| format!("LegacyMlxLayer layer {} eval: {}", layer_idx, e))?;
 
         // Store output back into context for next phase.
         ctx.hidden_state = Some(new_hidden);
 
-        eprintln!("[runner] LegacyMlxLayer: layer {} dispatched via run_layer_with_sinks", layer_idx);
+        eprintln!(
+            "[runner] LegacyMlxLayer: layer {} dispatched via run_layer_with_sinks",
+            layer_idx
+        );
         Ok(())
     }
 }
@@ -581,7 +798,9 @@ impl PhaseRunner for LegacyMlxLayerRunner {
 /// Legacy MLX prologue runner — executes prologue via executor::run_prologue().
 pub struct LegacyMlxPrologueRunner;
 impl PhaseRunner for LegacyMlxPrologueRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::LegacyMlxPrologue }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::LegacyMlxPrologue
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         // Get token IDs from execution context (set by caller before dispatch).
         let token_ids = &ctx.token_ids;
@@ -595,9 +814,12 @@ impl PhaseRunner for LegacyMlxPrologueRunner {
         let tok_arr = Array::from_slice(token_ids, &[batch, token_ids.len() as i32]);
 
         // Get backend.
-        let backend = ctx.backend.as_ref()
+        let backend = ctx
+            .backend
+            .as_ref()
             .ok_or_else(|| "Prologue: no backend context".to_string())?;
-        let rb = backend.downcast_ref::<RuntimeBackends>()
+        let rb = backend
+            .downcast_ref::<RuntimeBackends>()
             .ok_or_else(|| "Prologue: backend is not RuntimeBackends".to_string())?;
 
         // Build a minimal prologue plan.
@@ -610,8 +832,11 @@ impl PhaseRunner for LegacyMlxPrologueRunner {
         };
 
         // Hidden scale sqrt(hidden_size) — read from metadata or default.
-        let hidden_size: f32 = phase.metadata.get("hidden_size")
-            .and_then(|v| v.parse().ok()).unwrap_or(4096.0);
+        let hidden_size: f32 = phase
+            .metadata
+            .get("hidden_size")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4096.0);
         let hidden_scale = hidden_size.sqrt();
 
         let hidden = executor::run_prologue(
@@ -621,7 +846,8 @@ impl PhaseRunner for LegacyMlxPrologueRunner {
             &rb.emb_b,
             &plan,
             hidden_scale,
-        ).map_err(|e| format!("Prologue: {:?}", e))?;
+        )
+        .map_err(|e| format!("Prologue: {:?}", e))?;
 
         hidden.eval().map_err(|e| format!("Prologue eval: {}", e))?;
 
@@ -636,22 +862,26 @@ impl PhaseRunner for LegacyMlxPrologueRunner {
 /// Legacy MLX epilogue runner — executes final RMS norm + lm_head projection.
 pub struct LegacyMlxEpilogueRunner;
 impl PhaseRunner for LegacyMlxEpilogueRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::LegacyMlxEpilogue }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::LegacyMlxEpilogue
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let hidden = ctx.hidden_state.as_ref()
+        let hidden = ctx
+            .hidden_state
+            .as_ref()
             .ok_or_else(|| "Epilogue: hidden_state is None".to_string())?;
 
-        let backend = ctx.backend.as_ref()
+        let backend = ctx
+            .backend
+            .as_ref()
             .ok_or_else(|| "Epilogue: no backend context".to_string())?;
-        let rb = backend.downcast_ref::<RuntimeBackends>()
+        let rb = backend
+            .downcast_ref::<RuntimeBackends>()
             .ok_or_else(|| "Epilogue: backend is not RuntimeBackends".to_string())?;
 
         // Final RMS norm.
-        let normed = crate::primitives::rms_norm(
-            hidden,
-            &rb.fn_w,
-            1e-6f32,
-        ).map_err(|e| format!("Epilogue rms_norm: {}", e))?;
+        let normed = crate::primitives::rms_norm(hidden, &rb.fn_w, 1e-6f32)
+            .map_err(|e| format!("Epilogue rms_norm: {}", e))?;
 
         // Output projection (lm_head).  Tied embeddings: use emb_w.
         // The embedding weight is stored in packed quantized format
@@ -666,14 +896,15 @@ impl PhaseRunner for LegacyMlxEpilogueRunner {
         } else {
             4
         };
-        let full_weight = mlx_rs::ops::dequantize(
-            &rb.emb_w, &rb.emb_s, &rb.emb_b, group_size, bits
-        ).map_err(|e| format!("Epilogue dequantize: {}", e))?;
+        let full_weight =
+            mlx_rs::ops::dequantize(&rb.emb_w, &rb.emb_s, &rb.emb_b, group_size, bits)
+                .map_err(|e| format!("Epilogue dequantize: {}", e))?;
         let logits = mlx_rs::ops::matmul(
             &normed,
             &mlx_rs::ops::transpose(&full_weight)
-                .map_err(|e| format!("Epilogue transpose: {}", e))?
-        ).map_err(|e| format!("Epilogue matmul: {}", e))?;
+                .map_err(|e| format!("Epilogue transpose: {}", e))?,
+        )
+        .map_err(|e| format!("Epilogue matmul: {}", e))?;
 
         logits.eval().map_err(|e| format!("Epilogue eval: {}", e))?;
 
@@ -688,9 +919,13 @@ impl PhaseRunner for LegacyMlxEpilogueRunner {
 /// Token sampling runner — argmax from logits.
 pub struct SamplingRunner;
 impl PhaseRunner for SamplingRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::Sampling }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::Sampling
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let logits = ctx.hidden_state.as_ref()
+        let logits = ctx
+            .hidden_state
+            .as_ref()
             .ok_or_else(|| "Sampling: no logits".to_string())?;
 
         // Argmax sampling: select the last token position.
@@ -707,16 +942,24 @@ impl PhaseRunner for SamplingRunner {
 /// Weight residency phase — ensure required layers are active on the device.
 pub struct WeightResidencyRunner;
 impl PhaseRunner for WeightResidencyRunner {
-    fn kind(&self) -> PhaseKind { PhaseKind::WeightResidency }
+    fn kind(&self) -> PhaseKind {
+        PhaseKind::WeightResidency
+    }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         let total_layers = ctx.layer_weights.len();
         let metal_kernels: usize = if let Some(backend) = &ctx.backend {
             if let Some(rb) = backend.downcast_ref::<RuntimeBackends>() {
                 rb.metal_kernels.len()
-            } else { 0 }
-        } else { 0 };
-        eprintln!("[runner] WeightResidency: {} — {} layers resident, {} metal kernels",
-            phase.phase_id, total_layers, metal_kernels);
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        eprintln!(
+            "[runner] WeightResidency: {} — {} layers resident, {} metal kernels",
+            phase.phase_id, total_layers, metal_kernels
+        );
         Ok(())
     }
 }

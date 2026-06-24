@@ -180,10 +180,7 @@ impl AdapterRegistry {
     /// Select an adapter by `model_type` alone, without tensor-name
     /// evidence.  Used during early compile stages (compatibility checking)
     /// when only config.json has been loaded.
-    pub fn select_by_config_type(
-        &self,
-        config: &Value,
-    ) -> Result<&dyn ModelFamilyAdapter, String> {
+    pub fn select_by_config_type(&self, config: &Value) -> Result<&dyn ModelFamilyAdapter, String> {
         let model_type = config
             .get("model_type")
             .and_then(|v| v.as_str())

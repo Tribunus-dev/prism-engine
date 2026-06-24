@@ -41,6 +41,10 @@ prost-types = "0.14.4"
 tempfile = { version = "3" }
 png = "0.17"
 candle-core = { version = "0.8", optional = true, default-features = false }
+flux-klein-mlx = { workspace = true, optional = true }
+funasr-mlx = { workspace = true, optional = true }
+qwen3-tts-core = { workspace = true, optional = true }
+qwen3-tts-mlx = { workspace = true, optional = true }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
 half = "2"
@@ -53,6 +57,29 @@ prism-backend = ["dep:mlx-rs", "dep:mlx-sys", "dep:coreml-proto", "server", "met
 ane = []
 metal-dispatch = ["dep:metal", "dep:objc"]
 server = ["dep:axum", "dep:tower-http"]
+
+# Features referenced in cfg attributes throughout the codebase.
+# These are declared as inactive features so `unexpected_cfgs` lint is clean.
+candle-cpu = []
+intel = []
+tensix = []
+storage-adapters = []
+napi = []
+private-development = []
+image = []
+msgpack = []
+coreml-backend = []
+
+# Positive capability gates — independent of execution path.
+# Each gates a generation module. Enable with the backend of your choice.
+# No feature here removes modules that another feature enabled.
+generation-image = ["dep:mlx-rs", "dep:flux-klein-mlx"]
+generation-diffusion = ["dep:mlx-rs"]
+generation-video = []
+generation-audio-core = []
+generation-asr = ["generation-audio-core", "dep:funasr-mlx"]
+generation-tts = ["generation-audio-core", "dep:qwen3-tts-core", "dep:qwen3-tts-mlx"]
+generation-audio = ["generation-audio-core", "generation-asr", "generation-tts"]
 
 [[bin]]
 name = "prism"

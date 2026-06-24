@@ -127,8 +127,7 @@ fn load_shards(dir: &Path) -> Result<Vec<(PathBuf, Vec<u8>, SafeTensors<'static>
 
     for entry in &entries {
         let path = entry.path();
-        let buf = std::fs::read(&path)
-            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        let buf = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
         let tensors = SafeTensors::deserialize(&buf)
             .map_err(|e| format!("deserialize {}: {e}", path.display()))?;
         // SAFETY: `buf` is owned by the tuple element — it lives as long as
@@ -277,10 +276,9 @@ fn palettize_weight(weights: &[f32], out_dim: usize, in_dim: usize) -> (Vec<f32>
         let row_slice = &weights[start..start + in_dim];
 
         // 1. Find min / max.
-        let (row_min, row_max) = row_slice.iter().fold(
-            (f32::MAX, f32::MIN),
-            |(mn, mx), &v| (mn.min(v), mx.max(v)),
-        );
+        let (row_min, row_max) = row_slice
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(mn, mx), &v| (mn.min(v), mx.max(v)));
 
         // 2. Build 16 uniform centroids.
         if row_max == row_min {
@@ -468,17 +466,15 @@ pub fn compile_ane_prefill(
 
     // ── 3. Load top-level weights ───────────────────────────────────────
     // Embedding table.
-    let embed_raw = find_top_weight(&shards, TOP_KEYS).ok_or_else(|| {
-        "embed_tokens.weight not found in safetensors".to_string()
-    })?;
+    let embed_raw = find_top_weight(&shards, TOP_KEYS)
+        .ok_or_else(|| "embed_tokens.weight not found in safetensors".to_string())?;
     let embed_n = cfg.vocab_size;
     let embed_d = cfg.hidden_dim;
     let (embed_cb, embed_idx) = palettize_weight(embed_raw, embed_n, embed_d);
 
     // Final RMS norm weight (1-D vector [hidden_dim]).
-    let norm_raw = find_top_weight(&shards, NORM_KEYS).ok_or_else(|| {
-        "norm.weight not found in safetensors".to_string()
-    })?;
+    let norm_raw = find_top_weight(&shards, NORM_KEYS)
+        .ok_or_else(|| "norm.weight not found in safetensors".to_string())?;
 
     // LM head (may be None if tied with embedding).
     let lm_head_data = find_top_weight(&shards, LM_HEAD_KEYS);

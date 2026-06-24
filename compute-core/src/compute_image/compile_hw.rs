@@ -539,7 +539,10 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
     // Real Core ML benchmark: measure actual ANE dispatch latency.
     // If a pre-compiled .mlmodelc is present at a standard test path, loads
     // it and times predictions over 10 iterations.
-    #[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+    #[cfg(all(
+        target_os = "macos",
+        any(feature = "mlx-backend", feature = "prism-backend")
+    ))]
     if let Some(coreml_result) =
         crate::backend::coreml_lane::CoreMlLane::new().bench_minimal_subgraph()
     {

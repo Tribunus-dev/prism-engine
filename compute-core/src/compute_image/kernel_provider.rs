@@ -328,28 +328,28 @@ impl KernelProvider for TribunusNativeProvider {
         let is_palettized = matches!(request.quant_mode, QuantModeDescription::Palettized);
 
         let (source, entry_point, buf_map, scalar_map, grid_x) = if is_palettized {
-        let src = generate_palettized_gemv_source(k, n);
-        let ep = "palettized_gemv";
-        let mut bm = HashMap::new();
-        bm.insert("weight_arena".to_string(), 0u32);
-        bm.insert("input_vector".to_string(), 1u32);
-        bm.insert("output_vector".to_string(), 2u32);
-        bm.insert("in_dim".to_string(), 3u32);
-        bm.insert("out_dim".to_string(), 4u32);
-        let sm = HashMap::new();
-        // 64 threads per TG (2 SIMD-groups), one TG per output row
-        (src, ep.to_string(), bm, sm, n as u32)
+            let src = generate_palettized_gemv_source(k, n);
+            let ep = "palettized_gemv";
+            let mut bm = HashMap::new();
+            bm.insert("weight_arena".to_string(), 0u32);
+            bm.insert("input_vector".to_string(), 1u32);
+            bm.insert("output_vector".to_string(), 2u32);
+            bm.insert("in_dim".to_string(), 3u32);
+            bm.insert("out_dim".to_string(), 4u32);
+            let sm = HashMap::new();
+            // 64 threads per TG (2 SIMD-groups), one TG per output row
+            (src, ep.to_string(), bm, sm, n as u32)
         } else {
-        let src = generate_nf4_kernel_source(k, n, request.group_size);
-        let ep = "quantized_matmul_nf4";
-        let mut bm = HashMap::new();
-        bm.insert("input".to_string(), 0u32);
-        bm.insert("weight".to_string(), 1u32);
-        bm.insert("scale".to_string(), 2u32);
-        bm.insert("bias".to_string(), 3u32);
-        bm.insert("output".to_string(), 4u32);
-        let sm = HashMap::new();
-        (src, ep.to_string(), bm, sm, (n + 31) / 32)
+            let src = generate_nf4_kernel_source(k, n, request.group_size);
+            let ep = "quantized_matmul_nf4";
+            let mut bm = HashMap::new();
+            bm.insert("input".to_string(), 0u32);
+            bm.insert("weight".to_string(), 1u32);
+            bm.insert("scale".to_string(), 2u32);
+            bm.insert("bias".to_string(), 3u32);
+            bm.insert("output".to_string(), 4u32);
+            let sm = HashMap::new();
+            (src, ep.to_string(), bm, sm, (n + 31) / 32)
         };
 
         compile_metal_source_to_file(&source, &metallib_path, &entry_point)?;
@@ -359,11 +359,15 @@ impl KernelProvider for TribunusNativeProvider {
         Ok(Some(ProvidedKernel {
             metallib_bytes,
             metallib_blake3: blake3,
-        entry_point,
+            entry_point,
             buffer_slot_map: buf_map,
             scalar_slot_map: scalar_map,
             threadgroups_per_grid: [grid_x, 1, 1],
-        threads_per_threadgroup: if is_palettized { [64, 1, 1] } else { [32, 1, 1] },
+            threads_per_threadgroup: if is_palettized {
+                [64, 1, 1]
+            } else {
+                [32, 1, 1]
+            },
             kernel_abi_version: 1,
         }))
     }

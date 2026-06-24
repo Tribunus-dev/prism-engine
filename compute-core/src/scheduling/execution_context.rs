@@ -1,7 +1,7 @@
 //! Execution context — runtime state bundled for phase execution.
 
-use std::any::Any;
 use mlx_rs::Array;
+use std::any::Any;
 use std::sync::Arc;
 
 /// Runtime state passed to every phase runner.

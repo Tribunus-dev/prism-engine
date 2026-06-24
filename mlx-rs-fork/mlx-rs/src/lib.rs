@@ -11,6 +11,9 @@ pub mod macros;
 #[cfg(not(feature = "stub"))]
 mod array;
 #[cfg(not(feature = "stub"))]
+/// Backend foundation module (evidence, capabilities, reference ops).
+pub mod backend;
+#[cfg(not(feature = "stub"))]
 pub mod builder;
 #[cfg(not(feature = "stub"))]
 mod device;
@@ -47,9 +50,6 @@ pub mod stream;
 pub mod transforms;
 #[cfg(not(feature = "stub"))]
 pub mod utils;
-#[cfg(not(feature = "stub"))]
-/// Backend foundation module (evidence, capabilities, reference ops).
-pub mod backend;
 
 #[cfg(feature = "stub")]
 /// Dummy types for stub mode
@@ -97,7 +97,9 @@ pub mod stub {
     }
 
     impl AsRef<Array> for Array {
-        fn as_ref(&self) -> &Array { self }
+        fn as_ref(&self) -> &Array {
+            self
+        }
     }
 
     /// Helper for anything that converts to Array
@@ -107,37 +109,59 @@ pub mod stub {
     }
 
     impl IntoArray for f32 {
-        fn into_array(self) -> Array { Array { _marker: PhantomData } }
+        fn into_array(self) -> Array {
+            Array {
+                _marker: PhantomData,
+            }
+        }
     }
 
     impl IntoArray for Array {
-        fn into_array(self) -> Array { self }
+        fn into_array(self) -> Array {
+            self
+        }
     }
 
     impl IntoArray for &Array {
-        fn into_array(self) -> Array { Array { _marker: PhantomData } }
+        fn into_array(self) -> Array {
+            Array {
+                _marker: PhantomData,
+            }
+        }
     }
 
     impl IntoArray for Option<&Array> {
-        fn into_array(self) -> Array { Array { _marker: PhantomData } }
+        fn into_array(self) -> Array {
+            Array {
+                _marker: PhantomData,
+            }
+        }
     }
 
     impl Array {
         /// Create from slice
         pub fn from_slice<T>(_data: &[T], _shape: &[i32]) -> Self {
-            Self { _marker: PhantomData }
+            Self {
+                _marker: PhantomData,
+            }
         }
         /// Create from f32
         pub fn from_f32(_val: f32) -> Self {
-            Self { _marker: PhantomData }
+            Self {
+                _marker: PhantomData,
+            }
         }
         /// Create ones
         pub fn ones<T>(_shape: &[i32]) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// Create full
         pub fn full<T>(_shape: &[i32], _val: impl IntoArray) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// Get shape
         pub fn shape(&self) -> &[i32] {
@@ -153,23 +177,33 @@ pub mod stub {
         }
         /// Multiply
         pub fn multiply(&self, _other: &Self) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// Add
         pub fn add(&self, _other: &Self) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// Subtract
         pub fn subtract(&self, _other: &Self) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// Divide
         pub fn divide(&self, _other: &Self) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// Matmul
         pub fn matmul(&self, _other: &Self) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// nbytes
         pub fn nbytes(&self) -> usize {
@@ -177,7 +211,9 @@ pub mod stub {
         }
         /// as_dtype
         pub fn as_dtype(&self, _dtype: Dtype) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// eval
         pub fn eval(&self) -> MlxResult<()> {
@@ -197,15 +233,25 @@ pub mod stub {
         }
         /// reshape
         pub fn reshape(&self, _shape: &[i32]) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// transpose
         pub fn transpose(&self) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// from_raw_data
-        pub unsafe fn from_raw_data(_data: *const std::ffi::c_void, _shape: &[i32], _dtype: Dtype) -> Self {
-            Self { _marker: PhantomData }
+        pub unsafe fn from_raw_data(
+            _data: *const std::ffi::c_void,
+            _shape: &[i32],
+            _dtype: Dtype,
+        ) -> Self {
+            Self {
+                _marker: PhantomData,
+            }
         }
         /// size
         pub fn size(&self) -> usize {
@@ -213,15 +259,21 @@ pub mod stub {
         }
         /// index
         pub fn index<T>(&self, _indices: T) -> Self {
-            Self { _marker: PhantomData }
+            Self {
+                _marker: PhantomData,
+            }
         }
         /// from_ptr
         pub unsafe fn from_ptr(_ptr: mlx_sys::mlx_array) -> Self {
-            Self { _marker: PhantomData }
+            Self {
+                _marker: PhantomData,
+            }
         }
         /// mean_axes
         pub fn mean_axes(&self, _axes: &[i32], _keep_dims: bool) -> MlxResult<Self> {
-            Ok(Self { _marker: PhantomData })
+            Ok(Self {
+                _marker: PhantomData,
+            })
         }
         /// index_mut
         pub fn index_mut<T>(&mut self, _indices: T, _val: &Self) {
@@ -249,7 +301,9 @@ pub mod stub {
         pub struct Exception(pub String);
         impl Exception {
             /// Custom error
-            pub fn custom(m: impl Into<String>) -> Self { Self(m.into()) }
+            pub fn custom(m: impl Into<String>) -> Self {
+                Self(m.into())
+            }
         }
         impl std::fmt::Display for Exception {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -259,7 +313,9 @@ pub mod stub {
         impl std::error::Error for Exception {}
 
         impl From<Exception> for String {
-            fn from(e: Exception) -> Self { e.0 }
+            fn from(e: Exception) -> Self {
+                e.0
+            }
         }
     }
 
@@ -277,92 +333,154 @@ pub mod stub {
             impl IndexMutOp for Array {}
             /// Dummy take_along_axis
             pub fn take_along_axis(_a: &Array, _indices: &Array, _axis: i32) -> MlxResult<Array> {
-                Ok(Array { _marker: std::marker::PhantomData })
+                Ok(Array {
+                    _marker: std::marker::PhantomData,
+                })
             }
             /// Dummy argmax_axis
             pub fn argmax_axis(_a: &Array, _axis: i32, _keep_dims: bool) -> MlxResult<Array> {
-                Ok(Array { _marker: std::marker::PhantomData })
+                Ok(Array {
+                    _marker: std::marker::PhantomData,
+                })
             }
             /// Dummy take_axis
             pub fn take_axis(_a: &Array, _indices: &Array, _axis: i32) -> MlxResult<Array> {
-                Ok(Array { _marker: std::marker::PhantomData })
+                Ok(Array {
+                    _marker: std::marker::PhantomData,
+                })
             }
         }
         /// Dummy quantized_matmul
-        pub fn quantized_matmul(_x: &Array, _w: &Array, _s: &Array, _b: &Array, _transpose: bool, _group_size: i32, _bits: i32) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+        pub fn quantized_matmul(
+            _x: &Array,
+            _w: &Array,
+            _s: &Array,
+            _b: &Array,
+            _transpose: bool,
+            _group_size: i32,
+            _bits: i32,
+        ) -> MlxResult<Array> {
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy transpose_axes
         pub fn transpose_axes(_a: &Array, _axes: &[i32]) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy softmax_axes
-        pub fn softmax_axes(_a: &Array, _axes: &[i32], _precise: impl Into<Option<bool>>) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+        pub fn softmax_axes(
+            _a: &Array,
+            _axes: &[i32],
+            _precise: impl Into<Option<bool>>,
+        ) -> MlxResult<Array> {
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy tile
         pub fn tile(_a: &Array, _reps: &[i32]) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy sigmoid
         pub fn sigmoid(_a: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy reshape
         pub fn reshape(_a: &Array, _shape: &[i32]) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy add
         pub fn add(_a: &Array, _b: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy multiply
         pub fn multiply(_a: &Array, _b: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy tanh
         pub fn tanh(_a: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy rsqrt
         pub fn rsqrt(_a: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy cos
         pub fn cos(_a: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy sin
         pub fn sin(_a: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy concatenate
         pub fn concatenate(_arrays: &[&Array]) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy concatenate_axis
         pub fn concatenate_axis(_arrays: &[&Array], _axis: i32) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy zeros
         pub fn zeros<T>(_shape: &[i32]) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy mean_axes
         pub fn mean_axes(_a: &Array, _axes: &[i32], _keep_dims: bool) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy dequantize
-        pub fn dequantize(_x: &Array, _s: &Array, _b: &Array, _group_size: i32, _bits: i32) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+        pub fn dequantize(
+            _x: &Array,
+            _s: &Array,
+            _b: &Array,
+            _group_size: i32,
+            _bits: i32,
+        ) -> MlxResult<Array> {
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy transpose
         pub fn transpose(_a: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy matmul
         pub fn matmul(_a: &Array, _b: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
     }
 
@@ -371,11 +489,23 @@ pub mod stub {
         use super::{Array, MlxResult};
         /// Dummy rms_norm
         pub fn rms_norm(_x: &Array, _w: &Array, _eps: f32) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy rope
-        pub fn rope(_a: &Array, _dims: i32, _traditional: bool, _base: Option<f32>, _scale: f32, _offset: i32, _freqs: Option<&Array>) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+        pub fn rope(
+            _a: &Array,
+            _dims: i32,
+            _traditional: bool,
+            _base: Option<f32>,
+            _scale: f32,
+            _offset: i32,
+            _freqs: Option<&Array>,
+        ) -> MlxResult<Array> {
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
     }
 
@@ -384,7 +514,9 @@ pub mod stub {
         use super::{Array, MlxResult};
         /// Dummy silu
         pub fn silu(_x: &Array) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
     }
 
@@ -399,11 +531,20 @@ pub mod stub {
         use super::{Array, MlxResult, OptionalStream};
         /// Dummy key
         pub fn key(_seed: u64) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
         /// Dummy categorical
-        pub fn categorical(_logits: &Array, _shape: Option<&[i32]>, _num_samples: Option<i32>, _stream: impl OptionalStream) -> MlxResult<Array> {
-            Ok(Array { _marker: std::marker::PhantomData })
+        pub fn categorical(
+            _logits: &Array,
+            _shape: Option<&[i32]>,
+            _num_samples: Option<i32>,
+            _stream: impl OptionalStream,
+        ) -> MlxResult<Array> {
+            Ok(Array {
+                _marker: std::marker::PhantomData,
+            })
         }
     }
 
@@ -437,7 +578,9 @@ pub mod stub {
 
     impl Stream {
         /// New
-        pub fn new() -> Self { Self }
+        pub fn new() -> Self {
+            Self
+        }
         /// as_ptr
         pub fn as_ptr(&self) -> *mut std::ffi::c_void {
             std::ptr::null_mut()
@@ -445,23 +588,33 @@ pub mod stub {
     }
 
     impl OptionalStream for &Array {
-        fn as_option(&self) -> Option<&Stream> { None }
+        fn as_option(&self) -> Option<&Stream> {
+            None
+        }
     }
 
     impl OptionalStream for Option<&Stream> {
-        fn as_option(&self) -> Option<&Stream> { *self }
+        fn as_option(&self) -> Option<&Stream> {
+            *self
+        }
     }
 
     impl OptionalStream for Option<&Array> {
-        fn as_option(&self) -> Option<&Stream> { None }
+        fn as_option(&self) -> Option<&Stream> {
+            None
+        }
     }
 
     impl OptionalStream for &Option<Array> {
-        fn as_option(&self) -> Option<&Stream> { None }
+        fn as_option(&self) -> Option<&Stream> {
+            None
+        }
     }
 
     impl OptionalStream for &Option<&Array> {
-        fn as_option(&self) -> Option<&Stream> { None }
+        fn as_option(&self) -> Option<&Stream> {
+            None
+        }
     }
 
     /// Dummy transforms module

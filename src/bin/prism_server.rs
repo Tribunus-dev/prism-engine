@@ -26,16 +26,20 @@ use tokio::sync::Mutex;
 
 // When prism-backend is enabled, use compute-core's engine (same code, shared maintenance)
 // Otherwise, use Prism's own copy.
-#[cfg(feature = "prism-backend")]
+// When ane feature is enabled, use compute-core's PrismEngine which has with_ane().
+#[cfg(all(feature = "prism-backend", not(feature = "ane")))]
 use prism_engine::lut::cimage_engine::cimage_engine::CimageEngine as PrismEngine;
+// With ane enabled, use the full compute-core engine for Core ML/ANE support.
+#[cfg(all(feature = "prism-backend", feature = "ane"))]
+use tribunus_compute_core::lut::engine::PrismEngine;
 #[cfg(not(feature = "prism-backend"))]
 use prism_engine::lut::engine::PrismEngine;
 
 // Import ModelGraph from the same source as PrismEngine to avoid type conflicts
-#[cfg(feature = "prism-backend")]
-use tribunus_compute_core::lut::graph::{ModelGraph, UnifiedConfig};
 #[cfg(not(feature = "prism-backend"))]
 use prism_engine::lut::graph::{ModelGraph, UnifiedConfig};
+#[cfg(feature = "prism-backend")]
+use tribunus_compute_core::lut::graph::{ModelGraph, UnifiedConfig};
 
 use prism_engine::tokenizer::TribunusTokenizer;
 
@@ -61,6 +65,7 @@ struct Args {
 
 struct AppState {
     engine: PrismEngine,
+#[allow(dead_code)]
     graph: ModelGraph,
     tokenizer: TribunusTokenizer,
 }
@@ -72,6 +77,7 @@ struct ChatRequest {
     model: Option<String>,
     messages: Vec<ChatMessage>,
     max_tokens: Option<u32>,
+    #[allow(dead_code)]
     temperature: Option<f32>,
     stream: Option<bool>,
 }
@@ -128,7 +134,7 @@ struct ModelInfo {
 
 // ── Handlers ────────────────────────────────────────────────────────────
 
-async fn list_models(State(state): State<Arc<Mutex<AppState>>>) -> Json<ModelList> {
+async fn list_models(State(_state): State<Arc<Mutex<AppState>>>) -> Json<ModelList> {
     Json(ModelList {
         object: "list".to_string(),
         data: vec![ModelInfo {
@@ -140,6 +146,7 @@ async fn list_models(State(state): State<Arc<Mutex<AppState>>>) -> Json<ModelLis
     })
 }
 
+#[allow(unused_mut)]
 async fn chat_completions(
     State(state): State<Arc<Mutex<AppState>>>,
     Json(req): Json<ChatRequest>,
@@ -151,13 +158,17 @@ async fn chat_completions(
     let mut state = state.lock().await;
 
     // Build prompt from messages (simple concatenation for now)
-    let prompt_text: String = req.messages.iter()
+    let prompt_text: String = req
+        .messages
+        .iter()
         .map(|m| format!("{}: {}", m.role, m.content))
         .collect::<Vec<_>>()
         .join("\n");
 
     // Tokenize
-    let input_ids = state.tokenizer.encode(&prompt_text)
+    let input_ids = state
+        .tokenizer
+        .encode(&prompt_text)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if input_ids.is_empty() {
@@ -167,10 +178,14 @@ async fn chat_completions(
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
     let prompt_len = input_ids.len();
 
-    let stats = state.engine.generate(&input_ids, max_tokens)
-        .map_err(|e| { eprintln!("[prism-server] generate error: {e}"); StatusCode::INTERNAL_SERVER_ERROR })?;
+    let stats = state.engine.generate(&input_ids, max_tokens).map_err(|e| {
+        eprintln!("[prism-server] generate error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    let output_text = state.tokenizer.decode(&stats.generated_tokens)
+    let output_text = state
+        .tokenizer
+        .decode(&stats.generated_tokens)
         .unwrap_or_else(|_| format!("[prism] {} tokens generated", stats.generated_tokens.len()));
 
     Ok(Json(ChatResponse {
@@ -203,15 +218,25 @@ async fn chat_completions(
 async fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    println!("[prism-server] Loading config from {}/config.json", args.model_dir.display());
+    println!(
+        "[prism-server] Loading config from {}/config.json",
+        args.model_dir.display()
+    );
     let config_path = args.model_dir.join("config.json");
     let config = UnifiedConfig::from_file(&config_path)?;
 
-    println!("[prism-server] Building model graph ({} layers)...", config.num_layers);
+    println!(
+        "[prism-server] Building model graph ({} layers)...",
+        config.num_layers
+    );
     let graph = ModelGraph::build(&config);
 
-    println!("[prism-server] Loading .cimage from {}...", args.cimage.display());
-    let mut engine = PrismEngine::load(&args.cimage, graph.clone())?;
+    println!(
+        "[prism-server] Loading .cimage from {}...",
+        args.cimage.display()
+    );
+    let engine = PrismEngine::load(&args.cimage, graph.clone())?;
+    let mut engine = engine;
     #[cfg(feature = "metal-dispatch")]
     {
         if engine.with_metal().is_err() {
@@ -219,10 +244,46 @@ async fn main() -> Result<(), String> {
         }
     }
 
-    println!("[prism-server] Loading tokenizer from {}...", args.model_dir.display());
+    #[cfg(all(target_os = "macos", feature = "ane"))]
+    {
+        let ane_dir = args.model_dir.join("ane");
+        if ane_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&ane_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if let Some(cs_str) = name
+                        .strip_prefix("k_cache_")
+                        .and_then(|s| s.strip_suffix(".mlmodelc"))
+                    {
+                        if let Ok(cs) = cs_str.parse::<u32>() {
+                            let dir = ane_dir.to_string_lossy().to_string();
+                            match engine.with_ane(&dir, cs) {
+                                Ok(()) => {
+                                    eprintln!("[prism-server] ANE enabled (chunk={cs})");
+                                    break;
+                                }
+                                Err(e) => {
+                                    eprintln!("[prism-server] ANE init failed (chunk={cs}): {e}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!(
+        "[prism-server] Loading tokenizer from {}...",
+        args.model_dir.display()
+    );
     let tokenizer = TribunusTokenizer::from_dir(&args.model_dir)?;
 
-    let state = Arc::new(Mutex::new(AppState { engine, graph, tokenizer }));
+    let state = Arc::new(Mutex::new(AppState {
+        engine,
+        graph,
+        tokenizer,
+    }));
 
     let app = Router::new()
         .route("/v1/models", get(list_models))
@@ -232,11 +293,16 @@ async fn main() -> Result<(), String> {
 
     let addr = format!("0.0.0.0:{}", args.port);
     println!("[prism-server] Listening on http://{}", addr);
-    println!("[prism-server] Try: curl http://localhost:{}/v1/models", args.port);
+    println!(
+        "[prism-server] Try: curl http://localhost:{}/v1/models",
+        args.port
+    );
 
-    let listener = tokio::net::TcpListener::bind(&addr).await
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
         .map_err(|e| format!("bind: {e}"))?;
-    axum::serve(listener, app).await
+    axum::serve(listener, app)
+        .await
         .map_err(|e| format!("serve: {e}"))?;
 
     Ok(())

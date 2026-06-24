@@ -49,8 +49,8 @@ pub struct PalettizedMatrix {
 impl PalettizedMatrix {
     /// Total bytes of compressed representation.
     pub fn compressed_bytes(&self) -> usize {
-        self.rows.iter().map(|r| r.indices.len()).sum::<usize>()
-            + self.rows.len() * 16 * 4  // codebooks at f32
+        self.rows.iter().map(|r| r.indices.len()).sum::<usize>() + self.rows.len() * 16 * 4
+        // codebooks at f32
     }
 
     /// Effective bits per parameter.
@@ -165,12 +165,16 @@ pub fn fit_palette(channel: &[f32], k: usize, max_iter: usize) -> Vec<f32> {
     }
 
     // Sort centroids by magnitude (descending) for stable codebook order.
-    centroids.sort_by(|a, b| b.abs().partial_cmp(&a.abs()).unwrap_or(std::cmp::Ordering::Equal));
+    centroids.sort_by(|a, b| {
+        b.abs()
+            .partial_cmp(&a.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     centroids
 }
 
 /// Deterministic weighted-threshold value for k-means++ selection.
-fn weighted_threshold(total: f32, seed: usize, n: usize) -> f32 {
+fn weighted_threshold(total: f32, seed: usize, _n: usize) -> f32 {
     // Simple hash-based deterministic threshold in [0, total).
     // Uses the golden ratio to spread picks across the distribution.
     let frac = (seed as f64 * 0.6180339887498949).fract();
@@ -230,7 +234,11 @@ pub fn palettize_matrix(
     k: usize,
     max_iter: usize,
 ) -> PalettizedMatrix {
-    assert_eq!(weights.len(), out_dim * in_dim, "weight slice length must equal out_dim * in_dim");
+    assert_eq!(
+        weights.len(),
+        out_dim * in_dim,
+        "weight slice length must equal out_dim * in_dim"
+    );
 
     let mut rows = Vec::with_capacity(out_dim);
 
@@ -252,7 +260,10 @@ pub fn palettize_matrix(
         });
 
         if row_idx % 256 == 0 {
-            eprintln!("[palette] row {}/{} fitted, MSE={:.6}", row_idx, out_dim, mse);
+            eprintln!(
+                "[palette] row {}/{} fitted, MSE={:.6}",
+                row_idx, out_dim, mse
+            );
         }
     }
 
@@ -273,11 +284,7 @@ pub fn dequantize_matrix(pal: &PalettizedMatrix) -> Vec<f32> {
         let slice = &mut out[start..start + pal.in_dim];
         for (i, val) in slice.iter_mut().enumerate() {
             let byte = row.indices[i / 2];
-            let idx = if i & 1 == 0 {
-                byte & 0x0F
-            } else {
-                byte >> 4
-            } as usize;
+            let idx = if i & 1 == 0 { byte & 0x0F } else { byte >> 4 } as usize;
             *val = row.codebook[idx];
         }
     }
@@ -286,6 +293,7 @@ pub fn dequantize_matrix(pal: &PalettizedMatrix) -> Vec<f32> {
 
 // ── vDSP-accelerated batch distance ──────────────────────────────────────
 
+#[allow(dead_code)]
 fn vdsp_squared_distances(channel: &[f32], value: f32, out: &mut [f32]) {
     for (i, &x) in channel.iter().enumerate() {
         let d = x - value;
@@ -311,12 +319,11 @@ mod tests {
         let shape: Vec<usize> = view.shape().to_vec();
         let raw = view.data();
         let vals: Vec<f32> = match view.dtype() {
-            safetensors::Dtype::F32 => {
-                raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
-            }
-            safetensors::Dtype::BF16 => {
-                raw.chunks_exact(2).map(|c| bf16_chunk_to_f32(c)).collect()
-            }
+            safetensors::Dtype::F32 => raw
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect(),
+            safetensors::Dtype::BF16 => raw.chunks_exact(2).map(|c| bf16_chunk_to_f32(c)).collect(),
             _ => return None,
         };
         Some((vals, shape))
@@ -338,7 +345,9 @@ mod tests {
         let in_dim = shape[1];
         eprintln!(
             "[gate4] Q-proj shape={}x{}, elements={}",
-            out_dim, in_dim, weights.len()
+            out_dim,
+            in_dim,
+            weights.len()
         );
 
         // Palette-compress with 16-entry codebook
@@ -348,9 +357,12 @@ mod tests {
 
         // Dequantize and compute MSE
         let decoded = dequantize_matrix(&pal);
-        let mse: f32 = decoded.iter().zip(weights.iter())
+        let mse: f32 = decoded
+            .iter()
+            .zip(weights.iter())
             .map(|(a, b)| (a - b).powi(2))
-            .sum::<f32>() / weights.len() as f32;
+            .sum::<f32>()
+            / weights.len() as f32;
         let psnr = 10.0 * (1.0 / mse.max(1e-30)).log10();
         eprintln!("[gate4] MSE={:.8}, PSNR={:.1} dB", mse, psnr);
 
@@ -362,9 +374,15 @@ mod tests {
     fn test_fit_palette_synthetic() {
         // Three clusters at -5, 0, +5, each with 5 elements.
         let mut data = Vec::with_capacity(15);
-        for _ in 0..5 { data.push(-5.0); }
-        for _ in 0..5 { data.push(0.0); }
-        for _ in 0..5 { data.push(5.0); }
+        for _ in 0..5 {
+            data.push(-5.0);
+        }
+        for _ in 0..5 {
+            data.push(0.0);
+        }
+        for _ in 0..5 {
+            data.push(5.0);
+        }
 
         let codebook = fit_palette(&data, 3, 50);
         assert_eq!(codebook.len(), 3);
@@ -372,16 +390,29 @@ mod tests {
         // Centroid values should be near -5, 0, 5 (order by magnitude desc).
         let mut sorted = codebook.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert!((sorted[0] - (-5.0)).abs() < 0.1, "centroid 0 should be ~-5, got {}", sorted[0]);
-        assert!((sorted[1] - 0.0).abs() < 0.1, "centroid 1 should be ~0, got {}", sorted[1]);
-        assert!((sorted[2] - 5.0).abs() < 0.1, "centroid 2 should be ~5, got {}", sorted[2]);
+        assert!(
+            (sorted[0] - (-5.0)).abs() < 0.1,
+            "centroid 0 should be ~-5, got {}",
+            sorted[0]
+        );
+        assert!(
+            (sorted[1] - 0.0).abs() < 0.1,
+            "centroid 1 should be ~0, got {}",
+            sorted[1]
+        );
+        assert!(
+            (sorted[2] - 5.0).abs() < 0.1,
+            "centroid 2 should be ~5, got {}",
+            sorted[2]
+        );
     }
 
     #[test]
     fn test_encode_channel() {
         let channel = vec![1.0, 2.0, 3.0, 4.0];
-        let codebook = vec![1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0,
-                            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let codebook = vec![
+            1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
         let (packed, mse) = encode_channel(&channel, &codebook);
         // 4 elements → 2 packed bytes
         assert_eq!(packed.len(), 2);
@@ -397,9 +428,7 @@ mod tests {
     fn test_palettize_matrix_roundtrip() {
         // Small 3×4 matrix
         let weights = vec![
-            1.0, 2.0, 3.0, 4.0,
-            5.0, 6.0, 7.0, 8.0,
-            9.0, 10.0, 11.0, 12.0,
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
         ];
         let pal = palettize_matrix(&weights, 3, 4, 4, 50);
         assert_eq!(pal.out_dim, 3);
@@ -407,16 +436,22 @@ mod tests {
         assert_eq!(pal.rows.len(), 3);
         for row in &pal.rows {
             assert_eq!(row.indices.len(), 2); // 4 elements packed into 2 bytes
-            // First k=4 centroid slots should be non-zero for this data.
-            assert!(row.codebook[0..4].iter().all(|&v| v != 0.0), "filled centroids should be non-zero");
+                                              // First k=4 centroid slots should be non-zero for this data.
+            assert!(
+                row.codebook[0..4].iter().all(|&v| v != 0.0),
+                "filled centroids should be non-zero"
+            );
         }
         // Dequantize and check reconstruction
         let decoded = dequantize_matrix(&pal);
         assert_eq!(decoded.len(), 12);
         // MSE should be low for synthetic constant-like data
-        let mse: f32 = decoded.iter().zip(weights.iter())
+        let mse: f32 = decoded
+            .iter()
+            .zip(weights.iter())
             .map(|(a, b)| (a - b).powi(2))
-            .sum::<f32>() / 12.0;
+            .sum::<f32>()
+            / 12.0;
         assert!(mse < 2.0, "MSE should be reasonable, got {}", mse);
     }
 
@@ -432,15 +467,29 @@ mod tests {
         assert_eq!(pal.in_dim, 128);
         // Effective bits per param should be near 4 + (16*16)/128 = 6.0 bits
         let bpp = pal.effective_bpp();
-        assert!(bpp > 4.0 && bpp < 10.0, "bpp should be reasonable, got {}", bpp);
+        assert!(
+            bpp > 4.0 && bpp < 10.0,
+            "bpp should be reasonable, got {}",
+            bpp
+        );
 
         let decoded = dequantize_matrix(&pal);
-        let mse: f32 = decoded.iter().zip(weights.iter())
+        let mse: f32 = decoded
+            .iter()
+            .zip(weights.iter())
             .map(|(a, b)| (a - b).powi(2))
-            .sum::<f32>() / 8192.0;
-        eprintln!("[palette test] 64×128 matrix MSE={:.6}, bpp={:.3}", mse, bpp);
+            .sum::<f32>()
+            / 8192.0;
+        eprintln!(
+            "[palette test] 64×128 matrix MSE={:.6}, bpp={:.3}",
+            mse, bpp
+        );
         // For 16-entry palette with 128-dim vectors, expect MSE ~0.5-2.0
-        assert!(mse < 5.0, "MSE should be reasonable for 16-entry palette, got {}", mse);
+        assert!(
+            mse < 5.0,
+            "MSE should be reasonable for 16-entry palette, got {}",
+            mse
+        );
     }
 
     #[test]
@@ -459,9 +508,16 @@ mod tests {
         }
 
         let (packed, mse) = encode_channel(&data, &codebook);
-        assert!(mse < 0.01, "MSE for constant data should be near 0, got {}", mse);
+        assert!(
+            mse < 0.01,
+            "MSE for constant data should be near 0, got {}",
+            mse
+        );
         // All packed nybbles should be near 0
-        assert!(packed.iter().all(|&b| b == 0), "all indices should be 0 for constant data");
+        assert!(
+            packed.iter().all(|&b| b == 0),
+            "all indices should be 0 for constant data"
+        );
     }
 
     /// Smoke test: verify vDSP distance computation matches scalar.
@@ -476,7 +532,13 @@ mod tests {
         let scalar_out: Vec<f32> = channel.iter().map(|x| (x - value).powi(2)).collect();
 
         for (i, (a, b)) in vdsp_out.iter().zip(scalar_out.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-4, "vdsp/scalar mismatch at {}: {} vs {}", i, a, b);
+            assert!(
+                (a - b).abs() < 1e-4,
+                "vdsp/scalar mismatch at {}: {} vs {}",
+                i,
+                a,
+                b
+            );
         }
     }
 }

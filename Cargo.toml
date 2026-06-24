@@ -9,6 +9,11 @@ members = [
     "mlx-rs-fork/mlx-sys",
     "mlx-rs-fork/mlx-macros",
     "mlx-rs-fork/mlx-internal-macros",
+    "mlx-rs-core",
+    "models/flux-klein-mlx",
+    "models/funasr-mlx",
+    "models/qwen3-tts-core",
+    "models/qwen3-tts-mlx",
 ]
 
 [workspace.package]
@@ -26,6 +31,11 @@ mlx-sys = { path = "mlx-rs-fork/mlx-sys" }
 mlx-macros = { path = "mlx-rs-fork/mlx-macros" }
 mlx-internal-macros = { path = "mlx-rs-fork/mlx-internal-macros" }
 mlx-rs = { path = "mlx-rs-fork/mlx-rs" }
+mlx-rs-core = { path = "mlx-rs-core" }
+flux-klein-mlx = { path = "models/flux-klein-mlx" }
+funasr-mlx = { path = "models/funasr-mlx" }
+qwen3-tts-core = { path = "models/qwen3-tts-core" }
+qwen3-tts-mlx = { path = "models/qwen3-tts-mlx" }
 bytemuck = "1"
 float_eq = "1"
 pretty_assertions = "1.4.0"
@@ -79,6 +89,7 @@ path = "src/bin/prism.rs"
 [[bin]]
 name = "prism-server"
 path = "src/bin/prism_server.rs"
+required-features = ["server"]
 
 [dependencies]
 metal = { version = "0.29", optional = true }
@@ -90,13 +101,14 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 axum = { version = "0.8", optional = true }
 tower-http = { version = "0.6", optional = true, features = ["cors"] }
+tokio-stream = { version = "0.1", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "signal"] }
 hf-hub = "0.4"
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 rayon = "1"
 rand = "0.8"
 sha2 = { version = "0.10", features = ["asm"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 prost = "0.14"
 prost-types = "0.14"
 thiserror = "2"
@@ -105,16 +117,24 @@ parking_lot = "0.12"
 tempfile = "3"
 coreml-proto = { version = "0.1.0", optional = true }
 anyhow = "1.0.102"
+libc = { workspace = true }
+blake3 = "1"
 tribunus-compute-core = { path = "compute-core", optional = true }
 mlx-rs = { path = "mlx-rs-fork/mlx-rs", optional = true, features = ["metal", "accelerate"] }
 
 [features]
 default = []
 metal-dispatch = ["dep:metal", "dep:objc"]
-server = ["dep:axum", "dep:tower-http"]
+server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]
 ane = ["dep:coreml-proto"]
 full = ["metal-dispatch", "server", "ane"]
 prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "dep:mlx-rs"]
+generation-image = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-image"]
+generation-video = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-video"]
+generation-diffusion = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-diffusion"]
+generation-asr = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-asr"]
+generation-audio = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-tts", "tribunus-compute-core/generation-asr"]
+full-apple = ["prism-backend", "generation-image", "generation-audio", "generation-video", "generation-diffusion", "generation-asr", "ane", "server"]
 
 [build-dependencies]
 cc = "1.2"

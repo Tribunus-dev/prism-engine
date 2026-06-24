@@ -4,9 +4,9 @@
 //! phase.  It records the phase ID, completion status, duration, and
 //! optional fused-kernel evidence.
 
+use crate::compute_image::fusion_receipts::FusedMetalExecutionEvidence;
 use crate::compute_image::phase_dag::PhaseCompletionStatus;
 use serde::{Deserialize, Serialize};
-use crate::compute_image::fusion_receipts::FusedMetalExecutionEvidence;
 
 /// Receipt for an executed phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]

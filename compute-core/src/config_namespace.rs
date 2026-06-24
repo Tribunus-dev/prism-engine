@@ -22,19 +22,35 @@ const ANCHORS: &[&str] = &[
     "embed_tokens.weight",
     "norm.weight",
     "layers.0.input_layernorm.weight",
-    "layers.0.self_attn.q_proj.weight",
+    // Hybrid architectures (Qwen3.5) may use linear attention on layer 0.
+    // Check both standard and linear attention tensor names.
 ];
+
+/// Check whether a candidate prefix matches all required anchor tensors.
+fn matches_anchors(candidate: &str, tensor_names: &[String]) -> bool {
+    let required = [
+        format!("{candidate}.embed_tokens.weight"),
+        format!("{candidate}.norm.weight"),
+        format!("{candidate}.layers.0.input_layernorm.weight"),
+];
+    for key in &required {
+        if !tensor_names.iter().any(|n| n == key) {
+            return false;
+        }
+    }
+    // Either full-attention or linear-attention layer 0 is acceptable.
+    let full_attn = format!("{candidate}.layers.0.self_attn.q_proj.weight");
+    let linear_attn = format!("{candidate}.layers.0.linear_attn.in_proj_qkv.weight");
+    tensor_names.iter().any(|n| n == &full_attn || n == &linear_attn)
+}
 
 /// Discover the text model namespace by probing candidate prefixes.
 /// Candidates are checked in order; first to match all anchors wins.
 pub fn resolve_namespace(tensor_names: &[String]) -> Option<NamespaceBinding> {
-    let candidates = &["language_model.model", "model"];
+    let candidates = &["model.language_model", "language_model.model", "model"];
 
     for &candidate in candidates {
-        let all_found = ANCHORS.iter().all(|anchor| {
-            let full = format!("{}.{}", candidate, anchor);
-            tensor_names.iter().any(|n| n == &full)
-        });
+        let all_found = matches_anchors(candidate, tensor_names);
         if all_found {
             let lm_head_key = format!("{}.lm_head.weight", candidate);
             let embed_key = format!("{}.embed_tokens.weight", candidate);

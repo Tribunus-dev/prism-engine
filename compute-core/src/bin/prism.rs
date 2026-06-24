@@ -12,15 +12,22 @@
 //!   tokenizer.json     HuggingFace tokenizer
 //!   tokenizer_config.json
 
-use std::path::PathBuf;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+mod release;
+use release::VersionedInstallDir;
 
 pub const PRISM_HOME: &str = ".prism";
 pub const MODELS_DIR: &str = "models";
 
 fn prism_home() -> PathBuf {
-    let home = std::env::var("PRISM_HOME")
-        .unwrap_or_else(|_| format!("{}/{}", std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()), PRISM_HOME));
+    let home = std::env::var("PRISM_HOME").unwrap_or_else(|_| {
+        format!(
+            "{}/{}",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+            PRISM_HOME
+        )
+    });
     PathBuf::from(home)
 }
 
@@ -66,6 +73,36 @@ enum Commands {
         /// Model name (must exist in ~/.prism/models/<name>/ with safetensors).
         model: String,
     },
+    /// Compile ANE subgraphs for an already-downloaded model.
+    AncCompile {
+        /// Model name (must exist in ~/.prism/models/<name>/).
+        model: String,
+    },
+    /// Qualification placeholder for a model.
+    Qualify {
+        /// Model name to qualify.
+        model: String,
+        /// Optional output path for the qualification report.
+        output: Option<PathBuf>,
+    },
+    /// Run diagnostic checks on the runtime and environment.
+    Doctor {
+        /// Verify the provider backend is healthy.
+        #[arg(long)]
+        verify_provider: bool,
+    },
+    /// List available capabilities from installed release manifests.
+    Capabilities,
+    /// Collect a full diagnostic bundle.
+    Diagnostics {
+        /// Output path for the diagnostic archive.
+        output: PathBuf,
+        /// Include potentially sensitive information (env vars, paths).
+        #[arg(long)]
+        include_sensitive: bool,
+    },
+    /// Roll back to the previous release via versioned install dir.
+    Rollback,
 }
 
 fn main() {
@@ -75,12 +112,30 @@ fn main() {
         Commands::List => list(),
         Commands::Pull { repo } => pull(&repo),
         Commands::Compile { model } => compile_model(&model),
+        #[cfg(feature = "prism-backend")]
+        Commands::AncCompile { model } => ane_compile(&model),
+        #[cfg(not(feature = "prism-backend"))]
+        Commands::AncCompile { model: _ } => {
+            eprintln!("[prism] ANE compilation requires the `prism-backend` feature");
+        }
+        Commands::Qualify { model, output } => qualify(&model, output),
+        Commands::Doctor { verify_provider } => doctor(verify_provider),
+        Commands::Capabilities => capabilities(),
+        Commands::Diagnostics {
+            output,
+            include_sensitive,
+        } => diagnostics(&output, include_sensitive),
+        Commands::Rollback => rollback(),
     }
 }
 
 fn find_model(name: &str) -> Option<PathBuf> {
     let path = models_dir().join(name);
-    if path.join("model.cimage").exists() { Some(path) } else { None }
+    if path.join("model.cimage").exists() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 fn list() {
@@ -94,17 +149,29 @@ fn list() {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if !p.is_dir() { continue; }
-            let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let cim = p.join("model.cimage");
             if cim.exists() {
-                let size = std::fs::metadata(&cim).map(|m| m.len() / (1024 * 1024)).unwrap_or(0);
+                let size = std::fs::metadata(&cim)
+                    .map(|m| m.len() / (1024 * 1024))
+                    .unwrap_or(0);
                 println!("  {:<24} {} MB  (compiled)", name, size);
             } else {
-                let has_src = p.join("config.json").exists() && p.join("model.safetensors").exists();
+                let has_src =
+                    p.join("config.json").exists() && p.join("model.safetensors").exists();
                 let has_shards = p.join("model.safetensors.index.json").exists();
                 if has_src || has_shards {
-                    println!("  {:<24}           (source — run `prism compile {}`)", name, name);
+                    println!(
+                        "  {:<24}           (source — run `prism compile {}`)",
+                        name, name
+                    );
                 }
             }
             found = true;
@@ -123,13 +190,18 @@ fn run(model: Option<String>, port: u16) {
         }),
         None => {
             let dir = models_dir();
-            let mut candidates: Vec<_> = std::fs::read_dir(&dir).ok()
-                .into_iter().flatten()
+            let mut candidates: Vec<_> = std::fs::read_dir(&dir)
+                .ok()
+                .into_iter()
+                .flatten()
                 .flatten()
                 .filter(|e| e.path().join("model.cimage").exists())
                 .collect();
             candidates.sort_by_key(|e| e.file_name().to_os_string());
-            candidates.into_iter().next().map(|e| e.path())
+            candidates
+                .into_iter()
+                .next()
+                .map(|e| e.path())
                 .unwrap_or_else(|| {
                     eprintln!("No models found. Pull one: prism pull <repo>");
                     std::process::exit(1);
@@ -143,9 +215,12 @@ fn run(model: Option<String>, port: u16) {
         .unwrap_or_else(|| "prism-server".into());
 
     let status = std::process::Command::new(&server)
-        .arg("--cimage").arg(model_path.join("model.cimage"))
-        .arg("--model-dir").arg(&model_path)
-        .arg("--port").arg(port.to_string())
+        .arg("--cimage")
+        .arg(model_path.join("model.cimage"))
+        .arg("--model-dir")
+        .arg(&model_path)
+        .arg("--port")
+        .arg(port.to_string())
         .spawn()
         .and_then(|mut c| c.wait());
 
@@ -178,19 +253,35 @@ fn pull(repo: &str) {
     eprint!("  [1/4] config.json... ");
     let cfg_path = match repo_api.get("config.json") {
         Ok(p) => p,
-        Err(e) => { eprintln!("failed: {e}"); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("failed: {e}");
+            std::process::exit(1);
+        }
     };
     std::fs::copy(&cfg_path, out_dir.join("config.json")).ok();
     eprintln!("ok");
 
-    let cfg = tribunus_compute_core::lut::graph::UnifiedConfig::from_file(&out_dir.join("config.json"))
-        .unwrap_or_else(|e| { eprintln!("config: {e}"); std::process::exit(1); });
+    let cfg =
+        tribunus_compute_core::lut::graph::UnifiedConfig::from_file(&out_dir.join("config.json"))
+            .unwrap_or_else(|e| {
+                eprintln!("config: {e}");
+                std::process::exit(1);
+            });
     let graph = tribunus_compute_core::lut::graph::ModelGraph::build(&cfg);
-    eprintln!("  Graph: {} layers, {} nodes", graph.num_layers, graph.nodes.len());
+    eprintln!(
+        "  Graph: {} layers, {} nodes",
+        graph.num_layers,
+        graph.nodes.len()
+    );
 
     // 3. Download tokenizer files.
     eprint!("  [2/4] tokenizer... ");
-    for f in &["tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt"] {
+    for f in &[
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt",
+    ] {
         if let Ok(p) = repo_api.get(f) {
             std::fs::copy(&p, out_dir.join(f)).ok();
         }
@@ -216,13 +307,16 @@ fn pull(repo: &str) {
     }
     // Check for sharded index.
     if let Ok(index_path) = repo_api.get("model.safetensors.index.json") {
-        std::fs::copy(&index_path, safetensors_dir.join("model.safetensors.index.json")).ok();
+        std::fs::copy(
+            &index_path,
+            safetensors_dir.join("model.safetensors.index.json"),
+        )
+        .ok();
         let index_text = std::fs::read_to_string(&index_path).unwrap_or_default();
         if let Ok(index) = serde_json::from_str::<serde_json::Value>(&index_text) {
             if let Some(weight_map) = index.get("weight_map").and_then(|m| m.as_object()) {
-                let mut shard_set: Vec<&str> = weight_map.values()
-                    .filter_map(|v| v.as_str())
-                    .collect();
+                let mut shard_set: Vec<&str> =
+                    weight_map.values().filter_map(|v| v.as_str()).collect();
                 shard_set.sort();
                 shard_set.dedup();
                 for shard_name in &shard_set {
@@ -259,22 +353,35 @@ fn pull(repo: &str) {
     eprintln!("  [4/4] compiling... ");
     let out_cimage = cimage_path(&name);
     if let Err(e) = tribunus_compute_core::lut::compiler::compile_to_cimage(
-        &graph, &safetensors_dir, &out_cimage,
+        &graph,
+        &safetensors_dir,
+        &out_cimage,
+        &out_dir.join("config.json"),
     ) {
         eprintln!("Compilation failed: {e}");
         std::process::exit(1);
     }
 
-    let size_mb = std::fs::metadata(&out_cimage).map(|m| m.len() / (1024 * 1024)).unwrap_or(0);
+    let size_mb = std::fs::metadata(&out_cimage)
+        .map(|m| m.len() / (1024 * 1024))
+        .unwrap_or(0);
     eprintln!("[prism:pull] Done — {name} ({size_mb} MB)");
     eprintln!("  Run: prism run {name}");
+
+    // Optional: compile ANE subgraphs.
+    // On Apple Silicon, automatically compile ANE/Core ML subgraphs.
+    #[cfg(all(target_os = "macos", feature = "prism-backend"))]
+    ane_compile(&name);
 }
 
 /// Recompile an existing model's safetensors (already downloaded) to .cimage.
 fn compile_model(name: &str) {
     let dir = model_dir(name);
     if !dir.join("config.json").exists() {
-        eprintln!("No config.json in {}. First: prism pull <repo>", dir.display());
+        eprintln!(
+            "No config.json in {}. First: prism pull <repo>",
+            dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -284,28 +391,181 @@ fn compile_model(name: &str) {
         dir.clone()
     };
 
-    if !safetensors_dir.read_dir().ok()
-        .map(|rd| rd.flatten().any(|e| e.path().extension().map_or(false, |ext| ext == "safetensors")))
+    if !safetensors_dir
+        .read_dir()
+        .ok()
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                e.path()
+                    .extension()
+                    .map_or(false, |ext| ext == "safetensors")
+            })
+        })
         .unwrap_or(false)
     {
-        eprintln!("No safetensors found in {}. Re-pull the model.", safetensors_dir.display());
+        eprintln!(
+            "No safetensors found in {}. Re-pull the model.",
+            safetensors_dir.display()
+        );
         std::process::exit(1);
     }
 
-    eprint!("[prism:compile] Building graph from {}... ", dir.join("config.json").display());
+    eprint!(
+        "[prism:compile] Building graph from {}... ",
+        dir.join("config.json").display()
+    );
     let cfg = tribunus_compute_core::lut::graph::UnifiedConfig::from_file(&dir.join("config.json"))
-        .unwrap_or_else(|e| { eprintln!("config error: {e}"); std::process::exit(1); });
+        .unwrap_or_else(|e| {
+            eprintln!("config error: {e}");
+            std::process::exit(1);
+        });
     let graph = tribunus_compute_core::lut::graph::ModelGraph::build(&cfg);
     eprintln!("{} layers, {} nodes", graph.num_layers, graph.nodes.len());
 
     let out = cimage_path(name);
     eprintln!("[prism:compile] Compiling to {}...", out.display());
-    match tribunus_compute_core::lut::compiler::compile_to_cimage(&graph, &safetensors_dir, &out) {
+    match tribunus_compute_core::lut::compiler::compile_to_cimage(&graph, &safetensors_dir, &out, &dir.join("config.json")) {
         Ok(()) => {
-            let size = std::fs::metadata(&out).map(|m| m.len() / (1024 * 1024)).unwrap_or(0);
+            let size = std::fs::metadata(&out)
+                .map(|m| m.len() / (1024 * 1024))
+                .unwrap_or(0);
             eprintln!("[prism:compile] Done — {name} ({size} MB)");
             eprintln!("  Run: prism run {name}");
         }
         Err(e) => eprintln!("Compilation failed: {e}"),
+    }
+}
+/// Qualification stub — not yet implemented.
+fn qualify(model: &str, output: Option<PathBuf>) {
+    eprintln!("[prism] Qualification not yet implemented");
+    if let Some(path) = output {
+        eprintln!("  (output would be written to {})", path.display());
+    }
+    eprintln!("  Model: {model}");
+}
+
+/// Doctor — runtime diagnostic checks.
+fn doctor(verify_provider: bool) {
+    eprintln!("Prism Engine Diagnostic Report");
+    eprintln!("  Version:              {}", env!("CARGO_PKG_VERSION"));
+    eprintln!("  Home:                 {}", prism_home().display());
+    eprintln!("  Models dir:           {}", models_dir().display());
+    eprintln!("  Releases dir:         {}", release::VersionedInstallDir::releases_dir().display());
+    eprintln!("  Current link:         {}", release::VersionedInstallDir::current_link().display());
+    eprintln!("  Previous link:        {}", release::VersionedInstallDir::previous_link().display());
+
+    if verify_provider {
+        eprintln!("  Provider verification: not yet implemented");
+    }
+}
+
+/// Capabilities — enumerate what the installed release supports.
+fn capabilities() {
+    let releases_dir = release::VersionedInstallDir::releases_dir();
+    if !releases_dir.exists() {
+        eprintln!("No release manifests found at {}", releases_dir.display());
+        return;
+    }
+
+    match std::fs::read_dir(&releases_dir) {
+        Ok(entries) => {
+            let mut found = false;
+            for entry in entries.flatten() {
+                let manifest_path = entry.path().join("release.json");
+                if !manifest_path.exists() {
+                    continue;
+                }
+                match std::fs::read_to_string(&manifest_path) {
+                    Ok(text) => {
+                        match serde_json::from_str::<release::PrismReleaseManifest>(&text) {
+                            Ok(m) => {
+                                println!(
+                                    "  {} [{:?}] — prism {} | compute-core {}",
+                                    m.release_version, m.channel, m.prism_version, m.compute_core_version
+                                );
+                                for plat in &m.supported_platforms {
+                                    println!(
+                                        "      platform: {}/{} (min_macos: {:?})",
+                                        plat.os, plat.arch, plat.min_macos_version
+                                    );
+                                }
+                                println!(
+                                    "      schemas: {:?} | checksums: {} | status: {:?}",
+                                    m.artifact_schema_versions, m.checksums.len(), m.signing_status
+                                );
+                                if let Some(digest) = &m.compatibility_manifest_digest {
+                                    println!("      compat digest: {digest:?}");
+                                }
+                                found = true;
+                            }
+                            Err(e) => {
+                                println!(
+                                    "  (invalid manifest at {}: {e})",
+                                    manifest_path.display()
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("  Error reading {}: {e}", manifest_path.display());
+                    }
+                }
+            }
+            if !found {
+                eprintln!("No valid release manifests found.");
+            }
+        }
+        Err(e) => {
+            eprintln!("Error reading releases dir: {e}");
+        }
+    }
+}
+
+/// Diagnostics — collect a diagnostic bundle.
+fn diagnostics(output: &PathBuf, include_sensitive: bool) {
+    eprintln!("[prism] Diagnostics collection not yet implemented");
+    eprintln!("  Output path: {}", output.display());
+    eprintln!("  Include sensitive: {include_sensitive}");
+}
+
+/// Compile ANE subgraphs for a downloaded model.
+fn ane_compile(name: &str) {
+    let dir = model_dir(name);
+    if !dir.join("config.json").exists() {
+        eprintln!(
+            "No config.json in {}. First: prism pull <repo>",
+            dir.display()
+        );
+        std::process::exit(1);
+    }
+
+    eprintln!("[prism:ane] Compiling ANE subgraphs for {name}...");
+
+    #[cfg(feature = "prism-backend")]
+    {
+    use tribunus_compute_core::ane_compile;
+    match ane_compile::compile_ane_artifacts(&dir) {
+        Ok(paths) => {
+            eprintln!("[prism:ane] Generated {} .mlmodelc file(s):", paths.len());
+            for p in &paths {
+                eprintln!("    {p}");
+            }
+        }
+        Err(e) => eprintln!("[prism:ane] ANE compilation failed: {e}"),
+    }
+    }
+}
+
+/// Rollback — revert to previous release.
+fn rollback() {
+    match release::VersionedInstallDir::rollback() {
+        Ok(()) => {
+            let current = release::VersionedInstallDir::current_link();
+            println!("Rolled back. Current release link: {:?}", current.read_link().unwrap_or(current));
+        }
+        Err(e) => {
+            eprintln!("[prism] Rollback failed: {e}");
+            std::process::exit(1);
+        }
     }
 }

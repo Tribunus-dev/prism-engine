@@ -1,7 +1,7 @@
-use std::hash::{Hash, Hasher};
 use serde::{Deserialize, Serialize};
+use std::hash::{Hash, Hasher};
 
-use crate::backend::{MatmulOp, RmsNormOp, RoPEOp, EvaluationReceipt};
+use crate::backend::{EvaluationReceipt, MatmulOp, RmsNormOp, RoPEOp};
 use crate::compute_image::tensix::TensixComputeImage;
 
 /// A stage in the composed decode plan.
@@ -101,7 +101,7 @@ impl TensixDecodePlan {
     pub fn add_stage(&mut self, stage: DecodeStage) {
         self.stages.push(stage);
     }
-    
+
     pub fn add_evidence(&mut self, receipt: EvaluationReceipt) {
         self.evidence.push(receipt);
     }

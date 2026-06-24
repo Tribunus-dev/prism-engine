@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 pub struct IntegrityVerifier;
 
 impl IntegrityVerifier {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn compute_content_hash(data: &[u8]) -> ContentHash {
         use std::hash::{Hash, Hasher};

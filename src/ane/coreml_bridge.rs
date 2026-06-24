@@ -57,8 +57,7 @@ impl CoreMlModel {
             .as_ref()
             .to_str()
             .ok_or_else(|| "non-UTF-8 path".to_string())?;
-        let c_path = std::ffi::CString::new(path_str)
-            .map_err(|e| format!("CString: {}", e))?;
+        let c_path = std::ffi::CString::new(path_str).map_err(|e| format!("CString: {}", e))?;
         let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
         let status = unsafe {
             tribunus_coreml_load_model(

@@ -17,13 +17,18 @@ fn main() {
         "silu_vec.metal",
     ];
     for src in metal_sources {
-        println!("cargo:rerun-if-changed={}", template_dir.join(src).display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            template_dir.join(src).display()
+        );
     }
 
     let mut air_files = Vec::new();
     for src in metal_sources {
         let src_path = template_dir.join(src);
-        let air_file = std::path::Path::new(&out_dir).join(src).with_extension("air");
+        let air_file = std::path::Path::new(&out_dir)
+            .join(src)
+            .with_extension("air");
         if std::env::var("PRISM_MOCK_BUILD").is_ok() {
             std::fs::write(&air_file, "").unwrap();
         } else {
@@ -62,19 +67,29 @@ fn main() {
     // Generate embedded_metallib.rs with the kernel bytes baked into the binary.
     let metallib_bytes = std::fs::read(&metallib_path).expect("read metallib");
     let rs_path = std::path::Path::new(&out_dir).join("embedded_metallib.rs");
-    std::fs::write(&rs_path, format!(
-        "/// Auto-generated: embedded Metal kernel library ({} bytes)\n\
+    std::fs::write(
+        &rs_path,
+        format!(
+            "/// Auto-generated: embedded Metal kernel library ({} bytes)\n\
          pub const KERNEL_BYTES: &[u8] = &{:?};\n",
-        metallib_bytes.len(), metallib_bytes
-    )).expect("write embedded metallib");
+            metallib_bytes.len(),
+            metallib_bytes
+        ),
+    )
+    .expect("write embedded metallib");
 
     // Also keep the env var for fallback
-    println!("cargo:rustc-env=TRIBUNUS_METALLIB={}", metallib_path.display());
+    println!(
+        "cargo:rustc-env=TRIBUNUS_METALLIB={}",
+        metallib_path.display()
+    );
 
     // ── ANE ObjC bridge ────────────────────────────────────────────────
     #[cfg(all(target_os = "macos", feature = "ane"))]
     {
-        let bridge_dir = std::path::Path::new(&manifest_dir).join("src").join("bridge");
+        let bridge_dir = std::path::Path::new(&manifest_dir)
+            .join("src")
+            .join("bridge");
         let mut build = cc::Build::new();
         build
             .flag("-fobjc-arc")

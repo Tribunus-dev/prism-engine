@@ -360,11 +360,7 @@ pub fn build_hellaswag_questions() -> Vec<Question> {
 
 impl AccuracyTest {
     /// Create a new accuracy test with the given name, questions, and metric.
-    pub fn new(
-        name: impl Into<String>,
-        questions: Vec<Question>,
-        metric: AccuracyMetric,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, questions: Vec<Question>, metric: AccuracyMetric) -> Self {
         Self {
             name: name.into(),
             questions,
@@ -503,10 +499,10 @@ mod tests {
     #[test]
     fn test_accuracy_test_empty_questions() {
         let test = AccuracyTest::new("empty", vec![], AccuracyMetric::ExactMatch);
-    // Empty set returns Ok(1.0) without touching the harness.
-    // We just verify the early-return path logic is correct.
-    assert!(test.questions.is_empty());
-    assert!(test.questions.is_empty() && matches!(test.metric, AccuracyMetric::ExactMatch));
+        // Empty set returns Ok(1.0) without touching the harness.
+        // We just verify the early-return path logic is correct.
+        assert!(test.questions.is_empty());
+        assert!(test.questions.is_empty() && matches!(test.metric, AccuracyMetric::ExactMatch));
     }
 
     #[test]

@@ -204,8 +204,7 @@ impl CapabilityReport {
     /// Write to a file path.
     pub fn write_to(&self, path: &Path) -> Result<(), String> {
         let json = self.to_json();
-        std::fs::write(path, &json)
-            .map_err(|e| format!("write capability report: {}", e))
+        std::fs::write(path, &json).map_err(|e| format!("write capability report: {}", e))
     }
 
     /// Detect feature flags from cfg conditions.
@@ -258,7 +257,8 @@ impl CapabilityReport {
     pub fn fail_closed_check(&self) -> Result<(), Vec<String>> {
         let mut failures = Vec::new();
 
-        if self.metal_dispatch_enabled && (self.metal_state as u8) < (SubsystemState::Loaded as u8) {
+        if self.metal_dispatch_enabled && (self.metal_state as u8) < (SubsystemState::Loaded as u8)
+        {
             failures.push(format!(
                 "metal-dispatch feature enabled but metal_state is {:?} (< loaded)",
                 self.metal_state
@@ -267,14 +267,10 @@ impl CapabilityReport {
         if (self.coreml_model_load_status as u8) >= (SubsystemState::Selected as u8)
             && self.coreml_compiled_subgraphs == 0
         {
-            failures.push(
-                "Core ML model selected but zero compiled subgraphs".to_string(),
-            );
+            failures.push("Core ML model selected but zero compiled subgraphs".to_string());
         }
         if self.kv_compression_active && self.kv_mode == KvCacheModeState::None {
-            failures.push(
-                "KV compression claimed active but kv_mode is None".to_string(),
-            );
+            failures.push("KV compression claimed active but kv_mode is None".to_string());
         }
         if self.total_phases > 0 && self.dispatched_phases == 0 {
             failures.push(format!(

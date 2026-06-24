@@ -5,10 +5,16 @@
 //! `mlx_rs::Array` operations behind a generational slot-map registry.
 
 #[cfg(target_os = "macos")]
-#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod accelerate;
 #[cfg(target_os = "macos")]
-#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod accelerate_ffi;
 /// Accelerate CPU execution lane — arena-view-based ops on CPU-accessible
 /// memory (zero-copy, no FFI). Pure Rust fallback with no OS dependency.
@@ -16,10 +22,16 @@ pub mod accelerate_ffi;
 pub mod accelerate_lane;
 pub mod authority;
 #[cfg(target_os = "macos")]
-#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod coreml;
 /// Core ML execution lane — compiled subgraph on ANE.
-#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod coreml_lane;
 /// CPU attention scheduler — L2-cache-aware work partition + work-stealing
 /// (ported from vLLM's cpu_attn_impl.hpp).

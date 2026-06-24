@@ -20,7 +20,9 @@ pub struct VmProbe {
 
 impl VmProbe {
     pub fn start() -> Self {
-        Self { initial_pageouts: Self::get_pageouts() }
+        Self {
+            initial_pageouts: Self::get_pageouts(),
+        }
     }
 
     /// Stop the probe and return the page-out delta **in MB**.
@@ -46,7 +48,11 @@ impl VmProbe {
                 &mut stats as *mut _ as *mut i32,
                 &mut count,
             );
-            if result == 0 { stats.pageouts } else { 0 }
+            if result == 0 {
+                stats.pageouts
+            } else {
+                0
+            }
         }
         #[cfg(not(target_os = "macos"))]
         0
@@ -124,7 +130,10 @@ pub fn run_tps_benchmark(
     let prefill_tps = tokens_processed as f64 / prefill_duration;
     let pageouts_mb = vm_probe.stop_and_report_mb();
 
-    println!("[gate1] CPU page-outs during ANE execution: {} MB", pageouts_mb);
+    println!(
+        "[gate1] CPU page-outs during ANE execution: {} MB",
+        pageouts_mb
+    );
     println!("[gate2] ANE prefill throughput: {:.2} TPS", prefill_tps);
 
     // ── Gate 3: Metal LUT Decode ──────────────────────────────────────
@@ -153,11 +162,7 @@ pub fn run_tps_benchmark(
 /// # Arguments
 /// * `baseline_prefill_tps` — TPS of the standard MLX/Metal NF4 prefill.
 /// * `baseline_decode_tps`  — TPS of the standard MLX/Metal NF4 decode.
-pub fn assert_gates(
-    results: &GateResults,
-    baseline_prefill_tps: f64,
-    baseline_decode_tps: f64,
-) {
+pub fn assert_gates(results: &GateResults, baseline_prefill_tps: f64, baseline_decode_tps: f64) {
     // Gate 1: Zero-copy — page-outs must stay under 1 MB
     assert!(
         results.pageouts_mb <= 1,
@@ -241,27 +246,43 @@ mod tests {
     #[test]
     #[should_panic(expected = "FAIL Gate 1")]
     fn test_assert_gate1_fail() {
-        let r = GateResults { prefill_tps: 500.0, decode_tps: 100.0, pageouts_mb: 10 };
+        let r = GateResults {
+            prefill_tps: 500.0,
+            decode_tps: 100.0,
+            pageouts_mb: 10,
+        };
         assert_gates(&r, 10.0, 10.0);
     }
 
     #[test]
     #[should_panic(expected = "FAIL Gate 2")]
     fn test_assert_gate2_fail() {
-        let r = GateResults { prefill_tps: 15.0, decode_tps: 100.0, pageouts_mb: 0 };
+        let r = GateResults {
+            prefill_tps: 15.0,
+            decode_tps: 100.0,
+            pageouts_mb: 0,
+        };
         assert_gates(&r, 10.0, 10.0);
     }
 
     #[test]
     #[should_panic(expected = "FAIL Gate 3")]
     fn test_assert_gate3_fail() {
-        let r = GateResults { prefill_tps: 500.0, decode_tps: 5.0, pageouts_mb: 0 };
+        let r = GateResults {
+            prefill_tps: 500.0,
+            decode_tps: 5.0,
+            pageouts_mb: 0,
+        };
         assert_gates(&r, 10.0, 10.0);
     }
 
     #[test]
     fn test_assert_all_pass() {
-        let r = GateResults { prefill_tps: 500.0, decode_tps: 95.0, pageouts_mb: 0 };
+        let r = GateResults {
+            prefill_tps: 500.0,
+            decode_tps: 95.0,
+            pageouts_mb: 0,
+        };
         assert_gates(&r, 10.0, 100.0); // decode ratio 0.95 > 0.85
     }
 }

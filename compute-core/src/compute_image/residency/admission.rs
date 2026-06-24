@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::compute_image::residency::plan::{
-    CompiledResidencyPlan, ResidencyClass,
-};
+use crate::compute_image::residency::plan::{CompiledResidencyPlan, ResidencyClass};
 
 /// Runtime residency admission controller.
 ///
@@ -58,20 +56,17 @@ impl ResidencyAdmission {
             .filter(|w| {
                 matches!(
                     w.residency_class,
-                    ResidencyClass::MandatoryAtSessionStart
-                        | ResidencyClass::MandatoryBeforePhase
+                    ResidencyClass::MandatoryAtSessionStart | ResidencyClass::MandatoryBeforePhase
                 )
             })
             .map(|w| w.estimated_bytes)
             .sum();
 
         if mandatory_bytes > available_bytes {
-            return ResidencyAdmissionResult::Refused(
-                ResidencyRefusalReason::InsufficientMemory {
-                    required: mandatory_bytes,
-                    available: available_bytes,
-                },
-            );
+            return ResidencyAdmissionResult::Refused(ResidencyRefusalReason::InsufficientMemory {
+                required: mandatory_bytes,
+                available: available_bytes,
+            });
         }
 
         // ── 2. Check activation arena requirements fit ──────────────
@@ -88,12 +83,10 @@ impl ResidencyAdmission {
         // ── 3. Check KV cache requirements fit ──────────────────────
         let kv_required = plan.kv_cache_requirements.total_cache_bytes;
         if kv_required > available_bytes {
-            return ResidencyAdmissionResult::Refused(
-                ResidencyRefusalReason::KvCacheTooLarge {
-                    required: kv_required,
-                    available: available_bytes,
-                },
-            );
+            return ResidencyAdmissionResult::Refused(ResidencyRefusalReason::KvCacheTooLarge {
+                required: kv_required,
+                available: available_bytes,
+            });
         }
 
         // ── All checks passed ───────────────────────────────────────
@@ -217,11 +210,12 @@ mod tests {
                 resident_weight_bytes: 0,
                 overhead_bytes: 0,
             },
-            memory_admission_contract: crate::compute_image::residency::plan::MemoryAdmissionContract {
-                minimum_required_bytes: 0,
-                recommended_bytes: 0,
-                graceful_degradation: false,
-            },
+            memory_admission_contract:
+                crate::compute_image::residency::plan::MemoryAdmissionContract {
+                    minimum_required_bytes: 0,
+                    recommended_bytes: 0,
+                    graceful_degradation: false,
+                },
         }
     }
 

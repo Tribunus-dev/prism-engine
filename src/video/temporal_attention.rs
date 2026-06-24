@@ -1,5 +1,5 @@
 pub fn temporal_attention(
-    x: &[f32],           // [N, F, H*W, D] — flattened spatial
+    x: &[f32], // [N, F, H*W, D] — flattened spatial
     heads: usize,
     is_causal: bool,
     n: usize,
@@ -14,11 +14,11 @@ pub fn temporal_attention(
     //   attn = softmax(Q @ K^T / sqrt(d)) @ V  — attention across time
     //
     // Result: each spatial position aggregates information across frames
-    
+
     let mut output = vec![0.0; n * f * hw * d];
     let head_dim = d / heads;
     let scale = 1.0 / (head_dim as f32).sqrt();
-    
+
     let mut scores = vec![0.0; f * f];
     for batch in 0..n {
         for pos in 0..hw {
@@ -32,14 +32,16 @@ pub fn temporal_attention(
                         }
                         let mut score = 0.0;
                         for i in 0..head_dim {
-                            let q_idx = batch * (f * hw * d) + q_t * (hw * d) + pos * d + h * head_dim + i;
-                            let k_idx = batch * (f * hw * d) + k_t * (hw * d) + pos * d + h * head_dim + i;
+                            let q_idx =
+                                batch * (f * hw * d) + q_t * (hw * d) + pos * d + h * head_dim + i;
+                            let k_idx =
+                                batch * (f * hw * d) + k_t * (hw * d) + pos * d + h * head_dim + i;
                             score += x[q_idx] * x[k_idx];
                         }
                         scores[q_t * f + k_t] = score * scale;
                     }
                 }
-                
+
                 // Softmax
                 for q_t in 0..f {
                     let mut max_score = f32::NEG_INFINITY;
@@ -57,16 +59,18 @@ pub fn temporal_attention(
                         scores[q_t * f + k_t] /= sum;
                     }
                 }
-                
+
                 // Output
                 for q_t in 0..f {
                     for i in 0..head_dim {
                         let mut out_val = 0.0;
                         for k_t in 0..f {
-                            let v_idx = batch * (f * hw * d) + k_t * (hw * d) + pos * d + h * head_dim + i;
+                            let v_idx =
+                                batch * (f * hw * d) + k_t * (hw * d) + pos * d + h * head_dim + i;
                             out_val += scores[q_t * f + k_t] * x[v_idx];
                         }
-                        let out_idx = batch * (f * hw * d) + q_t * (hw * d) + pos * d + h * head_dim + i;
+                        let out_idx =
+                            batch * (f * hw * d) + q_t * (hw * d) + pos * d + h * head_dim + i;
                         output[out_idx] = out_val;
                     }
                 }

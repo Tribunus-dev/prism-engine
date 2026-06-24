@@ -15,7 +15,10 @@ impl<'a> ReadyQueue<'a> {
 
     /// Return all phases whose predecessors are all in the `completed` set.
     /// Phases already in `completed` are excluded.
-    pub fn ready_phases(&self, completed: &std::collections::HashSet<String>) -> Vec<&'a crate::compute_image::phase_dag::EmittedPhase> {
+    pub fn ready_phases(
+        &self,
+        completed: &std::collections::HashSet<String>,
+    ) -> Vec<&'a crate::compute_image::phase_dag::EmittedPhase> {
         self.dag
             .phases
             .iter()
@@ -34,8 +37,8 @@ impl<'a> ReadyQueue<'a> {
 mod tests {
     use super::*;
     use crate::compute_image::phase_dag::{
-        ComputeLane, EmittedArenaPlan, EmittedConcurrencyPlan, EmittedPhase,
-        EmittedPhaseEdge, PhaseKind, SemanticKind,
+        ComputeLane, EmittedArenaPlan, EmittedConcurrencyPlan, EmittedPhase, EmittedPhaseEdge,
+        PhaseKind, SemanticKind,
     };
     use std::collections::HashMap;
 
@@ -58,8 +61,13 @@ mod tests {
         let dag = EmittedPhaseGraph {
             phases: vec![make_phase("p0"), make_phase("p1")],
             edges: vec![],
-            arena_plan: EmittedArenaPlan { total_bytes: 0, slots: vec![] },
-            concurrency_plan: EmittedConcurrencyPlan { independent_sets: vec![] },
+            arena_plan: EmittedArenaPlan {
+                total_bytes: 0,
+                slots: vec![],
+            },
+            concurrency_plan: EmittedConcurrencyPlan {
+                independent_sets: vec![],
+            },
             compiler_version: "test".into(),
         };
         let rq = ReadyQueue::new(&dag);
@@ -73,11 +81,19 @@ mod tests {
         let dag = EmittedPhaseGraph {
             phases: vec![make_phase("a"), make_phase("b")],
             edges: vec![EmittedPhaseEdge {
-                from_phase: "a".into(), to_phase: "b".into(),
-                semantic_kind: SemanticKind::Data, label: None, metadata: HashMap::new(),
+                from_phase: "a".into(),
+                to_phase: "b".into(),
+                semantic_kind: SemanticKind::Data,
+                label: None,
+                metadata: HashMap::new(),
             }],
-            arena_plan: EmittedArenaPlan { total_bytes: 0, slots: vec![] },
-            concurrency_plan: EmittedConcurrencyPlan { independent_sets: vec![] },
+            arena_plan: EmittedArenaPlan {
+                total_bytes: 0,
+                slots: vec![],
+            },
+            concurrency_plan: EmittedConcurrencyPlan {
+                independent_sets: vec![],
+            },
             compiler_version: "test".into(),
         };
         let rq = ReadyQueue::new(&dag);
@@ -100,8 +116,13 @@ mod tests {
         let dag = EmittedPhaseGraph {
             phases: vec![make_phase("a"), make_phase("b")],
             edges: vec![],
-            arena_plan: EmittedArenaPlan { total_bytes: 0, slots: vec![] },
-            concurrency_plan: EmittedConcurrencyPlan { independent_sets: vec![] },
+            arena_plan: EmittedArenaPlan {
+                total_bytes: 0,
+                slots: vec![],
+            },
+            concurrency_plan: EmittedConcurrencyPlan {
+                independent_sets: vec![],
+            },
             compiler_version: "test".into(),
         };
         let rq = ReadyQueue::new(&dag);

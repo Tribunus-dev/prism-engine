@@ -1,10 +1,12 @@
 //! MIL protobuf construction helpers for ops not directly supported by MilBuilder.
 //! Ported from Tribunus Compute's compute-core/src/compute_image/subgraph_mil.rs.
 
-use std::collections::HashMap;
-use coreml_proto::proto::mil_spec;
-use coreml_proto::proto::mil_spec::{argument, dimension, tensor_value, value, value::immediate_value};
 use crate::ane::mil_builder::MilBuilder;
+use coreml_proto::proto::mil_spec;
+use coreml_proto::proto::mil_spec::{
+    argument, dimension, tensor_value, value, value::immediate_value,
+};
+use std::collections::HashMap;
 
 pub fn named_arg(name: &str) -> mil_spec::Argument {
     mil_spec::Argument {

@@ -40,4 +40,3 @@ impl fmt::Display for ContentHash {
         write!(f, "ContentHash({})", self.0)
     }
 }
-

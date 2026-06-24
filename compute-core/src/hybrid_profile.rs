@@ -401,7 +401,7 @@ impl HybridExecutor {
     }
     /// Execute a batch by dispatching each slot to its assigned backend.
     ///
-    /// backend_id mapping: 0=MLX, 1=Accelerate, 2=CoreML (stub), 3=ANE/Orion
+    /// backend_id mapping: 0=MLX, 1=Accelerate, 2=CoreML (stub), 3=ANE
     pub fn execute_batch(
         &mut self,
         batch: &crate::scheduling::Batch,
@@ -532,12 +532,7 @@ impl HybridExecutor {
                     });
                 }
                 3 => {
-                    // ── ANE / Orion dispatch ───────────────────────────────
-                    // Wrap the shared arena as an ANE IOSurface surface and
-                    // execute a compiled ANE program step.
-                    let _ane_surface = crate::memory::orion_bridge::wrap_arena_for_ane(&arena)
-                        .map_err(|e| format!("wrap_arena_for_ane failed: {}", e))?;
-
+                    // ── ANE dispatch ───────────────────────────────────────
                     let stub_step = ExecutionStep::AneInference {
                         mil_text: String::new(),
                         inputs: Vec::new(),

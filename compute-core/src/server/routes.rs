@@ -9,10 +9,33 @@ fn base64_encode(data: &[u8]) -> String {
         let triple = (b0 << 16) | (b1 << 8) | b2;
         const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
         let n = chunk.len();
-        write!(&mut buf, "{}", CHARS[((triple >> 18) & 0x3F) as usize] as char).unwrap();
-        write!(&mut buf, "{}", CHARS[((triple >> 12) & 0x3F) as usize] as char).unwrap();
-        if n >= 2 { write!(&mut buf, "{}", CHARS[((triple >> 6) & 0x3F) as usize] as char).unwrap(); } else { buf.push('='); }
-        if n >= 3 { write!(&mut buf, "{}", CHARS[(triple & 0x3F) as usize] as char).unwrap(); } else { buf.push('='); }
+        write!(
+            &mut buf,
+            "{}",
+            CHARS[((triple >> 18) & 0x3F) as usize] as char
+        )
+        .unwrap();
+        write!(
+            &mut buf,
+            "{}",
+            CHARS[((triple >> 12) & 0x3F) as usize] as char
+        )
+        .unwrap();
+        if n >= 2 {
+            write!(
+                &mut buf,
+                "{}",
+                CHARS[((triple >> 6) & 0x3F) as usize] as char
+            )
+            .unwrap();
+        } else {
+            buf.push('=');
+        }
+        if n >= 3 {
+            write!(&mut buf, "{}", CHARS[(triple & 0x3F) as usize] as char).unwrap();
+        } else {
+            buf.push('=');
+        }
     }
     buf
 }
@@ -29,6 +52,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::exo::ExoNode;
+#[cfg(feature = "generation-tts")]
+use crate::generation::text_to_speech::pcm_to_wav;
 use crate::generation::video_generation::{TextToImageGenerator, VideoGenerator};
 use crate::grammar::Grammar;
 use crate::grammar::GrammarTokenizer;
@@ -133,11 +158,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/v1/chat/completions", post(chat_completions_dispatch))
         .route("/v1/models", get(v1_models))
         .route("/v1/completions", post(v1_completions));
-    #[cfg(not(feature = "prism-backend"))]
-    let v1_routes = v1_routes
-        .route("/v1/audio/speech", post(audio_speech))
-        .route("/v1/audio/transcriptions", post(audio_transcriptions))
-        .route("/v1/images/generations", post(image_generations));
+    #[cfg(feature = "generation-tts")]
+    let v1_routes = v1_routes.route("/v1/audio/speech", post(audio_speech));
+    #[cfg(feature = "generation-asr")]
+    let v1_routes = v1_routes.route("/v1/audio/transcriptions", post(audio_transcriptions));
+    #[cfg(feature = "generation-image")]
+    let v1_routes = v1_routes.route("/v1/images/generations", post(image_generations));
     let v1_routes = v1_routes
         .route("/v1/video/generations", post(video_generations))
         .route("/v1/video/edits", post(video_edits))
@@ -1968,7 +1994,7 @@ async fn parse_response_format_from_model(
 ///
 /// Accepts `input` (text) and optional `voice` parameters.
 /// Returns base64-encoded WAV audio with sample rate and duration.
-#[cfg(not(feature = "prism-backend"))]
+#[cfg(feature = "generation-tts")]
 async fn audio_speech(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
@@ -2087,7 +2113,7 @@ async fn audio_edits(
 /// - `language` (optional) — language hint (e.g. "Chinese", "English")
 ///
 /// Returns transcribed text matching the OpenAI Whisper `text` field format.
-#[cfg(not(feature = "prism-backend"))]
+#[cfg(feature = "generation-asr")]
 async fn audio_transcriptions(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
@@ -2335,7 +2361,7 @@ fn decode_body_base64(input: &str) -> Vec<u8> {
 ///   "strength": 0.8
 /// }
 /// ```
-#[cfg(not(feature = "prism-backend"))]
+#[cfg(feature = "generation-image")]
 async fn image_generations(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,

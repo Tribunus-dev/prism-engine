@@ -666,9 +666,15 @@ mod tests {
         // bytes_per_row = 10*2 = 20, aligned to 64 = 64, total = 10*64 = 640.
         // Pool of 4096 gives pressure ~0.16, safely in (0, 1].
         let bounded = IosurfaceAllocator::new(4096);
-        bounded.allocate(10, 10, Dtype::Float16).expect("pressure allocate");
+        bounded
+            .allocate(10, 10, Dtype::Float16)
+            .expect("pressure allocate");
         let p = bounded.pressure();
-        assert!(p > 0.0 && p <= 1.0, "pressure {} out of (0, 1] for 4KiB pool", p);
+        assert!(
+            p > 0.0 && p <= 1.0,
+            "pressure {} out of (0, 1] for 4KiB pool",
+            p
+        );
     }
 
     #[test]
@@ -704,7 +710,11 @@ mod tests {
         let before = alloc.total_allocated();
         assert!(before > 0, "total_allocated should be > 0 after allocation");
         alloc.free(id).expect("free");
-        assert_eq!(alloc.total_allocated(), 0, "total should drop to zero after free");
+        assert_eq!(
+            alloc.total_allocated(),
+            0,
+            "total should drop to zero after free"
+        );
     }
 
     #[test]

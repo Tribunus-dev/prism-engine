@@ -51,6 +51,8 @@ fn sample_layer_plan(layer_index: u32, attention_kind: &str) -> LayerPlan {
         post_ffw_layernorm_tensor_id: None,
         layer_scalar_ids: vec![],
         quantization_ids: vec![],
+        fused_operations: vec![],
+        route: Default::default(),
     }
 }
 

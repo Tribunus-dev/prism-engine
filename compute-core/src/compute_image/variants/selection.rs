@@ -123,11 +123,23 @@ fn shapes_are_compatible(
         (&Decode1, &Decode1) => true,
         (&DecodeBatch { max_batch: ref v }, &DecodeBatch { max_batch: ref r }) => *v >= *r,
         (&PrefillBucket { tokens: ref v }, &PrefillBucket { tokens: ref r }) => *v >= *r,
-        (&ChunkedPrefill { chunk_tokens: ref v }, &ChunkedPrefill { chunk_tokens: ref r }) => *v == *r,
+        (
+            &ChunkedPrefill {
+                chunk_tokens: ref v,
+            },
+            &ChunkedPrefill {
+                chunk_tokens: ref r,
+            },
+        ) => *v == *r,
         (&MixedBatch, &MixedBatch) => true,
-        (&DiffusionForward { max_canvas_tokens: ref v }, &DiffusionForward { max_canvas_tokens: ref r }) => {
-            *v >= *r
-        }
+        (
+            &DiffusionForward {
+                max_canvas_tokens: ref v,
+            },
+            &DiffusionForward {
+                max_canvas_tokens: ref r,
+            },
+        ) => *v >= *r,
         _ => false,
     }
 }

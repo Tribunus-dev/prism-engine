@@ -14,16 +14,6 @@ use super::legality::{
 const ANE_MIN_TENSOR_BYTES: u64 = 49152;
 const ANE_OBSERVED_COMPILE_LIMIT: u32 = 119;
 
-fn orion(id: &str) -> RuleIdentity {
-    RuleIdentity {
-        id: id.to_string(),
-        version: "1.0.0".into(),
-        provenance: "Orion pass_ane_validate.c".into(),
-        implementation_digest: EvidenceDigest(String::new()),
-        evidence_state: RuleEvidenceState::ImportedUnverified,
-    }
-}
-
 fn mil_spec(id: &str) -> RuleIdentity {
     RuleIdentity {
         id: id.to_string(),
@@ -97,7 +87,13 @@ impl AneRule for ConcatUnsupportedRule {
 pub struct GeluDecompositionRule;
 impl AneRule for GeluDecompositionRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-GRAPH-002")
+        RuleIdentity {
+            id: "ANE-GRAPH-002".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::OperationLowering
@@ -142,7 +138,13 @@ impl AneRule for GeluDecompositionRule {
 pub struct MinTensorSizeRule;
 impl AneRule for MinTensorSizeRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-TENSOR-001")
+        RuleIdentity {
+            id: "ANE-TENSOR-001".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::TensorShapeDtype
@@ -217,7 +219,13 @@ impl AneRule for DtypeRestrictionRule {
 pub struct MinIoSurfaceAllocationRule;
 impl AneRule for MinIoSurfaceAllocationRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-IO-001")
+        RuleIdentity {
+            id: "ANE-IO-001".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::IoSurfaceAllocation
@@ -259,7 +267,13 @@ impl AneRule for MinIoSurfaceAllocationRule {
 pub struct UniformMultiInputAllocationRule;
 impl AneRule for UniformMultiInputAllocationRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-IO-002")
+        RuleIdentity {
+            id: "ANE-IO-002".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::IoSurfaceAllocation
@@ -312,7 +326,13 @@ impl AneRule for UniformMultiInputAllocationRule {
 pub struct AlphabeticalOutputOrderingRule;
 impl AneRule for AlphabeticalOutputOrderingRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-IO-003")
+        RuleIdentity {
+            id: "ANE-IO-003".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::InputOutputOrdering
@@ -358,7 +378,13 @@ impl AneRule for AlphabeticalOutputOrderingRule {
 pub struct BlobfileOffsetRule;
 impl AneRule for BlobfileOffsetRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-WEIGHT-001")
+        RuleIdentity {
+            id: "ANE-WEIGHT-001".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::WeightArtifact
@@ -382,7 +408,13 @@ impl AneRule for BlobfileOffsetRule {
 pub struct CompileCeilingRule;
 impl AneRule for CompileCeilingRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-COMPILE-001")
+        RuleIdentity {
+            id: "ANE-COMPILE-001".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::CompilationResource
@@ -409,7 +441,13 @@ impl AneRule for CompileCeilingRule {
 pub struct MatmulConvLoweringRule;
 impl AneRule for MatmulConvLoweringRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-OP-001")
+        RuleIdentity {
+            id: "ANE-OP-001".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::OperationLowering
@@ -498,7 +536,13 @@ impl AneRule for NamedTransposeConstantsRule {
 pub struct Fp16NumericalDriftRule;
 impl AneRule for Fp16NumericalDriftRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-NUM-001")
+        RuleIdentity {
+            id: "ANE-NUM-001".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::RuntimeNumericalHazard
@@ -530,7 +574,13 @@ impl AneRule for Fp16NumericalDriftRule {
 pub struct SoftmaxNondeterminismRule;
 impl AneRule for SoftmaxNondeterminismRule {
     fn identity(&self) -> RuleIdentity {
-        orion("ANE-NUM-002")
+        RuleIdentity {
+            id: "ANE-NUM-002".into(),
+            version: "1.0.0".into(),
+            provenance: "Orion pass_ane_validate.c".into(),
+            implementation_digest: EvidenceDigest(String::new()),
+            evidence_state: RuleEvidenceState::ImportedUnverified,
+        }
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::RuntimeNumericalHazard
@@ -558,244 +608,26 @@ impl AneRule for SoftmaxNondeterminismRule {
     }
 }
 
-// ── Factory ─────────────────────────────────────────────────────────────
-use super::legality::AneLegality;
-
-/// Register all 13 Orion-derived ANE legality rules.
-/// Each rule starts as `ImportedUnverified` — it must be reproduced
-/// against Tribunus-qualified hardware before it becomes authoritative.
-pub fn register_orion_rules(legality: &mut AneLegality) {
-    legality.add_rule(Box::new(ConcatUnsupportedRule));
-    legality.add_rule(Box::new(GeluDecompositionRule));
-    legality.add_rule(Box::new(MinTensorSizeRule));
-    legality.add_rule(Box::new(DtypeRestrictionRule));
-    legality.add_rule(Box::new(MinIoSurfaceAllocationRule));
-    legality.add_rule(Box::new(UniformMultiInputAllocationRule));
-    legality.add_rule(Box::new(AlphabeticalOutputOrderingRule));
-    legality.add_rule(Box::new(BlobfileOffsetRule));
-    legality.add_rule(Box::new(CompileCeilingRule));
-    legality.add_rule(Box::new(MatmulConvLoweringRule));
-    legality.add_rule(Box::new(NamedTransposeConstantsRule));
-    legality.add_rule(Box::new(Fp16NumericalDriftRule));
-    legality.add_rule(Box::new(SoftmaxNondeterminismRule));
-}
-
-/// Orion import coverage ledger — maps every documented Orion constraint
-/// to its Tribunus implementation status.
-#[derive(Debug, Clone)]
-pub struct OrionImportLedger {
-    pub entries: Vec<OrionImportEntry>,
-}
-
-#[derive(Debug, Clone)]
-pub struct OrionImportEntry {
-    pub orion_constraint: String,
-    pub orion_source: String,
-    pub tribunus_rule_id: Option<String>,
-    pub status: ImportStatus,
-    pub notes: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ImportStatus {
-    Implemented,
-    NotApplicable,
-    Deferred,
-    Contradicted,
-    MergedInto(String),
-}
-
-impl Default for OrionImportLedger {
-    fn default() -> Self {
-        Self {
-            entries: vec![
-                import(
-                    "concat unsupported",
-                    "pass_ane_validate.c:1",
-                    Some("ANE-GRAPH-001"),
-                    ImportStatus::Implemented,
-                    "",
-                ),
-                import(
-                    "no GELU (decompose)",
-                    "pass_ane_validate.c:10",
-                    Some("ANE-GRAPH-002"),
-                    ImportStatus::Implemented,
-                    "SiLU emitted directly",
-                ),
-                import(
-                    "min tensor size 49KB",
-                    "pass_ane_validate.c:4",
-                    Some("ANE-TENSOR-001"),
-                    ImportStatus::Implemented,
-                    "verified in diff test",
-                ),
-                import(
-                    "ALV1 MIL opset",
-                    "ane_runtime.m",
-                    None,
-                    ImportStatus::NotApplicable,
-                    "Tribunus uses CoreML9 opset",
-                ),
-                import(
-                    "BLOBFILE offset 64",
-                    "ane_runtime.m",
-                    Some("ANE-WEIGHT-001"),
-                    ImportStatus::Implemented,
-                    "verified at artifact-gen",
-                ),
-                import(
-                    "uniform multi-input",
-                    "pass_ane_validate.c:2",
-                    Some("ANE-IO-002"),
-                    ImportStatus::Implemented,
-                    "enforced at schedule time",
-                ),
-                import(
-                    "alphabetical outputs",
-                    "pass_ane_validate.c:3",
-                    Some("ANE-IO-003"),
-                    ImportStatus::Implemented,
-                    "verified in diff test",
-                ),
-                import(
-                    "~119 compile limit",
-                    "ane_runtime.m",
-                    Some("ANE-COMPILE-001"),
-                    ImportStatus::Implemented,
-                    "advisory; machine-qualified",
-                ),
-                import(
-                    "conv-based linear (matmul)",
-                    "codegen.m",
-                    Some("ANE-OP-001"),
-                    ImportStatus::Implemented,
-                    "lowering candidate offered",
-                ),
-                import(
-                    "named transpose constants",
-                    "codegen.m",
-                    Some("ANE-OP-002"),
-                    ImportStatus::Implemented,
-                    "MIL emitter guarantees",
-                ),
-                import(
-                    "fp16 numerical drift",
-                    "",
-                    Some("ANE-NUM-001"),
-                    ImportStatus::Implemented,
-                    "advisory",
-                ),
-                import(
-                    "softmax non-determinism",
-                    "",
-                    Some("ANE-NUM-002"),
-                    ImportStatus::Implemented,
-                    "advisory",
-                ),
-                import(
-                    "conv pad_type=valid",
-                    "codegen.m",
-                    None,
-                    ImportStatus::Deferred,
-                    "needed for conv lowering",
-                ),
-                import(
-                    "conv groups=1",
-                    "codegen.m",
-                    None,
-                    ImportStatus::Deferred,
-                    "needed for conv lowering",
-                ),
-                import(
-                    "BLOBFILE weight deltas",
-                    "ane_runtime.m",
-                    None,
-                    ImportStatus::Deferred,
-                    "needed for weight patching (M0012)",
-                ),
-                import(
-                    "fp16 dtypes only on ANE",
-                    "mil_spec",
-                    Some("ANE-TENSOR-002"),
-                    ImportStatus::Implemented,
-                    "fp16/fp32 allowed",
-                ),
-                import(
-                    "1x1 conv only on ANE",
-                    "codegen.m",
-                    None,
-                    ImportStatus::Deferred,
-                    "needed for conv lowering (M0012)",
-                ),
-                import(
-                    "ANE IOSurface [1,C,1,S]",
-                    "iosurface_tensor.h",
-                    Some("M0011"),
-                    ImportStatus::Implemented,
-                    "orion_tensor_from_external + orion_tensor_from_arena in iosurface_tensor.m/h; orion_bridge.rs in compute-core",
-                ),
-                import(
-                    "program cache by hash",
-                    "ane_program_cache.h",
-                    None,
-                    ImportStatus::Deferred,
-                    "M0013 program caching",
-                ),
-                import(
-                    "delta weight reload 494ms",
-                    "ane_runtime.m patch fn",
-                    None,
-                    ImportStatus::Deferred,
-                    "M0013 weight patching",
-                ),
-            ],
-        }
-    }
-}
-
-fn import(
-    constraint: &str,
-    source: &str,
-    rule: Option<&str>,
-    status: ImportStatus,
-    notes: &str,
-) -> OrionImportEntry {
-    OrionImportEntry {
-        orion_constraint: constraint.to_string(),
-        orion_source: source.to_string(),
-        tribunus_rule_id: rule.map(|s| s.to_string()),
-        status,
-        notes: notes.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod ledger_tests {
     use super::*;
 
     #[test]
-    fn orion_ledger_covers_20_constraints() {
-        let ledger = OrionImportLedger::default();
-        assert!(
-            ledger.entries.len() >= 20,
-            "ledger must cover at least 20 Orion constraints"
-        );
-        let implemented = ledger
-            .entries
-            .iter()
-            .filter(|e| e.status == ImportStatus::Implemented)
-            .count();
-        assert!(
-            implemented >= 12,
-            "at least 12 constraints must be implemented; got {implemented}"
-        );
-    }
-
-    #[test]
     fn all_rules_have_evidence_state() {
-        let mut legality = AneLegality::new(EvidenceDigest("test".into()));
-        register_orion_rules(&mut legality);
+        let mut legality = super::super::legality::AneLegality::new(EvidenceDigest("test".into()));
+        legality.add_rule(Box::new(super::ConcatUnsupportedRule));
+        legality.add_rule(Box::new(super::GeluDecompositionRule));
+        legality.add_rule(Box::new(super::MinTensorSizeRule));
+        legality.add_rule(Box::new(super::DtypeRestrictionRule));
+        legality.add_rule(Box::new(super::MinIoSurfaceAllocationRule));
+        legality.add_rule(Box::new(super::UniformMultiInputAllocationRule));
+        legality.add_rule(Box::new(super::AlphabeticalOutputOrderingRule));
+        legality.add_rule(Box::new(super::BlobfileOffsetRule));
+        legality.add_rule(Box::new(super::CompileCeilingRule));
+        legality.add_rule(Box::new(super::MatmulConvLoweringRule));
+        legality.add_rule(Box::new(super::NamedTransposeConstantsRule));
+        legality.add_rule(Box::new(super::Fp16NumericalDriftRule));
+        legality.add_rule(Box::new(super::SoftmaxNondeterminismRule));
         let region = crate::compiler::scheduled::ScheduledRegion {
             region_id: crate::compiler::scheduled::RegionId(1),
             name: "test".into(),

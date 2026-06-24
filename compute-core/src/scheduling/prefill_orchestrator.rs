@@ -78,8 +78,7 @@ impl PrefillOrchestrator {
 
         // Lazy-init MLState.
         if self.state_ctx.is_none() {
-            self.state_ctx =
-                Some(StatefulPrefillContext::new(model_ptrs[0].as_ptr())?);
+            self.state_ctx = Some(StatefulPrefillContext::new(model_ptrs[0].as_ptr())?);
         }
 
         let hidden = self.embedding.hidden_dim() as u32;
@@ -101,9 +100,8 @@ impl PrefillOrchestrator {
 
             // IOSurface-backed arenas and Core ML stateful prefill
             let ctx = self.state_ctx.as_mut().unwrap();
-            let mut input_arena =
-                Arena::new(chunk_size as u32, hidden, mlx_rs::Dtype::Float16)
-                    .map_err(|e| format!("input arena: {e}"))?;
+            let mut input_arena = Arena::new(chunk_size as u32, hidden, mlx_rs::Dtype::Float16)
+                .map_err(|e| format!("input arena: {e}"))?;
             input_arena.lock().map_err(|e| format!("input lock: {e}"))?;
             unsafe {
                 std::ptr::copy_nonoverlapping(
@@ -112,11 +110,12 @@ impl PrefillOrchestrator {
                     activations.len(),
                 );
             }
-            input_arena.unlock().map_err(|e| format!("input unlock: {e}"))?;
+            input_arena
+                .unlock()
+                .map_err(|e| format!("input unlock: {e}"))?;
 
-            let mut output_arena =
-                Arena::new(chunk_size as u32, hidden, mlx_rs::Dtype::Float16)
-                    .map_err(|e| format!("output arena: {e}"))?;
+            let mut output_arena = Arena::new(chunk_size as u32, hidden, mlx_rs::Dtype::Float16)
+                .map_err(|e| format!("output arena: {e}"))?;
 
             ctx.prefill_chunk(
                 model_ptrs[0].as_ptr(),

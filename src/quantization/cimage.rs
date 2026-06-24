@@ -83,11 +83,15 @@ impl CImageWriter {
         // Reserve first HEADER_PAGES × PAGE_SIZE for the header
         let header_bytes = (HEADER_PAGES * PAGE_SIZE) as usize;
         let zeros = vec![0u8; header_bytes];
-        file.write_all(&zeros).map_err(|e| format!("reserve header: {e}"))?;
+        file.write_all(&zeros)
+            .map_err(|e| format!("reserve header: {e}"))?;
         // Seek to end of header block so append starts at the next page
         file.seek(SeekFrom::Start(header_bytes as u64))
             .map_err(|e| format!("seek: {e}"))?;
-        Ok(CImageWriter { file, header: CImageHeader::default() })
+        Ok(CImageWriter {
+            file,
+            header: CImageHeader::default(),
+        })
     }
 
     /// Write a palettized split-block payload.
@@ -104,7 +108,9 @@ impl CImageWriter {
     ) -> Result<(), String> {
         self.align_to_page()?;
         let offset = self.current_pos()?;
-        self.file.write_all(payload).map_err(|e| format!("write payload: {e}"))?;
+        self.file
+            .write_all(payload)
+            .map_err(|e| format!("write payload: {e}"))?;
         self.header.tensors.insert(
             name.to_string(),
             TensorRecord {
@@ -128,7 +134,9 @@ impl CImageWriter {
     ) -> Result<(), String> {
         self.align_to_page()?;
         let offset = self.current_pos()?;
-        self.file.write_all(payload).map_err(|e| format!("write payload: {e}"))?;
+        self.file
+            .write_all(payload)
+            .map_err(|e| format!("write payload: {e}"))?;
         self.header.tensors.insert(
             name.to_string(),
             TensorRecord {
@@ -143,14 +151,12 @@ impl CImageWriter {
     }
 
     /// Write an arbitrary byte blob (CoreML model, etc.).
-    pub fn append_blob(
-        &mut self,
-        name: &str,
-        payload: &[u8],
-    ) -> Result<(), String> {
+    pub fn append_blob(&mut self, name: &str, payload: &[u8]) -> Result<(), String> {
         self.align_to_page()?;
         let offset = self.current_pos()?;
-        self.file.write_all(payload).map_err(|e| format!("write blob: {e}"))?;
+        self.file
+            .write_all(payload)
+            .map_err(|e| format!("write blob: {e}"))?;
         self.header.tensors.insert(
             name.to_string(),
             TensorRecord {
@@ -181,7 +187,8 @@ impl CImageWriter {
         assert!(
             16 + header_size <= reserved,
             "Header ({} B) exceeds reserved {} B",
-            16 + header_size, reserved
+            16 + header_size,
+            reserved
         );
 
         self.file
@@ -196,9 +203,7 @@ impl CImageWriter {
         self.file
             .write_all(header_bytes)
             .map_err(|e| format!("write header: {e}"))?;
-        self.file
-            .flush()
-            .map_err(|e| format!("flush: {e}"))?;
+        self.file.flush().map_err(|e| format!("flush: {e}"))?;
         Ok(())
     }
 
@@ -209,7 +214,9 @@ impl CImageWriter {
         if remainder != 0 {
             let pad = (PAGE_SIZE - remainder) as usize;
             let zeros = vec![0u8; pad];
-            self.file.write_all(&zeros).map_err(|e| format!("align padding: {e}"))?;
+            self.file
+                .write_all(&zeros)
+                .map_err(|e| format!("align padding: {e}"))?;
         }
         Ok(())
     }
@@ -242,7 +249,10 @@ impl CImageReader {
         file.read_exact(&mut magic)
             .map_err(|e| format!("read magic: {e}"))?;
         if &magic != MAGIC {
-            return Err(format!("Invalid magic: expected TRB_CIMG, got {:?}", &magic));
+            return Err(format!(
+                "Invalid magic: expected TRB_CIMG, got {:?}",
+                &magic
+            ));
         }
 
         // Read header size
@@ -255,38 +265,43 @@ impl CImageReader {
         let mut hdr_buf = vec![0u8; hdr_size];
         file.read_exact(&mut hdr_buf)
             .map_err(|e| format!("read header: {e}"))?;
-        let header: CImageHeader = serde_json::from_slice(&hdr_buf)
-            .map_err(|e| format!("parse header: {e}"))?;
+        let header: CImageHeader =
+            serde_json::from_slice(&hdr_buf).map_err(|e| format!("parse header: {e}"))?;
 
         let file_path = path.to_path_buf();
-        Ok(CImageReader { header, _file: file, file_path })
+        Ok(CImageReader {
+            header,
+            _file: file,
+            file_path,
+        })
     }
 
     /// Return the offset + size for a named tensor/blob.
 
     /// Read a blob payload from disk into memory.
     pub fn read_blob(&self, name: &str) -> Result<Vec<u8>, String> {
-        let rec = self.tensor(name).ok_or_else(|| format!("blob {name} not found"))?;
+        let rec = self
+            .tensor(name)
+            .ok_or_else(|| format!("blob {name} not found"))?;
         if !matches!(rec.tensor_type, TensorType::Blob) {
             return Err(format!("{name} is not a blob"));
         }
         use std::io::{Read, Seek};
-        let mut f = std::fs::File::open(&self.file_path)
-            .map_err(|e| format!("re-open: {e}"))?;
+        let mut f = std::fs::File::open(&self.file_path).map_err(|e| format!("re-open: {e}"))?;
         f.seek(SeekFrom::Start(rec.offset))
             .map_err(|e| format!("seek: {e}"))?;
         let mut buf = vec![0u8; rec.size as usize];
-        f.read_exact(&mut buf).map_err(|e| format!("read blob: {e}"))?;
+        f.read_exact(&mut buf)
+            .map_err(|e| format!("read blob: {e}"))?;
         Ok(buf)
     }
     /// Return the offset + size for a named tensor.
 
-/// Return the offset + size for a named tensor.
+    /// Return the offset + size for a named tensor.
     pub fn tensor(&self, name: &str) -> Option<&TensorRecord> {
         self.header.tensors.get(name)
     }
 }
-
 
 /// Append a blob payload to an already-finalized .cimage file.
 pub fn cimage_append_blob(
@@ -294,29 +309,37 @@ pub fn cimage_append_blob(
     name: &str,
     payload: &[u8],
 ) -> Result<(), String> {
-    use std::io::{Read, Seek, Write};
+    use std::io::{Seek, Write};
     let reader = CImageReader::open(path)?;
-    let end_offset = reader.header.tensors.values()
+    let end_offset = reader
+        .header
+        .tensors
+        .values()
         .map(|r| r.offset + r.size)
         .max()
         .unwrap_or(HEADER_PAGES * PAGE_SIZE);
     let aligned = (end_offset + PAGE_SIZE - 1) / PAGE_SIZE * PAGE_SIZE;
     let mut file = std::fs::OpenOptions::new()
-        .read(true).write(true).open(path)
+        .read(true)
+        .write(true)
+        .open(path)
         .map_err(|e| format!("open: {e}"))?;
     file.seek(SeekFrom::Start(aligned))
         .map_err(|e| format!("seek: {e}"))?;
     file.write_all(payload)
         .map_err(|e| format!("write blob: {e}"))?;
     let mut header = reader.header;
-    header.tensors.insert(name.to_string(), TensorRecord {
-        tensor_type: TensorType::Blob,
-        offset: aligned,
-        size: payload.len() as u64,
-        dim_m: 0, dim_n: 0,
-    });
-    let hdr_json = serde_json::to_string(&header)
-        .map_err(|e| format!("serialize: {e}"))?;
+    header.tensors.insert(
+        name.to_string(),
+        TensorRecord {
+            tensor_type: TensorType::Blob,
+            offset: aligned,
+            size: payload.len() as u64,
+            dim_m: 0,
+            dim_n: 0,
+        },
+    );
+    let hdr_json = serde_json::to_string(&header).map_err(|e| format!("serialize: {e}"))?;
     file.seek(SeekFrom::Start(0))
         .map_err(|e| format!("seek: {e}"))?;
     file.write_all(MAGIC)
@@ -345,7 +368,9 @@ mod tests {
             let mut writer = CImageWriter::new(&path).unwrap();
             // Palettized payload: 2 rows × (16 codebook × 2B + 4 indices)
             let payload = (0..(2 * 32 + 2 * 4) as u8).collect::<Vec<_>>();
-            writer.append_palettized("layer.0.wq", &payload, 2, 8).unwrap();
+            writer
+                .append_palettized("layer.0.wq", &payload, 2, 8)
+                .unwrap();
             writer.finalize().unwrap();
         }
 
@@ -355,7 +380,11 @@ mod tests {
         assert_eq!(rec.dim_m, 2);
         assert_eq!(rec.dim_n, 8);
         assert!(matches!(rec.tensor_type, TensorType::Palettized4Bit));
-        assert!(rec.offset % PAGE_SIZE == 0, "offset {} not page-aligned", rec.offset);
+        assert!(
+            rec.offset % PAGE_SIZE == 0,
+            "offset {} not page-aligned",
+            rec.offset
+        );
 
         std::fs::remove_file(&path).ok();
     }

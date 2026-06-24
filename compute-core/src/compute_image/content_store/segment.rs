@@ -54,7 +54,8 @@ impl DeterministicSegmentWriter {
         let misalignment = current_len % self.alignment;
         if misalignment != 0 {
             let pad = self.alignment - misalignment;
-            self.buffer.extend(std::iter::repeat(0u8).take(pad as usize));
+            self.buffer
+                .extend(std::iter::repeat(0u8).take(pad as usize));
         }
         let offset = self.buffer.len() as u64;
         let payload_bytes = data.len() as u64;
@@ -81,7 +82,8 @@ impl DeterministicSegmentWriter {
         let misalignment = current_len % self.alignment;
         if misalignment != 0 {
             let pad = self.alignment - misalignment;
-            self.buffer.extend(std::iter::repeat(0u8).take(pad as usize));
+            self.buffer
+                .extend(std::iter::repeat(0u8).take(pad as usize));
         }
     }
 

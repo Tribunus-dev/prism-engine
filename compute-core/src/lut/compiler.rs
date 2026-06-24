@@ -7,6 +7,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::config::build_execution_plan;
+use crate::config::parse_config;
+use crate::config_namespace::resolve_namespace;
 use crate::lut::graph::{ModelGraph, TensorBlueprint};
 use crate::quantization::cimage::CImageWriter;
 use crate::quantization::palette::palettize_matrix;
@@ -24,6 +27,7 @@ pub fn compile_to_cimage(
     graph: &ModelGraph,
     safetensors_dir: &Path,
     output_path: &Path,
+    config_path: &Path,
 ) -> Result<(), String> {
     let mut cimage = CImageWriter::new(output_path)?;
     let pal_tensors = graph.palettized_tensors();
@@ -60,9 +64,60 @@ pub fn compile_to_cimage(
         eprintln!("bpp={bpp:.3} {:.2}s", elapsed.as_secs_f64());
     }
 
+    // Build and embed heterogeneous execution plan
+    if let Ok(plan_json) = build_execution_plan_json(config_path, safetensors_dir) {
+        cimage.set_execution_plan(plan_json);
+    }
+
     cimage.finalize()?;
     eprintln!("[prism:compile] Done -> {}", output_path.display());
     Ok(())
+}
+
+/// Build the execution plan as a JSON string for embedding in the CImage.
+fn build_execution_plan_json(config_path: &Path, _weights_dir: &Path) -> Result<String, String> {
+    let (arch, _quant, _manifest) = parse_config(
+        &config_path.to_string_lossy()
+    ).map_err(|e| format!("config parse: {e}"))?;
+
+    // Collect tensor names for namespace discovery
+    let mut tensor_names: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(_weights_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "safetensors") {
+                if let Ok(data) = std::fs::read(&path) {
+                    if data.len() >= 8 {
+                        let header_len = u64::from_le_bytes(data[0..8].try_into().unwrap_or([0; 8]));
+                        if header_len > 0 && (8 + header_len as usize) <= data.len() {
+                            if let Ok(header) = serde_json::from_slice::<serde_json::Value>(&data[8..8 + header_len as usize]) {
+                                if let Some(obj) = header.as_object() {
+                                    tensor_names.extend(obj.keys().cloned());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    tensor_names.sort();
+
+    let namespace = match resolve_namespace(&tensor_names) {
+        Some(ns) => ns,
+        None => return Err("could not resolve model namespace".into()),
+    };
+
+    let mut emitted_ids: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for (i, name) in tensor_names.iter().enumerate() {
+        emitted_ids.insert(name.clone(), i as u32);
+    }
+
+    let mut execution_plan = build_execution_plan(&arch, &namespace, &emitted_ids);
+    execution_plan.apply_fusion_pass();
+
+    serde_json::to_string(&execution_plan)
+        .map_err(|e| format!("serialize execution plan: {e}"))
 }
 
 /// Compile to memory (no .cimage I/O).
@@ -93,13 +148,16 @@ pub fn compile_to_memory(
             payload.extend_from_slice(&row.indices);
         }
 
-        results.insert(tb.key.clone(), CompiledTensor {
-            key: tb.key.clone(),
-            dim_m: tb.dim_m,
-            dim_n: tb.dim_n,
-            payload,
-            effective_bpp: bpp as f32,
-        });
+        results.insert(
+            tb.key.clone(),
+            CompiledTensor {
+                key: tb.key.clone(),
+                dim_m: tb.dim_m,
+                dim_n: tb.dim_n,
+                payload,
+                effective_bpp: bpp as f32,
+            },
+        );
     }
 
     Ok(results)
@@ -111,7 +169,11 @@ fn discover_safetensors(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
     let mut shards = Vec::new();
     for entry in std::fs::read_dir(dir).map_err(|e| format!("read dir: {e}"))? {
         let entry = entry.map_err(|e| format!("entry: {e}"))?;
-        if entry.path().extension().map_or(false, |ext| ext == "safetensors") {
+        if entry
+            .path()
+            .extension()
+            .map_or(false, |ext| ext == "safetensors")
+        {
             shards.push(entry.path());
         }
     }
@@ -122,9 +184,13 @@ fn discover_safetensors(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
     Ok(shards)
 }
 
-fn load_weight_f32(shards: &[std::path::PathBuf], tb: &TensorBlueprint) -> Result<Vec<f32>, String> {
+fn load_weight_f32(
+    shards: &[std::path::PathBuf],
+    tb: &TensorBlueprint,
+) -> Result<Vec<f32>, String> {
     for shard_path in shards {
-        let data = std::fs::read(shard_path).map_err(|e| format!("read {}: {e}", shard_path.display()))?;
+        let data =
+            std::fs::read(shard_path).map_err(|e| format!("read {}: {e}", shard_path.display()))?;
         let tensors = safetensors::SafeTensors::deserialize(&data)
             .map_err(|e| format!("parse {}: {e}", shard_path.display()))?;
         if let Ok(view) = tensors.tensor(&tb.key) {
@@ -143,21 +209,21 @@ fn tensor_to_f32(
 ) -> Result<Vec<f32>, String> {
     use safetensors::Dtype;
     match view.dtype() {
-        Dtype::F32 => {
-            Ok(view.data().chunks_exact(4).map(|c| {
-                f32::from_le_bytes([c[0], c[1], c[2], c[3]])
-            }).collect())
-        }
-        Dtype::F16 => {
-            Ok(view.data().chunks_exact(2).map(|c| {
-                half::f16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32()
-            }).collect())
-        }
-        Dtype::BF16 => {
-            Ok(view.data().chunks_exact(2).map(|c| {
-                half::bf16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32()
-            }).collect())
-        }
+        Dtype::F32 => Ok(view
+            .data()
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect()),
+        Dtype::F16 => Ok(view
+            .data()
+            .chunks_exact(2)
+            .map(|c| half::f16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32())
+            .collect()),
+        Dtype::BF16 => Ok(view
+            .data()
+            .chunks_exact(2)
+            .map(|c| half::bf16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32())
+            .collect()),
         Dtype::U32 => dequantize_mlx_block(tensors, key, view),
         _ => Err(format!("unsupported dtype {:?} for {}", view.dtype(), key)),
     }
@@ -165,10 +231,22 @@ fn tensor_to_f32(
 
 /// NF4 exact quantile table (information-theoretic NormalFloat4).
 const NF4_LUT: [f32; 16] = [
-    -1.0, -0.6961928, -0.52507305, -0.39490527,
-    -0.28444138, -0.18477343, -0.091050036, 0.0,
-    0.07958029, 0.1609302, 0.2461123, 0.33791524,
-    0.44070983, 0.562617, 0.72295684, 1.0,
+    -1.0,
+    -0.6961928,
+    -0.52507305,
+    -0.39490527,
+    -0.28444138,
+    -0.18477343,
+    -0.091050036,
+    0.0,
+    0.07958029,
+    0.1609302,
+    0.2461123,
+    0.33791524,
+    0.44070983,
+    0.562617,
+    0.72295684,
+    1.0,
 ];
 
 /// Dequantize U32 block-quantized weights (MLX/AF8/NF4 format).
@@ -184,12 +262,16 @@ fn dequantize_mlx_block(
     let scales_key = format!("{base}.scales");
     let biases_key = format!("{base}.biases");
 
-    let packed: Vec<u32> = view.data().chunks_exact(4).map(|c| {
-        u32::from_le_bytes([c[0], c[1], c[2], c[3]])
-    }).collect();
+    let packed: Vec<u32> = view
+        .data()
+        .chunks_exact(4)
+        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
 
     // Recursively load scales/biases
-    let sv = tensors.tensor(&scales_key).map_err(|_| format!("missing {scales_key}"))?;
+    let sv = tensors
+        .tensor(&scales_key)
+        .map_err(|_| format!("missing {scales_key}"))?;
     let scales = tensor_to_f32(tensors, &sv, &scales_key)?;
     let biases = match tensors.tensor(&biases_key) {
         Ok(bv) => tensor_to_f32(tensors, &bv, &biases_key)?,
@@ -198,7 +280,11 @@ fn dequantize_mlx_block(
 
     let logical_n: usize = view.shape().iter().product();
     let group_size = logical_n / scales.len().max(1);
-    let elements_per_word = if packed.len() > 0 { logical_n / packed.len() } else { 8 };
+    let elements_per_word = if packed.len() > 0 {
+        logical_n / packed.len()
+    } else {
+        8
+    };
     let is_4bit = elements_per_word >= 8;
 
     let mut decoded = Vec::with_capacity(logical_n);
@@ -216,7 +302,10 @@ fn dequantize_mlx_block(
                 };
                 decoded.push(v);
                 gc += 1;
-                if gc >= group_size { gc = 0; si += 1; }
+                if gc >= group_size {
+                    gc = 0;
+                    si += 1;
+                }
             }
         }
     } else {
@@ -225,7 +314,10 @@ fn dequantize_mlx_block(
                 let byte = (*w >> (i * 8)) & 0xFF;
                 decoded.push(((byte as f32) * scales[si]) + biases[si]);
                 gc += 1;
-                if gc >= group_size { gc = 0; si += 1; }
+                if gc >= group_size {
+                    gc = 0;
+                    si += 1;
+                }
             }
         }
     }

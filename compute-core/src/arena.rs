@@ -6,8 +6,8 @@
 
 use std::ffi::c_void;
 
-use crate::external_array::ExternalStorage;
 pub use crate::arena_info::ArenaInfo;
+use crate::external_array::ExternalStorage;
 
 use std::os::raw::c_void as RawVoid;
 pub trait OutputBufferHint {
@@ -120,27 +120,30 @@ impl Arena {
         // IOSurface allocation failed (pool exhausted or tensor too large).
         // Fall back to heap memory. The Drop handler correctly frees heap
         // memory when cv_buffer is null and externally_owned is false.
-        eprintln!("[arena] IOSurface alloc failed (rc={}) for {} bytes, using heap", rc, byte_count);
-            let mut data: Vec<u8> = vec![0u8; byte_count as usize];
-            let ptr = data.as_mut_ptr();
-            let cap = data.capacity();
-            std::mem::forget(data);
-            let info = ArenaInfo {
-                width: byte_count as i32,
-                height: 1,
-                logical_dim0: byte_count as i32,
-                logical_dim1: 1,
-                pixel_format: 0,
-                bytes_per_row: byte_count as i32,
-                byte_size: cap as i32,
+        eprintln!(
+            "[arena] IOSurface alloc failed (rc={}) for {} bytes, using heap",
+            rc, byte_count
+        );
+        let mut data: Vec<u8> = vec![0u8; byte_count as usize];
+        let ptr = data.as_mut_ptr();
+        let cap = data.capacity();
+        std::mem::forget(data);
+        let info = ArenaInfo {
+            width: byte_count as i32,
+            height: 1,
+            logical_dim0: byte_count as i32,
+            logical_dim1: 1,
+            pixel_format: 0,
+            bytes_per_row: byte_count as i32,
+            byte_size: cap as i32,
             base_address: ptr as *mut std::ffi::c_void,
-                cv_buffer: std::ptr::null_mut(),
-                io_surface: std::ptr::null_mut(),
-            };
+            cv_buffer: std::ptr::null_mut(),
+            io_surface: std::ptr::null_mut(),
+        };
         Ok(Arena {
-                info,
-                dtype: mlx_rs::Dtype::Float32,
-                externally_owned: false,
+            info,
+            dtype: mlx_rs::Dtype::Float32,
+            externally_owned: false,
         })
     }
 

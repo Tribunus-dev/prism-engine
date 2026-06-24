@@ -34,7 +34,12 @@ impl TokenEmbedding {
             weights.len(),
             vocab_size * hidden_dim,
         );
-        TokenEmbedding { weights, vocab_size, hidden_dim, pad_token_id }
+        TokenEmbedding {
+            weights,
+            vocab_size,
+            hidden_dim,
+            pad_token_id,
+        }
     }
 
     /// Look up a sequence of token IDs and return concatenated FP16 embeddings.
@@ -93,7 +98,7 @@ mod tests {
         let tokens = vec![1u32, 0u32];
         let result = emb.lookup(&tokens);
         assert_eq!(result.len(), 8); // 2 tokens * 4 dim
-        // Token 1 starts at offset 4: weights[4..8]
+                                     // Token 1 starts at offset 4: weights[4..8]
         assert_eq!(result[0], 4);
         assert_eq!(result[3], 7);
         // Token 0 starts at offset 0: weights[0..4]

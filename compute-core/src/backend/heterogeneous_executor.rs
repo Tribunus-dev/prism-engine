@@ -65,8 +65,6 @@ pub struct HeterogeneousExecutor {
     allocator: Option<Arc<IosurfaceAllocator>>,
     execution_count: u64,
     pub(crate) operation_registry: HashMap<OperationId, OperationDescriptor>,
-    /// Optional ANE program cache for Orion-routed boundaries.
-    ane_cache: Option<crate::memory::ane_program_cache::AneProgramCache>,
     /// Per-operation runtime routing table (populated by FlexDispatch).
     pub(crate) routing_table: HashMap<OperationId, BackendId>,
 }
@@ -79,7 +77,6 @@ impl HeterogeneousExecutor {
             allocator: None,
             execution_count: 0,
             operation_registry: HashMap::new(),
-            ane_cache: None,
             routing_table: HashMap::new(),
         }
     }
@@ -104,12 +101,6 @@ impl HeterogeneousExecutor {
     /// to resolve each operation in a boundary plan at dispatch time.
     pub fn set_operation_registry(&mut self, registry: HashMap<OperationId, OperationDescriptor>) {
         self.operation_registry = registry;
-    }
-
-    /// Set the ANE program cache (compiled per-layer Orion programs).
-    /// Without this, Orion-routed boundaries will fall back to MLX.
-    pub fn set_ane_cache(&mut self, cache: crate::memory::ane_program_cache::AneProgramCache) {
-        self.ane_cache = Some(cache);
     }
 
     /// Find a registered backend by its [`BackendId`].
@@ -242,24 +233,8 @@ impl BoundaryExecutor for HeterogeneousExecutor {
                 .collect::<Result<Vec<_>, String>>()?;
 
             // 3. Find the backend for this boundary (mutable borrow)
-            //    (moved after the ANE cache lookup to avoid borrow conflict)
-
-            // If this boundary is assigned to Orion (ANE), use a compiled
-            // ANE program instead of individual backend operations.
-            let boundary_type = if plan.backend_id.0 == 3 {
-                self.ane_cache.as_ref().and_then(|cache| {
-                    // Find the program for this boundary's layer.
-                    // The evaluation group id maps to the layer index.
-                    let prog = cache.get_program(plan.group_id.0 as usize);
-                    if prog.is_null() {
-                        None
-                    } else {
-                        Some(prog)
-                    }
-                })
-            } else {
-                None
-            };
+            // 3. All boundaries dispatch through the regular backend path.
+            let boundary_type: Option<*mut std::ffi::c_void> = None;
 
             // Reserve space for operation receipts (used below)
             let mut _op_receipts: Vec<BackendExecutionReceipt> =
@@ -274,7 +249,7 @@ impl BoundaryExecutor for HeterogeneousExecutor {
                 // ANE dispatch: run the compiled Orion program.
                 // For now, emit a single receipt with ANE execution time.
                 // Phase 2: Build IOSurface I/O buffers from tensor registry
-                // and call orion_eval(prog, inputs, outputs).
+                // and execute the ANE program.
                 _op_receipts.push(BackendExecutionReceipt {
                     operation_id: OperationId(0),
                     backend_id: BackendId(3),

@@ -5,31 +5,31 @@
 //! Manages request queuing, prefill/decode phase scheduling, batch construction,
 //! and token budget allocation across concurrent requests.
 
+pub mod activation_arena;
+pub mod activation_binding;
 pub mod batch;
-pub mod phase_readiness;
+pub mod benchmark_harness;
+pub mod execution_context;
+pub mod kv_transaction;
+pub mod legacy_adapter;
+#[cfg(feature = "metal-dispatch")]
+pub mod metal_decoder;
+pub mod phase_cancellation;
 pub mod phase_engine;
 pub mod phase_engine_state;
 pub mod phase_invocation;
+pub mod phase_readiness;
 pub mod phase_runner;
-pub mod phase_cancellation;
 pub mod phase_telemetry;
-pub mod activation_binding;
-pub mod activation_arena;
-pub mod weight_residency;
-pub mod kv_transaction;
-pub mod legacy_adapter;
-pub mod execution_context;
-pub mod ready_queue;
 pub mod prefill_orchestrator;
-pub mod benchmark_harness;
-#[cfg(feature = "metal-dispatch")]
-pub mod metal_decoder;
+pub mod ready_queue;
 pub mod receipts;
 pub mod request;
 pub mod saved_request;
 pub mod scheduler;
 pub mod slot;
 pub mod token_budget;
+pub mod weight_residency;
 pub use token_budget::*;
 
 pub use saved_request::SavedRequest;

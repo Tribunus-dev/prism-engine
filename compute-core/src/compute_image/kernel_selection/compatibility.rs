@@ -7,10 +7,10 @@
 //! Multiple profile seals can be assembled into a
 //! [`ProfileProofSealBundle`] for batch verification.
 
-use serde::{Deserialize, Serialize};
 use crate::compute_image::kernel_selection::selection::PreselectedKernelVariant;
 use crate::compute_image::verification::numerical::NumericalVerificationReceipt;
 use crate::compute_image::verification::resource_fit::ResourceFitReceipt;
+use serde::{Deserialize, Serialize};
 
 /// Compile-time proof seal for a single target profile.
 ///

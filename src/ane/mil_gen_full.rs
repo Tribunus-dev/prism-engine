@@ -10,8 +10,8 @@ use coreml_proto::proto::mil_spec::argument;
 
 use crate::ane::mil_builder::MilBuilder;
 use crate::ane::mil_helpers::{
-    make_operation, named_arg, op_composite_silu, op_pow, op_reduce_sum, op_rsqrt, string_attr,
-    scalar_value_type, tensor_type, value_type_tensor,
+    make_operation, named_arg, op_composite_silu, op_pow, op_reduce_sum, op_rsqrt,
+    scalar_value_type, string_attr, tensor_type, value_type_tensor,
 };
 
 /// Generate a full prefill MIL program for all layers.
@@ -107,7 +107,13 @@ pub fn build_full_prefill_mil(
 
         // 2. QKV projections via LUT+matmul ───────────────────────────
         // Q: [1, n, h] → [1, n, q_dim]
-        let r = op_lut_to_dense(b, &format!("q_lut_{layer_idx}"), &w.q_idx, &w.q_cb, &[q_dim, h]);
+        let r = op_lut_to_dense(
+            b,
+            &format!("q_lut_{layer_idx}"),
+            &w.q_idx,
+            &w.q_cb,
+            &[q_dim, h],
+        );
         b = r.0;
         let q_weight_name = r.1;
         let r = op_matmul(b, &normed, &q_weight_name);
@@ -115,7 +121,13 @@ pub fn build_full_prefill_mil(
         let q_raw = r.1;
 
         // K: [1, n, h] → [1, n, kv_dim]
-        let r = op_lut_to_dense(b, &format!("k_lut_{layer_idx}"), &w.k_idx, &w.k_cb, &[kv_dim, h]);
+        let r = op_lut_to_dense(
+            b,
+            &format!("k_lut_{layer_idx}"),
+            &w.k_idx,
+            &w.k_cb,
+            &[kv_dim, h],
+        );
         b = r.0;
         let k_weight_name = r.1;
         let r = op_matmul(b, &normed, &k_weight_name);
@@ -123,7 +135,13 @@ pub fn build_full_prefill_mil(
         let k_raw = r.1;
 
         // V: [1, n, h] → [1, n, kv_dim]
-        let r = op_lut_to_dense(b, &format!("v_lut_{layer_idx}"), &w.v_idx, &w.v_cb, &[kv_dim, h]);
+        let r = op_lut_to_dense(
+            b,
+            &format!("v_lut_{layer_idx}"),
+            &w.v_idx,
+            &w.v_cb,
+            &[kv_dim, h],
+        );
         b = r.0;
         let v_weight_name = r.1;
         let r = op_matmul(b, &normed, &v_weight_name);
@@ -248,18 +266,42 @@ pub fn build_full_prefill_mil(
         let v_cache_read = r.1;
 
         // Quantize new K,V values before writing into cache
-        let r = op_quantize(b, &format!("k_quant_{layer_idx}"), &k_sdpa, 1.0, &[1, nkv, n, hd]);
+        let r = op_quantize(
+            b,
+            &format!("k_quant_{layer_idx}"),
+            &k_sdpa,
+            1.0,
+            &[1, nkv, n, hd],
+        );
         b = r.0;
         let k_quant = r.1;
-        let r = op_quantize(b, &format!("v_quant_{layer_idx}"), &v_3d, 1.0, &[1, nkv, n, hd]);
+        let r = op_quantize(
+            b,
+            &format!("v_quant_{layer_idx}"),
+            &v_3d,
+            1.0,
+            &[1, nkv, n, hd],
+        );
         b = r.0;
         let v_quant = r.1;
 
         // slice_update: insert new K,V into cache at seq position 0
-        let r = op_slice_update(b, &format!("k_upd_{layer_idx}"), &k_cache_read, &k_quant, &[0, 0, 0, 0]);
+        let r = op_slice_update(
+            b,
+            &format!("k_upd_{layer_idx}"),
+            &k_cache_read,
+            &k_quant,
+            &[0, 0, 0, 0],
+        );
         b = r.0;
         let k_cache_upd = r.1;
-        let r = op_slice_update(b, &format!("v_upd_{layer_idx}"), &v_cache_read, &v_quant, &[0, 0, 0, 0]);
+        let r = op_slice_update(
+            b,
+            &format!("v_upd_{layer_idx}"),
+            &v_cache_read,
+            &v_quant,
+            &[0, 0, 0, 0],
+        );
         b = r.0;
         let v_cache_upd = r.1;
 
@@ -270,10 +312,22 @@ pub fn build_full_prefill_mil(
         b = r.0;
 
         // Dequantize cache for attention input
-        let r = op_dequantize(b, &format!("k_deq_{layer_idx}"), &k_cache_upd, 1.0, &[1, nkv, max_s, hd]);
+        let r = op_dequantize(
+            b,
+            &format!("k_deq_{layer_idx}"),
+            &k_cache_upd,
+            1.0,
+            &[1, nkv, max_s, hd],
+        );
         b = r.0;
         let k_cache_fp = r.1;
-        let r = op_dequantize(b, &format!("v_deq_{layer_idx}"), &v_cache_upd, 1.0, &[1, nkv, max_s, hd]);
+        let r = op_dequantize(
+            b,
+            &format!("v_deq_{layer_idx}"),
+            &v_cache_upd,
+            1.0,
+            &[1, nkv, max_s, hd],
+        );
         b = r.0;
         let v_cache_fp = r.1;
 
@@ -291,7 +345,13 @@ pub fn build_full_prefill_mil(
         let attn_out = r.1;
 
         // 6. Output projection + residual ─────────────────────────────
-        let r = op_lut_to_dense(b, &format!("o_lut_{layer_idx}"), &w.o_idx, &w.o_cb, &[h, nh * hd]);
+        let r = op_lut_to_dense(
+            b,
+            &format!("o_lut_{layer_idx}"),
+            &w.o_idx,
+            &w.o_cb,
+            &[h, nh * hd],
+        );
         b = r.0;
         let o_weight_name = r.1;
         // SDPA output: [1, nh, n, hd] → flatten last two dims: [1, n, nh*hd]
@@ -417,7 +477,12 @@ fn rms_norm_3d(
 }
 
 /// Gather rows from weight using token IDs.
-fn op_gather(b: MilBuilder, weight: &str, indices: &str, output_shape: &[i64]) -> (MilBuilder, String) {
+fn op_gather(
+    b: MilBuilder,
+    weight: &str,
+    indices: &str,
+    output_shape: &[i64],
+) -> (MilBuilder, String) {
     let vt = value_type_tensor(tensor_type(mil_spec::DataType::Float16, output_shape));
     let out_name = format!("gather_{}", b.ops().len());
     let mut inputs = HashMap::new();
@@ -429,7 +494,12 @@ fn op_gather(b: MilBuilder, weight: &str, indices: &str, output_shape: &[i64]) -
 }
 
 /// Register a Float16 const tensor and return its SSA name.
-fn op_const_f16(b: MilBuilder, name_hint: &str, values: &[f32], shape: &[i64]) -> (MilBuilder, String) {
+fn op_const_f16(
+    b: MilBuilder,
+    name_hint: &str,
+    values: &[f32],
+    shape: &[i64],
+) -> (MilBuilder, String) {
     let name = format!("{}_{}", name_hint, b.ops().len());
     let b = b.const_f16(&name, values, shape);
     let out = b.last_name().map(|s| s.to_string()).unwrap_or(name);
@@ -437,7 +507,12 @@ fn op_const_f16(b: MilBuilder, name_hint: &str, values: &[f32], shape: &[i64]) -
 }
 
 /// Register a Uint8 const tensor and return its SSA name.
-fn op_const_uint8(b: MilBuilder, name_hint: &str, values: &[u8], shape: &[i64]) -> (MilBuilder, String) {
+fn op_const_uint8(
+    b: MilBuilder,
+    name_hint: &str,
+    values: &[u8],
+    shape: &[i64],
+) -> (MilBuilder, String) {
     let name = format!("{}_{}", name_hint, b.ops().len());
     let tt = tensor_type(mil_spec::DataType::Uint8, shape);
     let vt = value_type_tensor(tt.clone());
@@ -454,7 +529,9 @@ fn op_const_uint8(b: MilBuilder, name_hint: &str, values: &[u8], shape: &[i64]) 
         r#type: Some(vt.clone()),
         value: Some(coreml_proto::proto::mil_spec::value::Value::ImmediateValue(
             coreml_proto::proto::mil_spec::value::ImmediateValue {
-                value: Some(coreml_proto::proto::mil_spec::value::immediate_value::Value::Tensor(tv)),
+                value: Some(
+                    coreml_proto::proto::mil_spec::value::immediate_value::Value::Tensor(tv),
+                ),
             },
         )),
     };
@@ -541,13 +618,14 @@ fn op_concat(b: MilBuilder, a: &str, b_name: &str, axis: i64) -> (MilBuilder, St
     let mut inputs = HashMap::new();
     // MIL concat takes a variadic "values" input.
     let args = vec![
-        argument::Binding { binding: Some(argument::binding::Binding::Name(a.to_string())) },
-        argument::Binding { binding: Some(argument::binding::Binding::Name(b_name.to_string())) },
+        argument::Binding {
+            binding: Some(argument::binding::Binding::Name(a.to_string())),
+        },
+        argument::Binding {
+            binding: Some(argument::binding::Binding::Name(b_name.to_string())),
+        },
     ];
-    inputs.insert(
-        "values".to_string(),
-        mil_spec::Argument { arguments: args },
-    );
+    inputs.insert("values".to_string(), mil_spec::Argument { arguments: args });
 
     let mut attrs = HashMap::new();
     attrs.insert("name".to_string(), string_attr(&out_name));
@@ -702,9 +780,7 @@ fn op_scaled_dot_product_attention(
 fn int64_attr(val: i64) -> mil_spec::Value {
     let int_tensor = mil_spec::TensorValue {
         value: Some(mil_spec::tensor_value::Value::LongInts(
-            mil_spec::tensor_value::RepeatedLongInts {
-                values: vec![val],
-            },
+            mil_spec::tensor_value::RepeatedLongInts { values: vec![val] },
         )),
     };
     mil_spec::Value {

@@ -224,7 +224,6 @@ pub struct KvCacheRequirements {
     pub head_dim: u32,
     #[serde(default)]
     pub max_context: u32,
-
 }
 
 // ── Peak memory estimate ──────────────────────────────────────────

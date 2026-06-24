@@ -1,27 +1,31 @@
-pub mod diffusion_ane;
-pub mod coreml_bridge;
-pub mod coreml_state;
-#[cfg(feature = "ane")]
-pub mod mil_gen_full;
+pub mod arena;
+pub mod arena_info;
 #[cfg(feature = "ane")]
 pub mod compile_full_model;
 pub mod coreml_audit;
-pub mod arena_info;
-pub mod arena;
+pub mod coreml_bridge;
+pub mod coreml_state;
+pub mod diffusion_ane;
 #[cfg(feature = "ane")]
 pub mod mil_builder;
 #[cfg(feature = "ane")]
-pub mod mlpackage;
+pub mod mil_gen_full;
 #[cfg(feature = "ane")]
 pub mod mil_helpers;
+#[cfg(feature = "ane")]
+pub mod mlpackage;
 
-pub use arena_info::ArenaInfo;
 pub use arena::Arena;
+pub use arena_info::ArenaInfo;
 
 /// Pack a .mlmodelc directory into a flat byte buffer for .cimage embedding.
 /// Format: [name_len:u32][name_bytes][data_len:u64][data_bytes]+ per file.
 pub fn pack_mlmodelc(dir: &std::path::Path) -> Result<Vec<u8>, String> {
-    fn collect(base: &std::path::Path, dir: &std::path::Path, buf: &mut Vec<u8>) -> Result<(), String> {
+    fn collect(
+        base: &std::path::Path,
+        dir: &std::path::Path,
+        buf: &mut Vec<u8>,
+    ) -> Result<(), String> {
         for entry in std::fs::read_dir(dir).map_err(|e| format!("read dir: {e}"))? {
             let entry = entry.map_err(|e| format!("entry: {e}"))?;
             let path = entry.path();
@@ -50,14 +54,20 @@ pub fn unpack_mlmodelc(data: &[u8], dest: &std::path::Path) -> Result<(), String
     while pos + 4 <= data.len() {
         let name_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
         pos += 4;
-        if pos + name_len > data.len() { break; }
-        let name = std::str::from_utf8(&data[pos..pos + name_len])
-            .map_err(|e| format!("utf8: {e}"))?;
+        if pos + name_len > data.len() {
+            break;
+        }
+        let name =
+            std::str::from_utf8(&data[pos..pos + name_len]).map_err(|e| format!("utf8: {e}"))?;
         pos += name_len;
-        if pos + 8 > data.len() { break; }
+        if pos + 8 > data.len() {
+            break;
+        }
         let data_len = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap()) as usize;
         pos += 8;
-        if pos + data_len > data.len() { break; }
+        if pos + data_len > data.len() {
+            break;
+        }
         let file_data = &data[pos..pos + data_len];
         pos += data_len;
         let dest_path = dest.join(name);

@@ -59,10 +59,7 @@ pub enum FusedMetalFallbackReason {
 
 impl FusedMetalExecutionEvidence {
     /// Create evidence for a successful fused kernel dispatch.
-    pub fn from_artifact(
-        artifact: &SealedMetalFusionArtifact,
-        duration_us: u64,
-    ) -> Self {
+    pub fn from_artifact(artifact: &SealedMetalFusionArtifact, duration_us: u64) -> Self {
         Self {
             region_id: artifact.region_id.clone(),
             artifact_name: artifact.artifact_name.clone(),
@@ -76,10 +73,7 @@ impl FusedMetalExecutionEvidence {
     }
 
     /// Create evidence for a fallback path (fused kernel was not used).
-    pub fn fallback(
-        artifact_name: &str,
-        reason: FusedMetalFallbackReason,
-    ) -> Self {
+    pub fn fallback(artifact_name: &str, reason: FusedMetalFallbackReason) -> Self {
         Self {
             region_id: String::new(),
             artifact_name: artifact_name.to_string(),
@@ -101,16 +95,17 @@ impl FusedMetalExecutionEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compute_image::fusion_abi::{
-        ArtifactHash, MetalFusionFamily, QuantizationContract,
-    };
+    use crate::compute_image::fusion_abi::{ArtifactHash, MetalFusionFamily, QuantizationContract};
     use std::collections::HashMap;
 
     fn dummy_artifact() -> SealedMetalFusionArtifact {
         SealedMetalFusionArtifact::new(
             "qkv_proj",
             MetalFusionFamily::QkvProj,
-            ArtifactHash { sha256: "abc".into(), byte_length: 128 },
+            ArtifactHash {
+                sha256: "abc".into(),
+                byte_length: 128,
+            },
             MetalLaunchContract {
                 entry_point: "qkv_proj_kernel".into(),
                 threads_per_threadgroup: [32, 32, 1],
@@ -118,7 +113,9 @@ mod tests {
                 buffer_bindings: HashMap::new(),
             },
             Some(QuantizationContract {
-                scheme: "fp16".into(), group_size: 32, bits: 16,
+                scheme: "fp16".into(),
+                group_size: 32,
+                bits: 16,
             }),
         )
     }
@@ -140,7 +137,10 @@ mod tests {
             FusedMetalFallbackReason::XcrunNotAvailable,
         );
         assert_eq!(ev.artifact_name, "qkv_proj");
-        assert!(matches!(ev.fallback_reason, Some(FusedMetalFallbackReason::XcrunNotAvailable)));
+        assert!(matches!(
+            ev.fallback_reason,
+            Some(FusedMetalFallbackReason::XcrunNotAvailable)
+        ));
     }
 
     #[test]

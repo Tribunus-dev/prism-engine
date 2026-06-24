@@ -229,8 +229,12 @@ pub struct BorrowedStorage {
 }
 
 impl ExternalStorage for BorrowedStorage {
-    fn data_ptr(&self) -> *const u8 { self.ptr }
-    fn byte_len(&self) -> usize { self.len }
+    fn data_ptr(&self) -> *const u8 {
+        self.ptr
+    }
+    fn byte_len(&self) -> usize {
+        self.len
+    }
 }
 
 // Safety: BorrowedStorage only provides a pointer — the owner ensures validity.

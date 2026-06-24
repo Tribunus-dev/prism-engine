@@ -5,9 +5,9 @@
 //! arena and residency plan references, artifact selection decisions,
 //! and declared fallback chains.
 
-use serde::{Deserialize, Serialize};
 use crate::compute_image::execution_shape::ExecutionShapeClass;
 use crate::integration::ContentHash;
+use serde::{Deserialize, Serialize};
 
 pub type ProgramId = String;
 pub type ArenaPlanId = String;
@@ -188,8 +188,7 @@ pub enum DependencyKind {
 }
 
 /// The set of artifact ids selected for this program.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProgramArtifactSelection {
     pub artifact_ids: Vec<String>,
 }

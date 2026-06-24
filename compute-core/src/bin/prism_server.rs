@@ -140,13 +140,17 @@ async fn chat_completions(
     let mut state = state.lock().await;
 
     // Build prompt from messages (simple concatenation for now)
-    let prompt_text: String = req.messages.iter()
+    let prompt_text: String = req
+        .messages
+        .iter()
         .map(|m| format!("{}: {}", m.role, m.content))
         .collect::<Vec<_>>()
         .join("\n");
 
     // Tokenize
-    let input_ids = state.tokenizer.encode(&prompt_text)
+    let input_ids = state
+        .tokenizer
+        .encode(&prompt_text)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if input_ids.is_empty() {
@@ -156,10 +160,14 @@ async fn chat_completions(
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
     let prompt_len = input_ids.len();
 
-    let stats = state.engine.generate(&input_ids, max_tokens)
-        .map_err(|e| { eprintln!("[prism-server] generate error: {e}"); StatusCode::INTERNAL_SERVER_ERROR })?;
+    let stats = state.engine.generate(&input_ids, max_tokens).map_err(|e| {
+        eprintln!("[prism-server] generate error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    let output_text = state.tokenizer.decode(&stats.generated_tokens)
+    let output_text = state
+        .tokenizer
+        .decode(&stats.generated_tokens)
         .unwrap_or_else(|_| format!("[prism] {} tokens generated", stats.generated_tokens.len()));
 
     Ok(Json(ChatResponse {
@@ -192,14 +200,23 @@ async fn chat_completions(
 async fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    println!("[prism-server] Loading config from {}/config.json", args.model_dir.display());
+    println!(
+        "[prism-server] Loading config from {}/config.json",
+        args.model_dir.display()
+    );
     let config_path = args.model_dir.join("config.json");
     let config = UnifiedConfig::from_file(&config_path)?;
 
-    println!("[prism-server] Building model graph ({} layers)...", config.num_layers);
+    println!(
+        "[prism-server] Building model graph ({} layers)...",
+        config.num_layers
+    );
     let graph = ModelGraph::build(&config);
 
-    println!("[prism-server] Loading .cimage from {}...", args.cimage.display());
+    println!(
+        "[prism-server] Loading .cimage from {}...",
+        args.cimage.display()
+    );
     let mut engine = PrismEngine::load(&args.cimage, graph.clone())?;
     #[cfg(feature = "metal-dispatch")]
     {
@@ -208,10 +225,17 @@ async fn main() -> Result<(), String> {
         }
     }
 
-    println!("[prism-server] Loading tokenizer from {}...", args.model_dir.display());
+    println!(
+        "[prism-server] Loading tokenizer from {}...",
+        args.model_dir.display()
+    );
     let tokenizer = TribunusTokenizer::from_dir(&args.model_dir)?;
 
-    let state = Arc::new(Mutex::new(AppState { engine, graph, tokenizer }));
+    let state = Arc::new(Mutex::new(AppState {
+        engine,
+        graph,
+        tokenizer,
+    }));
 
     let app = Router::new()
         .route("/v1/models", get(list_models))
@@ -221,11 +245,16 @@ async fn main() -> Result<(), String> {
 
     let addr = format!("0.0.0.0:{}", args.port);
     println!("[prism-server] Listening on http://{}", addr);
-    println!("[prism-server] Try: curl http://localhost:{}/v1/models", args.port);
+    println!(
+        "[prism-server] Try: curl http://localhost:{}/v1/models",
+        args.port
+    );
 
-    let listener = tokio::net::TcpListener::bind(&addr).await
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
         .map_err(|e| format!("bind: {e}"))?;
-    axum::serve(listener, app).await
+    axum::serve(listener, app)
+        .await
         .map_err(|e| format!("serve: {e}"))?;
 
     Ok(())

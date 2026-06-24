@@ -565,7 +565,7 @@ impl ProjectionHarness {
             &input,
             &self.weight,
             &self.scale,
-                self.bias.as_ref(),
+            self.bias.as_ref(),
             true,
             self.group_size,
             self.bits,

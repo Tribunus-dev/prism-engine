@@ -15,11 +15,32 @@ use crate::compiler::ane::artifacts::{
     AneProgramGeneration, AneWeightBlobPlan,
 };
 use crate::compiler::ane::legality::{AneLegality, LegalityStatus};
-use crate::compiler::ane::rules::register_orion_rules;
 use crate::compiler::scheduled::{
     FusionBoundary, PhysicalTensor, RegionId, ScheduledRegion, StorageClass,
 };
 use crate::compiler::semantic::{SemanticModule, SemanticOp, ToleranceClass};
+
+fn register_all_ane_rules(legality: &mut AneLegality) {
+    use crate::compiler::ane::rules::{
+        AlphabeticalOutputOrderingRule, BlobfileOffsetRule, CompileCeilingRule,
+        ConcatUnsupportedRule, DtypeRestrictionRule, Fp16NumericalDriftRule, GeluDecompositionRule,
+        MatmulConvLoweringRule, MinIoSurfaceAllocationRule, MinTensorSizeRule,
+        NamedTransposeConstantsRule, SoftmaxNondeterminismRule, UniformMultiInputAllocationRule,
+    };
+    legality.add_rule(Box::new(ConcatUnsupportedRule));
+    legality.add_rule(Box::new(GeluDecompositionRule));
+    legality.add_rule(Box::new(MinTensorSizeRule));
+    legality.add_rule(Box::new(DtypeRestrictionRule));
+    legality.add_rule(Box::new(MinIoSurfaceAllocationRule));
+    legality.add_rule(Box::new(UniformMultiInputAllocationRule));
+    legality.add_rule(Box::new(AlphabeticalOutputOrderingRule));
+    legality.add_rule(Box::new(BlobfileOffsetRule));
+    legality.add_rule(Box::new(CompileCeilingRule));
+    legality.add_rule(Box::new(MatmulConvLoweringRule));
+    legality.add_rule(Box::new(NamedTransposeConstantsRule));
+    legality.add_rule(Box::new(Fp16NumericalDriftRule));
+    legality.add_rule(Box::new(SoftmaxNondeterminismRule));
+}
 
 /// Build a known-answer F32 matmul scheduled region with ANE-compatible
 /// physical tensors (fp16, IOSurface, [1,C,1,S] layout).
@@ -143,7 +164,7 @@ fn build_ane_matmul_region() -> (SemanticModule, ScheduledRegion) {
 fn f32_matmul_is_ane_legal() {
     let (_sem, region) = build_ane_matmul_region();
     let mut legality = AneLegality::new(EvidenceDigest("m1-max-profile".into()));
-    register_orion_rules(&mut legality);
+    register_all_ane_rules(&mut legality);
 
     let receipt = legality.evaluate_region(&region);
 
@@ -176,7 +197,7 @@ fn f32_matmul_is_ane_legal() {
 fn matmul_produces_compile_plan() {
     let (_sem, region) = build_ane_matmul_region();
     let mut legality = AneLegality::new(EvidenceDigest("m1-max-profile".into()));
-    register_orion_rules(&mut legality);
+    register_all_ane_rules(&mut legality);
     let receipt = legality.evaluate_region(&region);
     assert_eq!(receipt.status, LegalityStatus::Legal);
 
@@ -255,7 +276,7 @@ fn diff_unsupported_dtype_violates_tensor002() {
     region.physical_tensors[0].dtype = DType::I8;
 
     let mut legality = AneLegality::new(EvidenceDigest("m1-max".into()));
-    register_orion_rules(&mut legality);
+    register_all_ane_rules(&mut legality);
     let receipt = legality.evaluate_region(&region);
 
     assert_eq!(
@@ -280,7 +301,7 @@ fn diff_undersized_tensor_violates_tensor001() {
     region.physical_tensors[2].dtype = DType::F16;
 
     let mut legality = AneLegality::new(EvidenceDigest("m1-max".into()));
-    register_orion_rules(&mut legality);
+    register_all_ane_rules(&mut legality);
     let receipt = legality.evaluate_region(&region);
 
     let v = receipt
@@ -304,7 +325,7 @@ fn diff_non_alphabetical_outputs_violates_io003() {
     region.outputs = vec![TensorId(4), TensorId(3)];
 
     let mut legality = AneLegality::new(EvidenceDigest("m1-max".into()));
-    register_orion_rules(&mut legality);
+    register_all_ane_rules(&mut legality);
     let receipt = legality.evaluate_region(&region);
 
     let v = receipt
@@ -323,7 +344,7 @@ fn diff_no_fusion_matmul_passes_but_op001_says_no_matmul() {
     region.fusions.clear(); // remove matmul fusion annotation
 
     let mut legality = AneLegality::new(EvidenceDigest("m1-max".into()));
-    register_orion_rules(&mut legality);
+    register_all_ane_rules(&mut legality);
     let receipt = legality.evaluate_region(&region);
 
     // Still legal (no fatal violations), but OP-001 should say "no matmul"

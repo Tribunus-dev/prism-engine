@@ -316,7 +316,10 @@ impl Array {
     /// has not been compiled into the current mlx-c build.  Gated behind an
     /// always-off cfg until the C API is stabilized.
     #[cfg(any())]
-    pub fn evaluate_into(&self, hint: &impl crate::memory::OutputBufferHint) -> crate::error::Result<()> {
+    pub fn evaluate_into(
+        &self,
+        hint: &impl crate::memory::OutputBufferHint,
+    ) -> crate::error::Result<()> {
         unsafe {
             mlx_sys::mlx_set_output_buffer_hint(
                 hint.buffer_ptr() as *mut std::ffi::c_void,

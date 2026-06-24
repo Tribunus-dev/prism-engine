@@ -437,9 +437,15 @@ impl ImageRuntime {
 
         let arch = self.manifest.architecture.clone();
         // Detect namespace root from compiled tensor handles.
-        let root = if self.persistent_handles.contains_key("language_model.model.embed_tokens.weight") {
+        let root = if self
+            .persistent_handles
+            .contains_key("language_model.model.embed_tokens.weight")
+        {
             "language_model.model"
-        } else if self.persistent_handles.contains_key("model.embed_tokens.weight") {
+        } else if self
+            .persistent_handles
+            .contains_key("model.embed_tokens.weight")
+        {
             "model"
         } else {
             "model"
@@ -809,15 +815,29 @@ impl ImageRuntime {
 
         let arch = &self.manifest.architecture;
         // Detect namespace root from compiled tensor handles.
-        let root = if self.persistent_handles.contains_key("language_model.model.embed_tokens.weight") {
+        let root = if self
+            .persistent_handles
+            .contains_key("language_model.model.embed_tokens.weight")
+        {
             "language_model.model"
-        } else if self.persistent_handles.contains_key("model.embed_tokens.weight") {
+        } else if self
+            .persistent_handles
+            .contains_key("model.embed_tokens.weight")
+        {
             "model"
         } else {
             // Probe the first persistent handle's prefix as fallback.
-            let first_key = self.persistent_handles.keys().next().cloned().unwrap_or_default();
-            if first_key.starts_with("language_model.") { "language_model.model" }
-            else { "model" }
+            let first_key = self
+                .persistent_handles
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or_default();
+            if first_key.starts_with("language_model.") {
+                "language_model.model"
+            } else {
+                "model"
+            }
         };
         let seq_len = token_ids.len() as i32;
 

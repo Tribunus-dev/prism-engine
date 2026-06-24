@@ -127,6 +127,12 @@ pub struct ComputeError {
     pub message: String,
 }
 
+impl std::fmt::Display for ComputeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}: {}", self.kind, self.message)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComputeErrorKind {
     BackendError,

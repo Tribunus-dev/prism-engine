@@ -14,6 +14,7 @@ use crate::cache::evolkv::CalibrationSet;
 use crate::cache::evolkv::LayerBudget;
 use crate::cache::prefix_cache::{check_shared_prefix, insert_shared_prefix};
 use crate::compute_image::phase_dag::EmittedPhaseGraph;
+use crate::compute_image::phase_dag::PhaseCompletionStatus;
 use crate::compute_image::{CompiledImageReader, CopyClassification, TensorEntry};
 use crate::config::ModelExecutionPlan;
 use crate::engine_error::{EngineError, EngineErrorCode};
@@ -31,7 +32,6 @@ use crate::runtime_contract::{
 use crate::runtime_orchestration::InMemoryCoordinationFabric;
 use crate::runtime_trace::{RuntimeTimeline, TimelineEvent, TimelineEventType};
 use crate::scheduling::execution_context::ExecutionContext;
-use crate::compute_image::phase_dag::PhaseCompletionStatus;
 use crate::scheduling::phase_engine::PhaseEngine;
 use crate::scheduling::receipts::PhaseReceipt;
 use crate::session::InferenceSessionState;
@@ -45,11 +45,11 @@ use mlx_rs::Array;
 pub const PREFILL_CHUNK_SIZE: u32 = 512;
 
 pub use crate::profiled_model::*;
+use parking_lot::Mutex;
 /// Input image for multi-modal inference.
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 /// Execution mode for the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -271,7 +271,6 @@ pub enum EmbedPoolStrategy {
     Last,
 }
 
-
 /// Disposition of a PhaseEngine graph execution, used for safe fallback logic.
 pub enum GraphExecutionDisposition {
     /// All phases completed — skip legacy loop, use graph output.
@@ -300,10 +299,17 @@ impl ProfiledInferenceSession {
         let cap = kv_caches.first().map(|c| c.capacity).unwrap_or(2048);
         let mode = KvQuantMode::PolarHadamard(4);
         let group_size = 32usize;
-        let compressed_caches: Vec<Option<Arc<Mutex<TurboQuantKvCache>>>> = kv_caches.iter().map(|_kvc| {
-            let comp = Arc::new(Mutex::new(TurboQuantKvCache::new(mode, group_size, cap as usize)));
-            Some(comp)
-        }).collect();
+        let compressed_caches: Vec<Option<Arc<Mutex<TurboQuantKvCache>>>> = kv_caches
+            .iter()
+            .map(|_kvc| {
+                let comp = Arc::new(Mutex::new(TurboQuantKvCache::new(
+                    mode,
+                    group_size,
+                    cap as usize,
+                )));
+                Some(comp)
+            })
+            .collect();
 
         // Pair each KvCache with its compressed sink.
         for (kvc, comp) in kv_caches.iter_mut().zip(compressed_caches.iter()) {
@@ -519,10 +525,10 @@ impl ProfiledInferenceSession {
         token_ids: &[i32],
         is_prefill: bool,
     ) -> GraphExecutionDisposition {
-
         // Capture broad fallback checkpoint BEFORE any mutation.
         let checkpoint_hidden = hidden.clone();
-        let checkpoint_kv_lengths: Vec<u32> = self.kv_caches.iter().map(|c| c.committed_len).collect();
+        let checkpoint_kv_lengths: Vec<u32> =
+            self.kv_caches.iter().map(|c| c.committed_len).collect();
         let checkpoint_position = self.absolute_position;
 
         let engine = PhaseEngine::new();
@@ -558,7 +564,8 @@ impl ProfiledInferenceSession {
 
         let result = engine.execute_graph(dag, &mut ctx);
         let receipt_count = result.receipts.len();
-        let completed_count = result.receipts
+        let completed_count = result
+            .receipts
             .iter()
             .filter(|r| matches!(r.status, PhaseCompletionStatus::Complete))
             .count();
@@ -570,26 +577,40 @@ impl ProfiledInferenceSession {
         // Determine disposition.
         if result.all_completed {
             let label = if is_prefill { "prefill" } else { "decode" };
-            eprintln!("[phase-dag] {}: all {} phases completed via PhaseEngine", label, receipt_count);
+            eprintln!(
+                "[phase-dag] {}: all {} phases completed via PhaseEngine",
+                label, receipt_count
+            );
             // Propagate hidden only when Complete — never before disposition.
             if let Some(h) = ctx.hidden_state {
                 *hidden = h;
             }
             // Publish caches back to session — unwrap LiveKvCache::Fp16.
-            self.kv_caches = guard.into_inner().into_iter().map(|lc| match lc {
-                crate::kv_cache::LiveKvCache::Fp16(kv) => kv,
-                _ => panic!("execute_dag_with_kv_guard: unexpected compressed cache in Complete"),
-            }).collect();
+            self.kv_caches = guard
+                .into_inner()
+                .into_iter()
+                .map(|lc| match lc {
+                    crate::kv_cache::LiveKvCache::Fp16(kv) => kv,
+                    _ => {
+                        panic!("execute_dag_with_kv_guard: unexpected compressed cache in Complete")
+                    }
+                })
+                .collect();
             return GraphExecutionDisposition::Complete;
         }
 
         // Check mutations against the GUARD's caches (self.kv_caches is empty after take).
-        let has_kv_mutations = guard.caches.as_ref()
+        let has_kv_mutations = guard
+            .caches
+            .as_ref()
             .map(|caches| {
-                caches.iter().zip(&checkpoint_kv_lengths).any(|(lc, &ckpt)| match lc {
-                    crate::kv_cache::LiveKvCache::Fp16(c) => c.committed_len != ckpt,
-                    _ => true, // compressed variant always counts as mutation
-                })
+                caches
+                    .iter()
+                    .zip(&checkpoint_kv_lengths)
+                    .any(|(lc, &ckpt)| match lc {
+                        crate::kv_cache::LiveKvCache::Fp16(c) => c.committed_len != ckpt,
+                        _ => true, // compressed variant always counts as mutation
+                    })
             })
             .unwrap_or(false);
         let has_position_change = self.absolute_position != checkpoint_position;
@@ -598,27 +619,44 @@ impl ProfiledInferenceSession {
         // Restore from checkpoint when falling back.
         if has_kv_mutations || has_position_change {
             let label = if is_prefill { "prefill" } else { "decode" };
-            eprintln!("[phase-dag] {}: completed {} of {} phases WITH mutations (KV: {}, pos: {})",
-                label, completed_count, receipt_count, has_kv_mutations, has_position_change);
+            eprintln!(
+                "[phase-dag] {}: completed {} of {} phases WITH mutations (KV: {}, pos: {})",
+                label, completed_count, receipt_count, has_kv_mutations, has_position_change
+            );
             // Restore hidden from checkpoint before returning partial disposition.
             *hidden = checkpoint_hidden;
             // Publish caches back so caller can inspect/rollback.
-            self.kv_caches = guard.into_inner().into_iter().map(|lc| match lc {
-                crate::kv_cache::LiveKvCache::Fp16(kv) => kv,
-                _ => panic!("execute_dag_with_kv_guard: unexpected compressed cache in Partial"),
-            }).collect();
+            self.kv_caches = guard
+                .into_inner()
+                .into_iter()
+                .map(|lc| match lc {
+                    crate::kv_cache::LiveKvCache::Fp16(kv) => kv,
+                    _ => {
+                        panic!("execute_dag_with_kv_guard: unexpected compressed cache in Partial")
+                    }
+                })
+                .collect();
             return GraphExecutionDisposition::PartialPublishedResumeRequired;
         }
 
         let label = if is_prefill { "prefill" } else { "decode" };
-        eprintln!("[phase-dag] {}: {} phases completed, no KV mutation (safe fallback)", label, completed_count);
+        eprintln!(
+            "[phase-dag] {}: {} phases completed, no KV mutation (safe fallback)",
+            label, completed_count
+        );
         // Restore hidden from checkpoint so legacy loop starts clean.
         *hidden = checkpoint_hidden;
         // Publish caches back to session for legacy loop.
-        self.kv_caches = guard.into_inner().into_iter().map(|lc| match lc {
-            crate::kv_cache::LiveKvCache::Fp16(kv) => kv,
-            _ => panic!("execute_dag_with_kv_guard: unexpected compressed cache in ZeroMutations"),
-        }).collect();
+        self.kv_caches = guard
+            .into_inner()
+            .into_iter()
+            .map(|lc| match lc {
+                crate::kv_cache::LiveKvCache::Fp16(kv) => kv,
+                _ => panic!(
+                    "execute_dag_with_kv_guard: unexpected compressed cache in ZeroMutations"
+                ),
+            })
+            .collect();
         GraphExecutionDisposition::ZeroMutationsFallbackSafe
     }
 
@@ -658,7 +696,6 @@ impl ProfiledInferenceSession {
                     .collect();
             }
         }
-
 
         let plan = &model.reader.manifest.execution_plan;
         let full_prompt = self.pending_prompt_tokens.as_ref().unwrap();
@@ -708,7 +745,9 @@ impl ProfiledInferenceSession {
         let mut phase_engine_completed = false;
         if let Some(dag) = &model.phase_dag {
             match self.execute_dag_with_kv_guard(model, dag, &mut hidden, &token_ids_i32, true) {
-                GraphExecutionDisposition::Complete => { phase_engine_completed = true; }
+                GraphExecutionDisposition::Complete => {
+                    phase_engine_completed = true;
+                }
                 GraphExecutionDisposition::ZeroMutationsFallbackSafe => {}
                 GraphExecutionDisposition::PartialPublishedResumeRequired => {
                     return Err(EngineError::new(
@@ -728,116 +767,115 @@ impl ProfiledInferenceSession {
         if !phase_engine_completed {
             let _slots = model.memory_island.preallocate_layer_slots(1, 3840);
             for (l, layer_plan) in plan.layers.iter().enumerate() {
-            log_debug!(
-                "[infer] event=layer_run layer={} kind={}",
-                l,
-                &layer_plan.attention_kind
-            );
-            let lw = match &mut self.working_set {
-                Some(ws) => ws
-                    .weight_streamer
-                    .activate(l as u32)
-                    .map_err(|e| EngineError::new(EngineErrorCode::InferenceFailed, e))?,
-                None => &model.layers[l],
-            };
-            let is_full = layer_plan.attention_kind == "full_attention";
-            let (rcos, rsin) = if is_full {
-                (&model.full_cos, &model.full_sin)
-            } else {
-                (&model.rope_cos, &model.rope_sin)
-            };
+                log_debug!(
+                    "[infer] event=layer_run layer={} kind={}",
+                    l,
+                    &layer_plan.attention_kind
+                );
+                let lw = match &mut self.working_set {
+                    Some(ws) => ws
+                        .weight_streamer
+                        .activate(l as u32)
+                        .map_err(|e| EngineError::new(EngineErrorCode::InferenceFailed, e))?,
+                    None => &model.layers[l],
+                };
+                let is_full = layer_plan.attention_kind == "full_attention";
+                let (rcos, rsin) = if is_full {
+                    (&model.full_cos, &model.full_sin)
+                } else {
+                    (&model.rope_cos, &model.rope_sin)
+                };
 
-            hidden = crate::executor::run_layer_with_sinks(
-                &hidden,
-                layer_plan,
-                &layer_plan.route,
-                Some(&model.memory_island),
-                &model.ane_coreml_models,
-                &lw.input_layernorm,
-                &lw.post_attention_layernorm,
-                &lw.q_proj_w,
-                &lw.q_proj_s,
-                &lw.q_proj_b,
-                &lw.k_proj_w,
-                &lw.k_proj_s,
-                &lw.k_proj_b,
-                &lw.v_proj_w,
-                &lw.v_proj_s,
-                &lw.v_proj_b,
-                &lw.o_proj_w,
-                &lw.o_proj_s,
-                &lw.o_proj_b,
-                lw.q_norm.as_deref(),
-                lw.k_norm.as_deref(),
-                &lw.gate_proj_w,
-                &lw.gate_proj_s,
-                &lw.gate_proj_b,
-                &lw.up_proj_w,
-                &lw.up_proj_s,
-                &lw.up_proj_b,
-                &lw.down_proj_w,
-                &lw.down_proj_s,
-                &lw.down_proj_b,
-                rcos,
-                rsin,
-                &mut self.kv_caches[l],
-                kv_offset,
-                plan.rms_norm_eps as f32,
-                &crate::projection_identity::ProjectionContext {
-                    run_id: self.session_id.clone(),
-                    phase: crate::projection_identity::Phase::Prefill,
-                    forward_pass_index: 0,
-                    token_step: Some(kv_offset),
-                    layer_index: l,
-                    attention_kind: if is_full {
-                        crate::projection_identity::AttentionKind::Full
-                    } else {
-                        crate::projection_identity::AttentionKind::Sliding
+                hidden = crate::executor::run_layer_with_sinks(
+                    &hidden,
+                    layer_plan,
+                    &layer_plan.route,
+                    Some(&model.memory_island),
+                    &model.ane_coreml_models,
+                    &lw.input_layernorm,
+                    &lw.post_attention_layernorm,
+                    &lw.q_proj_w,
+                    &lw.q_proj_s,
+                    &lw.q_proj_b,
+                    &lw.k_proj_w,
+                    &lw.k_proj_s,
+                    &lw.k_proj_b,
+                    &lw.v_proj_w,
+                    &lw.v_proj_s,
+                    &lw.v_proj_b,
+                    &lw.o_proj_w,
+                    &lw.o_proj_s,
+                    &lw.o_proj_b,
+                    lw.q_norm.as_deref(),
+                    lw.k_norm.as_deref(),
+                    &lw.gate_proj_w,
+                    &lw.gate_proj_s,
+                    &lw.gate_proj_b,
+                    &lw.up_proj_w,
+                    &lw.up_proj_s,
+                    &lw.up_proj_b,
+                    &lw.down_proj_w,
+                    &lw.down_proj_s,
+                    &lw.down_proj_b,
+                    rcos,
+                    rsin,
+                    &mut self.kv_caches[l],
+                    kv_offset,
+                    plan.rms_norm_eps as f32,
+                    &crate::projection_identity::ProjectionContext {
+                        run_id: self.session_id.clone(),
+                        phase: crate::projection_identity::Phase::Prefill,
+                        forward_pass_index: 0,
+                        token_step: Some(kv_offset),
+                        layer_index: l,
+                        attention_kind: if is_full {
+                            crate::projection_identity::AttentionKind::Full
+                        } else {
+                            crate::projection_identity::AttentionKind::Sliding
+                        },
                     },
-                },
-                &mut self.sink_states[l],
-                false, // is_decode=false → prefill path captures sinks
-            )
-            .map_err(|e| {
-                EngineError::new(
-                    EngineErrorCode::InferenceFailed,
-                    format!("chunk layer {}: {}", l, e),
+                    &mut self.sink_states[l],
+                    false, // is_decode=false → prefill path captures sinks
                 )
-            })?;
-            hidden.eval().map_err(|e| {
-                EngineError::new(
-                    EngineErrorCode::NumericalFailure,
-                    format!("chunk layer {} eval: {}", l, e),
-                )
-            })?;
-            if ((l + 1) % 6 == 0) || (l + 1 == plan.layers.len()) {
+                .map_err(|e| {
+                    EngineError::new(
+                        EngineErrorCode::InferenceFailed,
+                        format!("chunk layer {}: {}", l, e),
+                    )
+                })?;
                 hidden.eval().map_err(|e| {
                     EngineError::new(
                         EngineErrorCode::NumericalFailure,
                         format!("chunk layer {} eval: {}", l, e),
                     )
                 })?;
-            }
-            // DIAGNOSTIC: materialization checksum after every layer.
-            // Logs layer index, kind, output shape, and a readback checksum.
-            // Isolates the crash between layers.
-            {
-                let h_shape = hidden.shape();
-                let h_elems = h_shape.iter().product::<i32>() as usize;
-                let checksum = match hidden.try_as_slice::<f32>() {
-                    Ok(slice) => {
-                        let n = slice.len().min(100);
-                        let partial_sum: f32 = slice[..n].iter().copied().sum();
-                        partial_sum
-                    }
-                    Err(_) => -1.0f32,
-                };
-                log_debug!("[infer] event=layer_materialize layer={} kind={} shape={:?} elems={} checksum={:.6}",
+                if ((l + 1) % 6 == 0) || (l + 1 == plan.layers.len()) {
+                    hidden.eval().map_err(|e| {
+                        EngineError::new(
+                            EngineErrorCode::NumericalFailure,
+                            format!("chunk layer {} eval: {}", l, e),
+                        )
+                    })?;
+                }
+                // DIAGNOSTIC: materialization checksum after every layer.
+                // Logs layer index, kind, output shape, and a readback checksum.
+                // Isolates the crash between layers.
+                {
+                    let h_shape = hidden.shape();
+                    let h_elems = h_shape.iter().product::<i32>() as usize;
+                    let checksum = match hidden.try_as_slice::<f32>() {
+                        Ok(slice) => {
+                            let n = slice.len().min(100);
+                            let partial_sum: f32 = slice[..n].iter().copied().sum();
+                            partial_sum
+                        }
+                        Err(_) => -1.0f32,
+                    };
+                    log_debug!("[infer] event=layer_materialize layer={} kind={} shape={:?} elems={} checksum={:.6}",
                     l, &plan.layers[l].attention_kind, h_shape, h_elems, checksum);
+                }
+                self.kv_caches[l].commit_step();
             }
-            self.kv_caches[l].commit_step();
-        }
-
         }
 
         // Clear the memory plan after the layer loop completes.
@@ -1067,7 +1105,6 @@ impl ProfiledInferenceSession {
             ));
         }
 
-
         let plan = &model.reader.manifest.execution_plan;
         let kv_offset = self.absolute_position;
 
@@ -1102,7 +1139,9 @@ impl ProfiledInferenceSession {
         let mut phase_engine_completed = false;
         if let Some(dag) = &model.phase_dag {
             match self.execute_dag_with_kv_guard(model, dag, &mut hidden, &token_ids_i32, false) {
-                GraphExecutionDisposition::Complete => { phase_engine_completed = true; }
+                GraphExecutionDisposition::Complete => {
+                    phase_engine_completed = true;
+                }
                 GraphExecutionDisposition::ZeroMutationsFallbackSafe => {}
                 GraphExecutionDisposition::PartialPublishedResumeRequired => {
                     return Err(EngineError::new(
@@ -1144,143 +1183,143 @@ impl ProfiledInferenceSession {
         if !phase_engine_completed {
             for (l, layer_plan) in plan.layers.iter().enumerate() {
                 if self.cancellation_flag.load(Ordering::Relaxed) {
-                return Err(EngineError::new(
-                    EngineErrorCode::Cancelled,
-                    "cancelled during prefill",
-                ));
-            }
+                    return Err(EngineError::new(
+                        EngineErrorCode::Cancelled,
+                        "cancelled during prefill",
+                    ));
+                }
 
-            let layer_start = std::time::Instant::now();
-            let work_id = format!("layer_{}", l);
-            let backend_id = layer_plan.route.dominant_backend();
-            let target = match backend_id {
-                0 => BackendTarget::Mlx,
-                1 => BackendTarget::Accelerate,
-                2 | 3 => BackendTarget::Coreml,
-                _ => BackendTarget::Mlx,
-            };
-            let work_item = RuntimeWorkItem {
-                schema: "tribunus.runtime_work_item.v1".into(),
-                schema_version: "v1".into(),
-                work_id: work_id.clone(),
-                run_id: self.session_id.clone(),
-                phase_id: format!("decode_{}", l),
-                canonical_phase: Some("inference_layer".into()),
-                backend_target: target,
-                island_id: "island_main".into(),
-                input_tensor_ids: vec![format!("hidden_{}", l)],
-                output_tensor_ids: vec![format!("hidden_{}", l + 1)],
-                authority_mode: AuthorityMode::Authority,
-                deadline: String::new(),
-                budget_class: BudgetClass::Interactive,
-                retry_policy: RetryPolicy {
-                    max_retries: 0,
-                    backoff_ms: 0,
-                },
-                expected_receipts: vec![],
-                receipt_before_ack: true,
-            };
-            self.coordinator.admit_sync(work_item).map_err(|e| {
-                EngineError::new(
-                    EngineErrorCode::InferenceFailed,
-                    format!("admit layer {}: {}", l, e),
-                )
-            })?;
-            let handles_before = crate::bridge::handle_count();
-            let lw = match &mut self.working_set {
-                Some(ws) => ws
-                    .weight_streamer
-                    .activate(l as u32)
-                    .map_err(|e| EngineError::new(EngineErrorCode::InferenceFailed, e))?,
-                None => &model.layers[l],
-            };
-            let is_full = layer_plan.attention_kind == "full_attention";
-            let (rcos, rsin) = if is_full {
-                (&model.full_cos, &model.full_sin)
-            } else {
-                (&model.rope_cos, &model.rope_sin)
-            };
-
-            hidden = crate::executor::run_layer_with_sinks(
-                &hidden,
-                layer_plan,
-                &layer_plan.route,
-                Some(&model.memory_island),
-                &model.ane_coreml_models,
-                &lw.input_layernorm,
-                &lw.post_attention_layernorm,
-                &lw.q_proj_w,
-                &lw.q_proj_s,
-                &lw.q_proj_b,
-                &lw.k_proj_w,
-                &lw.k_proj_s,
-                &lw.k_proj_b,
-                &lw.v_proj_w,
-                &lw.v_proj_s,
-                &lw.v_proj_b,
-                &lw.o_proj_w,
-                &lw.o_proj_s,
-                &lw.o_proj_b,
-                lw.q_norm.as_deref(),
-                lw.k_norm.as_deref(),
-                &lw.gate_proj_w,
-                &lw.gate_proj_s,
-                &lw.gate_proj_b,
-                &lw.up_proj_w,
-                &lw.up_proj_s,
-                &lw.up_proj_b,
-                &lw.down_proj_w,
-                &lw.down_proj_s,
-                &lw.down_proj_b,
-                rcos,
-                rsin,
-                &mut self.kv_caches[l],
-                kv_offset,
-                plan.rms_norm_eps as f32,
-                &crate::projection_identity::ProjectionContext {
+                let layer_start = std::time::Instant::now();
+                let work_id = format!("layer_{}", l);
+                let backend_id = layer_plan.route.dominant_backend();
+                let target = match backend_id {
+                    0 => BackendTarget::Mlx,
+                    1 => BackendTarget::Accelerate,
+                    2 | 3 => BackendTarget::Coreml,
+                    _ => BackendTarget::Mlx,
+                };
+                let work_item = RuntimeWorkItem {
+                    schema: "tribunus.runtime_work_item.v1".into(),
+                    schema_version: "v1".into(),
+                    work_id: work_id.clone(),
                     run_id: self.session_id.clone(),
-                    phase: crate::projection_identity::Phase::Decode,
-                    forward_pass_index: 0,
-                    token_step: Some(kv_offset),
-                    layer_index: l,
-                    attention_kind: if is_full {
-                        crate::projection_identity::AttentionKind::Full
-                    } else {
-                        crate::projection_identity::AttentionKind::Sliding
+                    phase_id: format!("decode_{}", l),
+                    canonical_phase: Some("inference_layer".into()),
+                    backend_target: target,
+                    island_id: "island_main".into(),
+                    input_tensor_ids: vec![format!("hidden_{}", l)],
+                    output_tensor_ids: vec![format!("hidden_{}", l + 1)],
+                    authority_mode: AuthorityMode::Authority,
+                    deadline: String::new(),
+                    budget_class: BudgetClass::Interactive,
+                    retry_policy: RetryPolicy {
+                        max_retries: 0,
+                        backoff_ms: 0,
                     },
-                },
-                &mut self.sink_states[l],
-                true, // is_decode=true → use sink attention path
-            )
-            .map_err(|e| {
-                EngineError::new(
-                    EngineErrorCode::InferenceFailed,
-                    format!("decode layer {}: {}", l, e),
-                )
-            })?;
-            // Capture the per-layer hidden state for anomaly detection
-            layer_hiddens.push(hidden.clone());
-            // OPT-0005: batch eval every 6 layers
-            if ((l + 1) % 6 == 0) || (l + 1 == plan.layers.len()) {
-                hidden.eval().map_err(|e| {
-                    self.kv_caches[l].rollback();
+                    expected_receipts: vec![],
+                    receipt_before_ack: true,
+                };
+                self.coordinator.admit_sync(work_item).map_err(|e| {
                     EngineError::new(
-                        EngineErrorCode::NumericalFailure,
-                        format!("decode layer {} eval: {}", l, e),
+                        EngineErrorCode::InferenceFailed,
+                        format!("admit layer {}: {}", l, e),
                     )
                 })?;
-            }
-            self.kv_caches[l].commit_step();
-            let kvc = &self.kv_caches[l];
-            eprintln!(
+                let handles_before = crate::bridge::handle_count();
+                let lw = match &mut self.working_set {
+                    Some(ws) => ws
+                        .weight_streamer
+                        .activate(l as u32)
+                        .map_err(|e| EngineError::new(EngineErrorCode::InferenceFailed, e))?,
+                    None => &model.layers[l],
+                };
+                let is_full = layer_plan.attention_kind == "full_attention";
+                let (rcos, rsin) = if is_full {
+                    (&model.full_cos, &model.full_sin)
+                } else {
+                    (&model.rope_cos, &model.rope_sin)
+                };
+
+                hidden = crate::executor::run_layer_with_sinks(
+                    &hidden,
+                    layer_plan,
+                    &layer_plan.route,
+                    Some(&model.memory_island),
+                    &model.ane_coreml_models,
+                    &lw.input_layernorm,
+                    &lw.post_attention_layernorm,
+                    &lw.q_proj_w,
+                    &lw.q_proj_s,
+                    &lw.q_proj_b,
+                    &lw.k_proj_w,
+                    &lw.k_proj_s,
+                    &lw.k_proj_b,
+                    &lw.v_proj_w,
+                    &lw.v_proj_s,
+                    &lw.v_proj_b,
+                    &lw.o_proj_w,
+                    &lw.o_proj_s,
+                    &lw.o_proj_b,
+                    lw.q_norm.as_deref(),
+                    lw.k_norm.as_deref(),
+                    &lw.gate_proj_w,
+                    &lw.gate_proj_s,
+                    &lw.gate_proj_b,
+                    &lw.up_proj_w,
+                    &lw.up_proj_s,
+                    &lw.up_proj_b,
+                    &lw.down_proj_w,
+                    &lw.down_proj_s,
+                    &lw.down_proj_b,
+                    rcos,
+                    rsin,
+                    &mut self.kv_caches[l],
+                    kv_offset,
+                    plan.rms_norm_eps as f32,
+                    &crate::projection_identity::ProjectionContext {
+                        run_id: self.session_id.clone(),
+                        phase: crate::projection_identity::Phase::Decode,
+                        forward_pass_index: 0,
+                        token_step: Some(kv_offset),
+                        layer_index: l,
+                        attention_kind: if is_full {
+                            crate::projection_identity::AttentionKind::Full
+                        } else {
+                            crate::projection_identity::AttentionKind::Sliding
+                        },
+                    },
+                    &mut self.sink_states[l],
+                    true, // is_decode=true → use sink attention path
+                )
+                .map_err(|e| {
+                    EngineError::new(
+                        EngineErrorCode::InferenceFailed,
+                        format!("decode layer {}: {}", l, e),
+                    )
+                })?;
+                // Capture the per-layer hidden state for anomaly detection
+                layer_hiddens.push(hidden.clone());
+                // OPT-0005: batch eval every 6 layers
+                if ((l + 1) % 6 == 0) || (l + 1 == plan.layers.len()) {
+                    hidden.eval().map_err(|e| {
+                        self.kv_caches[l].rollback();
+                        EngineError::new(
+                            EngineErrorCode::NumericalFailure,
+                            format!("decode layer {} eval: {}", l, e),
+                        )
+                    })?;
+                }
+                self.kv_caches[l].commit_step();
+                let kvc = &self.kv_caches[l];
+                eprintln!(
                 "[kv] layer={} capacity={} committed={} seq_len={} copy_bytes={} allocated_bytes={}",
                 l, kvc.capacity, kvc.committed_len, kvc.seq_len, kvc.copy_bytes(), kvc.allocated_bytes()
             );
-            let s = hidden.shape();
-            let layer_elapsed_ms = layer_start.elapsed().as_millis() as u64;
-            let shape_d0 = s.first().copied().unwrap_or(0);
-            let shape_d1 = s.get(1).copied().unwrap_or(0);
-            eprintln!(
+                let s = hidden.shape();
+                let layer_elapsed_ms = layer_start.elapsed().as_millis() as u64;
+                let shape_d0 = s.first().copied().unwrap_or(0);
+                let shape_d1 = s.get(1).copied().unwrap_or(0);
+                eprintln!(
                 "[full-model] layer={} kind={} elapsed_ms={} handles={}→{} active_mem={}→{} cache_mem={}→{} shape=[{},{}] finite={}",
                 l,
                 layer_plan.attention_kind,
@@ -1294,44 +1333,44 @@ impl ProfiledInferenceSession {
                 shape_d0, shape_d1,
                 true,
             );
-            self.coordinator
-                .commit_receipt_sync(&work_id)
-                .map_err(|e| {
+                self.coordinator
+                    .commit_receipt_sync(&work_id)
+                    .map_err(|e| {
+                        EngineError::new(
+                            EngineErrorCode::InferenceFailed,
+                            format!("commit receipt layer {}: {}", l, e),
+                        )
+                    })?;
+                self.coordinator.ack_sync(&work_id).map_err(|e| {
                     EngineError::new(
                         EngineErrorCode::InferenceFailed,
-                        format!("commit receipt layer {}: {}", l, e),
+                        format!("ack layer {}: {}", l, e),
                     )
                 })?;
-            self.coordinator.ack_sync(&work_id).map_err(|e| {
-                EngineError::new(
-                    EngineErrorCode::InferenceFailed,
-                    format!("ack layer {}: {}", l, e),
-                )
-            })?;
-        }
+            }
         }
 
         if !phase_engine_completed {
             eprintln!("[phase] decode_step end");
         }
         if !phase_engine_completed {
-        let expected = kv_offset + 1;
-        for (l, _) in plan.layers.iter().enumerate() {
-            if self.kv_caches[l].committed_len != expected {
-                return Err(EngineError::new(
-                    EngineErrorCode::InferenceFailed,
-                    format!(
-                        "decode layer {} committed {} positions, expected {}",
-                        l, self.kv_caches[l].committed_len, expected
-                    ),
-                ));
-        }
+            let expected = kv_offset + 1;
+            for (l, _) in plan.layers.iter().enumerate() {
+                if self.kv_caches[l].committed_len != expected {
+                    return Err(EngineError::new(
+                        EngineErrorCode::InferenceFailed,
+                        format!(
+                            "decode layer {} committed {} positions, expected {}",
+                            l, self.kv_caches[l].committed_len, expected
+                        ),
+                    ));
+                }
             }
 
-        // Check for anomalies in the decoded step (NaN, Inf, forbidden tokens)
-        let gen_tokens = self.generated_tokens.clone();
-        if let Err(e) = self.check_anomalies(&layer_hiddens, &gen_tokens) {
-            eprintln!("[autopsy] Anomaly check failed: {}", e);
+            // Check for anomalies in the decoded step (NaN, Inf, forbidden tokens)
+            let gen_tokens = self.generated_tokens.clone();
+            if let Err(e) = self.check_anomalies(&layer_hiddens, &gen_tokens) {
+                eprintln!("[autopsy] Anomaly check failed: {}", e);
             }
         }
 
@@ -2003,7 +2042,6 @@ impl ProfiledInferenceSession {
         }
 
         let kv_offset = 0u32;
-
 
         for (l, layer_plan) in plan.layers.iter().enumerate() {
             let lw = match &mut self.working_set {
@@ -2690,7 +2728,6 @@ mod tests {
         }
         assert_eq!(session_caches.len(), 4);
     }
-
 }
 
 /// Drop guard that restores session KV caches on unwind or early return.
@@ -2720,13 +2757,17 @@ impl KvCacheRestoreGuard {
 
     /// Get a mutable reference to the owned caches for building ExecutionContext.
     fn caches_mut(&mut self) -> &mut Vec<crate::kv_cache::LiveKvCache> {
-        self.caches.as_mut().expect("KvCacheRestoreGuard already disarmed")
+        self.caches
+            .as_mut()
+            .expect("KvCacheRestoreGuard already disarmed")
     }
 
     /// Consume the guard and return ownership of the (potentially mutated) caches.
     /// After this call, Drop restoration is suppressed — the caller assumes ownership.
     fn into_inner(mut self) -> Vec<crate::kv_cache::LiveKvCache> {
-        self.caches.take().expect("KvCacheRestoreGuard already disarmed")
+        self.caches
+            .take()
+            .expect("KvCacheRestoreGuard already disarmed")
     }
 }
 
@@ -2739,13 +2780,17 @@ impl Drop for KvCacheRestoreGuard {
                 .map(|lc| match lc {
                     crate::kv_cache::LiveKvCache::Fp16(kv) => kv,
                     _ => {
-                        eprintln!("[kv-guard] unexpected compressed cache variant on Drop — losing data");
+                        eprintln!(
+                            "[kv-guard] unexpected compressed cache variant on Drop — losing data"
+                        );
                         // Cannot recover — return zeroed cache to avoid leaving session empty.
                         KvCache::new(0, 0, 0, false)
                     }
                 })
                 .collect();
-            unsafe { *self.slot = restored; }
+            unsafe {
+                *self.slot = restored;
+            }
         }
     }
 }

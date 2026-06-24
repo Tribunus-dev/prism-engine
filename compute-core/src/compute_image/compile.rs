@@ -1,8 +1,8 @@
 //! ComputeImage compilation pipeline — source loading, quantization,
 //! sequential/differential compilation, diagnostics, and publishing.
 
-use super::compile_hw::run_hardware_assessment;
 use super::compatibility::CompatibilityMatrix;
+use super::compile_hw::run_hardware_assessment;
 use super::hw_assessment::AssessmentReceipt;
 use super::manifest::{
     mlx_active_memory_bytes, mlx_peak_memory_bytes, AliasEntry, CompilationAuthority,
@@ -26,7 +26,6 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Authority-aware compilation entry points
@@ -71,9 +70,12 @@ pub fn compile_with_authority(
         Err(e) => {
             // Config not available (e.g. HF hub download path) — proceed
             // with the original choice; the runtime will catch issues.
-            let fallback = quantize_mode
-                .or_else(|| CompileQuantMode::from_name(target.recommended_quant()));
-            eprintln!("[compatibility] warning: could not read model config: {}", e);
+            let fallback =
+                quantize_mode.or_else(|| CompileQuantMode::from_name(target.recommended_quant()));
+            eprintln!(
+                "[compatibility] warning: could not read model config: {}",
+                e
+            );
             (fallback, None)
         }
     };
@@ -86,7 +88,7 @@ pub fn compile_with_authority(
         target.segment_target_size_mb()
     );
     if let Some(ref d) = decision {
-    eprintln!(
+        eprintln!(
             "[compile] Compatibility: family={}, quant={}, valid={}",
             d.validation.model_family,
             d.quant_mode
@@ -94,7 +96,7 @@ pub fn compile_with_authority(
                 .map(|q| q.name())
                 .unwrap_or("none (FP16)"),
             d.validation.valid
-    );
+        );
         for w in &d.validation.warnings {
             eprintln!("[compatibility] warning: {}", w);
         }
@@ -130,10 +132,10 @@ fn detect_validate_quant(
     preferred_quant: Option<CompileQuantMode>,
 ) -> Result<super::compatibility::CompileDecision, String> {
     let config_path = std::path::Path::new(source_dir).join("config.json");
-    let config_text = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("read config.json: {}", e))?;
-    let config_value: serde_json::Value = serde_json::from_str(&config_text)
-        .map_err(|e| format!("parse config.json: {}", e))?;
+    let config_text =
+        std::fs::read_to_string(&config_path).map_err(|e| format!("read config.json: {}", e))?;
+    let config_value: serde_json::Value =
+        serde_json::from_str(&config_text).map_err(|e| format!("parse config.json: {}", e))?;
 
     // Extract architecture directly from config.json.
     // Full tensor normalization requires safetensors data, but the
@@ -142,11 +144,7 @@ fn detect_validate_quant(
     let arch = extract_architecture_from_config(&config_value)
         .map_err(|e| format!("extract architecture: {}", e))?;
 
-    let decision = CompatibilityMatrix::evaluate(
-        &arch,
-        target,
-        preferred_quant,
-    );
+    let decision = CompatibilityMatrix::evaluate(&arch, target, preferred_quant);
 
     Ok(decision)
 }
@@ -154,7 +152,9 @@ fn detect_validate_quant(
 /// Extract TextArchitecture from a raw config.json Value.
 /// This avoids requiring full model tensor data, which isn't available
 /// during the early compile-compatibility check phase.
-fn extract_architecture_from_config(config: &serde_json::Value) -> Result<crate::config::TextArchitecture, String> {
+fn extract_architecture_from_config(
+    config: &serde_json::Value,
+) -> Result<crate::config::TextArchitecture, String> {
     fn num(v: &serde_json::Value, key: &str) -> Result<u32, String> {
         v.get(key)
             .and_then(|v| v.as_u64())
@@ -2187,7 +2187,8 @@ pub(crate) fn compile_sequential(
         &loaded.arch,
         output_dir,
         &loaded.namespace,
-    ).map_err(crate::Error::from_reason)?;
+    )
+    .map_err(crate::Error::from_reason)?;
     // Apply compile-time graph optimization passes.
     crate::compiler::graph_optimizer::optimize(&mut plan_with_fusion);
     // Generate backend-specific fused operation plans for GPU, ANE, and CPU.
@@ -2573,7 +2574,8 @@ pub fn compile_differential(
         &loaded.arch,
         output_dir_path,
         &loaded.namespace,
-    ).map_err(crate::Error::from_reason)?;
+    )
+    .map_err(crate::Error::from_reason)?;
     builder.set_execution_plan(plan_with_fusion);
 
     let payload_emission_ms = t_emit.elapsed().as_millis() as u64;

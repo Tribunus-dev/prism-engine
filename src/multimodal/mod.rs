@@ -1,10 +1,6 @@
-pub mod vision_encoder;
-pub mod projector;
 pub mod dynamic_tiling;
-pub mod llava;
-pub mod qwen_vl;
-pub mod pixtral;
-pub mod cogvlm;
+pub mod projector;
+pub mod vision_encoder;
 
 use crate::lut::engine::PrismEngine;
 use anyhow::Result;
@@ -30,9 +26,9 @@ pub enum ImageTokenStrategy {
 }
 
 pub fn build_embedding_sequence(
-    text_tokens: &[u32],
+    _text_tokens: &[u32],
     image_embeds: &[Vec<u16>],
-    strategy: &ImageTokenStrategy,
+    _strategy: &ImageTokenStrategy,
 ) -> Vec<u16> {
     // Dummy implementation for building embedding sequence
     // In a real implementation, we would interleave these based on the strategy
@@ -60,7 +56,8 @@ pub fn multimodal_forward(
         .map(|e| pipeline.projector.forward(&e))
         .collect();
 
-    let combined = build_embedding_sequence(text_tokens, &projected, &pipeline.image_token_placement);
+    let combined =
+        build_embedding_sequence(text_tokens, &projected, &pipeline.image_token_placement);
 
     // Using dummy dummy values for forward since the original forward in CImage has a different signature.
     // For this stub, we just return the combined embeddings.

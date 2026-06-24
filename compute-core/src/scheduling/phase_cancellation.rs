@@ -56,9 +56,7 @@ impl CancellationChecker {
 
     /// Check if the deadline has expired.
     pub fn is_expired(&self) -> bool {
-        self.deadline
-            .map(|d| Instant::now() >= d)
-            .unwrap_or(false)
+        self.deadline.map(|d| Instant::now() >= d).unwrap_or(false)
     }
 
     /// Combined check — returns true if execution should stop.
@@ -135,10 +133,8 @@ mod tests {
     fn test_cancellation_evidence() {
         let flag = Arc::new(AtomicBool::new(true));
         let checker = CancellationChecker::new(flag);
-        let evidence = checker.check_phase(
-            &PhaseId("test".to_string()),
-            CancellationClass::Preemptible,
-        );
+        let evidence =
+            checker.check_phase(&PhaseId("test".to_string()), CancellationClass::Preemptible);
         assert!(evidence.any_cancelled());
         assert!(evidence.cancelled_at_dispatch);
     }

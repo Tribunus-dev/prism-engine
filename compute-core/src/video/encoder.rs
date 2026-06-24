@@ -364,7 +364,10 @@ mod tests {
             num_frames: Some(8),
         };
         let input = MultiModalInput::Video(video);
-        let tokens = match &input { MultiModalInput::Video(v) => &v.placeholder_tokens, _ => unreachable!() };
+        let tokens = match &input {
+            MultiModalInput::Video(v) => &v.placeholder_tokens,
+            _ => unreachable!(),
+        };
         assert_eq!(tokens, &[42, 43]);
     }
 }

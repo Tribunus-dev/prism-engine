@@ -1,6 +1,9 @@
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[cfg(not(any(
-    any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"),
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    ),
     feature = "prism-backend",
     feature = "candle-cpu",
     feature = "intel",
@@ -13,44 +16,116 @@ compile_error!(
 
 extern crate self as tribunus_compute_core;
 
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod analysis;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod ane;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(feature = "prism-backend")]
+pub mod ane_compile;
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod ane_bridge;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod arena;
 #[cfg(target_os = "macos")]
 pub mod arena_info;
 #[cfg(target_os = "macos")]
 pub mod arena_lifecycle;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod arena_pool;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod attention;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod audio;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(feature = "generation-tts")]
+pub mod audio_provider;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod autopsy;
-pub mod benchmark;
 pub mod backend;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+pub mod benchmark;
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod bridge;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod cache;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod capability;
 pub mod cli;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod compile_pipeline;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod compile_progress;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod compile_state;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod compiler;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
+pub mod compilation;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod compute_image;
 pub mod compute_image_v0;
 pub mod compute_ir;
@@ -58,167 +133,373 @@ pub mod compute_lane;
 pub mod compute_service;
 pub mod config;
 pub mod config_namespace;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod contracts;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod copy_ledger;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
+pub mod coreml;
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod coreml_audit;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod coreml_bridge;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod coreml_pipeline;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod coreml_state;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod cpu_benchmarks;
 pub mod crash_breadcrumb;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod decode_attribution;
 pub mod diffusion;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(feature = "generation-diffusion")]
+pub mod diffusion_provider;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod engine;
 pub mod engine_error;
 pub mod engine_policy;
 pub mod engine_receipts;
 pub mod errors;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod executor;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod executor_projection;
 pub mod experiment;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod external_array;
 pub mod fusion_region;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod gemma;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod generation;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod gguf;
 pub mod gpu_memory;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod gpu_worker;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod grammar;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod heterogeneous;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod hybrid_profile;
+#[cfg(feature = "generation-image")]
+pub mod image_provider;
 pub mod inference;
 pub mod inference_profile;
 pub mod integration;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod kv_arena;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod kv_cache;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod layout_compiler;
 pub mod layout_transform;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod loader;
+#[cfg(feature = "generation-video")]
+pub mod video_provider;
 #[macro_use]
 pub mod logging;
-pub mod lut;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod editing;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod exo;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod lora;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+pub mod lut;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod mapped_image;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod memory;
-#[cfg(all(target_os = "macos", any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend")))]
+#[cfg(all(
+    target_os = "macos",
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    )
+))]
 pub mod metal_capture;
 #[cfg(feature = "metal-dispatch")]
 pub mod metal_launcher;
 pub mod metrics;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod mil_builder;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod mlpackage;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod mlx_api_compat;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod mlx_executor;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod mlx_inventory;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod mlx_patch_register;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod mlx_runtime_probe;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod model;
 pub mod model_adapter;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod model_cache;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
-pub mod models;
-pub mod model_store;
 pub mod model_runtime;
+pub mod model_store;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
+pub mod models;
 pub mod native_kernel;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod operation_catalog;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod pipeline_parity;
 pub mod placement_profile;
 pub mod plugin;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod primitives;
 pub mod profile_compiler;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod profiled_executor;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod profiled_model;
-#[cfg(any(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"), feature = "candle-cpu"))]
+#[cfg(any(
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    ),
+    feature = "candle-cpu"
+))]
 pub mod projection_executor;
 #[cfg(any(
-    any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"),
+    any(
+        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "prism-backend"
+    ),
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix"
 ))]
 pub mod projection_identity;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod projection_tests;
 pub mod quantization;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod quantized;
 pub mod readiness_gates;
 pub mod receipt;
 pub mod receipts;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod replay_projection;
 pub mod requalification;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod research;
 pub mod research_contracts;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod research_metrics;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod research_trace;
 pub mod residency;
 pub mod ring;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod runtime;
 pub mod runtime_contract;
 pub mod runtime_orchestration;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod runtime_trace;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod scheduling;
 #[cfg(feature = "server")]
 pub mod server;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod session;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod sidecar;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod speculative;
 
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod supervisor_crash;
 
 #[cfg(feature = "candle-cpu")]
@@ -229,32 +510,62 @@ pub mod storage_kernel;
 pub mod streaming;
 pub mod tokenizer;
 pub mod toolchain_attest;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod tools;
 pub mod transform_recipe;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod treatment;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod validator;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod video;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod vision;
 pub mod worker_crash_ledger;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod worker_dispatch;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod worker_memory;
 pub mod worker_protocol;
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod worker_supervisor;
 
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub use crate::session::{
     ControlSessionState, GenerationControlSession, InferenceSession, InferenceSessionState,
     SamplerConfig,
 };
-#[cfg(any(any(feature = "mlx-backend", feature = "prism-backend"), feature = "prism-backend"))]
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub use coreml_proto;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

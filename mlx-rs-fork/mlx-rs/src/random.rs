@@ -25,7 +25,10 @@ pub struct RandomState {
 
 impl RandomState {
     fn new() -> Result<Self> {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
         Ok(Self { state: key(now)? })
     }
 

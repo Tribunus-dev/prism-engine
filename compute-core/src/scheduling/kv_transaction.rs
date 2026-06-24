@@ -52,9 +52,7 @@ impl KvMutationTransaction {
                 self.publication_state = KvPublicationState::Committed;
                 Ok(())
             }
-            KvPublicationState::Committed => {
-                Err("transaction already committed".to_string())
-            }
+            KvPublicationState::Committed => Err("transaction already committed".to_string()),
             KvPublicationState::RolledBack => {
                 Err("cannot commit a rolled-back transaction".to_string())
             }
@@ -72,9 +70,7 @@ impl KvMutationTransaction {
             KvPublicationState::Committed => {
                 Err("cannot roll back a committed transaction".to_string())
             }
-            KvPublicationState::RolledBack => {
-                Err("transaction already rolled back".to_string())
-            }
+            KvPublicationState::RolledBack => Err("transaction already rolled back".to_string()),
         }
     }
 

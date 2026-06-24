@@ -43,7 +43,10 @@ impl PhaseLifecycleState {
     }
 
     pub fn is_success(&self) -> bool {
-        matches!(self, PhaseLifecycleState::Complete | PhaseLifecycleState::FallbackComplete)
+        matches!(
+            self,
+            PhaseLifecycleState::Complete | PhaseLifecycleState::FallbackComplete
+        )
     }
 
     pub fn can_proceed(&self) -> bool {
@@ -96,11 +99,17 @@ impl PhaseLifecycleTracker {
     }
 
     pub fn register(&mut self, phase_id: &str) {
-        self.states.entry(phase_id.to_string()).or_insert(PhaseLifecycleState::Dormant);
+        self.states
+            .entry(phase_id.to_string())
+            .or_insert(PhaseLifecycleState::Dormant);
     }
 
     pub fn transition(&mut self, phase_id: &str, to: PhaseLifecycleState) -> Result<(), String> {
-        let current = self.states.get(phase_id).copied().unwrap_or(PhaseLifecycleState::Dormant);
+        let current = self
+            .states
+            .get(phase_id)
+            .copied()
+            .unwrap_or(PhaseLifecycleState::Dormant);
         // Allow transition from any state if the target is a terminal failure
         if to.is_terminal() {
             self.states.insert(phase_id.to_string(), to);
@@ -117,22 +126,22 @@ impl PhaseLifecycleTracker {
             | (PhaseLifecycleState::AwaitingCompletion, PhaseLifecycleState::Validating)
             | (PhaseLifecycleState::Validating, PhaseLifecycleState::Publishing)
             | (PhaseLifecycleState::Publishing, PhaseLifecycleState::Complete)
-            | (PhaseLifecycleState::FallbackPending, PhaseLifecycleState::FallbackComplete)
-            => {
+            | (PhaseLifecycleState::FallbackPending, PhaseLifecycleState::FallbackComplete) => {
                 self.states.insert(phase_id.to_string(), to);
                 Ok(())
             }
-            _ => {
-                Err(format!(
-                    "invalid phase lifecycle transition: {:?} -> {:?}",
-                    current, to
-                ))
-            }
+            _ => Err(format!(
+                "invalid phase lifecycle transition: {:?} -> {:?}",
+                current, to
+            )),
         }
     }
 
     pub fn state(&self, phase_id: &str) -> PhaseLifecycleState {
-        self.states.get(phase_id).copied().unwrap_or(PhaseLifecycleState::Dormant)
+        self.states
+            .get(phase_id)
+            .copied()
+            .unwrap_or(PhaseLifecycleState::Dormant)
     }
 
     pub fn all_complete(&self) -> bool {
@@ -149,26 +158,42 @@ mod tests {
         let mut tracker = PhaseLifecycleTracker::new();
         tracker.register("p1");
         assert!(tracker.transition("p1", PhaseLifecycleState::Ready).is_ok());
-        assert!(tracker.transition("p1", PhaseLifecycleState::Admitted).is_ok());
-        assert!(tracker.transition("p1", PhaseLifecycleState::Dispatched).is_ok());
-        assert!(tracker.transition("p1", PhaseLifecycleState::AwaitingCompletion).is_ok());
-        assert!(tracker.transition("p1", PhaseLifecycleState::Validating).is_ok());
-        assert!(tracker.transition("p1", PhaseLifecycleState::Publishing).is_ok());
-        assert!(tracker.transition("p1", PhaseLifecycleState::Complete).is_ok());
+        assert!(tracker
+            .transition("p1", PhaseLifecycleState::Admitted)
+            .is_ok());
+        assert!(tracker
+            .transition("p1", PhaseLifecycleState::Dispatched)
+            .is_ok());
+        assert!(tracker
+            .transition("p1", PhaseLifecycleState::AwaitingCompletion)
+            .is_ok());
+        assert!(tracker
+            .transition("p1", PhaseLifecycleState::Validating)
+            .is_ok());
+        assert!(tracker
+            .transition("p1", PhaseLifecycleState::Publishing)
+            .is_ok());
+        assert!(tracker
+            .transition("p1", PhaseLifecycleState::Complete)
+            .is_ok());
     }
 
     #[test]
     fn test_invalid_transition() {
         let mut tracker = PhaseLifecycleTracker::new();
         tracker.register("p1");
-        assert!(tracker.transition("p1", PhaseLifecycleState::Complete).is_err());
+        assert!(tracker
+            .transition("p1", PhaseLifecycleState::Complete)
+            .is_err());
     }
 
     #[test]
     fn test_terminal_override() {
         let mut tracker = PhaseLifecycleTracker::new();
         tracker.register("p1");
-        assert!(tracker.transition("p1", PhaseLifecycleState::Cancelled).is_ok());
+        assert!(tracker
+            .transition("p1", PhaseLifecycleState::Cancelled)
+            .is_ok());
         assert_eq!(tracker.state("p1"), PhaseLifecycleState::Cancelled);
     }
 

@@ -20,12 +20,12 @@ use mlx_rs::{ops, Array};
 use crate::cache::evolkv::{CalibrationSet, EvolKV, LayerBudget};
 
 use crate::memory::allocator::BlockHandle;
-use std::sync::Arc;
-use parking_lot::Mutex;
-use std::rc::Rc;
 use crate::quantization::turboquant_kv::{
     AsymmetricQuantMode, KvQuantMode, QjlCorrection, TurboQuantKvCache,
 };
+use parking_lot::Mutex;
+use std::rc::Rc;
+use std::sync::Arc;
 
 /// Backing store for one compressed KV slot.
 ///
