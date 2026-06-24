@@ -695,7 +695,16 @@ impl PrismEngine {
         let mut up: Option<Vec<u16>> = None;
         let mut last_k: Option<Vec<u16>> = None;
         *li = 0;
-        for node in &self.graph.nodes {
+        let nodes = &self.graph.nodes;
+        // Pre-compute consecutive GateProj+UpProj indices for fused dispatch
+        let fused_set: std::collections::HashSet<usize> = (0..nodes.len().saturating_sub(1))
+            .filter(|&i| matches!(&nodes[i], ComputeNode::PalettizedMatmul { role: TensorRole::GateProj, .. })
+                && matches!(&nodes[i+1], ComputeNode::PalettizedMatmul { role: TensorRole::UpProj, .. }))
+            .collect();
+        let mut skip = 0usize;
+        let mut fused_mlp = false;
+        for (ni, node) in nodes.iter().enumerate() {
+            if skip > 0 { skip -= 1; continue; }
             match node {
                 ComputeNode::TokenEmbedding { .. } => {}
                 ComputeNode::Norm { eps, .. } => self.norm(&mut h, *eps),
@@ -723,7 +732,26 @@ impl PrismEngine {
                             }
                         }
                         TensorRole::OProj => { h = out; vec_add_inplace(&mut h, &hr); hr = h.clone(); }
-                        TensorRole::GateProj => gate = Some(out),
+                        TensorRole::GateProj => {
+                            let mut did_fuse = false;
+                            #[cfg(feature = "metal-dispatch")]
+                            if fused_set.contains(&ni) {
+                                if let Some(ref m) = self.metal {
+                                    if let Some(next) = nodes.get(ni + 1) {
+                                        if let ComputeNode::PalettizedMatmul { tensor: up_tb, .. } = next {
+                                            let mut fused_out = vec![0u16; tensor.dim_m as usize];
+                                            if m.fused_gate_up(&tensor.key, &up_tb.key, &h, &mut fused_out).is_ok() {
+                                                gate = Some(fused_out);
+                                                fused_mlp = true;
+                                                skip = 1;
+                                                did_fuse = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if !did_fuse { gate = Some(out); }
+                        },
                         TensorRole::UpProj => up = Some(out),
                         TensorRole::DownProj => {
                             if let Some(ref act) = gate {
@@ -828,7 +856,9 @@ impl PrismEngine {
                         }
                     }
                 }
-                ComputeNode::Activation { func } => match func {
+                ComputeNode::Activation { func } => {
+                        if fused_mlp { fused_mlp = false; continue; }
+                        match func {
                     ActivationFunction::Silu => {
                         if let Some(ref mut g) = gate {
                             silu_inplace(g);
@@ -842,7 +872,8 @@ impl PrismEngine {
                         }
                     }
                     ActivationFunction::Gelu => { if let Some(ref mut g) = gate { gelu_inplace(g); } }
-                },
+                }
+            },
                 ComputeNode::LanguageModelHead { tensor } => {
                     if let Some(ct) = self.tensors.get(&tensor.key) {
                         if h.len() == tensor.dim_n as usize { h = self.gemv(&h, tensor, &ct.payload); }
