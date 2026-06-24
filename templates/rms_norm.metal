@@ -1,42 +1,41 @@
-// RMS normalization — SIMD group reduction for sum of squares, then threadgroup broadcast.
+// RMS normalization — proper threadgroup binary-tree reduction.
+// Eliminates dependence on Metal simd_sum (unreliable across Metal versions).
 
 #include <metal_stdlib>
 using namespace metal;
 
 kernel void rms_norm(
-    device const half* input    [[buffer(0)]],  // [rows * dim]
-    device half* output         [[buffer(1)]],  // [rows * dim]
+    device const half* input    [[buffer(0)]],
+    device half* output         [[buffer(1)]],
     constant uint& dim          [[buffer(2)]],
     constant float& eps         [[buffer(3)]],
-    uint3 gid [[thread_position_in_grid]],
-    uint3 tgid [[threadgroup_position_in_grid]]
+    uint tid [[thread_position_in_grid]],
+    uint tg_size [[threads_per_threadgroup]]
 ) {
-    uint row = tgid.x;
-    uint tid = gid.x;
-    uint d = dim;
-
     // Thread-local sum of squares
     float ssq = 0.0;
-    for (uint i = tid; i < d; i += 32) {
-        float v = float(input[row * d + i]);
+    for (uint i = tid; i < dim; i += tg_size) {
+        float v = float(input[i]);
         ssq += v * v;
     }
 
-    // SIMD group sum (all 32 threads get the same result)
-    ssq = simd_sum(ssq);
-
-    // First thread writes to threadgroup memory for broadcast
-    threadgroup float tg_ssq;
-    if (tid == 0) {
-        tg_ssq = ssq;
-    }
+    // Threadgroup reduction: binary tree in shared memory
+    threadgroup float tg_partial[256];
+    tg_partial[tid] = ssq;
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    float mean_sq = tg_ssq / float(d);
-    float inv_rms = 1.0 / sqrt(mean_sq + eps);
+    for (uint stride = tg_size / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            tg_partial[tid] += tg_partial[tid + stride];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    float total_ssq = tg_partial[0];
+    float inv_rms = 1.0 / sqrt(total_ssq / float(dim) + eps);
 
     // Apply normalization
-    for (uint i = tid; i < d; i += 32) {
-        output[row * d + i] = half(float(input[row * d + i]) * inv_rms);
+    for (uint i = tid; i < dim; i += tg_size) {
+        output[i] = half(float(input[i]) * inv_rms);
     }
 }
