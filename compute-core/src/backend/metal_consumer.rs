@@ -11,6 +11,8 @@ use crate::compute_image::apple_shared_arena::SlotState;
 // Metal import — only on macOS with metal-dispatch feature.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 use metal;
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+use objc::{msg_send, sel, sel_impl};
 
 /// Result of a Metal validation execution.
 ///
@@ -208,20 +210,30 @@ impl MetalConsumer {
             .ok_or("no Metal device available")?;
 
         // 2. Create MTLBuffer from the IOSurface memory (zero-copy)
-        let buffer = device.new_buffer_with_data(
-            unsafe { arena.base_ptr.add(offset) } as *const std::ffi::c_void,
-            byte_len as u64,
-            metal::MTLResourceOptions::StorageModeShared,
-        );
+        // Get the IOSurface handle from the backing arena — this is the actual
+        // IOSurface object that Core ML wrote to, not a CPU copy of its bytes.
+        let io_surface = arena.backing_arena.as_ref()
+            .map(|a| a.info.io_surface)
+            .ok_or("no IOSurface backing arena")?;
+        // Create a Metal buffer directly backed by the IOSurface — zero copy,
+        // no CPU readback, no data copy. Metal reads the same physical bytes
+        // that Core ML produced.
+        let buffer: metal::Buffer = unsafe {
+            msg_send![device,
+                newBufferWithIOSurface:io_surface
+                offset:offset as u64
+                length:byte_len as u64
+                options:metal::MTLResourceOptions::StorageModeShared]
+        };
 
         // 3. Dispatch a Metal compute kernel that sums the buffer contents
         let shader_src = r#"
 #include <metal_stdlib>
 using namespace metal;
 kernel void checksum(device const uint* in  [[buffer(0)]],
-                     device atomic_uint* out [[buffer(1)]],
+                     device atomic_ulong* out [[buffer(1)]],
                      uint tid [[thread_position_in_grid]]) {
-    atomic_fetch_add_explicit(out, in[tid], memory_order_relaxed);
+    atomic_fetch_add_explicit(out, (ulong)in[tid], memory_order_relaxed);
 }
 "#;
         let library = device.new_library_with_source(shader_src, &metal::CompileOptions::new())
@@ -232,7 +244,8 @@ kernel void checksum(device const uint* in  [[buffer(0)]],
             .map_err(|e| format!("pipeline: {:?}", e))?;
 
         // 4. Allocate 8-byte result buffer (StorageModeShared for CPU readback)
-        let result = device.new_buffer(4u64, metal::MTLResourceOptions::StorageModeShared);
+        // Allocate 8-byte result buffer with u64 accumulation to avoid overflow
+        let result = device.new_buffer(8u64, metal::MTLResourceOptions::StorageModeShared);
 
         // 5. Dispatch kernel
         let cmd_queue = device.new_command_queue();
@@ -250,7 +263,7 @@ kernel void checksum(device const uint* in  [[buffer(0)]],
         cmd_buf.wait_until_completed();
 
         // 6. Read GPU-computed checksum result
-        let gpu_sum = unsafe { *(result.contents() as *const u32) } as u64;
+        let gpu_sum = unsafe { *(result.contents() as *const u64) };
         Ok(gpu_sum)
     }
 }

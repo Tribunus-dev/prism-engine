@@ -493,9 +493,9 @@ impl CoreMlLane {
                 .ok_or("no output bindings")?;
 
             let input_info = arena.arena_info_for_slot(input_slot_id)
-                .ok_or_else(|| "IOSurface backing required for production warmup: input slot {input_slot_id} has no backing".to_string())?;
+                .ok_or_else(|| format!("IOSurface backing required for production warmup: input slot {} has no backing", input_slot_id))?;
             let output_info = arena.arena_info_for_slot(output_slot_id)
-                .ok_or_else(|| "IOSurface backing required for production warmup: output slot {output_slot_id} has no backing".to_string())?;
+                .ok_or_else(|| format!("IOSurface backing required for production warmup: output slot {} has no backing", output_slot_id))?;
 
             let start = std::time::Instant::now();
 
