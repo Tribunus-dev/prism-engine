@@ -30,8 +30,11 @@ mod metal_backend {
         pub rope_pipeline: ComputePipelineState,
         pub softmax_pipeline: ComputePipelineState,
         pub gateup_pipeline: ComputePipelineState,
+        pub silu_pipeline: ComputePipelineState,
+        pub vec_add_pipeline: ComputePipelineState,
         pub weight_bufs: HashMap<String, (Buffer, u32, u32)>,
         pub scratch: Buffer,
+        pub scratch2: Buffer,
     pub kv_bufs: Vec<(Buffer, Buffer)>,
     pub kv_stride: u64,
     pub kv_offsets: Vec<u64>,
@@ -66,8 +69,17 @@ mod metal_backend {
             let gateup_pipeline = device.new_compute_pipeline_state_with_function(
                 &gateup_fn)
                 .map_err(|e| format!("gateup ps: {e:?}"))?;
+            let silu_fn = library.get_function("silu_fp16", None).map_err(|e| format!("silu fn: {e:?}"))?;
+            let silu_pipeline = device.new_compute_pipeline_state_with_function(
+                &silu_fn)
+                .map_err(|e| format!("silu ps: {e:?}"))?;
+            let vec_add_fn = library.get_function("vec_add_fp16", None).map_err(|e| format!("vec_add fn: {e:?}"))?;
+            let vec_add_pipeline = device.new_compute_pipeline_state_with_function(
+                &vec_add_fn)
+                .map_err(|e| format!("vec_add ps: {e:?}"))?;
             let cq = device.new_command_queue();
             let scratch = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
+            let scratch2 = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
             let layer_cap = MAX_SEQ * kv_stride;
             let mut kv_bufs = Vec::with_capacity(num_layers as usize);
             for _ in 0..num_layers {
@@ -84,7 +96,7 @@ mod metal_backend {
                 wb.insert(k.clone(), (b, ct.dim_m, ct.dim_n));
             }
 
-            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, norm_pipeline, rope_pipeline, softmax_pipeline, gateup_pipeline, weight_bufs: wb, scratch, kv_bufs, kv_stride, kv_offsets })
+            Ok(MetalBackend { device, library, command_queue: cq, pipeline, attn_pipeline, norm_pipeline, rope_pipeline, softmax_pipeline, gateup_pipeline, silu_pipeline, vec_add_pipeline, weight_bufs: wb, scratch, scratch2, kv_bufs, kv_stride, kv_offsets })
         }
         pub fn gemv(&self, key: &str, inp: &[u16], out: &mut [u16]) -> Result<(), String> {
             let (wb, dm, dn) = self.weight_bufs.get(key).ok_or_else(|| format!("miss {key}"))?;
@@ -189,7 +201,7 @@ mod metal_backend {
             let enc = cb.new_compute_command_encoder();
             enc.set_compute_pipeline_state(&self.norm_pipeline);
             enc.set_buffer(0, Some(&self.scratch), 0);
-            enc.set_buffer(1, Some(&self.scratch), 0);
+            enc.set_buffer(1, Some(&self.scratch2), 0);
             enc.set_bytes(2, 4, &dim as *const u32 as *const _);
             enc.set_bytes(3, 4, &eps as *const f32 as *const _);
             unsafe {
@@ -200,7 +212,7 @@ mod metal_backend {
             enc.end_encoding(); cb.commit(); cb.wait_until_completed();
             unsafe {
                 std::ptr::copy_nonoverlapping(
-                    self.scratch.contents() as *const u8,
+                    self.scratch2.contents() as *const u8,
                     output.as_mut_ptr() as *mut u8, output.len() * 2);
             }
         }
@@ -239,14 +251,62 @@ mod metal_backend {
                     self.scratch.contents() as *mut u8, input.len() * 2);
             }
             enc.set_buffer(0, Some(&self.scratch), 0);
-            enc.set_buffer(1, Some(&self.scratch), 0);
+            enc.set_buffer(1, Some(&self.scratch2), 0);
             enc.set_bytes(2, 4, &dim as *const u32 as *const _);
             enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(32, 1, 1));
             enc.end_encoding(); cb.commit(); cb.wait_until_completed();
             unsafe {
                 std::ptr::copy_nonoverlapping(
-                    self.scratch.contents() as *const u8,
+                    self.scratch2.contents() as *const u8,
                     output.as_mut_ptr() as *mut u8, output.len() * 2);
+            }
+        }
+
+        /// GPU SiLU activation: x = x / (1 + exp(-x))
+        pub fn silu_metal(&self, data: &mut [u16]) {
+            let len = data.len() as u32;
+            let cb = self.command_queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&self.silu_pipeline);
+            unsafe {
+                std::ptr::copy_nonoverlapping(data.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8, data.len() * 2);
+            }
+            enc.set_buffer(0, Some(&self.scratch), 0);
+            enc.set_bytes(1, 4, &len as *const u32 as *const _);
+            let tg = ((len as u64) + 255) / 256;
+            enc.dispatch_thread_groups(MTLSize::new(tg, 1, 1), MTLSize::new(256, 1, 1));
+            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    self.scratch.contents() as *const u8,
+                    data.as_mut_ptr() as *mut u8, data.len() * 2);
+            }
+        }
+
+        /// GPU vector add: a[i] = a[i] + b[i]
+        pub fn vec_add_metal(&self, a: &mut [u16], b: &[u16]) {
+            let len = a.len().min(b.len()) as u32;
+            let cb = self.command_queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&self.vec_add_pipeline);
+            // Copy both to scratch
+            unsafe {
+                std::ptr::copy_nonoverlapping(a.as_ptr() as *const u8,
+                    self.scratch.contents() as *mut u8, a.len() * 2);
+                std::ptr::copy_nonoverlapping(b.as_ptr() as *const u8,
+                    (self.scratch.contents() as *mut u8).add(a.len() * 2), b.len() * 2);
+            }
+            enc.set_buffer(0, Some(&self.scratch), 0);
+            enc.set_buffer(1, Some(&self.scratch), a.len() as u64 * 2);
+            enc.set_bytes(2, 4, &len as *const u32 as *const _);
+            let tg = ((len as u64) + 255) / 256;
+            enc.dispatch_thread_groups(MTLSize::new(tg, 1, 1), MTLSize::new(256, 1, 1));
+            enc.end_encoding(); cb.commit(); cb.wait_until_completed();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    self.scratch.contents() as *const u8,
+                    a.as_mut_ptr() as *mut u8, a.len() * 2);
             }
         }
 
@@ -865,6 +925,7 @@ impl PrismEngine {
                         if let Some(ref mut g) = gate {
                             silu_inplace(g);
                             if let Some(ref u) = up {
+                                // gate * up element-wise (CPU — tiny, not bandwidth-bound)
                                 for i in 0..g.len().min(u.len()) {
                                     let a = half::f16::from_bits(g[i]).to_f32();
                                     let b = half::f16::from_bits(u[i]).to_f32();
