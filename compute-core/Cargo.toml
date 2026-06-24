@@ -62,6 +62,18 @@ deno_core_icudata = "0.77"
 anyhow = "1.0.102"
 
 [features]
+cpu-backend = []
+cuda-backend = []
+hip-backend = []
+level-zero-backend = []
+vulkan-backend = []
+linux-device-islands = [
+  "cpu-backend",
+  "cuda-backend",
+  "hip-backend",
+  "level-zero-backend",
+  "vulkan-backend"
+]
 default = []
 prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "mlx-backend"]
 ffi = ["prism-backend"]

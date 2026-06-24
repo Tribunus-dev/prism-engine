@@ -1,5 +1,5 @@
 #![allow(unexpected_cfgs)]
-#[cfg(feature = "linux-device-core")]
+#[cfg(feature = "linux-device-islands")]
 pub mod linux;
 pub mod trcs;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
