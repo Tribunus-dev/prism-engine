@@ -265,8 +265,10 @@ mod metal_backend {
             enc.set_buffer(1, Some(up_buf), 0);
             enc.set_buffer(2, Some(&self.scratch), 0);
             enc.set_buffer(3, Some(&self.scratch), il);
-            let dims: [u32; 2] = [input.len() as u32, *dm];
-            enc.set_bytes(4, 8, dims.as_ptr() as *const std::ffi::c_void);
+            let in_dim: u32 = input.len() as u32;
+            let out_dim: u32 = *dm;
+            enc.set_bytes(4, 4, &in_dim as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(5, 4, &out_dim as *const u32 as *const std::ffi::c_void);
             enc.dispatch_thread_groups(MTLSize::new(*dm as u64, 1, 1), MTLSize::new(64, 1, 1));
             enc.end_encoding(); cb.commit(); cb.wait_until_completed();
             unsafe {
