@@ -6,6 +6,7 @@
 
 pub mod phase_ir;
 pub mod admission;
+pub mod apple_installation;
 pub mod ane_lane;
 pub mod staging;
 pub mod evidence_probe;

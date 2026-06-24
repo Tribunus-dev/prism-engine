@@ -9,6 +9,11 @@ mod tests {
         CompileTimeReceiptBundle, ExecutableFormatVersion, ModelIdentity,
         SealedComputeImageExecutable,
     };
+    use tribunus_compute_core::compute_image::content_store::index::{
+    };
+use tribunus_compute_core::compute_image::content_store::index::{
+    ContentAddressedContentStore, ContentStoreVersion,
+};
     use tribunus_compute_core::compute_image::executable::seal::ExecutableSeal;
     use tribunus_compute_core::integration::ContentHash;
 
@@ -27,7 +32,13 @@ mod tests {
             },
             model_graph_hash: ContentHash(1),
             tokenizer_hash: ContentHash(2),
-            content_store: Default::default(),
+            content_store: ContentAddressedContentStore {
+                store_version: ContentStoreVersion { major: 1, minor: 0 },
+                segments: vec![],
+                objects: vec![],
+                aliases: vec![],
+                index_hash: ContentHash(0),
+            },
             target_profiles: vec![],
             executable_seal: ExecutableSeal {
                 root_hash: ContentHash(0),

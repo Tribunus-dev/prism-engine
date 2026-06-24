@@ -10,6 +10,8 @@
 //! bounded residency, and output parity. No-copy Metal buffers remain v2.
 
 pub mod adapter;
+pub mod apple_cimage_manifest;
+pub mod apple_shared_arena;
 pub mod compatibility;
 pub mod compile;
 #[cfg(all(

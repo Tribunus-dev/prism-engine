@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use crate::compilation::tri_lane::{
     AneLaneLifecycle, AneQualificationRecord, AppleFallbackPlan,
     AppleTriLaneExecutionReceipt, CoreMlWarmupContract, LaneExecutionEvent,
-    OverlapMetrics, NumericalStatus,
+    OverlapMetrics, NumericalStatus, FallbackStatus, AneExecutionEvidence,
 };
 use tempfile::TempDir;
 
@@ -462,6 +462,7 @@ impl CoreMlLane {
             ane_artifact_id: self.subgraphs.first().map(|sg| sg.name.clone()),
             ane_admission: crate::compilation::tri_lane::AneAdmission::Admitted,
             boundary_events: vec![],
+            slot_events: vec![],
             overlap_ns: OverlapMetrics {
                 epoch_wall_ns: 0,
                 total_compute_ns: 0,
@@ -473,6 +474,9 @@ impl CoreMlLane {
             numerical_status: NumericalStatus::Pass,
             configured_cpu_and_neural_engine: healthy,
             observed_ane_execution: self.is_available && healthy,
+            fallback_status: FallbackStatus::NotActivated,
+            coreml_configuration: None,
+            ane_execution_evidence: AneExecutionEvidence::NotObserved,
         }
     }
 }

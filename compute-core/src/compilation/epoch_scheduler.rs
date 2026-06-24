@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use crate::compilation::tri_lane::{
     AneAdmission, AppleTriLaneExecutionPlan, AppleTriLaneExecutionReceipt,
     ExecutionLane, ExecutionEpoch, LaneExecutionEvent, NumericalStatus, OverlapMetrics,
+    FallbackStatus, AneExecutionEvidence,
 };
 
 // ── Re-exports ───────────────────────────────────────────────────────────
@@ -309,11 +310,15 @@ impl EpochScheduler {
                 .map(|p| p.artifact_id.clone()),
             ane_admission: AneAdmission::Admitted,
             boundary_events: Vec::new(),
+            slot_events: Vec::new(),
             overlap_ns: overlap,
             fallback_used: false,
             numerical_status: NumericalStatus::Pass,
             configured_cpu_and_neural_engine: true,
             observed_ane_execution: self.plan.ane_program.is_some(),
+            fallback_status: FallbackStatus::NotActivated,
+            coreml_configuration: None,
+            ane_execution_evidence: AneExecutionEvidence::NotObserved,
         }
     }
 

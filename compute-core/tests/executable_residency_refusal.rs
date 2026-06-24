@@ -3,13 +3,13 @@
 
 #[cfg(test)]
 mod tests {
-    use tribunus_compute_core::compute_image::content_store::index::ResidencyClass;
+    use tribunus_compute_core::compute_image::residency::plan::ResidencyClass;
     use tribunus_compute_core::compute_image::residency::admission::{
         ResidencyAdmission, ResidencyAdmissionResult, ResidencyRefusalReason,
     };
     use tribunus_compute_core::compute_image::residency::plan::{
         ActivationArenaRequirements, CompiledResidencyPlan, KvCacheRequirements,
-        MemoryAdmissionContract, PeakMemoryEstimate, RequiredWeightObject, ResidencyPlanId,
+        MemoryAdmissionContract, PeakMemoryEstimate, RequiredWeightObject,
     };
     use tribunus_compute_core::integration::ContentHash;
 

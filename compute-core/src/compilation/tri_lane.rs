@@ -484,6 +484,83 @@ impl TriLaneCostModel {
     }
 }
 
+// ── Evidence and calibration types ──────────────────────────────────────────
+
+/// Evidence about how Core ML configuration was applied
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoreMlConfigurationEvidence {
+    /// Whether the model was loaded with cpuAndNeuralEngine compute policy
+    pub loaded_with_cpu_and_neural_engine: bool,
+    /// The actual compute policy string used
+    pub compute_policy: String,
+    /// Timestamp of configuration
+    pub configured_at: String,
+}
+
+/// Level of ANE execution evidence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AneExecutionEvidence {
+    /// ANE execution not observed
+    NotObserved,
+    /// Model configured for ANE but execution on ANE not directly confirmed
+    ConfiguredOnly,
+    /// IOSurface-backed prediction completed and outputs validated
+    IOSurfacePredictionValidated,
+    /// Trace/profiler verified ANE execution with trace identifier
+    TraceVerified { trace_id: String },
+}
+
+impl Default for AneExecutionEvidence {
+    fn default() -> Self {
+        Self::NotObserved
+    }
+}
+
+/// Slot event for per-epoch receipts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlotEvent {
+    pub slot_id: u32,
+    pub tensor_id: String,
+    pub epoch: u64,
+    pub slot_generation: u64,
+    pub state: String,
+}
+
+/// Fallback status for receipts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FallbackStatus {
+    NotActivated,
+    Activated { epoch: u64, reason: String },
+    RecoveryInProgress { epoch: u64 },
+    Permanent { epoch: u64 },
+}
+
+impl Default for FallbackStatus {
+    fn default() -> Self {
+        Self::NotActivated
+    }
+}
+
+/// Calibration record keyed by device and artifact identity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleTriLaneCalibrationRecord {
+    pub hardware_signature: String,
+    pub os_build: String,
+    pub coreml_runtime_identity: String,
+    pub region_fingerprint: String,
+    pub artifact_digest: String,
+    pub shape_class: ShapeClass,
+    pub ring_depth: u8,
+    pub measured_ane_ns: u64,
+    pub measured_metal_ns: u64,
+    pub measured_cpu_ns: u64,
+    pub measured_epoch_wall_ns: u64,
+    pub measured_overlap_ns: u64,
+    pub slot_wait_ns: u64,
+    pub fallback_metal_ns: u64,
+    pub numerical_error: f64,
+}
+
 // ── Evidence requirements ────────────────────────────────────────────────
 
 /// Evidence requirements for tri-lane execution qualification.
@@ -579,6 +656,14 @@ pub struct AppleTriLaneExecutionReceipt {
     pub overlap_ns: OverlapMetrics,
     /// Whether fallback was activated.
     pub fallback_used: bool,
+    /// Per-slot IO-arena events for this epoch.
+    pub slot_events: Vec<SlotEvent>,
+    /// Detailed fallback status beyond the boolean.
+    pub fallback_status: FallbackStatus,
+    /// Evidence about how Core ML configuration was applied (if available).
+    pub coreml_configuration: Option<CoreMlConfigurationEvidence>,
+    /// Level of evidence confirming ANE execution.
+    pub ane_execution_evidence: AneExecutionEvidence,
     /// Numerical validation status.
     pub numerical_status: NumericalStatus,
     /// Whether the plan was configured for cpuAndNeuralEngine.
@@ -865,6 +950,10 @@ mod tests {
                 overlap_fraction: 0.33,
             },
             fallback_used: false,
+            slot_events: vec![],
+            fallback_status: FallbackStatus::NotActivated,
+            coreml_configuration: None,
+            ane_execution_evidence: AneExecutionEvidence::NotObserved,
             numerical_status: NumericalStatus::Pass,
             configured_cpu_and_neural_engine: false,
             observed_ane_execution: false,
@@ -880,5 +969,9 @@ mod tests {
             _ => panic!("wrong admission variant"),
         }
         assert!(matches!(back.numerical_status, NumericalStatus::Pass));
+        assert!(back.slot_events.is_empty());
+        assert!(matches!(back.fallback_status, FallbackStatus::NotActivated));
+        assert!(back.coreml_configuration.is_none());
+        assert!(matches!(back.ane_execution_evidence, AneExecutionEvidence::NotObserved));
     }
 }
