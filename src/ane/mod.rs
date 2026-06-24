@@ -1,6 +1,10 @@
 pub mod diffusion_ane;
 pub mod coreml_bridge;
 pub mod coreml_state;
+#[cfg(feature = "ane")]
+pub mod mil_gen_full;
+#[cfg(feature = "ane")]
+pub mod compile_full_model;
 pub mod coreml_audit;
 pub mod arena_info;
 pub mod arena;
@@ -8,6 +12,8 @@ pub mod arena;
 pub mod mil_builder;
 #[cfg(feature = "ane")]
 pub mod mlpackage;
+#[cfg(feature = "ane")]
+pub mod mil_helpers;
 
 pub use arena_info::ArenaInfo;
 pub use arena::Arena;

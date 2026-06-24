@@ -335,41 +335,14 @@ fn pull(repo: &str) {
     #[cfg(feature = "ane")]
     {
         eprint!("  [5/5] ANE prefill... ");
-        use prism_engine::ane::mlpackage;
-        use coreml_proto::proto::mil_spec;
-        // Build minimal MIL program: identity passthrough
-        let prog = prism_engine::ane::mil_builder::MilBuilder::new("ane_prefill")
-            .input("input", mil_spec::DataType::Float16, &[1, 32, -1])
-            .output("output")
-            .build().unwrap_or_else(|e| {
-                eprintln!("mil error: {e}");
-                std::process::exit(1);
-            });
-        let meta = mlpackage::ModelMeta {
-            short_description: format!("ANE prefill for {}", name),
-            version: "1.0".into(), author: "prism-engine".into(),
-            model_name: format!("{}_ane_prefill", name),
-            function_name: "ane_prefill".into(),
-            inputs: vec![("input".into(), vec![1, 32, -1])],
-            outputs: vec![("output".into(), vec![1, 1, -1])],
-            output_name: "output".into(),
-        };
-        match mlpackage::write_mlpackage(prog, &out_dir, &meta) {
-            Ok(pkg) => {
-                eprint!("compiling... ");
-                let out_mlmodelc = out_dir.join(format!("{}_ane_prefill.mlmodelc", name));
-                match std::process::Command::new("xcrun")
-                    .args(["coremlcompiler", "compile",
-                        pkg.to_str().unwrap_or(""),
-                        out_mlmodelc.to_str().unwrap_or("")])
-                    .output()
-                {
-                    Ok(out) if out.status.success() => eprintln!("ok"),
-                    Ok(out) => eprintln!("failed: {}", String::from_utf8_lossy(&out.stderr)),
-                    Err(e) => eprintln!("coremlcompiler error: {e}"),
-                }
-            }
-            Err(e) => eprintln!("write mlpackage: {e}"),
+        match prism_engine::ane::compile_full_model::compile_ane_prefill(
+            &name,
+            &safetensors_dir,
+            &graph,
+            &out_cimage,
+        ) {
+            Ok(()) => eprintln!("ok"),
+            Err(e) => eprintln!("failed: {e}"),
         }
     }
 
