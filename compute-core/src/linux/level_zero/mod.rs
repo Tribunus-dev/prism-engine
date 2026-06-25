@@ -16,5 +16,9 @@ impl LinuxDeviceBackend for LevelZeroBackend {
     fn allocate(&self, _device: &DeviceId, _request: AllocationRequest) -> Result<DeviceBuffer, BackendError> { Err(BackendError::UnsupportedOperation("L0 stub".into())) }
     fn submit(&self, _queue: &QueueHandle, _submission: Submission) -> Result<SubmissionHandle, BackendError> { Err(BackendError::UnsupportedOperation("L0 stub".into())) }
     fn poll(&self, _submission: &SubmissionHandle) -> Result<SubmissionStatus, BackendError> { Ok(SubmissionStatus::Failed) }
-    fn synchronize(&self, _submission: &SubmissionHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("L0 stub".into())) }
+    fn synchronize(&self, _submission: &SubmissionHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn release(&self, _buffer: crate::linux::memory::BufferHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn create_event(&self, _device: &DeviceId) -> Result<crate::linux::event::EventHandle, BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn record_event(&self, _queue: &QueueHandle, _event: &crate::linux::event::EventHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn wait_event(&self, _queue: &QueueHandle, _event: &crate::linux::event::EventHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
 }

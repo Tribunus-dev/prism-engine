@@ -10,8 +10,39 @@ use crate::linux::queue::{QueueClass, QueueHandle};
 use crate::linux::submission::{Submission, SubmissionHandle, SubmissionStatus};
 use crate::linux::cpu::memory::CpuBuffer;
 
+use std::sync::Mutex;
+use std::collections::HashMap;
+
+use crate::linux::backend::{BackendKind, DeviceId, DeviceStableKey, VendorKind, RuntimeResourceId};
+use crate::linux::capability::{BackendAvailability, DeviceCapabilities};
+use crate::linux::device::{DeviceDescriptor, LinuxDeviceBackend};
+use crate::linux::errors::BackendError;
+use crate::linux::memory::{AllocationRequest, BufferOwnership, DeviceBuffer, MemoryKind, BufferHandle};
+use crate::linux::queue::{QueueClass, QueueHandle};
+use crate::linux::submission::{Submission, SubmissionHandle, SubmissionStatus};
+use crate::linux::cpu::memory::CpuBuffer;
+
+use crate::linux::receipt::BackendErrorReceipt;
+use crate::linux::submission::SubmissionKind;
+
+pub struct SubmissionRecord {
+    pub handle: SubmissionHandle,
+    pub queue: QueueHandle,
+    pub operation: SubmissionKind,
+    pub referenced_buffers: Vec<BufferHandle>,
+    pub status: SubmissionStatus,
+    pub submitted_at_unix_ms: u64,
+    pub started_at_unix_ms: Option<u64>,
+    pub completed_at_unix_ms: Option<u64>,
+    pub error: Option<BackendErrorReceipt>,
+    pub output_hash: Option<u64>,
+}
+
 pub struct CpuBackend {
-    buffers: Mutex<HashMap<u64, CpuBuffer>>,
+    buffers: Mutex<HashMap<RuntimeResourceId, CpuBuffer>>,
+    queues: Mutex<HashMap<RuntimeResourceId, QueueHandle>>,
+    events: Mutex<HashMap<RuntimeResourceId, ()>>,
+    submissions: Mutex<HashMap<RuntimeResourceId, SubmissionRecord>>,
     next_id: Mutex<u64>,
 }
 
@@ -19,6 +50,9 @@ impl CpuBackend {
     pub fn new() -> Self {
         Self {
             buffers: Mutex::new(HashMap::new()),
+            queues: Mutex::new(HashMap::new()),
+            events: Mutex::new(HashMap::new()),
+            submissions: Mutex::new(HashMap::new()),
             next_id: Mutex::new(1),
         }
     }
@@ -129,13 +163,17 @@ impl LinuxDeviceBackend for CpuBackend {
 
         let buf = CpuBuffer {
             handle: handle.clone(),
-            bytes: vec![0; request.size_bytes as usize],
+            storage: match request.layout {
+            crate::linux::memory::ElementLayout::Bytes => crate::linux::cpu::memory::CpuBufferStorage::Bytes(vec![0; request.size_bytes as usize]),
+            crate::linux::memory::ElementLayout::U32 => crate::linux::cpu::memory::CpuBufferStorage::U32(vec![0; (request.size_bytes / 4) as usize]),
+            crate::linux::memory::ElementLayout::U64 => crate::linux::cpu::memory::CpuBufferStorage::U64(vec![0; (request.size_bytes / 8) as usize]),
+        },
             alignment_bytes: request.alignment_bytes,
             ownership: BufferOwnership::HostOwned,
             usage: request.usage,
         };
 
-        self.buffers.lock().unwrap().insert(resource_id.opaque_id, buf);
+        self.buffers.lock().unwrap().insert(resource_id.clone(), buf);
 
         Ok(DeviceBuffer {
             buffer_id: handle,
@@ -158,76 +196,85 @@ impl LinuxDeviceBackend for CpuBackend {
 
         match submission {
             Submission::Fill { destination, value, element_count } => {
-                let dest = buffers.get_mut(&destination.id.opaque_id)
+                let dest = buffers.get_mut(&destination.id)
                     .ok_or_else(|| BackendError::SubmissionFailed("Invalid destination buffer".into()))?;
 
                 if dest.ownership == BufferOwnership::Released {
                     return Err(BackendError::SubmissionFailed("Buffer released".into()));
                 }
 
-                // Treat bytes as u32 array and fill
-                let dest_ptr = dest.bytes.as_mut_ptr() as *mut u32;
-    let dest_slice: &mut [u32] = unsafe { std::slice::from_raw_parts_mut(dest_ptr, dest.bytes.len() / 4) };
-                if element_count as usize > dest_slice.len() {
-                    return Err(BackendError::SubmissionFailed("Out of bounds".into()));
-                }
-
-                for i in 0..element_count as usize {
-                    dest_slice[i] = value;
+                match &mut dest.storage {
+                    crate::linux::cpu::memory::CpuBufferStorage::U32(vec) => {
+                        if element_count as usize > vec.len() {
+                            return Err(BackendError::SubmissionFailed("Out of bounds".into()));
+                        }
+                        for i in 0..element_count as usize {
+                            vec[i] = value;
+                        }
+                    },
+                    _ => return Err(BackendError::SubmissionFailed("Invalid layout for Fill U32".into())),
                 }
             },
             Submission::Copy { source, destination, size_bytes } => {
-                let (src_bytes, src_own) = {
-                    let src = buffers.get(&source.id.opaque_id)
-                        .ok_or_else(|| BackendError::SubmissionFailed("Invalid source buffer".into()))?;
+                let src_bytes = {
+                    let src = buffers.get(&source.id)
+                        .ok_or_else(|| BackendError::SubmissionFailed("Invalid src".into()))?;
                     if src.ownership == BufferOwnership::Released {
-                        return Err(BackendError::SubmissionFailed("Source buffer released".into()));
+                        return Err(BackendError::SubmissionFailed("Src released".into()));
                     }
-                    if size_bytes as usize > src.bytes.len() {
-                        return Err(BackendError::SubmissionFailed("Out of bounds read".into()));
+                    match &src.storage {
+                        crate::linux::cpu::memory::CpuBufferStorage::Bytes(v) => {
+                            if size_bytes as usize > v.len() { return Err(BackendError::SubmissionFailed("Out of bounds".into())); }
+                            v[..size_bytes as usize].to_vec()
+                        },
+                        _ => return Err(BackendError::SubmissionFailed("Invalid layout for Copy".into())),
                     }
-                    (src.bytes[..size_bytes as usize].to_vec(), src.ownership)
                 };
 
-                let dest = buffers.get_mut(&destination.id.opaque_id)
-                    .ok_or_else(|| BackendError::SubmissionFailed("Invalid destination buffer".into()))?;
+                let dest = buffers.get_mut(&destination.id)
+                    .ok_or_else(|| BackendError::SubmissionFailed("Invalid dest".into()))?;
 
-                if dest.ownership == BufferOwnership::Released {
-                    return Err(BackendError::SubmissionFailed("Dest buffer released".into()));
+                match &mut dest.storage {
+                    crate::linux::cpu::memory::CpuBufferStorage::Bytes(v) => {
+                        if size_bytes as usize > v.len() { return Err(BackendError::SubmissionFailed("Out of bounds".into())); }
+                        v[..size_bytes as usize].copy_from_slice(&src_bytes);
+                    },
+                    _ => return Err(BackendError::SubmissionFailed("Invalid layout for Copy".into())),
                 }
-                if size_bytes as usize > dest.bytes.len() {
-                    return Err(BackendError::SubmissionFailed("Out of bounds write".into()));
-                }
-
-                dest.bytes[..size_bytes as usize].copy_from_slice(&src_bytes);
             },
             Submission::Reduction { source, destination, element_count, operation } => {
-                // Simplistic sum mock to satisfy the contract structurally
-                let (src_bytes, _) = {
-                    let src = buffers.get(&source.id.opaque_id).ok_or(BackendError::SubmissionFailed("Invalid src".into()))?;
-                    (src.bytes.clone(), src.ownership)
-                };
+                let src = buffers.get(&source.id).ok_or(BackendError::SubmissionFailed("Invalid src".into()))?;
+                if src.ownership == BufferOwnership::Released { return Err(BackendError::SubmissionFailed("Src released".into())); }
 
-                let dest = buffers.get_mut(&destination.id.opaque_id).ok_or(BackendError::SubmissionFailed("Invalid dest".into()))?;
-
+                // For demonstration, only implementing SumU32 thoroughly as requested in spec snippet
                 match operation {
                     crate::linux::submission::ReductionOperation::SumU32 => {
-                        let src_ptr = src_bytes.as_ptr() as *const u32;
-    let src_slice: &[u32] = unsafe { std::slice::from_raw_parts(src_ptr, src_bytes.len() / 4) };
-                        let sum: u32 = src_slice[..element_count as usize].iter().sum();
-                        let dest_ptr = dest.bytes.as_mut_ptr() as *mut u32;
-    let dest_slice: &mut [u32] = unsafe { std::slice::from_raw_parts_mut(dest_ptr, dest.bytes.len() / 4) };
-                        dest_slice[0] = sum;
-                    }
+                        let sum = match &src.storage {
+                            crate::linux::cpu::memory::CpuBufferStorage::U32(v) => {
+                                if element_count as usize > v.len() { return Err(BackendError::SubmissionFailed("OOB".into())); }
+                                let mut s: u32 = 0;
+                                for &x in &v[..element_count as usize] {
+                                    s = s.checked_add(x).ok_or_else(|| BackendError::SubmissionFailed("ArithmeticOverflow".into()))?;
+                                }
+                                s
+                            },
+                            _ => return Err(BackendError::SubmissionFailed("Invalid layout".into())),
+                        };
+
+                        let dest = buffers.get_mut(&destination.id).ok_or(BackendError::SubmissionFailed("Invalid dest".into()))?;
+                        match &mut dest.storage {
+                            crate::linux::cpu::memory::CpuBufferStorage::U32(v) => {
+                                if v.is_empty() { return Err(BackendError::SubmissionFailed("Dest too small".into())); }
+                                v[0] = sum;
+                            },
+                            _ => return Err(BackendError::SubmissionFailed("Invalid dest layout".into())),
+                        }
+                    },
                     _ => return Err(BackendError::UnsupportedOperation("Unimplemented reduction".into())),
                 }
             },
-            Submission::DeterministicHash { .. } => {
-                return Err(BackendError::UnsupportedOperation("Stub Hash".into()));
-            },
-            Submission::ScanPreparation { .. } => {
-                return Err(BackendError::UnsupportedOperation("Stub Scan".into()));
-            },
+            Submission::DeterministicHash { .. } => return Err(BackendError::UnsupportedOperation("Stub Hash".into())),
+            Submission::ScanPreparation { .. } => return Err(BackendError::UnsupportedOperation("Stub Scan".into())),
         }
 
         let sub_id = RuntimeResourceId {
@@ -243,11 +290,50 @@ impl LinuxDeviceBackend for CpuBackend {
         })
     }
 
-    fn poll(&self, _submission: &SubmissionHandle) -> Result<SubmissionStatus, BackendError> {
-        Ok(SubmissionStatus::Complete)
+    fn poll(&self, submission: &SubmissionHandle) -> Result<SubmissionStatus, BackendError> {
+        let subs = self.submissions.lock().unwrap();
+        if let Some(record) = subs.get(&submission.id) {
+            Ok(record.status)
+        } else {
+            Err(BackendError::SubmissionFailed("Submission not found".into()))
+        }
     }
 
-    fn synchronize(&self, _submission: &SubmissionHandle) -> Result<(), BackendError> {
+    fn synchronize(&self, submission: &SubmissionHandle) -> Result<(), BackendError> {
+        let subs = self.submissions.lock().unwrap();
+        if let Some(record) = subs.get(&submission.id) {
+            if record.status == SubmissionStatus::Failed {
+                return Err(BackendError::SubmissionFailed("Submission previously failed".into()));
+            }
+            Ok(())
+        } else {
+            Err(BackendError::SubmissionFailed("Submission not found".into()))
+        }
+    }
+
+    fn release(&self, buffer: BufferHandle) -> Result<(), BackendError> {
+        let mut buffers = self.buffers.lock().unwrap();
+        if let Some(buf) = buffers.get_mut(&buffer.id) {
+            buf.ownership = BufferOwnership::Released;
+            // Immediate drop in CPU backend
+            buffers.remove(&buffer.id);
+            Ok(())
+        } else {
+            Err(BackendError::SubmissionFailed("Buffer not found or already released".into()))
+        }
+    }
+
+    fn create_event(&self, device: &DeviceId) -> Result<crate::linux::event::EventHandle, BackendError> {
+        let id = self.generate_resource_id(device);
+        self.events.lock().unwrap().insert(id.clone(), ());
+        Ok(crate::linux::event::EventHandle { id })
+    }
+
+    fn record_event(&self, _queue: &QueueHandle, _event: &crate::linux::event::EventHandle) -> Result<(), BackendError> {
+        Ok(())
+    }
+
+    fn wait_event(&self, _queue: &QueueHandle, _event: &crate::linux::event::EventHandle) -> Result<(), BackendError> {
         Ok(())
     }
 }

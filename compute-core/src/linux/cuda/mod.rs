@@ -52,7 +52,21 @@ impl LinuxDeviceBackend for CudaBackend {
         Ok(SubmissionStatus::Failed)
     }
 
-    fn synchronize(&self, _submission: &SubmissionHandle) -> Result<(), BackendError> {
-        Err(BackendError::UnsupportedOperation("CUDA FeatureNotCompiled".into()))
+    fn synchronize(&self, _submission: &SubmissionHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn release(&self, _buffer: crate::linux::memory::BufferHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn create_event(&self, _device: &DeviceId) -> Result<crate::linux::event::EventHandle, BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn record_event(&self, _queue: &QueueHandle, _event: &crate::linux::event::EventHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn wait_event(&self, _queue: &QueueHandle, _event: &crate::linux::event::EventHandle) -> Result<(), BackendError> { Err(BackendError::UnsupportedOperation("stub".into())) }
+    fn release(&self, _buffer: crate::linux::memory::BufferHandle) -> Result<(), BackendError> {
+        Err(BackendError::UnsupportedOperation("FeatureNotCompiled".into()))
+    }
+    fn create_event(&self, _device: &DeviceId) -> Result<crate::linux::event::EventHandle, BackendError> {
+        Err(BackendError::UnsupportedOperation("FeatureNotCompiled".into()))
+    }
+    fn record_event(&self, _queue: &QueueHandle, _event: &crate::linux::event::EventHandle) -> Result<(), BackendError> {
+        Err(BackendError::UnsupportedOperation("FeatureNotCompiled".into()))
+    }
+    fn wait_event(&self, _queue: &QueueHandle, _event: &crate::linux::event::EventHandle) -> Result<(), BackendError> {
+        Err(BackendError::UnsupportedOperation("FeatureNotCompiled".into()))
     }
 }

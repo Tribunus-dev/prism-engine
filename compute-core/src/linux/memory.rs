@@ -65,4 +65,12 @@ pub struct AllocationRequest {
     pub memory_preference: MemoryPreference,
     pub usage: BufferUsage,
     pub zero_initialize: bool,
+    pub layout: ElementLayout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElementLayout {
+    Bytes,
+    U32,
+    U64,
 }
