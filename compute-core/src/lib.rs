@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[cfg(not(any(
     any(

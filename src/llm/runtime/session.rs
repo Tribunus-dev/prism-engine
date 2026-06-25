@@ -213,6 +213,7 @@ mod compute_session {
 
     /// Map a compute-core `ControlSessionState` to the engine's
     /// `InferenceSessionState`.
+    #[allow(dead_code)]
     fn control_state_to_inference_state(state: ControlSessionState) -> InferenceSessionState {
         match state {
             ControlSessionState::Created => InferenceSessionState::Created,
@@ -228,6 +229,7 @@ mod compute_session {
     }
 
     /// Reverse mapping: engine state → compute-core state.
+    #[allow(dead_code)]
     fn inference_state_to_control_state(state: InferenceSessionState) -> ControlSessionState {
         match state {
             InferenceSessionState::Created => ControlSessionState::Created,
@@ -253,12 +255,14 @@ mod compute_session {
 
     /// Compute-backed session manager that wraps
     /// `GenerationControlSession` instances.
+    #[allow(dead_code)]
     pub struct ComputeSessionManager {
         sessions: Mutex<HashMap<SessionId, GenerationControlSession>>,
     }
 
     impl ComputeSessionManager {
         /// Create a new, empty compute session manager.
+        #[allow(dead_code)]
         pub fn new() -> Self {
             Self {
                 sessions: Mutex::new(HashMap::new()),
@@ -266,6 +270,7 @@ mod compute_session {
         }
 
         /// Create a new generation control session and store it.
+        #[allow(dead_code)]
         pub fn create_session(
             &self,
             session_id: SessionId,
@@ -288,6 +293,7 @@ mod compute_session {
         /// Transition an existing session to a new engine-level state.
         /// The state is converted to the compute-core equivalent before
         /// delegation.
+        #[allow(dead_code)]
         pub fn transition(
             &self,
             id: &SessionId,
@@ -305,6 +311,7 @@ mod compute_session {
         }
 
         /// Return the current engine-level state of a session.
+        #[allow(dead_code)]
         pub fn get_state(&self, id: &SessionId) -> Option<InferenceSessionState> {
             let sessions = self.sessions.lock().ok()?;
             sessions
@@ -313,6 +320,7 @@ mod compute_session {
         }
 
         /// Close and remove a session, consuming its compute-core state.
+        #[allow(dead_code)]
         pub fn close_session(&self, id: &SessionId) -> Result<(), String> {
             let mut sessions = self
                 .sessions

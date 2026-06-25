@@ -274,6 +274,7 @@ pub mod cimage_engine {
         Ok(arr.reshape(&[n as i32]).unwrap_or(arr))
     }
 
+    #[allow(dead_code)]
     fn load_one_f32_2d(
         r: &CImageReader,
         d: &[u8],

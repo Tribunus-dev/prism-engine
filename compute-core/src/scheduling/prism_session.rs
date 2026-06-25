@@ -238,6 +238,51 @@ impl Default for SessionEvidenceLog {
 }
 
 // ---------------------------------------------------------------------------
+// PrismExecutionMode
+// ---------------------------------------------------------------------------
+
+/// Execution mode for a single step call.
+#[derive(Debug, Clone)]
+pub struct PrismExecutionMode {
+    pub tri_lane_enabled: bool,
+    pub risk_policy: crate::compilation::ane_admission_gate::RiskPolicy,
+    pub scheduling_mode: SchedulingMode,
+}
+
+/// Scheduling strategy for this step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchedulingMode {
+    Latency,
+    Throughput,
+    Benchmark,
+}
+
+// ---------------------------------------------------------------------------
+// PrismStepRequest
+// ---------------------------------------------------------------------------
+
+/// A single step request.
+#[derive(Debug, Clone)]
+pub struct PrismStepRequest {
+    pub session_id: String,
+    pub epoch_id: u64,
+    pub execution_mode: PrismExecutionMode,
+    pub inputs: Vec<f32>,
+}
+
+// ---------------------------------------------------------------------------
+// PrismStepResult
+// ---------------------------------------------------------------------------
+
+/// Result of a single step.
+#[derive(Debug, Clone)]
+pub struct PrismStepResult {
+    pub output: Vec<f32>,
+    pub lane_receipts: Vec<crate::scheduling::tri_lane_orchestrator::TriLaneExecutionReceipt>,
+}
+
+
+// ---------------------------------------------------------------------------
 // PrismSession
 // ---------------------------------------------------------------------------
 
@@ -277,6 +322,22 @@ impl PrismSession {
             evidence_log: SessionEvidenceLog::new(),
         }
     }
+
+    /// Execute one step using the tri-lane orchestrator.
+    ///
+    /// This is a minimal wiring — real lane dispatch comes later.
+    pub async fn step_tri_lane(
+        &mut self,
+        _request: PrismStepRequest,
+        _orchestrator: &mut crate::scheduling::tri_lane_orchestrator::TriLaneExecutionPlan,
+        _phase_set: &crate::scheduling::tri_lane_orchestrator::PhaseVariantSet,
+    ) -> Result<PrismStepResult, String> {
+        // Submit the phase to the orchestrator
+        // For now: return a PrismStepResult with the completion receipt
+        // This is a minimal wiring — real lane dispatch comes later
+        Err("tri-lane not yet implemented".into())
+    }
+
 
     /// Advance the session's generation state (called after each epoch
     /// completes).

@@ -617,11 +617,13 @@ mod prism_backend {
     use tribunus_compute_core::kv_arena::block::PhysicalBlockId;
 
     /// Maps the KvEpochId to a compute-core SequenceId for physical page allocation.
+    #[allow(dead_code)]
     pub fn epoch_to_sequence(epoch_id: &KvEpochId) -> SequenceId {
         SequenceId(epoch_id.0)
     }
 
     /// Maps a KvPageId to a PhysicalBlockId reference.
+    #[allow(dead_code)]
     pub fn page_to_block(page_id: &KvPageId) -> PhysicalBlockId {
         PhysicalBlockId(page_id.0 as u32)
     }

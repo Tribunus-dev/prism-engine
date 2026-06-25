@@ -11,12 +11,13 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 use crate::backend::placement::ExecutionLane;
 use crate::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
 use crate::compilation::ane_admission_gate::{LaneAdmissionGate, RiskPolicy};
 use crate::compilation::phase_ir::PhaseId;
-use crate::compilation::tri_lane::{EpochRouteOrigin, MaterializationMode, NumericalStatus};
+use crate::compilation::tri_lane::{EpochRouteOrigin, NumericalStatus};
 use crate::compute_image::portfolio_compilation::CoreMlArtifactKey;
 use crate::scheduling::ane_artifact_cache::{AneArtifactCache, ArtifactKey, ArtifactResidencyState};
 
@@ -31,7 +32,7 @@ pub type VariantId = u64;
 // ── Admission status ────────────────────────────────────────────────────────
 
 /// Whether a phase variant has been admitted for execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AdmissionStatus {
     /// Fully admitted and ready for dispatch.
     Admitted,
@@ -44,7 +45,7 @@ pub enum AdmissionStatus {
 // ── Cost estimate ───────────────────────────────────────────────────────────
 
 /// Predicted cost of executing a phase variant on a specific lane.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseCostEstimate {
     /// Estimated queue delay before execution begins.
     pub queue_delay_ns: u64,
@@ -67,7 +68,7 @@ pub struct PhaseCostEstimate {
 // ── Phase variant ───────────────────────────────────────────────────────────
 
 /// A single execution variant for a phase — a specific lane + artifact binding.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseVariant {
     /// Which execution lane this variant targets.
     pub lane: ExecutionLane,
@@ -213,6 +214,16 @@ pub struct TriLaneExecutionReceipt {
     pub numerical_status: NumericalStatus,
 }
 
+// ── TriLaneExecutionPlan ────────────────────────────────────────────────────
+
+/// Compiled execution plan for an active model runtime.
+/// Constructed once at runtime init, consumed at every epoch.
+pub struct TriLaneExecutionPlan {
+    pub model_identity: String,
+    pub phase_templates: Vec<PhaseVariantSet>,
+    pub fallback_policy: crate::compilation::tri_lane::AppleFallbackPlan,
+}
+
 // ── TriLaneOrchestrator ─────────────────────────────────────────────────────
 
 /// Three-lane orchestrator that selects the best variant for each phase,
@@ -244,6 +255,8 @@ pub struct TriLaneOrchestrator {
     pub dispatch_policy: DispatchPolicy,
     /// Accumulated execution receipts.
     pub receipts: ReceiptCollector,
+    /// Channel receiver for work completions from lane callbacks.
+    pub completion_rx: Option<mpsc::UnboundedReceiver<WorkCompletion>>,
     /// Admission gate for ANE qualification checks.
     pub admission_gate: LaneAdmissionGate,
     /// ANE artifact cache for residency state tracking.
@@ -281,6 +294,7 @@ impl TriLaneOrchestrator {
                 receipts: Vec::new(),
             },
             admission_gate,
+            completion_rx: None,
             ane_cache,
         }
     }
@@ -434,6 +448,43 @@ impl TriLaneOrchestrator {
         };
         LaneState { queue_depth }
     }
+
+    /// Apply a work completion: update readiness, release leases, record receipt.
+    pub fn apply_completion(&mut self, completion: WorkCompletion) -> Result<(), String> {
+        // 1. Update readiness state
+        // 2. Release output lease
+        // 3. Record receipt
+        // Stub: just record the receipt
+        let receipt = TriLaneExecutionReceipt {
+            session_id: String::new(),
+            epoch_id: 0,
+            phase_id: completion.phase_id,
+            variant_id: completion.variant_id,
+            lane: completion.lane,
+            artifact_key: None,
+            input_slots: vec![],
+            output_slot: completion.output_slot,
+            input_abi: crate::compilation::activation_abi::ActivationAbi::MetalOnly(
+                crate::compilation::activation_abi::MetalOnlyParams {
+                    name: String::new(),
+                    dtype: crate::compilation::phase_ir::TensorDtype::Float16,
+                    byte_count: 0,
+                },
+            ),
+            output_abi: crate::compilation::activation_abi::ActivationAbi::MetalOnly(
+                crate::compilation::activation_abi::MetalOnlyParams {
+                    name: String::new(),
+                    dtype: crate::compilation::phase_ir::TensorDtype::Float16,
+                    byte_count: 0,
+                },
+            ),
+            fallback_used: false,
+            route_origin: crate::compilation::tri_lane::EpochRouteOrigin::CoreMlAne,
+            numerical_status: crate::compilation::tri_lane::NumericalStatus::Pass,
+        };
+        self.receipts.receipts.push(receipt);
+        Ok(())
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -451,12 +502,12 @@ mod tests {
         // Use the simplest variant available.
         ActivationAbi::DecodeActivationV1(
             crate::compilation::activation_abi::DecodeActivationV1Params {
-                num_heads: 8,
-                head_dim: 64,
-                seq_len: 128,
-                d_model: 512,
-                element_size: 2,
-                layout: crate::compilation::activation_abi::PhysicalLayout::Interleaved,
+                dtype: crate::compilation::phase_ir::TensorDtype::Float16,
+                seq_bucket: 128,
+                hidden_dim: 512,
+                physical_layout: crate::compilation::activation_abi::PhysicalLayout::ContiguousRowMajor,
+                alignment: 64,
+                stride_constraint: None,
             },
         )
     }

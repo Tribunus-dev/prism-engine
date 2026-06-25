@@ -464,6 +464,7 @@ mod prism_backend {
         safety_reserve_bytes: u64,
     }
 
+    #[allow(dead_code)]
     impl ComputeWeightResidencyManager {
         /// Creates a new, empty `ComputeWeightResidencyManager`.
         ///
