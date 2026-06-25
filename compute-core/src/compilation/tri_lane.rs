@@ -158,6 +158,41 @@ pub enum AneRejectionReason {
         gpu_cost_ns: u64,
         bridge_cost_ns: u64,
     },
+    /// Phase has dynamic dimension(s) that prevent static ANE binding.
+    DynamicDimension {
+        /// Name of the dimension that is dynamic.
+        dimension: String,
+    },
+    /// Phase contains a dynamic reshape that Core ML cannot express.
+    DynamicReshape,
+    /// Phase contains scatter/gather ops incompatible with ANE.
+    ScatterGather,
+    /// Phase uses dynamic indexing (non-constant index tensors).
+    DynamicIndexing,
+    /// Phase mutates KV-cache state in a way Core ML cannot represent.
+    MutableKvState,
+    /// Broadcast dimensions are outside Core ML's certified range.
+    UnsupportedBroadcast,
+    /// Rank conversion at a lane boundary is not representable.
+    BoundaryRankConversion,
+    /// Boundary copy to CPU is required but exceeds the acceptable threshold.
+    BoundaryCpuCopyRequired,
+    /// Operator has no valid tensor shape for lowering.
+    UnsizedOp,
+    /// No catalogue entry exists for this operator family.
+    MissingCatalogueEntry {
+        operator_family: String,
+    },
+    /// Data type not supported on the ANE lane.
+    UnsupportedDtype,
+    /// Input buffer ABI is incompatible with Core ML expectations.
+    UnsupportedInputAbi,
+    /// Output buffer ABI is incompatible with Core ML expectations.
+    UnsupportedOutputAbi,
+    /// ANE weight allocation would exceed the device budget.
+    WeightBudgetExceeded,
+    /// The required Core ML model function is unavailable on this runtime.
+    CoreMlFunctionUnavailable,
 }
 
 /// Reasons a region was admitted on an experimental basis.

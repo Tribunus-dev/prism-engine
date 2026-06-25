@@ -7,6 +7,7 @@
 
 pub mod activation_arena;
 pub mod activation_binding;
+pub mod ane_artifact_cache;
 pub mod batch;
 pub mod benchmark_harness;
 pub mod execution_context;

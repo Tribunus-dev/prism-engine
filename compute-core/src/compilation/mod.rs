@@ -4,6 +4,8 @@
 //! Types delegate to the runtime residency contract in
 //! `crate::backend::residency` for cross-backend transfer decisions.
 
+pub mod ane_admission_gate;
+pub mod ane_eligibility;
 pub mod phase_ir;
 pub mod admission;
 pub mod apple_installation;
@@ -18,3 +20,4 @@ pub mod epoch_scheduler;
 pub mod region_catalogue;
 
 pub mod region_planner;
+pub mod activation_abi;
