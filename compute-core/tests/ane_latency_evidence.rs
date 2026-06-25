@@ -124,7 +124,7 @@ fn make_arena_manifest() -> AppleSharedArenaManifest {
         arena_layout_digest: "layout-v1".into(),
         allocation_bytes: 65536,
         alignment_bytes: 16384,
-        ring_depth: RING_DEPTH as u32,
+        ring_depth: RING_DEPTH as u8,
         slots: make_slots(),
     }
 }
@@ -377,7 +377,7 @@ fn test_single_sequence_latency_mode() {
     );
     assert_eq!(
         install.arena.ring_depth,
-        RING_DEPTH as u32,
+        RING_DEPTH as u8,
         "ring depth must remain stable after {} epochs",
         EPOCH_COUNT
     );

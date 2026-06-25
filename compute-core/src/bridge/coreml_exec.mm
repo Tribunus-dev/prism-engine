@@ -157,7 +157,7 @@ int tribunus_coreml_predict(
         NSString* err = _assertFeature(
             desc.inputDescriptionsByName[inName],
             inName,
-            MLMultiArrayDataTypeFloat32,
+            MLMultiArrayDataTypeFloat16,
             shape);
         if (err) {
             fprintf(stderr, "coreml_predict: input validation failed: %s\n",
@@ -167,7 +167,7 @@ int tribunus_coreml_predict(
         err = _assertFeature(
             desc.outputDescriptionsByName[outName],
             outName,
-            MLMultiArrayDataTypeFloat32,
+            MLMultiArrayDataTypeFloat16,
             @[@(output_arena->logical_dim0), @(output_arena->logical_dim1)]);
         if (err) {
             fprintf(stderr, "coreml_predict: output validation failed: %s\n",
@@ -178,7 +178,7 @@ int tribunus_coreml_predict(
         MLMultiArray* input_ma = [[MLMultiArray alloc]
             initWithDataPointer:input_arena->base_address
                           shape:shape
-                       dataType:MLMultiArrayDataTypeFloat32
+                       dataType:MLMultiArrayDataTypeFloat16
                         strides:@[@(input_arena->logical_dim1), @1]
                     deallocator:^(void* p) { (void)p; }
                           error:&error];
@@ -191,7 +191,7 @@ int tribunus_coreml_predict(
         MLMultiArray* output_ma = [[MLMultiArray alloc]
             initWithDataPointer:output_arena->base_address
                           shape:@[@(output_arena->logical_dim0), @(output_arena->logical_dim1)]
-                       dataType:MLMultiArrayDataTypeFloat32
+                       dataType:MLMultiArrayDataTypeFloat16
                         strides:@[@(output_arena->logical_dim1), @1]
                     deallocator:^(void* p) { (void)p; }
                           error:&error];
