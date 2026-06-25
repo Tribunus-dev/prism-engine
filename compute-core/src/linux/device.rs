@@ -45,6 +45,11 @@ pub trait LinuxDeviceBackend: Send + Sync {
         request: AllocationRequest,
     ) -> Result<DeviceBuffer, BackendError>;
 
+    fn release(
+        &self,
+        buffer: crate::linux::memory::BufferHandle,
+    ) -> Result<(), BackendError>;
+
     fn submit(
         &self,
         queue: &QueueHandle,
@@ -60,4 +65,8 @@ pub trait LinuxDeviceBackend: Send + Sync {
         &self,
         submission: &SubmissionHandle,
     ) -> Result<(), BackendError>;
+
+    fn create_event(&self, device: &DeviceId) -> Result<crate::linux::event::EventHandle, BackendError>;
+    fn record_event(&self, queue: &QueueHandle, event: &crate::linux::event::EventHandle) -> Result<(), BackendError>;
+    fn wait_event(&self, queue: &QueueHandle, event: &crate::linux::event::EventHandle) -> Result<(), BackendError>;
 }
