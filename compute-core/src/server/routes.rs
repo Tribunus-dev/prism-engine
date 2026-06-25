@@ -39,12 +39,11 @@ fn base64_encode(data: &[u8]) -> String {
     }
     buf
 }
-use crate::logging;
 use axum::{
     extract::{Json, Path, State},
     http::StatusCode,
     response::Json as JsonResponse,
-    routing::{delete, get, post},
+    routing::{get, post},
     Router,
 };
 use std::collections::HashMap;
@@ -58,7 +57,6 @@ use crate::generation::video_generation::{TextToImageGenerator, VideoGenerator};
 use crate::grammar::Grammar;
 use crate::grammar::GrammarTokenizer;
 use crate::kv_cache::KvCache;
-use crate::profiled_executor::EmbedPoolStrategy;
 use crate::profiled_executor::{
     prefill_with_audio, AudioInput, LoadedProfiledModel, ProfiledInferenceSession,
 };
@@ -67,16 +65,14 @@ use crate::readiness_gates::ReadinessGates;
 use crate::server::auth::ApiKeyValidator;
 use crate::server::benchmark::SystemBenchmark;
 use crate::server::models::{ModelEntry, ModelRegistry};
-use crate::session::{InferenceSessionState, SamplerConfig};
+use crate::session::SamplerConfig;
 use crate::tokenizer::TribunusTokenizer;
-use std::path::Path as FilePath;
-use std::path::PathBuf;
 use std::time::Instant;
 //use std::path::Path; (removed - use FilePath alias from above)
 use crate::exo::NodeInfo;
-use crate::lora::{self, AdapterInfo, LoraAdapter};
-use crate::metrics::{CacheKind, InferenceTelemetry};
-use crate::model_cache::{ModelCache, ModelSource, ModelType};
+use crate::lora::{AdapterInfo, LoraAdapter};
+use crate::metrics::InferenceTelemetry;
+use crate::model_cache::{ModelCache, ModelType};
 
 use crate::worker_protocol::StartGenerationPayload;
 use crate::worker_supervisor::WorkerSupervisor;
@@ -87,7 +83,7 @@ use crate::editing::{
 use crate::profiled_executor::StreamConfig;
 use crate::server::admin::ActiveRequestInfo;
 use crate::server::rate_limiter::RateLimiter;
-use crate::tools::{self, ToolCallResult, ToolDefinition};
+use crate::tools::{self, ToolCallResult};
 use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, Sse};
@@ -101,7 +97,6 @@ use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::streaming::GenerationEvent;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -555,7 +550,7 @@ fn extract_multimodal_message(messages: &[serde_json::Value]) -> Option<(String,
     let parts = content.as_array()?;
     let mut prompt = String::new();
     let mut images: Vec<ImageInput> = Vec::new();
-    let mut img_idx: u32 = 0;
+    let mut _img_idx: u32 = 0;
 
     for part in parts {
         let part_type = part.get("type").and_then(|v| v.as_str()).unwrap_or("text");
@@ -581,7 +576,7 @@ fn extract_multimodal_message(messages: &[serde_json::Value]) -> Option<(String,
                         source: url.to_string(),
                         placeholder_tokens: vec![0xFFFF], // reserved image token
                     });
-                    img_idx += 1;
+                    _img_idx += 1;
                 }
             }
             _ => {}
@@ -923,10 +918,10 @@ async fn handle_streaming_chat(
         .unwrap_or(128);
 
     // ── Extract prompt and multimodal inputs ───────────────────────────
-    let (prompt, image_inputs) =
+    let (prompt, _image_inputs) =
         extract_multimodal_message(messages).unwrap_or((String::new(), Vec::new()));
-    let audio_inputs = extract_audio_inputs(messages);
-    let video_inputs = extract_video_inputs(messages);
+    let _audio_inputs = extract_audio_inputs(messages);
+    let _video_inputs = extract_video_inputs(messages);
 
     // ── Resolve model source and load from cache ───────────────────────
     let sources = crate::model_cache::default_model_sources();
@@ -940,7 +935,7 @@ async fn handle_streaming_chat(
         }
     };
 
-    let model_arc = match state.model_cache.lock().await.get_or_load(
+    let _model_arc = match state.model_cache.lock().await.get_or_load(
         &model_name,
         source,
         Some(state.telemetry.as_ref()),
@@ -1252,13 +1247,13 @@ async fn v1_chat_completions(
         }
         ModelType::Text | ModelType::Vision | ModelType::Audio => {
             // Parse response_format for grammar-guided generation.
-            let sampler_config = parse_response_format_from_model(&body, &model_arc).await;
+            let _sampler_config = parse_response_format_from_model(&body, &model_arc).await;
 
             // ── Extract prompt and multimodal inputs ─────────────────────
-            let (prompt, image_inputs) =
+            let (prompt, _image_inputs) =
                 extract_multimodal_message(messages).unwrap_or((String::new(), Vec::new()));
-            let audio_inputs = extract_audio_inputs(messages);
-            let video_inputs = extract_video_inputs(messages);
+            let _audio_inputs = extract_audio_inputs(messages);
+            let _video_inputs = extract_video_inputs(messages);
             let prompt_tokens: Vec<u32> = tokenize_prompt(&state, &prompt);
 
             // ── Token-generation rate limit check ──────
@@ -1668,7 +1663,7 @@ async fn v1_completions(
         }
     };
 
-    let model_arc = match state.model_cache.lock().await.get_or_load(
+    let _model_arc = match state.model_cache.lock().await.get_or_load(
         &model_name,
         source,
         Some(state.telemetry.as_ref()),
@@ -1788,7 +1783,7 @@ async fn embeddings(
     Json(body): Json<serde_json::Value>,
 ) -> Result<JsonResponse<serde_json::Value>, (StatusCode, String)> {
     // Parse input — single string or array of strings
-    let inputs: Vec<String> = {
+    let _inputs: Vec<String> = {
         if let Some(s) = body.get("input").and_then(|v| v.as_str()) {
             vec![s.to_string()]
         } else if let Some(arr) = body.get("input").and_then(|v| v.as_array()) {
@@ -1824,7 +1819,7 @@ async fn embeddings(
         )
     })?;
 
-    let model_arc = state
+    let _model_arc = state
         .model_cache
         .lock()
         .await
@@ -2186,7 +2181,7 @@ async fn v1_image_edits(
         .and_then(|v| v.as_str())
         .ok_or((StatusCode::BAD_REQUEST, "missing 'image' field".to_string()))?;
 
-    let prompt = body.get("prompt").and_then(|v| v.as_str()).ok_or((
+    let _prompt = body.get("prompt").and_then(|v| v.as_str()).ok_or((
         StatusCode::BAD_REQUEST,
         "missing 'prompt' field".to_string(),
     ))?;
@@ -2197,7 +2192,7 @@ async fn v1_image_edits(
         .unwrap_or("512x512");
 
     // Decode the mask if provided.
-    let mask_bytes: Option<Vec<u8>> = body
+    let _mask_bytes: Option<Vec<u8>> = body
         .get("mask")
         .and_then(|v| v.as_str())
         .map(|b64| decode_body_base64(b64));
@@ -2248,7 +2243,7 @@ async fn v1_image_variations(
         .and_then(|v| v.as_str())
         .ok_or((StatusCode::BAD_REQUEST, "missing 'image' field".to_string()))?;
 
-    let n = body.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+    let _n = body.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
     let _size = body
         .get("size")
         .and_then(|v| v.as_str())
@@ -2925,12 +2920,12 @@ fn crc32(data: &[u8]) -> u32 {
 
 /// Compute Adler-32 checksum (RFC 1950 / zlib).
 fn adler32(data: &[u8]) -> u32 {
-    let MOD: u32 = 65521;
+    let r#mod: u32 = 65521;
     let mut a: u32 = 1;
     let mut b: u32 = 0;
     for &byte in data {
-        a = (a + byte as u32) % MOD;
-        b = (b + a) % MOD;
+        a = (a + byte as u32) % r#mod;
+        b = (b + a) % r#mod;
     }
     (b << 16) | a
 }

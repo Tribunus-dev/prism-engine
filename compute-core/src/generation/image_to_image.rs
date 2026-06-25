@@ -304,6 +304,7 @@ fn decode_png(data: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     // For full generality a proper PNG library (e.g. the `png` crate) would
     // be needed, but we keep this dependency-free.
 
+    #[allow(dead_code)]
     struct Chunk {
         _len: u32,
         _ty: [u8; 4],
@@ -318,7 +319,7 @@ fn decode_png(data: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     let mut pos = 8; // skip signature
     let mut width = 0u32;
     let mut height = 0u32;
-    let mut bit_depth = 8u8;
+    let mut _bit_depth = 8u8;
     let mut color_type = 6u8; // default RGBA
     let mut raw_pixels: Vec<u8> = Vec::new();
 
@@ -336,7 +337,7 @@ fn decode_png(data: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
             }
             width = read_be_u32(data, chunk_data_start);
             height = read_be_u32(data, chunk_data_start + 4);
-            bit_depth = data[chunk_data_start + 8];
+            _bit_depth = data[chunk_data_start + 8];
             color_type = data[chunk_data_start + 9];
         } else if chunk_type == b"IDAT" {
             let start = chunk_data_start;

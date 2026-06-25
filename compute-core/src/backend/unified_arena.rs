@@ -35,6 +35,7 @@ pub struct UnifiedExecutionArena {
     regions: Vec<ArenaRegion>,
     next_offset: u64,
     read_hazards: Vec<(ArenaView, ArenaView)>,
+    #[allow(dead_code)]
     write_hazards: Vec<(ArenaView, ArenaView)>,
 }
 

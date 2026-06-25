@@ -14,6 +14,7 @@ pub enum EvictionPolicy {
 
 /// COW (Copy-on-Write) refcount manager.
 pub struct CowManager {
+    #[allow(dead_code)]
     policy: EvictionPolicy,
 }
 

@@ -146,6 +146,7 @@ pub struct WeightRowCache {
     /// ANE SRAM slot allocator.
     pub slot_allocator: SlotAllocator,
     /// Temporary buffer for dot-product computation.
+    #[allow(dead_code)]
     dot_buffer: Vec<f32>,
 }
 

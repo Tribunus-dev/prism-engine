@@ -1130,6 +1130,7 @@ fn nfa_transition(nfa: &[NFAState], states: &BTreeSet<usize>, ch: char) -> BTree
 }
 
 /// Build the set of all valid characters from a set of NFA states.
+#[allow(dead_code)]
 fn valid_chars_from_nfa_states(nfa: &[NFAState], states: &BTreeSet<usize>) -> Vec<(char, char)> {
     let mut char_set: BTreeSet<char> = BTreeSet::new();
     for &state_id in states {

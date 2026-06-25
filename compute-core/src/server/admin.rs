@@ -24,7 +24,6 @@ use tokio::sync::Mutex;
 use crate::cache::evolkv::{CalibrationSet, EvolKV};
 use crate::server::routes::AppState;
 use crate::worker_supervisor::WorkerLifecyclePhase;
-use crate::worker_supervisor::WorkerSupervisor;
 
 // ---------------------------------------------------------------------------
 // Request tracking

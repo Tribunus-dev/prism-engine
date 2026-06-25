@@ -20,7 +20,6 @@
 
 use crate::compute_image::executable::profile::ExecutableTargetProfile;
 use crate::compute_image::program::phase_program::{ExecutionLane, SerializedPhaseProgram};
-use crate::integration::ContentHash;
 
 // ---------------------------------------------------------------------------
 // Core data structures

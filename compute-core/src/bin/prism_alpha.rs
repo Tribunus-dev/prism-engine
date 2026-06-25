@@ -2,7 +2,9 @@ use clap::{Args, Parser, Subcommand};
 use std::collections::HashMap;
 use std::path::Path;
 
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 use tribunus_compute_core::compilation::region_catalogue::RegionCatalogue;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 use tribunus_compute_core::compilation::region_planner;
 use tribunus_compute_core::model_adapter::{AdapterRegistry, SourceModel};
 
@@ -204,7 +206,9 @@ fn run_import(model_path_str: &str) {
     };
 
     // ── Step 5: Build region plan ─────────────────────────────────────
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
     let catalogue = RegionCatalogue::fp16_alpha();
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
     let plan = region_planner::build_region_plan(&canonical, &catalogue);
 
     // ── Step 6: Print structured summary ──────────────────────────────
@@ -235,10 +239,13 @@ fn run_import(model_path_str: &str) {
         );
     }
     println!();
-    println!("=== Region Plan ===");
-    println!("  Core ML islands:  {}", plan.coreml_islands.len());
-    println!("  Metal ops:        {}", plan.metal_ops.len());
-    println!("  CPU ops:          {}", plan.cpu_ops.len());
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+    {
+        println!("=== Region Plan ===");
+        println!("  Core ML islands:  {}", plan.coreml_islands.len());
+        println!("  Metal ops:        {}", plan.metal_ops.len());
+        println!("  CPU ops:          {}", plan.cpu_ops.len());
+    }
 
     std::process::exit(0);
 }

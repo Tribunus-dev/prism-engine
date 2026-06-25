@@ -15,7 +15,6 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 mod release;
-use release::VersionedInstallDir;
 
 pub const PRISM_HOME: &str = ".prism";
 pub const MODELS_DIR: &str = "models";
@@ -529,6 +528,7 @@ fn diagnostics(output: &PathBuf, include_sensitive: bool) {
 }
 
 /// Compile ANE subgraphs for a downloaded model.
+#[allow(dead_code)]
 fn ane_compile(name: &str) {
     let dir = model_dir(name);
     if !dir.join("config.json").exists() {

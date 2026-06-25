@@ -45,8 +45,10 @@ const MAX_IMAGE_SIZE: u32 = 2048;
 /// Minimum supported image size (width or height).
 const MIN_IMAGE_SIZE: u32 = 256;
 /// Maximum number of diffusion steps.
+#[allow(dead_code)]
 const MAX_STEPS: u32 = 200;
 /// Default classifier-free guidance scale.
+#[allow(dead_code)]
 const DEFAULT_CFG_SCALE: f32 = 7.5;
 
 // ---------------------------------------------------------------------------
@@ -60,6 +62,7 @@ const THINKING_MASK_THRESHOLD: f32 = 0.3;
 /// Multiplier for denoising steps in thinking mode.
 const THINKING_STEPS_MULTIPLIER: u32 = 2;
 /// Default temperature for confidence-calibrated sampling.
+#[allow(dead_code)]
 const DEFAULT_TEMPERATURE: f32 = 1.0;
 
 // ---------------------------------------------------------------------------
@@ -485,6 +488,7 @@ impl DiffusionSampler {
     }
 
     /// Sample noise for N token positions at a given step.
+    #[allow(dead_code)]
     fn sample_noise(&self, n: u32, step: u32, total_steps: u32) -> Result<Array, String> {
         let hidden_size = 4096i32;
         let len = (n as i32) * hidden_size;

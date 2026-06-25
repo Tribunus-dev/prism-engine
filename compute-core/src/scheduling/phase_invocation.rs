@@ -1,4 +1,4 @@
-use crate::compute_image::phase_dag::{EmittedPhase, EmittedPhaseGraph};
+use crate::compute_image::phase_dag::EmittedPhase;
 use crate::compute_image::phase_graph::ResolvedPhaseBinding;
 use crate::inference::execution_image_state::ComputeImageState;
 use crate::inference::inference_session_state::InferenceSessionState;

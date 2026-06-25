@@ -124,7 +124,7 @@ pub fn quantized_embedding_lookup(
     } else {
         4
     };
-    let logical_in = packed_cols * (32 / bits);
+    let _logical_in = packed_cols * (32 / bits);
 
     let flat_ids = token_ids.reshape(&[-1])?;
     let rows = mlx_rs::ops::indexing::take_axis(weight, &flat_ids, 0)?;

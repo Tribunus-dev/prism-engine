@@ -89,8 +89,8 @@ impl AneAdmissionGate {
     #[must_use]
     pub fn admit(
         phase: &CompilePhaseDescriptor,
-        device: &DeviceSignature,
-        artifact: &ANEArtifactKey,
+        _device: &DeviceSignature,
+        _artifact: &ANEArtifactKey,
         baseline: &GpuBaseline,
     ) -> AdmissionVerdict {
         // ── 1. Numerical contract ──────────────────────────────────────

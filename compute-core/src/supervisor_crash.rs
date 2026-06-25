@@ -127,12 +127,12 @@ impl WorkerSupervisor {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if !request_id.is_empty() {
-                if let Err(e) = new_supervisor.cmd_writer.send_command_with_request(
+                if let Err(_e) = new_supervisor.cmd_writer.send_command_with_request(
                     HostCommand::StartGeneration,
                     request_id,
                     payload.clone(),
                 ) {
-                    log_error!("failed to re-queue request {request_id}: {e}");
+                    log_error!("failed to re-queue request {request_id}: {_e}");
                 }
             }
         }

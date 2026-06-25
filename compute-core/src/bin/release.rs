@@ -102,6 +102,7 @@ pub struct PrismReleaseManifest {
 /// `previous` symlinks under `~/.local/share/prism/`.
 pub struct VersionedInstallDir;
 
+#[allow(dead_code)]
 impl VersionedInstallDir {
     /// Base directory for all release artifacts.
     ///

@@ -153,7 +153,7 @@ impl RegionCatalogue {
     ///   CPU     — embedding lookup, token sampling, residual add
     pub fn fp16_alpha() -> Self {
         let fp16 = TensorDtype::Float16;
-        let f32 = TensorDtype::Float32;
+        let _f32 = TensorDtype::Float32;
         let i32 = TensorDtype::Int32;
 
         RegionCatalogue {

@@ -441,8 +441,8 @@ impl KvCache {
 
         // If compressed sink is set, quantize incoming data before storing.
         if let Some(sink) = &self.compressed_sink {
-            let n_kv = self.n_kv_heads as usize;
-            let hd = self.head_dim as usize;
+            let _n_kv = self.n_kv_heads as usize;
+            let _hd = self.head_dim as usize;
             for t in 0..incoming_len as usize {
                 let k_t = keys.index(t as i32);
                 let v_t = values.index(t as i32);

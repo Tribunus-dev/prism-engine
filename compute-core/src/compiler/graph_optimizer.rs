@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 
 /// Kinds of operations we track in the optimizer's internal graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 enum OpKind {
     EmbeddingLookup,
     RmsNorm,
@@ -40,6 +41,7 @@ enum OpKind {
     Argmax,
 }
 
+#[allow(dead_code)]
 impl OpKind {
     fn name(&self) -> &'static str {
         match self {
@@ -80,9 +82,10 @@ struct OpNode {
     inputs: Vec<String>,
     /// Symbolic output tensor name(s) this node produces.
     outputs: Vec<String>,
+    #[allow(dead_code)]
     /// Known input shapes (populated by shape propagation).
     known_input_shapes: Vec<Vec<u32>>,
-    /// Known output shape (populated by shape propagation).
+    /// Known output shape
     known_output_shape: Option<Vec<u32>>,
     /// Whether this operation produces a compile-time constant value.
     is_constant: bool,

@@ -1,7 +1,6 @@
 //! Model registry: list available models, load from Hub, compile to ComputeImage.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 /// A model available for inference
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -56,9 +55,9 @@ impl ModelRegistry {
 
     /// Download a model from HuggingFace
     pub async fn download_hf(
-        repo: &str,
-        filename: &str,
-        cache_dir: &PathBuf,
+        _repo: &str,
+        _filename: &str,
+        _cache_dir: &PathBuf,
     ) -> Result<PathBuf, String> {
         // TODO: use hf-hub crate for proper download
         Err("download not yet implemented — use local path instead".into())

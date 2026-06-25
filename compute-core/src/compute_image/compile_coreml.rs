@@ -178,7 +178,7 @@ pub fn decompose_subgraph(
 /// coremlcompiler` exits with a non-zero status.
 pub fn compile_subgraph(
     name: &str,
-    coreml_ops: &[String],
+    _coreml_ops: &[String],
     input_shapes: &HashMap<String, Vec<i64>>,
     weights: &HashMap<String, Vec<f32>>,
     output_dir: &Path,
@@ -358,6 +358,7 @@ pub fn compile_subgraph(
 ///
 /// When an op type is not recognised an error is returned.
 #[allow(unused_variables)]
+#[allow(dead_code)]
 fn build_mil_program(
     name: &str,
     ops: &[String],

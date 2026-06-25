@@ -148,6 +148,7 @@ fn find_modelc_dir(modelc_path: &Path) -> Option<PathBuf> {
 }
 
 /// Manages ANE compression/decompression programs for KV cache.
+#[allow(dead_code)]
 pub struct AneCompressor {
     programs: (),
     active: bool,

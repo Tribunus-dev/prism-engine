@@ -1,6 +1,6 @@
-use crate::compute_image::phase_dag::{EmittedPhase, EmittedPhaseGraph};
+use crate::compute_image::phase_dag::EmittedPhaseGraph;
 use crate::compute_image::phase_graph::{EmittedPhaseGraphV2, PhaseId};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Computes the ready set of phases given completed phases.
 ///

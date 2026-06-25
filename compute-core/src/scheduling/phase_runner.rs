@@ -13,7 +13,6 @@ use crate::config::operation_route::OperationRoute;
 use crate::config::LayerPlan;
 use crate::executor;
 use crate::executor::SinkState;
-use crate::primitives;
 use crate::projection_identity::{AttentionKind, Phase, ProjectionContext};
 use crate::runtime::executable_session::RuntimeBackends;
 use crate::scheduling::execution_context::ExecutionContext;
@@ -428,7 +427,7 @@ impl PhaseRunner for ArenaAllocRunner {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         if let Some(backend) = &ctx.backend {
-            if let Some(rb) = backend.downcast_ref::<RuntimeBackends>() {
+            if let Some(_rb) = backend.downcast_ref::<RuntimeBackends>() {
                 eprintln!(
                     "[runner] ArenaAlloc: {} reserve {} bytes",
                     phase.phase_id, byte_size
@@ -865,7 +864,7 @@ impl PhaseRunner for LegacyMlxEpilogueRunner {
     fn kind(&self) -> PhaseKind {
         PhaseKind::LegacyMlxEpilogue
     }
-    fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
+    fn run(&self, _phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         let hidden = ctx
             .hidden_state
             .as_ref()
@@ -922,7 +921,7 @@ impl PhaseRunner for SamplingRunner {
     fn kind(&self) -> PhaseKind {
         PhaseKind::Sampling
     }
-    fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
+    fn run(&self, _phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         let logits = ctx
             .hidden_state
             .as_ref()

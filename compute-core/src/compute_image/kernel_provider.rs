@@ -225,11 +225,13 @@ fn generate_palettized_gemv_source(_k: u32, _n: u32) -> String {
 }
 
 /// Generate Metal source for the fused palettized SwiGLU MLP kernel.
+#[allow(dead_code)]
 fn generate_palettized_swiglu_source(_k: u32, _n: u32) -> String {
     include_str!("templates/palettized_gemv_swiglu.metal").to_string()
 }
 
 /// Generate Metal source for the tiled palettized GEMM kernel.
+#[allow(dead_code)]
 fn generate_palettized_gemm_source(_k: u32, _n: u32) -> String {
     include_str!("templates/palettized_gemm.metal").to_string()
 }
@@ -293,7 +295,7 @@ impl KernelProvider for TribunusNativeProvider {
         &self,
         request: &KernelRequest,
         output_dir: &Path,
-        artifact_id: &str,
+        _artifact_id: &str,
         metallib_relpath: &Path,
     ) -> Result<Option<ProvidedKernel>, Box<dyn Error>> {
         if request.operation != "qmatmul" {

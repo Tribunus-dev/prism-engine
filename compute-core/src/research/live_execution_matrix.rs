@@ -9,7 +9,6 @@
 //! prove a live execution route.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------

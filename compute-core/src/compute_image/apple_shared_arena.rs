@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Digest type for layout verification.
+#[allow(dead_code)]
 type Digest = String;
 
 /// Slot identifier.
@@ -16,6 +17,7 @@ type SlotId = u32;
 type ArenaId = String;
 
 /// A monotonic epoch + generation pair for slot freshness tracking.
+#[allow(dead_code)]
 type SlotGeneration = u64;
 
 /// Failure reason for poisoned slots.

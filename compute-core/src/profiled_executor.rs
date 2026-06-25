@@ -15,7 +15,7 @@ use crate::cache::evolkv::LayerBudget;
 use crate::cache::prefix_cache::{check_shared_prefix, insert_shared_prefix};
 use crate::compute_image::phase_dag::EmittedPhaseGraph;
 use crate::compute_image::phase_dag::PhaseCompletionStatus;
-use crate::compute_image::{CompiledImageReader, CopyClassification, TensorEntry};
+use crate::compute_image::CompiledImageReader;
 use crate::config::ModelExecutionPlan;
 use crate::engine_error::{EngineError, EngineErrorCode};
 use crate::heterogeneous::ComputeRuntime;

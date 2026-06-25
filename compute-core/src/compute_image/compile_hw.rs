@@ -404,6 +404,7 @@ fn bench_mlx_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchResul
 /// Stub: Core ML benchmarks return empty until subgraph compilation is wired.
 /// Real IOSurface-backed inference requires full MIL -> coremlc compilation.
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[allow(dead_code)]
 fn bench_coreml_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchResult> {
     // Core ML subgraphs require shape-stable, compiled .mlmodelc packages.
     // This is wired during the full compute-image pipeline, not at probe time.

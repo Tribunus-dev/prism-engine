@@ -1181,7 +1181,7 @@ impl WorkerSupervisor {
 
             // ── Diffusion in-process dispatch ──────────────────────────────
             if request.generation_regime == crate::config::GenerationRegime::DiscreteDiffusion {
-                let session = session.clone();
+                let _session = session.clone();
                 let model = Arc::clone(
                     self.in_process_model
                         .as_ref()
@@ -1244,7 +1244,7 @@ impl WorkerSupervisor {
                             }
                         }
 
-                        let start_time = std::time::Instant::now();
+                        let _start_time = std::time::Instant::now();
                         let mut total_steps = 0u32;
                         let mut unchanged_steps = 0u32;
 

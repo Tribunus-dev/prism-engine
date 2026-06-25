@@ -17,9 +17,6 @@
 use crate::compute_image::phase_graph::{PhaseId, TensorId, TensorLayoutContract};
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-use mlx_rs::Array;
-
 /// Arena binding describing a memory region within the activation arena.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArenaBinding {

@@ -20,9 +20,11 @@ use crate::compute_image::residency::plan::{ActivationArenaRequirements, KvCache
 ///
 /// Computes the total and per-layer KV cache byte counts from the
 /// model architecture and configured context length.
+#[allow(dead_code)]
 pub struct ArenaRequirementsBuilder;
 
 impl ArenaRequirementsBuilder {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }
@@ -35,6 +37,7 @@ impl ArenaRequirementsBuilder {
     /// Returns [`ActivationArenaRequirements`] whose `total_activation_bytes`
     /// is the maximum (phases do not overlap) and `arena_region_count` is
     /// the count of distinct activation byte values.
+    #[allow(dead_code)]
     pub fn compute_activation_requirements(
         &self,
         phase_activation_sizes: &[(String, u64)],
@@ -66,6 +69,7 @@ impl ArenaRequirementsBuilder {
     /// * `head_dim`     — dimension of each attention head
     /// * `max_context`  — maximum sequence length the cache must support
     /// * `kv_dtype_bytes` — bytes per KV cache element (e.g. 2 for FP16)
+    #[allow(dead_code)]
     pub fn compute_kv_requirements(
         &self,
         n_layers: u32,
@@ -109,6 +113,7 @@ impl Default for ArenaRequirementsBuilder {
 /// This is a standalone helper that includes `max_batch` for use in
 /// contexts (e.g. batch serving) where the builder's single-batch
 /// [`ArenaRequirementsBuilder::compute_kv_requirements`] is insufficient.
+#[allow(dead_code)]
 pub fn estimate_kv_cache_bytes(
     n_layers: u32,
     n_kv_heads: u32,

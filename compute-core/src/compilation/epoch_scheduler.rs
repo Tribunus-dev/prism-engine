@@ -328,7 +328,7 @@ impl EpochScheduler {
     /// validation, measured timing, ANE observation, and fallback status.
     pub fn populate_receipt_with_evidence(
         receipt: &mut AppleTriLaneExecutionReceipt,
-        prediction_succeeded: bool,
+        _prediction_succeeded: bool,
         validation_matched: bool,
         measured_ns: u64,
         ane_observed: bool,

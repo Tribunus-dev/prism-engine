@@ -100,7 +100,7 @@ impl PrefillOrchestrator {
 
             // IOSurface-backed arenas and Core ML stateful prefill
             let ctx = self.state_ctx.as_mut().unwrap();
-            let mut input_arena = Arena::new(chunk_size as u32, hidden, mlx_rs::Dtype::Float16)
+            let input_arena = Arena::new(chunk_size as u32, hidden, mlx_rs::Dtype::Float16)
                 .map_err(|e| format!("input arena: {e}"))?;
             input_arena.lock().map_err(|e| format!("input lock: {e}"))?;
             unsafe {

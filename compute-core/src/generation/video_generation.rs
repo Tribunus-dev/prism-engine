@@ -20,6 +20,7 @@ use crate::profiled_executor::LoadedProfiledModel;
 pub struct TextToImageGenerator {
     /// Underlying generative model (typically a diffusion or flow-matching
     /// model loaded via MLX).  `None` during development/stub mode.
+    #[allow(dead_code)]
     model: Option<Arc<LoadedProfiledModel>>,
 }
 

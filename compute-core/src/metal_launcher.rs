@@ -4,7 +4,6 @@
 //! bind buffers from the unified arena, and dispatch compute work.
 
 use crate::worker_dispatch::LoadedMetalKernel;
-use metal::MTLDevice;
 
 /// Dispatch a fused Metal kernel and return execution time in microseconds.
 pub fn dispatch_fused_kernel(

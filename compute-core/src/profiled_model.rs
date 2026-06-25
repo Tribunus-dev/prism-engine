@@ -13,8 +13,7 @@ use crate::arena::Arena;
 use crate::compute_image::phase_dag::EmittedPhaseGraph;
 use crate::compute_image::{CompiledImageReader, CopyClassification, TensorEntry};
 use crate::config::{ModelExecutionPlan, TextArchitecture, VisionArchitecture};
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
-use crate::external_array;
+use crate::coreml_bridge::CoreMlModel;
 use crate::external_array::BorrowedStorage;
 use crate::external_array::{new_external_array, ExternalStorage};
 use crate::heterogeneous::SharedMemoryIsland;
@@ -490,7 +489,7 @@ impl LoadedProfiledModel {
         }
 
         let ns = detect_ns(&reader.manifest.tensor_table);
-        let ns_str = ns.clone();
+        let _ns_str = ns.clone();
         eprintln!("[detect-ns] detected namespace root: '{}'", ns);
 
         // Load global tensors

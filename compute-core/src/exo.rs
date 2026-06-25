@@ -222,6 +222,7 @@ pub struct RdmaRegion {
     /// Next free offset for allocation.
     next_free: u64,
     /// Local node identifier.
+    #[allow(dead_code)]
     local_node: String,
 }
 
@@ -303,6 +304,7 @@ pub struct DistributedKvCache {
     /// Pages sharded by consistent hash across cluster nodes.
     pages: ShardedByNode<DistributedKvPage>,
     /// Wrapped local prefix cache for fast local hits.
+    #[allow(dead_code)]
     local_cache: Arc<Mutex<BlockAwarePrefixCache>>,
     /// RDMA shared memory region for publishing local pages.
     rdma_region: Option<RdmaRegion>,

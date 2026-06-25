@@ -18,6 +18,7 @@ pub struct InferenceStats {
 mod metal_backend {
     use metal::*;
     use std::collections::HashMap;
+    #[allow(dead_code)]
     pub struct MetalBackend {
         pub device: Device,
         pub library: Library,
@@ -48,6 +49,7 @@ mod metal_backend {
             let scratch = device.new_buffer(mh.max(_mi) * 2, MTLResourceOptions::StorageModeShared);
             let mut wb = HashMap::new();
             for (k, ct) in tensors.iter() {
+                #[allow(unused_unsafe)]
                 let b = unsafe {
                     device.new_buffer_with_data(
                         ct.payload.as_ptr() as *const std::ffi::c_void,
@@ -111,6 +113,7 @@ mod metal_backend {
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
+#[allow(dead_code)]
 struct AneBackend {
     model: crate::coreml_bridge::CoreMlModel,
     ctx: crate::coreml_state::StatefulPrefillContext,
@@ -603,11 +606,12 @@ impl PrismEngine {
         _payload: &[u8],
     ) -> Vec<u16> {
         #[cfg(feature = "metal-dispatch")]
-        let mut out = vec![0u16; tensor.dim_m as usize];
+        let _out = vec![0u16; tensor.dim_m as usize];
+        let mut _out = vec![0u16; tensor.dim_m as usize];
         #[cfg(feature = "metal-dispatch")]
         if let Some(ref m) = self.metal {
-            if m.gemv(&tensor.key, input, &mut out).is_ok() {
-                return out;
+            if m.gemv(&tensor.key, input, &mut _out).is_ok() {
+                return _out;
             }
         }
         lut_gemv_cpu(input, _payload, tensor.dim_m, tensor.dim_n)

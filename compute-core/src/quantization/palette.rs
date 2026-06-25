@@ -28,7 +28,7 @@
 use crate::compilation::phase_ir::{
     ArithmeticIntensity, BridgeKind, CompileDeterminism, CompileExecutionReceipt,
     CompilationId, CompilePhaseDescriptor, CompilePlacement, DeviceSignature,
-    EffectiveRoute, FallbackReason, MaterializationContract, MutationClass, PhaseId,
+    EffectiveRoute, MaterializationContract, MutationClass, PhaseId,
     ShapeClass, TensorContract, ValidationResult,
 };
 
@@ -203,8 +203,7 @@ pub fn fit_palette(channel: &[f32], k: usize, max_iter: usize, seeds: Option<&[f
     centroids
 }
 
-/// Deterministic weighted-threshold value for k-means++ selection.
-fn weighted_threshold(total: f32, seed: usize, n: usize) -> f32 {
+
 fn weighted_threshold(total: f32, seed: usize, _n: usize) -> f32 {
     // Simple hash-based deterministic threshold in [0, total).
     // Uses the golden ratio to spread picks across the distribution.
@@ -263,6 +262,7 @@ pub fn encode_channel(channel: &[f32], codebook: &[f32]) -> (Vec<u8>, f32) {
 /// Accepts an optional ANE feature mask for calibration-based seeding
 /// and returns both the palettized matrix and a vector of per-phase
 /// execution receipts.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub fn palettize_matrix_phased(
     weights: &[f32],
     out_dim: usize,
@@ -564,6 +564,72 @@ pub fn palettize_matrix_phased(
 
     (matrix, receipts)
 }
+
+/// Core palettization: build the palettized matrix without compilation receipts.
+fn build_palettized_matrix(
+    weights: &[f32],
+    out_dim: usize,
+    in_dim: usize,
+    k: usize,
+    max_iter: usize,
+    ane_features: Option<std::collections::HashMap<String, f32>>,
+) -> PalettizedMatrix {
+    assert_eq!(
+        weights.len(),
+        out_dim * in_dim,
+        "weight slice length must equal out_dim * in_dim"
+    );
+
+    // ── Extract ANE seed values from feature mask ────────────────────
+    let ane_seeds: Option<Vec<f32>> = ane_features.as_ref().map(|features| {
+        let mut seeds: Vec<f32> = Vec::with_capacity(k);
+        for i in 0..k {
+            let key = format!("seed_{}", i);
+            if let Some(&val) = features.get(&key) {
+                seeds.push(val);
+}
+}
+        seeds
+    });
+
+    let seed_ref: Option<&[f32]> = ane_seeds.as_deref();
+
+    use rayon::prelude::*;
+    let progress = std::sync::atomic::AtomicUsize::new(0);
+    let palette_rows: Vec<PalettizedRow> = (0..out_dim)
+        .into_par_iter()
+        .map(|row_idx| {
+            let start = row_idx * in_dim;
+            let channel = &weights[start..start + in_dim];
+
+            let codebook = fit_palette(channel, k, max_iter, seed_ref);
+            let (indices, _mse) = encode_channel(channel, &codebook);
+
+            let mut cb_arr = [0.0f32; 16];
+            for (i, &v) in codebook.iter().enumerate().take(16) {
+                cb_arr[i] = v;
+}
+
+            let done = progress.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if done % 256 == 0 {
+                eprintln!("[palette] row {}/{} fitted", done, out_dim);
+}
+
+            PalettizedRow {
+                codebook: cb_arr,
+                indices,
+}
+        })
+        .collect();
+
+    PalettizedMatrix {
+        rows: palette_rows,
+        ane_features,
+        in_dim,
+        out_dim,
+}
+}
+
 /// Palettize a complete weight matrix (f32, row-major) into per-channel
 /// 16-entry LUT + packed 4-bit indices.
 ///
@@ -580,10 +646,7 @@ pub fn palettize_matrix(
     k: usize,
     max_iter: usize,
 ) -> PalettizedMatrix {
-    let (matrix, _receipts) = palettize_matrix_phased(
-        weights, out_dim, in_dim, k, max_iter, None,
-    );
-    matrix
+    build_palettized_matrix(weights, out_dim, in_dim, k, max_iter, None)
 }
 
 // ── Dequantization (for verification) ────────────────────────────────────
@@ -605,6 +668,8 @@ pub fn dequantize_matrix(pal: &PalettizedMatrix) -> Vec<f32> {
 
 // ── vDSP-accelerated batch distance ──────────────────────────────────────
 
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
 fn vdsp_squared_distances(channel: &[f32], value: f32, out: &mut [f32]) {
     for (i, &x) in channel.iter().enumerate() {
         let d = x - value;

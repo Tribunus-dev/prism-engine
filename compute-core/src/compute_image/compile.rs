@@ -1732,7 +1732,7 @@ pub(crate) fn apply_nf4_quantize(
             let group_end = (group_start + gs).min(row_offset + in_dim_u);
             let group_vals = &f32_vals[group_start..group_end];
 
-            let (packed_group, scale, _bias) = quantize_nf4_group(group_vals);
+            let (_packed_group, _scale, _bias) = quantize_nf4_group(group_vals);
             let (packed_group, scale, _bias) = quantize_int4_group(group_vals);
             scales.push(scale);
 
@@ -2017,6 +2017,7 @@ pub(crate) fn compile_unchecked(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Compile a Metal shader source string to a .metallib using xcrun metal + metallib.
+#[allow(dead_code)]
 fn compile_metal_source_to_metallib(
     source: &str,
     output_metallib: &Path,
@@ -2082,6 +2083,7 @@ fn compile_metal_source_to_metallib(
 }
 
 /// Copy a C string literal into a fixed-size c_char array (null-terminated).
+#[allow(dead_code)]
 fn copy_cstr_to_array(arr: &mut [std::os::raw::c_char], s: &std::ffi::CStr) {
     let bytes = s.to_bytes();
     for (i, &b) in bytes.iter().enumerate() {
