@@ -14,3 +14,6 @@ pub mod tri_lane;
 pub mod qualification_gate;
 pub mod profitability;
 pub mod epoch_scheduler;
+pub mod region_catalogue;
+
+pub mod region_planner;
