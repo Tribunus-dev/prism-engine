@@ -361,7 +361,7 @@ mod tests {
 
         let abi = sample_abi();
         // ShapeBucket is a forward reference to ane_eligibility module
-        let bucket = ShapeBucket {};
+        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
 
         assert!(gate.admit(&key, &abi, &bucket).is_ok());
     }
@@ -371,7 +371,7 @@ mod tests {
         let gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
         let key = sample_key();
         let abi = sample_abi();
-        let bucket = ShapeBucket {};
+        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
 
         let result = gate.admit(&key, &abi, &bucket);
         assert!(result.is_err());
@@ -392,7 +392,7 @@ mod tests {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
         gate.record(record);
         let abi = sample_abi();
-        let bucket = ShapeBucket {};
+        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
 
         let result = gate.admit(&key, &abi, &bucket);
         assert!(result.is_err());
@@ -413,7 +413,7 @@ mod tests {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
         gate.record(record);
         let abi = sample_abi();
-        let bucket = ShapeBucket {};
+        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
 
         let result = gate.admit(&key, &abi, &bucket);
         assert!(result.is_err());
@@ -433,7 +433,7 @@ mod tests {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::BenchmarkAllowed);
         gate.record(record);
         let abi = sample_abi();
-        let bucket = ShapeBucket {};
+        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
 
         // BenchmarkAllowed tolerates fallback suspicion.
         assert!(gate.admit(&key, &abi, &bucket).is_ok());
@@ -449,7 +449,7 @@ mod tests {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::ExperimentalAllowed);
         gate.record(record);
         let abi = sample_abi();
-        let bucket = ShapeBucket {};
+        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
 
         // ExperimentalAllowed bypasses warmup, parity, and fallback checks.
         assert!(gate.admit(&key, &abi, &bucket).is_ok());
@@ -537,13 +537,14 @@ mod tests {
         assert!(gate.is_production_ready(&key));
 
         // Corrupt each required flag.
-        for (field, check) in [
-            ("compile_success", |r: &mut AneArtifactQualificationRecord| { r.compile_success = false; }),
-            ("load_success", |r: &mut AneArtifactQualificationRecord| { r.load_success = false; }),
-            ("warmup_success", |r: &mut AneArtifactQualificationRecord| { r.warmup_success = false; }),
-            ("parity_passed", |r: &mut AneArtifactQualificationRecord| { r.numerical_parity.passed = false; }),
-            ("fallback_suspected", |r: &mut AneArtifactQualificationRecord| { r.fallback_suspected = true; }),
-        ] {
+        let checks: Vec<(&str, Box<dyn FnMut(&mut AneArtifactQualificationRecord)>)> = vec![
+            ("compile_success", Box::new(|r| r.compile_success = false)),
+            ("load_success", Box::new(|r| r.load_success = false)),
+            ("warmup_success", Box::new(|r| r.warmup_success = false)),
+            ("parity_passed", Box::new(|r| r.numerical_parity.passed = false)),
+            ("fallback_suspected", Box::new(|r| r.fallback_suspected = true)),
+        ];
+        for (field, mut check) in checks {
             let mut bad = qualified_record(key.clone());
             check(&mut bad);
             let mut gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);

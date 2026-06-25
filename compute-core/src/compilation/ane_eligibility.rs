@@ -526,7 +526,7 @@ pub fn analyze_ane_eligibility(
 mod tests {
     use super::*;
     use crate::compilation::phase_ir::{
-        ArithmeticIntensity, CompileDeterminism, CompilePlacement, MaterializationContract,
+        ArithmeticIntensity, CompileDeterminism, CompilePlacement, MaterializationContract, TensorContract,
         MutationClass, PhaseId,
     };
 
@@ -562,7 +562,7 @@ mod tests {
             shape_class,
             arithmetic_intensity: ArithmeticIntensity::ComputeBound,
             mutation,
-            determinism: CompileDeterminism::NumericallyBounded,
+            determinism: CompileDeterminism::NumericallyBounded { abs_error: 0.01, rel_error: 0.01 },
             allowed_placements: vec![CompilePlacement::Ane, CompilePlacement::MetalGpu],
             minimum_profitable_elements: 1024,
             fallback: CompilePlacement::MetalGpu,

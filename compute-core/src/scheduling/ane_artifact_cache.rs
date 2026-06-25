@@ -375,7 +375,7 @@ mod tests {
         // impractical, so we set last_used manually).
         {
             let mut timestamps: Vec<_> = cache.entries.iter_mut().collect();
-            timestamps.sort_by_key(|(k, _)| k.0.layer_start);
+            timestamps.sort_by_key(|(k, _)| k.layer_start);
             for (i, (_, e)) in timestamps.iter_mut().enumerate() {
                 e.last_used = Instant::now() - Duration::from_secs(10 - i as u64);
             }
