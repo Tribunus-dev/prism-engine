@@ -89,7 +89,7 @@ fn build_fp16_throughput_model(model_dir: &Path) -> Result<PathBuf, String> {
         .collect();
 
     let mut b = MilBuilder::new("main");
-    b = b.input("input", mil_spec::DataType::Float16, &[BATCH, HIDDEN]);
+    b = b.input("input", coreml_proto::proto::mil_spec::DataType::Float16, &[BATCH, HIDDEN]);
     b = b.const_f16("weight", &weight, &[HIDDEN, HIDDEN]);
     let weight_name = b.last_name().unwrap_or("weight_0").to_string();
     b = b.matmul("input", &weight_name);
@@ -135,8 +135,8 @@ fn make_throughput_slots(base_offset: u64) -> Vec<IOSurfaceSlotManifest> {
             byte_offset: base_offset,
             byte_length: BYTE_COUNT as u64,
             dtype: "float16".into(),
-            logical_shape: vec![BATCH as u64, HIDDEN as u64],
-            physical_shape: vec![BATCH as u64, HIDDEN as u64],
+            logical_shape: vec![BATCH as u32, HIDDEN as u32],
+            physical_shape: vec![BATCH as u32, HIDDEN as u32],
             strides_bytes: vec![(HIDDEN as u64) * 2],
             layout: "NHWC".into(),
             producer: ExecutionLane::AccelerateCpu,
@@ -150,8 +150,8 @@ fn make_throughput_slots(base_offset: u64) -> Vec<IOSurfaceSlotManifest> {
             byte_offset: base_offset + BYTE_COUNT as u64,
             byte_length: BYTE_COUNT as u64,
             dtype: "float16".into(),
-            logical_shape: vec![BATCH as u64, HIDDEN as u64],
-            physical_shape: vec![BATCH as u64, HIDDEN as u64],
+            logical_shape: vec![BATCH as u32, HIDDEN as u32],
+            physical_shape: vec![BATCH as u32, HIDDEN as u32],
             strides_bytes: vec![(HIDDEN as u64) * 2],
             layout: "NHWC".into(),
             producer: ExecutionLane::CoreMlAne,
@@ -165,8 +165,8 @@ fn make_throughput_slots(base_offset: u64) -> Vec<IOSurfaceSlotManifest> {
             byte_offset: base_offset + 2 * BYTE_COUNT as u64,
             byte_length: BYTE_COUNT as u64,
             dtype: "float16".into(),
-            logical_shape: vec![BATCH as u64, HIDDEN as u64],
-            physical_shape: vec![BATCH as u64, HIDDEN as u64],
+            logical_shape: vec![BATCH as u32, HIDDEN as u32],
+            physical_shape: vec![BATCH as u32, HIDDEN as u32],
             strides_bytes: vec![(HIDDEN as u64) * 2],
             layout: "NHWC".into(),
             producer: ExecutionLane::MlxGpu,
@@ -220,6 +220,7 @@ fn make_manifest(arena: AppleSharedArenaManifest) -> AppleTriLaneArtifactManifes
         metal_artifacts: vec![],
         cpu_artifacts: vec![],
         epochs: vec![],
+        dependencies: vec![],
         fallback: AppleFallbackManifest {
             replacement_lane: "gpu".into(),
             replacement_artifact: String::new(),
@@ -227,13 +228,13 @@ fn make_manifest(arena: AppleSharedArenaManifest) -> AppleTriLaneArtifactManifes
             output_slots: vec![],
             epoch_boundary: 0,
         },
-        arbitration: AppleTriLaneAdmissionManifest {
+        admission: AppleTriLaneAdmissionManifest {
             region_count: 1,
             admitted_regions: vec!["ane_region_0".into()],
             rejected_regions: vec![],
             fallback_available: false,
         },
-        numerical: AppleNumericalPolicy {
+        numerical_policy: AppleNumericalPolicy {
             absolute_tolerance: 0.01,
             relative_tolerance: 0.01,
             validation_mode: "sampled".into(),

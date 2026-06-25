@@ -75,6 +75,35 @@ pub enum SlotReuseClass {
 /// Re-export ExecutionLane for convenience.
 pub use crate::backend::placement::ExecutionLane;
 
+/// Pool-level telemetry for IOSurface lifecycle diagnostics.
+///
+/// Recorded at allocation boundaries and on any rc=-3 failure to
+/// distinguish pool exhaustion from lifecycle bugs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IOSurfacePoolSnapshot {
+    pub total_slots: u32,
+    pub leased_slots: u32,
+    pub free_slots: u32,
+    pub pending_release_slots: u32,
+    pub allocation_failures: u64,
+    pub release_failures: u64,
+    pub high_watermark: u32,
+}
+
+impl Default for IOSurfacePoolSnapshot {
+    fn default() -> Self {
+        Self {
+            total_slots: 0,
+            leased_slots: 0,
+            free_slots: 0,
+            pending_release_slots: 0,
+            allocation_failures: 0,
+            release_failures: 0,
+            high_watermark: 0,
+        }
+    }
+}
+
 /// Attestation of a real IOSurface allocation against its manifest.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IOSurfaceAllocationAttestation {
@@ -207,6 +236,38 @@ impl AppleSharedArena {
     /// Advance the arena generation counter.
     pub fn advance_generation(&mut self) {
         self.generation += 1;
+    }
+
+    /// Returns true when every slot has been retired for the given epoch.
+    /// Return a pool-snapshot of slot state for lifecycle diagnostics.
+    pub fn pool_snapshot(&self) -> IOSurfacePoolSnapshot {
+        let total_slots = self.slots.len() as u32;
+        let mut leased = 0u32;
+        let mut free = 0u32;
+        let mut pending_release = 0u32;
+
+        for slot in self.slots.values() {
+            match &slot.state {
+                SlotState::Free => free += 1,
+                SlotState::Reserved { .. } | SlotState::Writing { .. } | SlotState::Ready { .. } | SlotState::Reading { .. } => {
+                    leased += 1;
+                }
+                SlotState::Retired { .. } => pending_release += 1,
+                SlotState::Poisoned { .. } => {
+                    // Poisoned slots are neither free nor leased.
+                }
+            }
+        }
+
+        IOSurfacePoolSnapshot {
+            total_slots,
+            leased_slots: leased,
+            free_slots: free,
+            pending_release_slots: pending_release,
+            allocation_failures: 0,   // tracked externally via counters
+            release_failures: 0,
+            high_watermark: total_slots.max(leased),
+        }
     }
 
     /// Returns true when every slot has been retired for the given epoch.

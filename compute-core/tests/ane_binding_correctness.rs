@@ -73,7 +73,7 @@ fn build_test_model() -> Result<(PathBuf, String), String> {
 }
 
 #[test]
-fn test_iosurface_arena_allocates_and_releases() {
+fn ws8a1_arena_allocates_and_releases() {
     let arena = Arena::new(BATCH as u32, HIDDEN as u32, mlx_rs::Dtype::Float16)
         .expect("Arena::new must succeed for Float16");
     assert_eq!(arena.element_count(), ELEMENT_COUNT);
@@ -82,7 +82,7 @@ fn test_iosurface_arena_allocates_and_releases() {
 }
 
 #[test]
-fn test_model_builds_and_loads() {
+fn ws8a1_model_builds_and_loads() {
     let (path, out_name) = build_test_model().expect("model must build");
     assert!(path.exists(), "modelc path must exist");
     let model = CoreMlModel::load_with_compute_units(
@@ -93,7 +93,7 @@ fn test_model_builds_and_loads() {
 }
 
 #[test]
-fn test_model_produces_identity_output() {
+fn ws8a1_model_produces_identity_output() {
     let (path, out_name) = build_test_model().expect("model must build");
     let model = CoreMlModel::load_with_compute_units(
         &path.to_string_lossy(),

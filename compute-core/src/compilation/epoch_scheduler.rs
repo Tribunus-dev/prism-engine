@@ -435,20 +435,58 @@ impl EpochScheduler {
                     if let Some(model) = &coreml_exec.model {
                         let in_name = &coreml_exec.input_bindings[0].tensor_id;
                         let out_name = &coreml_exec.output_bindings[0].tensor_id;
-                        // ArenaInfo stub — production would use IOSurface backed slots
-                        let arena_info = crate::arena_info::ArenaInfo {
-                            width: 1,
-                            height: 1,
-                            logical_dim0: 1,
-                            logical_dim1: 1,
-                            pixel_format: 0,
-                            byte_size: 0,
-                            bytes_per_row: 0,
-                            base_address: std::ptr::null_mut(),
-                            cv_buffer: std::ptr::null_mut(),
-                            io_surface: std::ptr::null_mut(),
-                        };
-                        model.predict(in_name, &arena_info, out_name, &arena_info).is_ok()
+                        let in_slot_id = coreml_exec.input_bindings[0].slot_id;
+                        let out_slot_id = coreml_exec.output_bindings[0].slot_id;
+
+                        // Extract ArenaInfo from the slot's IOSurface-backed arena.
+                        // Falls back to heap memory when backing_arena is None (mock).
+                        let in_info = arena.slot(in_slot_id)
+                            .and_then(|s| s.backing_arena.as_ref())
+                            .map(|a| a.info)
+                            .unwrap_or_else(|| {
+                                let s = arena.slot(in_slot_id)
+                                    .expect("in_slot for prediction must exist");
+                                let byte_len = s.manifest.byte_length.max(1) as usize;
+                                let mut heap: Vec<u8> = vec![0u8; byte_len];
+                                let ptr = heap.as_mut_ptr();
+                                std::mem::forget(heap);
+                                crate::arena_info::ArenaInfo {
+                                    width: 1,
+                                    height: 1,
+                                    logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1) as i32,
+                                    logical_dim1: s.manifest.logical_shape.get(1).copied().unwrap_or(1) as i32,
+                                    pixel_format: 0,
+                                    byte_size: byte_len as i32,
+                                    bytes_per_row: s.manifest.strides_bytes.first().copied().unwrap_or(byte_len as u64) as i32,
+                                    base_address: ptr as *mut std::ffi::c_void,
+                                    cv_buffer: std::ptr::null_mut(),
+                                    io_surface: std::ptr::null_mut(),
+                                }
+                            });
+                        let out_info = arena.slot(out_slot_id)
+                            .and_then(|s| s.backing_arena.as_ref())
+                            .map(|a| a.info)
+                            .unwrap_or_else(|| {
+                                let s = arena.slot(out_slot_id)
+                                    .expect("out_slot for prediction must exist");
+                                let byte_len = s.manifest.byte_length.max(1) as usize;
+                                let mut heap: Vec<u8> = vec![0u8; byte_len];
+                                let ptr = heap.as_mut_ptr();
+                                std::mem::forget(heap);
+                                crate::arena_info::ArenaInfo {
+                                    width: 1,
+                                    height: 1,
+                                    logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1) as i32,
+                                    logical_dim1: s.manifest.logical_shape.get(1).copied().unwrap_or(1) as i32,
+                                    pixel_format: 0,
+                                    byte_size: byte_len as i32,
+                                    bytes_per_row: s.manifest.strides_bytes.first().copied().unwrap_or(byte_len as u64) as i32,
+                                    base_address: ptr as *mut std::ffi::c_void,
+                                    cv_buffer: std::ptr::null_mut(),
+                                    io_surface: std::ptr::null_mut(),
+                                }
+                            });
+                        model.predict(in_name, &in_info, out_name, &out_info).is_ok()
                     } else {
                         false
                     }
