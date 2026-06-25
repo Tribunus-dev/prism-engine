@@ -335,10 +335,10 @@ kernel void checksum(texture2d<ushort, access::read> in  [[texture(0)]],
             let binding = slot.attestation.as_ref()
                 .ok_or_else(|| format!("slot {} has no attestation", slot_id))?;
             if !binding.attested { continue; }
-            // Skip slots without real IOSurface backing (test/mock paths)
-            let Some(io_surface) = slot.backing_arena.as_ref().map(|a| a.info.io_surface) else {
-                continue;
-            };
+            // Production FP16 slots must have real IOSurface backing
+            let io_surface = slot.backing_arena.as_ref()
+                .map(|a| a.info.io_surface)
+                .ok_or_else(|| format!("slot {}: FP16 Metal texture requires real IOSurface backing", slot_id))?;
 
             let device = metal::Device::system_default()
                 .ok_or("no Metal device")?;

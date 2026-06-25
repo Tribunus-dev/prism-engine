@@ -99,85 +99,25 @@ pub fn install_apple_tri_lane(
     compute_policy: CoreMlComputePolicy,
 ) -> Result<AppleInstallationResult, String> {
     // 1. Allocate arena
-    let mut arena = AppleSharedArena::new(
-        format!("arena-{}", &manifest.plan_digest[..8.min(manifest.plan_digest.len())]),
-        manifest.arena.ring_depth,
-    );
+    // Install the shared arena from the sealed manifest — allocates real
+    // IOSurface/CVPixelBuffer backings for every slot, populates per-slot
+    // attestation with actual platform properties (pixel format, dimensions,
+    // bytes-per-row, capacity). Fails closed on allocation error.
+    let arena = AppleSharedArena::install(&manifest.arena)
+        .map_err(|e| format!("arena installation failed: {}", e))?;
 
-    // 2. Create slots from manifest
-    for slot_manifest in &manifest.arena.slots {
-        let arena_slot = cimage_slot_to_arena_slot(slot_manifest);
-        // Generate attestation from manifest data.
-        // In production, real IOSurface allocation (AppleSharedArena::install)
-        // would set the backing and attestation; here we populate attestation
-        // directly so step 2b can verify every slot has a valid record.
-        let width = slot_manifest.physical_shape.first().copied().unwrap_or(1);
-        let height = slot_manifest.physical_shape.get(1).copied().unwrap_or(1);
-        let pixel_format = match slot_manifest.dtype.as_str() {
-            "float16" | "fp16" => 0x4C303068u32,
-            _ => 0x0u32,
-        };
-        let fp16_ok = pixel_format == 0x4C303068 || pixel_format == 0x4C303066;
-        // Use byte_length as capacity since the manifest encodes the
-        // required allocation size. In production the real IOSurface
-        // capacity is computed from height * bytes_per_row (with
-        // platform alignment) and verified against byte_length.
-        let capacity = slot_manifest.byte_length;
-        let attestation = Some(IOSurfaceAllocationAttestation {
-            slot_id: slot_manifest.slot_id,
-            iosurface_id: 0,
-            actual_width: width as u32,
-            actual_height: height as u32,
-            actual_bytes_per_row: slot_manifest.strides_bytes.first().copied().unwrap_or(0) as u32,
-            actual_pixel_format: pixel_format,
-            actual_byte_capacity: capacity,
-            manifest_layout_digest: manifest.arena.arena_layout_digest.clone(),
-            attested: fp16_ok && width > 0 && height > 0
-                && capacity >= slot_manifest.byte_length,
-        });
-        let live_slot = LiveIOSurfaceSlot {
-            manifest: arena_slot,
-            state: SlotState::Free,
-            generation: 0,
-            layout_digest: manifest.arena.arena_layout_digest.clone(),
-            metal_view: None,
-            coreml_view: None,
-            backing_arena: None,
-            attestation,
-        };
-        arena.add_slot(live_slot);
-    }
-
-    // 2a. Verify IOSurface slot properties against manifest expectations.
-    // For FP16 production slots, the CVPixelBuffer format should be
-    // kCVPixelFormatType_OneComponent16Half.  This loop documents the
-    // invariant -- when real backings are populated the pixel format
-    // check becomes active.
-    for slot_entry in arena.slots.values() {
-        if slot_entry.manifest.dtype == "float16" {
-            if let Some(backing) = &slot_entry.backing_arena {
-                let expected_format: i32 = 0x4C303068; // 'L00h' = half-float
-                if backing.info.pixel_format != expected_format {
-                    return Err(format!(
-                        "slot {}: expected pixel_format 0x{:08x} for float16, got 0x{:08x}",
-                        slot_entry.manifest.slot_id,
-                        expected_format,
-                        backing.info.pixel_format
-                    ));
-                }
-            }
-        }
-    }
-
-    // 2b. Verify every slot has a valid attestation.
+    // Verify every FP16 slot has a valid real IOSurface attestation.
     for (id, slot) in arena.slots.iter() {
-        // Only FP16 production slots require attestation
         if slot.manifest.dtype != "float16" && slot.manifest.dtype != "fp16" {
             continue;
         }
-        match &slot.attestation {
-            Some(a) if a.attested => {}
-            _ => return Err(format!("slot {}: FP16 production requires valid IOSurface attestation", id)),
+        let att = slot.attestation.as_ref()
+            .ok_or_else(|| format!("slot {}: missing IOSurface allocation attestation", id))?;
+        if att.iosurface_id == 0 {
+            return Err(format!("slot {}: FP16 production requires nonzero IOSurface identity", id));
+        }
+        if !att.attested {
+            return Err(format!("slot {}: IOSurface attestation failed", id));
         }
     }
 
@@ -368,7 +308,7 @@ mod tests {
     fn dummy_arena() -> AppleSharedArenaManifest {
         AppleSharedArenaManifest {
             arena_layout_digest: "test_layout_digest".into(),
-            allocation_bytes: 1_048_576,
+            allocation_bytes: 256,
             alignment_bytes: 16384,
             ring_depth: 2,
             slots: vec![
@@ -376,8 +316,8 @@ mod tests {
                     slot_id: 0,
                     tensor_id: "input_0".into(),
                     byte_offset: 0,
-                    byte_length: 262_144,
-                    dtype: "f16".into(),
+                    byte_length: 128,
+                    dtype: "float16".into(),
                     logical_shape: vec![1, 64],
                     physical_shape: vec![1, 64],
                     strides_bytes: vec![128, 2],
@@ -390,9 +330,9 @@ mod tests {
                 CimageSlotManifest {
                     slot_id: 1,
                     tensor_id: "output_0".into(),
-                    byte_offset: 262_144,
-                    byte_length: 262_144,
-                    dtype: "f16".into(),
+                    byte_offset: 128,
+                    byte_length: 128,
+                    dtype: "float16".into(),
                     logical_shape: vec![1, 64],
                     physical_shape: vec![1, 64],
                     strides_bytes: vec![128, 2],
