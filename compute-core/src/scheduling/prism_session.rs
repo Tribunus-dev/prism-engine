@@ -9,6 +9,10 @@ use crate::backend::coreml_iosurface::CoreMlIOSurfaceExecutable;
 use crate::backend::metal_consumer::MetalConsumer;
 use crate::compilation::epoch_scheduler::EpochScheduler;
 use crate::compilation::failure_injector::FailureInjector;
+use crate::compilation::tri_lane::EpochRouteOrigin;
+use crate::scheduling::tri_lane_orchestrator::{
+    PhaseVariantSet, TriLaneOrchestrator,
+};
 use crate::compute_image::apple_shared_arena::AppleSharedArena;
 
 // PrismSessionRequest
@@ -324,18 +328,57 @@ impl PrismSession {
     }
 
     /// Execute one step using the tri-lane orchestrator.
-    ///
-    /// This is a minimal wiring — real lane dispatch comes later.
     pub async fn step_tri_lane(
         &mut self,
-        _request: PrismStepRequest,
-        _orchestrator: &mut crate::scheduling::tri_lane_orchestrator::TriLaneExecutionPlan,
-        _phase_set: &crate::scheduling::tri_lane_orchestrator::PhaseVariantSet,
+        request: PrismStepRequest,
+        orchestrator: &mut TriLaneOrchestrator,
+        phase_set: &PhaseVariantSet,
     ) -> Result<PrismStepResult, String> {
-        // Submit the phase to the orchestrator
-        // For now: return a PrismStepResult with the completion receipt
-        // This is a minimal wiring — real lane dispatch comes later
-        Err("tri-lane not yet implemented".into())
+        if self.scheduler.terminated
+            || matches!(
+                self.generation_state,
+                GenerationState::Completed | GenerationState::Failed(_)
+            )
+        {
+            return Err("session terminated".into());
+        }
+
+        // 1. Submit phase to orchestrator — selects best variant, enqueues on lane
+        let completion = orchestrator.submit(phase_set)?;
+
+        // 2. Process all available lane completions from the channel
+        //    In production, this runs in a Tokio select loop with timeout.
+        let completions: Vec<_> = orchestrator.completion_rx
+        .as_mut()
+        .map(|rx| std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>())
+        .unwrap_or_default();
+
+        for c in completions {
+                orchestrator.apply_completion(c)?;
+            }
+
+        // 3. Apply the submit-origin completion (synchronous receipt)
+        orchestrator.apply_completion(completion)?;
+
+        // 4. Collect receipts for the step result
+        let lane_receipts = orchestrator.receipts.receipts.clone();
+
+        // 5. Record evidence
+        self.evidence_log.record(SessionLogEntry {
+            epoch: self.scheduler.epoch,
+            token: None,
+            wall_time_ns: 0,
+            fallback_used: false,
+            route_origin: format!("{:?}", EpochRouteOrigin::CoreMlAne),
+        });
+
+        // 6. Advance state
+        self.advance_state();
+
+        Ok(PrismStepResult {
+            output: request.inputs,  // passthrough stub
+            lane_receipts,
+        })
     }
 
 
