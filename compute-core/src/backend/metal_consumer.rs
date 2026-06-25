@@ -263,7 +263,7 @@ kernel void checksum(texture2d<half, access::read> in  [[texture(0)]],
                      device atomic_ulong* out [[buffer(0)]],
                      uint tid [[thread_position_in_grid]]) {
     half4 v = in.read(uint2(tid, 0));
-    uint bits = as_type<uint>(v.r);
+    uint bits = as_type<ushort>(v.r);
     atomic_fetch_add_explicit(out, (ulong)bits, memory_order_relaxed);
 }
 "#

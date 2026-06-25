@@ -150,6 +150,44 @@ impl Arena {
     /// Return the physical byte size.
     /// Set the IOSurface pixel format for this arena (e.g. 0x4C303068 = 'L00h' = half-float).
     /// Must be called after allocation and before creating a Metal texture.
+    /// Allocate an IOSurface-backed arena with explicit pixel format, width, height,
+    /// and bytes-per-row.  The returned ArenaInfo is patched to match the requested
+    /// geometry so that Metal texture descriptors derived from it are valid.
+    pub fn new_image(width: u32, height: u32, bpr: u32, pixel_format: u32) -> Result<Self, String> {
+        let total_bytes = (height * bpr) as u32;
+        if total_bytes == 0 {
+            return Err("Arena::new_image: total bytes must be > 0".into());
+        }
+        let mut info: ArenaInfo = unsafe { std::mem::zeroed() };
+        let rc = unsafe { tribunus_arena_alloc_bytes(&mut info, total_bytes as i32) };
+        if rc == 0 {
+            info.width = width as i32;
+            info.height = height as i32;
+            info.logical_dim0 = width as i32;
+            info.logical_dim1 = height as i32;
+            info.bytes_per_row = bpr as i32;
+            info.pixel_format = pixel_format as i32;
+            return Ok(Arena { info, dtype: mlx_rs::Dtype::Float32, externally_owned: true });
+        }
+        eprintln!(
+            "[arena] IOSurface alloc failed (rc={}) for {} bytes, using heap", rc, total_bytes
+        );
+        let total = total_bytes as usize;
+        let mut data: Vec<u8> = vec![0u8; total];
+        let ptr = data.as_mut_ptr();
+        let cap = data.capacity();
+        std::mem::forget(data);
+        let info = ArenaInfo {
+            width: width as i32, height: height as i32,
+            logical_dim0: width as i32, logical_dim1: height as i32,
+            pixel_format: pixel_format as i32,
+            bytes_per_row: bpr as i32, byte_size: cap as i32,
+            base_address: ptr as *mut std::ffi::c_void,
+            cv_buffer: std::ptr::null_mut(), io_surface: std::ptr::null_mut(),
+        };
+        Ok(Arena { info, dtype: mlx_rs::Dtype::Float32, externally_owned: false })
+    }
+
     pub fn set_pixel_format(&mut self, fmt: u32) {
         self.info.pixel_format = fmt as i32;
     }

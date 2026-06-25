@@ -248,22 +248,18 @@ impl AppleSharedArena {
         for slot_entry in arena.slots.values_mut() {
             let byte_count = slot_entry.manifest.byte_length;
             if byte_count > 0 {
-                let mut backing = crate::arena::Arena::new_bytes(byte_count as u32)
-                    .map_err(|e| format!("failed to allocate backing for slot {}: {}",
-                        slot_entry.manifest.slot_id, e))?;
-                // Set IOSurface pixel format to match the slot's dtype
-                let pix_fmt = match slot_entry.manifest.dtype.as_str() {
-                    "float16" | "fp16" => 0x4C303068u32, // 'L00h' = half-float
-                    _ => 0u32,
-                };
-                backing.set_pixel_format(pix_fmt);
-                // Set dimensions from manifest so the IOSurface layout matches the texture descriptor
                 let pw = slot_entry.manifest.physical_shape.first().copied().unwrap_or(1);
                 let ph = slot_entry.manifest.physical_shape.get(1).copied().unwrap_or(1);
-                let bpr = slot_entry.manifest.strides_bytes.first()
-                .copied()
-                .unwrap_or(pw as u64 * 2) as u32;
-                backing.set_dimensions(pw, ph, bpr);
+                // Float16 slots use dtype-aware allocator (creates CVPixelBuffer with
+                // kCVPixelFormatType_OneComponent16Half). Other slots use generic surface.
+                let backing = match slot_entry.manifest.dtype.as_str() {
+                    "float16" | "fp16" =>
+                        crate::arena::Arena::new(pw, ph, mlx_rs::Dtype::Float16),
+                    _ =>
+                        crate::arena::Arena::new_bytes(byte_count as u32),
+                }
+                    .map_err(|e| format!("failed to allocate backing for slot {}: {}",
+                        slot_entry.manifest.slot_id, e))?;
                 slot_entry.backing_arena = Some(backing);
             }
         }
