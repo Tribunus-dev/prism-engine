@@ -399,25 +399,18 @@ fn test_two_slot_isolation() {
 #[cfg(all(target_os = "macos", feature = "prism-backend"))]
 mod fp16_production_v1 {
     use super::*;
+    use tribunus_compute_core::compilation::apple_installation::{install_apple_tri_lane, AppleInstallationResult};
+    use tribunus_compute_core::backend::coreml_iosurface::CoreMlComputePolicy;
 
-    fn create_fp16_arena() -> AppleSharedArena {
-        let manifest = make_arena_manifest();
-        AppleSharedArena::install(&manifest).unwrap()
-
-    }
-
-    fn create_fp16_consumer(arena: &AppleSharedArena) -> MetalConsumer {
-        let mut consumer = MetalConsumer::new("fp16-validation");
-        let slot0 = arena.slot(0).unwrap();
-        consumer.add_input(MetalSlotBinding {
-            slot_id: 0,
-            tensor_name: "test".into(),
-            byte_offset: slot0.manifest.byte_offset,
-            byte_length: slot0.manifest.byte_length,
-            layout_digest: arena.layout_digest.clone(),
-        });
-        consumer
-
+    fn create_fp16_install() -> AppleInstallationResult {
+        let manifest = make_manifest();
+        let model_dir = std::path::Path::new("/tmp/fp16-models");
+        let mut result = install_apple_tri_lane(
+            &manifest, model_dir, CoreMlComputePolicy::CpuAndNeuralEngine,
+        ).expect("FP16 production install should succeed");
+        result.precreate_metal_textures()
+            .expect("precreate Metal textures should succeed");
+        result
     }
 
     fn create_minimal_execution_plan() -> AppleTriLaneExecutionPlan {
@@ -488,7 +481,8 @@ mod fp16_production_v1 {
     #[test]
     fn test_fp16_slot_allocated_with_correct_pixel_format() {
         // Create a float16 arena, verify each slot's IOSurface pixel format.
-        let arena = create_fp16_arena();
+        let install = create_fp16_install();
+        let arena = install.arena;
         let slot = arena.slot(0).unwrap();
         if let Some(backing) = &slot.backing_arena {
             // Arena::new(pw=1, ph=64, Float16) => C allocator: width=dim1=64, height=dim0=1
@@ -511,7 +505,9 @@ mod fp16_production_v1 {
         // Run 1000 epochs, verify slot identities stable, no alloc growth.
         // Uses the real EpochScheduler::execute_epoch() with CoreML/Metal
         // bindings instead of simulate_epoch().
-        let mut arena = create_fp16_arena();
+        let install = create_fp16_install();
+        let mut arena = install.arena;
+        let mut metal_consumer = install.metal_consumer.expect("install must have metal_consumer");
         let plan = create_minimal_execution_plan();
         let mut scheduler = EpochScheduler::new(plan);
         let mut coreml_exec = CoreMlIOSurfaceExecutable::new(
@@ -526,7 +522,7 @@ mod fp16_production_v1 {
             byte_offset: slot0.manifest.byte_offset,
             contract_digest: arena.layout_digest.clone(),
         }).unwrap();
-        let mut metal_consumer = create_fp16_consumer(&arena);
+        
 
         for epoch in 0..1000u64 {
             let _receipt = scheduler
@@ -553,16 +549,13 @@ mod fp16_production_v1 {
         let mut arena = AppleSharedArena::install(&manifest.arena).unwrap();
 
         // Create a TestFailureInjector that fails at epoch 5
-        let injector = std::sync::Arc::new(parking_lot::Mutex::new(
-            tribunus_compute_core::compute_image::fallback_plan::TestFailureInjector {
-                fail_epoch: Some(5),
-            }
-        ));
+        use tribunus_compute_core::compute_image::fallback_plan::{CoreMlFailureInjector, TestFailureInjector};
+        let injector = TestFailureInjector { fail_epoch: Some(5) };
 
         // Run epochs 0-4: should succeed (CoreMlAne route)
         for epoch in 0..5u64 {
             // verify injector doesn't fire
-            assert!(!injector.lock().should_fail(epoch),
+            assert!(!injector.should_fail(epoch),
                 "injector should not fire before epoch 5");
 
             // Simulate epoch (real execution would call execute_epoch)
@@ -577,7 +570,7 @@ mod fp16_production_v1 {
         }
 
         // Epoch 5: inject failure
-        assert!(injector.lock().should_fail(5),
+        assert!(injector.should_fail(5),
             "injector must fire at epoch 5");
 
         // After failure, verify fallback preserves ABI
