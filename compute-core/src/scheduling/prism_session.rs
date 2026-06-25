@@ -335,7 +335,6 @@ impl PrismSession {
         });
 
         // Advance state
-        self.scheduler.advance();
         self.advance_state();
 
         Ok(Some(0))

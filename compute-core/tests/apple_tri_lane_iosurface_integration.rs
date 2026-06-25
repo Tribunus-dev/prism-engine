@@ -414,13 +414,16 @@ mod fp16_production_v1 {
         let _ = std::fs::create_dir_all(model_dir);
 
         let weight: Vec<f32> = (0..4096).map(|i| (i % 256) as f32).collect();
-
-        let prog = MilBuilder::new("main")
-            .input("input", mil_spec::DataType::Float16, &[1, 64])
-            .const_f16("weight", &weight, &[64, 64])
-            .matmul("input", "weight")
-            .output("output")
-            .build()
+        let mut builder = MilBuilder::new("main");
+        // input() uses exact name; const_f16() uses fresh_name() with counter suffix
+        // Build MIL program — const_f16 uses fresh_name(), so capture the SSA names
+        let mut b = MilBuilder::new("main");
+        b = b.input("input", mil_spec::DataType::Float16, &[1, 64]);
+        b = b.const_f16("weight", &weight, &[64, 64]);
+        let weight_name = b.last_name().unwrap_or("weight_0").to_string();
+        b = b.matmul("input", &weight_name);
+        let output_name = b.last_name().unwrap_or("matmul_0").to_string();
+        let prog = b.output(&output_name).build()
             .map_err(|e| format!("MIL build: {:?}", e))?;
 
         let meta = ModelMeta {
@@ -429,9 +432,9 @@ mod fp16_production_v1 {
             short_description: "FP16 test model".into(),
             version: "1.0.0".into(),
             author: "Tribunus Compute".into(),
-            output_name: "output".into(),
+            output_name: output_name.clone(),
             inputs: vec![("input".into(), vec![1, 64])],
-            outputs: vec![("output".into(), vec![1, 64])],
+            outputs: vec![(output_name.clone(), vec![1, 64])],
         };
 
         let mlpackage_dir = write_mlpackage(prog, model_dir, &meta)
@@ -703,5 +706,101 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
             assert!(receipt.fallback_used,
                 "fallback epoch {} must report fallback active", epoch);
         }
+    }
+
+    #[test]
+    fn test_prism_session_step_with_failure_injector() {
+        use tribunus_compute_core::compilation::failure_injector::{EpochFailureInjector, NoopFailureInjector};
+        use tribunus_compute_core::scheduling::prism_session::{
+            PrismSession, PrismSessionRequest, SessionLogEntry,
+        };
+
+        let mut install = create_fp16_install();
+        let mut metal_consumer = install.metal_consumer.take().expect("install must have metal_consumer");
+        let plan = create_minimal_execution_plan();
+        let mut scheduler = EpochScheduler::new(plan);
+
+        let mut coreml_exec = install.coreml_executables
+            .remove("fp16_test")
+            .expect("install must have fp16_test executable");
+
+        let request = PrismSessionRequest {
+            image_digest: "test-digest".into(),
+            prompt: "test".into(),
+            max_new_tokens: 105,
+            context_bucket: 0,
+            temperature: 0.0,
+            top_p: 1.0,
+            seed: None,
+        };
+        let mut session = PrismSession::new(request);
+        let injector = EpochFailureInjector { fail_every: 5 };
+
+        for epoch in 0u64..105 {
+            let result = session.step(
+                &mut scheduler,
+                &mut install.arena,
+                &mut coreml_exec,
+                &mut metal_consumer,
+                &injector,
+            );
+            assert!(result.is_ok(), "epoch {} should return Ok", epoch);
+            let token = result.unwrap();
+
+            // Epochs divisible by 5 have injected failure
+            if epoch > 0 && epoch % 5 == 0 {
+                assert!(token.is_none(),
+                    "epoch {} (injected failure) should return no token", epoch);
+            }
+        }
+
+        assert_eq!(session.evidence_log.len(), 105,
+            "step must record 105 evidence entries");
+        assert!(session.scheduler.terminated,
+            "scheduler must terminate after 105 epochs");
+    }
+
+    #[test]
+    #[test]
+    fn test_prism_session_step_noop_injector_never_fails() {
+        use tribunus_compute_core::compilation::failure_injector::NoopFailureInjector;
+        use tribunus_compute_core::scheduling::prism_session::{
+            PrismSession, PrismSessionRequest,
+        };
+
+        let mut install = create_fp16_install();
+        let mut metal_consumer = install.metal_consumer.take().expect("install must have metal_consumer");
+        let plan = create_minimal_execution_plan();
+        let mut scheduler = EpochScheduler::new(plan);
+
+        let mut coreml_exec = install.coreml_executables
+            .remove("fp16_test")
+            .expect("install must have fp16_test executable");
+
+        let request = PrismSessionRequest {
+            image_digest: "test-digest".into(),
+            prompt: "hello".into(),
+            max_new_tokens: 10,
+            context_bucket: 0,
+            temperature: 0.0,
+            top_p: 1.0,
+            seed: None,
+        };
+        let mut session = PrismSession::new(request);
+        let injector = NoopFailureInjector;
+
+        for epoch in 0u64..10 {
+            let result = session.step(
+                &mut scheduler,
+                &mut install.arena,
+                &mut coreml_exec,
+                &mut metal_consumer,
+                &injector,
+            );
+            assert!(result.is_ok(), "epoch {} should return Ok", epoch);
+        }
+
+        assert_eq!(session.evidence_log.len(), 10,
+            "step must record 10 evidence entries");
     }
 }
