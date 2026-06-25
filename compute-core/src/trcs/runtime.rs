@@ -74,7 +74,8 @@ impl TrcsRelationRuntime for CpuTrcsRuntime {
 
         let trace = self.traces.entry(relation_id).or_insert_with(|| RelationTrace::new(relation_id, vec![]));
 
-        let (base_run, support, input_rows, visible_rows) = execute_bulk_load(relation_id, snapshot, self.max_arity)?;
+        let run_id_alloc = self.next_run_id;
+        let (base_run, support, input_rows, visible_rows) = execute_bulk_load(run_id_alloc, relation_id, snapshot, self.max_arity)?;
         let run_id = base_run.run_id;
         trace.base = Some(base_run);
         trace.recent.clear();

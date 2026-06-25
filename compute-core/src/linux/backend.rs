@@ -33,3 +33,11 @@ pub struct DeviceId {
     pub ordinal: u32,
     pub stable_key: DeviceStableKey,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RuntimeResourceId {
+    pub backend: BackendKind,
+    pub device: DeviceId,
+    pub generation: u32,
+    pub opaque_id: u64,
+}

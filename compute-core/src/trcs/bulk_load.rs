@@ -32,18 +32,24 @@ impl BulkLoadEligibility {
 }
 
 pub fn execute_bulk_load(
+    run_id_alloc: u64,
     relation_id: u32,
     snapshot: Vec<WeightedFact>,
     max_arity: usize,
 ) -> Result<(Arc<RelationRun>, SupportTable, u64, u64), TrcsError> {
     let mut support = SupportTable::new();
     let initial_count = snapshot.len() as u64;
+    for update in &snapshot {
+        if update.relation_id != relation_id {
+            return Err(TrcsError::InvalidBulkLoadPlan("Input fact relation_id does not match".into()));
+        }
+    }
 
     // Validate schema, canonicalize, sort, consolidate duplicate signed rows
     let (physical_rows, visible_insertions, _) = consolidate_updates(snapshot, &mut support, max_arity)?;
 
     let base_run = Arc::new(RelationRun {
-        run_id: 1, // First run
+        run_id: run_id_alloc,
         relation_id,
         key_order: KeyOrder::Ascending,
         frontier_min: 0,

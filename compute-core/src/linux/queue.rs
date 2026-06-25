@@ -1,4 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Hash)]
 pub enum QueueClass {
     ForegroundCompute,
     BackgroundAnalysis,
@@ -6,7 +7,10 @@ pub enum QueueClass {
     Conformance,
 }
 
+use crate::linux::backend::RuntimeResourceId;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct QueueHandle {
-    pub opaque_id: u64,
+    pub id: RuntimeResourceId,
+    pub class: QueueClass,
 }

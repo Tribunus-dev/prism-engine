@@ -47,11 +47,12 @@ half = "2"
 clap = { version = "4", features = ["derive"] }
 
 [features]
-cpu-backend = []
-cuda-backend = []
-hip-backend = []
-level-zero-backend = []
-vulkan-backend = []
+linux-device-core = []
+cpu-backend = ["linux-device-core"]
+cuda-backend = ["linux-device-core"]
+hip-backend = ["linux-device-core"]
+level-zero-backend = ["linux-device-core"]
+vulkan-backend = ["linux-device-core"]
 linux-device-islands = [
   "cpu-backend",
   "cuda-backend",

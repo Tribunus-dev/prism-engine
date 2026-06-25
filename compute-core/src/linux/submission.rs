@@ -46,9 +46,12 @@ pub enum ValidationMode {
     CpuReferenceCompared,
 }
 
+use crate::linux::backend::RuntimeResourceId;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SubmissionHandle {
-    pub opaque_id: u64,
+    pub id: RuntimeResourceId,
+    pub queue_id: RuntimeResourceId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
