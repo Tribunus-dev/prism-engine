@@ -393,9 +393,23 @@ impl EpochScheduler {
     ) -> Result<AppleTriLaneExecutionReceipt, String> {
         let epoch = self.current_epoch;
         let start = std::time::Instant::now();
+        let mut slot_events: Vec<SlotEvent> = Vec::new();
 
         let has_inputs = !coreml_exec.input_bindings.is_empty();
         let has_outputs = !coreml_exec.output_bindings.is_empty();
+
+        // 0a. FP16-only production envelope check
+        // Verify the slot dtype is float16 before dispatching.
+        let slot_dtype = coreml_exec.input_bindings.first()
+            .and_then(|b| arena.slot(b.slot_id))
+            .map(|s| s.manifest.dtype.as_str());
+        if let Some(dt) = slot_dtype {
+            if dt != "float16" && dt != "fp16" {
+                return Err(
+                    "FP16-only production envelope: slot dtype must be float16".into()
+                );
+            }
+        }
 
         // 1. Acquire input slot
         if has_inputs {
@@ -479,10 +493,23 @@ impl EpochScheduler {
             }
         }
 
+
+        // Build slot events from the current arena state
+        for (id, slot) in &arena.slots {
+            slot_events.push(SlotEvent {
+                slot_id: *id,
+                tensor_id: slot.manifest.tensor_id.clone(),
+                epoch,
+                slot_generation: slot.generation,
+                state: format!("{:?}", slot.state),
+            });
+        }
+
         let wall_ns = start.elapsed().as_nanos() as u64;
         self.complete_epoch(wall_ns);
 
         let mut receipt = self.generate_receipt();
+        receipt.slot_events = slot_events;
         Self::populate_receipt_with_evidence(
             &mut receipt,
             prediction_succeeded,
