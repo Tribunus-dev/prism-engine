@@ -23,7 +23,7 @@
 //! of the runtime memory manager.
 
 use crate::compute_image::residency::plan::{
-    PrefetchAction, PrefetchPriority, RequiredWeightObject, RequiredWeightObjectId,
+    PrefetchAction, PrefetchPriority, RequiredWeightObject,
 };
 use crate::compute_image::residency::ResidencyClass;
 
@@ -254,7 +254,7 @@ mod tests {
 
     fn make_weight(id: &str, class: ResidencyClass, bytes: u64) -> RequiredWeightObject {
         RequiredWeightObject {
-            object_id: RequiredWeightObjectId::from(id),
+            object_id: id.to_string(),
             residency_class: class,
             estimated_bytes: bytes,
         }

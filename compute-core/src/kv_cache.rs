@@ -24,7 +24,6 @@ use crate::quantization::turboquant_kv::{
     AsymmetricQuantMode, KvQuantMode, QjlCorrection, TurboQuantKvCache,
 };
 use parking_lot::Mutex;
-use std::rc::Rc;
 use std::sync::Arc;
 
 /// Backing store for one compressed KV slot.

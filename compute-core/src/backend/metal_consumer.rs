@@ -1,13 +1,5 @@
-/// Metal consumer that reads a Core ML output slot and validates it against a
-/// CPU reference.
-///
-/// Provides zero-copy validation of IOSurface-backed compute results by
-/// computing a simple checksum across the slot buffer and comparing it
-/// against an expected CPU reference value. This ensures that Metal consumers
-/// can correctly read IOSurface memory produced by Core ML execution lanes.
-
 use crate::compute_image::apple_shared_arena::SlotState;
-use crate::compute_image::apple_shared_arena::{AppleSharedArena, IOSurfaceAllocationAttestation};
+use crate::compute_image::apple_shared_arena::AppleSharedArena;
 
 // Metal import — only on macOS with metal-dispatch feature.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
@@ -258,6 +250,7 @@ impl MetalConsumer {
             desc.set_usage(metal::MTLTextureUsage::ShaderRead);
             desc.set_storage_mode(metal::MTLStorageMode::Shared);
 
+            #[allow(unexpected_cfgs)]
             unsafe {
                 msg_send![device.as_ref(),
                     newTextureWithDescriptor:&*desc
@@ -349,6 +342,7 @@ kernel void checksum(texture2d<ushort, access::read> in  [[texture(0)]],
             desc.set_usage(metal::MTLTextureUsage::ShaderRead);
             desc.set_storage_mode(metal::MTLStorageMode::Shared);
 
+            #[allow(unexpected_cfgs)]
             let texture: metal::Texture = unsafe {
                 msg_send![device.as_ref(),
                     newTextureWithDescriptor:&*desc

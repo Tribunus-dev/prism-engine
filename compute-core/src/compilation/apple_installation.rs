@@ -10,7 +10,7 @@ use crate::compute_image::apple_cimage_manifest::{
     AppleTriLaneArtifactManifest, IOSurfaceSlotManifest as CimageSlotManifest,
 };
 use crate::compute_image::apple_shared_arena::{
-    AppleSharedArena, IOSurfaceAllocationAttestation, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass, SlotState,
+    AppleSharedArena, IOSurfaceSlotManifest, SlotReuseClass,
 };
 use crate::backend::coreml_iosurface::{CoreMlComputePolicy, CoreMlIOSurfaceExecutable};
 use crate::backend::metal_iosurface::{
@@ -57,6 +57,7 @@ impl AppleInstallationResult {
 
 /// Convert a cimage-manifest slot (String reuse_class) to a shared-arena
 /// IOSurfaceSlotManifest (SlotReuseClass enum).
+#[allow(dead_code)]
 fn cimage_slot_to_arena_slot(slot: &CimageSlotManifest) -> IOSurfaceSlotManifest {
     let reuse_class = match slot.reuse_class.as_str() {
         "exclusive" => SlotReuseClass::Exclusive,

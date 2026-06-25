@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::compilation::region_catalogue::{RegionAdmission, RegionCatalogue};
 use crate::model_adapter::CanonicalModel;
-use crate::config::{TextArchitecture, AttentionKind, RopeSpec};
 
 // ── Scheduled operation ──────────────────────────────────────────────────
 

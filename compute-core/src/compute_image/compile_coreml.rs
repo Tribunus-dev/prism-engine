@@ -489,7 +489,7 @@ pub fn compile_ane_islands(
             })
             .unwrap_or_default()
     }
-    /// Compile all ANE fused islands
+    // Compile all ANE fused islands
     for island in &execution_plan.fused_ane_islands {
         let idx = island.layer_indices.first().copied().unwrap_or(0);
         let ns = &namespace.root;

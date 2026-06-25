@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::str::FromStr;
 
 /// A content-addressed hash value used to identify objects in the content
 /// store.  Wraps a raw `u64` for compact serialization.

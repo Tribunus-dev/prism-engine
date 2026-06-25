@@ -1,5 +1,5 @@
 use crate::compute_image::phase_graph::{
-    ArtifactBindingId, PhaseId, ResolvedPhaseBinding, TensorLayoutContract,
+    PhaseId, ResolvedPhaseBinding,
 };
 use serde::{Deserialize, Serialize};
 

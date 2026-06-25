@@ -1,4 +1,4 @@
-use crate::compute_image::phase_graph::{DeclaredFallback, EdgeSemanticKind, PhaseId};
+use crate::compute_image::phase_graph::{DeclaredFallback, PhaseId};
 use serde::{Deserialize, Serialize};
 
 /// A fallback decomposition entry in the phase graph.

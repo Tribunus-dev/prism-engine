@@ -15,14 +15,11 @@ use super::manifest::{
 use super::plan::{compile_unchecked_speculative, plan};
 use crate::config::CompileQuantMode;
 use crate::config::HardwareTarget;
-use crate::config::TextArchitecture;
-use crate::model_adapter::{self, CanonicalModel, CanonicalRole, SourceModel};
 use mlx_rs::Array;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;

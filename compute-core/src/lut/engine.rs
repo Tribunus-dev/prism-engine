@@ -602,6 +602,7 @@ impl PrismEngine {
         tensor: &crate::lut::graph::TensorBlueprint,
         _payload: &[u8],
     ) -> Vec<u16> {
+        #[cfg(feature = "metal-dispatch")]
         let mut out = vec![0u16; tensor.dim_m as usize];
         #[cfg(feature = "metal-dispatch")]
         if let Some(ref m) = self.metal {
@@ -726,7 +727,7 @@ fn attention_cpu(
     o
 }
 
-fn rope_inplace(x: &mut [u16], pos: i64, hd: usize, th: f32) {
+fn rope_inplace(x: &mut [u16], pos: i64, hd: usize, _th: f32) {
     for i in (0..x.len()).step_by(hd) {
         let h = hd / 2;
         for j in 0..h {

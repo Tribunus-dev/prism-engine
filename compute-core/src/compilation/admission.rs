@@ -17,7 +17,7 @@
 //! with an explicit fallback to [`CompilePlacement::MetalGpu`].
 
 use super::phase_ir::{
-    CompilePhaseDescriptor, CompilePlacement, CompileDeterminism, CompileExecutionReceipt,
+    CompilePhaseDescriptor, CompilePlacement, CompileDeterminism,
     DeviceSignature, PhaseId,
 };
 use super::phase_ir::ANEArtifactKey;

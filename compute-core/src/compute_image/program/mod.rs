@@ -24,6 +24,5 @@ pub use arena::*;
 pub use dependencies::*;
 pub use phase_program::*;
 pub use runtime_view::*;
-pub use selection::*;
 pub use serialization::*;
 pub use validation::*;

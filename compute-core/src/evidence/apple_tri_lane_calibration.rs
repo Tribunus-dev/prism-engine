@@ -5,7 +5,7 @@
 //! provides evidence-based decisions for ANE placement.  Decisions are
 //! grounded in real measured latencies, not compile-time heuristics.
 
-use crate::compilation::tri_lane::{AppleTriLaneCalibrationRecord, ShapeClass};
+use crate::compilation::tri_lane::AppleTriLaneCalibrationRecord;
 
 /// Calibration evidence store — keyed by (device_fingerprint, artifact_digest).
 pub struct CalibrationStore {

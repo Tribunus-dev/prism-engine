@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::compute_image::content_store::index::{
-    ArtifactConsumerRef, ContentObjectEntry, ResidencyClass,
+    ContentObjectEntry, ResidencyClass,
 };
 use crate::integration::ContentHash;
 
@@ -181,6 +181,7 @@ fn estimate_lifetime(consumer_phases: &[String], all_phase_ids: &[String]) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compute_image::content_store::index::ArtifactConsumerRef;
 
     fn make_consumer(phase: &str) -> ArtifactConsumerRef {
         ArtifactConsumerRef {

@@ -24,6 +24,7 @@
 // (vDSP bindings available for batch-distance acceleration; FFI stubs use
 //  scalar fallback until vDSP_vsub / vDSP_vsbm are added to accelerate_ffi)
 
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 use crate::compilation::phase_ir::{
     ArithmeticIntensity, BridgeKind, CompileDeterminism, CompileExecutionReceipt,
     CompilationId, CompilePhaseDescriptor, CompilePlacement, DeviceSignature,
@@ -204,6 +205,7 @@ pub fn fit_palette(channel: &[f32], k: usize, max_iter: usize, seeds: Option<&[f
 
 /// Deterministic weighted-threshold value for k-means++ selection.
 fn weighted_threshold(total: f32, seed: usize, n: usize) -> f32 {
+fn weighted_threshold(total: f32, seed: usize, _n: usize) -> f32 {
     // Simple hash-based deterministic threshold in [0, total).
     // Uses the golden ratio to spread picks across the distribution.
     let frac = (seed as f64 * 0.6180339887498949).fract();
