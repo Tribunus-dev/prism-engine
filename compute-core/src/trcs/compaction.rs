@@ -43,7 +43,11 @@ pub fn execute_compaction(
         min_frontier = min_frontier.min(run.frontier_min);
         max_frontier = max_frontier.max(run.frontier_max);
 
-        merged_rows.extend(run.rows.iter().cloned());
+        for row in run.rows.iter().cloned() {
+            if row.diff != 0 {
+                merged_rows.push(row);
+            }
+        }
     }
 
     // In a production setup, this would consolidate physical deltas identical to the trace level logic.

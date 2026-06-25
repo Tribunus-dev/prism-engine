@@ -21,7 +21,7 @@ impl LinuxDeviceBackend for CudaBackend {
         &self,
         _device: &DeviceId,
     ) -> Result<DeviceCapabilities, BackendError> {
-        Err(BackendError::NotReady)
+        Ok(DeviceCapabilities { backend: BackendKind::Cuda, vendor: crate::linux::backend::VendorKind::Nvidia, device_name: "Stub".into(), driver_version: None, architecture: None, device_memory_bytes: 0, host_visible_memory: false, unified_addressing: false, managed_memory: false, peer_access: false, async_copy: false, events: false, command_graphs: false, cooperative_launch: false, fp16: false, bf16: false, int8: false, int4: false, subgroup_widths: vec![], max_workgroup_size: 0, max_shared_memory_bytes: 0, max_allocation_bytes: 0, supports_timestamps: false, supports_profiling: false, supports_external_memory: false, availability: BackendAvailability::RuntimeLibraryMissing })
     }
 
     fn create_queue(

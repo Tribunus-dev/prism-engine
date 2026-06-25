@@ -1,9 +1,11 @@
 use crate::linux::backend::BackendKind;
 use crate::linux::errors::BackendError;
 
+use crate::linux::backend::RuntimeResourceId;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EventHandle {
-    pub backend: BackendKind,
-    pub opaque_id: u64,
+    pub id: RuntimeResourceId,
 }
 
 pub enum EventStatus {

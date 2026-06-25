@@ -12,6 +12,8 @@ pub mod fallback;
 pub mod errors;
 pub mod conformance;
 
+pub mod tests;
+
 #[cfg(feature = "cpu-backend")]
 pub mod cpu;
 #[cfg(feature = "cuda-backend")]

@@ -13,7 +13,7 @@ impl LinuxDeviceBackend for HipBackend {
         BackendKind::Hip
     }
     fn enumerate_devices(&self) -> Result<Vec<DeviceDescriptor>, BackendError> { Ok(vec![]) }
-    fn probe_capabilities(&self, _device: &DeviceId) -> Result<DeviceCapabilities, BackendError> { Err(BackendError::NotReady) }
+    fn probe_capabilities(&self, _device: &DeviceId) -> Result<DeviceCapabilities, BackendError> { Ok(DeviceCapabilities { backend: BackendKind::Hip, vendor: crate::linux::backend::VendorKind::Amd, device_name: "Stub".into(), driver_version: None, architecture: None, device_memory_bytes: 0, host_visible_memory: false, unified_addressing: false, managed_memory: false, peer_access: false, async_copy: false, events: false, command_graphs: false, cooperative_launch: false, fp16: false, bf16: false, int8: false, int4: false, subgroup_widths: vec![], max_workgroup_size: 0, max_shared_memory_bytes: 0, max_allocation_bytes: 0, supports_timestamps: false, supports_profiling: false, supports_external_memory: false, availability: BackendAvailability::RuntimeLibraryMissing }) }
     fn create_queue(&self, _device: &DeviceId, _class: QueueClass) -> Result<QueueHandle, BackendError> { Err(BackendError::UnsupportedOperation("HIP stub".into())) }
     fn allocate(&self, _device: &DeviceId, _request: AllocationRequest) -> Result<DeviceBuffer, BackendError> { Err(BackendError::UnsupportedOperation("HIP stub".into())) }
     fn submit(&self, _queue: &QueueHandle, _submission: Submission) -> Result<SubmissionHandle, BackendError> { Err(BackendError::UnsupportedOperation("HIP stub".into())) }

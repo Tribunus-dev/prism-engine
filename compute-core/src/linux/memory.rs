@@ -1,6 +1,13 @@
 use crate::linux::backend::{BackendKind, DeviceId};
 
-pub type BufferId = u64;
+use crate::linux::backend::RuntimeResourceId;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BufferHandle {
+    pub id: RuntimeResourceId,
+}
+
+pub type BufferId = BufferHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BufferOwnership {

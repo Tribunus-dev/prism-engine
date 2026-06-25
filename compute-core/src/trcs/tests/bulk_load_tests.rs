@@ -27,3 +27,14 @@ fn test_bulk_load_equivalence() {
     assert_eq!(receipt.visible_rows, 2000);
     assert_eq!(runtime.visible_facts(1).unwrap().len(), 2000);
 }
+#[test]
+fn trcs_bulk_load_rejects_mixed_relation_input() {
+    let mut runtime = CpuTrcsRuntime::new(16);
+    let facts = vec![
+        WeightedFact { fact_id: 1, relation_id: 1, tuple: CompactTuple { columns: vec![1] }, revision_frontier_id: 1, diff: 1 },
+        WeightedFact { fact_id: 2, relation_id: 2, tuple: CompactTuple { columns: vec![2] }, revision_frontier_id: 1, diff: 1 },
+    ];
+    let eligibility = BulkLoadEligibility { full_relation_empty: true, delta_to_full_ratio: 1.0, input_fact_count: 1024, estimated_incremental_overhead: 1000 };
+    let res = runtime.bulk_load(1, facts, eligibility);
+    assert!(res.is_err());
+}
