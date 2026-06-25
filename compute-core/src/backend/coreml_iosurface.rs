@@ -389,6 +389,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         });
 
         arena.add_slot(LiveIOSurfaceSlot {
@@ -413,6 +414,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         });
 
         // Create executable with input/output bindings matching arena slots

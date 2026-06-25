@@ -7,6 +7,7 @@
 /// can correctly read IOSurface memory produced by Core ML execution lanes.
 
 use crate::compute_image::apple_shared_arena::SlotState;
+use crate::compute_image::apple_shared_arena::{AppleSharedArena, IOSurfaceAllocationAttestation};
 
 // Metal import — only on macOS with metal-dispatch feature.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
@@ -43,6 +44,20 @@ pub struct MetalSlotBinding {
     pub byte_offset: u64,
     pub byte_length: u64,
     pub layout_digest: String,
+}
+
+/// Binding recording a Metal texture pre-created from an IOSurface slot at
+/// installation time.
+#[derive(Debug, Clone)]
+pub struct MetalTextureBinding {
+    pub slot_id: u32,
+    pub texture_identity: u64,
+    pub width: u32,
+    pub height: u32,
+    pub pixel_format: u64,
+    pub iosurface_id: u32,
+    pub layout_digest: String,
+    pub created_at_install: bool,
 }
 
 /// Metal consumer that validates Core ML output slots.
@@ -309,6 +324,46 @@ kernel void checksum(texture2d<ushort, access::read> in  [[texture(0)]],
         let gpu_sum = unsafe { *(result.contents() as *const u64) };
         Ok(gpu_sum)
     }
+
+    /// Pre-create Metal textures for all arena slots with valid
+    /// attestations and cache them.  Must be called after the arena
+    /// is fully installed and before any epoch dispatch so that the
+    /// epoch loop never needs to create textures lazily.
+    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+    pub fn precreate_metal_textures(&mut self, arena: &AppleSharedArena) -> Result<(), String> {
+        for (slot_id, slot) in arena.slots.iter() {
+            let binding = slot.attestation.as_ref()
+                .ok_or_else(|| format!("slot {} has no attestation", slot_id))?;
+            if !binding.attested { continue; }
+            let io_surface = slot.backing_arena.as_ref()
+                .map(|a| a.info.io_surface)
+                .ok_or_else(|| format!("slot {} has no IOSurface backing", slot_id))?;
+
+            let device = metal::Device::system_default()
+                .ok_or("no Metal device")?;
+            let desc = metal::TextureDescriptor::new();
+            desc.set_width(binding.actual_width as u64);
+            desc.set_height(binding.actual_height as u64);
+            desc.set_pixel_format(metal::MTLPixelFormat::R16Float);
+            desc.set_usage(metal::MTLTextureUsage::ShaderRead);
+            desc.set_storage_mode(metal::MTLStorageMode::Shared);
+
+            let texture: metal::Texture = unsafe {
+                msg_send![device.as_ref(),
+                    newTextureWithDescriptor:&*desc
+                    iosurface:io_surface
+                    plane:0u64]
+            };
+            self.texture_cache.insert(*slot_id, texture);
+        }
+        Ok(())
+    }
+
+    /// Non-Metal stub for #[cfg(not(...))] builds.
+    #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+    pub fn precreate_metal_textures(&mut self, _arena: &AppleSharedArena) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -342,6 +397,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         }
     }
 

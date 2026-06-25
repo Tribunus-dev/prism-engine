@@ -133,6 +133,31 @@ pub enum AneRejectionReason {
     PredictedGainBelowThreshold { predicted_us: u64, threshold_us: u64 },
     /// GPU contention risk from this placement.
     GpuContentionRisk,
+    /// Phase has dynamic shape (needs static for production).
+    DynamicShape {
+        tensor_id: String,
+    },
+    /// Boundary tensor dtype is not FP16.
+    UnsupportedBoundaryDtype {
+        tensor_id: String,
+        expected: super::phase_ir::TensorDtype,
+        actual: super::phase_ir::TensorDtype,
+    },
+    /// Missing boundary contract for a tensor.
+    MissingBoundaryContract {
+        tensor_id: String,
+    },
+    /// FP16 layout not representable as one-component IOSurface slot.
+    InvalidFp16Layout {
+        tensor_id: String,
+        reason: String,
+    },
+    /// Cost profitability evaluation failed.
+    CostUnprofitable {
+        ane_cost_ns: u64,
+        gpu_cost_ns: u64,
+        bridge_cost_ns: u64,
+    },
 }
 
 /// Reasons a region was admitted on an experimental basis.
@@ -739,6 +764,92 @@ pub enum AneLaneLifecycle {
     FallbackActive,
     /// Lane released (resources freed).
     Released,
+}
+
+// ── Epoch route and resource counters ────────────────────────────────────
+
+/// Origin of an epoch's execution route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EpochRouteOrigin {
+    /// Epoch executed on the ANE via Core ML.
+    CoreMlAne,
+    /// Epoch executed via Metal fallback.
+    MetalFallback,
+}
+
+/// Counters for resource churn in the production epoch loop.
+/// Post-warmup invariant: all fields must be 0.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpochResourceCounters {
+    /// Number of IOSurface allocations since epoch loop start.
+    pub iosurface_allocations: u64,
+    /// Number of Metal texture creations since epoch loop start.
+    pub metal_texture_creations: u64,
+    /// Number of Core ML model loads since epoch loop start.
+    pub coreml_model_loads: u64,
+    /// Number of command queue creations since epoch loop start.
+    pub command_queue_creations: u64,
+    /// Number of command pipeline creations since epoch loop start.
+    pub command_pipeline_creations: u64,
+    /// Number of CPU readbacks since epoch loop start.
+    pub cpu_readbacks: u64,
+}
+
+impl Default for EpochResourceCounters {
+    fn default() -> Self {
+        Self {
+            iosurface_allocations: 0,
+            metal_texture_creations: 0,
+            coreml_model_loads: 0,
+            command_queue_creations: 0,
+            command_pipeline_creations: 0,
+            cpu_readbacks: 0,
+        }
+    }
+}
+
+/// FP16 production epoch receipt.
+pub struct AppleFp16ProductionEpochReceipt {
+    /// Epoch index.
+    pub epoch: u64,
+    /// Origin of this epoch's execution route.
+    pub route_origin: EpochRouteOrigin,
+    /// Input slot ID.
+    pub input_slot_id: u32,
+    /// Output slot ID.
+    pub output_slot_id: u32,
+    /// Input slot generation at execution time.
+    pub input_slot_generation: u64,
+    /// Output slot generation at execution time.
+    pub output_slot_generation: u64,
+    /// Whether the Core ML prediction completed.
+    pub coreml_prediction_completed: bool,
+    /// Whether the Metal command buffer completed.
+    pub metal_command_buffer_completed: bool,
+    /// Numerical validation status.
+    pub numerical_status: NumericalStatus,
+    /// Evidence of ANE execution.
+    pub ane_execution_evidence: AneExecutionEvidence,
+    /// Detailed fallback status.
+    pub fallback_status: FallbackStatus,
+    /// Resource counters observed during this epoch.
+    pub loop_resource_counters: EpochResourceCounters,
+}
+
+/// Installation receipt for FP16 production.
+pub struct AppleFp16ProductionInstallationReceipt {
+    /// Digest of the compiled CImage.
+    pub cimage_digest: String,
+    /// Digest of the manifest.
+    pub manifest_digest: String,
+    /// Whether the FP16 contract was admitted.
+    pub fp16_contract_admitted: bool,
+    /// Per-slot IO-arena allocation attestations.
+    pub slot_attestations: Vec<crate::compute_image::apple_shared_arena::IOSurfaceAllocationAttestation>,
+    /// Digest of the compiled Core ML artifact.
+    pub coreml_artifact_digest: String,
+    /// Whether installation completed.
+    pub installation_completed: bool,
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────

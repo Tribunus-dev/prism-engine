@@ -73,6 +73,20 @@ pub enum SlotReuseClass {
 /// Re-export ExecutionLane for convenience.
 pub use crate::backend::placement::ExecutionLane;
 
+/// Attestation of a real IOSurface allocation against its manifest.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IOSurfaceAllocationAttestation {
+    pub slot_id: u32,
+    pub iosurface_id: u32,
+    pub actual_width: u32,
+    pub actual_height: u32,
+    pub actual_bytes_per_row: u32,
+    pub actual_pixel_format: u32,
+    pub actual_byte_capacity: u64,
+    pub manifest_layout_digest: String,
+    pub attested: bool,
+}
+
 /// Live IOSurface slot at runtime.
 pub struct LiveIOSurfaceSlot {
     pub manifest: IOSurfaceSlotManifest,
@@ -83,6 +97,8 @@ pub struct LiveIOSurfaceSlot {
     pub coreml_view: Option<String>, // Core ML IOSurface view descriptor
     /// Per-slot IOSurface backing (None when mocked)
     pub backing_arena: Option<crate::arena::Arena>,
+    /// Attestation of the real IOSurface allocation against its manifest.
+    pub attestation: Option<IOSurfaceAllocationAttestation>,
 }
 
 impl LiveIOSurfaceSlot {
@@ -241,6 +257,7 @@ impl AppleSharedArena {
                 metal_view: None,
                 coreml_view: None,
                 backing_arena: None,
+                attestation: None,
             };
             arena.add_slot(slot);
         }
@@ -261,6 +278,25 @@ impl AppleSharedArena {
                     .map_err(|e| format!("failed to allocate backing for slot {}: {}",
                         slot_entry.manifest.slot_id, e))?;
                 slot_entry.backing_arena = Some(backing);
+                // Attest the IOSurface allocation against the manifest.
+                let backing = slot_entry.backing_arena.as_ref().unwrap();
+                let pixel_fmt = backing.info.pixel_format as u32;
+                let fp16_ok = pixel_fmt == 0x4C303068 || pixel_fmt == 0x4C303066;
+                let capacity = (backing.info.height as u64).saturating_mul(backing.info.bytes_per_row as u64);
+                slot_entry.attestation = Some(IOSurfaceAllocationAttestation {
+                    slot_id: slot_entry.manifest.slot_id,
+                    iosurface_id: backing.io_surface_id() as u32,
+                    actual_width: backing.info.width as u32,
+                    actual_height: backing.info.height as u32,
+                    actual_bytes_per_row: backing.info.bytes_per_row as u32,
+                    actual_pixel_format: pixel_fmt,
+                    actual_byte_capacity: capacity,
+                    manifest_layout_digest: slot_entry.layout_digest.clone(),
+                    attested: fp16_ok && backing.info.width > 0 && backing.info.height > 0 && capacity >= slot_entry.manifest.byte_length as u64,
+                });
+                if !slot_entry.attestation.as_ref().map(|a| a.attested).unwrap_or(false) {
+                    return Err(format!("FP16 slot {} attestation failed", slot_entry.manifest.slot_id));
+                }
             }
         }
         Ok(arena)
@@ -327,6 +363,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         }
     }
 

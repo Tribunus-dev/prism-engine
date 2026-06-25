@@ -223,6 +223,39 @@ pub struct ANEArtifactKey {
     pub program_hash: [u8; 32],
 }
 
+// ── Boundary tensor contracts ──────────────────────────────────────────────
+
+/// Canonical dtype for phase boundary contracts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum TensorDtype {
+    Float16,
+    Float32,
+    BFloat16,
+    Int8,
+    UInt8,
+    UInt16,
+    Int32,
+    Unknown,
+}
+
+impl TensorDtype {
+    pub fn is_fp16(self) -> bool {
+        matches!(self, Self::Float16)
+    }
+}
+
+/// Boundary tensor contract for a phase that crosses the ANE-to-Metal boundary.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BoundaryTensorContract {
+    pub tensor_id: String,
+    pub dtype: TensorDtype,
+    pub logical_shape: Vec<u64>,
+    pub physical_shape: Vec<u64>,
+    pub strides_bytes: Vec<u64>,
+    pub static_shape: bool,
+    pub layout_digest: String,
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

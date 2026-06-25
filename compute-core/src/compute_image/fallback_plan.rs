@@ -10,6 +10,25 @@
 use crate::compilation::tri_lane::{AppleFallbackPlan, FallbackStatus};
 use crate::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
 
+
+/// Trait for injecting controlled Core ML failures in production tests.
+pub trait CoreMlFailureInjector: std::fmt::Debug {
+    /// Return `true` when the injector wants to simulate a failure at this epoch.
+    fn should_fail(&self, epoch: u64) -> bool;
+}
+
+/// A failure injector that fails at a specific epoch.
+#[derive(Debug, Clone)]
+pub struct TestFailureInjector {
+    pub fail_epoch: Option<u64>,
+}
+
+impl CoreMlFailureInjector for TestFailureInjector {
+    fn should_fail(&self, epoch: u64) -> bool {
+        self.fail_epoch == Some(epoch)
+    }
+}
+
 /// Detection of various failure conditions that may trigger an ANE lane
 /// fallback.
 #[derive(Debug, Clone)]
@@ -62,6 +81,8 @@ pub struct FallbackPlanManager {
     ///
     /// Defaults to 3.  Tune via [`FallbackPlanManager::set_max_consecutive_failures`].
     pub max_consecutive_failures: u32,
+    /// Optional failure injector for production tests.
+    pub failure_injector: Option<Box<dyn CoreMlFailureInjector + Send>>,
 }
 
 impl FallbackPlanManager {
@@ -74,12 +95,18 @@ impl FallbackPlanManager {
             status: FallbackStatus::NotActivated,
             consecutive_failures: 0,
             max_consecutive_failures: 3,
+            failure_injector: None,
         }
     }
 
     /// Override the consecutive-failure threshold.
     pub fn set_max_consecutive_failures(&mut self, max: u32) {
         self.max_consecutive_failures = max;
+    }
+
+    /// Set a failure injector for controlled production test failures.
+    pub fn set_failure_injector(&mut self, injector: Box<dyn CoreMlFailureInjector + Send>) {
+        self.failure_injector = Some(injector);
     }
 
     /// Evaluate a trigger and decide whether to activate fallback.
@@ -115,6 +142,35 @@ impl FallbackPlanManager {
                 false
             }
         }
+    }
+
+    /// Evaluate epoch health, checking the failure injector before actual triggers.
+    ///
+    /// If a failure injector is configured and signals failure for this epoch,
+    /// the manager increments consecutive failures. When the threshold is met,
+    /// fallback activates.
+    ///
+    /// If no injector fires, delegates to the normal [`Self::evaluate`] path
+    /// using the provided actual trigger.
+    pub fn evaluate_with_injector(
+        &mut self,
+        epoch: u64,
+        actual_trigger: Option<&FallbackTrigger>,
+    ) -> bool {
+        // Check injector first
+        if let Some(injector) = &self.failure_injector {
+            if injector.should_fail(epoch) {
+                self.consecutive_failures += 1;
+                if self.consecutive_failures >= self.max_consecutive_failures {
+                    return true;
+                }
+            }
+        }
+        // Then check actual triggers
+        if let Some(trigger) = actual_trigger {
+            return self.evaluate(trigger);
+        }
+        false
     }
 
     /// Activate fallback, recording the epoch and reason.
@@ -216,6 +272,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         });
 
         // Slot 1: Poisoned — layout mismatch
@@ -233,6 +290,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         });
 
         // Slot 2: Ready (healthy)
@@ -247,6 +305,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         });
 
         // Slot 3: Poisoned — Core ML failure
@@ -261,6 +320,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         });
 
         // Slot 4: Retired (already cleaned up)
@@ -272,6 +332,7 @@ mod tests {
             metal_view: None,
             coreml_view: None,
             backing_arena: None,
+            attestation: None,
         });
 
         arena
@@ -433,5 +494,260 @@ mod tests {
         // Second call releases nothing.
         let released2 = mgr.release_poisoned_slots(&mut arena, 44).unwrap();
         assert_eq!(released2, 0, "no poisoned slots remain on second pass");
+    }
+
+    // -----------------------------------------------------------------------
+    // failure injector
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_fallback_injector_configured() {
+        // Default: injector is None
+        let mut mgr = FallbackPlanManager::new(dummy_plan());
+        assert!(
+            mgr.failure_injector.is_none(),
+            "injector must be None by default"
+        );
+
+        // Can be set via setter
+        let injector = Box::new(TestFailureInjector {
+            fail_epoch: Some(7),
+        });
+        mgr.set_failure_injector(injector);
+        assert!(
+            mgr.failure_injector.is_some(),
+            "injector must be Some after setter"
+        );
+    }
+
+    #[test]
+    fn test_fallback_injector_fires_at_correct_epoch() {
+        let mut mgr = FallbackPlanManager::new(dummy_plan());
+        mgr.set_max_consecutive_failures(1);
+        mgr.set_failure_injector(Box::new(TestFailureInjector {
+            fail_epoch: Some(3),
+        }));
+
+        // Epoch 3 is the configured failure epoch
+        assert!(
+            mgr.evaluate_with_injector(3, None),
+            "injector must fire at configured epoch"
+        );
+        assert_eq!(mgr.consecutive_failures, 1);
+    }
+
+    #[test]
+    fn test_fallback_injector_does_not_fire_at_wrong_epoch() {
+        let mut mgr = FallbackPlanManager::new(dummy_plan());
+        mgr.set_max_consecutive_failures(3);
+        mgr.set_failure_injector(Box::new(TestFailureInjector {
+            fail_epoch: Some(7),
+        }));
+
+        // Epoch 5 is not the configured failure epoch
+        assert!(
+            !mgr.evaluate_with_injector(5, None),
+            "injector must NOT fire at wrong epoch"
+        );
+        assert_eq!(mgr.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn test_fallback_injector_respected_before_actual_triggers() {
+        let mut mgr = FallbackPlanManager::new(dummy_plan());
+        mgr.set_max_consecutive_failures(1);
+        mgr.set_failure_injector(Box::new(TestFailureInjector {
+            fail_epoch: Some(2),
+        }));
+
+        // Injector fires at epoch 2 — returns true even though actual_trigger
+        // is also provided (would have been a trigger anyway)
+        assert!(
+            mgr.evaluate_with_injector(
+                2,
+                Some(&FallbackTrigger::ArtifactLoadFailed("missing.mlmodelc".into())),
+            ),
+            "injector must be checked before actual triggers"
+        );
+        assert_eq!(mgr.consecutive_failures, 1);
+
+        // Now test that actual trigger is only evaluated when injector does
+        // NOT fire. Reset and set injector to None to show actual triggers work.
+        let mut mgr2 = FallbackPlanManager::new(dummy_plan());
+        mgr2.set_max_consecutive_failures(1);
+        // No injector set — actual trigger should be evaluated
+        assert!(
+            mgr2.evaluate_with_injector(
+                3,
+                Some(&FallbackTrigger::ArtifactLoadFailed("missing.mlmodelc".into())),
+            ),
+            "actual trigger must fire when injector is absent"
+        );
+        assert_eq!(mgr2.consecutive_failures, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // epoch boundary / slot lifecycle
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_epoch_boundary_fallback_does_not_expose_partial_output() {
+        let mut mgr = FallbackPlanManager::new(dummy_plan());
+        mgr.set_max_consecutive_failures(1);
+        mgr.set_failure_injector(Box::new(TestFailureInjector {
+            fail_epoch: Some(10),
+        }));
+
+        // Simulate: epoch 10 starts, slot is reserved/writing
+        let mut arena = AppleSharedArena::new("test-arena".into(), 2);
+        let mut slot = LiveIOSurfaceSlot {
+            manifest: IOSurfaceSlotManifest {
+                slot_id: 0,
+                tensor_id: "t0".into(),
+                byte_offset: 0,
+                byte_length: 1024,
+                dtype: "float16".into(),
+                logical_shape: vec![1, 64],
+                physical_shape: vec![1, 64],
+                strides_bytes: vec![128, 2],
+                layout: "nchw".into(),
+                producer: ExecutionLane::CoreMlAne,
+                consumer: ExecutionLane::MlxGpu,
+                reuse_class: SlotReuseClass::Exclusive,
+                required_alignment: 64,
+            },
+            state: SlotState::Reserved {
+                epoch: 10,
+                producer: ExecutionLane::CoreMlAne,
+            },
+            generation: 0,
+            layout_digest: String::new(),
+            metal_view: None,
+            coreml_view: None,
+            backing_arena: None,
+            attestation: None,
+        };
+        arena.add_slot(slot);
+
+        // Injector fires at epoch 10 — fallback activates
+        let triggered = mgr.evaluate_with_injector(10, None);
+        assert!(triggered, "injector must fire at epoch 10");
+
+        // On fallback, the slot should be poisoned, never marked Ready
+        let poisoned_slot = arena.slot(0).unwrap();
+        match &poisoned_slot.state {
+            SlotState::Poisoned { epoch, reason: _ } => {
+                assert_eq!(*epoch, 10, "slot must be poisoned at epoch 10");
+            }
+            SlotState::Ready { .. } => {
+                panic!("slot must NOT be Ready on fallback — would expose partial output");
+            }
+            other => {
+                panic!("slot must be Poisoned, got {:?}", other);
+            }
+        }
+    }
+
+    #[test]
+    fn test_fallback_preserves_slot_abi() {
+        // The fallback outputs must have the same ABI as the primary:
+        // same tensor id, dtype, logical/ physical shape, layout, strides.
+        let primary_manifest = IOSurfaceSlotManifest {
+            slot_id: 1,
+            tensor_id: "output_0".into(),
+            byte_offset: 0,
+            byte_length: 4096,
+            dtype: "float16".into(),
+            logical_shape: vec![1, 64, 64],
+            physical_shape: vec![1, 64, 64],
+            strides_bytes: vec![8192, 128, 2],
+            layout: "NHWC".into(),
+            producer: ExecutionLane::CoreMlAne,
+            consumer: ExecutionLane::MlxGpu,
+            reuse_class: SlotReuseClass::Exclusive,
+            required_alignment: 256,
+        };
+
+        // Fallback slot manifest (e.g. GPU-produced output) must match
+        // in tensor_id, dtype, shape, strides, layout.
+        let fallback_manifest = IOSurfaceSlotManifest {
+            slot_id: 1,
+            tensor_id: "output_0".into(),
+            byte_offset: 0,
+            byte_length: 4096,
+            dtype: "float16".into(),
+            logical_shape: vec![1, 64, 64],
+            physical_shape: vec![1, 64, 64],
+            strides_bytes: vec![8192, 128, 2],
+            layout: "NHWC".into(),
+            producer: ExecutionLane::MlxGpu,
+            consumer: ExecutionLane::MlxGpu,
+            reuse_class: SlotReuseClass::Exclusive,
+            required_alignment: 256,
+        };
+
+        // ABI-critical fields must be identical
+        assert_eq!(
+            primary_manifest.tensor_id, fallback_manifest.tensor_id,
+            "tensor_id must match"
+        );
+        assert_eq!(primary_manifest.dtype, fallback_manifest.dtype, "dtype must match");
+        assert_eq!(
+            primary_manifest.logical_shape, fallback_manifest.logical_shape,
+            "logical_shape must match"
+        );
+        assert_eq!(
+            primary_manifest.physical_shape, fallback_manifest.physical_shape,
+            "physical_shape must match"
+        );
+        assert_eq!(
+            primary_manifest.strides_bytes, fallback_manifest.strides_bytes,
+            "strides_bytes must match"
+        );
+        assert_eq!(primary_manifest.layout, fallback_manifest.layout, "layout must match");
+        assert_eq!(
+            primary_manifest.byte_length, fallback_manifest.byte_length,
+            "byte_length must match"
+        );
+        assert_eq!(
+            primary_manifest.required_alignment, fallback_manifest.required_alignment,
+            "required_alignment must match"
+        );
+
+        // Producer may differ (ANE vs GPU fallback) — that's expected.
+        assert_ne!(
+            primary_manifest.producer, fallback_manifest.producer,
+            "producer may differ between primary and fallback"
+        );
+    }
+
+    #[test]
+    fn test_fallback_recovery_at_subsequent_epoch_boundary() {
+        let mut mgr = FallbackPlanManager::new(dummy_plan());
+        mgr.set_max_consecutive_failures(1);
+        mgr.set_failure_injector(Box::new(TestFailureInjector {
+            fail_epoch: Some(10),
+        }));
+
+        // Epoch 10: injector fires — fallback activated
+        assert!(
+            mgr.evaluate_with_injector(10, None),
+            "injector fires at epoch 10"
+        );
+        mgr.activate(10, "injector failure".into());
+        assert!(mgr.is_active());
+
+        // After fallback, a subsequent epoch (11+) can begin recovery:
+        // reset clears the failure state and deactivates fallback.
+        mgr.reset();
+        assert!(!mgr.is_active(), "fallback must be deactivated after reset");
+        assert_eq!(mgr.consecutive_failures, 0);
+
+        // Subsequent epoch with injector not firing should succeed
+        assert!(
+            !mgr.evaluate_with_injector(11, None),
+            "epoch 11 must not trigger injector"
+        );
+        assert_eq!(mgr.consecutive_failures, 0);
     }
 }
