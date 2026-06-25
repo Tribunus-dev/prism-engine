@@ -4,7 +4,13 @@
 //! a single generation request tracked through prompt processing, decode epochs,
 //! and completion with an evidence log of runtime decisions.
 
-// ---------------------------------------------------------------------------
+
+use crate::backend::coreml_iosurface::CoreMlIOSurfaceExecutable;
+use crate::backend::metal_consumer::MetalConsumer;
+use crate::compilation::epoch_scheduler::EpochScheduler;
+use crate::compilation::failure_injector::FailureInjector;
+use crate::compute_image::apple_shared_arena::AppleSharedArena;
+
 // PrismSessionRequest
 // ---------------------------------------------------------------------------
 
@@ -289,6 +295,50 @@ impl PrismSession {
                 // Terminal states — no further transitions.
             }
         }
+    }
+
+    /// Execute one decode step against the installed runtime resources.
+    pub fn step(
+        &mut self,
+        scheduler: &mut EpochScheduler,
+        arena: &mut AppleSharedArena,
+        coreml_exec: &mut CoreMlIOSurfaceExecutable,
+        metal_consumer: &mut MetalConsumer,
+        injector: &dyn FailureInjector,
+    ) -> Result<Option<u32>, String> {
+        if self.scheduler.terminated || matches!(self.generation_state, GenerationState::Completed | GenerationState::Failed(_)) {
+            return Ok(None);
+        }
+
+        // Check injector before dispatch
+        let receipt = if injector.should_fail_before_prediction(self.scheduler.epoch) {
+            // Inject failure by swapping to a nonexistent model path
+            let original_path = coreml_exec.model_path.clone();
+            let original_loaded = coreml_exec.loaded;
+            coreml_exec.model_path = "/tmp/nonexistent.mlmodelc".into();
+            coreml_exec.loaded = false;
+            let result = scheduler.execute_epoch(arena, coreml_exec, metal_consumer);
+            coreml_exec.model_path = original_path;
+            coreml_exec.loaded = original_loaded;
+            result?
+        } else {
+            scheduler.execute_epoch(arena, coreml_exec, metal_consumer)?
+        };
+
+        // Record evidence
+        self.evidence_log.record(SessionLogEntry {
+            epoch: self.scheduler.epoch,
+            token: None,
+            wall_time_ns: 0,
+            fallback_used: receipt.fallback_used,
+            route_origin: format!("{:?}", receipt.route_origin),
+        });
+
+        // Advance state
+        self.scheduler.advance();
+        self.advance_state();
+
+        Ok(Some(0))
     }
 }
 

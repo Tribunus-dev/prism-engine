@@ -138,8 +138,8 @@ fn run_import(model_path_str: &str) {
             }
         };
         match safetensors::SafeTensors::read_metadata(&bytes) {
-            Ok((_, tensor_meta)) => {
-                for (name, info) in &tensor_meta {
+            Ok((_, tensor_info)) => {
+                for (name, info) in tensor_info.tensors() {
                     tensor_names.push(name.to_string());
                     let elems: u64 = info.shape.iter().map(|&d| d as u64).product();
                     total_params += elems;
