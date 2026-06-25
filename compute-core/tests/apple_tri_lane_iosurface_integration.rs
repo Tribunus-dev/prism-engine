@@ -34,6 +34,7 @@ use tribunus_compute_core::compilation::tri_lane::{
     AppleTriLaneExecutionPlan, AppleHardwareSignature, ShapeClass, NumericalPolicy,
     MetalProgramBinding, CpuProgramBinding, AppleFallbackPlan,
     TriLaneCostModel, TriLaneEvidenceRequirements, LaneCostEstimate,
+    EpochRouteOrigin,
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -605,9 +606,17 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
 
 
         for epoch in 0..1000u64 {
-            let _receipt = scheduler
+            let receipt = scheduler
                 .execute_epoch(&mut install.arena, &mut coreml_exec, &mut metal_consumer)
                 .unwrap();
+            assert_eq!(receipt.route_origin, EpochRouteOrigin::CoreMlAne,
+                "epoch {} must use Core ML route", epoch);
+            assert!(receipt.coreml_prediction_completed,
+                "epoch {} must complete Core ML prediction", epoch);
+            assert!(receipt.metal_command_buffer_completed,
+                "epoch {} must complete Metal command buffer", epoch);
+            assert!(!receipt.fallback_used,
+                "epoch {} must not report fallback", epoch);
             if epoch % 100 == 0 {
                 assert_eq!(
                     install.arena.slots.len(),
@@ -637,7 +646,6 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
         let mut coreml_exec = install.coreml_executables
             .remove("fp16_test")
             .expect("install must have fp16_test executable");
-        let original_model_path = coreml_exec.model_path.clone();
 
         // Run epochs 0-4: should succeed (CoreMlAne route)
         for epoch in 0..5u64 {
@@ -656,10 +664,21 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
             "injector must fire at epoch 5");
         coreml_exec.model_path = "/tmp/nonexistent_fp16_test.mlmodelc".into();
         coreml_exec.loaded = false;
-        let _epoch5_receipt = scheduler
+        let epoch5 = scheduler
             .execute_epoch(&mut install.arena, &mut coreml_exec, &mut metal_consumer)
-            .expect("epoch 5 should return Ok even with injected failure");
-        // Prediction was skipped — output slot was not transitioned to Ready
+            .expect("epoch 5 returns Ok");
+        assert_eq!(epoch5.route_origin, EpochRouteOrigin::CoreMlAne,
+            "failed epoch must show CoreMlAne route (lane where prediction was attempted)");
+        assert!(!epoch5.coreml_prediction_completed,
+            "failed epoch must not complete Core ML prediction");
+        assert!(epoch5.fallback_used,
+            "failed epoch must report fallback activated");
+        // Failed primary output must not reach Ready
+        let out_slot = install.arena.slot(1).unwrap();
+        match &out_slot.state {
+            SlotState::Retired { .. } | SlotState::Free => {}
+            other => panic!("epoch 5 output must be Retired/Free, got {:?}", other),
+        }
 
         // After failure, verify fallback preserves ABI
         for id in 0..3 {
@@ -673,12 +692,16 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
         }
 
         // Run epochs 6+: restore model path, continue with fallback route
-        coreml_exec.model_path = original_model_path;
-        coreml_exec.loaded = false;
-        for epoch in 6..10u64 {
-            let _ = scheduler
+        for epoch in 6..106u64 {
+            let receipt = scheduler
                 .execute_epoch(&mut install.arena, &mut coreml_exec, &mut metal_consumer)
-                .expect(&format!("epoch {} should succeed after fallback", epoch));
+                .expect(&format!("epoch {} should succeed", epoch));
+            assert_eq!(receipt.route_origin, EpochRouteOrigin::CoreMlAne,
+                "fallback epoch {} must show CoreMlAne route", epoch);
+            assert!(!receipt.coreml_prediction_completed,
+                "fallback epoch {} must not complete Core ML prediction", epoch);
+            assert!(receipt.fallback_used,
+                "fallback epoch {} must report fallback active", epoch);
         }
     }
 }

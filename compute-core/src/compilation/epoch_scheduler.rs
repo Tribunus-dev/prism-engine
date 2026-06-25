@@ -529,11 +529,10 @@ impl EpochScheduler {
         );
 
         // Set route origin based on fallback status
-        receipt.route_origin = if receipt.fallback_used {
-            EpochRouteOrigin::MetalFallback
-        } else {
-            EpochRouteOrigin::CoreMlAne
-        };
+        // route_origin records which lane attempted execution.
+        // Even when prediction fails, execution was attempted on the Core ML ANE lane.
+        // MetalFallback is only set when an actual Metal fallback kernel produces output.
+        receipt.route_origin = EpochRouteOrigin::CoreMlAne;
         receipt.coreml_prediction_completed = prediction_succeeded;
         receipt.metal_command_buffer_completed = validation_matched;
 
