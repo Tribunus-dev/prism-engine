@@ -87,6 +87,7 @@ impl RuntimeWorkItemHandle {
 #[derive(Debug, Clone)]
 pub struct PhaseLifecycleTracker {
     states: std::collections::HashMap<String, PhaseLifecycleState>,
+    #[allow(dead_code)]
     activation_generations: std::collections::HashMap<String, u64>,
 }
 

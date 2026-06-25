@@ -70,9 +70,9 @@ fn storage_dtype_to_mlx(dtype: &str) -> crate::Result<mlx_rs::Dtype> {
     }
 }
 
-/// Thread-local registry of IOSurface arenas created during weight loading.
-/// `load_tensor_from_mapped_segment` pushes arenas here. The caller
-/// (`LoadedProfiledModel::new`) drains them into the model struct.
+// Thread-local registry of IOSurface arenas created during weight loading.
+// `load_tensor_from_mapped_segment` pushes arenas here. The caller
+// (`LoadedProfiledModel::new`) drains them into the model struct.
 thread_local! {
     static WEIGHT_ARENAS: RefCell<Vec<Arc<Arena>>> = const { RefCell::new(Vec::new()) };
 }
@@ -839,6 +839,7 @@ impl std::fmt::Debug for LoadedProfiledModel {
 /// when the ANE kernel driver exposes the DMA interface.
 pub struct AneDmaPrefetcher {
     /// Temporary IOSurface arena for DMA writes.
+    #[allow(dead_code)]
     io_arena: Arena,
 }
 
@@ -892,6 +893,7 @@ pub struct LayerWeightStreamer {
     /// Prefetch window size (default: 2, meaning weights for layer N and N+1 are resident)
     prefetch_window: u32,
     /// IO buffer for DMA transfers (IOSurface-backed)
+    #[allow(dead_code)]
     io_buffer: Arena,
     /// ANE prefetcher for async DMA
     ane_prefetcher: Option<AneDmaPrefetcher>,

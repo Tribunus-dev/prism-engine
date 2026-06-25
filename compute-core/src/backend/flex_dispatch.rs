@@ -150,6 +150,7 @@ impl SystemState {
 
             let result = unsafe {
                 libc::host_statistics(
+                    #[allow(deprecated)]
                     libc::mach_host_self(),
                     libc::HOST_CPU_LOAD_INFO,
                     cpu_info.as_mut_ptr() as *mut u32 as *mut libc::integer_t,
@@ -350,6 +351,7 @@ impl SystemState {
         }
 
         // Fallback (non-macOS or if APIs unavailable).
+        #[allow(unreachable_code)]
         (1.0, true)
     }
 

@@ -17,6 +17,7 @@ pub trait OutputBufferHint {
 
 extern "C" {
     fn tribunus_arena_alloc(info: *mut ArenaInfo, dim0: i32, dim1: i32, dtype: i32) -> i32;
+    #[allow(dead_code)]
     fn tribunus_arena_alloc_f32(info: *mut ArenaInfo, dim0: i32, dim1: i32) -> i32;
     fn tribunus_arena_alloc_bytes(info: *mut ArenaInfo, byte_count: i32) -> i32;
     fn tribunus_arena_free(info: *mut ArenaInfo);

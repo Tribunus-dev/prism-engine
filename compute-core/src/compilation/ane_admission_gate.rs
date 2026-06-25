@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::compilation::activation_abi::ActivationAbi;
-use crate::compilation::ane_eligibility::ShapeBucket;
+use crate::compilation::ane_eligibility::{ShapeBucket, ShapeBucketFamily};
 use crate::compilation::tri_lane::AneRejectionReason;
 
 // ── Identity types ────────────────────────────────────────────────────────

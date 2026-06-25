@@ -600,7 +600,7 @@ mod tests {
 
         // Simulate: epoch 10 starts, slot is reserved/writing
         let mut arena = AppleSharedArena::new("test-arena".into(), 2);
-        let mut slot = LiveIOSurfaceSlot {
+        let slot = LiveIOSurfaceSlot {
             manifest: IOSurfaceSlotManifest {
                 slot_id: 0,
                 tensor_id: "t0".into(),

@@ -356,7 +356,7 @@ mod tests {
     use super::*;
     use crate::compilation::phase_ir::{
         ArithmeticIntensity, CompileDeterminism, CompilePlacement, MutationClass, PhaseId,
-        ShapeClass, TensorContract,
+        ShapeClass,
     };
 
     fn make_descriptor(

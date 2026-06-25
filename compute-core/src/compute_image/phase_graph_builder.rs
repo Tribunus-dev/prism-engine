@@ -58,6 +58,7 @@ impl PhaseGraphBuilder {
     /// Build a standard decoder-layer phase graph.
     /// Topology: ArenaAlloc -> Prologue -> LayerAttention[0] -> LayerMlp[0] -> ... -> Epilogue ->
     /// Sampling
+    #[allow(unused_assignments)]
     pub fn build_v2(&self) -> EmittedPhaseGraphV2 {
         let mut phases = Vec::new();
         let mut edges = Vec::new();

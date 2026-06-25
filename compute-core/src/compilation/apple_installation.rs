@@ -10,7 +10,7 @@ use crate::compute_image::apple_cimage_manifest::{
     AppleTriLaneArtifactManifest, IOSurfaceSlotManifest as CimageSlotManifest,
 };
 use crate::compute_image::apple_shared_arena::{
-    AppleSharedArena, IOSurfaceSlotManifest, SlotReuseClass,
+    AppleSharedArena, IOSurfaceAllocationAttestation, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass, SlotState,
 };
 use crate::backend::coreml_iosurface::{CoreMlComputePolicy, CoreMlIOSurfaceExecutable};
 use crate::backend::metal_iosurface::{

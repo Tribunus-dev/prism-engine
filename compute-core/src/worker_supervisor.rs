@@ -1245,6 +1245,7 @@ impl WorkerSupervisor {
                         }
 
                         let _start_time = std::time::Instant::now();
+                        #[allow(unused_assignments)]
                         let mut total_steps = 0u32;
                         let mut unchanged_steps = 0u32;
 

@@ -8,6 +8,7 @@ pub trait CompileTarget: Send + Sync {
     fn name(&self) -> &str;
 
     /// Compile a loaded model source into a compute image.
+    #[allow(private_interfaces)]
     fn compile(
         &self,
         source: &super::compile::LoadedSource,

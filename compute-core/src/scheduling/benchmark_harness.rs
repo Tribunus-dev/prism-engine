@@ -43,6 +43,7 @@ impl VmProbe {
                 (mem::size_of::<libc::vm_statistics64>() / mem::size_of::<i32>()) as u32;
             let mut stats: libc::vm_statistics64 = mem::zeroed();
             let result = libc::host_statistics64(
+                #[allow(deprecated)]
                 libc::mach_host_self(),
                 libc::HOST_VM_INFO64,
                 &mut stats as *mut _ as *mut i32,

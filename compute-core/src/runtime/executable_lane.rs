@@ -230,6 +230,7 @@ impl std::error::Error for BindingError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::integration::ContentHash;
     use crate::compute_image::executable::profile::{
         DefaultVariantSelection, ExecutableTargetProfile, HardwareTargetContract,
         RuntimeTargetContract,

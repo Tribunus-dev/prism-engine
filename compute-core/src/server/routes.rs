@@ -701,6 +701,7 @@ fn extract_video_inputs(messages: &[serde_json::Value]) -> Vec<VideoInput> {
 
 /// Run a full inference cycle (prefill + decode loop) and return the
 /// generated text.
+#[allow(dead_code)]
 fn run_inference(
     sess: &mut ProfiledInferenceSession,
     model: &LoadedProfiledModel,
@@ -801,6 +802,7 @@ fn detokenize(tokens: &[u32]) -> String {
 ///
 /// Runs prefill + decode loop, batching generated tokens into SSE events
 /// according to `StreamConfig`. Events are sent through the mpsc sender.
+#[allow(dead_code)]
 async fn stream_generate(
     sess: &mut ProfiledInferenceSession,
     model: &LoadedProfiledModel,
@@ -2506,6 +2508,7 @@ async fn image_generations(
 }
 
 /// Current Unix timestamp in seconds.
+#[allow(dead_code)]
 fn chrono_now() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -2728,6 +2731,7 @@ struct TrainAdapterRequest {
     target_layers: Option<Vec<u32>>,
     target_modules: Option<Vec<String>>,
     input_ids: Vec<u32>,
+    #[allow(dead_code)]
     target_ids: Vec<u32>,
     learning_rate: Option<f64>,
     num_steps: Option<u32>,

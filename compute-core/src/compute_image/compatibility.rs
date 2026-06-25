@@ -212,7 +212,7 @@ impl CompatibilityMatrix {
                     ));
                 }
             }
-            CompileQuantMode::Af8 { group_size } => {
+            CompileQuantMode::Af8 { group_size: _ } => {
                 // 8-bit affine quantization changes byte layout but preserves
                 // logical element count. Always compatible.
             }

@@ -337,8 +337,8 @@ impl KnowledgeEditor {
         // through the MLP up-projection, scaled to match the output space.
         //
         // In a full implementation this would be the actual hidden state at
-        /// `layer` after processing `prompt`.  Here we seed a deterministic
-        /// vector from the hash of (layer, prompt) so edits are reproducible.
+        // `layer` after processing `prompt`.  Here we seed a deterministic
+        // vector from the hash of (layer, prompt) so edits are reproducible.
         let u_seed = self.seed_for(prompt, layer, 0x55);
         let u_len = in_dim;
         let u_data: Vec<f32> = (0..u_len)

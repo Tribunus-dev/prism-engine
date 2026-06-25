@@ -101,6 +101,7 @@ pub struct TokenBudgetScheduler {
     run_queue: VecDeque<TokenWorkUnit>,
     active_requests: std::collections::HashSet<String>,
     total_budget_tokens: u32, // remaining token budget for this scheduling cycle
+    #[allow(dead_code)]
     config_t: std::collections::HashMap<String, TokenWorkUnit>, // re-insertions
 }
 
@@ -123,6 +124,7 @@ impl TokenBudgetScheduler {
 
     /// Schedule the next batch of work units.
     /// Returns work units that can be dispatched (admission granted).
+    #[allow(unused_assignments)]
     pub fn schedule(&mut self) -> Vec<TokenWorkUnit> {
         let mut batch = Vec::new();
         let mut budget = self.total_budget_tokens;

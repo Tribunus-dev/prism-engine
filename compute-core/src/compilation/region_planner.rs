@@ -193,7 +193,8 @@ fn partition_islands(ops: &[ScheduledOp]) -> Vec<CoreMlIsland> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_adapter::{CanonicalModel, CanonicalRole, TensorData};
+    use crate::model_adapter::CanonicalModel;
+    use crate::config::{AttentionKind, RopeSpec, TextArchitecture};
 
     fn make_test_canonical(n_layers: u32) -> CanonicalModel {
         let arch = TextArchitecture {

@@ -161,10 +161,7 @@ fn has_vision_input(phase: &CompilePhaseDescriptor) -> bool {
 fn is_scatter_gather_operator(family: &str) -> bool {
     matches!(
         family,
-        "attention_score"
-            | "attention_value_aggregation"
-            | "kv_cache_append"
-            | "kv_cache_view"
+        "attention_score" | "attention_value_aggregation"
     )
 }
 

@@ -24,6 +24,7 @@ const PLACEHOLDER_TOKEN: u32 = 0;
 /// | 4    | `dim_n` (scalar)     | `uint`          | —                     |
 /// | 5    | `dim_m` (scalar)     | `uint`          | —                     |
 pub struct PalettizedGemvDecoder {
+    #[allow(dead_code)]
     device: Device,
     command_queue: CommandQueue,
     pipeline_state: ComputePipelineState,

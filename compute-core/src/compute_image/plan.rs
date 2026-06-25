@@ -11,6 +11,7 @@ use crate::config::CompileQuantMode;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
+#[allow(private_interfaces)]
 pub fn plan(
     source_dir: &Path,
     skip_validation: bool,

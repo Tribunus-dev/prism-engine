@@ -469,6 +469,7 @@ fn build_mil_program(
 /// plan and compiles each as a Core ML subgraph with the weights extracted
 /// from `source_tensors`.  Each island's `.mlmodelc` is written to
 /// `output_dir / island.modelc_relpath`.
+#[allow(private_interfaces)]
 pub fn compile_ane_islands(
     execution_plan: &crate::config::ModelExecutionPlan,
     source_tensors: &std::collections::HashMap<String, SourceTensor>,
