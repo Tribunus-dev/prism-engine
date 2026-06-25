@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::compilation::phase_ir::{
-    CompilePhaseDescriptor, ShapeClass, TensorContract,
+    CompilePhaseDescriptor, ShapeClass,
 };
 use crate::compilation::region_catalogue::{LayoutContract, RegionCatalogue, RegionCatalogueEntry};
 use crate::compilation::tri_lane::AneRejectionReason;
@@ -21,7 +21,7 @@ use crate::compilation::tri_lane::AneRejectionReason;
 // ── Eligibility result ────────────────────────────────────────────────────
 
 /// Status of the ANE eligibility check for a compile phase.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AneEligibilityStatus {
     /// Phase is eligible for ANE execution.
     Eligible,
@@ -32,7 +32,7 @@ pub enum AneEligibilityStatus {
 }
 
 /// Shape class assigned by the eligibility pass.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AneShapeClass {
     /// Static-shape vision/multi-modal region (image inputs).
     VisionStatic,
@@ -46,7 +46,7 @@ pub enum AneShapeClass {
 
 /// A single qualified shape bucket — a (batch, sequence, hidden, rank)
 /// tuple that the ANE lane is certified to handle.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ShapeBucket {
     pub batch: u32,
     pub sequence: u32,
@@ -56,7 +56,7 @@ pub struct ShapeBucket {
 }
 
 /// Functional family of a shape bucket.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ShapeBucketFamily {
     Decode,
     Prefill,
@@ -65,7 +65,7 @@ pub enum ShapeBucketFamily {
 }
 
 /// Evidence tier required to qualify a shape bucket for ANE execution.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AneEvidenceRequirement {
     AllocationAttested,
     Warmed,

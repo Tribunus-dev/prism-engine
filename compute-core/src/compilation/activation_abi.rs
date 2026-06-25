@@ -20,7 +20,7 @@ use crate::compute_image::apple_shared_arena::SlotState;
 // ── Activation ABI variants ──────────────────────────────────────────────
 
 /// Per-variant ABI for an activation tensor crossing a lane boundary.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActivationAbi {
     /// Decode-step activation (KV-cache projections, MLP intermediates).
     DecodeActivationV1(DecodeActivationV1Params),
@@ -33,7 +33,7 @@ pub enum ActivationAbi {
 }
 
 /// Parameters for a decode-step activation V1.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DecodeActivationV1Params {
     pub dtype: TensorDtype,
     pub seq_bucket: u32,
@@ -44,7 +44,7 @@ pub struct DecodeActivationV1Params {
 }
 
 /// Parameters for attention head projections.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AttentionHeadsParams {
     pub dtype: TensorDtype,
     pub num_heads: u32,
@@ -55,7 +55,7 @@ pub struct AttentionHeadsParams {
 }
 
 /// Parameters for vision image tensors.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct VisionImageParams {
     pub dtype: TensorDtype,
     pub channel_count: u32,
@@ -66,7 +66,7 @@ pub struct VisionImageParams {
 }
 
 /// Parameters for an opaque metal-only buffer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MetalOnlyParams {
     pub name: String,
     pub dtype: TensorDtype,
@@ -76,7 +76,7 @@ pub struct MetalOnlyParams {
 // ── Physical layout ──────────────────────────────────────────────────────
 
 /// Describes how a tensor's logical dimensions map to physical memory.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PhysicalLayout {
     /// Row-major contiguous (C-order).
     ContiguousRowMajor,
@@ -101,7 +101,7 @@ pub struct LogicalTensorId(pub String);
 // ── Slot backing ─────────────────────────────────────────────────────────
 
 /// How a slot's backing memory is provisioned.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SlotBacking {
     /// IOSurface shared memory (ANE ↔ GPU).
     IOSurface,
@@ -114,7 +114,7 @@ pub enum SlotBacking {
 // ── Slot descriptor ──────────────────────────────────────────────────────
 
 /// Full descriptor for a single activation slot tracked in the shared arena.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ActivationSlotDescriptor {
     pub slot_index: u32,
     pub logical_tensor_id: LogicalTensorId,
@@ -131,7 +131,7 @@ pub struct ActivationSlotDescriptor {
 
 /// Concrete ABI contract for one activation tensor — the validated
 /// description used at dispatch time to match producer and consumer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ActivationContract {
     pub abi: ActivationAbi,
     pub element_count: u64,

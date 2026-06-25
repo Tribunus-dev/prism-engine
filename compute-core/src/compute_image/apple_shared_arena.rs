@@ -19,7 +19,7 @@ type ArenaId = String;
 type SlotGeneration = u64;
 
 /// Failure reason for poisoned slots.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SlotFailureReason {
     LayoutMismatch { expected: String, actual: String },
     CoreMlPredictionFailed(String),
@@ -31,7 +31,7 @@ pub enum SlotFailureReason {
 }
 
 /// Slot state with explicit ownership semantics.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SlotState {
     Free,
     Reserved { epoch: u64, producer: ExecutionLane },

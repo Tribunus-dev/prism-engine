@@ -58,8 +58,6 @@ use crate::generation::video_generation::{TextToImageGenerator, VideoGenerator};
 use crate::grammar::Grammar;
 use crate::grammar::GrammarTokenizer;
 use crate::kv_cache::KvCache;
-use crate::log_error;
-use crate::log_warn;
 use crate::profiled_executor::EmbedPoolStrategy;
 use crate::profiled_executor::{
     prefill_with_audio, AudioInput, LoadedProfiledModel, ProfiledInferenceSession,

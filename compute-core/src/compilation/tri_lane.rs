@@ -210,7 +210,7 @@ pub enum AneExperimentalReason {
 
 /// How tensor data crosses a device boundary.  Should never be called
 /// "zero-copy" unless the provider proves it for the exact buffer route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MaterializationMode {
     /// IO-arena buffer reused by the consumer lane (proven zero-copy).
     ReusedProviderBuffer,

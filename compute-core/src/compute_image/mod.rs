@@ -44,6 +44,7 @@ pub mod metal_codegen;
 #[cfg(test)]
 pub mod metal_codegen_model_test;
 pub mod metal_pipeline;
+pub mod metal_epilogue;
 pub mod phase_dag;
 pub mod phase_fallback;
 pub mod phase_graph;
@@ -53,6 +54,7 @@ pub mod phase_graph_validation;
 pub mod phase_program_version;
 pub mod pipeline;
 pub mod plan;
+pub mod portfolio_compilation;
 pub mod program;
 pub mod quant;
 pub mod receipts;
