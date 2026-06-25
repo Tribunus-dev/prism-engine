@@ -55,6 +55,7 @@ pub mod pipeline;
 pub mod plan;
 pub mod program;
 pub mod quant;
+pub mod receipts;
 pub mod residency;
 pub mod segment;
 pub mod source;

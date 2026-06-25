@@ -22,6 +22,7 @@ pub mod phase_readiness;
 pub mod phase_runner;
 pub mod phase_telemetry;
 pub mod prefill_orchestrator;
+pub mod prism_session;
 pub mod ready_queue;
 pub mod receipts;
 pub mod request;

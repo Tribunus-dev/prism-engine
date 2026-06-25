@@ -5,7 +5,6 @@
 //! architecture parameters and tensor shards with deterministic data.
 
 use serde_json::json;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

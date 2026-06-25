@@ -77,6 +77,7 @@ pub mod audio_provider;
 ))]
 pub mod autopsy;
 pub mod backend;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod benchmark;
 #[cfg(all(
     target_os = "macos",
@@ -263,8 +264,10 @@ pub mod heterogeneous;
 pub mod hybrid_profile;
 #[cfg(feature = "generation-image")]
 pub mod image_provider;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod inference;
 pub mod inference_profile;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod integration;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -374,6 +377,7 @@ pub mod model_adapter;
     feature = "prism-backend"
 ))]
 pub mod model_cache;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod model_runtime;
 pub mod model_store;
 #[cfg(any(
@@ -439,6 +443,7 @@ pub mod quantization;
     feature = "prism-backend"
 ))]
 pub mod quantized;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod readiness_gates;
 pub mod receipt;
 pub mod receipts;
@@ -453,6 +458,7 @@ pub mod requalification;
     feature = "prism-backend"
 ))]
 pub mod research;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod research_contracts;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -464,6 +470,7 @@ pub mod research_metrics;
     feature = "prism-backend"
 ))]
 pub mod research_trace;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod residency;
 pub mod ring;
 #[cfg(any(

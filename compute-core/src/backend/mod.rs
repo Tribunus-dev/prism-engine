@@ -28,7 +28,10 @@ pub mod authority;
 ))]
 pub mod coreml;
 /// Core ML execution lane — compiled subgraph on ANE.
-#[cfg(target_os = "macos")]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod coreml_iosurface;
 /// Core ML IOSurface binding — validated executable binding.
 #[cfg(all(
@@ -39,6 +42,7 @@ pub mod coreml_lane;
 /// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
 pub mod metal_iosurface;
 /// Metal consumer — validates Core ML output slots against CPU references.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod metal_consumer;
 /// CPU attention scheduler — L2-cache-aware work partition + work-stealing
 /// (ported from vLLM's cpu_attn_impl.hpp).

@@ -1161,8 +1161,6 @@ pub fn compile(
     };
 
     let root = &namespace.root;
-    // bits=0 and gs=0 means no quantization (quantized_linear returns None for packed_shape)
-    let bits = q.as_ref().map(|m| m.bits).unwrap_or(0);
     // bits=0 means no quantization. quantized_linear checks bits>0.
     // bits=0 and gs=0 means no quantization (quantized_linear returns None for packed_shape)
     let bits = q.as_ref().map(|m| m.bits).unwrap_or(0);
@@ -1484,6 +1482,7 @@ pub use crate::config_namespace::*;
 // ── Raw JSON parsing to normalized types ───────────────────────────────────
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct RawConfig {
     #[serde(default)]
     model_type: Option<String>,

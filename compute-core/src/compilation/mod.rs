@@ -10,6 +10,7 @@ pub mod apple_installation;
 pub mod ane_lane;
 pub mod staging;
 pub mod evidence_probe;
+pub mod failure_injector;
 pub mod tri_lane;
 pub mod qualification_gate;
 pub mod profitability;
