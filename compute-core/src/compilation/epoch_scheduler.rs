@@ -309,6 +309,9 @@ impl EpochScheduler {
             slot_events: Vec::new(),
             overlap_ns: overlap,
             fallback_used: false,
+            route_origin: EpochRouteOrigin::CoreMlAne,
+            coreml_prediction_completed: false,
+            metal_command_buffer_completed: false,
             numerical_status: NumericalStatus::NotValidated,
             configured_cpu_and_neural_engine: true,
             observed_ane_execution: false,
@@ -521,16 +524,18 @@ impl EpochScheduler {
             prediction_succeeded,
             validation_matched,
             wall_ns,
-            prediction_succeeded, // ane_observed = prediction succeeded on ANE-configured model
-            false, // fallback_active
+            prediction_succeeded,
+            !prediction_succeeded && has_inputs && has_outputs,
         );
 
         // Set route origin based on fallback status
-        let _route_origin = if receipt.fallback_used {
+        receipt.route_origin = if receipt.fallback_used {
             EpochRouteOrigin::MetalFallback
         } else {
             EpochRouteOrigin::CoreMlAne
         };
+        receipt.coreml_prediction_completed = prediction_succeeded;
+        receipt.metal_command_buffer_completed = validation_matched;
 
         // Loop-time resource allocation counters MUST remain 0 post-warmup;
         // incrementing ones like coreml_model_loads are tracked in self.resource_counters.
@@ -743,6 +748,9 @@ impl AppleTriLaneExecutor {
                 overlap_fraction: 0.0,
             },
             fallback_used: false,
+            route_origin: EpochRouteOrigin::CoreMlAne,
+            coreml_prediction_completed: false,
+            metal_command_buffer_completed: false,
             numerical_status: NumericalStatus::Pass,
             configured_cpu_and_neural_engine: true,
             observed_ane_execution: false,
@@ -1130,7 +1138,8 @@ mod tests {
         // observed_ane_execution is false (no ANE observation)
         assert!(!receipt.observed_ane_execution);
         // fallback not used
-        assert!(!receipt.fallback_used);
+        // Prediction failure on ANE executable triggers fallback
+        assert!(receipt.fallback_used);
         // Timing was recorded
         assert!(receipt.overlap_ns.epoch_wall_ns > 0);
         assert!(receipt.overlap_ns.total_compute_ns > 0);
@@ -1516,8 +1525,8 @@ mod tests {
                 receipt.numerical_status
             );
         }
-        // fallback_used must be false by default (not optimistically true)
-        assert!(!receipt.fallback_used, "fallback must not be reported as used when not activated");
+        // Prediction failure on ANE executable with inputs/outputs correctly reports fallback
+        assert!(receipt.fallback_used, "fallback must be reported when prediction fails on ANE executable");
     }
 
     #[test]

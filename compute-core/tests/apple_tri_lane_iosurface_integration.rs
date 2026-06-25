@@ -585,17 +585,17 @@ mod fp16_production_v1 {
         let mut scheduler = EpochScheduler::new(plan);
 
         // Warm up the Core ML artifact against installed slots
-        for (_id, exec) in install.coreml_executables.iter_mut() {
+for (_id, exec) in install.coreml_executables.iter_mut() {
             let warmup_contract = CoreMlWarmupContract {
                 min_warmup_predictions: 3,
                 max_warmup_latency_ms: 5000,
                 tolerance: 0.01,
             };
-            let warmup_result = warmup_with_arena(exec, &mut install.arena, &warmup_contract);
-            // Warmup may fail if model file doesn't exist — that's acceptable for test
-            if let Ok(record) = &warmup_result {
-                assert!(record.warmup_success, "warmup must succeed");
-            }
+            let record = warmup_with_arena(exec, &mut install.arena, &warmup_contract)
+                .expect("real FP16 Core ML warmup must succeed");
+            assert!(record.warmup_success, "warmup predictions must complete");
+            assert!(record.output_present, "warmup must produce output");
+            assert!(record.load_success, "warmup must load model");
         }
 
         // Take the Core ML executable from the install

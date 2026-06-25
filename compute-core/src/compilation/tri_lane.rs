@@ -683,6 +683,12 @@ pub struct AppleTriLaneExecutionReceipt {
     pub overlap_ns: OverlapMetrics,
     /// Whether fallback was activated.
     pub fallback_used: bool,
+    /// Execution route for this epoch (Core ML ANE or Metal fallback).
+    pub route_origin: EpochRouteOrigin,
+    /// Whether a Core ML prediction was completed this epoch.
+    pub coreml_prediction_completed: bool,
+    /// Whether a Metal command buffer was completed this epoch.
+    pub metal_command_buffer_completed: bool,
     /// Per-slot IO-arena events for this epoch.
     pub slot_events: Vec<SlotEvent>,
     /// Detailed fallback status beyond the boolean.
@@ -1063,6 +1069,9 @@ mod tests {
                 overlap_fraction: 0.33,
             },
             fallback_used: false,
+            route_origin: EpochRouteOrigin::CoreMlAne,
+            coreml_prediction_completed: false,
+            metal_command_buffer_completed: false,
             slot_events: vec![],
             fallback_status: FallbackStatus::NotActivated,
             coreml_configuration: None,

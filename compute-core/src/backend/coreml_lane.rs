@@ -21,6 +21,7 @@ use crate::compilation::tri_lane::{
     AneLaneLifecycle, AneQualificationRecord, AppleFallbackPlan,
     AppleTriLaneExecutionReceipt, CoreMlWarmupContract, LaneExecutionEvent,
     OverlapMetrics, NumericalStatus, FallbackStatus, AneExecutionEvidence,
+    EpochRouteOrigin,
 };
 use tempfile::TempDir;
 
@@ -595,6 +596,9 @@ impl CoreMlLane {
                 overlap_fraction: 0.0,
             },
             fallback_used,
+            route_origin: EpochRouteOrigin::CoreMlAne,
+            coreml_prediction_completed: false,
+            metal_command_buffer_completed: false,
             numerical_status: NumericalStatus::Pass,
             configured_cpu_and_neural_engine: healthy,
             observed_ane_execution: self.is_available && healthy,
