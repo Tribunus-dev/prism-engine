@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::compilation::region_catalogue::{RegionAdmission, RegionCatalogue};
 use crate::model_adapter::CanonicalModel;
+use crate::compilation::ane_eligibility::AneEligibility;
+use crate::compilation::phase_ir::{PhaseRegion, RegionId};
 
 // ── Scheduled operation ──────────────────────────────────────────────────
 
@@ -186,6 +188,47 @@ fn partition_islands(ops: &[ScheduledOp]) -> Vec<CoreMlIsland> {
         }
     }
     islands
+}
+
+/// Run the ANE eligibility pass on a set of operations and produce PhaseRegions.
+/// Each region is a contiguous group of ops with homogeneous eligibility.
+pub fn build_phase_regions(
+    plan: &RegionExecutionPlan,
+) -> Vec<PhaseRegion> {
+    // For now: return one PhaseRegion per CoreML island, marked as MetalOnly.
+    // Full eligibility integration will run AneEligibility::classify_ane_eligibility().
+    let mut regions = Vec::new();
+    for island in &plan.coreml_islands {
+        // Map CoreMlIsland to PhaseRegion
+        let region_id = island.island_id as RegionId;
+        let ops: Vec<crate::compilation::phase_ir::CompilePhaseDescriptor> = Vec::new(); // stub
+        let eligibility = AneEligibility {
+            status: crate::compilation::ane_eligibility::AneEligibilityStatus::Deferred,
+            shape_class: crate::compilation::ane_eligibility::AneShapeClass::MetalOnly,
+            rejection_reason: None,
+            qualified_buckets: vec![],
+            input_layout_contract: crate::compilation::region_catalogue::LayoutContract {
+                layout: String::new(),
+                preferred: false,
+                stride_constraints: vec![],
+            },
+            output_layout_contract: crate::compilation::region_catalogue::LayoutContract {
+                layout: String::new(),
+                preferred: false,
+                stride_constraints: vec![],
+            },
+            evidence_requirements: vec![],
+        };
+        regions.push(PhaseRegion {
+            region_id,
+            operations: ops,
+            placement_candidates: vec![],
+            ane_eligibility: eligibility,
+            input_contract: None,
+            output_contract: None,
+        });
+    }
+    regions
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────

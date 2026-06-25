@@ -288,6 +288,48 @@ fn infer_packet_kind(island: &CoreMlIsland) -> PacketKind {
     PacketKind::ResidualNorm
 }
 
+/// Compile-time profile of legal shape buckets for a model.
+pub struct ShapeBucketProfile {
+    pub decode: Vec<u32>,
+    pub prefill: Vec<u32>,
+    pub vision: Vec<VisionBucket>,
+    pub projector: Vec<ProjectorBucket>,
+}
+
+/// Vision inference bucket.
+pub struct VisionBucket {
+    pub height: u32,
+    pub width: u32,
+}
+
+/// Projector (multi-modal projection) bucket.
+pub struct ProjectorBucket {
+    pub sequence: u32,
+    pub hidden: u32,
+}
+
+/// Select the appropriate shape bucket for a given sequence length.
+/// Returns the bucket value or None if no bucket matches and Metal-only is required.
+pub fn select_shape_bucket(
+    profile: &ShapeBucketProfile,
+    sequence: u32,
+    is_decode: bool,
+) -> Option<u32> {
+    let buckets = if is_decode { &profile.decode } else { &profile.prefill };
+    // Exact match first
+    if buckets.contains(&sequence) {
+        return Some(sequence);
+    }
+    // Pad to next larger bucket
+    for &bucket in buckets {
+        if bucket >= sequence {
+            return Some(bucket);
+        }
+    }
+    // No suitable bucket — Metal-only fallback
+    None
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

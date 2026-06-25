@@ -582,6 +582,14 @@ pub use crate::session::{
 ))]
 pub use coreml_proto;
 
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
+pub use crate::compilation::phase_ir::{
+    LogicalTensorId, MaterializationPlan, PhaseEdge, PhaseRegion, RegionId,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     InvalidArg,

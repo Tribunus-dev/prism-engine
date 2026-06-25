@@ -256,6 +256,51 @@ pub struct BoundaryTensorContract {
     pub layout_digest: String,
 }
 
+// ── Region and edge types ────────────────────────────────────────────────────
+
+/// A region of contiguous PhaseIR operations with a shared ANE eligibility assessment.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PhaseRegion {
+    pub region_id: RegionId,
+    pub operations: Vec<CompilePhaseDescriptor>,
+    pub placement_candidates: Vec<crate::compilation::phase_ir::CompilePlacement>,
+    pub ane_eligibility: crate::compilation::ane_eligibility::AneEligibility,
+    pub input_contract: Option<crate::compilation::activation_abi::ActivationContract>,
+    pub output_contract: Option<crate::compilation::activation_abi::ActivationContract>,
+}
+
+/// Edge connecting two PhaseIR phases with ABI contract and materialization plan.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PhaseEdge {
+    pub producer: PhaseId,
+    pub consumer: PhaseId,
+    pub logical_tensor: LogicalTensorId,
+    pub producer_output_abi: crate::compilation::activation_abi::ActivationAbi,
+    pub consumer_input_abi: crate::compilation::activation_abi::ActivationAbi,
+    pub materialization_plan: MaterializationPlan,
+}
+
+/// How tensor data crosses device boundaries between phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MaterializationPlan {
+    /// Direct shared memory (IOSurface handoff).
+    DirectShared,
+    /// Metal epilogue repacks tensor layout for ANE consumption.
+    MetalEpilogueRepack,
+    /// Explicit Metal-side repack.
+    ExplicitMetalRepack,
+    /// CPU-side materialization (slow path).
+    CpuMaterialization,
+    /// Not permitted for production ANE edges.
+    Forbidden,
+}
+
+/// Unique region identifier.
+pub type RegionId = u64;
+
+/// Unique logical tensor identifier within a session.
+pub type LogicalTensorId = u64;
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
