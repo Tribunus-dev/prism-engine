@@ -317,6 +317,7 @@ kernel void gemma4_full_decode_persistent(
     device const half*    draft_scales      [[buffer(11)]],  // draft model block scales
     device const half*    draft_norms       [[buffer(12)]],  // draft model RMSNorm weights
     device uint*          draft_output      [[buffer(28)]],  // draft output: [N, tok_id0..4, logprob0..4]
+    device const half*    head_gates        [[buffer(29)]],  // per-head attention gates (NUM_Q_HEADS × f16)
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]])
 {
@@ -612,7 +613,8 @@ kernel void gemma4_full_decode_persistent(
                 threadgroup_barrier(mem_flags::mem_device);
                 float inv_s = 1.0 / shared_sums[0];
 
-                // Pass 3: weighted sum of V
+                half gate = (half)sigmoid((float)head_gates[qh]);
+                // Pass 3: weighted sum of V (gated by per-head attention gate)
                 for (uint d = tid; d < h_dim; d += tg_sz) {
                     float acc = 0.0;
                     for (uint p = 0; p < num_cached; ++p) {
@@ -621,7 +623,7 @@ kernel void gemma4_full_decode_persistent(
                     }
                     uint write_pos = qh * h_dim + d;
                     if (write_pos < HIDDEN_DIM)
-                        n_buf[write_pos] = (half)acc;
+                        n_buf[write_pos] = (half)((float)acc * (float)gate);
                 }
                 // Accumulate per-position entropy (-q * log2(q))
                 for (uint p = tid; p < num_cached; p += tg_sz) {
@@ -1717,6 +1719,7 @@ kernel void gemma4_full_decode_persistent(
     device const half*    draft_scales      [[buffer(11)]],  // draft model block scales
     device const half*    draft_norms       [[buffer(12)]],  // draft model RMSNorm weights
     device uint*          draft_output      [[buffer(28)]],  // draft output: [N, tok_id0..4, logprob0..4]
+    device const half*    head_gates        [[buffer(29)]],  // per-head attention gates (NUM_Q_HEADS × f16)
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]])
 {
@@ -2011,7 +2014,8 @@ kernel void gemma4_full_decode_persistent(
                 threadgroup_barrier(mem_flags::mem_device);
                 float inv_s = 1.0 / shared_sums[0];
 
-                // Pass 3: weighted sum of V
+                half gate = (half)sigmoid((float)head_gates[qh]);
+                // Pass 3: weighted sum of V (gated by per-head attention gate)
                 for (uint d = tid; d < h_dim; d += tg_sz) {
                     float acc = 0.0;
                     for (uint p = 0; p < num_cached; ++p) {
@@ -2020,7 +2024,7 @@ kernel void gemma4_full_decode_persistent(
                     }
                     uint write_pos = qh * h_dim + d;
                     if (write_pos < HIDDEN_DIM)
-                        n_buf[write_pos] = (half)acc;
+                        n_buf[write_pos] = (half)((float)acc * (float)gate);
                 }
                 // Accumulate per-position entropy (-q * log2(q))
                 for (uint p = tid; p < num_cached; p += tg_sz) {

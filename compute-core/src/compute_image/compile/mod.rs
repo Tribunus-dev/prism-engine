@@ -16,6 +16,7 @@ pub mod hardware;
 pub mod portfolio;
 pub mod ternary;
 pub mod int4_pack;
+pub mod draft_loader;
 #[cfg(feature = "tensix")]
 pub mod tensix;
 
