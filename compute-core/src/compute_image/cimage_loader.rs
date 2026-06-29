@@ -19,9 +19,15 @@ use crate::compute_image::compile::ternary::{
 };
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
+use crate::compute_image::megakernel::kernels::HIDDEN_DIM;
 use std::fs::File;
 use std::io;
 use std::path::Path;
+
+// O_ROWS and DOWN_ROWS are defined as private const in kernels.rs;
+// declare local copies for use in fused interleave setup.
+const O_ROWS: u32 = 4096;
+const DOWN_ROWS: u32 = 15360;
 
 // Re-export header types so callers only need `cimage_loader::CImageHeader`.
 pub use crate::compute_image::compile::ternary::{PrismCimageHeader, PrismCimageLayoutMeta};
@@ -29,7 +35,7 @@ pub use crate::compute_image::compile::ternary::{PrismCimageHeader, PrismCimageL
 // ── V1 layout metadata (legacy format, kept for backward compat parsing) ─────
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
-struct V1CImageLayoutMeta {
+pub struct V1CImageLayoutMeta {
     pub mil_offset: u64,
     pub mil_size: u32,
     _pad0: [u8; 4],
@@ -107,6 +113,15 @@ pub struct CimageDeployment {
     pub weights_buffer: metal::Buffer,
     /// Metal buffer containing the FP16 block scales.
     pub scales_buffer: metal::Buffer,
+    /// INT4 block-quantized weights for M5+ Neural Accelerator direct consumption.
+    /// Populated at load time by `maybe_expand_to_int4()`. None on M1-M4 or if expansion disabled.
+    pub weights_int4_buffer: Option<metal::Buffer>,
+    /// Fused interleaved INT4 weights buffer arranged in tile-interleaved order
+    /// across all 7 per-layer matrices (Q, K, V, O, Gate, Up, Down).
+    /// Populated at load time by `maybe_expand_to_int4()` on M5+.
+    /// Improves SLC utilization on M5 Max by laying out tiles for contiguous
+    /// GPU streaming access.
+    pub fused_int4_buffer: Option<metal::Buffer>,
     /// FP16 embedding table reordered by cluster (vocab_size × hidden_dim), v2 format.
     pub embed_buffer: Option<metal::Buffer>,
     /// FP16 block scales for ternary-quantized embedding table (1 per 256 weights), v2 format.
@@ -277,6 +292,8 @@ impl CimageDeployment {
             compaction_model_bytes: None,
             prefill_model_bytes: None,
             embed_scales_buffer: None,
+            weights_int4_buffer: None,
+            fused_int4_buffer: None,
             num_weights,
             num_layers,
             mmap_data: bytes,
@@ -601,10 +618,104 @@ impl CimageDeployment {
             metallib_buffer,
             compaction_model_bytes,
             prefill_model_bytes,
+            weights_int4_buffer: None,
+            fused_int4_buffer: None,
             num_weights,
             num_layers,
             mmap_data: bytes,
         })
+    }
+
+    /// If running on M5+ (Apple10 GPU family), expand ternary weights to INT4
+    /// block-quantized format in a GPU-readable shared buffer.
+    /// Called once after load, before any decode.
+    pub fn maybe_expand_to_int4(&mut self, device: &metal::Device) -> Result<(), String> {
+        // Check GPU family — activate on M5+ (Apple10).
+        // metal-rs 0.29 caps at Apple9; update to Apple10 when the crate adds it.
+        if !device.supports_family(metal::MTLGPUFamily::Apple9) {
+            return Ok(());
+        }
+
+        // If already expanded or no weights loaded, skip
+        if self.weights_int4_buffer.is_some() {
+            return Ok(());
+        }
+
+        let ternary_total = self.weights_buffer.length() as usize;
+        // Map CPU-side pointers
+        let src = unsafe {
+            std::slice::from_raw_parts(
+                self.weights_buffer.contents() as *const u32,
+                ternary_total / 4,
+            )
+        };
+
+        // Repack .cimage ternary (20 trits/u32) → TernaryBlock32 (5 trits/byte) format
+        let blocks = crate::compute_image::compile::int4_pack::repack_ternary_tensor(src);
+        let block_bytes = unsafe {
+            std::slice::from_raw_parts(blocks.as_ptr() as *const u8, blocks.len() * 9)
+        };
+
+        let ternary_buf = device.new_buffer_with_data(
+            block_bytes.as_ptr() as *const std::ffi::c_void,
+            block_bytes.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+
+        self.weights_int4_buffer = Some(ternary_buf);
+
+        // Build fused interleaved ternary buffer from the per-matrix block data
+        const Q_WEIGHTS: usize   = 3840 * 4096;
+        const KV_WEIGHTS: usize  = 3840 * 2048;
+        const O_WEIGHTS: usize   = 4096 * 3840;
+        const FFN_WEIGHTS: usize = 3840 * 15360;
+        const DOWN_WEIGHTS: usize = 15360 * 3840;
+
+        const Q_BLOCKS: usize    = Q_WEIGHTS / 32;
+        const KV_BLOCKS: usize   = KV_WEIGHTS / 32;
+        const O_BLOCKS: usize    = O_WEIGHTS / 32;
+        const FFN_BLOCKS: usize  = FFN_WEIGHTS / 32;
+        const DOWN_BLOCKS: usize = DOWN_WEIGHTS / 32;
+
+        const Q_BYTES: usize    = Q_BLOCKS * 9;
+        const KV_BYTES: usize   = KV_BLOCKS * 9;
+        const O_BYTES: usize    = O_BLOCKS * 9;
+        const FFN_BYTES: usize  = FFN_BLOCKS * 9;
+        const DOWN_BYTES: usize = DOWN_BLOCKS * 9;
+
+        const LAYER_BLOCK_BYTES: usize =
+            Q_BYTES + 2 * KV_BYTES + O_BYTES + 2 * FFN_BYTES + DOWN_BYTES;
+
+        let mut fused = Vec::with_capacity(self.num_layers as usize * 120 * 7 * 180);
+
+        for layer in 0..self.num_layers as usize {
+            let lbase = layer * LAYER_BLOCK_BYTES;
+            let q    = &block_bytes[lbase..lbase + Q_BYTES];
+            let k    = &block_bytes[lbase + Q_BYTES..lbase + Q_BYTES + KV_BYTES];
+            let v    = &block_bytes[lbase + Q_BYTES + KV_BYTES..lbase + Q_BYTES + 2 * KV_BYTES];
+            let o    = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES..lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES];
+            let gate = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES..
+                                    lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + FFN_BYTES];
+            let up   = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + FFN_BYTES..
+                                    lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + 2 * FFN_BYTES];
+            let down = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + 2 * FFN_BYTES..
+                                    lbase + LAYER_BLOCK_BYTES];
+
+            let layer_fused = crate::compute_image::compile::int4_pack::interleave_fused_ternary_layer(
+                q, k, v, o, gate, up, down,
+                HIDDEN_DIM as usize,
+                HIDDEN_DIM as usize,
+                O_ROWS as usize,
+                HIDDEN_DIM as usize,
+                DOWN_ROWS as usize,
+            );
+            fused.extend_from_slice(&layer_fused);
+        }
+
+        let fused_metal = new_slc_bypass_buffer(device, &fused);
+        self.fused_int4_buffer = Some(fused_metal);
+
+        Ok(())
     }
 
     /// Verify SHA-256 integrity of a `.cimage` file without allocating

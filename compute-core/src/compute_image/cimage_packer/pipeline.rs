@@ -26,7 +26,7 @@ use crate::config::CompileQuantMode;
 /// offsets within the weights segment and passing them to the Metal kernel
 /// for direct-to-mmap write via `newBufferWithBytesNoCopy`.
 #[cfg(feature = "metal-dispatch")]
-pub fn stream_weights_to_mmap_gpu(
+pub(crate) fn stream_weights_to_mmap_gpu(
     loaded: &mut LoadedSource,
     plan: &CImageLayoutPlan,
     builder: &mut AlignedMmapBuilder,
@@ -159,7 +159,7 @@ pub fn stream_weights_to_mmap_gpu(
     Ok(())
 }
 
-pub fn compile_and_pack_god_binary(
+pub(crate) fn compile_and_pack_god_binary(
     output_path: &str,
     metallib_path: &Path,
     main_mlmodelc_path: &Path,

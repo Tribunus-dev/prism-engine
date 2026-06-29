@@ -141,7 +141,7 @@ impl TreeAttention {
         std::fs::write(&metal_path, KERNEL_SRC).map_err(|e| format!("write .metal: {e}"))?;
 
         let status = std::process::Command::new("xcrun")
-            .args(["-sdk", "macosx", "metal", "-std=metal3.2", "-O3", "-c"])
+            .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
             .arg(metal_path.to_str().unwrap())
             .arg("-o")
             .arg(air_path.to_str().unwrap())

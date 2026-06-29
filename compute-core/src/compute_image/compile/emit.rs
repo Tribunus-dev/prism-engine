@@ -291,6 +291,7 @@ pub(crate) fn compute_manifest_hash(manifest: &Manifest) -> String {
     sha256_bytes(&bytes)
 }
 
+#[allow(dead_code)]
 fn compute_struct_hash<T: Serialize>(value: &T) -> String {
     let bytes = serde_json::to_vec(value).expect("struct hash serialization");
     sha256_bytes(&bytes)

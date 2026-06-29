@@ -51,7 +51,7 @@ pub fn compile_metal_source(name: &str, source: &str) -> Option<MetalPipelineOut
 
     // Compile to AIR.
     let status = std::process::Command::new("xcrun")
-        .args(["-sdk", "macosx", "metal", "-std=metal3.2", "-O3", "-c"])
+        .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
         .arg(src_path.to_str().unwrap())
         .arg("-o")
         .arg(air_path.to_str().unwrap())

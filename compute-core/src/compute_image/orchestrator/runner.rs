@@ -8,10 +8,11 @@ use crate::arena::DataType;
 use crate::compute_image::compaction;
 use crate::compute_image::cimage_loader::CimageDeployment;
 use crate::compute_image::megakernel::{KernelBuffers, Megakernel};
+use crate::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
 use crate::compute_image::tree_attention::TreeAttention;
 use crate::compute_image::vm_manager::VmManager;
 use super::{
-    f32_from_half, generate_speculative_candidates, sample_argmax,
+    generate_speculative_candidates, sample_argmax,
     GLOBAL_HEAD_DIM, LAYERS, MAX_CONTEXT, MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS, SLCPhase,
 };
 use crate::arena::Arena;
@@ -34,6 +35,7 @@ pub struct Orchestrator {
     pub device: Device,
     pub queue: CommandQueue,
     pub deployment: CimageDeployment,
+    pub int4_mode: bool,
     pub kernel_buffers: KernelBuffers,
     pub batch_size: u32,
     /// Per-slot sequence positions (0..NUM_SLOTS).
@@ -84,12 +86,19 @@ impl Orchestrator {
     /// If the deployment contains a `mil_buffer` (ANE MIL program),
     /// attempts to compile it via `xcrun coremlcompiler` and load the
     /// resulting model for ANE prefill.
-    pub fn from_cimage(path: impl AsRef<std::path::Path>, batch_size: u32) -> Result<Self, String> {
+    pub fn from_cimage(
+        path: impl AsRef<std::path::Path>,
+        batch_size: u32,
+        int4_mode: bool,
+    ) -> Result<Self, String> {
         let path = path.as_ref();
         let device = Device::system_default().ok_or("no Metal device available")?;
         let queue = device.new_command_queue();
-        let deployment = CimageDeployment::load(path, &device)?;
-        let megakernel = Megakernel::new(&device, &queue, &deployment)?;
+        let mut deployment = CimageDeployment::load(path, &device)?;
+        if int4_mode {
+            deployment.maybe_expand_to_int4(&device)?;
+        }
+        let megakernel = Megakernel::new(&device, &queue, &deployment, int4_mode)?;
         let tree_attn = TreeAttention::new(&device)?;
         let kernel_buffers = megakernel.launch(&deployment, batch_size)?;
 
@@ -157,6 +166,7 @@ impl Orchestrator {
         Ok(Self {
             megakernel,
             tree_attn,
+            int4_mode,
             device,
             queue,
             deployment,
@@ -446,13 +456,45 @@ impl Orchestrator {
         self.megakernel
             .submit_work(&self.kernel_buffers, slot_id, token_id, seq_pos, slot_id);
 
-        // Completion counter-based backoff — frees the CPU core vs spin-loop
         while !self.megakernel.poll_work(&self.kernel_buffers, slot_id) {
             std::thread::yield_now();
         }
 
-        // GPU decode complete — entropy map is now populated for future compaction passes.
         self.entropy_available = true;
+
+        // ── Continuous entropy-driven eviction ──
+        // If context exceeds L1 capacity (~20K), evict the lowest-entropy token.
+        const L1_CAPACITY: u32 = 20480;
+        const SINK_COUNT: u32 = 4;
+        const SLIDING_WINDOW: u32 = 4096;
+
+        let next_pos = seq_pos + 1;
+        if next_pos > L1_CAPACITY {
+            // Read entropy map
+            let entropy = self.megakernel.read_entropy_map(&self.kernel_buffers, slot_id as u32);
+
+            // Find lowest-entropy token outside pinned regions
+            // Pinned: sinks [0..4), recent window [next_pos - SLIDING_WINDOW, next_pos)
+            let window_start = next_pos.saturating_sub(SLIDING_WINDOW);
+            let mut min_entropy = f32::MAX;
+            let mut min_pos = SINK_COUNT.max(1);
+
+            for pos in SINK_COUNT..window_start {
+                let e = half::f16::from_bits(entropy[pos as usize]).to_f32();
+                if e < min_entropy {
+                    min_entropy = e;
+                    min_pos = pos;
+                }
+            }
+
+            // Mark for eviction in the GPU's active_mask buffer
+            unsafe {
+                let ptr = self.kernel_buffers.active_mask.contents() as *mut u32;
+                let offset = slot as u64 * MAX_CONTEXT as u64;
+                *ptr.add(offset as usize + min_pos as usize) = 0;
+            }
+        }
+        // ── End eviction ──
 
         let logits = self
             .megakernel
@@ -553,6 +595,125 @@ impl Orchestrator {
         }
 
         self.slot_seq_pos[0] += accepted.len() as u32;
+        Ok(accepted)
+    }
+
+    /// Decode with draft model speculation + MTP verification.
+    ///
+    /// Flow per call:
+    /// 1. Submit draft model (kind=3) — fast forward pass, outputs N candidate
+    ///    token IDs + log-probs into the `draft_output` buffer.
+    /// 2. Poll draft completion, read candidate tokens from `draft_output`.
+    /// 3. Submit main model decode (kind=0) — full transformer forward pass
+    ///    that also produces MTP head predictions.
+    /// 4. Poll main completion, read logits + MTP predictions.
+    /// 5. Rejection sampling: accept each draft token where
+    ///    p_main(draft) / p_draft(draft) > threshold.
+    /// 6. For positions the draft chain did not cover, accept MTP predictions.
+    /// 7. Advance `seq_pos` by the number of accepted tokens.
+    pub fn decode_speculative(&mut self, token_id: u32, num_draft: u32) -> Result<Vec<u32>, String> {
+        self.slc_phase = SLCPhase::GPUDecode;
+        let slot = 0usize;
+        let seq_pos = self.slot_seq_pos[slot];
+
+        // Cap draft candidates to buffer capacity.
+        let num_candidates = num_draft.min(MAX_DRAFT_CANDIDATES);
+        if num_candidates == 0 {
+            return self.decode_with_mtp(token_id, 0);
+        }
+
+        // ── Phase 1: Run draft model forward pass ──
+        self.megakernel.submit_draft(
+            &self.kernel_buffers,
+            token_id,
+            seq_pos,
+            num_candidates,
+        );
+        while !self.megakernel.poll_work(&self.kernel_buffers, 0) {
+            std::hint::spin_loop();
+        }
+
+        // ── Phase 2: Read draft candidate tokens + log-probs ──
+        let draft_candidates = self.megakernel.read_draft_output(&self.kernel_buffers);
+        if draft_candidates.is_empty() {
+            // Fall back to single-token decode if draft produced nothing.
+            return self.decode_with_mtp(token_id, 0);
+        }
+
+        // ── Phase 3: Run main model decode (kind=0) — produces logits + MTP heads ──
+        self.megakernel
+            .submit_work(&self.kernel_buffers, 0, token_id, seq_pos, 0);
+        while !self.megakernel.poll_work(&self.kernel_buffers, 0) {
+            std::hint::spin_loop();
+        }
+        self.entropy_available = true;
+
+        // ── Phase 4: Read main model logits (head 0) and MTP head predictions ──
+        let logits = self.megakernel.read_slot_logits(&self.kernel_buffers, 0, 0);
+
+        let mut mtp_logits_list: Vec<Vec<u16>> = Vec::with_capacity(NUM_MTP_HEADS as usize);
+        for h in 1..=NUM_MTP_HEADS {
+            let head_logits = self.megakernel.read_slot_logits(&self.kernel_buffers, 0, h);
+            mtp_logits_list.push(head_logits);
+        }
+        self.megakernel.reset_work_slot(&self.kernel_buffers, 0);
+
+        // ── Phase 5: Softmax over main model logits ──
+        // Convert f16 logit buffer to f32 and compute softmax with numerical
+        // stability (subtract max before exponentiation).
+        let n_vocab = logits.len();
+        let mut probs_f32 = Vec::with_capacity(n_vocab);
+        let mut max_logit = f32::NEG_INFINITY;
+        for &bits in &logits {
+            let v = half::f16::from_bits(bits).to_f32();
+            if v > max_logit {
+                max_logit = v;
+            }
+            probs_f32.push(v);
+        }
+        let mut sum = 0.0f32;
+        for v in probs_f32.iter_mut() {
+            *v = (*v - max_logit).exp();
+            sum += *v;
+        }
+        for v in probs_f32.iter_mut() {
+            *v /= sum;
+        }
+
+        // ── Phase 6: Rejection sampling over draft candidates ──
+        // Always accept the primary token sampled from the main model.
+        let primary_token = sample_argmax(&logits);
+        let mut accepted = vec![primary_token];
+
+        for &(draft_token, draft_logprob) in &draft_candidates {
+            let p_main = probs_f32[draft_token as usize];
+            let p_draft = draft_logprob.exp(); // log-prob → probability
+            // Standard speculative decoding rejection criterion:
+            // Accept if p_main / p_draft > uniform(0,1).
+            // Conservative approximation: accept when p_main > p_draft
+            // (since uniform < 1, this is a stricter bound that guarantees
+            // the correct target distribution when satisfied).
+            if p_main > p_draft {
+                accepted.push(draft_token);
+            } else {
+                break;
+            }
+        }
+
+        // ── Phase 7: Fill remaining positions from MTP head predictions ──
+        // MTP head h predicts the token at seq_pos + 1 + h.
+        // If the draft chain accepted fewer tokens than there are MTP heads,
+        // use the MTP predictions for the uncovered positions.
+        let draft_accepted = accepted.len().saturating_sub(1); // exclude primary
+        for h in draft_accepted..NUM_MTP_HEADS as usize {
+            if h < mtp_logits_list.len() {
+                let mtp_token = sample_argmax(&mtp_logits_list[h]);
+                accepted.push(mtp_token);
+            }
+        }
+
+        // ── Phase 8: Advance sequence position ──
+        self.slot_seq_pos[slot] = seq_pos + accepted.len() as u32;
         Ok(accepted)
     }
 

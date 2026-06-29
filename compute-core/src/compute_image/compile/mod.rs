@@ -15,11 +15,12 @@ pub mod coreml;
 pub mod hardware;
 pub mod portfolio;
 pub mod ternary;
+pub mod int4_pack;
 #[cfg(feature = "tensix")]
 pub mod tensix;
 
 pub use source::*;
 pub use quantize::*;
-pub use emit::*;
+pub(crate) use emit::*;
 pub use pipeline::*;
 pub use download::*;

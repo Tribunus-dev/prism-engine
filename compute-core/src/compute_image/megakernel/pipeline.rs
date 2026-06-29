@@ -1,9 +1,17 @@
-//! Dispatch orchestration for the persistent GPU megakernel.
+
+//! Dispatch orchestration for the persistent GPU megakernel (Metal 4 + MPP TensorOps).
 //!
 //! The [`Megakernel`] struct owns the compiled Metal compute pipeline state
 //! and provides methods to allocate KV cache buffers, submit decode work
 //! via an atomic ring buffer, poll for completion, and read back
 //! logits and entropy data.
+//!
+//! Compiled with `-std=metal4`.  The GEMV tile decompression uses threadgroup
+//! scratch memory at index 0 (1280 bytes = 640 halves) to decompress ternary
+//! weights to FP16 before issuing `mpp::tensor_ops` operations.  Backward
+//! compatible with M1–M4 (TensorOps auto-fall back to ALU on pre-M5 hardware).
+//! All non-GEMV shader paths (RMSNorm, RoPE, SwiGLU, GQA attention, centroid
+//! scout, MTP) are unchanged from the M3 baseline.
 
 use super::*;
 use crate::compute_image::cimage_loader::CimageDeployment;
@@ -22,13 +30,15 @@ pub const RING_SIZE: usize = 512;
 fn compute_num_slots(device: &Device) -> u64 {
     let working_set = device.recommended_max_working_set_size();
 
-    // Per-slot KV cache cost in bytes (ternary K+V + FP16 scratch + scales + logits)
-    let blocks_per_slot = (LAYERS * MAX_CONTEXT * NUM_KV_HEADS * (GLOBAL_HEAD_DIM + 255) / 256) as u64;
-    let ternary_kv_per_slot = blocks_per_slot * KV_BLOCK_BYTES * 2; // K+V nibbles
-    let scales_per_slot   = blocks_per_slot * 2 * 2;                // K+V half scales
-    let scratch_per_slot  = (MAX_CONTEXT * NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64 * 2 * 2; // K+V FP16
-    let logits_per_slot   = LOGITS_PER_SLOT;
-    let per_slot_total    = ternary_kv_per_slot + scales_per_slot + scratch_per_slot + logits_per_slot;
+    // Per-slot KV cache cost in bytes (ternary32 K+V + outlier bypass + FP16 scratch + logits)
+    let blocks_per_head   = ((GLOBAL_HEAD_DIM + 31) / 32) as u64;  // 16 for 512-dim
+    let blocks_per_slot   = (LAYERS as u64) * (MAX_CONTEXT as u64) * (NUM_KV_HEADS as u64) * blocks_per_head;
+    let ternary_kv_per_slot = blocks_per_slot * 9 * 2;             // K+V TernaryBlock32: 7 packed + 2 scale = 9
+    let outlier_per_slot    = blocks_per_slot * 2 * 2;             // K+V FP16 outlier bypass: 2 bytes/block
+    let scratch_per_slot    = (MAX_CONTEXT as u64) * (NUM_KV_HEADS as u64) * (GLOBAL_HEAD_DIM as u64) * 2 * 2; // K+V FP16
+    let logits_per_slot     = LOGITS_PER_SLOT;
+    let per_slot_total      = ternary_kv_per_slot + outlier_per_slot + scratch_per_slot + logits_per_slot;
+
 
     // Reserve ~1.5 GB for model weights, scales, embed table, centroids, norms
     let kv_budget = working_set.saturating_sub(1_500_000_000);
@@ -42,6 +52,7 @@ pub struct Megakernel {
     pso: ComputePipelineState,
     queue: CommandQueue,
     device: Device,
+    pub int4_mode: bool,
     pub num_slots: u64,
     ring_head: AtomicU32,
     last_completed: AtomicU32,
@@ -52,20 +63,23 @@ impl Megakernel {
         device: &Device,
         queue: &CommandQueue,
         deployment: &CimageDeployment,
+        int4_mode: bool,
     ) -> Result<Self, String> {
         let num_slots = compute_num_slots(device);
         let pso = if let Some(metallib_buf) = &deployment.metallib_buffer {
             let ptr = metallib_buf.contents() as *const u8;
             let len = metallib_buf.length() as usize;
             let data = unsafe { std::slice::from_raw_parts(ptr, len) };
-            compile_kernel_from_metallib(device, data)?
+            if int4_mode { compile_kernel_from_metallib_int4(device, data)? }
+            else { compile_kernel_from_metallib(device, data)? }
         } else {
-            super::kernels::compile_kernel(device)?
+            super::kernels::compile_kernel(device, int4_mode)?
         };
         Ok(Self {
             pso,
             queue: queue.clone(),
             device: device.clone(),
+            int4_mode,
             num_slots,
             ring_head: AtomicU32::new(0),
             last_completed: AtomicU32::new(0),
@@ -81,31 +95,85 @@ impl Megakernel {
     ) -> Result<KernelBuffers, String> {
         let num_slots = compute_num_slots(&self.device);
 
-        // ── Ternary KV cache buffers (per slot) ──────────────────────
-        // Ternary packed: 256 values → 13 u32 nibbles + 1 half scale = 54 bytes/block
-        // h_dim = 256 → 1 block, h_dim = 512 → 2 blocks
-        // Total blocks per slot = LAYERS × MAX_CONTEXT × NUM_KV_HEADS × ceil(GLOBAL_HEAD_DIM / 256)
-        let total_blocks_per_slot =
-            (LAYERS * MAX_CONTEXT * NUM_KV_HEADS * (GLOBAL_HEAD_DIM + 255) / 256) as u64;
-        let ternary_kv_bytes_per_slot = total_blocks_per_slot * KV_BLOCK_BYTES;
-        let ternary_kv_total = ternary_kv_bytes_per_slot * num_slots;
 
-        let kv_k_nibbles = self
-            .device
-            .new_buffer(ternary_kv_total, MTLResourceOptions::StorageModeShared);
-        let kv_v_nibbles = self
-            .device
-            .new_buffer(ternary_kv_total, MTLResourceOptions::StorageModeShared);
+        // ── KV cache buffers (per slot) ─────────────────────────────
+        // Ternary: TernaryBlock32 = 7 packed trits + 2 FP16 scale = 9 bytes/block
+        // + outlier bypass: 1 FP16 per block = 2 bytes/block
+        // Non-INT4 path: 256-elem blocks = 54 bytes/block + separate FP16 scales
+        let (kv_k_nibbles, kv_v_nibbles, kv_k_scales, kv_v_scales, kv_k_outliers, kv_v_outliers) = if self.int4_mode {
+            // Ternary 5-per-byte blocks with outlier isolation (TernaryBlock32)
+            let int4_blocks_per_head = (GLOBAL_HEAD_DIM + 31) / 32;  // 16 for 512-dim
+            let total_blocks_per_slot =
+                (LAYERS * MAX_CONTEXT * NUM_KV_HEADS * int4_blocks_per_head) as u64;
+            // TernaryBlock32: 7 bytes packed trits + 2 bytes FP16 scale = 9 bytes/block
+            let ternary_bytes = total_blocks_per_slot * 9;
+            let ternary_total = ternary_bytes * num_slots;
+            // Outlier bypass: 1 FP16 value per block worst case = 2 bytes/block
+            let outlier_bytes = total_blocks_per_slot * 2;
+            let outlier_total = outlier_bytes * num_slots;
 
-        // Block scales: one half per block
-        let total_blocks = total_blocks_per_slot * num_slots;
-        let scales_bytes = total_blocks * 2; // one half (2 bytes) per block
-        let kv_k_scales = self
+            let k_ternary = self
+                .device
+                .new_buffer(ternary_total, MTLResourceOptions::StorageModeShared);
+            let v_ternary = self
+                .device
+                .new_buffer(ternary_total, MTLResourceOptions::StorageModeShared);
+            let k_outliers = self
+                .device
+                .new_buffer(outlier_total, MTLResourceOptions::StorageModeShared);
+            let v_outliers = self
+                .device
+                .new_buffer(outlier_total, MTLResourceOptions::StorageModeShared);
+            unsafe {
+                std::ptr::write_bytes(k_ternary.contents(), 0, ternary_total as usize);
+                std::ptr::write_bytes(v_ternary.contents(), 0, ternary_total as usize);
+                std::ptr::write_bytes(k_outliers.contents(), 0, outlier_total as usize);
+                std::ptr::write_bytes(v_outliers.contents(), 0, outlier_total as usize);
+            }
+            (k_ternary, v_ternary, None, None, Some(k_outliers), Some(v_outliers))
+        } else {
+            // Ternary: 256 values per block, 54 bytes/block + separate FP16 scales
+            let total_blocks_per_slot =
+                (LAYERS * MAX_CONTEXT * NUM_KV_HEADS * (GLOBAL_HEAD_DIM + 255) / 256) as u64;
+            let ternary_kv_bytes_per_slot = total_blocks_per_slot * KV_BLOCK_BYTES;
+            let ternary_kv_total = ternary_kv_bytes_per_slot * num_slots;
+
+            let k_buf = self
+                .device
+                .new_buffer(ternary_kv_total, MTLResourceOptions::StorageModeShared);
+            let v_buf = self
+                .device
+                .new_buffer(ternary_kv_total, MTLResourceOptions::StorageModeShared);
+
+            let total_blocks = total_blocks_per_slot * num_slots;
+            let scales_bytes = total_blocks * 2;
+            let k_scales = self
+                .device
+                .new_buffer(scales_bytes, MTLResourceOptions::StorageModeShared);
+            let v_scales = self
+                .device
+                .new_buffer(scales_bytes, MTLResourceOptions::StorageModeShared);
+
+            unsafe {
+                std::ptr::write_bytes(k_buf.contents(), 0, ternary_kv_total as usize);
+                std::ptr::write_bytes(v_buf.contents(), 0, ternary_kv_total as usize);
+                std::ptr::write_bytes(k_scales.contents(), 0, scales_bytes as usize);
+                std::ptr::write_bytes(v_scales.contents(), 0, scales_bytes as usize);
+            }
+            (k_buf, v_buf, Some(k_scales), Some(v_scales), None, None)
+        };
+
+        // ── Outlier bitmask LUT (static, shared across slots) ────────
+        // One u32 per 32-element block, zero-initialized (all inlier by default).
+        let blocks_per_head = (GLOBAL_HEAD_DIM + 31) / 32;  // 16 for 512-dim
+        let total_masks = (LAYERS * NUM_KV_HEADS * blocks_per_head) as u64;
+        let mask_bytes = total_masks * 4;
+        let outlier_masks = self
             .device
-            .new_buffer(scales_bytes, MTLResourceOptions::StorageModeShared);
-        let kv_v_scales = self
-            .device
-            .new_buffer(scales_bytes, MTLResourceOptions::StorageModeShared);
+            .new_buffer(mask_bytes, MTLResourceOptions::StorageModeShared);
+        unsafe {
+            std::ptr::write_bytes(outlier_masks.contents(), 0, mask_bytes as usize);
+        }
 
         // ── FP16 scratch buffers (1 layer per slot) ──────────────────
         // Scratch holds decompressed FP16 K/V for one layer, used during decode.
@@ -122,26 +190,22 @@ impl Megakernel {
 
         // Zero-initialize all buffers
         unsafe {
-            std::ptr::write_bytes(kv_k_nibbles.contents(), 0, ternary_kv_total as usize);
-            std::ptr::write_bytes(kv_v_nibbles.contents(), 0, ternary_kv_total as usize);
-            std::ptr::write_bytes(kv_k_scales.contents(), 0, scales_bytes as usize);
-            std::ptr::write_bytes(kv_v_scales.contents(), 0, scales_bytes as usize);
             std::ptr::write_bytes(kv_scratch_k.contents(), 0, scratch_total as usize);
             std::ptr::write_bytes(kv_scratch_v.contents(), 0, scratch_total as usize);
         }
 
         // ── Atomic ring buffer for work submission ───────────────────
-        // ring_entries: RING_SIZE entries × 4 u32s each (state, token_id, seq_pos, kv_slot_id)
+        // ring_entries: RING_SIZE entries × 5 u32s each (state|kind, token_id/chunk_pos, seq_pos/num_prior, kv_slot_id, reserved)
         // CPUCacheModeWriteCombined: CPU writes bypass SLC entirely, go directly to DRAM.
         // This prevents evicting ANE's hot weights from the 8 MB SLC.
         let ring_entries = self
             .device
             .new_buffer(
-                RING_SIZE as u64 * 4 * 4,
+                RING_SIZE as u64 * 5 * 4,
                 MTLResourceOptions::CPUCacheModeWriteCombined | MTLResourceOptions::StorageModeShared,
             );
         unsafe {
-            std::ptr::write_bytes(ring_entries.contents(), 0, RING_SIZE * 4 * 4);
+            std::ptr::write_bytes(ring_entries.contents(), 0, RING_SIZE * 5 * 4);
         }
 
         // ring_tail: atomic u32 (GPU produces)
@@ -158,7 +222,7 @@ impl Megakernel {
             .new_buffer(logits_total, MTLResourceOptions::StorageModeShared);
 
         // completion_counter: atomic u32 (GPU increments after each work item)
-        // CPUCacheModeWriteCombined — CPU only reads, but ensures no SLC pollution.
+        // CPUCacheModeWriteCombined CPU only reads, but ensures no SLC pollution.
         let completion_counter = self
             .device
             .new_buffer(
@@ -200,12 +264,46 @@ impl Megakernel {
             .device
             .new_buffer(entropy_size, MTLResourceOptions::StorageModeShared);
 
+        // ── Active token mask (continuous compaction) ──
+        // One u32 per MAX_CONTEXT position per slot. 1 = active, 0 = evicted.
+        // CPU updates after each decode step based on running entropy scores.
+        let active_mask_bytes = (MAX_CONTEXT as u64) * 4 * num_slots;
+        let active_mask = self
+            .device
+            .new_buffer(active_mask_bytes, MTLResourceOptions::StorageModeShared);
+        // Initialize all to 1 (all positions active by default)
+        unsafe {
+            let ptr = active_mask.contents() as *mut u32;
+            for i in 0..(MAX_CONTEXT as usize * num_slots as usize) {
+                *ptr.add(i) = 1;
+            }
+        }
+
+        // ── Draft model output buffer ──────────────────────────────
+        // Per slot: [u32 count] + [MAX_DRAFT_CANDIDATES × u32 token_ids] +
+        // [MAX_DRAFT_CANDIDATES × f32 logprobs]
+        let draft_output_bytes = (num_slots as u64) * (1 + MAX_DRAFT_CANDIDATES as u64 * 2) * 4;
+        let draft_output = self
+            .device
+            .new_buffer(draft_output_bytes, MTLResourceOptions::StorageModeShared);
+        unsafe {
+            std::ptr::write_bytes(draft_output.contents(), 0, draft_output_bytes as usize);
+        }
+
         // One-shot dispatch of persistent kernel (runs forever)
         let cmd_buf = self.queue.new_command_buffer();
         let enc = cmd_buf.new_compute_command_encoder();
 
         enc.set_compute_pipeline_state(&self.pso);
-        enc.set_buffer(0, Some(&deployment.weights_buffer), 0);
+        if self.int4_mode {
+            if let Some(fused) = &deployment.fused_int4_buffer {
+                enc.set_buffer(0, Some(&**fused), 0);
+            } else {
+                enc.set_buffer(0, deployment.weights_int4_buffer.as_ref().map(|b| &**b), 0);
+            }
+        } else {
+            enc.set_buffer(0, Some(&deployment.weights_buffer), 0);
+        }
         enc.set_buffer(1, Some(&deployment.scales_buffer), 0);
         if let Some(b) = &deployment.norms_buffer {
             enc.set_buffer(2, Some(b), 0);
@@ -221,8 +319,15 @@ impl Megakernel {
         }
         enc.set_buffer(6, Some(&*kv_k_nibbles), 0);
         enc.set_buffer(7, Some(&*kv_v_nibbles), 0);
-        enc.set_buffer(8, Some(&*kv_k_scales), 0);
-        enc.set_buffer(9, Some(&*kv_v_scales), 0);
+        if self.int4_mode {
+            // Ternary+outlier: buffer(8)=kv_k_outliers, buffer(9)=kv_v_outliers, buffer(10)=outlier_masks
+            enc.set_buffer(8, kv_k_outliers.as_deref(), 0);
+            enc.set_buffer(9, kv_v_outliers.as_deref(), 0);
+            enc.set_buffer(10, Some(&*outlier_masks), 0);
+        } else {
+            enc.set_buffer(8, kv_k_scales.as_deref(), 0);
+            enc.set_buffer(9, kv_v_scales.as_deref(), 0);
+        }
         enc.set_buffer(14, deployment.embed_scales_buffer.as_ref().map(|b| &**b), 0);
         enc.set_buffer(15, Some(&*centroid_scales), 0);
         enc.set_buffer(16, Some(&*centroid_scratch), 0);
@@ -231,10 +336,17 @@ impl Megakernel {
         enc.set_buffer(19, Some(&*kv_scratch_k), 0);
         enc.set_buffer(20, Some(&*kv_scratch_v), 0);
         enc.set_buffer(21, Some(&*entropy_map), 0);
+        enc.set_buffer(11, Some(&*active_mask), 0);
         enc.set_buffer(22, Some(&*ring_entries), 0);
         enc.set_buffer(23, Some(&*ring_tail), 0);
         enc.set_buffer(24, Some(&*slot_logits), 0);
         enc.set_buffer(25, Some(&*completion_counter), 0);
+        enc.set_buffer(28, Some(&*draft_output), 0);
+
+        // Threadgroup scratch for ternary->FP16 decompress in tile-GEMV:
+        // 640 halves = 1280 bytes at index 0 (consumed by the `tile_scratch`
+        // threadgroup buffer in the Metal 4 shader).
+        enc.set_threadgroup_memory_length(0, (TILE as u64) * 2);
 
         enc.dispatch_thread_groups(
             MTLSize {
@@ -251,13 +363,16 @@ impl Megakernel {
 
         enc.end_encoding();
         cmd_buf.commit();
-        // Do NOT wait — the persistent kernel runs forever
+        // Do NOT wait -- the persistent kernel runs forever
 
         Ok(KernelBuffers {
             kv_k_nibbles,
             kv_v_nibbles,
             kv_k_scales,
             kv_v_scales,
+            kv_k_outliers,
+            kv_v_outliers,
+            outlier_masks,
             kv_scratch_k,
             kv_scratch_v,
             ring_entries,
@@ -268,45 +383,12 @@ impl Megakernel {
             centroid_scales,
             decompress_progress,
             entropy_map,
+            active_mask,
+            draft_output,
         })
     }
 
     /// Prefill a slot with a batch of tokens using the GPU work queue.
-    ///
-    /// # Design decision: host-side sequential submission
-    ///
-    /// The persistent GPU kernel processes one token per work queue submission.
-    /// Each submission runs embedding lookup, 48 transformer layers, writes K/V
-    /// to the ternary-packed KV cache at `seq_pos`, then signals completion.
-    ///
-    /// For batched prefill, we simply loop on the host: submit token N, spin-wait
-    /// for GPU completion (which populates KV cache at position start_pos+N),
-    /// then submit token N+1.  This is correct because position `p+1` attends to
-    /// positions 0..p (causal attention), so the KV entry for position `p` must
-    /// exist before we compute position `p+1`.
-    ///
-    /// ## Why not modify the kernel?
-    ///
-    /// - **True batched GEMV** (sharing weights across N tokens) would require
-    ///   N × HIDDEN_DIM × 2 bytes of SRAM — 1.9 MB for N=256, HIDDEN_DIM=3840.
-    ///   The threadgroup SRAM limit is 32 KB.  Micro-batching fits only 1–2
-    ///   additional hidden states with the current ~19 KB SRAM budget.
-    /// - **Sequential per-token loop inside the kernel** would avoid the host
-    ///   round-trip but would re-read all weights from DRAM for every token.
-    ///   The per-token throughput would match single-token decode (~33 t/s),
-    ///   which is memory-bandwidth bound, not compute bound.
-    ///
-    /// ## Prefill throughput
-    ///
-    /// With 32 slots processing prompts concurrently, each at ~33 t/s:
-    ///   32 × 33 = ~1,056 t/s aggregate prefill throughput.
-    /// A 1,000-token prompt takes ~30 s per slot.
-    ///
-    /// ## Cross-architecture note
-    ///
-    /// The ANE path (via [`Orchestrator::prefill_slot`]) provides faster prefill
-    /// by processing all tokens in one MIL program invocation.  This GPU-based
-    /// prefill is intended as a fallback or for systems without ANE support.
     pub fn prefill_slot_batched(
         &self,
         buffers: &KernelBuffers,
@@ -326,7 +408,7 @@ impl Megakernel {
             }
 
             // Reset slot for the next token in the batch.
-            // We skip reading logits — the KV cache is the only output we need.
+            // We skip reading logits the KV cache is the only output we need.
             self.reset_work_slot(buffers, slot_id);
         }
     }
@@ -347,12 +429,27 @@ impl Megakernel {
             let head = self.ring_head.fetch_add(1, Ordering::Release);
             let idx = head as usize % RING_SIZE;
             let entries = buffers.ring_entries.contents() as *mut u32;
-            let entry = entries.add(idx * 4);
-            *entry.add(0) = 1; // SUBMITTED
+            let entry = entries.add(idx * 5);
+            *entry.add(0) = 1; // SUBMITTED | (kind << 2) — kind=0 for decode
             entry.add(1).write(token_id);
             entry.add(2).write(seq_pos);
             entry.add(3).write(kv_slot_id);
+            entry.add(4).write(0); // reserved
             std::sync::atomic::fence(Ordering::SeqCst); // ensure store visibility
+        }
+    }
+
+    pub fn submit_prefill_work(&self, buffers: &KernelBuffers, slot_id: u32, chunk_pos: u32, num_prior: u32) {
+        unsafe {
+        let head = self.ring_head.fetch_add(1, Ordering::Release);
+        let idx = head as usize % RING_SIZE;
+        let entries = buffers.ring_entries.contents() as *mut u32;
+        let entry = entries.add(idx * 5);
+        *entry.add(0) = 1 | (1 << 2); // SUBMITTED | (PREFILL << 2)
+        entry.add(1).write(chunk_pos);
+        entry.add(2).write(num_prior);
+        entry.add(3).write(slot_id);
+        entry.add(4).write(0);
         }
     }
 
@@ -389,10 +486,53 @@ impl Megakernel {
     }
 
     /// Reset slot state after reading results.
-    /// With the ring-buffer design each work item is a unique ring entry,
-    /// so there is no per-slot state to clear.  Kept for API compatibility.
     pub fn reset_work_slot(&self, _buffers: &KernelBuffers, _slot_id: u32) {
         // no-op: ring entries are naturally consumed by the GPU
+    }
+
+    /// Submit a draft model decode request (kind=3).
+    ///
+    /// The GPU runs the fast draft model forward pass at `seq_pos` for slot 0,
+    /// writing up to `num_candidates` candidate token IDs + log-probs into
+    /// the `draft_output` buffer.
+    pub fn submit_draft(
+        &self,
+        buffers: &KernelBuffers,
+        _token_id: u32,
+        seq_pos: u32,
+        num_candidates: u32,
+    ) {
+        unsafe {
+            let head = self.ring_head.fetch_add(1, Ordering::Release);
+            let idx = head as usize % RING_SIZE;
+            let entries = buffers.ring_entries.contents() as *mut u32;
+            let entry = entries.add(idx * 5);
+            *entry.add(0) = 1 | (3 << 2);  // SUBMITTED | (DRAFT << 2)
+            entry.add(1).write(num_candidates);  // number of tokens to draft
+            entry.add(2).write(seq_pos);
+            entry.add(3).write(0);  // slot 0
+            entry.add(4).write(0);
+            std::sync::atomic::fence(Ordering::SeqCst);
+        }
+    }
+
+    /// Read draft model output for slot 0.
+    ///
+    /// Returns a vector of `(token_id, logprob)` pairs for each candidate
+    /// token the draft model produced, in order.  The logprob is the draft
+    /// model's log-probability for that token (already converted to f32).
+    pub fn read_draft_output(&self, buffers: &KernelBuffers) -> Vec<(u32, f32)> {
+        let slot = 0usize;
+        let slot_offset = slot * (1 + MAX_DRAFT_CANDIDATES as usize * 2);
+        let ptr = buffers.draft_output.contents() as *const u32;
+        let count = unsafe { *ptr.add(slot_offset) }.min(MAX_DRAFT_CANDIDATES);
+        unsafe {
+            let token_ptr = ptr.add(slot_offset + 1) as *const u32;
+            let prob_ptr = ptr.add(slot_offset + 1 + MAX_DRAFT_CANDIDATES as usize) as *const f32;
+            (0..count as usize)
+                .map(|i| (*token_ptr.add(i), *prob_ptr.add(i)))
+                .collect()
+        }
     }
 }
 
@@ -400,11 +540,14 @@ impl Megakernel {
 pub struct KernelBuffers {
     pub kv_k_nibbles: metal::Buffer,
     pub kv_v_nibbles: metal::Buffer,
-    pub kv_k_scales: metal::Buffer,
-    pub kv_v_scales: metal::Buffer,
+    pub kv_k_scales: Option<metal::Buffer>,
+    pub kv_v_scales: Option<metal::Buffer>,
+    pub kv_k_outliers: Option<metal::Buffer>,  // FP16 outlier bypass (INT4 path)
+    pub kv_v_outliers: Option<metal::Buffer>,
+    pub outlier_masks: metal::Buffer,          // static u32 bitmask LUT per block
     pub kv_scratch_k: metal::Buffer,
     pub kv_scratch_v: metal::Buffer,
-    pub ring_entries: metal::Buffer,        // RING_SIZE * 4 * 4 bytes (WorkEntry[512])
+    pub ring_entries: metal::Buffer,        // RING_SIZE * 5 * 4 bytes (WorkEntry[512])
     pub ring_tail: metal::Buffer,           // 4 bytes (atomic u32, GPU-produced)
     pub slot_logits: metal::Buffer,         // NUM_SLOTS * VOCAB_SIZE * 2 bytes (half-float)
     pub completion_counter: metal::Buffer,  // 4 bytes (atomic u32, GPU-incremented)
@@ -412,4 +555,8 @@ pub struct KernelBuffers {
     pub centroid_scales: metal::Buffer,
     pub decompress_progress: metal::Buffer,
     pub entropy_map: metal::Buffer,
+    pub active_mask: metal::Buffer,
+    /// Draft model output buffer: per-slot, first u32 = candidate count, then
+    /// MAX_DRAFT_CANDIDATES × u32 token IDs, then MAX_DRAFT_CANDIDATES × f32 log-probs.
+    pub draft_output: metal::Buffer,
 }

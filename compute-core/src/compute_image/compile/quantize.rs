@@ -779,9 +779,9 @@ pub(crate) fn apply_ternary_tile640_quantize(
 ) -> crate::Result<()> {
     let in_dim_u = in_dim as usize;
     let out_dim_u = out_dim as usize;
-    let gs = group_size as usize;
-    let gpr = groups_per_row as usize;
-    let total_g = total_groups as usize;
+    let _gs = group_size as usize;
+    let _gpr = groups_per_row as usize;
+    let _total_g = total_groups as usize;
 
     // Pad each row to TILE_SIZE multiple
     let padded_cols = ((in_dim_u + TILE_SIZE - 1) / TILE_SIZE) * TILE_SIZE;
@@ -798,7 +798,7 @@ pub(crate) fn apply_ternary_tile640_quantize(
         let row_offset = row * in_dim_u;
 
         // Build padded row
-        let mut row_padded: Vec<f32> = if padded_cols > in_dim_u {
+        let row_padded: Vec<f32> = if padded_cols > in_dim_u {
             let mut r = Vec::with_capacity(padded_cols);
             r.extend_from_slice(&f32_vals[row_offset..row_offset + in_dim_u]);
             r.resize(padded_cols, 0.0);

@@ -96,6 +96,7 @@ pub fn swizzled_buffer_size(rows: usize, cols: usize) -> usize {
 }
 
 /// Decode a u32 base-3 pack into an array of 20 ternary digits [0..2].
+#[allow(dead_code)]
 #[inline(always)]
 fn decode_ternary_u32(packed: u32, digits: &mut [u8; 20]) {
     let mut rem = packed;

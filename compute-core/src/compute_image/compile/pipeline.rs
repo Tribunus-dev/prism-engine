@@ -7,19 +7,18 @@ use super::emit::{
 };
 use crate::compute_image::hw_assessment::AssessmentReceipt;
 use crate::compute_image::manifest::{
-    mlx_active_memory_bytes, mlx_peak_memory_bytes, AliasEntry, CompilationAuthority,
+    mlx_active_memory_bytes, mlx_peak_memory_bytes, CompilationAuthority,
     CompileReceipt, CompiledImage, CompiledImageReader, IgnoredTensorClassification, ImageBuilder,
     Manifest, ManifestVerification, MetalDispatchRecipe, MetalKernelArtifact,
-    NativeCapabilityReport, QuantizationDesc, ResidencyPlan, Segment, SegmentKind, SegmentReceipt,
-    ShardHash, SourceIdentity, StageProfile, StorageBackend, TensorDiff, TensorEntry,
+    NativeCapabilityReport, Segment, SegmentKind, SegmentReceipt,
+    StageProfile, StorageBackend, TensorEntry,
     TensorProvenance,
 };
 use crate::compute_image::plan::{compile_unchecked_speculative, plan};
 use crate::compute_image::compile::quantize::{
-    apply_nf4_quantize, apply_quantize_to_loaded, apply_ternary_quantize,
-    apply_ternary_tile640_quantize,
+    apply_quantize_to_loaded,
 };
-use crate::compute_image::compile::source::{diff_tensors, ensure_tensor_loaded, load_source, LoadedSource, SourceTensor};
+use crate::compute_image::compile::source::{diff_tensors, ensure_tensor_loaded, LoadedSource};
 use crate::compute_image::compile::hardware::run_hardware_assessment;
 use crate::config::CompileQuantMode;
 use crate::config::HardwareTarget;
@@ -28,7 +27,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -409,8 +408,7 @@ fn compile_metal_source_to_metallib(
             "-sdk",
             "macosx",
             "metal",
-            "-std=osx-metal3.2",
-            "-std=metal3.2",
+            "-std=metal4.0",
             "-O3",
             "-c",
             source_path.to_str().unwrap(),

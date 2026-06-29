@@ -27,9 +27,6 @@ mod compilation;
 mod loading;
 
 pub use runner::Orchestrator;
-pub use runner::*;
-pub use compilation::*;
-pub use loading::*;
 
 // ── Architecture constants (shared with megakernel) ───────────────
 

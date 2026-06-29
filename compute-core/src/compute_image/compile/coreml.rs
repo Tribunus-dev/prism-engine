@@ -19,7 +19,6 @@
 use coreml_proto::proto::mil_spec;
 use std::collections::HashMap;
 use std::path::Path;
-use mil_spec::ValueType;
 use crate::compute_image::hw_assessment::ConcurrencyPlan;
 use crate::compute_image::subgraph_mil;
 use crate::coreml_pipeline;

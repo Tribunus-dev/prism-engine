@@ -8,7 +8,6 @@ use super::Orchestrator;
 use crate::arena::Arena;
 use crate::compute_image::compaction;
 use crate::coreml_bridge::CoreMlModel;
-use metal::*;
 
 impl Orchestrator {
     /// Load a pre-compiled compaction model from embedded .mlmodelc bytes.

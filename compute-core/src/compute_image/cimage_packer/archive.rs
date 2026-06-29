@@ -1,6 +1,5 @@
 //! .mlmodelc directory → uncompressed tar inside a mmap slice.
 
-use std::io::Write;
 use std::path::Path;
 
 /// Write a .mlmodelc directory tree into the given byte slice as an

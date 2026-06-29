@@ -8,6 +8,7 @@
 pub mod kernels;
 pub mod kv;
 pub mod pipeline;
+pub mod gather_kernel;
 
 pub use kernels::*;
 pub use kv::*;
