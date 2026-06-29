@@ -32,6 +32,7 @@ pub mod hw_bench_suite;
 pub mod kernel_provider;
 pub mod kernel_selection;
 pub mod kv_plan;
+pub mod kv_interleave;
 #[cfg(feature = "tensix")]
 pub mod layout_tensix;
 pub mod manifest;
