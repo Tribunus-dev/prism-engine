@@ -106,15 +106,13 @@ fn main() {
         std::env::consts::ARCH
     );
 
-    // MLX identity (fixed for this gate - pointing to the new published fork)
-    println!("cargo:rustc-env=TRIBUNUS_MLX_IDENTITY=Tribunus-dev/mlx-rs-fork@main");
 
     // Guard: on non-macOS targets, a CPU backend feature must be explicit.
 
     // Compile the ObjC++ Core ML / IOSurface bridge.
     #[cfg(all(
         target_os = "macos",
-        any(feature = "mlx-backend", feature = "prism-backend")
+        any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi")
     ))]
     {
         cc::Build::new()

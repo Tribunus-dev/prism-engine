@@ -5,6 +5,8 @@ use super::{
 use crate::backend::routing::ComputeRouteProfile;
 use crate::kv_cache::CompressedKvSlot;
 use crate::memory::allocator::{IosurfaceAllocator, PagedIosurfaceAllocator};
+use crate::scheduling::memory_pool::MemoryPoolAllocator;
+use half::f16;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -247,6 +249,26 @@ impl Scheduler {
         // Remove completed requests from active (those whose slots were freed)
         self.active
             .retain(|req| self.slots.iter().any(|s| s.request_id == Some(req.id)));
+    }
+
+    /// Compact a slot's KV cache using entropy-guided position selection.
+    ///
+    /// Delegates to [`MemoryPoolAllocator::compact_slot`] to select which
+    /// positions to keep, then returns the selected positions.
+    pub fn compact_slot_kv(
+        &self,
+        memory_pool: &MemoryPoolAllocator,
+        slot_id: usize,
+        entropy_map: &[f16],
+        target: usize,
+    ) -> Vec<u32> {
+        let positions = memory_pool.compact_slot(slot_id, entropy_map, target);
+        eprintln!(
+            "[scheduler] slot {} compacted to {} positions",
+            slot_id,
+            positions.len()
+        );
+        positions
     }
 
     /// Add more slots when the initial pool is exhausted.

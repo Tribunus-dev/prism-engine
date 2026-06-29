@@ -104,19 +104,19 @@ impl HazardTracker {
 
     pub fn register_view(&mut self, view: ArenaView) {
         self.barriers
-            .entry(view.0)
+            .entry(view.offset)
             .or_insert_with(|| HazardBarrier::new(view));
     }
 
     pub fn write(&mut self, view: ArenaView, lane: ExecutionLane) {
-        if let Some(barrier) = self.barriers.get_mut(&view.0) {
+        if let Some(barrier) = self.barriers.get_mut(&view.offset) {
             barrier.write(lane);
         }
     }
 
     pub fn needs_sync(&mut self, view: ArenaView, lane: ExecutionLane) -> bool {
         self.barriers
-            .get_mut(&view.0)
+            .get_mut(&view.offset)
             .map(|b| b.read(lane))
             .unwrap_or(false)
     }

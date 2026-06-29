@@ -4,7 +4,7 @@
 //! block, decoder layer) rather than individual primitives.  This separates
 //! Core ML and similar backends from primitive backends like MLX or Accelerate.
 
-use super::routing::{
+use crate::backend::routing::{
     BackendExecutionReceipt, BackendId, CompiledRegionHandle, EvidenceDigest, GraphRegion,
     RequestedSubstrate,
 };

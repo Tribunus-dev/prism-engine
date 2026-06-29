@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::compute_image::compile::SourceTensor;
-use crate::compute_image::compile_coreml::compile_ane_islands;
+use crate::compute_image::compile::coreml::compile_ane_islands;
 use crate::config::{build_execution_plan, parse_config};
 use crate::config_namespace::resolve_namespace;
 
@@ -129,10 +129,8 @@ pub fn compile_ane_artifacts(model_dir: &Path) -> Result<Vec<String>, String> {
     // ── 6. Compile ANE islands with real weights ──────────────────────
     compile_ane_islands(
         &plan_with_fusion,
-        &source_tensors,
         &arch,
         &output_dir,
-        &namespace,
     )
     .map_err(|e| format!("ANE compilation failed: {}", e))?;
 

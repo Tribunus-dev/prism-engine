@@ -19,6 +19,7 @@
 //! Core ML reads and writes them without any CPU-side copies.
 
 use crate::arena::Arena;
+use crate::arena::DataType;
 use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use crate::speculative::DraftModel;
 use crate::speculative::SampleStrategy;
@@ -162,10 +163,10 @@ impl AneDraftModel {
             CoreMlModel::load_with_compute_units(path, CoreMlComputeUnits::CpuAndNeuralEngine)?;
 
         // Input arena: one FP16 token ID per sequence position.
-        let input_arena = Arena::new(seq_len, 1, mlx_rs::Dtype::Float16)?;
+        let input_arena = Arena::new(seq_len, 1, DataType::Float16)?;
 
         // Output arena: vocab_size FP16 logits per sequence position.
-        let output_arena = Arena::new(seq_len, vocab_size, mlx_rs::Dtype::Float16)?;
+        let output_arena = Arena::new(seq_len, vocab_size, DataType::Float16)?;
 
         Ok(Self {
             model,

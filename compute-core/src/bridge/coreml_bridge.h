@@ -95,6 +95,20 @@ int tribunus_coreml_predict_pixelbuffer(
     TribunusArenaInfo* output_arena
 );
 
+/// Run stateless prediction with multiple named inputs and outputs.
+/// All inputs are set up as a feature dictionary, all outputs as backings.
+/// Thread-safe for concurrent calls on the same model.
+/// @return 0 on success, negative on error.
+int tribunus_coreml_predict_multi(
+    void* model_ptr,
+    const char** input_names,
+    const TribunusArenaInfo** input_arenas,
+    int num_inputs,
+    const char** output_names,
+    TribunusArenaInfo** output_arenas,
+    int num_outputs
+);
+
 // ── Stateful prediction (synchronous) ───────────────────────────────────────
 
 /// Run stateful prediction: input arena -> model + state -> output arena.

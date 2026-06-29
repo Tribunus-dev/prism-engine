@@ -17,7 +17,9 @@
 pub mod cross_attn;
 pub mod encoder;
 pub mod preprocess;
+pub mod live_capture;
 
 pub use cross_attn::{inject_vision_features, CrossAttentionLayer};
 pub use encoder::VisionEncoder;
 pub use preprocess::preprocess_image;
+pub use live_capture::{VisionProjectionConfiguration, prism_inject_live_frame_buffer};

@@ -14,14 +14,9 @@ pub mod apple_cimage_manifest;
 pub mod apple_shared_arena;
 pub mod compatibility;
 pub mod compile;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub mod compile_coreml;
-pub mod compile_hw;
 pub mod content_store;
 pub mod diag;
+pub mod orchestrator;
 pub mod executable;
 pub mod execution_shape;
 pub mod fallback_plan;
@@ -40,6 +35,7 @@ pub mod kv_plan;
 #[cfg(feature = "tensix")]
 pub mod layout_tensix;
 pub mod manifest;
+pub mod megakernel;
 pub mod metal_codegen;
 #[cfg(test)]
 pub mod metal_codegen_model_test;
@@ -54,7 +50,6 @@ pub mod phase_graph_validation;
 pub mod phase_program_version;
 pub mod pipeline;
 pub mod plan;
-pub mod portfolio_compilation;
 pub mod program;
 pub mod quant;
 pub mod receipts;
@@ -67,9 +62,13 @@ pub mod tensix;
 pub mod variants;
 pub mod verification;
 pub mod verify;
-
-#[cfg(feature = "tensix")]
-pub mod compile_tensix;
+pub mod ane_prefill;
+pub mod cimage_loader;
+pub mod cimage_packer;
+pub mod compaction;
+pub mod speculative_routing;
+pub mod tree_attention;
+pub mod vm_manager;
 
 pub use manifest::{
     build_tensor_catalog, clear_mlx_cache, is_valid_storage_abi, mlx_active_memory_bytes,
@@ -82,6 +81,7 @@ pub use manifest::{
     RepresentationAdmissionEstimate, ResidencyPlan, ResolvedTensorBinding, Segment, SegmentKind,
     SegmentLease, SegmentReceipt, ShardHash, StageProfile, StorageAbiSpec, StorageBackend,
     TensorEntry, TensorLease, STORAGE_ABI_COPIED_V0, STORAGE_ABI_MAPPED_NO_COPY_V1,
+    CImageHeader, CIMAGE_MAGIC,
 };
 
 pub use kv_plan::{KVDtype, KvCachePlan, KvLayout, PrefixCompatibilityKey};
@@ -92,7 +92,7 @@ pub use compile::{
     SourceTensorInfo,
 };
 
-pub use compile_hw::run_hardware_assessment;
+pub use compile::hardware::run_hardware_assessment;
 
 pub use segment::{ImageRuntime, LayerLease};
 

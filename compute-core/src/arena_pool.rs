@@ -5,7 +5,7 @@
 //!
 //! Phase 3: Arena Pool + Structured Errors.
 
-use crate::arena::Arena;
+use crate::arena::{Arena, DataType};
 use crate::arena_lifecycle::LifecycleState;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -86,7 +86,7 @@ impl ArenaPool {
         }
 
         // No Free entry — allocate a new arena.
-        let arena = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16)?;
+        let arena = Arena::new(dim0, dim1, DataType::Float16)?;
         let byte_size = arena.byte_len();
 
         // Check global byte budget.

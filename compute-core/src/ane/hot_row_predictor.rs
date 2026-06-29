@@ -21,6 +21,7 @@
 //! IOSurface-backed [`Arena`] instances — zero CPU copy.
 
 use crate::arena::Arena;
+use crate::arena::DataType;
 use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 
 // ---------------------------------------------------------------------------
@@ -141,10 +142,10 @@ impl HotRowPredictor {
         )?;
 
         // Input arena: one FP16 value per hidden dimension, shaped [1, hidden_size].
-        let input_arena = Arena::new(1, hidden_size, mlx_rs::Dtype::Float16)?;
+        let input_arena = Arena::new(1, hidden_size, DataType::Float16)?;
 
         // Output arena: [num_candidates, 2] — each slot is (token_id, confidence).
-        let output_arena = Arena::new(num_candidates, 2, mlx_rs::Dtype::Float16)?;
+        let output_arena = Arena::new(num_candidates, 2, DataType::Float16)?;
 
         Ok(Self {
             model,

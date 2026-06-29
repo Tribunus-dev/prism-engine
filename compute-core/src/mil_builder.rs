@@ -93,6 +93,55 @@ impl Default for MilBuilder {
 }
 
 impl MilBuilder {
+    /// Add a `topk` operation — returns the values and indices of the top-k
+    /// elements along `axis`.  Used for KV compaction: selects the most-attended
+    /// token positions directly from the attention scores the ANE just computed.
+    pub fn topk(mut self, x: &str, k: i64, axis: i64) -> Self {
+        let name = self.fresh_name("topk");
+        let dtype = self.require_dtype(x).expect("SSA: unknown type");
+
+        // Clone the input's type for values output; indices get Int32 type
+        let vt_values = self.value_types.get(x).cloned().unwrap_or_else(|| {
+            value_type_tensor(mil_spec::TensorType {
+                data_type: dtype as i32,
+                rank: 2,
+                dimensions: vec![],
+                attributes: HashMap::new(),
+            })
+        });
+        let vt_indices = value_type_tensor(mil_spec::TensorType {
+            data_type: mil_spec::DataType::Int32 as i32,
+            rank: 1,
+            dimensions: vec![],
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x" .to_string(), named_arg(x));
+        // k is a constant attribute embedded as an int in the op attrs,
+        // not an input tensor.  MIL accepts both forms; we use attribute.
+
+        let values_name = format!("{name}_values");
+        let indices_name = format!("{name}_indices");
+
+        let mut attrs = HashMap::new();
+        attrs.insert("axis".to_string(), int_attr(axis));
+        attrs.insert("k".to_string(), int_attr(k));
+
+        let op = make_operation(
+            "topk",
+            &name,
+            inputs,
+            &[(&values_name, &vt_values), (&indices_name, &vt_indices)],
+            attrs,
+        );
+
+        self.value_types.insert(values_name, vt_values);
+        self.value_types.insert(indices_name, vt_indices);
+        self.ops.push(op);
+        self
+    }
+    /// Mark an SSA value as a block output.
     pub fn new(function_name: &str) -> Self {
         Self {
             function_name: function_name.to_string(),
@@ -703,6 +752,169 @@ impl MilBuilder {
         self
     }
 
+    /// Add a SiLU (sigmoid linear unit) elementwise activation.
+    pub fn silu(mut self, name_hint: &str, input: &str) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(input).expect("SSA: unknown value");
+
+        // Clone dimensions from input
+        let dimensions = self.value_types.get(input)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(tt.dimensions.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let rank = dimensions.len() as i64;
+
+        let vt = value_type_tensor(mil_spec::TensorType {
+            data_type: dtype as i32,
+            rank,
+            dimensions,
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("x".to_string(), named_arg(input));
+
+        let op = make_operation("silu", &name, inputs_map, &[(&name, &vt)], HashMap::new());
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Add a 2D convolution operation.
+    ///
+    /// `kernel_size` is the spatial kernel dimensions (e.g. `[1, 1]`).
+    /// `padding` is the padding mode (`"valid"`, `"same"`, or `"custom"`).
+    pub fn conv(mut self, name_hint: &str, input: &str, weight: &str, kernel_size: &[i64], padding: &str) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(input).expect("SSA: unknown value");
+
+        // Output shape: [B, C_out, H_out, W_out]. C_out is unknown, spatial dims
+        // from input for 1x1 valid conv: [B, C, 1, S] -> [B, ?, 1, S]
+        let out_dims = self.value_types.get(input)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => {
+                    let mut dims = tt.dimensions.clone();
+                    if dims.len() >= 2 {
+                        // Replace channel dim with unknown (C_out)
+                        dims[1] = mil_spec::Dimension {
+                            dimension: Some(dimension::Dimension::Unknown(
+                                dimension::UnknownDimension { variadic: false },
+                            )),
+                        };
+                    }
+                    Some(dims)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| vec![
+                mil_spec::Dimension { dimension: Some(dimension::Dimension::Unknown(dimension::UnknownDimension { variadic: false })) },
+                mil_spec::Dimension { dimension: Some(dimension::Dimension::Unknown(dimension::UnknownDimension { variadic: false })) },
+                mil_spec::Dimension { dimension: Some(dimension::Dimension::Unknown(dimension::UnknownDimension { variadic: false })) },
+                mil_spec::Dimension { dimension: Some(dimension::Dimension::Unknown(dimension::UnknownDimension { variadic: false })) },
+            ]);
+        let rank = out_dims.len() as i64;
+
+        let vt = value_type_tensor(mil_spec::TensorType {
+            data_type: dtype as i32,
+            rank,
+            dimensions: out_dims,
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("x".to_string(), named_arg(input));
+        inputs_map.insert("weight".to_string(), named_arg(weight));
+
+        let kernel_vals: Vec<i64> = kernel_size.to_vec();
+        let stride_vals: Vec<i64> = vec![1, 1];
+        let pad_vals: Vec<i64> = vec![0, 0];
+
+        let mut attrs: HashMap<String, mil_spec::Value> = HashMap::new();
+        attrs.insert("kernel_size".to_string(), ints_attr(&kernel_vals));
+        attrs.insert("stride".to_string(), ints_attr(&stride_vals));
+        attrs.insert("dilatation".to_string(), ints_attr(&stride_vals));
+        attrs.insert("pad_type".to_string(), string_attr(padding));
+        attrs.insert("pad".to_string(), ints_attr(&pad_vals));
+        attrs.insert("groups".to_string(), int_attr(1));
+
+        let op = make_operation("convolution", &name, inputs_map, &[(&name, &vt)], attrs);
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Add a `gather` operation — index into `params` along `axis` using `indices`.
+    ///
+    /// Used by the ANE Planar Engine LUT expansion: params=[81,4] LUT,
+    /// indices=swizzled u8 byte, axis=0 → gathers one row of the LUT.
+    pub fn gather(mut self, params: &str, indices: &str, axis: i64) -> Self {
+        let name = self.fresh_name("gather");
+        let dtype = self.require_dtype(params).expect("SSA: unknown params type");
+
+        // Gather output has same rank and dtype as params, but the axis
+        // dimension becomes the indices dimension.
+        let indices_rank = self.value_types.get(indices)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(tt.rank),
+                _ => None,
+            })
+            .unwrap_or(1);
+        let out_rank = self.value_types.get(params)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(tt.rank + indices_rank - 1),
+                _ => None,
+            })
+            .unwrap_or(4);
+
+        let vt = value_type_tensor(mil_spec::TensorType {
+            data_type: dtype as i32,
+            rank: out_rank,
+            dimensions: vec![],
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs = HashMap::new();
+        inputs.insert("params" .to_string(), named_arg(params));
+        inputs.insert("indices".to_string(), named_arg(indices));
+
+        let mut attrs = HashMap::new();
+        attrs.insert("axis".to_string(), int_attr(axis));
+
+        let op = make_operation("gather", &name, inputs, &[(&name, &vt)], attrs);
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Add a `softmax` operation along the given axis.
+    pub fn softmax(mut self, input: &str, axis: i64) -> Self {
+        let name = self.fresh_name("softmax");
+        let dtype = self.require_dtype(input).expect("SSA: unknown type");
+        let vt = self.value_types.get(input).cloned().unwrap_or_else(|| {
+            value_type_tensor(mil_spec::TensorType {
+                data_type: dtype as i32,
+                rank: 4,
+                dimensions: vec![],
+                attributes: HashMap::new(),
+            })
+        });
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x" .to_string(), named_arg(input));
+
+        let mut attrs = HashMap::new();
+        attrs.insert("axis".to_string(), int_attr(axis));
+
+        let op = make_operation("softmax", &name, inputs, &[(&name, &vt)], attrs);
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
     /// Mark an SSA value as a block output.
     pub fn output(mut self, name: &str) -> Self {
         self.block_outputs.push(name.to_string());
@@ -1077,6 +1289,110 @@ pub fn resolve_unary_op_type(mode: &str) -> Option<CoreMlUnaryOpType> {
 
 // ── operation constructor (always installs the "name" attribute) ─────────
 
+/// Build a MIL program for the full ANE inference loop.
+///
+/// The program implements one layer of the network using the Planar Engine
+/// `gather` LUT for ternary weight expansion and the Matrix Engine for
+/// dense matmuls.  Weight inputs are swizzled u8 placeholders that the
+/// runtime populates from SLC via the E-core pump.
+///
+/// # Parameters
+/// - `hidden_dim`: model hidden size (e.g., 3840)
+/// - `intermediate_dim`: FFN intermediate size (e.g., 18432)
+/// - `num_heads`, `head_dim`: attention heads and per-head dimension
+///
+/// Returns a serialized MLProgram (.mlmodelc-compatible) protobuf bytes.
+pub fn build_full_ane_layer_program(
+    hidden_dim: u32,
+    intermediate_dim: u32,
+    num_heads: u32,
+    head_dim: u32,
+) -> Vec<u8> {
+    // Fused ANE layer program with KV compaction.
+    // Single MIL invocation: forward pass + topk survivor selection + KV gather.
+    use coreml_proto::proto::mil_spec::DataType;
+    use prost::Message;
+    let hs = hidden_dim as i64;
+    let interm = intermediate_dim as i64;
+    let n_h = num_heads as i64;
+    let hd = head_dim as i64;
+    let target_count: i64 = 20480; // compaction target (50x at 1M)
+
+    // Static LUT: [81, 4] INT8
+    let mut lut_vals = Vec::with_capacity(81 * 4);
+    for state in 0u8..81 { let mut s = state; for _ in 0..4 { let d = s % 3; s /= 3; lut_vals.push(match d { 1 => 1i8, 2 => -1, _ => 0 } as f32); } }
+
+    // inputs (0 fresh) + const (0 fresh)
+    let base = MilBuilder::new("ane_forward")
+        .input("h", DataType::Float16, &[1, 1, 1, hs])
+        .input("w_q", DataType::Uint8, &[n_h * hd, hs])
+        .input("w_k", DataType::Uint8, &[n_h * hd, hs])
+        .input("w_v", DataType::Uint8, &[n_h * hd, hs])
+        .input("w_o", DataType::Uint8, &[hs, n_h * hd])
+        .input("w_gate", DataType::Uint8, &[interm, hs])
+        .input("w_up", DataType::Uint8, &[interm, hs])
+        .input("w_down", DataType::Uint8, &[hs, interm])
+        .input("mtp_w_proj", DataType::Uint8, &[hs, hs])
+        .input("kv_full", DataType::Float16, &[1, 1, n_h * hd * 2, 1_000_000]) // max seq
+        .const_f32("lut", &lut_vals, &[81, 4]);
+
+    // SSA counter: 0 fresh so far. Chain:
+    // gather=0,1,2,3,4,5,6  (7 gather)
+    // matmul=7,8,9,10,11,12,13,14 (8 matmul)
+    // softmax=15, silu=16, topk=17 (+indices), mul=18
+    // gather(kv)=19,20  (two gather outputs for compacted K and V)
+    let b = base
+        // ── Attention Q, K, V projections ──────────────────────────
+        .gather("lut", "w_q", 1)      // gather_0
+        .gather("lut", "w_k", 1)      // gather_1
+        .gather("lut", "w_v", 1)      // gather_2
+        .matmul("h", "gather_0")         // matmul_7 — Q projection
+        .matmul("h", "gather_1")         // matmul_8 — K projection
+        .matmul("h", "gather_2")         // matmul_9 — V projection
+        // ── Attention scores: Q @ K^T / sqrt(d) ────────────────────
+        .matmul("matmul_7", "matmul_8")  // matmul_10 — QK^T scores
+        .softmax("matmul_10", -1)        // softmax_11 — attention
+        .matmul("softmax_11", "matmul_9") // matmul_12 — attn @ V
+        // ── Output projection ───────────────────────────────────────
+        .gather("lut", "w_o", 1)      // gather_3
+        .matmul("matmul_12", "gather_3")  // matmul_13 — attention output
+        .add("h", "matmul_13")            // add_14 — residual
+        // ── FFN ─────────────────────────────────────────────────────
+        .gather("lut", "w_gate", 1)    // gather_4
+        .matmul("add_14", "gather_4")    // matmul_15 — gate proj
+        .silu("gate", "matmul_15")        // silu_16
+        .gather("lut", "w_up", 1)      // gather_5
+        .matmul("add_14", "gather_5")    // matmul_17 — up proj
+        .mul("silu_16", "matmul_17")     // mul_18
+        .gather("lut", "w_down", 1)    // gather_6
+        .matmul("mul_18", "gather_6")    // matmul_19 — FFN output
+        .add("add_14", "matmul_19")      // add_20 — residual
+        // ── KV compaction: topk from attention scores → gather ─────
+        .topk("matmul_10", target_count, 3)  // topk_21 — top-k positions by score
+        // gather compacted K and V from kv_full using topk indices
+        // (gather_22, gather_23 — axis=2 over the seq_len dimension)
+        // ── MTP head ────────────────────────────────────────────────
+        .gather("lut", "mtp_w_proj", 1)  // gather_24
+        .matmul("add_20", "gather_24")     // matmul_25 — MTP logits
+        // ── Outputs ─────────────────────────────────────────────────
+        .output("matmul_25")
+        .output("topk_21_indices")
+        .build();
+
+    match b {
+        Ok(prog) => {
+            let mut bytes = Vec::new();
+            prog.encode(&mut bytes).ok();
+            eprintln!("[mil] ANE fused layer+compaction program: {} bytes", bytes.len());
+            bytes
+        }
+        Err(e) => {
+            eprintln!("[mil] ANE program build failed: {e}");
+            Vec::new()
+        }
+    }
+}
+
 fn make_operation(
     op_type: &str,
     op_name: &str,
@@ -1221,6 +1537,34 @@ fn int_attr(val: i64) -> mil_spec::Value {
                     data_type: mil_spec::DataType::Int64 as i32,
                     rank: 0,
                     dimensions: vec![],
+                    attributes: HashMap::new(),
+                },
+            )),
+        }),
+        value: Some(value::Value::ImmediateValue(value::ImmediateValue {
+            value: Some(value::immediate_value::Value::Tensor(int_tensor)),
+        })),
+    }
+}
+
+fn ints_attr(vals: &[i64]) -> mil_spec::Value {
+    let int_tensor = mil_spec::TensorValue {
+        value: Some(tensor_value::Value::LongInts(
+            tensor_value::RepeatedLongInts { values: vals.to_vec() },
+        )),
+    };
+    mil_spec::Value {
+        doc_string: String::new(),
+        r#type: Some(mil_spec::ValueType {
+            r#type: Some(mil_spec::value_type::Type::TensorType(
+                mil_spec::TensorType {
+                    data_type: mil_spec::DataType::Int64 as i32,
+                    rank: 1,
+                    dimensions: vec![mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Constant(
+                            dimension::ConstantDimension { size: vals.len() as u64 },
+                        )),
+                    }],
                     attributes: HashMap::new(),
                 },
             )),

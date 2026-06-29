@@ -8,15 +8,15 @@ description = "Tribunus Compute Kernel — core MLX backend"
 
 [lib]
 name = "tribunus_compute_core"
-crate-type = ["rlib"]
+crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 metal = { version = "0.29", optional = true }
 objc = { version = "0.2", optional = true }
 hf-hub = "0.4"
-mlx-sys = { path = "../mlx-rs-fork/mlx-sys", optional = true }
-mlx-rs = { path = "../mlx-rs-fork/mlx-rs", optional = true, features = ["metal", "accelerate", "safetensors"] }
 tribunus-evidence-schema = { path = "../evidence-schema" }
+mlx-rs = { path = "../mlx-rs-fork/mlx-rs" }
+mlx-sys = { path = "../mlx-rs-fork/mlx-sys" }
 safetensors = "0.5"
 sha2 = { version = "0.10", features = ["asm"] }
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -40,20 +40,17 @@ prost = "0.14.4"
 prost-types = "0.14.4"
 tempfile = { version = "3" }
 png = "0.17"
-candle-core = { version = "0.8", optional = true, default-features = false }
-flux-klein-mlx = { workspace = true, optional = true }
-funasr-mlx = { workspace = true, optional = true }
-qwen3-tts-core = { workspace = true, optional = true }
-qwen3-tts-mlx = { workspace = true, optional = true }
 blake3 = "1"
+memmap2 = { workspace = true }
 bytemuck = { version = "1", features = ["derive"] }
 half = "2"
 clap = { version = "4", features = ["derive"] }
+tar = "0.4"
 
 [features]
 default = []
-mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "dep:coreml-proto", "server", "metal-dispatch"]
-prism-backend = ["dep:mlx-rs", "dep:mlx-sys", "dep:coreml-proto", "server", "metal-dispatch"]
+prism-backend = ["dep:coreml-proto", "server", "metal-dispatch"]
+ffi = ["server", "metal-dispatch"]
 ane = []
 metal-dispatch = ["dep:metal", "dep:objc"]
 server = ["dep:axum", "dep:tower-http"]
@@ -73,13 +70,7 @@ coreml-backend = []
 # Positive capability gates — independent of execution path.
 # Each gates a generation module. Enable with the backend of your choice.
 # No feature here removes modules that another feature enabled.
-generation-image = ["dep:mlx-rs", "dep:flux-klein-mlx"]
-generation-diffusion = ["dep:mlx-rs"]
-generation-video = []
-generation-audio-core = []
-generation-asr = ["generation-audio-core", "dep:funasr-mlx"]
-generation-tts = ["generation-audio-core", "dep:qwen3-tts-core", "dep:qwen3-tts-mlx"]
-generation-audio = ["generation-audio-core", "generation-asr", "generation-tts"]
+generation-features-moved-to-separate-crates = []
 
 [[bin]]
 name = "prism"
@@ -96,3 +87,4 @@ path = "src/bin/prism_alpha.rs"
 
 [build-dependencies]
 cc = "1.2"
+tar = "0.4"

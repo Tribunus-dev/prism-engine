@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 /// Selected namespace root for text model tensors.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct NamespaceBinding {
     pub root: String,
     /// How the root was discovered.

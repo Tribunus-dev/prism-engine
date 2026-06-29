@@ -31,7 +31,7 @@ use crate::backend::heterogeneous_executor::BackendInstance;
 use crate::backend::routing::{
     BackendExecutionReceipt, BackendId, ComputeRouteProfile, OperationDescriptor, OperationFamily,
 };
-use crate::backend::{MlxBackend, TensorHandle};
+use crate::backend::{MlxBackend, TensorBackend, TensorHandle};
 use crate::compute_image::{
     clear_mlx_cache, mlx_active_memory_bytes, mlx_cache_memory_bytes, mlx_get_memory_limit,
 };

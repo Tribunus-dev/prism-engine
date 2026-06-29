@@ -1,0 +1,5 @@
+241f5aa step_tri_lane() real loop + WS8A2 diagnostic
+96bbdef Phase 3: PhaseIR eligibility integration, ShapeBucketProfile, region planner
+5b09e21 Phase 2: PrismStep types, TriLaneExecutionPlan, lane executors, orchestrator wiring
+35c201d Phase 1: WS8C repair, IOSurface pool telemetry, epoch_scheduler ArenaInfo fix
+342e3ef fix WS8 tests, coreml_exec.mm Float16 support, arena pixel format fix

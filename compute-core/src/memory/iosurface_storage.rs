@@ -105,14 +105,14 @@ pub fn arena_to_mlx_array(arena: Arc<Arena>, shape: &[i32], dtype: Dtype) -> Res
 mod tests {
     use mlx_rs::Dtype;
 
-    use crate::arena::Arena;
+    use crate::arena::{Arena, DataType};
 
     use super::*;
 
     #[test]
     fn test_iosurface_storage_round_trip() {
         // Allocate a small FP16 arena.
-        let arena = Arena::new(1, 16, Dtype::Float16).expect("arena allocation failed");
+        let arena = Arena::new(1, 16, DataType::Float16).expect("arena allocation failed");
         let arena = Arc::new(arena);
 
         let shape = &[1i32, 16i32];
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_iosurface_storage_data_ptr() {
-        let arena = Arena::new(1, 8, Dtype::Float16).expect("arena allocation failed");
+        let arena = Arena::new(1, 8, DataType::Float16).expect("arena allocation failed");
         let arena = Arc::new(arena);
 
         let storage = IosurfaceStorage::new(arena.clone());
@@ -143,7 +143,7 @@ mod tests {
         fn assert_send<T: Send>(_: &T) {}
         fn assert_sync<T: Sync>(_: &T) {}
 
-        let arena = Arena::new(1, 4, Dtype::Float16).expect("arena allocation failed");
+        let arena = Arena::new(1, 4, DataType::Float16).expect("arena allocation failed");
         let storage = IosurfaceStorage::new(Arc::new(arena));
 
         assert_send(&storage);
@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_arena_to_mlx_array_wrong_dtype() {
-        let arena = Arena::new(1, 4, Dtype::Float16).expect("arena allocation failed");
+        let arena = Arena::new(1, 4, DataType::Float16).expect("arena allocation failed");
         let arena = Arc::new(arena);
 
         // Float32 is not supported — the Arena should reject it, but here we
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_iosurface_storage_trait_object() {
-        let arena = Arena::new(1, 8, Dtype::Float16).expect("arena allocation failed");
+        let arena = Arena::new(1, 8, DataType::Float16).expect("arena allocation failed");
         let arena = Arc::new(arena);
 
         let storage: Arc<dyn ExternalStorage + Send + Sync> =

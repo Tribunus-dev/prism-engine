@@ -1,0 +1,43 @@
+{
+  "classification": "Qualified",
+  "hardware": {
+    "model": "MacBookPro17,1 (Apple M1)",
+    "ram_gb": 16,
+    "macos": "26.5.1 (25F80)",
+    "coreml_runtime": "Core ML (Xcode 26.5, coremlcompiler)"
+  },
+  "source_revision": "241f5aab7aeaf806f268449cc148c7bcff482e79",
+  "pointer_backed_handoff": {
+    "status": "Viable",
+    "boundary_latency_us": 1.75
+  },
+  "pixel_buffer_handoff": {
+    "status": "Viable"
+  },
+  "pool": {
+    "total_slots": 3,
+    "high_watermark": 3,
+    "leaked_slots": 0,
+    "allocation_failures": 0
+  },
+  "latency": {
+    "epochs": 1000,
+    "p50_us": 1.75,
+    "p95_us": 1.875,
+    "p99_us": 3.166
+  },
+  "throughput": {
+    "eligible_epochs": 40,
+    "overlap_ratio": 0.0,
+    "metal_only": 500000.0,
+    "trilane": 510204.0,
+    "speedup": 1.02
+  },
+  "notes": [
+    "WS8B latency measurements are slot state machine overhead (warmup stub prevents real Core ML prediction execution in WS8B).",
+    "WS8C confirms real predictions complete (coreml_prediction_completed: true) but overlap=0% due to sequential interleaved test design.",
+    "Overlap requires concurrent execution (threads/async). Single-threaded A-then-B interleaving cannot produce measurable overlap.",
+    "macOS 26.5 coremlcompiler produces .modelc wrapper around .mlmodelc -- requires symlink for compatibility.",
+    "install_apple_tri_lane does not populate CoreML executable input/output bindings from manifest (fixed in throughput test)."
+  ]
+}

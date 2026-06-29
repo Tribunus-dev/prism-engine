@@ -5,15 +5,11 @@ members = [
     ".",
     "compute-core",
     "evidence-schema",
+    "prism-ffi",
     "mlx-rs-fork/mlx-rs",
     "mlx-rs-fork/mlx-sys",
     "mlx-rs-fork/mlx-macros",
     "mlx-rs-fork/mlx-internal-macros",
-    "mlx-rs-core",
-    "models/flux-klein-mlx",
-    "models/funasr-mlx",
-    "models/qwen3-tts-core",
-    "models/qwen3-tts-mlx",
 ]
 
 [workspace.package]
@@ -23,19 +19,14 @@ license = "AGPL-3.0-only"
 authors = ["Tribunus Dev"]
 repository = "https://github.com/Tribunus-dev/prism-engine"
 documentation = "https://github.com/Tribunus-dev/prism-engine"
-keywords = ["mlx", "ml", "inference"]
+keywords = ["inference", "apple-silicon"]
 categories = ["science", "wasm"]
 
 [workspace.dependencies]
-mlx-sys = { path = "mlx-rs-fork/mlx-sys" }
-mlx-macros = { path = "mlx-rs-fork/mlx-macros" }
 mlx-internal-macros = { path = "mlx-rs-fork/mlx-internal-macros" }
+mlx-macros = { path = "mlx-rs-fork/mlx-macros" }
+mlx-sys = { path = "mlx-rs-fork/mlx-sys" }
 mlx-rs = { path = "mlx-rs-fork/mlx-rs" }
-mlx-rs-core = { path = "mlx-rs-core" }
-flux-klein-mlx = { path = "models/flux-klein-mlx" }
-funasr-mlx = { path = "models/funasr-mlx" }
-qwen3-tts-core = { path = "models/qwen3-tts-core" }
-qwen3-tts-mlx = { path = "models/qwen3-tts-mlx" }
 bytemuck = "1"
 float_eq = "1"
 pretty_assertions = "1.4.0"
@@ -120,7 +111,6 @@ anyhow = "1.0.102"
 libc = { workspace = true }
 blake3 = "1"
 tribunus-compute-core = { path = "compute-core", optional = true }
-mlx-rs = { path = "mlx-rs-fork/mlx-rs", optional = true, features = ["metal", "accelerate"] }
 
 [features]
 default = []
@@ -128,13 +118,8 @@ metal-dispatch = ["dep:metal", "dep:objc"]
 server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]
 ane = ["dep:coreml-proto"]
 full = ["metal-dispatch", "server", "ane"]
-prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "dep:mlx-rs"]
-generation-image = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-image"]
-generation-video = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-video"]
-generation-diffusion = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-diffusion"]
-generation-asr = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-asr"]
-generation-audio = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/generation-tts", "tribunus-compute-core/generation-asr"]
-full-apple = ["prism-backend", "generation-image", "generation-audio", "generation-video", "generation-diffusion", "generation-asr", "ane", "server"]
+prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/ffi"]
+full-apple = ["prism-backend", "ane", "server"]
 
 [build-dependencies]
 cc = "1.2"

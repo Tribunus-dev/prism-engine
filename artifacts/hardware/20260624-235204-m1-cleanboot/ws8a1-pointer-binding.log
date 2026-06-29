@@ -1,0 +1,128 @@
+warning: unused import: `mach_sys::mach_time`
+ --> mlx-rs-fork/mlx-rs/src/random.rs:7:5
+  |
+7 | use mach_sys::mach_time;
+  |     ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mlx-rs` (lib) generated 1 warning (run `cargo fix --lib -p mlx-rs` to apply 1 suggestion)
+warning: unused import: `crate::compilation::ane_eligibility::ShapeBucketFamily`
+  --> compute-core/src/compilation/ane_admission_gate.rs:23:5
+   |
+23 | use crate::compilation::ane_eligibility::ShapeBucketFamily;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `IOSurfaceAllocationAttestation`, `LiveIOSurfaceSlot`, and `SlotState`
+  --> compute-core/src/compilation/apple_installation.rs:13:23
+   |
+13 |     AppleSharedArena, IOSurfaceAllocationAttestation, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass, SlotState,
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^                         ^^^^^^^^^^^^^^^^^                  ^^^^^^^^^
+
+warning: `tribunus-compute-core` (lib) generated 2 warnings (run `cargo fix --lib -p tribunus-compute-core` to apply 2 suggestions)
+warning: unused import: `std::time::Instant`
+  --> compute-core/tests/ane_binding_correctness.rs:12:5
+   |
+12 | use std::time::Instant;
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `tribunus_compute_core::coreml_pipeline::compile_mlpackage`
+  --> compute-core/tests/ane_binding_correctness.rs:16:5
+   |
+16 | use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `out_name`
+  --> compute-core/tests/ane_binding_correctness.rs:86:16
+   |
+86 |     let (path, out_name) = build_test_model().expect("model must build");
+   |                ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_out_name`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `model`
+  --> compute-core/tests/ane_binding_correctness.rs:88:9
+   |
+88 |     let model = CoreMlModel::load_with_compute_units(
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_model`
+
+warning: variable does not need to be mutable
+   --> compute-core/tests/ane_binding_correctness.rs:103:9
+    |
+103 |     let mut input = Arena::new(BATCH as u32, HIDDEN as u32, mlx_rs::Dtype::Float16)
+    |         ----^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `BOUNDARY_NS_BUDGET` is never used
+  --> compute-core/tests/ane_binding_correctness.rs:25:7
+   |
+25 | const BOUNDARY_NS_BUDGET: u128 = 2_000_000;
+   |       ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `f16_to_f32` is never used
+   --> compute-core/tests/ane_binding_correctness.rs:141:4
+    |
+141 | fn f16_to_f32(h: u16) -> f32 {
+    |    ^^^^^^^^^^
+
+warning: unused variable: `state`
+   --> compute-core/src/bin/prism_server.rs:120:28
+    |
+120 | async fn list_models(State(state): State<Arc<Mutex<AppState>>>) -> Json<ModelList> {
+    |                            ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `graph` is never read
+  --> compute-core/src/bin/prism_server.rs:53:5
+   |
+51 | struct AppState {
+   |        -------- field in this struct
+52 |     engine: PrismEngine,
+53 |     graph: ModelGraph,
+   |     ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `temperature` is never read
+  --> compute-core/src/bin/prism_server.rs:64:5
+   |
+60 | struct ChatRequest {
+   |        ----------- field in this struct
+...
+64 |     temperature: Option<f32>,
+   |     ^^^^^^^^^^^
+
+warning: `tribunus-compute-core` (test "ane_binding_correctness") generated 7 warnings (run `cargo fix --test "ane_binding_correctness" -p tribunus-compute-core` to apply 5 suggestions)
+warning: `tribunus-compute-core` (bin "prism-server") generated 3 warnings (run `cargo fix --bin "prism-server" -p tribunus-compute-core` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/ane_binding_correctness.rs (target/debug/deps/ane_binding_correctness-5326eb99c71d2214)
+
+running 3 tests
+test ws8a1_arena_allocates_and_releases ... ok
+coreml_load_model: loaded /tmp/ane_binding_correctness_models/compiled/fp16_test.modelc/fp16_test.mlmodelc
+  inputs:
+coreml_load_model: loaded /tmp/ane_binding_correctness_models/compiled/fp16_test.modelc/fp16_test.mlmodelc
+  inputs:
+    input: input : MultiArray (Float16, 1 × 64)
+  outputs:
+    input: input : MultiArray (Float16, 1 × 64)
+  outputs:
+    matmul_1: matmul_1 : MultiArray (Float16, 1 × 64)
+    matmul_1: matmul_1 : MultiArray (Float16, 1 × 64)
+test ws8a1_model_builds_and_loads ... ok
+test ws8a1_model_produces_identity_output ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+

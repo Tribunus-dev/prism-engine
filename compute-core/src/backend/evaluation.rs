@@ -14,7 +14,7 @@
 //! - EVAL-P2 (ExplicitRegion): projection-family boundaries
 //! - EVAL-P3 (Eager): every operation materialised individually
 
-use super::routing::*;
+use crate::backend::routing::*;
 
 /// Named evaluation-boundary profile with typed cardinality.
 #[derive(Debug, Clone)]

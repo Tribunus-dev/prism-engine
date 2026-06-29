@@ -14,6 +14,7 @@ pub mod execution_context;
 pub mod kv_transaction;
 pub mod lane_executors;
 pub mod legacy_adapter;
+pub mod memory_pool;
 #[cfg(feature = "metal-dispatch")]
 pub mod metal_decoder;
 pub mod phase_cancellation;

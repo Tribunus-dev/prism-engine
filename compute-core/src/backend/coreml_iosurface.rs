@@ -6,6 +6,8 @@
 //! against a cimage manifest contract.
 
 use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use std::ffi::c_void;
+use std::io;
 
 /// Core ML compute policy enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,6 +162,62 @@ impl CoreMlIOSurfaceExecutable {
         }
         Ok(())
     }
+}
+
+/// Create an IOSurface backed by a page-aligned mmap slice.
+/// The kernel skips the shadow copy because the pointer matches the
+/// hardware 16 KB boundary — the IOSurface pages are wired directly.
+///
+/// # Parameters
+/// - `base`: Page-aligned pointer to the mmap'd data (may be null for
+///   zero-initialized allocation).
+/// - `width`: IOSurface width in pixels.
+/// - `height`: IOSurface height in pixels.
+/// - `pixel_format`: FourCC pixel format (e.g. `'L00h'` for FP16).
+///
+/// # Returns
+/// The IOSurfaceRef as an opaque pointer, or an error if allocation fails.
+/// The returned IOSurface owns its backing pages and must be freed by the
+/// caller via `CFRelease`.
+pub fn create_iosurface_from_mmap(
+    base: *const u8,
+    width: u32,
+    height: u32,
+    pixel_format: u32,
+) -> io::Result<*mut c_void> {
+    let byte_count = (width as u64) * (height as u64) * 4; // worst-case bytes per pixel
+    if byte_count > i32::MAX as u64 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "IOSurface too large"));
+    }
+    let mut info = crate::arena_info::ArenaInfo {
+        width: 0,
+        height: 0,
+        logical_dim0: 0,
+        logical_dim1: 0,
+        pixel_format: 0,
+        byte_size: 0,
+        bytes_per_row: 0,
+        base_address: std::ptr::null_mut(),
+        cv_buffer: std::ptr::null_mut(),
+        io_surface: std::ptr::null_mut(),
+    };
+    let rc = unsafe {
+        crate::arena::tribunus_create_iosurface_from_mmap(
+            &mut info as *mut crate::arena_info::ArenaInfo,
+            base as *const std::ffi::c_void,
+            width as i32,
+            height as i32,
+            pixel_format,
+            byte_count as i32,
+        )
+    };
+    if rc != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("create_iosurface_from_mmap failed: {}", rc),
+        ));
+    }
+    Ok(info.io_surface)
 }
 
 #[cfg(test)]

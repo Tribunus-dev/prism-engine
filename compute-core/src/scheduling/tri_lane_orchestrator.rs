@@ -18,8 +18,9 @@ use crate::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
 use crate::compilation::ane_admission_gate::{LaneAdmissionGate, RiskPolicy};
 use crate::compilation::phase_ir::PhaseId;
 use crate::compilation::tri_lane::{EpochRouteOrigin, NumericalStatus};
-use crate::compute_image::portfolio_compilation::CoreMlArtifactKey;
+use crate::compute_image::compile::portfolio::CoreMlArtifactKey;
 use crate::scheduling::ane_artifact_cache::{AneArtifactCache, ArtifactKey, ArtifactResidencyState};
+use crate::scheduling::memory_pool::MemoryPoolAllocator;
 
 // ── Type aliases ────────────────────────────────────────────────────────────
 
@@ -261,6 +262,8 @@ pub struct TriLaneOrchestrator {
     pub admission_gate: LaneAdmissionGate,
     /// ANE artifact cache for residency state tracking.
     pub ane_cache: AneArtifactCache,
+    /// KV cache memory pool with token-stealing allocation.
+    pub memory_pool: MemoryPoolAllocator,
 }
 
 impl TriLaneOrchestrator {
@@ -271,6 +274,8 @@ impl TriLaneOrchestrator {
         policy: DispatchPolicy,
         admission_gate: LaneAdmissionGate,
         ane_cache: AneArtifactCache,
+        max_vram_bytes: u64,
+        fixed_overhead_bytes: u64,
     ) -> Self {
         Self {
             metal_executor: (),
@@ -296,6 +301,7 @@ impl TriLaneOrchestrator {
             admission_gate,
             completion_rx: None,
             ane_cache,
+            memory_pool: MemoryPoolAllocator::new(max_vram_bytes, fixed_overhead_bytes),
         }
     }
 
@@ -315,6 +321,12 @@ impl TriLaneOrchestrator {
 
         let variant = phase_set.variants[best_idx].clone();
 
+        // Preflight memory budget check.
+        if let Err(oom) = self.check_memory_budget() {
+            eprintln!("[tri-lane] REJECTED: {}", oom);
+            return Err(oom);
+        }
+
         // Push the phase id onto the appropriate lane queue.
         match variant.lane {
             ExecutionLane::MlxGpu => {
@@ -330,6 +342,11 @@ impl TriLaneOrchestrator {
                 // Fall back to accelerate queue for unknown/untargeted lanes.
                 self.lane_queues.accelerate_queue.push(phase_set.phase_id);
             }
+        }
+
+        // Reserve page allocation for the activated slot.
+        if let Err(e) = self.memory_pool.resolve_pool_allocation(phase_set.phase_id.0 as usize, 4096) {
+            eprintln!("[tri-lane] page allocation failed: {}", e);
         }
 
         Ok(WorkCompletion {
@@ -413,6 +430,13 @@ impl TriLaneOrchestrator {
         Vec::new()
     }
 
+    /// Preflight memory budget check before accepting new work.
+    /// Returns Ok(total_bytes) if within budget, Err(OOM description) otherwise.
+    pub fn check_memory_budget(&self) -> Result<u64, String> {
+        let static_base: u64 = 6_500_000_000; // ~6.5 GB base model + runtime
+        self.memory_pool.verify_memory_budget().map(|used| used + static_base)
+    }
+
     // ── Private helpers ────────────────────────────────────────────────────
 
     /// Check whether an ANE variant has a warmed artifact in the cache.
@@ -493,7 +517,7 @@ impl TriLaneOrchestrator {
 mod tests {
     use super::*;
     use crate::compilation::ane_eligibility::{ShapeBucket, ShapeBucketFamily};
-    use crate::compute_image::portfolio_compilation::{PacketKind, WeightEncoding};
+    use crate::compute_image::compile::portfolio::{PacketKind, WeightEncoding};
     use crate::scheduling::ane_artifact_cache::AneEvictionPolicy;
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -563,6 +587,8 @@ mod tests {
             },
         LaneAdmissionGate::new(RiskPolicy::ProductionOnly),
             AneArtifactCache::new(32, 1_000_000_000, AneEvictionPolicy::Lru),
+            16_000_000_000,  // max_vram_bytes: 16 GB
+            1_000_000_000,   // fixed_overhead_bytes: 1 GB
         )
     }
 

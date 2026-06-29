@@ -848,7 +848,7 @@ impl AneDmaPrefetcher {
     pub fn new() -> Result<Self, String> {
         // 4MB buffer — enough for a single layer's weights (~400MB for a 2-layer window
         // but we only buffer the DMA transfer, not the full weight storage).
-        let io_arena = Arena::new(1024 * 1024, 1, mlx_rs::Dtype::Uint8)
+        let io_arena = Arena::new_bytes(1024 * 1024)
             .map_err(|e| format!("DMA prefetcher arena: {}", e))?;
         Ok(Self { io_arena })
     }
@@ -933,7 +933,7 @@ impl LayerWeightStreamer {
         reader: Arc<CompiledImageReader>,
     ) -> Result<Self, String> {
         let detected_ns = Self::detect_ns_from_reader(&reader);
-        let io_buffer = Arena::new(4 * 1024 * 1024, 1, mlx_rs::Dtype::Uint8)
+        let io_buffer = Arena::new_bytes(4 * 1024 * 1024)
             .map_err(|e| format!("weight streamer io arena: {}", e))?;
 
         let ane_prefetcher = AneDmaPrefetcher::new().ok();

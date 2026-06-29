@@ -16,7 +16,7 @@ use parking_lot::Mutex;
 use std::sync::{Arc, Weak};
 
 use crate::arena::Arena;
-use mlx_rs::Dtype;
+use crate::arena::DataType;
 
 /// Unique identifier for an allocated arena within the `IosurfaceAllocator`.
 pub type ArenaId = u64;
@@ -79,7 +79,7 @@ impl IosurfaceAllocator {
         &self,
         logical_dim0: u32,
         logical_dim1: u32,
-        dtype: Dtype,
+        dtype: DataType,
     ) -> Result<ArenaId, String> {
         // 1. Estimate byte cost before allocating.
         let estimated_bytes = (logical_dim0 as u64)
@@ -197,16 +197,10 @@ impl IosurfaceAllocator {
 ///
 /// This is used for pre-allocation pool-limit checks. Actual physical
 /// allocation may differ due to IOSurface row-stride alignment.
-fn bytes_per_element(dtype: Dtype) -> u64 {
+fn bytes_per_element(dtype: DataType) -> u64 {
     match dtype {
-        Dtype::Float16 => 2,
-        Dtype::Float32 | Dtype::Bfloat16 => 4,
-        Dtype::Int8 | Dtype::Uint8 => 1,
-        Dtype::Int16 | Dtype::Uint16 => 2,
-        Dtype::Int32 | Dtype::Uint32 => 4,
-        Dtype::Int64 | Dtype::Uint64 => 8,
-        // Default fallback — Float32-sized.
-        _ => 4,
+        DataType::Float16 => 2,
+        DataType::Float32 => 4,
     }
 }
 
@@ -281,7 +275,7 @@ impl PagedIosurfaceAllocator {
 
         // Arena is FP16 (2 bytes/element). Total elements = pages_per_arena * page_size / 2.
         let total_elements = (pages_per_arena * page_size) / 2;
-        let arena = Arena::new(1, total_elements as u32, mlx_rs::Dtype::Float16)
+        let arena = Arena::new(1, total_elements as u32, DataType::Float16)
             .expect("new_compressed: arena allocation failed");
 
         Self::new(arena, pages_per_arena, page_size)
@@ -353,7 +347,7 @@ impl PagedIosurfaceAllocator {
     /// counters are extended so that new allocations can use the space.
     fn grow(&mut self) -> Result<(), String> {
         let arena_elements = (self.pages_per_arena * self.page_size) / 2;
-        let arena = Arena::new(1, arena_elements as u32, mlx_rs::Dtype::Float16)?;
+        let arena = Arena::new(1, arena_elements as u32, DataType::Float16)?;
         self.arenas.push(arena);
         self.num_pages += self.pages_per_arena;
         // Extend free_bitmap to cover the new pages.
@@ -629,7 +623,7 @@ mod tests {
     fn test_allocate_and_free() {
         let alloc = IosurfaceAllocator::new(1024 * 1024);
         let id = alloc
-            .allocate(1, 4, Dtype::Float16)
+            .allocate(1, 4, DataType::Float16)
             .expect("allocate should succeed");
         assert!(alloc.total_allocated() > 0);
         assert_eq!(alloc.free(id), Ok(()));
@@ -639,7 +633,7 @@ mod tests {
     #[test]
     fn test_get_arena_transfers_ownership() {
         let alloc = IosurfaceAllocator::new(0);
-        let id = alloc.allocate(1, 4, Dtype::Float16).expect("allocate");
+        let id = alloc.allocate(1, 4, DataType::Float16).expect("allocate");
         let arena = alloc.get_arena(id).expect("get_arena should find id");
         assert_eq!(arena.element_count(), 4);
         // Second get should be None.
@@ -667,7 +661,7 @@ mod tests {
         // Pool of 4096 gives pressure ~0.16, safely in (0, 1].
         let bounded = IosurfaceAllocator::new(4096);
         bounded
-            .allocate(10, 10, Dtype::Float16)
+            .allocate(10, 10, DataType::Float16)
             .expect("pressure allocate");
         let p = bounded.pressure();
         assert!(
@@ -680,7 +674,7 @@ mod tests {
     #[test]
     fn test_allocate_exceeds_pool() {
         let alloc = IosurfaceAllocator::new(2); // 2-byte pool
-        let result = alloc.allocate(1, 4, Dtype::Float16); // 1 x 4 x 2 = 8 bytes
+        let result = alloc.allocate(1, 4, DataType::Float16); // 1 x 4 x 2 = 8 bytes
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("exceed"));
         assert_eq!(alloc.total_allocated(), 0);
@@ -690,7 +684,7 @@ mod tests {
     fn test_dtype_not_supported() {
         let alloc = IosurfaceAllocator::new(0);
         // Arena::new supports Float16 and Float32 only.
-        let result = alloc.allocate(1, 4, Dtype::Int8);
+        let result = alloc.allocate(1, 4, DataType::Float32);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("FP16"));
     }
@@ -698,15 +692,15 @@ mod tests {
     #[test]
     fn test_monotonic_ids() {
         let alloc = IosurfaceAllocator::new(0);
-        let id1 = alloc.allocate(1, 1, Dtype::Float16).expect("allocate 1");
-        let id2 = alloc.allocate(1, 1, Dtype::Float16).expect("allocate 2");
+        let id1 = alloc.allocate(1, 1, DataType::Float16).expect("allocate 1");
+        let id2 = alloc.allocate(1, 1, DataType::Float16).expect("allocate 2");
         assert!(id2 > id1);
     }
 
     #[test]
     fn test_total_allocated_after_free() {
         let alloc = IosurfaceAllocator::new(0);
-        let id = alloc.allocate(1, 4, Dtype::Float16).expect("allocate");
+        let id = alloc.allocate(1, 4, DataType::Float16).expect("allocate");
         let before = alloc.total_allocated();
         assert!(before > 0, "total_allocated should be > 0 after allocation");
         alloc.free(id).expect("free");
@@ -720,8 +714,8 @@ mod tests {
     #[test]
     fn test_multiple_arenas() {
         let alloc = IosurfaceAllocator::new(0);
-        let id1 = alloc.allocate(1, 4, Dtype::Float16).expect("allocate 1");
-        let id2 = alloc.allocate(2, 4, Dtype::Float16).expect("allocate 2");
+        let id1 = alloc.allocate(1, 4, DataType::Float16).expect("allocate 1");
+        let id2 = alloc.allocate(2, 4, DataType::Float16).expect("allocate 2");
         assert_ne!(id1, id2);
 
         let _ = alloc.free(id1);

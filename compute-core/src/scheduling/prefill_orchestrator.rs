@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::arena::Arena;
+use crate::arena::DataType;
 use crate::coreml_state::StatefulPrefillContext;
 use crate::models::embedding::TokenEmbedding;
 
@@ -100,7 +101,7 @@ impl PrefillOrchestrator {
 
             // IOSurface-backed arenas and Core ML stateful prefill
             let ctx = self.state_ctx.as_mut().unwrap();
-            let input_arena = Arena::new(chunk_size as u32, hidden, mlx_rs::Dtype::Float16)
+            let input_arena = Arena::new(chunk_size as u32, hidden, DataType::Float16)
                 .map_err(|e| format!("input arena: {e}"))?;
             input_arena.lock().map_err(|e| format!("input lock: {e}"))?;
             unsafe {
@@ -114,7 +115,7 @@ impl PrefillOrchestrator {
                 .unlock()
                 .map_err(|e| format!("input unlock: {e}"))?;
 
-            let mut output_arena = Arena::new(chunk_size as u32, hidden, mlx_rs::Dtype::Float16)
+            let mut output_arena = Arena::new(chunk_size as u32, hidden, DataType::Float16)
                 .map_err(|e| format!("output arena: {e}"))?;
 
             ctx.prefill_chunk(

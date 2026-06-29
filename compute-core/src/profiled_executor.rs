@@ -436,7 +436,7 @@ impl ProfiledInferenceSession {
             }
             if let Some(plan) = crate::memory::plan::plan_from_scheduled_module(
                 scheduled,
-                &crate::arena::Arena::new(1, 1, mlx_rs::Dtype::Float32)
+                &crate::arena::Arena::new(1, 1, crate::arena::DataType::Float32)
                     .unwrap_or_else(|_| panic!("tmp arena")),
                 self.compression_ratio,
             ) {
@@ -539,6 +539,7 @@ impl ProfiledInferenceSession {
         let mut ctx = ExecutionContext {
             request_id: 0,
             token_position: self.absolute_position as usize,
+            sink_detector: None,
             token_ids: token_ids.to_vec(),
             is_prefill,
             hidden_state: Some(hidden.clone()),

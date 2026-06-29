@@ -19,6 +19,7 @@
 //! We default to 256 rows for a comfortable margin.
 
 use crate::arena::Arena;
+use crate::arena::DataType;
 use crate::backend::MlxBackend;
 use crate::projection_executor::{
     MaterializationClass, ProjectionExecutor, QuantizedProjectionDescriptor, RuntimeMode,
@@ -159,7 +160,7 @@ impl WeightRowCache {
     /// * `hidden_size` — model's hidden state dimension (e.g. 3840).
     /// * `bits` — quantization bit width for the LM head weight (e.g. 4 for int4).
     pub fn new(max_rows: u32, hidden_size: u32, bits: u8) -> Result<Self, String> {
-        let row_arena = Arena::new(max_rows, hidden_size, mlx_rs::Dtype::Float16)?;
+        let row_arena = Arena::new(max_rows, hidden_size, DataType::Float16)?;
 
         Ok(Self {
             row_arena,

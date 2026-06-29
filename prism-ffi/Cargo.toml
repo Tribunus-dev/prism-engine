@@ -1,0 +1,18 @@
+[package]
+name = "prism-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+tribunus-compute-core = { path = "../compute-core", optional = true }
+
+[features]
+default = []
+compute-core = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend"]
+
+[package.metadata]
+docs = "C ABI bridge for the Prism Engine Swift menu bar app"

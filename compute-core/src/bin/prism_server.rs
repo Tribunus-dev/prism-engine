@@ -28,6 +28,12 @@ use tribunus_compute_core::lut::engine::PrismEngine;
 use tribunus_compute_core::lut::graph::{ModelGraph, UnifiedConfig};
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
 
+use tribunus_compute_core::runtime::agent_slot::MultiplexerState;
+use tribunus_compute_core::runtime::ecore_pump::spawn_ecore_prefetch_pump;
+use tribunus_compute_core::runtime::ane_multiplexer::spawn_ane_multiplexer;
+use tribunus_compute_core::runtime::ane_multiplexer::DynamicMultiplexer;
+use tribunus_compute_core::compute_image::cimage_loader::load_cimage_mmap;
+
 // ── CLI ─────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -224,6 +230,24 @@ async fn main() -> Result<(), String> {
             eprintln!("[prism-server] Metal acceleration not available, using CPU");
         }
     }
+
+    // ── Atomic Scheduler Boot ──────────────────────────────────────
+    // Initialise the 32-agent multiplexer from the .cimage header.
+    let mut multiplexer = Arc::new(MultiplexerState::new());
+    {
+        let mmap = load_cimage_mmap(&args.cimage)
+            .expect("failed to load .cimage for atomic scheduler");
+        Arc::get_mut(&mut multiplexer)
+            .expect("multiplexer has no references yet")
+            .init_from_cimage(mmap.0.into(), &mmap.1, 3840, 18432);
+    }
+
+    // Spawn the two dedicated threads.
+    let pump = spawn_ecore_prefetch_pump(multiplexer.clone());
+    let dynamic_mux = Arc::new(std::sync::Mutex::new(DynamicMultiplexer::new()));
+    let mux = spawn_ane_multiplexer(multiplexer, dynamic_mux);
+
+    eprintln!("[prism] Atomic scheduler running: E-core prefetch + P-core ANE multiplexer");
 
     println!(
         "[prism-server] Loading tokenizer from {}...",

@@ -12,7 +12,7 @@ pub mod operation_route;
 // ── Layer 1: Raw Manifest ──────────────────────────────────────────────────
 
 /// Raw model manifest read from config.json.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ModelManifest {
     pub config_path: String,
     pub config_hash: String,
@@ -29,7 +29,7 @@ pub struct ModelManifest {
     pub safetensors_shards: Vec<ShardManifest>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ShardManifest {
     pub path: String,
     pub sha256: String,
@@ -70,6 +70,51 @@ pub struct TextArchitecture {
     /// Diffusion model configuration, if applicable.
     #[serde(default)]
     pub diffusion_config: Option<DiffusionConfig>,
+}
+
+impl TextArchitecture {
+    /// Compute the total number of weight elements that will be quantized
+    /// via TernaryTile640.  This determines the exact .cimage weights segment size.
+    ///
+    /// Includes: embedding, per-layer Q/K/V/O/Gate/Up/Down, LM head (if untied).
+    pub fn total_ternary_weight_elements(&self) -> u64 {
+        let h = self.hidden_size as u64;
+        let im = self.intermediate_size as u64;
+        let v = self.vocab_size as u64;
+        let n = self.num_hidden_layers as u64;
+        let hd = self.head_dim as u64;
+        let nq = self.num_attention_heads as u64;
+        let nk = self.num_key_value_heads as u64;
+
+        // Embedding: vocab x hidden
+        let mut total = v * h;
+
+        // Per layer projections:
+        // Q: hidden x (n_heads x head_dim)
+        // K: hidden x (n_kv_heads x head_dim)
+        // V: hidden x (n_kv_heads x head_dim)
+        // O: (n_heads x head_dim) x hidden
+        // Gate: hidden x intermediate
+        // Up: hidden x intermediate
+        // Down: intermediate x hidden
+        let per_layer = n * (
+            h * (nq * hd)      // Q
+            + h * (nk * hd)     // K
+            + h * (nk * hd)     // V
+            + (nq * hd) * h     // O
+            + h * im             // Gate
+            + h * im             // Up
+            + im * h              // Down
+        );
+        total += per_layer;
+
+        // LM head (if not tied with embeddings)
+        if !self.tie_word_embeddings {
+            total += h * v;
+        }
+
+        total
+    }
 }
 
 /// Vision encoder configuration from a model's vision_config.
@@ -364,6 +409,15 @@ pub enum CompileQuantMode {
     Nf4 { group_size: u32 },
     /// 8-bit affine quantization.
     Af8 { group_size: u32 },
+    /// Ternary 1.58-bit quantization. Uses 2-bit nibble encoding
+    /// (00=0, 01=+1, 10=-1), packed 4 weights per byte, matching
+    /// the ternary_gemv.metal and ternary_gemm.metal shader decoders.
+    Ternary { group_size: u32 },
+    /// Ternary 1.58-bit quantization with 640-weight SIMD-aligned tiles.
+    /// Uses Base-3 encoding (0=0, 1=+1, 2=-1), packed 20 weights per
+    /// u32, 32 lanes per tile, matching the tile640_gemv.metal kernel
+    /// and production megakernel path.
+    TernaryTile640 { group_size: u32 },
 }
 
 impl CompileQuantMode {
@@ -374,6 +428,8 @@ impl CompileQuantMode {
             "nf4" => Some(Self::Nf4 { group_size: 64 }),
             "nf4-128" => Some(Self::Nf4 { group_size: 128 }),
             "8bit" => Some(Self::Af8 { group_size: 64 }),
+            "ternary" | "1.58" => Some(Self::Ternary { group_size: 32 }),
+            "ternary_tile640" | "tile640" => Some(Self::TernaryTile640 { group_size: 640 }),
             "none" => None,
             _ => None,
         }
@@ -385,6 +441,8 @@ impl CompileQuantMode {
             Self::Nf4 { group_size: 64 } => "nf4",
             Self::Nf4 { group_size: 128 } => "nf4-128",
             Self::Af8 { .. } => "8bit",
+            Self::Ternary { .. } => "ternary",
+            Self::TernaryTile640 { .. } => "ternary_tile640",
             _ => "nf4-64",
         }
     }
@@ -473,7 +531,7 @@ impl HardwareTarget {
 // ── Layer 3: Compiled Execution Specification ──────────────────────────────
 
 /// Full execution plan: one spec per layer, plus global tensors.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ExecutionSpec {
     pub architecture: TextArchitecture,
     pub namespace: NamespaceBinding,

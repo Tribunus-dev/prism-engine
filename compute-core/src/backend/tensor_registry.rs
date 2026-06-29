@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use super::routing::{
+use crate::backend::routing::{
     BackendId, LogicalShape, PhysicalLayout, TensorId, TensorMaterializationId, TensorShape,
     TensorVersion,
 };

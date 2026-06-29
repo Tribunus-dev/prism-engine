@@ -1,0 +1,12 @@
+[package]
+name = "block"
+version = "0.1.6"
+authors = ["Steven Sheldon"]
+description = "A Rust interface for Objective-C blocks"
+license = "MIT"
+repository = "https://github.com/SSheldon/rust-block"
+edition = "2021"
+
+[lints.rust]
+missing-abi = "allow"
+improper-ctypes = "allow"

@@ -13,6 +13,7 @@ use crate::backend::routing::*;
 use crate::backend::MlxBackend;
 use crate::backend::TensorBackend;
 use crate::memory::allocator::IosurfaceAllocator;
+use crate::arena::DataType;
 
 /// Complete hybrid deployment profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -413,13 +414,13 @@ impl HybridExecutor {
         // IOSurface-backed memory island (zero-copy transport).
         let arena = if let Some(allocator) = self.allocator.as_ref() {
             let arena_id = allocator
-                .allocate(1, 4096, mlx_rs::Dtype::Float16)
+                .allocate(1, 4096, DataType::Float16)
                 .map_err(|e| format!("execute_batch: arena alloc failed: {e}"))?;
             allocator
                 .get_arena(arena_id)
                 .ok_or_else(|| "execute_batch: arena not found after alloc".to_string())?
         } else {
-            crate::arena::Arena::new(1, 4096, mlx_rs::Dtype::Float16)
+            crate::arena::Arena::new(1, 4096, crate::arena::DataType::Float16)
                 .map_err(|e| format!("execute_batch: throwaway arena failed: {e}"))?
         };
 

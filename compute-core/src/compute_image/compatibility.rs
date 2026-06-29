@@ -216,6 +216,14 @@ impl CompatibilityMatrix {
                 // 8-bit affine quantization changes byte layout but preserves
                 // logical element count. Always compatible.
             }
+            CompileQuantMode::Ternary { .. } => {
+                // Ternary 1.58-bit quantization uses a special packed format
+                // but preserves logical element count. Always compatible.
+            }
+            CompileQuantMode::TernaryTile640 { .. } => {
+                // Ternary tile640 uses SIMD-aligned Base-3 encoding.
+                // Always compatible.
+            }
         }
 
         if issues.is_empty() {

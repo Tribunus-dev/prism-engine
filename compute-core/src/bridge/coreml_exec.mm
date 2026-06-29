@@ -230,6 +230,103 @@ int tribunus_coreml_predict(
 }
 
 // ── predict_pixelbuffer (FP16 IOSurface) ───────────────────────────────────
+// ── predict_multi (FP16 MLMultiArray, multiple I/O) ─────────────────────────
+
+int tribunus_coreml_predict_multi(
+    void* model_ptr,
+    const char** input_names,
+    const TribunusArenaInfo** input_arenas,
+    int num_inputs,
+    const char** output_names,
+    TribunusArenaInfo** output_arenas,
+    int num_outputs) {
+
+    os_signpost_interval_begin(tribunus_coreml_log, 0, "predict_multi", "model=%p", model_ptr);
+
+    if (!model_ptr || !input_names || !input_arenas || !output_names || !output_arenas) {
+        os_signpost_interval_end(tribunus_coreml_log, 0, "predict_multi", "null_args");
+        return -1;
+    }
+
+    @autoreleasepool {
+    @try {
+        MLModel* mlmodel = (__bridge MLModel*)model_ptr;
+        NSError* error = nil;
+
+        // Build input feature dictionary
+        NSMutableDictionary* input_dict = [NSMutableDictionary dictionary];
+        for (int i = 0; i < num_inputs; i++) {
+            NSString* name = [NSString stringWithUTF8String:input_names[i]];
+            const TribunusArenaInfo* arena = input_arenas[i];
+
+            NSArray<NSNumber*>* shape = @[
+                @(arena->logical_dim0),
+                @(arena->logical_dim1),
+            ];
+
+            MLMultiArray* ma = [[MLMultiArray alloc]
+                initWithDataPointer:arena->base_address
+                              shape:shape
+                           dataType:MLMultiArrayDataTypeFloat16
+                            strides:@[@(arena->logical_dim1), @1]
+                        deallocator:^(void* p) { (void)p; }
+                              error:&error];
+            if (!ma) {
+                fprintf(stderr, "coreml_predict_multi: input '%s' MLMultiArray failed\n",
+                        input_names[i]);
+                return -2;
+            }
+            input_dict[name] = [MLFeatureValue featureValueWithMultiArray:ma];
+        }
+
+        // Build output backings dictionary
+        NSMutableDictionary* output_backings = [NSMutableDictionary dictionary];
+        for (int i = 0; i < num_outputs; i++) {
+            NSString* name = [NSString stringWithUTF8String:output_names[i]];
+            TribunusArenaInfo* arena = output_arenas[i];
+
+            MLMultiArray* ma = [[MLMultiArray alloc]
+                initWithDataPointer:arena->base_address
+                              shape:@[@(arena->logical_dim0), @(arena->logical_dim1)]
+                           dataType:MLMultiArrayDataTypeFloat16
+                            strides:@[@(arena->logical_dim1), @1]
+                        deallocator:^(void* p) { (void)p; }
+                              error:&error];
+            if (!ma) {
+                fprintf(stderr, "coreml_predict_multi: output '%s' MLMultiArray failed\n",
+                        output_names[i]);
+                return -3;
+            }
+            output_backings[name] = ma;
+        }
+
+        MLDictionaryFeatureProvider* input_provider =
+            [[MLDictionaryFeatureProvider alloc] initWithDictionary:input_dict error:&error];
+        if (!input_provider) return -4;
+
+        MLPredictionOptions* options = [[MLPredictionOptions alloc] init];
+        options.outputBackings = output_backings;
+
+        id<MLFeatureProvider> result = [mlmodel predictionFromFeatures:input_provider
+                                                                options:options
+                                                                  error:&error];
+        if (!result) {
+            fprintf(stderr, "coreml_predict_multi: prediction failed: %s\n",
+                    error.localizedDescription.UTF8String);
+            return -5;
+        }
+    } @catch (NSException* exc) {
+        fprintf(stderr, "coreml_predict_multi EXCEPTION: %s\n",
+                exc.description.UTF8String);
+        os_signpost_interval_end(tribunus_coreml_log, 0, "predict_multi", "exception=%s", exc.description.UTF8String);
+        return -20;
+    }
+    } // @autoreleasepool
+    os_signpost_interval_end(tribunus_coreml_log, 0, "predict_multi", "ok");
+    return 0;
+}
+
+// ── predict_pixelbuffer (FP16 IOSurface) ───────────────────────────────────
 
 int tribunus_coreml_predict_pixelbuffer(
     void* model_ptr,

@@ -215,92 +215,53 @@ pub(crate) fn compile_unchecked_speculative(
     let started_at = std::time::Instant::now();
     let output_dir = Path::new(output_dir);
 
-    // Load both models independently
+    // === STEP 1: Load target, capture metadata, emit, drop ===
     let t_load = Instant::now();
-    let target_loaded = load_source(Path::new(target_dir), false)?;
-    let draft_loaded = load_source(Path::new(draft_dir), false)?;
+    let mut target_loaded = load_source(Path::new(target_dir), false)?;
     let source_load_ms = t_load.elapsed().as_millis() as u64;
 
-    // Detect embedding shareability
-    let shared_embedding = target_loaded.arch.vocab_size == draft_loaded.arch.vocab_size
-        && target_loaded.arch.hidden_size == draft_loaded.arch.hidden_size;
-    let shared_lm_head = shared_embedding;
+    // Capture lightweight metadata BEFORE dropping target source tensors
+    let target_arch = target_loaded.arch.clone();
+    let target_namespace = target_loaded.namespace.clone();
+    let target_spec = target_loaded.spec.clone();
+    let target_shard_hashes = target_loaded.shard_hashes.clone();
+    let target_tokenizer_hashes = target_loaded.tokenizer_hashes.clone();
+    let target_auxiliary_hashes = target_loaded.auxiliary_hashes.clone();
+    let target_manifest = target_loaded.manifest.clone();
 
-    // Build source identity from target model
     let source = build_source_identity(
-        &target_loaded.manifest,
-        target_loaded.shard_hashes.clone(),
-        target_loaded.tokenizer_hashes.clone(),
-        target_loaded.auxiliary_hashes.clone(),
+        &target_manifest,
+        target_shard_hashes,
+        target_tokenizer_hashes,
+        target_auxiliary_hashes,
     );
 
-    let mut builder = ImageBuilder::new(target_loaded.arch.clone(), source);
+    let mut builder = ImageBuilder::new(target_arch.clone(), source);
+    // Set file-backed writing: flushed segments go to disk immediately,
+    // freeing the Vec<u8> payload without accumulating in segment_payloads.
+    builder.set_output_dir(output_dir);
     let mut emitted_ids: HashMap<String, u32> = HashMap::new();
 
     let t_emit = Instant::now();
 
-    // 1. Shared persistent segment (embeddings stored once if shareable)
+    // Emit target persistent tensors (global_tensors)
     let shared_seg_id = "persistent".to_string();
     builder.begin_segment(&shared_seg_id, SegmentKind::Persistent);
+    for binding in &target_spec.global_tensors {
+        let id = emit_binding_set(&mut builder, &target_loaded.source_tensors, binding, None)?;
+        emitted_ids.insert(binding.name.clone(), id);
+    }
 
-    if shared_embedding {
-        // Emit target embeddings — shared by both models
-        for binding in &target_loaded.spec.global_tensors {
-            let id = emit_binding_set(&mut builder, &target_loaded.source_tensors, binding, None)?;
-            emitted_ids.insert(binding.name.clone(), id);
-            // Register aliases for draft model tensors that map to shared weights
-            let draft_root = &draft_loaded.namespace.root;
-            let target_root = &target_loaded.namespace.root;
-            if binding.name.contains("embed_tokens") {
-                let draft_embed = binding.name.replace(target_root, draft_root);
-                builder.add_alias(&draft_embed, id, "shared_embedding_speculative");
-                emitted_ids.insert(draft_embed, id);
-            }
-        }
-        if shared_lm_head {
-            // If lm_head is aliased (tied), register draft alias too
-            if target_loaded.namespace.lm_head_aliased {
-                let target_head = "lm_head.weight".to_string();
-                let draft_head_key = format!("{}.lm_head.weight", draft_loaded.namespace.root);
-                if let Some(&id) = emitted_ids.get(&target_head) {
-                    builder.add_alias(&draft_head_key, id, "shared_lm_head_speculative");
-                    emitted_ids.insert(draft_head_key, id);
-                }
-            }
-        }
-    } else {
-        // Not shared: emit target embeddings, then switch to new persistent for draft
-        for binding in &target_loaded.spec.global_tensors {
-            let id = emit_binding_set(&mut builder, &target_loaded.source_tensors, binding, None)?;
-            emitted_ids.insert(binding.name.clone(), id);
+    // Register tied embedding alias on target side
+    if target_namespace.lm_head_aliased {
+        let embed_name = format!("{}.embed_tokens.weight", target_namespace.root);
+        if let Some(&id) = emitted_ids.get(&embed_name) {
+            builder.add_alias("lm_head.weight", id, "tie_word_embeddings");
         }
     }
 
-    // 2. Draft layer segments (first for fast startup)
-    for layer in &draft_loaded.spec.layers {
-        let seg_id = format!("draft_layer_{}", layer.index);
-        builder.begin_segment(&seg_id, SegmentKind::Layer(layer.index));
-        for binding in &layer.tensors {
-            let id = emit_binding_set(
-                &mut builder,
-                &draft_loaded.source_tensors,
-                binding,
-                Some(layer.index),
-            )?;
-            emitted_ids.insert(binding.name.clone(), id);
-        }
-    }
-
-    // 3. Target persistent (norms, LM head) — if embeddings not shared, they're already emitted
-    if !shared_embedding {
-        // switch back to target persistent for norms
-        builder.begin_segment("persistent_target", SegmentKind::Persistent);
-        // norms and other non-embedding global tensors already emitted above
-        // if not shared, the loop above already emitted all target globals
-    }
-
-    // 4. Target layer segments
-    for layer in &target_loaded.spec.layers {
+    // Emit target layer tensors
+    for layer in &target_spec.layers {
         let seg_id = format!("target_layer_{}", layer.index);
         builder.begin_segment(&seg_id, SegmentKind::Layer(layer.index));
         for binding in &layer.tensors {
@@ -314,26 +275,86 @@ pub(crate) fn compile_unchecked_speculative(
         }
     }
 
-    // Register aliases for tied embeddings on target side
-    if target_loaded.namespace.lm_head_aliased {
-        let embed_name = format!("{}.embed_tokens.weight", target_loaded.namespace.root);
-        if let Some(&id) = emitted_ids.get(&embed_name) {
-            builder.add_alias("lm_head.weight", id, "tie_word_embeddings");
+    let total_target_bytes: u64 = target_loaded
+        .source_tensors
+        .values()
+        .map(|t| t.data.len() as u64)
+        .sum();
+
+    // Drop target source tensors — ~22 GB freed before draft is loaded
+    target_loaded.source_tensors.clear();
+
+    // === STEP 2: Load draft, emit, drop ===
+    let mut draft_loaded = load_source(Path::new(draft_dir), false)?;
+
+    let draft_arch = draft_loaded.arch.clone();
+    let draft_namespace = draft_loaded.namespace.clone();
+    let draft_spec = draft_loaded.spec.clone();
+
+    // Detect embedding shareability from captured arch metadata
+    let shared_embedding = target_arch.vocab_size == draft_arch.vocab_size
+        && target_arch.hidden_size == draft_arch.hidden_size;
+    let shared_lm_head = shared_embedding;
+
+    // Emit draft layer tensors
+    for layer in &draft_spec.layers {
+        let seg_id = format!("draft_layer_{}", layer.index);
+        builder.begin_segment(&seg_id, SegmentKind::Layer(layer.index));
+        for binding in &layer.tensors {
+            let id = emit_binding_set(
+                &mut builder,
+                &draft_loaded.source_tensors,
+                binding,
+                Some(layer.index),
+            )?;
+            emitted_ids.insert(binding.name.clone(), id);
         }
     }
 
-    // 5. Build the target execution plan
+    let total_draft_bytes: u64 = draft_loaded
+        .source_tensors
+        .values()
+        .map(|t| t.data.len() as u64)
+        .sum();
+
+    // Drop draft source tensors
+    draft_loaded.source_tensors.clear();
+
+    // === STEP 3: Shared embedding aliases (after draft metadata known) ===
+    if shared_embedding {
+        let draft_root = &draft_namespace.root;
+        let target_root = &target_namespace.root;
+        for binding in &target_spec.global_tensors {
+            if binding.name.contains("embed_tokens") {
+                let draft_embed = binding.name.replace(target_root, draft_root);
+                if let Some(&id) = emitted_ids.get(&binding.name) {
+                    builder.add_alias(&draft_embed, id, "shared_embedding_speculative");
+                    emitted_ids.insert(draft_embed, id);
+                }
+            }
+        }
+        if shared_lm_head && target_namespace.lm_head_aliased {
+            let target_head = "lm_head.weight".to_string();
+            let draft_head_key = format!("{}.lm_head.weight", draft_root);
+            if let Some(&id) = emitted_ids.get(&target_head) {
+                builder.add_alias(&draft_head_key, id, "shared_lm_head_speculative");
+                emitted_ids.insert(draft_head_key, id);
+            }
+        }
+    }
+
+    // === STEP 4: Build execution plan with captured metadata ===
     let mut execution_plan = crate::config::build_execution_plan(
-        &target_loaded.arch,
-        &target_loaded.namespace,
+        &target_arch,
+        &target_namespace,
         &emitted_ids,
     );
     execution_plan.build_ane_fusion_plan();
 
-    // 6. Attach speculative config metadata
+    // Attach speculative config metadata
     execution_plan.speculative_config = Some(crate::config::SpeculativeModelConfig {
-        draft_architecture: draft_loaded.arch.clone(),
-        target_architecture: target_loaded.arch.clone(),
+        draft_architecture: draft_arch,
+        target_architecture: target_arch,
         shared_embedding,
         shared_lm_head,
         draft_first_segments: true,
@@ -343,11 +364,7 @@ pub(crate) fn compile_unchecked_speculative(
     builder.set_execution_plan(execution_plan);
 
     let payload_emission_ms = t_emit.elapsed().as_millis() as u64;
-    let emitted_so_far = builder
-        .segment_payloads
-        .iter()
-        .map(|p| p.len() as u64)
-        .sum();
+    let emitted_so_far: u64 = builder.segments.iter().map(|s| s.byte_size).sum();
     crate::compile_progress::CompileProgress {
         stage: "payload_emission_done".into(),
         bytes_processed: emitted_so_far,
@@ -360,16 +377,7 @@ pub(crate) fn compile_unchecked_speculative(
     let manifest = builder.finalize(output_dir)?;
     let finalize_ms = t_finalize.elapsed().as_millis() as u64;
 
-    let total_source_bytes = target_loaded
-        .source_tensors
-        .values()
-        .map(|t| t.data.len() as u64)
-        .sum::<u64>()
-        + draft_loaded
-            .source_tensors
-            .values()
-            .map(|t| t.data.len() as u64)
-            .sum::<u64>();
+    let total_source_bytes = total_target_bytes + total_draft_bytes;
     let total_emitted_bytes = manifest.segments.iter().map(|s| s.byte_size).sum();
 
     let stage_profile = StageProfile {
@@ -396,6 +404,7 @@ pub(crate) fn compile_unchecked_speculative(
         started_at.elapsed().as_millis(),
         stage_profile,
         Default::default(),
+        Some(total_source_bytes),
     );
     let receipt_path = output_dir.join("receipt.json");
     let receipt_json = serde_json::to_string_pretty(&receipt)

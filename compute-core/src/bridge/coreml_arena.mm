@@ -224,4 +224,96 @@ int tribunus_arena_alloc_bytes(TribunusArenaInfo* info, int32_t byte_count) {
     }
 }
 
+int tribunus_create_iosurface_from_mmap(TribunusArenaInfo* info,
+                                         const void* base,
+                                         int32_t width,
+                                         int32_t height,
+                                         uint32_t pixel_format,
+                                         int32_t byte_count) {
+    @autoreleasepool {
+        if (!info || byte_count <= 0) return -1;
+        memset(info, 0, sizeof(TribunusArenaInfo));
+
+        int32_t bytes_per_elem;
+        switch (pixel_format) {
+            case kCVPixelFormatType_OneComponent8:
+                bytes_per_elem = 1;
+                break;
+            case kCVPixelFormatType_OneComponent16Half:
+                bytes_per_elem = 2;
+                break;
+            case kCVPixelFormatType_OneComponent32Float:
+                bytes_per_elem = 4;
+                break;
+            default:
+                // Fall back to conservative estimate
+                bytes_per_elem = byte_count / (width * height);
+                if (bytes_per_elem < 1) bytes_per_elem = 1;
+                break;
+        }
+
+        NSDictionary* surfaceAttrs = @{
+            (id)kIOSurfaceWidth: @(width),
+            (id)kIOSurfaceHeight: @(height),
+            (id)kIOSurfaceBytesPerElement: @(bytes_per_elem),
+            (id)kIOSurfacePixelFormat: @(pixel_format),
+        };
+
+        IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)surfaceAttrs);
+        if (!surface) return -2;
+
+        // Lock IOSurface and get base address for initialization
+        IOSurfaceLock(surface, 0, NULL);
+        void* surface_base = IOSurfaceGetBaseAddress(surface);
+        if (!surface_base) {
+            IOSurfaceUnlock(surface, 0, NULL);
+            CFRelease(surface);
+            return -3;
+        }
+
+        // If a base pointer is provided, copy the data into the IOSurface.
+        // This is a one-time copy at load time; subsequent access by ANE/GPU/CPU
+        // is zero-copy through the IOSurface's wired physical pages.
+        if (base != NULL && byte_count > 0) {
+            memcpy(surface_base, base, byte_count);
+        } else {
+            memset(surface_base, 0, byte_count);
+        }
+
+        IOSurfaceUnlock(surface, 0, NULL);
+
+        // Wrap in CVPixelBuffer for Core ML compatibility
+        CVPixelBufferRef cvBuffer = NULL;
+        CVReturn cvRet = CVPixelBufferCreateWithIOSurface(
+            kCFAllocatorDefault, surface, NULL, &cvBuffer);
+        if (cvRet != kCVReturnSuccess || !cvBuffer) {
+            CFRelease(surface);
+            return -6;
+        }
+
+        CVReturn lockRet = CVPixelBufferLockBaseAddress(cvBuffer, 0);
+        if (lockRet != kCVReturnSuccess) {
+            CVPixelBufferUnlockBaseAddress(cvBuffer, 0);
+            CFRelease(cvBuffer);
+            CFRelease(surface);
+            return -7;
+        }
+
+        void* cv_base = CVPixelBufferGetBaseAddress(cvBuffer);
+        size_t bpr = CVPixelBufferGetBytesPerRow(cvBuffer);
+
+        info->width = width;
+        info->height = height;
+        info->logical_dim0 = height;
+        info->logical_dim1 = width;
+        info->pixel_format = (int32_t)pixel_format;
+        info->byte_size = byte_count;
+        info->bytes_per_row = (uint32_t)bpr;
+        info->base_address = cv_base;
+        info->cv_buffer = (void*)CFRetain(cvBuffer);
+        info->io_surface = (void*)CFRetain(surface);
+        return 0;
+    }
+}
+
 } // extern "C"

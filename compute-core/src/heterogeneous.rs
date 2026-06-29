@@ -6,6 +6,7 @@ use mlx_rs::error::Result as MlxResult;
 use mlx_rs::Array;
 
 use crate::arena::Arena;
+use crate::arena::DataType;
 use crate::config::operation_route::OperationRoute;
 use crate::log_debug;
 use crate::memory::allocator::IosurfaceAllocator;
@@ -64,12 +65,18 @@ impl SharedMemoryIsland {
     ) -> MlxResult<(Arc<Arena>, Array)> {
         let n = shape.iter().product::<i32>() as u32;
         let alloc = self.allocator.lock();
+        let arena_dtype = match dtype {
+            mlx_rs::Dtype::Float16 => DataType::Float16,
+            mlx_rs::Dtype::Float32 => DataType::Float32,
+            _ => return Err(mlx_rs::error::Exception::custom(
+                format!("unsupported arena dtype: {:?}", dtype))),
+        };
         let arena_id = alloc
-            .allocate(1, n, dtype)
-            .map_err(|e| mlx_rs::error::Exception::from(e.as_str()))?;
+            .allocate(1, n, arena_dtype)
+            .map_err(|e| mlx_rs::error::Exception::custom(e.to_string()))?;
         let arena = alloc
             .get_arena(arena_id)
-            .ok_or_else(|| mlx_rs::error::Exception::from("arena not found"))?;
+            .ok_or_else(|| mlx_rs::error::Exception::custom("arena not found"))?;
         drop(alloc);
         let arena_arc = Arc::new(arena);
         let arr =

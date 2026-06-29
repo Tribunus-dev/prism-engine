@@ -195,6 +195,7 @@ impl PhaseEngine {
         let mut ctx = ExecutionContext {
             request_id: step.request_id.0,
             token_position: step.token_position,
+            sink_detector: None,
             is_prefill: step.mode == InferenceMode::Prefill,
             token_ids: step
                 .input_tokens

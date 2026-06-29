@@ -10,6 +10,7 @@
 //! where >0.5 means "window should grow".
 
 use crate::arena::Arena;
+use crate::arena::DataType;
 use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 
 /// Input feature name in the compiled Core ML model.
@@ -48,8 +49,8 @@ impl AneSinkDetector {
             match CoreMlModel::load_with_compute_units(path, CoreMlComputeUnits::CpuAndNeuralEngine)
             {
                 Ok(m) => {
-                    let inp = Arena::new(1, max_seq_len, mlx_rs::Dtype::Float16)?;
-                    let out = Arena::new(1, 1, mlx_rs::Dtype::Float16)?;
+                    let inp = Arena::new(1, max_seq_len, DataType::Float16)?;
+                    let out = Arena::new(1, 1, DataType::Float16)?;
                     (Some(m), Some(inp), Some(out))
                 }
                 Err(e) => {

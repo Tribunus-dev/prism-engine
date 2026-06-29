@@ -1,0 +1,15 @@
+=== WS8A2 IOSurface Pixel-Buffer Diagnostic ===
+Device: Apple M1 MacBook Pro 16GB
+
+  [OK] IOSurfaceCreate('L00h') -- allocated
+  actual format: 0x4c303068 'h00L'
+  [OK] CVPixelBufferCreateWithIOSurface -- CVReturn=0
+  [OK] Metal texture from IOSurface ('R16Float') -- bound
+  iosurface handle: valid
+  [OK] MLMultiArray from IOSurface base_address -- bound
+  [OK] IOSurface write pattern (1..64 as Float16) -- ok
+  [OK] MLMultiArray readback first element -- 1.0
+
+=== Summary ===
+  OK: 6  FAIL: 0
+  All paths viable, including pixel-buffer handoff.

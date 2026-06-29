@@ -334,7 +334,7 @@ impl AppleSharedArena {
                 // kCVPixelFormatType_OneComponent16Half). Other slots use generic surface.
                 let backing = match slot_entry.manifest.dtype.as_str() {
                     "float16" | "fp16" =>
-                        crate::arena::Arena::new(pw, ph, mlx_rs::Dtype::Float16),
+                        crate::arena::Arena::new(pw, ph, crate::arena::DataType::Float16),
                     _ =>
                         crate::arena::Arena::new_bytes(byte_count as u32),
                 }

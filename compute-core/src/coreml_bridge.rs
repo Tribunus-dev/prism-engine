@@ -45,6 +45,15 @@ extern "C" {
         output_name: *const i8,
         output_arena: *mut ArenaInfo,
     ) -> i32;
+    fn tribunus_coreml_predict_multi(
+        model: *mut std::ffi::c_void,
+        input_names: *mut *const i8,
+        input_arenas: *mut *const ArenaInfo,
+        num_inputs: i32,
+        output_names: *mut *const i8,
+        output_arenas: *mut *mut ArenaInfo,
+        num_outputs: i32,
+    ) -> i32;
 }
 
 /// Owned Core ML model handle.
@@ -147,6 +156,52 @@ impl Drop for CoreMlModel {
         if !self.ptr.is_null() {
             unsafe { tribunus_coreml_free_model(self.ptr) };
         }
+    }
+}
+
+impl CoreMlModel {
+    /// Run prediction with multiple named inputs and outputs.
+    /// All inputs are set up as a feature dictionary, all outputs as backings.
+    /// The model is evaluated once with all I/O bound.
+    pub fn predict_multi(
+        &self,
+        input_names: &[&str],
+        input_infos: &[&ArenaInfo],
+        output_names: &[&str],
+        output_infos: &mut [&mut ArenaInfo],
+    ) -> Result<(), String> {
+        let c_input_names: Vec<std::ffi::CString> = input_names
+            .iter()
+            .map(|n| std::ffi::CString::new(*n).map_err(|e| format!("CString: {}", e)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let c_output_names: Vec<std::ffi::CString> = output_names
+            .iter()
+            .map(|n| std::ffi::CString::new(*n).map_err(|e| format!("CString: {}", e)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut c_in_ptrs: Vec<*const i8> = c_input_names.iter().map(|s| s.as_ptr()).collect();
+        let mut c_out_ptrs: Vec<*const i8> = c_output_names.iter().map(|s| s.as_ptr()).collect();
+
+        let mut in_arena_ptrs: Vec<*const ArenaInfo> =
+            input_infos.iter().map(|a| &**a as *const ArenaInfo).collect();
+        let mut out_arena_ptrs: Vec<*mut ArenaInfo> =
+            output_infos.iter_mut().map(|a| &mut **a as *mut ArenaInfo).collect();
+
+        let status = unsafe {
+            tribunus_coreml_predict_multi(
+                self.ptr,
+                c_in_ptrs.as_mut_ptr(),
+                in_arena_ptrs.as_mut_ptr(),
+                input_names.len() as i32,
+                c_out_ptrs.as_mut_ptr(),
+                out_arena_ptrs.as_mut_ptr(),
+                output_names.len() as i32,
+            )
+        };
+        if status != 0 {
+            return Err(format!("tribunus_coreml_predict_multi failed: {}", status));
+        }
+        Ok(())
     }
 }
 

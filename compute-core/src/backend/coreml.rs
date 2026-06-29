@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use super::graph::*;
-use super::routing::*;
+use crate::backend::routing::*;
 use crate::coreml_bridge::CoreMlModel;
 
 /// Core ML compute-unit policies.

@@ -31,6 +31,16 @@ int tribunus_arena_alloc(TribunusArenaInfo* info,
 /// The memory is zero-initialized and accessible via info->base_address.
 /// Returns 0 on success, nonzero on failure.
 int tribunus_arena_alloc_bytes(TribunusArenaInfo* info, int32_t byte_count);
+/// Create an IOSurface from a page-aligned mmap pointer.
+/// The IOSurface is created with the given width, height, and pixel format.
+/// If `base` is non-null, the IOSurface memory is initialized by copying
+/// `byte_count` bytes from `base`. Returns 0 on success, nonzero on failure.
+int tribunus_create_iosurface_from_mmap(TribunusArenaInfo* info,
+                                         const void* base,
+                                         int32_t width,
+                                         int32_t height,
+                                         uint32_t pixel_format,
+                                         int32_t byte_count);
 
 void tribunus_arena_free(TribunusArenaInfo* info);
 

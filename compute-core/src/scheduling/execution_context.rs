@@ -10,6 +10,8 @@ pub struct ExecutionContext {
     pub request_id: u64,
     /// Current token position in decode.
     pub token_position: usize,
+    /// ANE-based sink detector for adaptive window sizing.
+    pub sink_detector: Option<crate::ane::sink_detector::AneSinkDetector>,
     /// Whether this is a prefill or decode pass.
     pub is_prefill: bool,
     /// Input token IDs for this step (set by caller before dispatch).
@@ -33,6 +35,7 @@ impl ExecutionContext {
         Self {
             request_id: 0,
             token_position: 0,
+            sink_detector: None,
             is_prefill: true,
             token_ids: Vec::new(),
             hidden_state: None,
@@ -40,5 +43,12 @@ impl ExecutionContext {
             layer_weights: Arc::new(Vec::new()),
             backend: None,
         }
+    }
+
+    /// Run the ANE sink detector on attention weights from the last layer.
+    /// Returns whether the adaptive window should grow, or None if the
+    /// detector isn't loaded.
+    pub fn detect_sink_grow(&mut self, attention_weights: &[f32]) -> Option<bool> {
+        self.sink_detector.as_mut()?.check(attention_weights).ok()
     }
 }

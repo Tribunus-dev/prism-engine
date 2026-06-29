@@ -79,6 +79,7 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
     use std::time::Instant;
 
     use crate::arena::Arena;
+    use crate::arena::DataType;
     use crate::coreml_bridge::CoreMlModel;
 
     let compute_units = CoreMlComputeUnits::CpuAndNeuralEngine;
@@ -92,9 +93,9 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
         })?;
 
     // 2. Allocate IOSurface-backed arenas for input and output.
-    let input_arena = Arena::new(batch, dim, mlx_rs::Dtype::Float16)
+    let input_arena = Arena::new(batch, dim, DataType::Float16)
         .map_err(|e| format!("evidence_probe: input arena alloc failed: {}", e))?;
-    let output_arena = Arena::new(batch, dim, mlx_rs::Dtype::Float16)
+    let output_arena = Arena::new(batch, dim, DataType::Float16)
         .map_err(|e| format!("evidence_probe: output arena alloc failed: {}", e))?;
 
     let input_shape = vec![batch as u64, dim as u64];

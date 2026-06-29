@@ -1,0 +1,143 @@
+warning: unused import: `mach_sys::mach_time`
+ --> mlx-rs-fork/mlx-rs/src/random.rs:7:5
+  |
+7 | use mach_sys::mach_time;
+  |     ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mlx-rs` (lib) generated 1 warning (run `cargo fix --lib -p mlx-rs` to apply 1 suggestion)
+warning: unused import: `crate::compilation::ane_eligibility::ShapeBucketFamily`
+  --> compute-core/src/compilation/ane_admission_gate.rs:23:5
+   |
+23 | use crate::compilation::ane_eligibility::ShapeBucketFamily;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `IOSurfaceAllocationAttestation`, `LiveIOSurfaceSlot`, and `SlotState`
+  --> compute-core/src/compilation/apple_installation.rs:13:23
+   |
+13 |     AppleSharedArena, IOSurfaceAllocationAttestation, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass, SlotState,
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^                         ^^^^^^^^^^^^^^^^^                  ^^^^^^^^^
+
+warning: `tribunus-compute-core` (lib) generated 2 warnings (run `cargo fix --lib -p tribunus-compute-core` to apply 2 suggestions)
+warning: unused variable: `state`
+   --> compute-core/src/bin/prism_server.rs:120:28
+    |
+120 | async fn list_models(State(state): State<Arc<Mutex<AppState>>>) -> Json<ModelList> {
+    |                            ^^^^^ help: if this is intentional, prefix it with an underscore: `_state`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `graph` is never read
+  --> compute-core/src/bin/prism_server.rs:53:5
+   |
+51 | struct AppState {
+   |        -------- field in this struct
+52 |     engine: PrismEngine,
+53 |     graph: ModelGraph,
+   |     ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `temperature` is never read
+  --> compute-core/src/bin/prism_server.rs:64:5
+   |
+60 | struct ChatRequest {
+   |        ----------- field in this struct
+...
+64 |     temperature: Option<f32>,
+   |     ^^^^^^^^^^^
+
+warning: unused import: `Duration`
+  --> compute-core/tests/ane_throughput_evidence.rs:18:17
+   |
+18 | use std::time::{Duration, Instant, SystemTime};
+   |                 ^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `OverlapMetrics`
+  --> compute-core/tests/ane_throughput_evidence.rs:33:52
+   |
+33 |     TriLaneCostModel, TriLaneEvidenceRequirements, OverlapMetrics,
+   |                                                    ^^^^^^^^^^^^^^
+
+warning: unused import: `CoreMlIslandReceipt`
+  --> compute-core/tests/ane_throughput_evidence.rs:42:65
+   |
+42 | use tribunus_compute_core::coreml_pipeline::{compile_mlpackage, CoreMlIslandReceipt};
+   |                                                                 ^^^^^^^^^^^^^^^^^^^
+
+warning: field `overlap_fraction` is never read
+   --> compute-core/tests/ane_throughput_evidence.rs:874:9
+    |
+869 |     struct EpochTiming {
+    |            ----------- field in this struct
+...
+874 |         overlap_fraction: f64,
+    |         ^^^^^^^^^^^^^^^^
+    |
+    = note: `EpochTiming` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tribunus-compute-core` (bin "prism-server") generated 3 warnings (run `cargo fix --bin "prism-server" -p tribunus-compute-core` to apply 1 suggestion)
+warning: `tribunus-compute-core` (test "ane_throughput_evidence") generated 4 warnings (run `cargo fix --test "ane_throughput_evidence" -p tribunus-compute-core` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.19s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/ane_throughput_evidence.rs (target/debug/deps/ane_throughput_evidence-90d31760a59aa9c8)
+
+running 3 tests
+test test_aggregate_throughput_exceeds_baseline ... BASELINE: 50 epochs in 0 ms (0.5 µs/epoch, 500000.0 eps)
+TRI-LANE: 100 epochs across 2 sequences in 0 ms (510204.1 eps, 1.02x vs baseline)
+OVERLAP: seq A 0.0%, seq B 0.0% epochs with nonzero overlap
+ok
+test test_multi_sequence_ane_metal_overlap ... coreml_load_model: loaded /tmp/ane_throughput_models/fp16_throughput.mlmodelc
+  inputs:
+    input: input : MultiArray (Float16, 1 × 64)
+  outputs:
+    matmul_1: matmul_1 : MultiArray (Float16, 1 × 64)
+coreml_load_model: loaded /tmp/ane_throughput_models/fp16_throughput.mlmodelc
+  inputs:
+    input: input : MultiArray (Float16, 1 × 64)
+  outputs:
+    matmul_1: matmul_1 : MultiArray (Float16, 1 × 64)
+
+thread 'test_multi_sequence_ane_metal_overlap' (51925) panicked at compute-core/tests/ane_throughput_evidence.rs:624:5:
+seq A: only 0.0% of epochs have nonzero overlap (expected ≥1%)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library/core/src/panicking.rs:80:14
+   2: ane_throughput_evidence::test_multi_sequence_ane_metal_overlap
+             at ./tests/ane_throughput_evidence.rs:624:5
+   3: ane_throughput_evidence::test_multi_sequence_ane_metal_overlap::{{closure}}
+             at ./tests/ane_throughput_evidence.rs:494:43
+   4: core::ops::function::FnOnce::call_once
+             at /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library/core/src/ops/function.rs:250:5
+   5: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+FAILED
+test test_overlap_latency_headroom ... --- Overlap Latency Headroom Report ---
+Seq A: avg wall 0.4 µs, avg overlap 0.0 µs
+Seq B: avg wall 0.4 µs, avg overlap 0.0 µs
+Serial sum: 17.3 µs across 40 timings
+Cycle wall: 34.0 µs across 20 cycles
+Epoch-level speedup: 0.5082x
+Avg boundary latency: 0.4 µs (19 samples)
+Avg CPU orchestration: seq A 1.3 µs, seq B 3.0 µs
+Epochs with non-zero overlap: 0/40 (0.0%)
+ok
+
+failures:
+
+failures:
+    test_multi_sequence_ane_metal_overlap
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+error: test failed, to rerun pass `-p tribunus-compute-core --test ane_throughput_evidence`

@@ -13,6 +13,7 @@
 
 use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use crate::arena::Arena;
+use crate::arena::DataType;
 
 /// Generate MIL program text for KV cache decompression.
 ///
@@ -288,9 +289,9 @@ impl AneCompressor {
 
         // Allocate arenas sized for the largest FP16 page.
         let arena_size = head_dim * n_kv_heads;
-        let input_arena = Arena::new(arena_size, 1, mlx_rs::Dtype::Float16)
+        let input_arena = Arena::new(arena_size, 1, DataType::Float16)
             .map_err(|e| format!("AneCompressor input arena: {}", e))?;
-        let output_arena = Arena::new(arena_size, 1, mlx_rs::Dtype::Float16)
+        let output_arena = Arena::new(arena_size, 1, DataType::Float16)
             .map_err(|e| format!("AneCompressor output arena: {}", e))?;
 
         Ok(Self {
