@@ -290,6 +290,16 @@ impl Megakernel {
             std::ptr::write_bytes(draft_output.contents(), 0, draft_output_bytes as usize);
         }
 
+        // ── Per-head attention gates (Gated Attention from Qwen NeurIPS 2025) ──
+        // One f16 per query head. sigmoid(g) gates the SDPA output per head.
+        let head_gates_bytes = NUM_Q_HEADS as u64 * 2;  // 16 heads × 2 bytes = 32 bytes
+        let head_gates = self.device.new_buffer(
+            head_gates_bytes,
+            MTLResourceOptions::StorageModeShared,
+        );
+        // Initialize to 0 (sigmoid(0) = 0.5 = half-open gate)
+        unsafe { std::ptr::write_bytes(head_gates.contents(), 0, head_gates_bytes as usize); }
+
         // One-shot dispatch of persistent kernel (runs forever)
         let cmd_buf = self.queue.new_command_buffer();
         let enc = cmd_buf.new_compute_command_encoder();
@@ -342,6 +352,7 @@ impl Megakernel {
         enc.set_buffer(24, Some(&*slot_logits), 0);
         enc.set_buffer(25, Some(&*completion_counter), 0);
         enc.set_buffer(28, Some(&*draft_output), 0);
+        enc.set_buffer(29, Some(&*head_gates), 0);
 
         // Threadgroup scratch for ternary->FP16 decompress in tile-GEMV:
         // 640 halves = 1280 bytes at index 0 (consumed by the `tile_scratch`
@@ -384,6 +395,7 @@ impl Megakernel {
             decompress_progress,
             entropy_map,
             active_mask,
+            head_gates,
             draft_output,
         })
     }
@@ -559,4 +571,6 @@ pub struct KernelBuffers {
     /// Draft model output buffer: per-slot, first u32 = candidate count, then
     /// MAX_DRAFT_CANDIDATES × u32 token IDs, then MAX_DRAFT_CANDIDATES × f32 log-probs.
     pub draft_output: metal::Buffer,
+    /// Per-head attention gates (NUM_Q_HEADS × f16). sigmoid(gate) gates the SDPA output.
+    pub head_gates: metal::Buffer,
 }

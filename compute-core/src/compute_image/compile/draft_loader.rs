@@ -535,7 +535,7 @@ mod tests {
         // Matrix with cols=33 (one full block + 1 element in second block).
         let rows = 2usize;
         let cols = 33usize;
-        let weights: Vec<f32> = (0..rows * cols).map(|i| (i % 7 - 3) as f32).collect();
+        let weights: Vec<f32> = (0..rows * cols).map(|i| ((i as i32) % 7 - 3) as f32).collect();
 
         let packed = pack_matrix_to_fused_ternary(&weights, rows, cols);
 
