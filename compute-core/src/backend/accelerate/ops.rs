@@ -2,7 +2,6 @@
 
 use crate::backend::accelerate_ffi;
 use crate::backend::routing::*;
-use super::*;
 use crate::backend::{BackendCapabilities, DType, EvaluationReceipt, MatmulOp, QuantizedMatmulOp, QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle};
 use crate::memory::allocator::IosurfaceAllocator;
 use parking_lot::Mutex;
@@ -748,7 +747,7 @@ impl TensorBackend for AccelerateBackend {
 
                 // Compute x_sq = x_row * x_row via vDSP_vmul
                 let mut x_sq_buf = uncached_vec_f32!(dim);
-                let mut x_sq = x_sq_buf.as_mut_slice();
+                let x_sq = x_sq_buf.as_mut_slice();
                 unsafe {
                     accelerate_ffi::vDSP_vmul(
                         x_row.as_ptr(),
@@ -775,7 +774,7 @@ impl TensorBackend for AccelerateBackend {
                 // First multiply by scalar inv_rms
                 let scalar = [inv_rms];
                 let mut scaled_buf = uncached_vec_f32!(dim);
-                let mut scaled = scaled_buf.as_mut_slice();
+                let scaled = scaled_buf.as_mut_slice();
                 unsafe {
                     accelerate_ffi::vDSP_vsmul(
                         x_row.as_ptr(),
@@ -924,13 +923,13 @@ impl TensorBackend for AccelerateBackend {
             //   sigmoid(x) = exp(x) / (1 + exp(x))
             //   silu(x) = x * exp(x) / (1 + exp(x))
             let mut exp_x_buf = uncached_vec_f32!(n);
-            let mut exp_x = exp_x_buf.as_mut_slice();
+            let exp_x = exp_x_buf.as_mut_slice();
             unsafe {
                 accelerate_ffi::vvexpf(exp_x.as_mut_ptr(), x_data.as_ptr(), &n_i);
             }
             // Compute x * exp_x
             let mut x_exp_buf = uncached_vec_f32!(n);
-            let mut x_exp = x_exp_buf.as_mut_slice();
+            let x_exp = x_exp_buf.as_mut_slice();
             unsafe {
                 accelerate_ffi::vDSP_vmul(
                     x_data.as_ptr(),
@@ -944,10 +943,10 @@ impl TensorBackend for AccelerateBackend {
             }
             // Compute 1 + exp_x
             let mut one_plus_exp_buf = uncached_vec_f32!(n);
-            let mut one_plus_exp = one_plus_exp_buf.as_mut_slice();
+            let one_plus_exp = one_plus_exp_buf.as_mut_slice();
             unsafe {
                 let mut ones_buf = uncached_vec_f32!(n);
-                let mut ones = ones_buf.as_mut_slice();
+                let ones = ones_buf.as_mut_slice();
                 ones.fill(1.0f32);
                 accelerate_ffi::vDSP_vadd(
                     ones.as_ptr(),
@@ -1068,7 +1067,7 @@ impl TensorBackend for AccelerateBackend {
     fn softmax(&mut self, x: TensorHandle, axis: i32) -> Result<TensorHandle, String> {
         let x_data_src = self.data(x)?;
         let mut x_data_buf = uncached_vec_f32!(x_data_src.len());
-        let mut x_data = x_data_buf.as_mut_slice();
+        let x_data = x_data_buf.as_mut_slice();
         x_data.copy_from_slice(x_data_src);
         let x_shape = self.stored_shape(x)?.to_vec();
 

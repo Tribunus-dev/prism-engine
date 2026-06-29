@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::arena_info::ArenaInfo;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
@@ -26,7 +27,7 @@ fn md(n: &str) -> PathBuf {
     p
 }
 fn ma(d0: u32, d1: u32) -> Arena {
-    Arena::new(d0, d1, Dtype::Float16).expect("a")
+    Arena::new(d0, d1, DataType::Float16).expect("a")
 }
 
 fn rw(r: i64, c: i64) -> Vec<f32> {
@@ -69,7 +70,6 @@ fn mdl(h: i64, i: i64, tag: &str) -> (PathBuf, String) {
         output_name: on.clone(),
         inputs: vec![("x".into(), vec![1, h])],
         outputs: vec![(on.clone(), vec![1, i])],
-        spec_version: 9,
     };
     (cc(tag, p, m), on)
 }

@@ -13,6 +13,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::CoreMlModel;
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -25,7 +26,7 @@ fn md(n: &str) -> PathBuf {
     p
 }
 fn ma(d0: u32, d1: u32) -> Arena {
-    Arena::new(d0, d1, Dtype::Float16).expect("a")
+    Arena::new(d0, d1, DataType::Float16).expect("a")
 }
 
 fn rw(r: i64, c: i64) -> Vec<f32> {
@@ -189,7 +190,6 @@ fn measure(tag: &str, prog: mil_spec::Program, h: i64, _i: i64) {
         output_name: on.clone(),
         inputs: vec![("x".into(), vec![1, h])],
         outputs: vec![(on.clone(), vec![1, h])],
-        spec_version: 9,
     };
     let mp = cc(tag, prog, meta);
     let art = dir_size(&mp);

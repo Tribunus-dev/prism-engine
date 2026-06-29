@@ -10,7 +10,7 @@ use crate::compute_image::apple_cimage_manifest::{
     AppleTriLaneArtifactManifest, IOSurfaceSlotManifest as CimageSlotManifest,
 };
 use crate::compute_image::apple_shared_arena::{
-    AppleSharedArena, IOSurfaceAllocationAttestation, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass, SlotState,
+    AppleSharedArena, IOSurfaceSlotManifest, SlotReuseClass,
 };
 use crate::backend::coreml_iosurface::{CoreMlComputePolicy, CoreMlIOSurfaceExecutable};
 use crate::backend::metal_iosurface::{
@@ -293,6 +293,9 @@ mod tests {
         AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, CoreMlArtifactManifest,
         MetalArtifactManifest,
     };
+    use crate::compute_image::apple_shared_arena::SlotState;
+    use crate::compute_image::apple_shared_arena::LiveIOSurfaceSlot;
+    use crate::compute_image::apple_shared_arena::IOSurfaceAllocationAttestation;
 
     fn dummy_hardware() -> AppleHardwareCompatibility {
         AppleHardwareCompatibility {

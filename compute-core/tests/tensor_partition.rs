@@ -16,6 +16,7 @@ use std::time::Instant;
 
 use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -116,7 +117,6 @@ fn build_chunk_model(
         output_name: on.clone(),
         inputs: vec![("x".into(), vec![1, chunk_input_dim])],
         outputs: vec![(on.clone(), vec![1, output_dim])],
-        spec_version: 9,
     };
 
     let pkg = write_mlpackage(prog, dir, &meta).map_err(|e| format!("write: {}", e))?;

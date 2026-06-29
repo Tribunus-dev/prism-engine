@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use coreml_proto::proto::mil_spec;
-use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -144,7 +144,7 @@ fn bench_one(
 }
 
 fn make_arena(d0: u32, d1: u32) -> Arena {
-    Arena::new(d0, d1, Dtype::Float16).expect("arena")
+    Arena::new(d0, d1, DataType::Float16).expect("arena")
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -190,7 +190,6 @@ fn ane_throughput_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![1, H])],
             outputs: vec![(out_name.clone(), vec![1, FFN])],
-            spec_version: 9,
         };
 
         // ── Compile ────────────────────────────────────────────────

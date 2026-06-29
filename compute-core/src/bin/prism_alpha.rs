@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 use clap::{Args, Parser, Subcommand};
 use std::collections::HashMap;
 use std::path::Path;

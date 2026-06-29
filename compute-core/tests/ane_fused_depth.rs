@@ -22,6 +22,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -192,7 +193,7 @@ fn ane_fused_depth_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![1, H])],
             outputs: vec![(out_name.clone(), vec![1, H])],
-            spec_version: 10,
+
         };
 
         // ── Compile ───────────────────────────────────────────────
@@ -210,7 +211,7 @@ fn ane_fused_depth_sweep() {
         let path_str = model_path.to_str().expect("valid path");
 
         // ── Allocate arenas ───────────────────────────────────────
-        let in_arena = match Arena::new(1, H as u32, Dtype::Float16) {
+        let in_arena = match Arena::new(1, H as u32, DataType::Float16) {
             Ok(a) => a,
             Err(e) => {
                 println!(
@@ -221,7 +222,7 @@ fn ane_fused_depth_sweep() {
                 continue;
             }
         };
-        let out_arena = match Arena::new(1, H as u32, Dtype::Float16) {
+        let out_arena = match Arena::new(1, H as u32, DataType::Float16) {
             Ok(a) => a,
             Err(e) => {
                 println!(

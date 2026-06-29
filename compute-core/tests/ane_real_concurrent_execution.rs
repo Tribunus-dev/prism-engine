@@ -133,7 +133,6 @@ fn build_ane_packet(model_dir: &Path) -> Result<PathBuf, String> {
         output_name: output_name.clone(),
         inputs: vec![("input".into(), vec![ANE_BATCH, ANE_SEQ, ANE_HIDDEN])],
         outputs: vec![(output_name.clone(), vec![ANE_BATCH, ANE_SEQ, ANE_HIDDEN])],
-        spec_version: 9,
     };
 
     let mlpackage_dir =

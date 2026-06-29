@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::backend::accelerate::AccelerateBackend;
 use tribunus_compute_core::backend::MlxBackend;
 use tribunus_compute_core::backend::*;

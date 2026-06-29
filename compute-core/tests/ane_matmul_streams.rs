@@ -24,6 +24,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec::{self, argument, dimension, tensor_value, value};
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -433,7 +434,7 @@ fn ane_matmul_stream_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![BATCH as i64, H])],
             outputs: vec![(out_name.clone(), vec![BATCH as i64, FFN])],
-            spec_version: 9,
+
         };
 
         // ── Compile ───────────────────────────────────────────────
@@ -454,7 +455,7 @@ fn ane_matmul_stream_sweep() {
         let path_str = model_path.to_str().expect("valid path");
 
         // ── Allocate arenas ───────────────────────────────────────
-        let in_arena = match Arena::new(BATCH, H as u32, Dtype::Float16) {
+        let in_arena = match Arena::new(BATCH, H as u32, DataType::Float16) {
             Ok(a) => a,
             Err(e) => {
                 println!(
@@ -465,7 +466,7 @@ fn ane_matmul_stream_sweep() {
                 continue;
             }
         };
-        let out_arena = match Arena::new(BATCH, FFN as u32, Dtype::Float16) {
+        let out_arena = match Arena::new(BATCH, FFN as u32, DataType::Float16) {
             Ok(a) => a,
             Err(e) => {
                 println!(

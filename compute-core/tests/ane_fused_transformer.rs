@@ -29,6 +29,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -309,15 +310,14 @@ fn bench_model(
         output_name: out_name.into(),
         inputs: vec![("x".into(), vec![batch as i64, rows])],
         outputs: vec![(out_name.into(), vec![batch as i64, cols])],
-        spec_version: 10,
     };
 
     let model_path = compile(tag, prog, meta).map_err(|e| format!("compile {}: {}", tag, e))?;
     let path_str = model_path.to_str().ok_or(format!("bad path for {}", tag))?;
 
-    let in_arena = Arena::new(batch, rows as u32, Dtype::Float16)
+    let in_arena = Arena::new(batch, rows as u32, DataType::Float16)
         .map_err(|e| format!("{} in arena: {}", tag, e))?;
-    let out_arena = Arena::new(batch, cols as u32, Dtype::Float16)
+    let out_arena = Arena::new(batch, cols as u32, DataType::Float16)
         .map_err(|e| format!("{} out arena: {}", tag, e))?;
     fill_arena(&in_arena, (batch as usize) * (rows as usize));
 

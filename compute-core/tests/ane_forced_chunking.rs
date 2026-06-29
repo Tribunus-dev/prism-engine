@@ -17,6 +17,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -188,7 +189,6 @@ fn ane_forced_chunking() {
         output_name: mono_out_name.clone(),
         inputs: vec![("x".into(), vec![1, H, 1, BATCH])],
         outputs: vec![(mono_out_name.clone(), vec![1, FFN, 1, BATCH])],
-        spec_version: 10,
     };
     println!("[compile] Monolithic...");
     let mono_path = match compile("monolith", mono_prog, mono_meta) {
@@ -222,7 +222,7 @@ fn ane_forced_chunking() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![1, H, 1, BATCH])],
             outputs: vec![(out_name.clone(), vec![1, FFN, 1, BATCH])],
-            spec_version: 10,
+
         };
         match compile(&tag, prog, chunk_meta) {
             Ok(p) => chunked_models.push((n, p, in_name, out_name)),
@@ -231,9 +231,9 @@ fn ane_forced_chunking() {
     }
 
     // ── Benchmark ─────────────────────────────────────────────────
-    let in_arena = Arena::new(1, (H as u32) * (BATCH as u32), Dtype::Float16).expect("input arena");
+    let in_arena = Arena::new(1, (H as u32) * (BATCH as u32), DataType::Float16).expect("input arena");
     let out_arena =
-        Arena::new(1, (FFN as u32) * (BATCH as u32), Dtype::Float16).expect("output arena");
+        Arena::new(1, (FFN as u32) * (BATCH as u32), DataType::Float16).expect("output arena");
     fill_arena(&in_arena, 1 * H as usize * 1 * BATCH as usize);
 
     println!();

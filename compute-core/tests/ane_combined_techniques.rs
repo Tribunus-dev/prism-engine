@@ -32,6 +32,7 @@ use std::time::Instant;
 
 use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -570,7 +571,7 @@ fn ane_combined_techniques_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), input_shape.clone())],
             outputs: vec![(out_name.clone(), output_shape.clone())],
-            spec_version: 9,
+
         };
 
         // ── Compile ───────────────────────────────────────────────

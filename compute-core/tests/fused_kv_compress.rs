@@ -118,7 +118,7 @@ fn compile_fused_kernel() -> (ComputePipelineState, CommandQueue, Device) {
     let lib_path = tmp.join("kernel.metallib");
     std::fs::write(&src_path, FUSED_KERNEL).expect("write metal src");
     let status = std::process::Command::new("xcrun")
-        .args(["-sdk", "macosx", "metal", "-std=metal3.2", "-O3", "-c"])
+        .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
         .arg(src_path.to_str().unwrap())
         .arg("-o")
         .arg(air_path.to_str().unwrap())

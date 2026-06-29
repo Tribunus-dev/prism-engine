@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use coreml_proto::proto::mil_spec::{self, argument, dimension, tensor_value, value, value_type};
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -193,7 +194,6 @@ fn build_and_compile_mlp() -> Result<(PathBuf, String), String> {
         output_name: out_ssa.clone(),
         inputs: vec![("x".into(), vec![BATCH, IN_DIM])],
         outputs: vec![(out_ssa.clone(), vec![BATCH, OUT_DIM])],
-        spec_version: 9,
     };
     let mlpackage_dir =
         write_mlpackage(prog, model_dir, &meta).map_err(|e| format!("write_mlpackage: {}", e))?;

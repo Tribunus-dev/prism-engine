@@ -20,6 +20,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use parking_lot::Mutex;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::compute_image::metal_pipeline::compile_metal_source;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
@@ -219,7 +220,6 @@ fn build_ane_model(model_dir: &Path, h: i64, ffn: i64) -> Result<(PathBuf, Strin
         output_name: out_name.clone(),
         inputs: vec![("x".into(), vec![1, h])],
         outputs: vec![(out_name.clone(), vec![1, ffn])],
-        spec_version: 9,
     };
 
     let mlpackage_path =

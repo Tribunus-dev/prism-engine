@@ -56,6 +56,7 @@ struct Args {
 
 struct AppState {
     engine: PrismEngine,
+    #[allow(dead_code)]
     graph: ModelGraph,
     tokenizer: TribunusTokenizer,
 }
@@ -67,6 +68,7 @@ struct ChatRequest {
     model: Option<String>,
     messages: Vec<ChatMessage>,
     max_tokens: Option<u32>,
+    #[allow(dead_code)]
     temperature: Option<f32>,
     stream: Option<bool>,
 }
@@ -123,7 +125,7 @@ struct ModelInfo {
 
 // ── Handlers ────────────────────────────────────────────────────────────
 
-async fn list_models(State(state): State<Arc<Mutex<AppState>>>) -> Json<ModelList> {
+async fn list_models(State(_state): State<Arc<Mutex<AppState>>>) -> Json<ModelList> {
     Json(ModelList {
         object: "list".to_string(),
         data: vec![ModelInfo {
@@ -243,9 +245,9 @@ async fn main() -> Result<(), String> {
     }
 
     // Spawn the two dedicated threads.
-    let pump = spawn_ecore_prefetch_pump(multiplexer.clone());
+    let _pump = spawn_ecore_prefetch_pump(multiplexer.clone());
     let dynamic_mux = Arc::new(std::sync::Mutex::new(DynamicMultiplexer::new()));
-    let mux = spawn_ane_multiplexer(multiplexer, dynamic_mux);
+    let _mux = spawn_ane_multiplexer(multiplexer, dynamic_mux);
 
     eprintln!("[prism] Atomic scheduler running: E-core prefetch + P-core ANE multiplexer");
 

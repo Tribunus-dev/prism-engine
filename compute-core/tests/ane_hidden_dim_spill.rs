@@ -28,6 +28,7 @@ use coreml_proto::proto::mil_spec;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::{compile_mlpackage, CoreMlIslandReceipt};
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -121,7 +122,6 @@ fn build_model(h: u32) -> Result<PathBuf, String> {
         output_name: "matmul_1".into(),
         inputs: vec![("input".into(), vec![1, h as i64])],
         outputs: vec![("matmul_1".into(), vec![1, (2 * h) as i64])],
-        spec_version: 9,
     };
 
     // ── Write .mlpackage ──────────────────────────────────────────────────

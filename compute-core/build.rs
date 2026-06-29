@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 fn forward(name: &str) {
     let value = std::env::var(name).unwrap_or_else(|_| format!("{name}_MISSING"));
     println!("cargo:rustc-env=TRIBUNUS_{name}={value}");
@@ -105,7 +107,6 @@ fn main() {
         "cargo:rustc-env=TRIBUNUS_HOST_ARCH={}",
         std::env::consts::ARCH
     );
-
 
     // Guard: on non-macOS targets, a CPU backend feature must be explicit.
 

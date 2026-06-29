@@ -142,7 +142,7 @@ fn compile_megakernel() -> (ComputePipelineState, CommandQueue, Device) {
     std::fs::write(&s, MEGAKERNEL).unwrap();
     assert!(
         std::process::Command::new("xcrun")
-            .args(["-sdk", "macosx", "metal", "-std=metal3.2", "-O3", "-c"])
+            .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
             .arg(s.to_str().unwrap())
             .arg("-o")
             .arg(a.to_str().unwrap())

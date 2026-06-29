@@ -126,7 +126,7 @@ pub fn spawn_context_interceptor(
                         let path_str = path.to_string_lossy().to_string();
 
                         // Check if this file has been modified since last scan.
-                        let modified = match path.metadata().and_then(|m| m.modified()) {
+                        let _modified = match path.metadata().and_then(|m| m.modified()) {
                             Ok(t) => t,
                             _ => continue,
                         };

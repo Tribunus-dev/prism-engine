@@ -15,6 +15,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -27,7 +28,7 @@ fn md(n: &str) -> PathBuf {
     p
 }
 fn ma(d0: u32, d1: u32) -> Arena {
-    Arena::new(d0, d1, Dtype::Float16).expect("a")
+    Arena::new(d0, d1, DataType::Float16).expect("a")
 }
 
 fn cc(tag: &str, prog: mil_spec::Program, meta: ModelMeta) -> PathBuf {
@@ -73,7 +74,6 @@ fn mdl(h: i64, i: i64, tag: &str) -> (PathBuf, String) {
         output_name: on.clone(),
         inputs: vec![("x".into(), vec![1, h])],
         outputs: vec![(on.clone(), vec![1, i])],
-        spec_version: 9,
     };
     (cc(tag, p, m), on)
 }

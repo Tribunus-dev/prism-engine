@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::CoreMlModel;
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;

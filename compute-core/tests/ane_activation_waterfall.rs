@@ -29,6 +29,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -209,7 +210,7 @@ fn ane_activation_waterfall() {
             output_name: silu_out.clone(),
             inputs: vec![("x".into(), vec![1, c as i64, 1, 64])],
             outputs: vec![(silu_out.clone(), vec![1, c as i64, 1, 64])],
-            spec_version: 10,
+
         };
 
         let silu_path = match compile(&silu_tag, silu_prog, silu_meta) {
@@ -225,8 +226,8 @@ fn ane_activation_waterfall() {
         };
 
         let elem_count = (c as u32) * 64;
-        let silu_in_arena = Arena::new(1, elem_count, Dtype::Float16).expect("silu in arena");
-        let silu_out_arena = Arena::new(1, elem_count, Dtype::Float16).expect("silu out arena");
+        let silu_in_arena = Arena::new(1, elem_count, DataType::Float16).expect("silu in arena");
+        let silu_out_arena = Arena::new(1, elem_count, DataType::Float16).expect("silu out arena");
         fill_arena(&silu_in_arena, elem_count as usize);
 
         let silu_time = match bench_one(
@@ -271,7 +272,7 @@ fn ane_activation_waterfall() {
             output_name: conv_out.clone(),
             inputs: vec![("x".into(), vec![1, c as i64, 1, 64])],
             outputs: vec![(conv_out.clone(), vec![1, c as i64, 1, 64])],
-            spec_version: 10,
+
         };
 
         let conv_path = match compile(&conv_tag, conv_prog, conv_meta) {
@@ -286,8 +287,8 @@ fn ane_activation_waterfall() {
             }
         };
 
-        let conv_in_arena = Arena::new(1, elem_count, Dtype::Float16).expect("conv in arena");
-        let conv_out_arena = Arena::new(1, elem_count, Dtype::Float16).expect("conv out arena");
+        let conv_in_arena = Arena::new(1, elem_count, DataType::Float16).expect("conv in arena");
+        let conv_out_arena = Arena::new(1, elem_count, DataType::Float16).expect("conv out arena");
         fill_arena(&conv_in_arena, elem_count as usize);
 
         let conv_time = match bench_one(

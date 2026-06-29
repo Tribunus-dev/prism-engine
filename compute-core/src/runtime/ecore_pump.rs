@@ -19,7 +19,6 @@ use crate::runtime::components::AgentSlot;
 use crate::compute_image::compile::ternary::{
     swizzled_buffer_size,
     repack_ternary_to_swizzled_u8,
-    requantize_kv_to_swizzled_u8,
 };
 
 #[repr(C)]

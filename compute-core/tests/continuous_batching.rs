@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -149,7 +150,6 @@ fn build_sdpa_model(
         output_name: out.clone(),
         inputs: vec![("x".into(), vec![1, flat])],
         outputs: vec![(out.clone(), vec![1, flat])],
-        spec_version: 9,
     };
 
     let mlpackage_dir =
@@ -222,7 +222,6 @@ fn build_block_diag_model(model_dir: &Path) -> Result<(PathBuf, String, String),
         output_name: out.clone(),
         inputs: vec![("x".into(), vec![1, flat])],
         outputs: vec![(out, vec![1, flat])],
-        spec_version: 9,
     };
 
     let mlpackage_dir =

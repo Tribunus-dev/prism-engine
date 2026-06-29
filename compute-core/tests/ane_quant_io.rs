@@ -16,6 +16,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec::{self, argument, dimension, tensor_value, value};
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -499,7 +500,6 @@ fn ane_quant_io_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![BATCH as i64, H])],
             outputs: vec![(out_name.clone(), vec![BATCH as i64, FFN])],
-            spec_version: if *in_dtype == Dtype::Int8 { 10 } else { 9 },
         };
 
         let compile_start = Instant::now();

@@ -21,6 +21,7 @@ use coreml_proto::proto::mil_spec;
 use metal::*;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -263,16 +264,15 @@ fn test_ane_gpu_ring_buffer() {
         output_name: out_name.clone(),
         inputs: vec![("x".into(), vec![1, H])],
         outputs: vec![(out_name.clone(), vec![1, FFN])],
-        spec_version: 10,
     };
     let modelc_path = compile(prog, meta, "ane_rb");
 
     // ── 2. Allocate arenas ─────────────────────────────────────────────────
 
-    let in_arena = Arena::new(1, H as u32, Dtype::Float16).expect("input arena");
-    let out_arena = Arena::new(1, FFN as u32, Dtype::Float16).expect("output arena (ring buffer)");
+    let in_arena = Arena::new(1, H as u32, DataType::Float16).expect("input arena");
+    let out_arena = Arena::new(1, FFN as u32, DataType::Float16).expect("output arena (ring buffer)");
     let out_arena2 =
-        Arena::new(1, FFN as u32, Dtype::Float16).expect("output arena (ring buffer 2)");
+        Arena::new(1, FFN as u32, DataType::Float16).expect("output arena (ring buffer 2)");
 
     fill_input(&in_arena, (1 * H) as usize);
     fill_input(&out_arena, (1 * FFN) as usize);

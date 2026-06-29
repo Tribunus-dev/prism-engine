@@ -20,6 +20,6 @@ pub type SignalBus = mpsc::Sender<RuntimeSignal>;
 pub type SignalReceiver = mpsc::Receiver<RuntimeSignal>;
 
 /// Create a new signal bus with a synchronous channel of the given capacity.
-pub fn create_signal_bus(capacity: usize) -> (SignalBus, SignalReceiver) {
+pub fn create_signal_bus(_capacity: usize) -> (SignalBus, SignalReceiver) {
     mpsc::channel()
 }

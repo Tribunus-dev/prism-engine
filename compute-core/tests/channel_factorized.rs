@@ -25,6 +25,7 @@ use coreml_proto::proto::mil_spec;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::{compile_mlpackage, CoreMlIslandReceipt};
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -212,7 +213,6 @@ fn build_branch_model(branch: u32, global_weight_f32: &[f32]) -> Result<PathBuf,
         output_name: "matmul_1".into(),
         inputs: vec![("input".into(), vec![1, BRANCH_H as i64])],
         outputs: vec![("matmul_1".into(), vec![1, BRANCH_FFN as i64])],
-        spec_version: 9,
     };
 
     // ── Write .mlpackage ───────────────────────────────────────────────

@@ -83,7 +83,7 @@ fn compile() -> (ComputePipelineState, CommandQueue, Device) {
     let l = tmp.join("k.metallib");
     std::fs::write(&s, BATCH_KERNEL).unwrap();
     assert!(std::process::Command::new("xcrun")
-        .args(["-sdk", "macosx", "metal", "-std=metal3.2", "-O3", "-c"])
+        .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
         .arg(s.to_str().unwrap())
         .arg("-o")
         .arg(a.to_str().unwrap())

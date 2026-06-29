@@ -107,7 +107,6 @@ impl Arena {
             let element_bytes = match dtype {
                 DataType::Float16 => 2i32,
                 DataType::Float32 => 4i32,
-                _ => return Err(format!("unsupported dtype: {:?}", dtype)),
             };
             let bytes_per_row = (logical_dim1 * element_bytes + 63) & !63;
 
@@ -150,13 +149,7 @@ impl Arena {
     pub fn new(logical_dim0: u32, logical_dim1: u32, dtype: DataType) -> Result<Self, String> {
         match dtype {
             DataType::Float16 | DataType::Float32 => {}
-            _ => {
-                return Err(format!(
-                    "unsupported arena dtype: {:?} (FP16/F32 only)",
-                    dtype
-                ))
             }
-        }
 
         let mut info: ArenaInfo = unsafe { std::mem::zeroed() };
         let rc = unsafe {

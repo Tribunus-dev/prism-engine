@@ -3,7 +3,6 @@
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
-use std::os::raw::c_void;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -160,7 +159,7 @@ pub unsafe extern "C" fn prism_execute_multimodal(
     if multiplexer.is_null() {
         return;
     }
-    let state = &(*multiplexer).inner;
+    let _state = &(*multiplexer).inner;
     let prompt = if !payload.text_prompt.is_null() {
         CStr::from_ptr(payload.text_prompt).to_str().unwrap_or("")
     } else {

@@ -4,7 +4,7 @@
 //! (CPU/NEON) based on the real-time [`SystemState`] sampled by
 //! [`profiling`](crate::backend::flex_dispatch::profiling).
 
-use super::profiling::{SystemState, ThermalState};
+use super::profiling::SystemState;
 use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
 use crate::backend::routing::*;
 

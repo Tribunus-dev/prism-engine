@@ -24,6 +24,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -130,15 +131,14 @@ fn run_variation(
         output_name: out_name.clone(),
         inputs: vec![("x".into(), vec![batch as i64, H])],
         outputs: vec![(out_name.clone(), vec![batch as i64, H])],
-        spec_version: 10,
     };
 
     let model_path = compile(tag, prog, meta).map_err(|e| format!("compile: {}", e))?;
 
     let in_arena =
-        Arena::new(batch, H as u32, Dtype::Float16).map_err(|e| format!("in arena: {}", e))?;
+        Arena::new(batch, H as u32, DataType::Float16).map_err(|e| format!("in arena: {}", e))?;
     let out_arena =
-        Arena::new(batch, H as u32, Dtype::Float16).map_err(|e| format!("out arena: {}", e))?;
+        Arena::new(batch, H as u32, DataType::Float16).map_err(|e| format!("out arena: {}", e))?;
     fill_arena(&in_arena, (batch as usize) * (H as usize));
 
     let ane_time_ns = bench_one(

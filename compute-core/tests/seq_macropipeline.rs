@@ -25,6 +25,7 @@ use std::time::Instant;
 
 use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -129,7 +130,6 @@ fn build_model() -> Result<PathBuf, String> {
         output_name: "matmul_1".into(),
         inputs: vec![("input".into(), vec![CHUNK_SIZE as i64, HIDDEN as i64])],
         outputs: vec![("matmul_1".into(), vec![CHUNK_SIZE as i64, FFN_DIM as i64])],
-        spec_version: 9,
     };
 
     let tmp = tempfile::tempdir().map_err(|e| format!("tempdir: {}", e))?;

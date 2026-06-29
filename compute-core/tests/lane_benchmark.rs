@@ -13,6 +13,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -39,7 +40,7 @@ fn compile(tag: &str, prog: mil_spec::Program, meta: ModelMeta) -> Result<PathBu
 }
 
 fn make_arena(d0: u32, d1: u32) -> Arena {
-    Arena::new(d0, d1, Dtype::Float16).expect("arena")
+    Arena::new(d0, d1, DataType::Float16).expect("arena")
 }
 
 /// Benchmark one model on one compute policy.
@@ -224,7 +225,7 @@ fn bench_matmul_sweep() {
             output_name: on.clone(),
             inputs: vec![("x".into(), vec![1, m])],
             outputs: vec![(on.clone(), vec![1, n])],
-            spec_version: 9,
+
         };
         match bench_both(&tag, prog, meta, "x", &on, m as u32, n as u32, k as u32) {
             Ok((c50, c95, cm, a50, a95, am)) => {
@@ -281,7 +282,7 @@ fn bench_mlp_sweep() {
             output_name: on.clone(),
             inputs: vec![("x".into(), vec![1, h])],
             outputs: vec![(on.clone(), vec![1, h])],
-            spec_version: 9,
+
         };
         match bench_both(&tag, prog, meta, "x", &on, h as u32, h as u32, i as u32) {
             Ok((c50, c95, cm, a50, a95, am)) => {
@@ -332,7 +333,7 @@ fn bench_rmsnorm_sweep() {
             output_name: on.clone(),
             inputs: vec![("x".into(), vec![1, h])],
             outputs: vec![(on.clone(), vec![1, h])],
-            spec_version: 9,
+
         };
         match bench_both(&tag, prog, meta, "x", &on, h as u32, h as u32, h as u32) {
             Ok((c50, c95, cm, a50, a95, am)) => {

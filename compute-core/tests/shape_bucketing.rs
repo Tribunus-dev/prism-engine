@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -84,7 +85,6 @@ fn build_model(batch: i64, weights: &[f32], tag: &str) -> Result<(PathBuf, Strin
         output_name: out_name.clone(),
         inputs: vec![("input".into(), vec![batch, IN_DIM as i64])],
         outputs: vec![(out_name.clone(), vec![batch, OUT_DIM as i64])],
-        spec_version: 9,
     };
 
     let tmp = tempfile::tempdir().map_err(|e| format!("tempdir: {}", e))?;
@@ -130,7 +130,6 @@ fn build_model_with_dims(
         output_name: out_name.clone(),
         inputs: vec![("input".into(), vec![batch, in_dim])],
         outputs: vec![(out_name.clone(), vec![batch, out_dim])],
-        spec_version: 9,
     };
 
     let tmp = tempfile::tempdir().map_err(|e| format!("tempdir: {}", e))?;

@@ -20,7 +20,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::compilation::activation_abi::ActivationAbi;
 use crate::compilation::ane_eligibility::ShapeBucket;
-use crate::compilation::ane_eligibility::ShapeBucketFamily;
 use crate::compilation::tri_lane::AneRejectionReason;
 
 // ── Identity types ────────────────────────────────────────────────────────
@@ -287,6 +286,7 @@ mod tests {
     use crate::compilation::activation_abi::DecodeActivationV1Params;
     use crate::compilation::activation_abi::PhysicalLayout;
     use crate::compilation::phase_ir::TensorDtype;
+    use crate::compilation::ane_eligibility::ShapeBucketFamily;
     use serde_json;
 
     fn sample_key() -> AneQualificationKey {

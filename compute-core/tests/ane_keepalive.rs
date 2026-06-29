@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -123,7 +124,6 @@ fn ane_keepalive_test() {
         output_name: out_name.clone(),
         inputs: vec![("x".into(), vec![1, H])],
         outputs: vec![(out_name.clone(), vec![1, FFN])],
-        spec_version: 9,
     };
 
     let model_path = compile_model(tag, prog, meta).expect("compile model");
@@ -134,8 +134,8 @@ fn ane_keepalive_test() {
         CoreMlModel::load_with_compute_units(path_str, CoreMlComputeUnits::CpuAndNeuralEngine)
             .expect("load model");
 
-    let in_arena = Arena::new(1, H as u32, Dtype::Float16).expect("input arena");
-    let out_arena = Arena::new(1, FFN as u32, Dtype::Float16).expect("output arena");
+    let in_arena = Arena::new(1, H as u32, DataType::Float16).expect("input arena");
+    let out_arena = Arena::new(1, FFN as u32, DataType::Float16).expect("output arena");
 
     let in_name = "x";
     // ── Part 1: Gap sensitivity ───────────────────────────────────

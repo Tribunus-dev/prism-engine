@@ -38,6 +38,7 @@ use std::time::{Duration, Instant};
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -402,7 +403,6 @@ fn slc_bypass_orchestrator() {
         output_name: out_name.clone(),
         inputs: vec![("x".into(), vec![BATCH as i64, H])],
         outputs: vec![(out_name.clone(), vec![BATCH as i64, H])],
-        spec_version: 10,
     };
     let modelc_path = compile_fused("fused_swiglu", fused_prog, meta).expect("compile fused");
     println!("  Model compiled: {}", modelc_path.display());
@@ -414,8 +414,8 @@ fn slc_bypass_orchestrator() {
     .expect("load ANE model");
 
     // ── Set up IOSurface arenas ────────────────────────────────────
-    let in_arena = Arena::new(BATCH, H as u32, Dtype::Float16).expect("input arena");
-    let out_arena = Arena::new(BATCH, H as u32, Dtype::Float16).expect("output arena");
+    let in_arena = Arena::new(BATCH, H as u32, DataType::Float16).expect("input arena");
+    let out_arena = Arena::new(BATCH, H as u32, DataType::Float16).expect("output arena");
 
     // Fill input arena with deterministic data
     {

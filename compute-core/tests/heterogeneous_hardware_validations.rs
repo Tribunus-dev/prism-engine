@@ -11,6 +11,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -38,7 +39,7 @@ fn compile_model(tag: &str, prog: mil_spec::Program, meta: ModelMeta) -> Result<
 }
 
 fn make_arena(dim0: u32, dim1: u32) -> Arena {
-    Arena::new(dim0, dim1, Dtype::Float16).expect("arena alloc")
+    Arena::new(dim0, dim1, DataType::Float16).expect("arena alloc")
 }
 
 unsafe fn fill_arena(a: &Arena, base: f32) {
@@ -197,7 +198,6 @@ fn run_sdpa(
             ("v".into(), vec![1, nh, seq, hd]),
         ],
         outputs: vec![(out_name.clone(), vec![1, nh, seq, hd])],
-        spec_version: 9,
     };
     let mp = compile_model(tag, prog, meta)?;
     let m = CoreMlModel::load_with_compute_units(mp.to_str().ok_or("bad path")?, cu)
@@ -325,7 +325,6 @@ fn test_d_multi_output() {
         output_name: out_names[0].clone(),
         inputs: vec![("x".into(), vec![1, h])],
         outputs,
-        spec_version: 9,
     };
     let mp = compile_model("d_qkv", p, meta).expect("compile");
     let m_path = mp.to_str().ok_or("path").unwrap();
@@ -387,7 +386,7 @@ fn test_e_iosurface_min_size() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![1, h])],
             outputs: vec![(out_name.clone(), vec![1, h])],
-            spec_version: 9,
+
         };
         let mp = match compile_model(&format!("e_h{}", h), p, meta) {
             Ok(x) => x,
@@ -458,7 +457,6 @@ fn test_f_prepare_vs_steady_state() {
         output_name: out_name.clone(),
         inputs: vec![("x".into(), vec![1, h])],
         outputs: vec![(out_name.clone(), vec![1, h])],
-        spec_version: 9,
     };
     let mp = compile_model("f_mlp", p, meta).expect("compile");
     let art_bytes = dir_size(&mp);

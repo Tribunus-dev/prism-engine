@@ -18,6 +18,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -155,7 +156,7 @@ fn ane_alignment_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![seq_len as i64, H])],
             outputs: vec![(out_name.clone(), vec![seq_len as i64, FFN])],
-            spec_version: 9,
+
         };
 
         let model_path = match compile(&tag, prog, meta) {
@@ -169,8 +170,8 @@ fn ane_alignment_sweep() {
             }
         };
 
-        let in_arena = Arena::new(seq_len, H as u32, Dtype::Float16).expect("in arena");
-        let out_arena = Arena::new(seq_len, FFN as u32, Dtype::Float16).expect("out arena");
+        let in_arena = Arena::new(seq_len, H as u32, DataType::Float16).expect("in arena");
+        let out_arena = Arena::new(seq_len, FFN as u32, DataType::Float16).expect("out arena");
         fill_arena(&in_arena, (seq_len as usize) * (H as usize));
 
         let time_ns = match bench(

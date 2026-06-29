@@ -15,6 +15,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -162,7 +163,7 @@ fn ane_big_batch_util_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![batch as i64, H])],
             outputs: vec![(out_name.clone(), vec![batch as i64, FFN])],
-            spec_version: 9,
+
         };
 
         eprintln!("  Compiling batch={}...", batch);
@@ -186,7 +187,7 @@ fn ane_big_batch_util_sweep() {
             "  Allocating arenas batch={}, H={}, FFN={}...",
             batch, H, FFN
         );
-        let in_arena = match Arena::new(batch, H as u32, Dtype::Float16) {
+        let in_arena = match Arena::new(batch, H as u32, DataType::Float16) {
             Ok(a) => a,
             Err(e) => {
                 println!(
@@ -197,7 +198,7 @@ fn ane_big_batch_util_sweep() {
                 continue;
             }
         };
-        let out_arena = match Arena::new(batch, FFN as u32, Dtype::Float16) {
+        let out_arena = match Arena::new(batch, FFN as u32, DataType::Float16) {
             Ok(a) => a,
             Err(e) => {
                 println!(

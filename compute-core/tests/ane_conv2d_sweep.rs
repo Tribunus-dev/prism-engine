@@ -20,6 +20,7 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
@@ -198,7 +199,7 @@ fn ane_conv2d_sweep() {
             output_name: conv_out.clone(),
             inputs: vec![("x".into(), vec![1, H, 1, seq_len as i64])],
             outputs: vec![(conv_out.clone(), vec![1, FFN, 1, seq_len as i64])],
-            spec_version: 10,
+
         };
 
         let conv_path = match compile_with_target(&conv_tag, conv_prog, conv_meta, "macOS26") {
@@ -215,9 +216,9 @@ fn ane_conv2d_sweep() {
 
         // Conv2d input arena: [1, H, 1, S] -> elem count = 1*H*1*S
         let conv_in_arena =
-            Arena::new(1, (H as u32) * seq_len, Dtype::Float16).expect("conv in arena");
+            Arena::new(1, (H as u32) * seq_len, DataType::Float16).expect("conv in arena");
         let conv_out_arena =
-            Arena::new(1, (FFN as u32) * seq_len, Dtype::Float16).expect("conv out arena");
+            Arena::new(1, (FFN as u32) * seq_len, DataType::Float16).expect("conv out arena");
         fill_arena(&conv_in_arena, 1 * H as usize * 1 * seq_len as usize);
 
         let conv_time = match bench_one(
@@ -263,7 +264,7 @@ fn ane_conv2d_sweep() {
             output_name: mm_out.clone(),
             inputs: vec![("x".into(), vec![seq_len as i64, H])],
             outputs: vec![(mm_out.clone(), vec![seq_len as i64, FFN])],
-            spec_version: 9,
+
         };
 
         let mm_path = match compile(&mm_tag, mm_prog, mm_meta) {
@@ -278,8 +279,8 @@ fn ane_conv2d_sweep() {
             }
         };
 
-        let mm_in_arena = Arena::new(seq_len, H as u32, Dtype::Float16).expect("mm in arena");
-        let mm_out_arena = Arena::new(seq_len, FFN as u32, Dtype::Float16).expect("mm out arena");
+        let mm_in_arena = Arena::new(seq_len, H as u32, DataType::Float16).expect("mm in arena");
+        let mm_out_arena = Arena::new(seq_len, FFN as u32, DataType::Float16).expect("mm out arena");
         fill_arena(&mm_in_arena, (seq_len as usize) * (H as usize));
 
         let mm_time = match bench_one(
