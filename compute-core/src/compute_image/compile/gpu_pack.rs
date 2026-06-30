@@ -191,6 +191,7 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
     for binding in &mut loaded.spec.global_tensors {

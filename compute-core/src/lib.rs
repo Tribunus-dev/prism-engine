@@ -528,6 +528,7 @@ pub mod toolchain_attest;
     feature = "prism-backend"
 ))]
 pub mod tools;
+pub mod agent;
 pub mod transform_recipe;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),

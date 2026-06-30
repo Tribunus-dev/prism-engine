@@ -19,6 +19,10 @@ pub(crate) struct SourceTensor {
     pub source_filename: String,
     pub source_sha256: String,
     pub source_offset: u64,
+    /// For GGML-quantized tensors (q8_0, q4_0, etc.) the byte size of the
+    /// raw quantized payload in the source file.  Zero for safetensors or
+    /// standard-precision tensors where byte_len = shape_product × elem_size.
+    pub source_byte_size: u64,
 }
 
 /// Lightweight tensor metadata used for differential-compile hashing.
@@ -75,6 +79,18 @@ fn optional_hash(path: &Path) -> crate::Result<Option<ShardHash>> {
 
 pub(crate) fn ensure_tensor_loaded(tensor: &mut SourceTensor, mmap: &[u8]) {
     if !tensor.data.is_empty() || (tensor.source_offset == 0 && tensor.shape.is_empty()) {
+        return;
+    }
+    // GGML-quantized tensors (q8_0, q4_0) use source_byte_size instead
+    // of computing byte_len from shape × elem_size.
+    if tensor.source_byte_size > 0 {
+        let offset = tensor.source_offset as usize;
+        let end = (offset + tensor.source_byte_size as usize).min(mmap.len());
+        tensor.data = if offset < mmap.len() {
+            mmap[offset..end].to_vec()
+        } else {
+            Vec::new()
+        };
         return;
     }
     let elem_bytes: usize = match tensor.dtype.as_str() {
@@ -254,6 +270,7 @@ pub(crate) fn load_source(
                         .into_owned(),
                     source_sha256: source_sha256.clone(),
                     source_offset: info.data_offsets.0 as u64,
+                    source_byte_size: 0,
                 },
             );
             all_names.push(name);
@@ -430,9 +447,9 @@ pub(crate) fn load_source(
                     model_type, report
                 ))
             })?;
-            eprintln!("[adapter] {} validation passed", adapter.family_name());
         }
     }
+
 
     Ok(LoadedSource {
         arch,
@@ -441,6 +458,214 @@ pub(crate) fn load_source(
         spec,
         source_tensors,
         mmap_bytes: mmaps,
+        shard_hashes,
+        tokenizer_hashes,
+        auxiliary_hashes,
+        validation,
+    })
+}
+
+// ── GGUF source loading ────────────────────────────────────────────────────
+
+#[cfg(feature = "prism-backend")]
+/// Load a GGUF file as the compile source, producing a LoadedSource that the
+/// compile pipeline (plan → compile_sequential) can consume directly.
+///
+/// Tensors are stored lazily (data = Vec::new()) with source_offset pointing
+/// into the GGUF mmap.  `ensure_tensor_loaded` reads raw Q8_0 bytes using
+/// source_byte_size and stores them in tensor.data for the emit step.
+pub(crate) fn load_gguf_source(
+    gguf_path: &Path,
+    skip_validation: bool,
+) -> crate::Result<LoadedSource> {
+    use crate::gguf;
+    use std::fs;
+    use std::io::Write;
+
+    // 1. Parse GGUF header
+    let (metadata, tensors) = gguf::parse_gguf_header(gguf_path)
+        .map_err(|e| crate::Error::from_reason(format!("GGUF parse: {e}")))?;
+    let mut arch = gguf::extract_architecture(&metadata)
+        .map_err(|e| crate::Error::from_reason(format!("GGUF arch: {e}")))?;
+    let manifest = gguf::gguf_to_manifest(&metadata)
+        .map_err(|e| crate::Error::from_reason(format!("GGUF manifest: {e}")))?;
+
+    // 2. Infer head_dim and kv_heads from first Q/K projection tensor shapes
+    if let Some(q) = tensors.iter().find(|t| t.name.ends_with("attn_q.weight")) {
+        if q.shape.len() >= 2 {
+            let inferred = q.shape[1] / arch.num_attention_heads.max(1);
+            if inferred > 0 { arch.head_dim = inferred; }
+        }
+    }
+    if let Some(k) = tensors.iter().find(|t| t.name.ends_with("attn_k.weight")) {
+        if k.shape.len() >= 2 && arch.head_dim > 0 {
+            let inferred = k.shape[1] / arch.head_dim;
+            if inferred > 0 { arch.num_key_value_heads = inferred; }
+        }
+    }
+
+    let arch_type = gguf::meta_str(&metadata, "general.architecture").unwrap_or("unknown");
+
+    // 3. Write a temporary config.json for adapter validation
+    let tmp_dir = tempfile::tempdir()
+        .map_err(|e| crate::Error::from_reason(format!("tempdir: {e}")))?;
+    let config_path = tmp_dir.path().join("config.json");
+    let architecture_name = match arch.model_type.as_str() {
+        "gemma4" => "Gemma4ForCausalLM",
+        "gemma" | "gemma2" => "GemmaForCausalLM",
+        "llama" => "LlamaForCausalLM",
+        _ => "LlamaForCausalLM",
+    };
+    {
+        let json = serde_json::json!({
+            "architectures": [architecture_name],
+            "model_type": arch.model_type,
+            "hidden_size": arch.hidden_size,
+            "intermediate_size": arch.intermediate_size,
+            "num_attention_heads": arch.num_attention_heads,
+            "num_key_value_heads": arch.num_key_value_heads,
+            "head_dim": arch.head_dim,
+            "num_hidden_layers": arch.num_hidden_layers,
+            "vocab_size": arch.vocab_size,
+            "rms_norm_eps": arch.rms_norm_eps,
+            "tie_word_embeddings": arch.tie_word_embeddings,
+            "rope_theta": arch.rope_local.theta,
+            "attention_k_eq_v": arch.attention_k_eq_v,
+            "sliding_window": arch.sliding_window,
+        });
+        let json_str = serde_json::to_string_pretty(&json)
+            .map_err(|e| crate::Error::from_reason(format!("serialize config: {e}")))?;
+        let mut f = fs::File::create(&config_path)
+            .map_err(|e| crate::Error::from_reason(format!("create config: {e}")))?;
+        f.write_all(json_str.as_bytes())
+            .map_err(|e| crate::Error::from_reason(format!("write config: {e}")))?;
+    }
+
+    // 4. Mmap the GGUF file (single shard)
+    let file = fs::File::open(gguf_path)
+        .map_err(|e| crate::Error::from_reason(format!("open GGUF: {e}")))?;
+    let mmap = unsafe { Mmap::map(&file) }
+        .map_err(|e| crate::Error::from_reason(format!("mmap GGUF: {e}")))?;
+    let gguf_sha256 = sha256_bytes(&mmap);
+
+    // 5. Map GgufTensorMeta → SourceTensor via HF name mapping
+    let mut source_tensors: HashMap<String, SourceTensor> = HashMap::new();
+    let mut all_hf_names: Vec<String> = Vec::new();
+    for t in &tensors {
+        let hf_name = gguf::gguf_name_to_hf_name(&t.name, arch_type)
+            .unwrap_or_else(|| t.name.clone());
+        if source_tensors.contains_key(&hf_name) { continue; }
+        source_tensors.insert(hf_name.clone(), SourceTensor {
+            name: hf_name.clone(),
+            dtype: t.dtype.clone(),
+            shape: t.shape.clone(),
+            data: Vec::new(),        // lazy — loaded on demand
+            source_filename: gguf_path.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            source_sha256: gguf_sha256.clone(),
+            source_offset: t.byte_offset,
+            source_byte_size: t.byte_size,
+        });
+        all_hf_names.push(hf_name);
+    }
+    all_hf_names.sort();
+
+    // 6. Hashes
+    let shard_hashes = vec![ShardHash {
+        filename: gguf_path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        sha256: gguf_sha256,
+    }];
+    // Tokenizer files alongside the GGUF
+    let gguf_dir = gguf_path.parent().unwrap_or(Path::new("."));
+    let tokenizer_hashes = ["tokenizer.json", "tokenizer_config.json"]
+        .into_iter()
+        .filter_map(|name| {
+            let path = gguf_dir.join(name);
+            match optional_hash(&path) {
+                Ok(Some(h)) => Some(Ok(h)),
+                Ok(None) => None,
+                Err(e) => Some(Err(e)),
+        }
+    })
+        .collect::<crate::Result<Vec<_>>>()?;
+    let auxiliary_hashes = Vec::new();
+
+    // 7. Namespace + spec
+    let namespace = crate::config::resolve_namespace(&all_hf_names)
+        .ok_or_else(|| crate::Error::from_reason("GGUF: could not resolve namespace"))?;
+    let mut spec = crate::config::compile(&arch, &namespace, None);
+    let name_set: std::collections::HashSet<String> =
+        all_hf_names.into_iter().collect();
+    crate::config::filter_spec_to_existing(&mut spec, &name_set);
+
+    // 8. Validation
+    let tensor_meta: HashMap<_, _> = source_tensors.iter()
+        .map(|(name, t)| (
+            name.clone(),
+            crate::validator::TensorMeta {
+                name: t.name.clone(),
+                shape: t.shape.clone(),
+                dtype: t.dtype.clone(),
+            },
+        ))
+        .collect();
+    let validation = crate::validator::validate_bindings_from_map(&tensor_meta, &spec)?;
+
+    if !skip_validation && !validation.verdict.executable {
+        if !validation.missing_tensors.is_empty() {
+            eprintln!("GGUF missing tensors (first 10):");
+            for (i, t) in validation.missing_tensors.iter().take(10).enumerate() {
+                eprintln!("  {}. {}", i + 1, t);
+    }
+        }
+        return Err(crate::Error::from_reason(format!(
+            "GGUF source failed validation: {} errors across {} expected tensors",
+            validation.verdict.errors,
+            validation.verdict.total_expected,
+        )));
+    }
+
+    // 9. Model-adapter check (reads from temp config.json)
+    if !skip_validation {
+        let config_val: serde_json::Value =
+            fs::read_to_string(&config_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+        let tnames: Vec<String> = source_tensors.keys().cloned().collect();
+        let registry = crate::model_adapter::AdapterRegistry::new();
+        match registry.select(&config_val, &tnames) {
+            Ok(adapter) => {
+            let source_model = crate::model_adapter::SourceModel {
+                    config: config_val,
+                    config_path,
+                    model_type: arch.model_type.clone(),
+                    tensor_names: tnames,
+                    tensors: source_tensors.iter()
+                        .map(|(k, v)| (k.clone(), (v.dtype.clone(), v.shape.clone(), Vec::new())))
+                        .collect(),
+                };
+                if adapter.normalize(&source_model).is_ok() {
+            eprintln!("[adapter] {} validation passed", adapter.family_name());
+}
+            }
+            _ => {}
+        }
+
+    }
+
+    Ok(LoadedSource {
+        arch,
+        manifest,
+        namespace,
+        spec,
+        source_tensors,
+        mmap_bytes: vec![mmap],
         shard_hashes,
         tokenizer_hashes,
         auxiliary_hashes,

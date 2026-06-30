@@ -435,6 +435,7 @@ pub(crate) fn apply_af8_quantize(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
 
@@ -448,6 +449,7 @@ pub(crate) fn apply_af8_quantize(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
 
@@ -579,6 +581,7 @@ pub(crate) fn apply_nf4_quantize(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
 
@@ -593,6 +596,7 @@ pub(crate) fn apply_nf4_quantize(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
 
@@ -719,6 +723,7 @@ pub(crate) fn apply_ternary_quantize(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
 
@@ -732,6 +737,7 @@ pub(crate) fn apply_ternary_quantize(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
 
@@ -893,6 +899,7 @@ pub(crate) fn apply_ternary_tile640_quantize(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
 
@@ -906,6 +913,7 @@ pub(crate) fn apply_ternary_tile640_quantize(
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
+            source_byte_size: 0,
         },
     );
 

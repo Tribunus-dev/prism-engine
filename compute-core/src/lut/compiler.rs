@@ -4,14 +4,19 @@
 //! weights in any format (F32/BF16/F16/U32 block-quantized), runs k-means
 //! per row, builds split-block payloads, and writes a `.cimage` file.
 
-use serde_json::json;
-use std::fs::File;
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
 use std::path::Path;
 
-use crate::compute_image::compile::try_q8_0_ternary_pack_gpu;
+#[cfg(feature = "prism-backend")]
+use serde_json::json;
+
+#[cfg(feature = "prism-backend")]
+use std::fs::File;
+#[cfg(feature = "prism-backend")]
+use std::fs;
+#[cfg(feature = "prism-backend")]
+use std::io::Write;
+
 use crate::config::build_execution_plan;
 use crate::config::parse_config;
 use crate::config_namespace::resolve_namespace;
@@ -341,6 +346,7 @@ pub fn compile_gguf_to_cimage(
     gguf_path: &Path,
     output_path: &Path,
 ) -> Result<(), String> {
+    use crate::compute_image::compile::try_q8_0_ternary_pack_gpu;
     use crate::gguf;
 
     // 1. Parse GGUF header → metadata + tensor inventory + architecture

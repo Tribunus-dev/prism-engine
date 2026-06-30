@@ -12,9 +12,13 @@
 //!   tokenizer.json     HuggingFace tokenizer
 //!   tokenizer_config.json
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 mod release;
+
+use tribunus_compute_core::compute_image::manifest::CompilationAuthority;
+use tribunus_compute_core::config::CompileQuantMode;
+use tribunus_compute_core::config::HardwareTarget;
 
 pub const PRISM_HOME: &str = ".prism";
 pub const MODELS_DIR: &str = "models";
@@ -49,6 +53,23 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliAuthority {
+    #[clap(name = "test-fixture")]
+    TestFixture,
+    #[clap(name = "sealed")]
+    Sealed,
+}
+
+impl From<CliAuthority> for CompilationAuthority {
+    fn from(a: CliAuthority) -> Self {
+        match a {
+            CliAuthority::TestFixture => CompilationAuthority::TestFixture,
+            CliAuthority::Sealed => CompilationAuthority::SealedComputeImage,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Start the OpenAI-compatible server with a compiled model.
@@ -74,12 +95,47 @@ enum Commands {
     },
     /// Compile a GGUF model file to .cimage.
     CompileGGUF {
-        /// Path to the GGUF file (e.g. ~/Downloads/model.gguf).
+    /// Path to the GGUF file (e.g. ~/Downloads/model.gguf).
         gguf_path: PathBuf,
 
-        /// Output path for the compiled .cimage.
+    /// Output path for the compiled .cimage.
         #[arg(short, long, default_value = "model.cimage")]
         output: PathBuf,
+
+    /// Optional draft GGUF path for speculative decoding (MTP).
+        #[arg(long)]
+        draft: Option<PathBuf>,
+
+    /// Compilation authority — controls validation gates.
+        #[arg(long, default_value = "test-fixture", value_enum)]
+        authority: CliAuthority,
+
+    /// Target hardware (e.g. m1, m1pro, m2, m2ultra, m3ultra). Auto-detected if omitted.
+        #[arg(long)]
+        target_hardware: Option<String>,
+
+    /// Quantize mode (e.g. nf4, nf4-128, 8bit, ternary, tile640). Uses target default if omitted.
+        #[arg(long)]
+        quantize_mode: Option<String>,
+
+    /// Skip model validation checks.
+        #[arg(long)]
+        skip_validation: bool,
+
+    /// Use legacy LUT-based compilation path.
+        #[arg(long)]
+        legacy_lut: bool,
+
+    /// Directory containing pre-compiled .mlmodelc bundles from the Swift/cross-compilation
+    /// host.  When set, the compiler skips MIL generation and uses these instead.
+        #[arg(long)]
+        ane_models_dir: Option<PathBuf>,
+
+    /// Path to a pre-compiled .metallib file (Metal inference kernels) from the
+    /// Swift/cross-compilation host.  When set, the compiler skips xcrun metal
+    /// and embeds this library directly.
+        #[arg(long)]
+        metallib_path: Option<PathBuf>,
     },
     /// Compile ANE subgraphs for an already-downloaded model.
     AncCompile {
@@ -120,7 +176,29 @@ fn main() {
         Commands::List => list(),
         Commands::Pull { repo } => pull(&repo),
         Commands::Compile { model } => compile_model(&model),
-        Commands::CompileGGUF { gguf_path, output } => compile_gguf(&gguf_path, &output),
+        Commands::CompileGGUF {
+            gguf_path,
+            output,
+            draft,
+            authority,
+            target_hardware,
+            quantize_mode,
+            skip_validation,
+            legacy_lut,
+            ane_models_dir,
+            metallib_path,
+        } => compile_gguf(
+            &gguf_path,
+            &output,
+            draft.as_deref(),
+            authority.into(),
+            target_hardware.as_deref(),
+            quantize_mode.as_deref(),
+            skip_validation,
+            legacy_lut,
+            ane_models_dir.as_deref(),
+            metallib_path.as_deref(),
+        ),
         #[cfg(feature = "prism-backend")]
         Commands::AncCompile { model } => ane_compile(&model),
         #[cfg(not(feature = "prism-backend"))]
@@ -445,26 +523,145 @@ fn compile_model(name: &str) {
     }
 }
 /// Compile a GGUF model file to .cimage.
-fn compile_gguf(gguf_path: &Path, output_path: &Path) {
+fn compile_gguf(
+    gguf_path: &Path,
+    output_path: &Path,
+    draft: Option<&Path>,
+    authority: CompilationAuthority,
+    raw_target: Option<&str>,
+    raw_quant: Option<&str>,
+    _skip_validation: bool,
+    legacy_lut: bool,
+    ane_models_dir: Option<&Path>,
+    metallib_path: Option<&Path>,
+) {
     if !gguf_path.exists() {
         eprintln!("GGUF file not found: {}", gguf_path.display());
         std::process::exit(1);
     }
+
+    if draft.is_some() && legacy_lut {
+        eprintln!("error: --draft and --legacy-lut are mutually exclusive");
+        std::process::exit(1);
+    }
+
+    // Parse optional target and quantize mode into their rich types.
+    let target = raw_target.and_then(|t| {
+        match t.to_lowercase().as_str() {
+            "m1" => Some(HardwareTarget::M1),
+            "m1pro" => Some(HardwareTarget::M1Pro),
+            "m2" => Some(HardwareTarget::M2),
+            "m2ultra" => Some(HardwareTarget::M2Ultra),
+            "m3ultra" => Some(HardwareTarget::M3Ultra),
+            other => {
+                eprintln!("warning: unknown target '{}', using auto-detect", other);
+                None
+            }
+        }
+    });
+
+    let quantize_mode = raw_quant.and_then(|q| match CompileQuantMode::from_name(q) {
+        Some(qm) => Some(qm),
+        None => {
+            eprintln!(
+                "warning: unknown quantize mode '{}', using target default",
+                q
+            );
+            None
+        }
+    });
+
     eprintln!(
         "[prism:compile-gguf] Compiling {} → {}",
         gguf_path.display(),
         output_path.display()
     );
-    match tribunus_compute_core::lut::compiler::compile_gguf_to_cimage(gguf_path, output_path) {
-        Ok(()) => {
-            let size = std::fs::metadata(output_path)
-                .map(|m| m.len() / (1024 * 1024))
-                .unwrap_or(0);
-            eprintln!("[prism:compile-gguf] Done — {} MB", size);
+
+    // ── Legacy LUT path (always available) ─────────────────────────
+    if legacy_lut {
+        match tribunus_compute_core::lut::compiler::compile_gguf_to_cimage(gguf_path, output_path) {
+            Ok(()) => {
+                let size = std::fs::metadata(output_path)
+                    .map(|m| m.len() / (1024 * 1024))
+                    .unwrap_or(0);
+                eprintln!("[prism:compile-gguf] Done — {} MB", size);
+            }
+            Err(e) => {
+                eprintln!("Compilation failed: {e}");
+                std::process::exit(1);
+            }
         }
-        Err(e) => {
-            eprintln!("Compilation failed: {e}");
-            std::process::exit(1);
+        return;
+    }
+
+    // ── New GGUF pipeline requires prism-backend ───────────────────
+    #[cfg(not(feature = "prism-backend"))]
+    {
+        eprintln!(
+            "[prism:compile-gguf] New GGUF pipeline requires --features prism-backend. Use --legacy-lut to fall back."
+        );
+        std::process::exit(1);
+    }
+
+    #[cfg(feature = "prism-backend")]
+    {
+        let new_pipeline_result = if let Some(draft_path) = draft {
+            // Speculative compilation with draft GGUF.
+            let gguf_str = gguf_path.to_string_lossy();
+            let draft_str = draft_path.to_string_lossy();
+            let out_str = output_path.to_string_lossy();
+            tribunus_compute_core::compute_image::compile::compile_gguf_speculative(
+                &gguf_str,
+                &draft_str,
+                &out_str,
+                authority,
+                quantize_mode,
+                target,
+            )
+            .map(|_| ())
+        } else if matches!(authority, CompilationAuthority::SealedComputeImage) {
+            // Authority-gated compilation.
+            let gguf_str = gguf_path.to_string_lossy();
+            let out_str = output_path.to_string_lossy();
+            let ane_str = ane_models_dir.map(|p| p.to_string_lossy().into_owned());
+            let metal_str = metallib_path.map(|p| p.to_string_lossy().into_owned());
+            tribunus_compute_core::compute_image::compile::compile_gguf_with_authority(
+                &gguf_str,
+                &out_str,
+                authority,
+                quantize_mode,
+                target,
+                ane_str.as_deref(),
+                metal_str.as_deref(),
+            )
+            .map(|_| ())
+        } else {
+            // Unchecked default path.
+            let gguf_str = gguf_path.to_string_lossy();
+            let out_str = output_path.to_string_lossy();
+            let ane_str = ane_models_dir.map(|p| p.to_string_lossy().into_owned());
+            let metal_str = metallib_path.map(|p| p.to_string_lossy().into_owned());
+            tribunus_compute_core::compute_image::compile::compile_gguf_unchecked(
+                &gguf_str,
+                &out_str,
+                quantize_mode,
+                ane_str.as_deref(),
+                metal_str.as_deref(),
+            )
+            .map(|_| ())
+        };
+
+        match new_pipeline_result {
+            Ok(()) => {
+                let size = std::fs::metadata(output_path)
+                    .map(|m| m.len() / (1024 * 1024))
+                    .unwrap_or(0);
+                eprintln!("[prism:compile-gguf] Done — {} MB", size);
+            }
+            Err(e) => {
+                eprintln!("Compilation failed: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }

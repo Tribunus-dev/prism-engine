@@ -19,6 +19,8 @@ use crate::compute_image::compile::quantize::{
     apply_quantize_to_loaded,
 };
 use crate::compute_image::compile::source::{diff_tensors, ensure_tensor_loaded, LoadedSource};
+#[cfg(feature = "prism-backend")]
+use crate::compute_image::compile::source::load_gguf_source;
 use crate::compute_image::compile::hardware::run_hardware_assessment;
 use crate::config::CompileQuantMode;
 use crate::config::HardwareTarget;
@@ -118,6 +120,55 @@ pub fn compile_with_authority(
     })
 }
 
+#[cfg(feature = "prism-backend")]
+/// Compile a GGUF model directly into a ComputeImage with authority checks.
+///
+/// Parses the GGUF header, creates a temporary config.json for compatibility
+/// validation and ANE pre-compilation, loads tensors lazily from the GGUF
+/// mmap, then runs the standard compile pipeline.
+pub fn compile_gguf_with_authority(
+    gguf_path: &str,
+    output_dir: &str,
+    authority: CompilationAuthority,
+    quantize_mode: Option<CompileQuantMode>,
+    target: Option<HardwareTarget>,
+    ane_models_dir: Option<&str>,
+    metallib_path: Option<&str>,
+) -> crate::Result<CompiledImage> {
+    let target = target.unwrap_or_else(HardwareTarget::detect);
+
+    match authority {
+        CompilationAuthority::TestFixture => {
+            let profile = option_env!("TRIBUNUS_PROFILE").unwrap_or("unknown");
+            if profile == "image-build" {
+                return Err(crate::Error::new(
+                    crate::Status::GenericFailure,
+                    "TestFixture must not use image-build profile. Use cargo test or cargo build.",
+                ));
+            }
+        }
+        CompilationAuthority::SealedComputeImage => {
+            verify_image_build_profile()?;
+        }
+    }
+
+    eprintln!(
+        "[compile] Target: {:?} ({}, {} batch, {} MB segments)",
+        target,
+        target.recommended_quant(),
+        target.recommended_batch(),
+        target.segment_target_size_mb()
+    );
+
+    let quantize_mode =
+        quantize_mode.or_else(|| CompileQuantMode::from_name(target.recommended_quant()));
+
+    compile_gguf_unchecked(gguf_path, output_dir, quantize_mode, ane_models_dir, metallib_path).map(|mut compiled| {
+        compiled.manifest.hardware_target = Some(target);
+        compiled
+    })
+}
+
 /// Read the model source config.json, detect the architecture, and validate
 /// the quantization choice against it using the CompatibilityMatrix.
 fn detect_validate_quant(
@@ -127,12 +178,12 @@ fn detect_validate_quant(
 ) -> Result<crate::compute_image::compatibility::CompileDecision, String> {
     let config_path = std::path::Path::new(source_dir).join("config.json");
     let config_text =
-        std::fs::read_to_string(&config_path).map_err(|e| format!("read config.json: {}", e))?;
+        std::fs::read_to_string(&config_path).map_err(|e| format!("read config.json: {e}"))?;
     let config_value: serde_json::Value =
-        serde_json::from_str(&config_text).map_err(|e| format!("parse config.json: {}", e))?;
+        serde_json::from_str(&config_text).map_err(|e| format!("parse config.json: {e}"))?;
 
     let arch = extract_architecture_from_config(&config_value)
-        .map_err(|e| format!("extract architecture: {}", e))?;
+        .map_err(|e| format!("extract architecture: {e}"))?;
 
     let decision = CompatibilityMatrix::evaluate(&arch, target, preferred_quant);
 
@@ -234,6 +285,235 @@ pub fn compile_with_authority_speculative(
             compiled
         },
     )
+}
+
+#[cfg(feature = "prism-backend")]
+/// Compile a draft GGUF + target GGUF pair into a single speculative ComputeImage.
+///
+/// Loads target GGUF via `load_gguf_source`, emits target tensors, drops,
+/// then loads draft GGUF, emits draft tensors, builds the execution plan with
+/// speculative config, and finalizes.
+pub fn compile_gguf_speculative(
+    target_gguf: &str,
+    draft_gguf: &str,
+    output_dir: &str,
+    authority: CompilationAuthority,
+    quantize_mode: Option<CompileQuantMode>,
+    target: Option<HardwareTarget>,
+) -> crate::Result<CompiledImage> {
+    let target = target.unwrap_or_else(HardwareTarget::detect);
+    let _quantize_mode =
+        quantize_mode.or_else(|| CompileQuantMode::from_name(target.recommended_quant()));
+
+    eprintln!(
+        "[speculative compile] Target: {:?} ({}, {} batch, {} MB segments)",
+        target,
+        target.recommended_quant(),
+        target.recommended_batch(),
+        target.segment_target_size_mb()
+    );
+
+    match authority {
+        CompilationAuthority::TestFixture => {}
+        CompilationAuthority::SealedComputeImage => {
+            verify_image_build_profile()?;
+        }
+    }
+
+    let started_at = std::time::Instant::now();
+    let output_dir = Path::new(output_dir);
+
+    // === STEP 1: Load target GGUF, capture metadata, emit, drop ===
+    let t_load = Instant::now();
+    let mut target_loaded = load_gguf_source(Path::new(target_gguf), true)?;
+    let source_load_ms = t_load.elapsed().as_millis() as u64;
+
+    let target_arch = target_loaded.arch.clone();
+    let target_namespace = target_loaded.namespace.clone();
+    let target_spec = target_loaded.spec.clone();
+    let target_shard_hashes = target_loaded.shard_hashes.clone();
+    let target_tokenizer_hashes = target_loaded.tokenizer_hashes.clone();
+    let target_auxiliary_hashes = target_loaded.auxiliary_hashes.clone();
+    let target_manifest = target_loaded.manifest.clone();
+
+    let source = build_source_identity(
+        &target_manifest,
+        target_shard_hashes,
+        target_tokenizer_hashes,
+        target_auxiliary_hashes,
+    );
+
+    let mut builder = ImageBuilder::new(target_arch.clone(), source);
+    builder.set_output_dir(output_dir);
+    let mut emitted_ids: HashMap<String, u32> = HashMap::new();
+
+    let t_emit = Instant::now();
+
+    // Emit target persistent tensors
+    builder.begin_segment("persistent", SegmentKind::Persistent);
+    for binding in &target_spec.global_tensors {
+        let id = emit_binding_set(&mut builder, &target_loaded.source_tensors, binding, None)?;
+        emitted_ids.insert(binding.name.clone(), id);
+    }
+
+    if target_namespace.lm_head_aliased {
+        let embed_name = format!("{}.embed_tokens.weight", target_namespace.root);
+        if let Some(&id) = emitted_ids.get(&embed_name) {
+            builder.add_alias("lm_head.weight", id, "tie_word_embeddings");
+        }
+    }
+
+    // Emit target layer tensors
+    for layer in &target_spec.layers {
+        let seg_id = format!("target_layer_{}", layer.index);
+        builder.begin_segment(&seg_id, SegmentKind::Layer(layer.index));
+        for binding in &layer.tensors {
+            let id = emit_binding_set(
+                &mut builder,
+                &target_loaded.source_tensors,
+                binding,
+                Some(layer.index),
+            )?;
+            emitted_ids.insert(binding.name.clone(), id);
+        }
+    }
+
+    let total_target_bytes: u64 = target_loaded
+        .source_tensors
+        .values()
+        .map(|t| t.data.len() as u64)
+        .sum();
+
+    // Drop target source tensors
+    target_loaded.source_tensors.clear();
+
+    // === STEP 2: Load draft GGUF, emit, drop ===
+    let mut draft_loaded = load_gguf_source(Path::new(draft_gguf), true)?;
+
+    let draft_arch = draft_loaded.arch.clone();
+    let draft_namespace = draft_loaded.namespace.clone();
+    let draft_spec = draft_loaded.spec.clone();
+
+    let shared_embedding = target_arch.vocab_size == draft_arch.vocab_size
+        && target_arch.hidden_size == draft_arch.hidden_size;
+    let shared_lm_head = shared_embedding;
+
+    // Emit draft layer tensors
+    for layer in &draft_spec.layers {
+        let seg_id = format!("draft_layer_{}", layer.index);
+        builder.begin_segment(&seg_id, SegmentKind::Layer(layer.index));
+        for binding in &layer.tensors {
+            let id = emit_binding_set(
+                &mut builder,
+                &draft_loaded.source_tensors,
+                binding,
+                Some(layer.index),
+            )?;
+            emitted_ids.insert(binding.name.clone(), id);
+        }
+    }
+
+    let total_draft_bytes: u64 = draft_loaded
+        .source_tensors
+        .values()
+        .map(|t| t.data.len() as u64)
+        .sum();
+
+    // Drop draft source tensors
+    draft_loaded.source_tensors.clear();
+
+    // === STEP 3: Shared embedding aliases ===
+    if shared_embedding {
+        let draft_root = &draft_namespace.root;
+        let target_root = &target_namespace.root;
+        for binding in &target_spec.global_tensors {
+            if binding.name.contains("embed_tokens") {
+                let draft_embed = binding.name.replace(target_root, draft_root);
+                if let Some(&id) = emitted_ids.get(&binding.name) {
+                    builder.add_alias(&draft_embed, id, "shared_embedding_speculative");
+                    emitted_ids.insert(draft_embed, id);
+                }
+            }
+        }
+        if shared_lm_head && target_namespace.lm_head_aliased {
+            let target_head = "lm_head.weight".to_string();
+            let draft_head_key = format!("{}.lm_head.weight", draft_root);
+            if let Some(&id) = emitted_ids.get(&target_head) {
+                builder.add_alias(&draft_head_key, id, "shared_lm_head_speculative");
+                emitted_ids.insert(draft_head_key, id);
+            }
+        }
+    }
+
+    // === STEP 4: Build execution plan with speculative config ===
+    let mut execution_plan = crate::config::build_execution_plan(
+        &target_arch,
+        &target_namespace,
+        &emitted_ids,
+    );
+    execution_plan.build_ane_fusion_plan();
+
+    execution_plan.speculative_config = Some(crate::config::SpeculativeModelConfig {
+        draft_architecture: draft_arch,
+        target_architecture: target_arch,
+        shared_embedding,
+        shared_lm_head,
+        draft_first_segments: true,
+        speculation_length: 5,
+    });
+
+    builder.set_execution_plan(execution_plan);
+
+    let payload_emission_ms = t_emit.elapsed().as_millis() as u64;
+    let emitted_so_far: u64 = builder.segments.iter().map(|s| s.byte_size).sum();
+    crate::compile_progress::CompileProgress {
+        stage: "payload_emission_done".into(),
+        bytes_processed: emitted_so_far,
+        bytes_total: emitted_so_far,
+        elapsed_ms: started_at.elapsed().as_millis() as u64,
+    }
+    .emit();
+
+    let t_finalize = Instant::now();
+    let manifest = builder.finalize(output_dir)?;
+    let finalize_ms = t_finalize.elapsed().as_millis() as u64;
+
+    let total_source_bytes = total_target_bytes + total_draft_bytes;
+    let total_emitted_bytes = manifest.segments.iter().map(|s| s.byte_size).sum();
+
+    let stage_profile = StageProfile {
+        source_discovery_ms: source_load_ms,
+        header_parsing_ms: 0,
+        architecture_normalization_ms: 0,
+        binding_validation_ms: 0,
+        source_hashing_ms: 0,
+        layout_planning_ms: 0,
+        payload_emission_ms,
+        segment_hashing_ms: finalize_ms,
+        manifest_generation_ms: 0,
+        verification_ms: 0,
+        total_source_bytes,
+        total_emitted_bytes,
+        peak_rss_bytes: 0,
+        peak_mlx_active_bytes: mlx_active_memory_bytes() as u64,
+        peak_mlx_cache_bytes: 0,
+    };
+
+    let receipt = build_compile_receipt(
+        &target_loaded,
+        &manifest,
+        started_at.elapsed().as_millis(),
+        stage_profile,
+        Default::default(),
+        Some(total_source_bytes),
+    );
+    let receipt_path = output_dir.join("receipt.json");
+    let receipt_json = serde_json::to_string_pretty(&receipt)
+        .map_err(|e| crate::Error::from_reason(format!("json: {}", e)))?;
+    std::fs::write(&receipt_path, receipt_json)
+        .map_err(|e| crate::Error::from_reason(format!("write receipt: {}", e)))?;
+
+    Ok(CompiledImage { manifest, receipt })
 }
 
 /// Verify the current binary was compiled with production optimization settings.
@@ -378,6 +658,173 @@ pub(crate) fn compile_unchecked(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+#[cfg(feature = "prism-backend")]
+/// Compile a GGUF model into a ComputeImage, bypassing authority checks.
+///
+/// This is the unchecked GGUF entry point. It parses the GGUF header, writes
+/// a temporary config.json for ANE pre-compilation, loads tensors lazily from
+/// the GGUF mmap via `load_gguf_source`, then runs `compile_sequential`.
+pub fn compile_gguf_unchecked(
+    gguf_path: &str,
+    output_dir: &str,
+    quantize_mode: Option<CompileQuantMode>,
+    ane_models_dir: Option<&str>,
+    metallib_path: Option<&str>,
+) -> crate::Result<CompiledImage> {
+    use crate::gguf;
+    use std::io::Write;
+
+    let gguf_path = Path::new(gguf_path);
+    let output_dir = Path::new(output_dir);
+    let started_at = std::time::Instant::now();
+
+    // 1. Parse GGUF header for metadata + arch + tensor inventory
+    let (metadata, tensors) = gguf::parse_gguf_header(gguf_path)
+        .map_err(|e| crate::Error::from_reason(format!("GGUF parse: {e}")))?;
+    let mut arch = gguf::extract_architecture(&metadata)
+        .map_err(|e| crate::Error::from_reason(format!("GGUF arch: {e}")))?;
+
+    // 2. Infer head_dim and kv_heads from first Q/K projection tensor shapes
+    if let Some(q) = tensors.iter().find(|t| t.name.ends_with("attn_q.weight")) {
+        if q.shape.len() >= 2 {
+            let inferred = q.shape[1] / arch.num_attention_heads.max(1);
+            if inferred > 0 {
+                arch.head_dim = inferred;
+            }
+        }
+    }
+    if let Some(k) = tensors.iter().find(|t| t.name.ends_with("attn_k.weight")) {
+        if k.shape.len() >= 2 && arch.head_dim > 0 {
+            let inferred = k.shape[1] / arch.head_dim;
+            if inferred > 0 {
+                arch.num_key_value_heads = inferred;
+            }
+        }
+    }
+
+    // 3. Write temp config.json for ANE pre-compile
+    let tmp_dir = tempfile::tempdir()
+        .map_err(|e| crate::Error::from_reason(format!("tempdir: {e}")))?;
+    let config_path = tmp_dir.path().join("config.json");
+    let architecture_name = match arch.model_type.as_str() {
+        "gemma4" => "Gemma4ForCausalLM",
+        "gemma" | "gemma2" => "GemmaForCausalLM",
+        "llama" => "LlamaForCausalLM",
+        _ => "LlamaForCausalLM",
+    };
+    {
+        let json = serde_json::json!({
+            "architectures": [architecture_name],
+            "model_type": arch.model_type,
+            "hidden_size": arch.hidden_size,
+            "intermediate_size": arch.intermediate_size,
+            "num_attention_heads": arch.num_attention_heads,
+            "num_key_value_heads": arch.num_key_value_heads,
+            "head_dim": arch.head_dim,
+            "num_hidden_layers": arch.num_hidden_layers,
+            "vocab_size": arch.vocab_size,
+            "rms_norm_eps": arch.rms_norm_eps,
+            "tie_word_embeddings": arch.tie_word_embeddings,
+            "rope_theta": arch.rope_local.theta,
+            "attention_k_eq_v": arch.attention_k_eq_v,
+            "sliding_window": arch.sliding_window,
+        });
+        let json_str = serde_json::to_string_pretty(&json)
+            .map_err(|e| crate::Error::from_reason(format!("serialize config: {e}")))?;
+        let mut f = fs::File::create(&config_path)
+            .map_err(|e| crate::Error::from_reason(format!("create config: {e}")))?;
+        f.write_all(json_str.as_bytes())
+            .map_err(|e| crate::Error::from_reason(format!("write config: {e}")))?;
+    }
+
+    // 4. ANE pre-compilation phase (reads config.json from temp dir)
+    match ane_models_dir {
+        None => {
+        let (arch_ane, _, _manifest) = crate::config::parse_config(
+            config_path
+                .to_str()
+                .ok_or_else(|| crate::Error::from_reason("invalid config path"))?,
+        )?;
+        let empty_ids = std::collections::HashMap::new();
+        let namespace = crate::config::resolve_namespace(&[]).unwrap_or_default();
+        let mut ane_plan =
+            crate::config::build_execution_plan(&arch_ane, &namespace, &empty_ids);
+        ane_plan.build_ane_fusion_plan();
+        super::coreml::compile_ane_islands(&ane_plan, &arch_ane, output_dir)
+            .map_err(|e| crate::Error::from_reason(format!("ANE pre-compilation failed: {e}")))?;
+        }
+        Some(dir) => {
+            eprintln!("[gguf:ane] using pre-compiled .mlmodelc from {dir}");
+            let dir = Path::new(dir);
+            copy_precompiled_ane_models(dir, output_dir)?;
+        }
+    }
+
+    // 5. Load GGUF source (re-parses header internally)
+    let t_source = Instant::now();
+    let loaded = load_gguf_source(gguf_path, true)?;
+    let source_load_ms = t_source.elapsed().as_millis() as u64;
+
+    // 6. Compile inference Metal kernels into temp dir so embed_metallib finds them
+    let model_metallib_path = tmp_dir.path().join("model.metallib");
+    match metallib_path {
+        Some(src) => {
+            std::fs::copy(src, &model_metallib_path).map_err(|e| {
+                crate::Error::from_reason(format!(
+                    "copy metallib {} -> {}: {e}",
+                    src,
+                    model_metallib_path.display()
+                ))
+            })?;
+            eprintln!(
+                "[gguf:metal] using pre-compiled metallib: {}",
+                src
+            );
+        }
+        None if !model_metallib_path.exists() => {
+        compile_inference_metallib(&model_metallib_path)
+            .map_err(|e| crate::Error::from_reason(format!("compile inference kernels: {e}")))?;
+        eprintln!(
+            "[gguf:metal] compiled inference kernels -> {}",
+            model_metallib_path.display()
+        );
+        }
+        _ => {}  // pre-existing, skip
+    }
+
+    let compiled = compile_sequential(
+        tmp_dir.path().to_str().unwrap(),
+        output_dir,
+        loaded,
+        started_at,
+        source_load_ms,
+        quantize_mode,
+    )?;
+
+    // 7. Archive ANE .mlmodelc directories for portable deployment
+    let islands: Vec<crate::config::AneFusedIsland> = compiled
+        .manifest
+        .execution_plan
+        .fused_ane_islands
+        .clone();
+    for island in &islands {
+        let modelc_dir = output_dir.join(&island.modelc_relpath);
+        if modelc_dir.is_dir() {
+            let tar_path = output_dir.join(format!("{}.ane.tar", island.island_id));
+            archive_ane_modelc(&modelc_dir, &tar_path)
+                .unwrap_or_else(|e| eprintln!("[gguf:ane] archive {} failed: {e}", island.island_id));
+            eprintln!(
+                "[gguf:ane] archived {} -> {}",
+                island.island_id,
+                tar_path.display()
+            );
+        }
+    }
+
+    Ok(compiled)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Metal kernel compilation helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -443,6 +890,88 @@ fn compile_metal_source_to_metallib(
     // Cleanup
     let _ = std::fs::remove_dir_all(&tmp_dir);
 
+    Ok(())
+}
+
+/// Compile all inference Metal kernel templates into a single .metallib.
+///
+/// Reads source from embedded templates (`include_str!`) and runs `xcrun metal` +
+/// `xcrun metallib` to produce the library at `output_path`.  The resulting
+/// .metallib contains every inference kernel the runtime needs (palettized GEMV/GEMM,
+/// ternary GEMV/GEMM, Q4 GEMV, fused gate-up, mixed-precision KV attention).
+fn compile_inference_metallib(output_path: &Path) -> Result<(), String> {
+    // Every template .metal source, concatenated into one compilation unit.
+    // Order does not matter — each is a separate [[kernel]] function.
+    let source = concat!(
+        include_str!("../templates/palettized_gemv.metal"),
+        "\n",
+        include_str!("../templates/palettized_gemv_swiglu.metal"),
+        "\n",
+        include_str!("../templates/palettized_gemm.metal"),
+        "\n",
+        include_str!("../templates/fused_gate_up.metal"),
+        "\n",
+        include_str!("../templates/ternary_gemv.metal"),
+        "\n",
+        include_str!("../templates/ternary_gemm.metal"),
+        "\n",
+        include_str!("../templates/q4_block_sym_gemv.metal"),
+        "\n",
+        include_str!("../templates/kv_mixed.metal"),
+        "\n",
+    );
+    compile_metal_source_to_metallib(source, output_path, "inference_kernels")
+}
+
+/// Tar-archive a .mlmodelc directory into a single `.ane.tar` file.
+/// The resulting archive can be extracted to a temp dir at runtime and loaded
+/// via CoreMlModel::load (which expects a .mlmodelc directory on disk).
+fn archive_ane_modelc(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let file = std::fs::File::create(dst)?;
+    let mut builder = tar::Builder::new(std::io::BufWriter::new(file));
+    builder.append_dir_all(".", src)?;
+    builder.finish()?;
+    Ok(())
+}
+
+/// Scan a directory for pre-compiled .mlmodelc bundles, tar-archive each,
+/// and write the archives to `output_dir`.  Skips items that are not
+/// directories ending in `.mlmodelc`.
+fn copy_precompiled_ane_models(src: &Path, output_dir: &Path) -> crate::Result<()> {
+    let mut found = 0u32;
+    for entry in std::fs::read_dir(src).map_err(|e| {
+        crate::Error::from_reason(format!("read ane_models_dir {}: {e}", src.display()))
+    })? {
+        let entry = entry.map_err(|e| {
+            crate::Error::from_reason(format!("ane_models_dir entry: {e}"))
+        })?;
+        let path = entry.path();
+        if path.is_dir()
+            && path
+                .extension()
+                .map(|ext| ext == "mlmodelc")
+                .unwrap_or(false)
+        {
+            let stem = path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let tar_path = output_dir.join(format!("{stem}.ane.tar"));
+            archive_ane_modelc(&path, &tar_path).map_err(|e| {
+                crate::Error::from_reason(format!("archive {}: {e}", path.display()))
+            })?;
+            eprintln!(
+                "[gguf:ane] pre-compiled {} -> {}",
+                stem,
+                tar_path.display()
+            );
+            found += 1;
+        }
+    }
+    if found == 0 {
+        eprintln!("[gguf:ane] warning: no .mlmodelc directories found in {}", src.display());
+    }
     Ok(())
 }
 
@@ -1079,8 +1608,8 @@ pub fn compile_differential(
     plan_with_fusion.build_ane_fusion_plan();
     plan_with_fusion.apply_fusion_pass();
     // ── Compile ANE subgraphs (new 3-param signature) ────────────────
-    super::coreml::compile_ane_islands(&plan_with_fusion, &loaded.arch, output_dir_path)
-        .map_err(crate::Error::from_reason)?;
+        super::coreml::compile_ane_islands(&plan_with_fusion, &loaded.arch, output_dir_path)
+            .map_err(crate::Error::from_reason)?;
     builder.set_execution_plan(plan_with_fusion);
 
     let payload_emission_ms = t_emit.elapsed().as_millis() as u64;

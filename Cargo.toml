@@ -6,6 +6,7 @@ members = [
     "compute-core",
     "evidence-schema",
     "prism-ffi",
+    "prism-bridge",
     "mlx-rs-fork/mlx-rs",
     "mlx-rs-fork/mlx-sys",
     "mlx-rs-fork/mlx-macros",

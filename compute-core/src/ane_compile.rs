@@ -96,6 +96,7 @@ pub fn compile_ane_artifacts(model_dir: &Path) -> Result<Vec<String>, String> {
                         .into_owned(),
                     source_sha256: String::new(),
                     source_offset: info.data_offsets.0 as u64,
+                    source_byte_size: 0,
                 },
             );
             all_tensor_names.push(name);

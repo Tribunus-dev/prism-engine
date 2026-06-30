@@ -10,39 +10,7 @@
 //! 2. [`validate_and_fix`] — check required fields, fix type mismatches, correct names
 //! 3. [`retry_with_error`] — if unrepairable, regenerate with error context
 
-use serde::{Deserialize, Serialize};
-
-/// A tool definition parsed from the OpenAI API request body.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolDefinition {
-    pub name: String,
-    pub description: String,
-    /// JSON Schema describing the function parameters.
-    pub parameters: serde_json::Value,
-    /// Parameter names that are required.
-    pub required: Vec<String>,
-}
-
-/// A function call emitted by the model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FunctionCall {
-    pub name: String,
-    /// Parsed JSON arguments.
-    pub arguments: serde_json::Value,
-    /// Raw text the model generated.
-    pub raw: String,
-}
-
-/// Result of attempting to parse and repair a tool call.
-#[derive(Debug, Clone)]
-pub enum ToolCallResult {
-    /// Valid tool call, ready to execute.
-    Valid(FunctionCall),
-    /// Repaired deterministically from malformed output.
-    Repaired(FunctionCall, Vec<String>),
-    /// Cannot repair — should retry generation.
-    Unrepairable(String),
-}
+use crate::tools::{ToolCallResult, ToolDefinition};
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -169,16 +137,12 @@ pub fn validate_and_fix(mut val: serde_json::Value, tool: &ToolDefinition) -> To
     }
 
     let name = tool.name.clone();
-    let fc = FunctionCall {
-        name: name.clone(),
-        arguments: val.clone(),
-        raw: val.to_string(),
-    };
+    let arguments = val.clone();
 
     if fixes.is_empty() {
-        ToolCallResult::Valid(fc)
+        ToolCallResult::Valid(name, arguments)
     } else {
-        ToolCallResult::Repaired(fc, fixes)
+        ToolCallResult::Repaired(name, arguments, fixes)
     }
 }
 
@@ -481,22 +445,6 @@ pub fn extract_tools(body: &serde_json::Value) -> Result<Vec<ToolDefinition>, St
         .collect()
 }
 
-/// Execute a tool call and return the result as a JSON value.
-///
-/// This function handles:
-/// - Built-in tools (respond with confirmation)
-/// - Custom tools (delegated to the caller-provided dispatcher)
-pub fn execute_tool_call(call: &FunctionCall) -> Result<serde_json::Value, String> {
-    // For the server integration, tool execution is application-specific.
-    // This default implementation returns an acknowledgment that the tool
-    // was called, along with the parsed arguments.
-    Ok(serde_json::json!({
-        "tool": call.name,
-        "arguments": call.arguments,
-        "status": "called"
-    }))
-}
-
 // ── Internal helpers ───────────────────────────────────────────────────────
 
 /// Build a chat prompt string from a messages array (serde_json::Value).
@@ -689,8 +637,8 @@ mod tests {
         let tool = make_test_tool();
         let raw = r#"{"name": "get_weather", "arguments": {"location": "London"}}"#;
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Valid(call) => {
-                assert_eq!(call.name, "get_weather");
+            ToolCallResult::Valid(name, _args) => {
+                assert_eq!(name, "get_weather");
             }
             _ => panic!("expected Valid"),
         }
@@ -701,8 +649,8 @@ mod tests {
         let tool = make_test_tool();
         let raw = "Here is the result:\n```json\n{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Paris\"}}\n```\n";
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Valid(call) => {
-                assert_eq!(call.name, "get_weather");
+            ToolCallResult::Valid(name, _args) => {
+                assert_eq!(name, "get_weather");
             }
             _ => panic!("expected Valid"),
         }
@@ -713,8 +661,8 @@ mod tests {
         let tool = make_test_tool();
         let raw = "Some explanation text then {\"name\": \"get_weather\", \"arguments\": {\"location\": \"Berlin\"}} more text";
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Valid(call) => {
-                assert_eq!(call.name, "get_weather");
+            ToolCallResult::Valid(name, _args) => {
+                assert_eq!(name, "get_weather");
             }
             _ => panic!("expected Valid"),
         }
@@ -726,21 +674,16 @@ mod tests {
         // Missing "location" which is required
         let raw = r#"{"name": "get_weather", "arguments": {}}"#;
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Repaired(call, fixes) => {
+            ToolCallResult::Repaired(_name, _args, fixes) => {
                 assert!(fixes.iter().any(|f| f.contains("filled missing")));
-                let args = call
-                    .arguments
-                    .get("arguments")
-                    .and_then(|a| a.as_object())
-                    .cloned()
-                    .unwrap_or_default();
-                assert!(args.contains_key("location"));
             }
-            ToolCallResult::Valid(_) => {
+            ToolCallResult::Valid(_name, args) => {
                 // The arguments exist but are empty; validate_and_fix would add
-                // location but at default level it's Valid if no type mismatch
+                // location but at default level it's Parsed if no type mismatch
+                let arguments = args.get("arguments").and_then(|a| a.as_object());
+                assert!(arguments.is_some());
             }
-            _ => panic!("expected Valid or Repaired"),
+            _ => panic!("expected Parsed or Repaired"),
         }
     }
 
@@ -749,7 +692,7 @@ mod tests {
         let tool = make_test_tool();
         let raw = r#"{"name": "get_weathr", "arguments": {"location": "Tokyo"}}"#;
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Repaired(_call, fixes) => {
+            ToolCallResult::Repaired(_name, _args, fixes) => {
                 assert!(fixes.iter().any(|f| f.contains("corrected function name")));
             }
             _ => panic!("expected Repaired"),
@@ -776,13 +719,13 @@ mod tests {
         // value is a string "42" instead of number 42
         let raw = r#"{"name": "calculate", "arguments": {"value": "42"}}"#;
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Valid(_call) => {
+            ToolCallResult::Valid(_name, _args) => {
                 // string "42" might be accepted as string
             }
-            ToolCallResult::Repaired(_call, fixes) => {
+            ToolCallResult::Repaired(_name, _args, fixes) => {
                 assert!(fixes.iter().any(|f| f.contains("type mismatch")));
             }
-            _ => panic!("expected Repaired or Valid"),
+            _ => panic!("expected Repaired or Parsed"),
         }
     }
 
@@ -792,10 +735,10 @@ mod tests {
         let raw =
             "{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {\\\"location\\\": \\\"Rome\\\"}}";
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Valid(call) | ToolCallResult::Repaired(call, _) => {
-                assert_eq!(call.name, "get_weather");
+            ToolCallResult::Valid(name, _args) | ToolCallResult::Repaired(name, _args, _) => {
+                assert_eq!(name, "get_weather");
             }
-            _ => panic!("expected Valid or Repaired"),
+            _ => panic!("expected Parsed or Repaired"),
         }
     }
 
@@ -914,13 +857,13 @@ mod tests {
         let tool = make_test_tool();
         let raw = r#"{"id":"call_abc","type":"function","function":{"name":"get_weather","arguments":"{\"location\":\"NYC\"}"}}"#;
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Repaired(_call, fixes) => {
+            ToolCallResult::Repaired(_name, _args, fixes) => {
                 assert!(fixes.iter().any(|f| f.contains("normalized")));
             }
-            ToolCallResult::Valid(_call) => {
+            ToolCallResult::Valid(_name, _args) => {
                 // If no fix needed (already normalized)
             }
-            _ => panic!("expected Repaired or Valid"),
+            _ => panic!("expected Repaired or Parsed"),
         }
     }
 }

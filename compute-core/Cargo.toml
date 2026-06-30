@@ -47,6 +47,10 @@ bytemuck = { version = "1", features = ["derive"] }
 half = "2"
 clap = { version = "4", features = ["derive"] }
 tar = "0.4"
+walkdir = "2"
+regex = "1"
+content_inspector = "0.2"
+encoding_rs = "0.8"
 
 [features]
 default = []

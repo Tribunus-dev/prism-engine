@@ -83,7 +83,7 @@ use crate::editing::{
 use crate::profiled_executor::StreamConfig;
 use crate::server::admin::ActiveRequestInfo;
 use crate::server::rate_limiter::RateLimiter;
-use crate::tools::{self, ToolCallResult};
+use crate::tools::{self, FunctionCall, ToolCallResult};
 use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, Sse};
@@ -1356,9 +1356,11 @@ async fn v1_chat_completions(
                 match tools::extract_tool(&body) {
                     Ok(tool) => {
                         match tools::parse_and_repair(&output_text, &tool) {
-                            ToolCallResult::Valid(call) | ToolCallResult::Repaired(call, _) => {
-                                // Execute the tool call and return a tool_calls response.
-                                match tools::execute_tool_call(&call) {
+                            ToolCallResult::Valid(name, args)
+                            | ToolCallResult::Repaired(name, args, _) => {
+                        let call = FunctionCall { name, arguments: args };
+                        // Execute the tool call and return a tool_calls response.
+                        match tools::execute_tool_call(&call) {
                                     Ok(_tool_result) => {
                                         // Return the tool call in OpenAI format.
                                         return JsonResponse(serde_json::json!({
@@ -1441,8 +1443,9 @@ async fn v1_chat_completions(
                                                             &retry_text,
                                                             &tool,
                                                         ) {
-                                                            ToolCallResult::Valid(c)
-                                                            | ToolCallResult::Repaired(c, _) => {
+                                                            ToolCallResult::Valid(name, args)
+                                                            | ToolCallResult::Repaired(name, args, _) => {
+                                                            let c = FunctionCall { name, arguments: args };
                                                                 return JsonResponse(
                                                                     serde_json::json!({
                                                                         "id": format!("chatcmpl-{:x}", rand_hex()),
@@ -1544,8 +1547,9 @@ async fn v1_chat_completions(
                                             Ok(retry_toks) => {
                                                 let retry_text = detokenize(&retry_toks);
                                                 match tools::parse_and_repair(&retry_text, &tool) {
-                                                    ToolCallResult::Valid(c)
-                                                    | ToolCallResult::Repaired(c, _) => {
+                                                    ToolCallResult::Valid(name, args)
+                                                    | ToolCallResult::Repaired(name, args, _) => {
+                                                    let c = FunctionCall { name, arguments: args };
                                                         return JsonResponse(serde_json::json!({
                                                             "id": format!("chatcmpl-{:x}", rand_hex()),
                                                             "object": "chat.completion",

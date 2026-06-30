@@ -29,6 +29,13 @@ fn main() -> Result<(), String> {
             continue;
         }
 
+        // Zero out non-finite values (BF16→f16 overflow blocks) so tile
+        // scale computation and ternary comparison use only valid data.
+        let mut orig = orig;
+        for v in orig.iter_mut() {
+            if !v.is_finite() { *v = 0.0; }
+        }
+
         // Ternary tile640 quantize → dequantize on finite values only
         let num_tiles = (cols + 639) / 640;
         let mut recon = vec![0.0f32; n];
@@ -40,22 +47,20 @@ fn main() -> Result<(), String> {
                 // Only compute scale from finite values in this tile segment
                 let mut absmax = 0.0f32;
                 for c in ts..te {
-                    let v = orig[base + c];
-                    if v.is_finite() { let a = v.abs(); if a > absmax { absmax = a; } }
+                    let a = orig[base + c].abs();
+                    if a > absmax { absmax = a; }
                 }
                 let scale = if absmax > 1e-12 { absmax } else { 1.0 };
                 let inv = 1.0 / scale;
                 for c in ts..te {
-                    if orig[base + c].is_finite() {
-                        let val = orig[base + c] * inv;
-                        let d = if val > 0.5 { 1.0 } else if val < -0.5 { -1.0 } else { 0.0 };
-                        recon[base + c] = d * scale;
-                    }
+                    let val = orig[base + c] * inv;
+                    let d = if val > 0.5 { 1.0 } else if val < -0.5 { -1.0 } else { 0.0 };
+                    recon[base + c] = d * scale;
                 }
             }
         }
 
-        // Sample-based accuracy metrics on finite values
+        // Sample-based accuracy metrics (all values now finite)
         let sample = n.min(200_000);
         let step = if n > sample { n / sample } else { 1 };
         let mut sq = 0.0f64;
@@ -65,7 +70,6 @@ fn main() -> Result<(), String> {
         let mut checked = 0usize;
         for i in (0..n).step_by(step) {
             let o = orig[i];
-            if !o.is_finite() { continue; }
             let r = recon[i];
             let err = (o as f64) - (r as f64);
             let ab = err.abs() as f32;
