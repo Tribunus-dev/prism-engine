@@ -443,7 +443,14 @@ pub fn parse_gguf_header(
         let n_dims = read_u32_le(&mut f)?;
         let mut dims = Vec::with_capacity(n_dims as usize);
         for _ in 0..n_dims {
-            dims.push(read_u32_le(&mut f)?);
+            // GGUF v3 (and later) stores dimensions as uint64, v1/v2 as uint32.
+            // The values always fit in u32 (tensor shapes).
+            let dim = if version >= 3 {
+                read_u64_le(&mut f)? as u32
+            } else {
+                read_u32_le(&mut f)?
+            };
+            dims.push(dim);
         }
         let dtype = read_u32_le(&mut f)?;
         let byte_offset = read_u64_le(&mut f)?;
@@ -469,12 +476,6 @@ pub fn parse_gguf_header(
 fn meta_u64(metadata: &[(String, String)], key: &str) -> Option<u64> {
     let (_, val) = metadata.iter().find(|(k, _)| k == key)?;
     val.parse::<u64>().ok()
-}
-
-/// Look up a metadata value by key and parse it as a f64.
-fn meta_f64(metadata: &[(String, String)], key: &str) -> Option<f64> {
-    let (_, val) = metadata.iter().find(|(k, _)| k == key)?;
-    val.parse::<f64>().ok()
 }
 
 /// Look up a metadata value by key and return it as a trimmed string.

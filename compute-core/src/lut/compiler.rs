@@ -353,6 +353,34 @@ pub fn compile_gguf_to_cimage(
     // 2. Write a config.json to a temp directory for ModelGraph construction
     let tmp_dir = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
     let config_path = tmp_dir.path().join("config.json");
+    // The GGUF metadata may omit head_dim. Compute it from the first layer's
+    // Q projection tensor shape: Q_out = num_heads * head_dim → head_dim = Q_out / num_heads.
+    let mut arch = arch;
+    // Also infer num_key_value_heads from K projection shape.
+    if let Some(q_tensor) = tensors.iter().find(|t| t.name.ends_with("attn_q.weight")) {
+        if q_tensor.shape.len() >= 2 {
+            let q_out = q_tensor.shape[1] as u32;
+            let inferred = q_out / arch.num_attention_heads;
+            if inferred > 0 && inferred != arch.head_dim {
+                eprintln!("[gguf] inferred head_dim={inferred} from {}(out={q_out}, heads={})",
+                    q_tensor.name, arch.num_attention_heads);
+                arch.head_dim = inferred;
+            }
+        }
+    }
+    // Infer num_key_value_heads from the first K projection tensor shape.
+    // The GGUF metadata stores head_count_kv as an array (variable per layer).
+    if let Some(k_tensor) = tensors.iter().find(|t| t.name.ends_with("attn_k.weight")) {
+        if k_tensor.shape.len() >= 2 {
+            let k_out = k_tensor.shape[1] as u32;
+            let inferred_kv = k_out / arch.head_dim;
+            if inferred_kv > 0 && inferred_kv != arch.num_key_value_heads {
+                eprintln!("[gguf] inferred kv_heads={inferred_kv} from {}(out={k_out}, head_dim={})",
+                    k_tensor.name, arch.head_dim);
+                arch.num_key_value_heads = inferred_kv;
+    }
+    }
+    }
     write_gguf_config_json(&config_path, &arch, &metadata)?;
 
     // 3. Build the ModelGraph from the config
@@ -403,18 +431,31 @@ pub fn compile_gguf_to_cimage(
         let meta = &tensors[*t_idx];
 
         // Verify shape consistency: GGUF stores [out_features, in_features]
-        // Graph expects dim_m = out_rows, dim_n = in_cols
-        let n_rows = meta.shape.first().copied().unwrap_or(1) as u32;
-        let n_cols = meta.shape.get(1).copied().unwrap_or(1) as u32;
-        if n_rows != tb.dim_m || n_cols != tb.dim_n {
+        // GGUF stores [in_features, out_features]; graph expects [dim_m, dim_n] = [out, in]
+        let gguf_in = meta.shape.first().copied().unwrap_or(1) as u32;
+        let gguf_out = meta.shape.get(1).copied().unwrap_or(1) as u32;
+        if gguf_in != tb.dim_n || gguf_out != tb.dim_m {
             return Err(format!(
-                "Shape mismatch for {} (mapped from '{}'): GGUF [{n_rows}×{n_cols}] vs graph [{}×{}] (transposed?)",
+                "Shape mismatch for {} (mapped from '{}'): GGUF [{gguf_in}×{gguf_out}] vs graph [{}×{}]",
                 meta.name, tb.key, tb.dim_m, tb.dim_n
             ));
         }
 
         // Read and dequantize the GGUF tensor to f32
-        let f32_vals = gguf::read_gguf_tensor_f32(gguf_path, meta)?;
+        let mut f32_vals = gguf::read_gguf_tensor_f32(gguf_path, meta)?;
+
+        // Transpose: GGUF data is [in×out] row-major, LUT expects [out×in] row-major.
+        if gguf_in > 1 && gguf_out > 1 && f32_vals.len() > 1 {
+            let (d_in, d_out) = (gguf_in as usize, gguf_out as usize);
+            let mut t = vec![0.0f32; f32_vals.len()];
+            for i in 0..d_in {
+                let src_row_off = i * d_out;
+                for j in 0..d_out {
+                    t[j * d_in + i] = f32_vals[src_row_off + j];
+                }
+            }
+            f32_vals = t;
+        }
 
         let t0 = std::time::Instant::now();
         let pal = palettize_matrix(&f32_vals, tb.dim_m as usize, tb.dim_n as usize, 16, 50);
