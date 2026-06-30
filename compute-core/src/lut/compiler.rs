@@ -434,18 +434,23 @@ pub fn compile_gguf_to_cimage(
         // GGUF stores [in_features, out_features]; graph expects [dim_m, dim_n] = [out, in]
         let gguf_in = meta.shape.first().copied().unwrap_or(1) as u32;
         let gguf_out = meta.shape.get(1).copied().unwrap_or(1) as u32;
+        // Use the GGUF file's actual dimensions — they are the source of truth.
+        // The graph's expected dims (from ModelGraph) assume uniform per-layer
+        // projection sizes, but Gemma 4 shared KV layers vary (kv_heads=1 every
+        // 5th layer doubles Q, shrinks K/V). The ANE path handles per-layer
+        // shapes via its own fixed-shape contracts.
+        let use_dim_m = gguf_out;
+        let use_dim_n = gguf_in;
         if gguf_in != tb.dim_n || gguf_out != tb.dim_m {
-            return Err(format!(
-                "Shape mismatch for {} (mapped from '{}'): GGUF [{gguf_in}×{gguf_out}] vs graph [{}×{}]",
-                meta.name, tb.key, tb.dim_m, tb.dim_n
-            ));
+            eprintln!("  [gguf] shape adjusted: {} graph [{}×{}] → GGUF [{gguf_in}×{gguf_out}]",
+                meta.name, tb.dim_m, tb.dim_n);
         }
 
         // Read and dequantize the GGUF tensor to f32
         let mut f32_vals = gguf::read_gguf_tensor_f32(gguf_path, meta)?;
 
         // Transpose: GGUF data is [in×out] row-major, LUT expects [out×in] row-major.
-        if gguf_in > 1 && gguf_out > 1 && f32_vals.len() > 1 {
+        if use_dim_m > 1 && use_dim_n > 1 && f32_vals.len() > 1 {
             let (d_in, d_out) = (gguf_in as usize, gguf_out as usize);
             let mut t = vec![0.0f32; f32_vals.len()];
             for i in 0..d_in {
@@ -458,7 +463,7 @@ pub fn compile_gguf_to_cimage(
         }
 
         let t0 = std::time::Instant::now();
-        let pal = palettize_matrix(&f32_vals, tb.dim_m as usize, tb.dim_n as usize, 16, 50);
+        let pal = palettize_matrix(&f32_vals, use_dim_m as usize, use_dim_n as usize, 16, 50);
         let bpp = pal.effective_bpp();
 
         // Build payload: codebook (f16) + indices
@@ -475,14 +480,14 @@ pub fn compile_gguf_to_cimage(
             payload.extend_from_slice(&row.indices);
         }
 
-        cimage.append_palettized(&tb.key, &payload, tb.dim_m, tb.dim_n)?;
+        cimage.append_palettized(&tb.key, &payload, use_dim_m, use_dim_n)?;
         emitted_ids.insert(tb.key.clone(), id as u32);
 
         eprintln!(
             "  [gguf] {} ({}×{}) bpp={bpp:.3} {:.2}s",
             meta.name,
-            tb.dim_m,
-            tb.dim_n,
+            use_dim_m,
+            use_dim_n,
             t0.elapsed().as_secs_f64()
         );
     }
