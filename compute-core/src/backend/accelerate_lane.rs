@@ -513,7 +513,7 @@ mod tests {
     fn test_rms_norm_scalar_matches_neon() {
         // Verify scalar and (when available) NEON produce identical results.
         let n = 32;
-        let x: Vec<f32> = (0..n).map(|i| (i as f32)).collect();
+        let x: Vec<f32> = (0..n).map(|i| i as f32).collect();
         let w: Vec<f32> = (0..n).map(|i| 1.0 / (i + 1) as f32).collect();
         let eps = 1e-6;
 

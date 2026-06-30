@@ -61,7 +61,7 @@ fn fill_standard_tensors(
     num_kv_heads: u32,
     head_dim: u32,
 ) {
-    let qk_dim = hs; // each head's Q/K projection dimension
+    let _qk_dim = hs; // each head's Q/K projection dimension
     let _qk_dim = hs; // each head's Q/K projection dimension
     let _vo_dim = head_dim * num_kv_heads; // V/O see KV heads
 

@@ -130,7 +130,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::thread;
-    use std::time::Duration;
+    
 
     #[test]
     fn test_token_bucket_initial_full() {

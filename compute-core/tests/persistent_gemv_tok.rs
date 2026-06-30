@@ -11,11 +11,10 @@
 #![cfg(all(target_os = "macos", feature = "prism-backend"))]
 
 use metal::*;
-use std::io::Write;
 use std::time::Instant;
 use tribunus_compute_core::compute_image::compile::int4_pack::quantize_to_ternary_block32;
 use tribunus_compute_core::compute_image::megakernel::{
-    dispatch_persistent_gemv, PERSISTENT_GEMV_ROWS_PER_TG, PERSISTENT_GEMV_THREADS_PER_TG, PERSISTENT_GEMV_SRC,
+    PERSISTENT_GEMV_ROWS_PER_TG, PERSISTENT_GEMV_THREADS_PER_TG, PERSISTENT_GEMV_SRC,
 };
 
 const HIDDEN: usize = 3840;
@@ -156,7 +155,7 @@ kernel void matvec_persistent_batched_640(
 #[test]
 fn decode_tok_benchmark() {
     let mut rng = Rng::new(42);
-    let dev = Device::system_default().expect("Metal device");
+    let _dev = Device::system_default().expect("Metal device");
 
     // Projection configs: (name, rows, hidden_dim, repeats_for_down)
     #[derive(Clone, Copy)]
@@ -315,7 +314,7 @@ fn decode_tok_benchmark() {
     println!("
   Occupancy estimate (3840-dim):");
     let concurrent_3840 = 64u64;
-    let tgs_3840 = prepped[0].tgs;
+    let _tgs_3840 = prepped[0].tgs;
     println!("    Concurrent TGs:   {}", concurrent_3840);
     println!("    TGs (Q 4096):     {}", (4096 / PERSISTENT_GEMV_ROWS_PER_TG));
     println!("    TGs (Gate 15360): {}", (15360 / PERSISTENT_GEMV_ROWS_PER_TG));

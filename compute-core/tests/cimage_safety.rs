@@ -19,15 +19,27 @@
 #![cfg(all(target_os = "macos", feature = "prism-backend"))]
 
 use sha2::{Digest, Sha256};
+use std::mem::size_of;
 use std::time::Instant;
-use metal::*;
 use tribunus_compute_core::compute_image::manifest::{CImageHeader, CIMAGE_MAGIC};
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Serialise `CImageHeader` → JSON bytes.
+const HEADER_SIZE: usize = 128;
+
+/// Serialise `CImageHeader` → raw bytes.
 fn header_to_bytes(hdr: &CImageHeader) -> Vec<u8> {
-    serde_json::to_vec(hdr).expect("serialise header")
+    unsafe {
+        let ptr = hdr as *const CImageHeader as *const u8;
+        std::slice::from_raw_parts(ptr, size_of::<CImageHeader>())
+            .to_vec()
+    }
+}
+
+/// Deserialise raw bytes → `CImageHeader`.
+fn header_from_bytes(bytes: &[u8]) -> CImageHeader {
+    assert_eq!(bytes.len(), size_of::<CImageHeader>(), "header size mismatch");
+    unsafe { std::ptr::read(bytes.as_ptr() as *const CImageHeader) }
 }
 
 /// Compute SHA-256 of a byte slice (one-time at load time).
@@ -60,19 +72,17 @@ fn verify_hash(expected: &[u8; 32], payload: &[u8]) -> bool {
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 fn minimal_header() -> CImageHeader {
-    CImageHeader {
-        magic: CIMAGE_MAGIC,
-        version: 1,
-        payload_hash: [0u8; 32],
-        phase_count: 0,
-        layout_offset: 0,
-        phase_offset: 0,
-        quantization_schema: 0,
-        ane_hidden_dim_limit: 2048,
-        ane_ffn_dim_limit: 4096,
-        ane_max_batch: 131072,
-        ane_keepalive_interval_us: 5000,
-        lane_isolation: true,
+    let mut hdr = CImageHeader::default();
+    hdr.magic = CIMAGE_MAGIC;
+    hdr.version = 1;
+    hdr.payload_hash = [0u8; 32];
+    hdr.quantization_schema = 0;
+    hdr.ane_hidden_dim_limit = 2048;
+    hdr.ane_ffn_dim_limit = 4096;
+    hdr.ane_max_batch = 131072;
+    hdr.ane_keepalive_interval_us = 5000;
+    hdr.lane_isolation = true;
+    hdr
     }
 }
 
@@ -107,8 +117,8 @@ fn cimage_signature_roundtrip() {
     // (b) Serialise the signed header.
     let header_bytes = header_to_bytes(&hdr);
 
-    // (c) Deserialise back.
-    let decoded: CImageHeader = serde_json::from_slice(&header_bytes).expect("deserialise header");
+    // (c) Deserialise back from raw bytes.
+    let decoded = header_from_bytes(&header_bytes);
 
     // (d) Verify: hash stored in header matches the (unchanged) payload.
     assert!(
@@ -127,7 +137,7 @@ fn cimage_signature_corruption_detected() {
     let mut hdr = minimal_header();
     hdr.payload_hash = payload_hash;
     let header_bytes = header_to_bytes(&hdr);
-    let decoded: CImageHeader = serde_json::from_slice(&header_bytes).expect("deserialise header");
+    let decoded = header_from_bytes(&header_bytes);
 
     // (f) Corrupt one byte of the payload (not the header).
     let corrupt_idx = payload.len() / 2;

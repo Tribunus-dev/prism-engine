@@ -185,8 +185,8 @@ fn test_shape_bucketing() {
 
     // ── Test A: individual (batch=1) ───────────────────────────────
 
-    let ia_b1 = Arena::new(1, IN_DIM, mlx_rs::Dtype::Float16).expect("input arena b1");
-    let oa_b1 = Arena::new(1, OUT_DIM, mlx_rs::Dtype::Float16).expect("output arena b1");
+    let ia_b1 = Arena::new(1, IN_DIM, DataType::Float16).expect("input arena b1");
+    let oa_b1 = Arena::new(1, OUT_DIM, DataType::Float16).expect("output arena b1");
 
     // Warmup: run each request through batch=1 model (WARMUP times each)
     for _ in 0..WARMUP {
@@ -229,8 +229,8 @@ fn test_shape_bucketing() {
 
     // ── Test B: batched (batch=4, zero-padded) ─────────────────────
 
-    let ia_b4 = Arena::new(BATCH_4, IN_DIM, mlx_rs::Dtype::Float16).expect("input arena b4");
-    let oa_b4 = Arena::new(BATCH_4, OUT_DIM, mlx_rs::Dtype::Float16).expect("output arena b4");
+    let ia_b4 = Arena::new(BATCH_4, IN_DIM, DataType::Float16).expect("input arena b4");
+    let oa_b4 = Arena::new(BATCH_4, OUT_DIM, DataType::Float16).expect("output arena b4");
 
     // Fill batch-4 input: rows 0..=2 from requests, row 3 stays zero
     // (IOSurface memory is zero-initialized on allocation)
@@ -366,8 +366,8 @@ fn test_batch_crossover_sweep() {
         )
         .expect("load batch=1");
 
-        let ia_b1 = Arena::new(1, hidden as u32, mlx_rs::Dtype::Float16).expect("input arena b1");
-        let oa_b1 = Arena::new(1, ffn as u32, mlx_rs::Dtype::Float16).expect("output arena b1");
+        let ia_b1 = Arena::new(1, hidden as u32, DataType::Float16).expect("input arena b1");
+        let oa_b1 = Arena::new(1, ffn as u32, DataType::Float16).expect("output arena b1");
 
         for &batch in BATCH_SIZES {
             // Generate deterministic inputs for this batch
@@ -428,9 +428,9 @@ fn test_batch_crossover_sweep() {
             )
             .expect("load batched model");
 
-            let ia_b_b = Arena::new(batch as u32, hidden as u32, mlx_rs::Dtype::Float16)
+            let ia_b_b = Arena::new(batch as u32, hidden as u32, DataType::Float16)
                 .expect("input arena batch");
-            let oa_b_b = Arena::new(batch as u32, ffn as u32, mlx_rs::Dtype::Float16)
+            let oa_b_b = Arena::new(batch as u32, ffn as u32, DataType::Float16)
                 .expect("output arena batch");
 
             unsafe {
@@ -573,9 +573,9 @@ fn test_ane_batch_capacity() {
             .collect();
 
         let arena_in =
-            Arena::new(batch as u32, HIDDEN as u32, mlx_rs::Dtype::Float16).expect("input arena");
+            Arena::new(batch as u32, HIDDEN as u32, DataType::Float16).expect("input arena");
         let arena_out =
-            Arena::new(batch as u32, FFN as u32, mlx_rs::Dtype::Float16).expect("output arena");
+            Arena::new(batch as u32, FFN as u32, DataType::Float16).expect("output arena");
 
         unsafe {
             for (row, req) in requests.iter().enumerate() {

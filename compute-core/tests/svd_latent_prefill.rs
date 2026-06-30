@@ -444,8 +444,8 @@ fn svd_latent_prefill() {
     println!("ANE model loaded.");
 
     // ── Step 5: Allocate arenas ────────────────────────────────────────────
-    let input_arena = Arena::new(1, LATENT, mlx_rs::Dtype::Float16).expect("input arena");
-    let output_arena = Arena::new(1, LATENT_FFN, mlx_rs::Dtype::Float16).expect("output arena");
+    let input_arena = Arena::new(1, LATENT, DataType::Float16).expect("input arena");
+    let output_arena = Arena::new(1, LATENT_FFN, DataType::Float16).expect("output arena");
 
     let input_name = "input".to_string();
     let output_name = "matmul_1".to_string();

@@ -262,9 +262,9 @@ fn predict_branch(model: &CoreMlModel, input_chunk: &[f32]) -> Result<Vec<f32>, 
     let ffn_chunk = BRANCH_FFN;
 
     // Allocate FP16 arenas.
-    let input_arena = Arena::new(1, h_chunk, mlx_rs::Dtype::Float16)
+    let input_arena = Arena::new(1, h_chunk, DataType::Float16)
         .map_err(|e| format!("input arena alloc: {}", e))?;
-    let output_arena = Arena::new(1, ffn_chunk, mlx_rs::Dtype::Float16)
+    let output_arena = Arena::new(1, ffn_chunk, DataType::Float16)
         .map_err(|e| format!("output arena alloc: {}", e))?;
 
     // Fill input arena with FP16 data.
@@ -330,9 +330,9 @@ fn detect_cpu_fallback(
         .map_err(|e| format!("load CPU branch {}: {}", branch, e))?;
 
     // Allocate arenas.
-    let input_arena = Arena::new(1, h_chunk, mlx_rs::Dtype::Float16)
+    let input_arena = Arena::new(1, h_chunk, DataType::Float16)
         .map_err(|e| format!("input arena: {}", e))?;
-    let output_arena = Arena::new(1, ffn_chunk, mlx_rs::Dtype::Float16)
+    let output_arena = Arena::new(1, ffn_chunk, DataType::Float16)
         .map_err(|e| format!("output arena: {}", e))?;
 
     // Fill input.

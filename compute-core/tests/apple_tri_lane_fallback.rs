@@ -13,9 +13,7 @@
 
 use tribunus_compute_core::backend::placement::ExecutionLane;
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
-    AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
-    AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, AppleTriLaneArtifactManifest,
-    CoreMlArtifactManifest, CpuArtifactManifest, IOSurfaceSlotManifest, MetalArtifactManifest,
+    AppleSharedArenaManifest, IOSurfaceSlotManifest,
 };
 use tribunus_compute_core::compute_image::apple_shared_arena::{
     AppleSharedArena, SlotFailureReason, SlotState,

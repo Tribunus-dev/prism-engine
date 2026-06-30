@@ -593,7 +593,7 @@ fn ane_combined_techniques_sweep() {
             // Optimized arena: use padded dimensions with batch=256
             // The arena holds [B, C*1*S] elements; we allocate batch * (C*S).
             let in_elements = padded_c_in * padded_s; // total elements per batch row
-            match Arena::new(batch, in_elements, mlx_rs::Dtype::Float16) {
+            match Arena::new(batch, in_elements, DataType::Float16) {
                 Ok(a) => a,
                 Err(e) => {
                     println!(
@@ -605,7 +605,7 @@ fn ane_combined_techniques_sweep() {
                 }
             }
         } else {
-            match Arena::new(1, H as u32, mlx_rs::Dtype::Float16) {
+            match Arena::new(1, H as u32, DataType::Float16) {
                 Ok(a) => a,
                 Err(e) => {
                     println!(
@@ -618,7 +618,7 @@ fn ane_combined_techniques_sweep() {
             }
         };
 
-        let out_dtype = mlx_rs::Dtype::Float16;
+        let out_dtype = DataType::Float16;
 
         let out_arena_elements: u32 = if cfg.opt {
             // All optimized configs output [B, C_out, 1, S] -> need C_out * S elements per batch row

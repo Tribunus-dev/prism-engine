@@ -210,7 +210,7 @@ impl std::error::Error for SealVerificationError {}
 mod tests {
     use super::*;
     use crate::integration::ContentHash;
-    use crate::compute_image::executable::seal::{ExecutableSeal, ExecutableSignature};
+    use crate::compute_image::executable::seal::ExecutableSeal;
 
     fn make_valid_seal() -> ExecutableSeal {
         ExecutableSeal {

@@ -427,9 +427,9 @@ fn test_disaggregated_pipeline() {
     )
     .expect("[ANE] Model load must succeed");
 
-    let input_arena = Arena::new(BATCH as u32, IN_DIM as u32, mlx_rs::Dtype::Float16)
+    let input_arena = Arena::new(BATCH as u32, IN_DIM as u32, DataType::Float16)
         .expect("[ANE] Input arena allocation");
-    let output_arena = Arena::new(BATCH as u32, OUT_DIM as u32, mlx_rs::Dtype::Float16)
+    let output_arena = Arena::new(BATCH as u32, OUT_DIM as u32, DataType::Float16)
         .expect("[ANE] Output arena allocation");
 
     // Fill input with random FP16 values

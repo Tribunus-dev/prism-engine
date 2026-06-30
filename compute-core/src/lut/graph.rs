@@ -653,9 +653,9 @@ mod tests {
             .iter()
             .filter(|t| t.contains("full"))
             .count();
-        let expected = 1 + (n_lin * 9 + n_full * 12) + 1 + 1;
+        let _expected = 1 + (n_lin * 9 + n_full * 12) + 1 + 1;
         // tie_word_embeddings=true → no LM head node: formula is 1 (embed) + layers + 1 (final norm)
-        let expected = 1 + (n_lin * 10 + n_full * 12) + 1;
+        let _expected = 1 + (n_lin * 10 + n_full * 12) + 1;
         assert_eq!(graph.nodes.len(), 236, "Qwen3.5 node count");
         assert_eq!(graph.num_layers, 24);
 

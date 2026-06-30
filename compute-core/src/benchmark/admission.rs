@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn test_admission_passes_valid_artifact() {
         let artifact = make_artifact();
-        let bytes = artifact.metallib_hash.sha256.clone();
+        let _bytes = artifact.metallib_hash.sha256.clone();
         // We need the actual bytes used for sealing, but seal_fusion_artifact
         // computes the hash from the bytes we pass. We passed b"MTLBvalid_metallib".
         // So we need to pass the same bytes to verify.

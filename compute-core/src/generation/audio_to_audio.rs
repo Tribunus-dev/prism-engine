@@ -427,7 +427,7 @@ mod tests {
         // Can't instantiate AudioToAudioGenerator without a model, but
         // compute_reference_fingerprint is a private method; we test it
         // indirectly by checking the shape of output via encode_wav.
-        let dummy_audio = vec![0u8; 1024];
+        let _dummy_audio = vec![0u8; 1024];
         // We can call the module-level encode_wav to verify the pipeline.
         let samples = vec![0.1f32; 100];
         let wav = encode_wav(&samples, 16000);

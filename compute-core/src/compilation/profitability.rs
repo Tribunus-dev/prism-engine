@@ -993,7 +993,7 @@ mod tests {
     fn test_estimate_gate_proj_time() {
         let plan = test_plan(1, 4096, 32, 8, 128, gemma_default_route());
         let layer = &plan.layers[0];
-        let (gpu, accel, ane) = ProfitabilityAnalyzer::estimate_op_times(layer, "gate_proj");
+        let (gpu, _accel, ane) = ProfitabilityAnalyzer::estimate_op_times(layer, "gate_proj");
         // MLP matmuls: wider hidden_size → larger matmuls
         assert!(gpu >= 4_000, "GPU gate_proj expected >= 4μs, got {gpu}ns");
         assert!(ane >= 2_000, "ANE gate_proj expected >= 2μs, got {ane}ns");
@@ -1436,7 +1436,7 @@ mod tests {
         let costs = ProfitabilityAnalyzer::gather_op_costs(&plan);
         let unique_ops_in_layer: std::collections::HashSet<&str> =
             plan.layers[0].operation_names().into_iter().collect();
-        let expected = unique_ops_in_layer.len() * plan.layers.len();
+        let _expected = unique_ops_in_layer.len() * plan.layers.len();
         assert!(
             costs.len() >= unique_ops_in_layer.len(),
             "should have at least one cost per unique op (got {}, min per layer {})",

@@ -183,9 +183,9 @@ fn measure_latency(
     compute_desc: &str,
 ) -> Result<(f64, Vec<u64>), String> {
     // Allocate input [1, H] and output [1, 2*H] arenas (FP16).
-    let input_arena = Arena::new(1, h, mlx_rs::Dtype::Float16)
+    let input_arena = Arena::new(1, h, DataType::Float16)
         .map_err(|e| format!("input arena alloc failed ({} H={}): {}", compute_desc, h, e))?;
-    let output_arena = Arena::new(1, 2 * h, mlx_rs::Dtype::Float16).map_err(|e| {
+    let output_arena = Arena::new(1, 2 * h, DataType::Float16).map_err(|e| {
         format!(
             "output arena alloc failed ({} H={}): {}",
             compute_desc, h, e

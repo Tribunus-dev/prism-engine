@@ -464,18 +464,93 @@ impl Megakernel {
         // threadgroup buffer in the Metal 4 shader).
         enc.set_threadgroup_memory_length(0, (TILE as u64) * 2);
 
-        enc.dispatch_thread_groups(
-            MTLSize {
-                width: num_slots,
-                height: 1,
-                depth: 1,
-            },
-            MTLSize {
-                width: 256,
-                height: 1,
-                depth: 1,
-            },
-        );
+        // ── KV interleave concurrent dispatch ──────────────────
+        // When prefetch is enabled, dispatch decode + prefetch workers
+        // concurrently on the same encoder. Decode enqueues prefetch
+        // requests; prefetch processes them.
+        if self.kv_prefetch_enabled {
+            let pso_d = self.pso_decode.as_ref()
+                .expect("pso_decode must be Some when kv_prefetch_enabled");
+            let pso_p = self.pso_prefetch.as_ref()
+                .expect("pso_prefetch must be Some when kv_prefetch_enabled");
+
+            // Bind extra interleave decode buffers (extension of standard
+            // decode bindings already set above).
+            enc.set_buffer(13, Some(&epoch_control), 0);
+            enc.set_buffer(18, Some(&epoch_receipt), 0);
+            let max_tokens_per_epoch = 0xFFFFFFFFu32;
+            let max_tokens_bytes = max_tokens_per_epoch.to_le_bytes();
+            enc.set_bytes(
+                27,
+                std::mem::size_of::<u32>() as u64,
+                max_tokens_bytes.as_ptr() as *const std::ffi::c_void,
+            );
+            enc.set_buffer(30, Some(&kv_prefetch_arena), 0);
+
+            // Dispatch decode worker (persistent_decode_worker)
+            enc.set_compute_pipeline_state(pso_d);
+            enc.dispatch_thread_groups(
+                MTLSize { width: num_slots, height: 1, depth: 1 },
+                MTLSize { width: 256, height: 1, depth: 1 },
+            );
+
+            // Bind prefetch worker buffers (override slots 1-11)
+            enc.set_buffer(1, Some(&*kv_k_nibbles), 0);
+            enc.set_buffer(2, Some(&*kv_v_nibbles), 0);
+            enc.set_buffer(3, kv_k_scales.as_deref(), 0);
+            enc.set_buffer(4, kv_v_scales.as_deref(), 0);
+            enc.set_buffer(5, Some(&*kv_scratch_k), 0);
+            enc.set_buffer(6, Some(&*kv_scratch_v), 0);
+            // Headers pointer into arena buffer at set[0].header_offset
+            enc.set_buffer(
+                7,
+                Some(&kv_prefetch_arena),
+                arena_layout.sets[0].header_offset as u64,
+            );
+            let slot_offset = 0u32;
+            let slot_offset_bytes = slot_offset.to_le_bytes();
+            enc.set_bytes(
+                8,
+                std::mem::size_of::<u32>() as u64,
+                slot_offset_bytes.as_ptr() as *const std::ffi::c_void,
+            );
+            let max_positions = MAX_CONTEXT as u32;
+            let max_positions_bytes = max_positions.to_le_bytes();
+            enc.set_bytes(
+                9,
+                std::mem::size_of::<u32>() as u64,
+                max_positions_bytes.as_ptr() as *const std::ffi::c_void,
+            );
+            let max_tokens_epoch = 0xFFFFFFFFu32;
+            let max_tokens_epoch_bytes = max_tokens_epoch.to_le_bytes();
+            enc.set_bytes(
+                10,
+                std::mem::size_of::<u32>() as u64,
+                max_tokens_epoch_bytes.as_ptr() as *const std::ffi::c_void,
+            );
+            enc.set_buffer(11, Some(&epoch_control), 0);
+
+            // Dispatch prefetch worker (persistent_kv_prefetch_worker)
+            enc.set_compute_pipeline_state(pso_p);
+            enc.dispatch_thread_groups(
+                MTLSize { width: num_slots, height: 1, depth: 1 },
+                MTLSize { width: 256, height: 1, depth: 1 },
+            );
+        } else {
+            // Standard single-kernel persistent decode dispatch
+            enc.dispatch_thread_groups(
+                MTLSize {
+                    width: num_slots,
+                    height: 1,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
+            );
+        }
 
         enc.end_encoding();
         cmd_buf.commit();
@@ -530,7 +605,7 @@ impl Megakernel {
         if !self.kv_prefetch_enabled {
             return;
         }
-        if let (Some(pso_d), Some(pso_p), Some(arena), Some(epoch_ctrl), Some(epoch_rcpt)) = (
+        if let (Some(pso_d), Some(pso_p), Some(arena), Some(epoch_ctrl), Some(_epoch_rcpt)) = (
             &self.pso_decode,
             &self.pso_prefetch,
             &buffers.kv_prefetch_arena,
@@ -540,18 +615,15 @@ impl Megakernel {
             // arena layout reference kept for future buffer binding
             let _ = arena;
 
-            // Bind epoch control and receipt buffers (shared by both kernels)
-            encoder.set_buffer(30, Some(epoch_ctrl), 0);
-            encoder.set_buffer(31, Some(epoch_rcpt), 0);
-
-            // Bind max_tokens_per_epoch as a constant at buffer 32 (treated as uint)
-            let max_tokens_bytes = max_tokens_per_epoch.to_le_bytes();
-            encoder.set_bytes(32, std::mem::size_of::<u32>() as u64, max_tokens_bytes.as_ptr() as *const std::ffi::c_void);
-
             // Dispatch decode worker
             encoder.set_compute_pipeline_state(pso_d);
-            // Set decode-specific buffers (main weights, norms, etc.)
-            // ... plus kv_prefetch_queue and double-buffer scratch
+            // Decode interleave extras: epoch_control@13, epoch_receipt@18, max_tokens@27, prefetch_queue@30
+            encoder.set_buffer(13, Some(epoch_ctrl), 0);
+            let mte = max_tokens_per_epoch.to_le_bytes();
+            encoder.set_bytes(27, std::mem::size_of::<u32>() as u64, mte.as_ptr() as *const std::ffi::c_void);
+            if let Some(layout) = &buffers.arena_layout {
+                encoder.set_buffer(30, Some(arena), layout.queue_offset as u64);
+            }
             encoder.dispatch_threads(
                 MTLSize {
                     width: max_tokens_per_epoch as u64,
@@ -567,7 +639,21 @@ impl Megakernel {
 
             // Dispatch prefetch worker
             encoder.set_compute_pipeline_state(pso_p);
-            // Set prefetch-specific buffers (KV nibbles, arena, etc.)
+            // Prefetch worker: bind KV cache scratch at correct slots
+            encoder.set_buffer(1, Some(&buffers.kv_k_nibbles), 0);
+            encoder.set_buffer(2, Some(&buffers.kv_v_nibbles), 0);
+            encoder.set_buffer(3, buffers.kv_k_scales.as_deref(), 0);
+            encoder.set_buffer(4, buffers.kv_v_scales.as_deref(), 0);
+            encoder.set_buffer(5, Some(&buffers.kv_scratch_k), 0);
+            encoder.set_buffer(6, Some(&buffers.kv_scratch_v), 0);
+            if let Some(layout) = &buffers.arena_layout {
+                encoder.set_buffer(7, Some(arena), layout.sets[layout.active_set].header_offset as u64);
+            }
+            let sz = std::mem::size_of::<u32>() as u64;
+            encoder.set_bytes(8, sz, [0u8;4].as_ptr() as *const std::ffi::c_void); // slot_offset = 0
+            encoder.set_bytes(9, sz, (MAX_CONTEXT as u32).to_le_bytes().as_ptr() as *const std::ffi::c_void);
+            encoder.set_bytes(10, sz, mte.as_ptr() as *const std::ffi::c_void);
+            encoder.set_buffer(11, Some(epoch_ctrl), 0);
             encoder.dispatch_threads(
                 MTLSize {
                     width: max_tokens_per_epoch as u64,
@@ -652,13 +738,14 @@ impl Megakernel {
             return Ok(());
         }
 
-        let (pso_d, pso_p, epoch_ctrl, epoch_rcpt) = match (
+        let (pso_d, pso_p, epoch_ctrl, epoch_rcpt, kv_prefetch_arena) = match (
             &self.pso_decode,
             &self.pso_prefetch,
             &buffers.epoch_control,
             &buffers.epoch_receipt,
+            &buffers.kv_prefetch_arena,
         ) {
-            (Some(d), Some(p), Some(ctrl), Some(rcpt)) => (d.clone(), p.clone(), ctrl.clone(), rcpt.clone()),
+            (Some(d), Some(p), Some(ctrl), Some(rcpt), Some(arena)) => (d.clone(), p.clone(), ctrl.clone(), rcpt.clone(), arena.clone()),
             _ => return Ok(()),
         };
 
@@ -670,20 +757,44 @@ impl Megakernel {
             cmd_buf.new_compute_command_encoder()
         };
 
-        // Bind epoch control and receipt buffers
-        enc.set_buffer(30, Some(&epoch_ctrl), 0);
-        enc.set_buffer(31, Some(&epoch_rcpt), 0);
+        enc.set_compute_pipeline_state(&pso_d);
 
-        // Bind max_tokens_per_epoch as inline constant at buffer 32
+        // Standard decode buffers (slots 0-5 for weights/scales/norms/embed/centroid/cluster_map
+        // and slot 14 for embed_scales are model-level — bound from deployment elsewhere).
+        enc.set_buffer(6, Some(&buffers.kv_k_nibbles), 0);
+        enc.set_buffer(7, Some(&buffers.kv_v_nibbles), 0);
+        enc.set_buffer(8, buffers.kv_k_scales.as_deref(), 0);
+        enc.set_buffer(9, buffers.kv_v_scales.as_deref(), 0);
+        enc.set_buffer(11, Some(&buffers.active_mask), 0);
+        // Slot 13: epoch_control
+        enc.set_buffer(13, Some(&epoch_ctrl), 0);
+        enc.set_buffer(15, Some(&buffers.centroid_scales), 0);
+        enc.set_buffer(16, Some(&buffers.centroid_scratch), 0);
+        enc.set_buffer(17, Some(&buffers.decompress_progress), 0);
+        // Slot 18: epoch receipt
+        enc.set_buffer(18, Some(&epoch_rcpt), 0);
+        enc.set_buffer(19, Some(&buffers.kv_scratch_k), 0);
+        enc.set_buffer(20, Some(&buffers.kv_scratch_v), 0);
+        enc.set_buffer(21, Some(&buffers.entropy_map), 0);
+        enc.set_buffer(22, Some(&buffers.ring_entries), 0);
+        enc.set_buffer(23, Some(&buffers.ring_tail), 0);
+        enc.set_buffer(24, Some(&buffers.slot_logits), 0);
+        enc.set_buffer(25, Some(&buffers.completion_counter), 0);
+        // Slot 27: max_tokens_per_epoch as inline constant
         let max_tokens_bytes = max_tokens_per_epoch.to_le_bytes();
         enc.set_bytes(
-            32,
+            27,
             std::mem::size_of::<u32>() as u64,
             max_tokens_bytes.as_ptr() as *const std::ffi::c_void,
         );
+        enc.set_buffer(28, Some(&buffers.draft_output), 0);
+        enc.set_buffer(29, Some(&buffers.head_gates), 0);
+        // Slot 30: kv_prefetch_queue from arena
+        if let Some(layout) = &buffers.arena_layout {
+            enc.set_buffer(30, Some(&kv_prefetch_arena), layout.queue_offset as u64);
+        }
 
         // Dispatch decode worker
-        enc.set_compute_pipeline_state(&pso_d);
         enc.dispatch_threads(
             MTLSize {
                 width: max_tokens_per_epoch as u64,
@@ -697,8 +808,44 @@ impl Megakernel {
             },
         );
 
-        // Dispatch prefetch worker
+        // ── Prefetch worker dispatch ──
         enc.set_compute_pipeline_state(&pso_p);
+
+        // Bind prefetch-specific buffers
+        enc.set_buffer(1, Some(&buffers.kv_k_nibbles), 0);
+        enc.set_buffer(2, Some(&buffers.kv_v_nibbles), 0);
+        enc.set_buffer(3, buffers.kv_k_scales.as_deref(), 0);
+        enc.set_buffer(4, buffers.kv_v_scales.as_deref(), 0);
+        enc.set_buffer(5, Some(&buffers.kv_scratch_k), 0);
+        enc.set_buffer(6, Some(&buffers.kv_scratch_v), 0);
+        // Slot 7: headers pointer from arena (active set header)
+        if let Some(layout) = &buffers.arena_layout {
+            enc.set_buffer(7, Some(&kv_prefetch_arena), layout.sets[layout.active_set].header_offset as u64);
+        }
+        // Slot 8: slot_offset inline bytes (value: 0u32)
+        let slot_offset_bytes = 0u32.to_le_bytes();
+        enc.set_bytes(
+            8,
+            std::mem::size_of::<u32>() as u64,
+            slot_offset_bytes.as_ptr() as *const std::ffi::c_void,
+        );
+        // Slot 9: max_positions inline bytes (value: MAX_CONTEXT)
+        let max_positions_bytes = MAX_CONTEXT.to_le_bytes();
+        enc.set_bytes(
+            9,
+            std::mem::size_of::<u32>() as u64,
+            max_positions_bytes.as_ptr() as *const std::ffi::c_void,
+        );
+        // Slot 10: max_tokens_per_epoch inline bytes
+        let prefetch_max_tokens_bytes = max_tokens_per_epoch.to_le_bytes();
+        enc.set_bytes(
+            10,
+            std::mem::size_of::<u32>() as u64,
+            prefetch_max_tokens_bytes.as_ptr() as *const std::ffi::c_void,
+        );
+        // Slot 11: epoch_control (same buffer as decode uses)
+        enc.set_buffer(11, Some(&epoch_ctrl), 0);
+
         enc.dispatch_threads(
             MTLSize {
                 width: max_tokens_per_epoch as u64,

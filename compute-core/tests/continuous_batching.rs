@@ -300,7 +300,7 @@ fn ws9a1_block_diagonal_isolation() {
 
     let flat = (4 * D) as u32;
 
-    let input1 = Arena::new(1, flat, mlx_rs::Dtype::Float16).expect("input arena 1");
+    let input1 = Arena::new(1, flat, DataType::Float16).expect("input arena 1");
     unsafe {
         let p = input1.base_ptr() as *mut u16;
         fill_token_vector(p, 1.0, D); // pos 0 (A)
@@ -308,13 +308,13 @@ fn ws9a1_block_diagonal_isolation() {
         fill_token_vector(p.add(2 * D as usize), 10.0, D); // pos 2 (B)
         fill_token_vector(p.add(3 * D as usize), 20.0, D); // pos 3 (B)
     }
-    let output1 = Arena::new(1, flat, mlx_rs::Dtype::Float32).expect("output arena 1");
+    let output1 = Arena::new(1, flat, DataType::Float32).expect("output arena 1");
     model
         .predict(&in_name, &input1.info, &out_name, &output1.info)
         .expect("predict run 1 must succeed");
     let means1 = position_means(&output1, 4);
 
-    let input2 = Arena::new(1, flat, mlx_rs::Dtype::Float16).expect("input arena 2");
+    let input2 = Arena::new(1, flat, DataType::Float16).expect("input arena 2");
     unsafe {
         let p = input2.base_ptr() as *mut u16;
         fill_token_vector(p, 1.0, D); // pos 0 (A)
@@ -322,7 +322,7 @@ fn ws9a1_block_diagonal_isolation() {
         fill_token_vector(p.add(2 * D as usize), 100.0, D); // pos 2 (B)
         fill_token_vector(p.add(3 * D as usize), 200.0, D); // pos 3 (B)
     }
-    let output2 = Arena::new(1, flat, mlx_rs::Dtype::Float32).expect("output arena 2");
+    let output2 = Arena::new(1, flat, DataType::Float32).expect("output arena 2");
     model
         .predict(&in_name, &input2.info, &out_name, &output2.info)
         .expect("predict run 2 must succeed");
@@ -371,12 +371,12 @@ fn ws9a2_causal_sdpa_per_position() {
     .expect("model2 load");
 
     let flat2 = (2 * D) as u32;
-    let input2 = Arena::new(1, flat2, mlx_rs::Dtype::Float16).expect("input2 arena");
+    let input2 = Arena::new(1, flat2, DataType::Float16).expect("input2 arena");
     unsafe {
         fill_token_vector(input2.base_ptr() as *mut u16, 1.0, D);
         fill_token_vector((input2.base_ptr() as *mut u16).add(D as usize), 3.0, D);
     }
-    let output2 = Arena::new(1, flat2, mlx_rs::Dtype::Float32).expect("output2 arena");
+    let output2 = Arena::new(1, flat2, DataType::Float32).expect("output2 arena");
     model2
         .predict(&in_name, &input2.info, &out_name2, &output2.info)
         .expect("seq=2 predict");
@@ -401,7 +401,7 @@ fn ws9a2_causal_sdpa_per_position() {
     .expect("model4 load");
 
     let flat4 = (4 * D) as u32;
-    let input4 = Arena::new(1, flat4, mlx_rs::Dtype::Float16).expect("input4 arena");
+    let input4 = Arena::new(1, flat4, DataType::Float16).expect("input4 arena");
     unsafe {
         for pos in 0..4 {
             fill_token_vector(
@@ -411,7 +411,7 @@ fn ws9a2_causal_sdpa_per_position() {
             );
         }
     }
-    let output4 = Arena::new(1, flat4, mlx_rs::Dtype::Float32).expect("output4 arena");
+    let output4 = Arena::new(1, flat4, DataType::Float32).expect("output4 arena");
     model4
         .predict(&in_name4, &input4.info, &out_name4, &output4.info)
         .expect("seq=4 predict");
@@ -443,7 +443,7 @@ fn ws9a3_sdpa_no_mask_baseline() {
         .expect("model load");
 
         let flat = (seq * D) as u32;
-        let input = Arena::new(1, flat, mlx_rs::Dtype::Float16).expect("input arena");
+        let input = Arena::new(1, flat, DataType::Float16).expect("input arena");
         unsafe {
             for pos in 0..*seq {
                 fill_token_vector(
@@ -453,7 +453,7 @@ fn ws9a3_sdpa_no_mask_baseline() {
                 );
             }
         }
-        let output = Arena::new(1, flat, mlx_rs::Dtype::Float32).expect("output arena");
+        let output = Arena::new(1, flat, DataType::Float32).expect("output arena");
         model
             .predict(&in_name, &input.info, &out_name, &output.info)
             .expect("predict");

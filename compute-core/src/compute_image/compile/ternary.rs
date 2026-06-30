@@ -433,7 +433,7 @@ mod tests {
             let mut blk = [0.0f32; 256];
             for j in 0..(rows * cols - st).min(256) { blk[j] = src[st + j]; }
             let (sc, nib) = ternary_quantize_block(&blk);
-            let sc_f32 = fp16_to_f32(sc);
+            let _sc_f32 = fp16_to_f32(sc);
             let off = vi - st;
             let nibble = (nib[off / 4] >> ((off % 4) * 2)) & 0x03;
             expected_i8[vi] = match nibble { 0b01 => 1, 0b10 => -1, _ => 0 };

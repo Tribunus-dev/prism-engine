@@ -204,7 +204,7 @@ impl CoreMlArtifactExecutor for AppleCoreMlArtifactExecutor {
 mod tests {
     use super::*;
     use crate::coreml::fixture::{CoreMlExecutionPolicy, NamedTensorInput};
-    use uuid::Uuid;
+    
 
     /// Helper to build a minimal artifact handle.
     fn dummy_handle(path: &str) -> CoreMlArtifactHandle {

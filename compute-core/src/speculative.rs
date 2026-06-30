@@ -917,7 +917,7 @@ mod tests {
         // Target logits for: each candidate (positive) and bonus position
         let mut target = MockTarget::new(vec![1.0, 1.0, 1.0, 2.0]);
 
-        let token = sd.step(&mut draft, &mut target, &[99]).unwrap();
+        let _token = sd.step(&mut draft, &mut target, &[99]).unwrap();
 
         // All 3 draft tokens should be recorded as accepted.
         assert_eq!(sd.stats().total_accepted_draft, 3);
@@ -946,7 +946,7 @@ mod tests {
         // Target assigns very low logit to the first draft token
         let mut target = MockTarget::new(vec![-100.0, -100.0, 0.0]);
 
-        let token = sd.step(&mut draft, &mut target, &[199]).unwrap();
+        let _token = sd.step(&mut draft, &mut target, &[199]).unwrap();
 
         // First token should have been rejected; none accepted.
         assert_eq!(sd.stats().total_accepted_draft, 0);
@@ -967,7 +967,7 @@ mod tests {
         // Target: first token gets positive logit, second gets strongly negative
         let mut target = MockTarget::new(vec![5.0, -100.0, -100.0, 0.0]);
 
-        let token = sd.step(&mut draft, &mut target, &[299]).unwrap();
+        let _token = sd.step(&mut draft, &mut target, &[299]).unwrap();
 
         // First token accepted (i=0 passes), second rejected (i=1)
         assert_eq!(sd.stats().total_accepted_draft, 1);

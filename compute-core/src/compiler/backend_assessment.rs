@@ -321,7 +321,7 @@ fn build_groups(assignments: &[(OperationId, BackendId)]) -> Vec<BackendBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::routing::{EvaluationPolicy, SynchronizationPolicy};
+    use crate::backend::routing::SynchronizationPolicy;
 
     // Helper to create a test operation
     fn make_op(

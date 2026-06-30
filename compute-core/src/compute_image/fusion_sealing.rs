@@ -49,7 +49,7 @@ pub fn verify_hash(expected: &str, metallib_bytes: &[u8]) -> bool {
 mod tests {
     use super::*;
     use crate::compute_image::fusion_abi::{
-        MetalFusionFamily, MetalLaunchContract, QuantizationContract,
+        MetalFusionFamily, MetalLaunchContract,
     };
     use std::collections::HashMap;
 

@@ -75,7 +75,7 @@ fn build_test_model() -> Result<(PathBuf, String), String> {
 
 #[test]
 fn ws8a1_arena_allocates_and_releases() {
-    let arena = Arena::new(BATCH as u32, HIDDEN as u32, mlx_rs::Dtype::Float16)
+    let arena = Arena::new(BATCH as u32, HIDDEN as u32, DataType::Float16)
         .expect("Arena::new must succeed for Float16");
     assert_eq!(arena.element_count(), ELEMENT_COUNT);
     assert!(arena.byte_len() >= ELEMENT_COUNT * 2);
@@ -101,9 +101,9 @@ fn ws8a1_model_produces_identity_output() {
         tribunus_compute_core::coreml_bridge::CoreMlComputeUnits::CpuAndNeuralEngine,
     ).expect("model must load");
 
-    let mut input = Arena::new(BATCH as u32, HIDDEN as u32, mlx_rs::Dtype::Float16)
+    let mut input = Arena::new(BATCH as u32, HIDDEN as u32, DataType::Float16)
         .expect("input arena");
-    let mut output = Arena::new(BATCH as u32, HIDDEN as u32, mlx_rs::Dtype::Float32)
+    let mut output = Arena::new(BATCH as u32, HIDDEN as u32, DataType::Float32)
         .expect("output arena");
 
     // Write test pattern [1.0, 2.0, ..., 64.0]

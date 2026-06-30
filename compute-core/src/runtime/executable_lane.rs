@@ -238,8 +238,7 @@ mod tests {
     use crate::compute_image::executable::variant::{ShapeProfile, ShapeSpecializedProgram};
     use crate::compute_image::program::phase_program::{
         CanonicalArtifactIdentity, ExecutionKind, PhaseArtifactKind, PhaseCompletionContract,
-        PhaseDependencyContract, PhaseResourceReservation, ProgramArtifactSelection,
-        ProgramBinding, SerializedPhase, SerializedPhaseEdge, SerializedPhaseProgram,
+        PhaseDependencyContract, PhaseResourceReservation, ProgramArtifactSelection, SerializedPhase, SerializedPhaseProgram,
     };
 
     // ── Helpers ────────────────────────────────────────────────────────

@@ -146,7 +146,7 @@ impl MetalDecoder for PalettizedGemvDecoder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn test_codebook_byte_size() {

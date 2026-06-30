@@ -4,7 +4,10 @@
 //! weights in any format (F32/BF16/F16/U32 block-quantized), runs k-means
 //! per row, builds split-block payloads, and writes a `.cimage` file.
 
+use serde_json::json;
 use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use crate::config::build_execution_plan;
@@ -322,4 +325,181 @@ fn dequantize_mlx_block(
         }
     }
     Ok(decoded)
+}
+
+// ── GGUF compilation ───────────────────────────────────────────────────
+
+#[cfg(feature = "prism-backend")]
+/// Compile a GGUF model file directly to a .cimage palettized format.
+///
+/// Parses the GGUF header, maps tensor names to HuggingFace-style conventions,
+/// builds an execution graph, dequantizes weights (GGML → f32) and palettizes
+/// each weight matrix via k-means clustering.
+pub fn compile_gguf_to_cimage(
+    gguf_path: &Path,
+    output_path: &Path,
+) -> Result<(), String> {
+    use crate::gguf;
+
+    // 1. Parse GGUF header → metadata + tensor inventory + architecture
+    eprintln!("[gguf] parsing header...");
+    let (metadata, tensors) = gguf::parse_gguf_header(gguf_path)?;
+    let arch = gguf::extract_architecture(&metadata)?;
+    eprintln!(
+        "[gguf] arch={} layers={} hidden={}",
+        arch.model_type, arch.num_hidden_layers, arch.hidden_size
+    );
+
+    // 2. Write a config.json to a temp directory for ModelGraph construction
+    let tmp_dir = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
+    let config_path = tmp_dir.path().join("config.json");
+    write_gguf_config_json(&config_path, &arch, &metadata)?;
+
+    // 3. Build the ModelGraph from the config
+    let unified = crate::lut::graph::UnifiedConfig::from_file(&config_path)?;
+    let graph = crate::lut::graph::ModelGraph::build(&unified);
+    eprintln!(
+        "[gguf] graph: {} layers, {} nodes",
+        graph.num_layers,
+        graph.nodes.len()
+    );
+
+    // 4. Build HF-name → GGUF-tensor map and collect all HF tensor names
+    let arch_type = gguf::meta_str(&metadata, "general.architecture").unwrap_or("unknown");
+    // Use indexes into the tensors vec since GgufTensorMeta is not Clone
+    let mut hf_to_tensor_idx: HashMap<String, usize> = HashMap::new();
+    let mut all_hf_names: Vec<String> = Vec::new();
+    for (idx, t) in tensors.iter().enumerate() {
+        if let Some(hf_name) = gguf::gguf_name_to_hf_name(&t.name, arch_type) {
+            hf_to_tensor_idx.insert(hf_name.clone(), idx);
+            all_hf_names.push(hf_name);
+        }
+    }
+    all_hf_names.sort();
+
+    eprintln!("[gguf] mapped {}/{} tensors to HF names", hf_to_tensor_idx.len(), tensors.len());
+
+    // 5. Resolve namespace from HF-style names
+    let namespace = resolve_namespace(&all_hf_names).ok_or_else(|| {
+        format!(
+            "could not resolve model namespace from {} mapped tensor names",
+            all_hf_names.len()
+        )
+    })?;
+    eprintln!("[gguf] namespace: {} (root={})", namespace.discovery, namespace.root);
+
+    // 6. Compile each palettized tensor
+    let mut cimage = CImageWriter::new(output_path)?;
+    let pal_tensors = graph.palettized_tensors();
+    let mut emitted_ids: HashMap<String, u32> = HashMap::new();
+
+    for (id, tb) in pal_tensors.iter().enumerate() {
+        let t_idx = hf_to_tensor_idx.get(&tb.key).ok_or_else(|| {
+            format!(
+                "Tensor '{}' not found in GGUF file (mapped from graph key)",
+                tb.key
+            )
+        })?;
+        let meta = &tensors[*t_idx];
+
+        // Verify shape consistency: GGUF stores [out_features, in_features]
+        // Graph expects dim_m = out_rows, dim_n = in_cols
+        let n_rows = meta.shape.first().copied().unwrap_or(1) as u32;
+        let n_cols = meta.shape.get(1).copied().unwrap_or(1) as u32;
+        if n_rows != tb.dim_m || n_cols != tb.dim_n {
+            return Err(format!(
+                "Shape mismatch for {} (mapped from '{}'): GGUF [{n_rows}×{n_cols}] vs graph [{}×{}] (transposed?)",
+                meta.name, tb.key, tb.dim_m, tb.dim_n
+            ));
+        }
+
+        // Read and dequantize the GGUF tensor to f32
+        let f32_vals = gguf::read_gguf_tensor_f32(gguf_path, meta)?;
+
+        let t0 = std::time::Instant::now();
+        let pal = palettize_matrix(&f32_vals, tb.dim_m as usize, tb.dim_n as usize, 16, 50);
+        let bpp = pal.effective_bpp();
+
+        // Build payload: codebook (f16) + indices
+        let cb_bytes = pal.rows.len() * 16 * 2;
+        let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
+        let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
+        for row in &pal.rows {
+            for &cb_f32 in &row.codebook {
+                let cb_f16 = half::f16::from_f32(cb_f32);
+                payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
+            }
+        }
+        for row in &pal.rows {
+            payload.extend_from_slice(&row.indices);
+        }
+
+        cimage.append_palettized(&tb.key, &payload, tb.dim_m, tb.dim_n)?;
+        emitted_ids.insert(tb.key.clone(), id as u32);
+
+        eprintln!(
+            "  [gguf] {} ({}×{}) bpp={bpp:.3} {:.2}s",
+            meta.name,
+            tb.dim_m,
+            tb.dim_n,
+            t0.elapsed().as_secs_f64()
+        );
+    }
+
+    // 7. Build and embed execution plan
+    let mut execution_plan = build_execution_plan(&arch, &namespace, &emitted_ids);
+    execution_plan.apply_fusion_pass();
+    let plan_json =
+        serde_json::to_string(&execution_plan).map_err(|e| format!("serialize plan: {e}"))?;
+    cimage.set_execution_plan(plan_json);
+
+    // 8. Finalize .cimage
+    cimage.finalize()?;
+    eprintln!("[gguf:compile] Done -> {}", output_path.display());
+    Ok(())
+}
+
+/// Write a HuggingFace-style config.json from GGUF metadata.
+/// Used to build the ModelGraph and execution plan.
+#[cfg(feature = "prism-backend")]
+fn write_gguf_config_json(
+    path: &Path,
+    arch: &crate::config::TextArchitecture,
+    _metadata: &[(String, String)],
+) -> Result<(), String> {
+    // Determine architectures field from model_type
+    let architecture_name = match arch.model_type.as_str() {
+        "gemma4" => "Gemma4ForCausalLM",
+        "gemma" | "gemma2" => "GemmaForCausalLM",
+        "llama" => "LlamaForCausalLM",
+        "mistral" => "MistralForCausalLM",
+        "qwen2" => "Qwen2ForCausalLM",
+        "qwen3" | "qwen3_5" => "Qwen3_5ForCausalLM",
+        _ => "LlamaForCausalLM",
+    };
+
+    let config = json!({
+        "architectures": [architecture_name],
+        "model_type": arch.model_type,
+        "hidden_size": arch.hidden_size,
+        "intermediate_size": arch.intermediate_size,
+        "num_attention_heads": arch.num_attention_heads,
+        "num_key_value_heads": arch.num_key_value_heads,
+        "head_dim": arch.head_dim,
+        "num_hidden_layers": arch.num_hidden_layers,
+        "vocab_size": arch.vocab_size,
+        "max_position_embeddings": arch.max_position_embeddings,
+        "rms_norm_eps": arch.rms_norm_eps,
+        "tie_word_embeddings": arch.tie_word_embeddings,
+        "rope_theta": arch.rope_local.theta,
+        "attention_k_eq_v": arch.attention_k_eq_v,
+        "sliding_window": arch.sliding_window,
+    });
+
+    let json_str =
+        serde_json::to_string_pretty(&config).map_err(|e| format!("serialize config: {e}"))?;
+    let mut f = fs::File::create(path).map_err(|e| format!("create config.json: {e}"))?;
+    f.write_all(json_str.as_bytes())
+        .map_err(|e| format!("write config.json: {e}"))?;
+    Ok(())
 }

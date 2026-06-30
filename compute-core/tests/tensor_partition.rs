@@ -248,14 +248,14 @@ fn test_tensor_partition() {
             .collect();
 
         // Create arena with chunk input
-        let ia = Arena::new(1, chunk_dim as u32, mlx_rs::Dtype::Float16).expect("input arena");
+        let ia = Arena::new(1, chunk_dim as u32, DataType::Float16).expect("input arena");
         unsafe {
             let ptr = ia.info.base_address as *mut u16;
             for (i, &v) in chunk_input_f32.iter().enumerate() {
                 ptr.add(i).write(f32_to_f16_bits(v));
             }
         }
-        let oa = Arena::new(1, FFN_DIM as u32, mlx_rs::Dtype::Float16).expect("output arena");
+        let oa = Arena::new(1, FFN_DIM as u32, DataType::Float16).expect("output arena");
 
         // Run on ANE
         match run_ane(&path, &out_name, &ia, &oa) {

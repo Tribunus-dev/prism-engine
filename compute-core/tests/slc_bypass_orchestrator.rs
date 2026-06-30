@@ -36,7 +36,6 @@ const QOS_CLASS_BACKGROUND: c_uint = 0x09;
 use std::time::{Duration, Instant};
 
 use coreml_proto::proto::mil_spec;
-use mlx_rs::Dtype;
 use tribunus_compute_core::arena::Arena;
 use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
@@ -103,7 +102,7 @@ fn compile_fused(tag: &str, prog: mil_spec::Program, meta: ModelMeta) -> Result<
 /// Input: "x" [batch, H]
 /// Output: "add_8" [batch, H]
 fn build_fused(batch: u32, h_dim: i64) -> Result<(mil_spec::Program, String, String), String> {
-    let ffn = h_dim * 4;
+    let _ffn = h_dim * 4;
 
     let wg_vals = seeded_weights(100, H, FFN);
     let wu_vals = seeded_weights(101, H, FFN);

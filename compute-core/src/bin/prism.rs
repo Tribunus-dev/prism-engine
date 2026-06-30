@@ -13,7 +13,7 @@
 //!   tokenizer_config.json
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 mod release;
 
 pub const PRISM_HOME: &str = ".prism";
@@ -72,6 +72,15 @@ enum Commands {
         /// Model name (must exist in ~/.prism/models/<name>/ with safetensors).
         model: String,
     },
+    /// Compile a GGUF model file to .cimage.
+    CompileGGUF {
+        /// Path to the GGUF file (e.g. ~/Downloads/model.gguf).
+        gguf_path: PathBuf,
+
+        /// Output path for the compiled .cimage.
+        #[arg(short, long, default_value = "model.cimage")]
+        output: PathBuf,
+    },
     /// Compile ANE subgraphs for an already-downloaded model.
     AncCompile {
         /// Model name (must exist in ~/.prism/models/<name>/).
@@ -111,6 +120,7 @@ fn main() {
         Commands::List => list(),
         Commands::Pull { repo } => pull(&repo),
         Commands::Compile { model } => compile_model(&model),
+        Commands::CompileGGUF { gguf_path, output } => compile_gguf(&gguf_path, &output),
         #[cfg(feature = "prism-backend")]
         Commands::AncCompile { model } => ane_compile(&model),
         #[cfg(not(feature = "prism-backend"))]
@@ -434,6 +444,31 @@ fn compile_model(name: &str) {
         Err(e) => eprintln!("Compilation failed: {e}"),
     }
 }
+/// Compile a GGUF model file to .cimage.
+fn compile_gguf(gguf_path: &Path, output_path: &Path) {
+    if !gguf_path.exists() {
+        eprintln!("GGUF file not found: {}", gguf_path.display());
+        std::process::exit(1);
+    }
+    eprintln!(
+        "[prism:compile-gguf] Compiling {} → {}",
+        gguf_path.display(),
+        output_path.display()
+    );
+    match tribunus_compute_core::lut::compiler::compile_gguf_to_cimage(gguf_path, output_path) {
+        Ok(()) => {
+            let size = std::fs::metadata(output_path)
+                .map(|m| m.len() / (1024 * 1024))
+                .unwrap_or(0);
+            eprintln!("[prism:compile-gguf] Done — {} MB", size);
+        }
+        Err(e) => {
+            eprintln!("Compilation failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Qualification stub — not yet implemented.
 fn qualify(model: &str, output: Option<PathBuf>) {
     eprintln!("[prism] Qualification not yet implemented");

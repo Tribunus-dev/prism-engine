@@ -1048,7 +1048,7 @@ mod tests {
 
     #[test]
     fn test_detect_chunks_fallback_boundary() {
-        let mut cache = ChunkKvCache::new(10, 1024 * 1024);
+        let cache = ChunkKvCache::new(10, 1024 * 1024);
         // No boundary tokens registered — fallback should still split long streams.
         let tokens: Vec<u32> = (0..200).collect();
         let boundaries = cache.detect_chunks(&tokens);

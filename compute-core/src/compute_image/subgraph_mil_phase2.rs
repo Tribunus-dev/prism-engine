@@ -128,8 +128,8 @@ mod tests {
 
     #[test]
     fn build_qkv_bundle_palettized_acceptance() {
-        let cb: Vec<f32> = vec![1.0; (8 * 16)];
-        let idx: Vec<u8> = vec![0; (8 * 16 / 2)];
+        let cb: Vec<f32> = vec![1.0; 8 * 16 ];
+        let idx: Vec<u8> = vec![0; 8 * 16 / 2 ];
         let prog =
             build_qkv_bundle_mil_palettized("x", 8, 2, 2, 4, &cb, &idx, &cb, &idx, &cb, &idx)
                 .unwrap();

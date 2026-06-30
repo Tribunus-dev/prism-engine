@@ -267,7 +267,7 @@ mod tests {
     fn test_write_read_roundtrip() {
         let dir = std::env::temp_dir();
         let path = dir.join("test_roundtrip.cimage");
-        let path_str = path.to_str().unwrap().to_string();
+        let _path_str = path.to_str().unwrap().to_string();
 
         // Write
         {

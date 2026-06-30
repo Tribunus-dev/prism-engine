@@ -224,7 +224,7 @@ mod tests {
             k_norm: None,
         };
 
-        let mut invocation = LegacyMlxLayerInvocation {
+        let invocation = LegacyMlxLayerInvocation {
             hidden: None,
             layer_plan: &plan,
             layer_weights: &weights,

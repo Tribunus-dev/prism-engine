@@ -749,7 +749,7 @@ mod tests {
         let tool = make_test_tool();
         let raw = r#"{"name": "get_weathr", "arguments": {"location": "Tokyo"}}"#;
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Repaired(call, fixes) => {
+            ToolCallResult::Repaired(_call, fixes) => {
                 assert!(fixes.iter().any(|f| f.contains("corrected function name")));
             }
             _ => panic!("expected Repaired"),
@@ -914,10 +914,10 @@ mod tests {
         let tool = make_test_tool();
         let raw = r#"{"id":"call_abc","type":"function","function":{"name":"get_weather","arguments":"{\"location\":\"NYC\"}"}}"#;
         match parse_and_repair(raw, &tool) {
-            ToolCallResult::Repaired(call, fixes) => {
+            ToolCallResult::Repaired(_call, fixes) => {
                 assert!(fixes.iter().any(|f| f.contains("normalized")));
             }
-            ToolCallResult::Valid(call) => {
+            ToolCallResult::Valid(_call) => {
                 // If no fix needed (already normalized)
             }
             _ => panic!("expected Repaired or Valid"),

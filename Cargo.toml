@@ -120,6 +120,10 @@ ane = ["dep:coreml-proto"]
 full = ["metal-dispatch", "server", "ane"]
 prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/ffi"]
 full-apple = ["prism-backend", "ane", "server"]
+generation-audio = []
+generation-diffusion = []
+generation-image = []
+generation-video = []
 
 [build-dependencies]
 cc = "1.2"

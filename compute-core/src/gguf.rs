@@ -11,7 +11,9 @@
 //! the compile_sequential/compile_tensix pipeline to produce a ComputeImage.
 
 use sha2::{Digest, Sha256};
-use std::io::Read;
+use half::{bf16, f16};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 /// Minimum GGUF version supported for import.
@@ -34,7 +36,27 @@ pub mod keys {
     pub const FILE_TYPE: &str = "general.file_type";
 }
 
-/// Results of importing a GGUF file into the compiler pipeline.
+/// Look up a metadata value by key, trying both the exact key and
+/// architecture-prefixed versions.
+fn meta_val(metadata: &[(String, String)], arch: &str, generic_key: &str) -> Option<(String, String)> {
+    // Try architecture-prefixed key first (e.g. "gemma4.block_count")
+    let with_prefix = format!("{arch}.{generic_key}");
+    if let Some(kv) = metadata.iter().find(|(k, _)| *k == with_prefix) {
+        return Some(kv.clone());
+}
+    // Fall back to generic key (e.g. "llama.block_count")
+    metadata.iter().find(|(k, _)| *k == generic_key).cloned()
+}
+
+fn meta_u64_flex(metadata: &[(String, String)], arch: &str, generic_key: &str) -> Option<u64> {
+    meta_val(metadata, arch, generic_key).and_then(|(_, v)| v.parse::<u64>().ok())
+}
+
+fn meta_f64_flex(metadata: &[(String, String)], arch: &str, generic_key: &str) -> Option<f64> {
+    meta_val(metadata, arch, generic_key).and_then(|(_, v)| v.parse::<f64>().ok())
+}
+
+// GGUF metadata key constants for Tribunus ModelManifest extraction.
 pub struct GgufImportResult {
     /// Model architecture config (feeds into `config::compile()`).
     pub model_config: crate::config::TextArchitecture,
@@ -207,10 +229,14 @@ fn read_u64_le<R: Read>(r: &mut R) -> Result<u64, String> {
 
 fn read_string<R: Read>(r: &mut R) -> Result<String, String> {
     let len = read_u64_le(r)? as usize;
+    // Sanity check: GGUF strings should be at most a few KB
+    if len > 10_000_000 {
+        return Err(format!("GGUF string length {} exceeds maximum (10M)", len));
+    }
     let mut buf = vec![0u8; len];
     r.read_exact(&mut buf)
         .map_err(|e| format!("GGUF read string: {}", e))?;
-    String::from_utf8(buf).map_err(|e| format!("Invalid UTF-8 in GGUF string: {}", e))
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 /// Parse a single GGUF value given its type tag, returning a string
@@ -271,6 +297,11 @@ fn read_typed_value<R: Read>(r: &mut R, typ: u32) -> Result<String, String> {
         GGUF_TYPE_ARRAY => {
             let elem_type = read_u32_le(r)?;
             let count = read_u64_le(r)?;
+            // For large arrays (tokenizer vocab), return a placeholder.
+            if count > 10000 {
+                for _ in 0..count { read_typed_value(r, elem_type)?; }
+                return Ok(format!("[<{} elements>]", count));
+            }
             let mut elems = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 elems.push(read_typed_value(r, elem_type)?);
@@ -370,6 +401,44 @@ pub fn parse_gguf_header(
     // ── Tensor infos ────────────────────────────────────────────────────────
     let mut tensors: Vec<GgufTensorMeta> = Vec::with_capacity(tensor_count as usize);
     for _ in 0..tensor_count {
+        // After the first entry, skip any zero or non-tensor padding bytes
+        // by reading one byte at a time until we find a valid name_len.
+        // Some GGUF files insert stray non-zero bytes (like 0x40) that aren't
+        // part of the name_len — skip those too by verifying the name_bytes are
+        // valid (all printable ASCII or valid UTF-8 extension bytes).
+        if !tensors.is_empty() {
+            // Some GGUF files insert alignment padding (zero or stray bytes)
+            // between tensor info entries. Scan byte-by-byte for a valid
+            // name_len + tensor name pattern.
+            loop {
+                let _pos = f.stream_position().map_err(|e| format!("pos: {e}"))?;
+                match read_u64_le(&mut f) {
+                    Ok(len) if len > 0 && len < 500 => {
+                        // Tentative name_len — check if the name bytes are valid
+                        let mut name_buf = vec![0u8; len as usize];
+                        match f.read_exact(&mut name_buf) {
+                            Ok(()) => {
+                                // Accept the name if all bytes are readable ASCII/UTF-8
+                                // and the name ends in a weight suffix
+                                let name_str = String::from_utf8_lossy(&name_buf);
+                                if name_str.chars().all(|c| c.is_ascii_graphic() || c.is_ascii_whitespace() || c == '.' || c == '_' || c == '/') {
+                                    // Seek back to re-read with proper read_string
+                                    let rewind = 8 + len as i64;
+                                    f.seek(SeekFrom::Current(-rewind))
+                                        .map_err(|e| format!("GGUF rewind: {e}"))?;
+                                    break;
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    _ => {}
+                };
+                // Not a valid name_len at this position — try next byte
+                f.seek(SeekFrom::Current(-7))
+                    .map_err(|e| format!("GGUF re-position: {e}"))?;
+            }
+        }
         let name = read_string(&mut f)?;
         let n_dims = read_u32_le(&mut f)?;
         let mut dims = Vec::with_capacity(n_dims as usize);
@@ -409,7 +478,7 @@ fn meta_f64(metadata: &[(String, String)], key: &str) -> Option<f64> {
 }
 
 /// Look up a metadata value by key and return it as a trimmed string.
-fn meta_str<'a>(metadata: &'a [(String, String)], key: &str) -> Option<&'a str> {
+pub fn meta_str<'a>(metadata: &'a [(String, String)], key: &str) -> Option<&'a str> {
     let (_, val) = metadata.iter().find(|(k, _)| k == key)?;
     Some(val.trim())
 }
@@ -444,25 +513,30 @@ pub fn import_gguf_model(path: &Path) -> Result<GgufImportResult, String> {
 }
 
 /// Extract a `TextArchitecture` from GGUF metadata KV pairs.
-fn extract_architecture(
+pub fn extract_architecture(
     metadata: &[(String, String)],
 ) -> Result<crate::config::TextArchitecture, String> {
-    let hidden_size = meta_u64(metadata, keys::HIDDEN_SIZE).unwrap_or(4096) as u32;
-    let num_attention_heads = meta_u64(metadata, keys::NUM_ATTENTION_HEADS).unwrap_or(32) as u32;
-    let num_kv_heads =
-        meta_u64(metadata, keys::NUM_KV_HEADS).unwrap_or(num_attention_heads as u64) as u32;
-    let head_dim = meta_u64(metadata, keys::HEAD_DIM)
-        .unwrap_or((hidden_size / num_attention_heads) as u64) as u32;
-    let num_hidden_layers = meta_u64(metadata, keys::NUM_HIDDEN_LAYERS).unwrap_or(32) as u32;
-    let vocab_size = meta_u64(metadata, keys::VOCAB_SIZE).unwrap_or(32000) as u32;
-    let intermediate_size =
-        meta_u64(metadata, keys::INTERMEDIATE_SIZE).unwrap_or(hidden_size as u64 * 4) as u32;
-    let max_seq_len = meta_u64(metadata, keys::MAX_SEQ_LEN).unwrap_or(131072) as u32;
-    let rms_norm_eps = meta_f64(metadata, keys::NORM_EPS).unwrap_or(1e-6);
-    let rope_theta = meta_f64(metadata, keys::ROPE_THETA).unwrap_or(10000.0);
+    // First extract the architecture type (used for key resolution)
     let model_type = meta_str(metadata, keys::MODEL_TYPE)
         .unwrap_or("unknown")
         .to_string();
+    let arch = model_type.as_str();
+
+    // Use flex lookups that check both architecture-prefixed keys
+    // (gemma4.embedding_length) and generic keys (llama.embedding_length)
+    let hidden_size = meta_u64_flex(metadata, arch, "embedding_length").unwrap_or(4096) as u32;
+    let num_attention_heads = meta_u64_flex(metadata, arch, "attention.head_count").unwrap_or(32) as u32;
+    let num_kv_heads =
+        meta_u64_flex(metadata, arch, "attention.head_count_kv").unwrap_or(num_attention_heads as u64) as u32;
+    let head_dim = meta_u64_flex(metadata, arch, "attention.head_dim")
+        .unwrap_or((hidden_size / num_attention_heads) as u64) as u32;
+    let num_hidden_layers = meta_u64_flex(metadata, arch, "block_count").unwrap_or(32) as u32;
+    let vocab_size = meta_u64_flex(metadata, arch, "vocab_size").unwrap_or(32000) as u32;
+    let intermediate_size =
+        meta_u64_flex(metadata, arch, "feed_forward_length").unwrap_or(hidden_size as u64 * 4) as u32;
+    let max_seq_len = meta_u64_flex(metadata, arch, "context_length").unwrap_or(131072) as u32;
+    let rms_norm_eps = meta_f64_flex(metadata, arch, "attention.layer_norm_rms_epsilon").unwrap_or(1e-6);
+    let rope_theta = meta_f64_flex(metadata, arch, "rope.freq_base").unwrap_or(10000.0);
 
     let num_layers = num_hidden_layers as usize;
     let mut layer_types = Vec::with_capacity(num_layers);
@@ -623,6 +697,153 @@ fn gguf_file_type_to_mode_str(file_type: u32) -> Option<String> {
     }
 }
 
+// ── GGML dequantization ────────────────────────────────────────────────────
+
+/// Dequantize a GGML-quantized tensor to f32.
+/// Supports: f32, f16, bf16, q8_0, q4_0.
+pub fn dequantize_ggml_tensor(data: &[u8], dtype: &str, num_elements: usize) -> Result<Vec<f32>, String> {
+    match dtype {
+        "f32" => {
+            if data.len() < num_elements * 4 {
+                return Err(format!(
+                    "f32 data too short: {} bytes for {} elements",
+                    data.len(), num_elements
+                ));
+            }
+            Ok(data[..num_elements * 4].chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+        }
+        "f16" => {
+            if data.len() < num_elements * 2 {
+                return Err(format!("f16 data too short: {} bytes for {} elements", data.len(), num_elements));
+            }
+            Ok(data[..num_elements * 2].chunks_exact(2).map(|c| f16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32()).collect())
+        }
+        "bf16" => {
+            if data.len() < num_elements * 2 {
+                return Err(format!("bf16 data too short: {} bytes for {} elements", data.len(), num_elements));
+            }
+            Ok(data[..num_elements * 2].chunks_exact(2).map(|c| bf16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32()).collect())
+        }
+        "q8_0" => Ok(dequantize_ggml_q8_0(data, num_elements)),
+        "q4_0" => Ok(dequantize_ggml_q4_0(data, num_elements)),
+        _ => Err(format!("unsupported GGML dtype for dequantization: {dtype}")),
+    }
+}
+
+/// Q8_0 block: 2-byte f16 scale + 32 int8 values = 34 bytes per 32 elements.
+const Q8_0_BLOCK_SIZE: usize = 32;
+const Q8_0_BYTES_PER_BLOCK: usize = 34;
+
+/// Dequantize a GGML Q8_0 tensor to f32.
+fn dequantize_ggml_q8_0(data: &[u8], num_elements: usize) -> Vec<f32> {
+    let block_count = (num_elements + Q8_0_BLOCK_SIZE - 1) / Q8_0_BLOCK_SIZE;
+    let mut out = Vec::with_capacity(num_elements);
+    for b in 0..block_count {
+        let offset = b * Q8_0_BYTES_PER_BLOCK;
+        if offset + Q8_0_BYTES_PER_BLOCK > data.len() { break; }
+        let scale_bits = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let scale = f16::from_bits(scale_bits).to_f32();
+        let vals_start = offset + 2;
+        let remaining = num_elements.saturating_sub(b * Q8_0_BLOCK_SIZE).min(Q8_0_BLOCK_SIZE);
+        for i in 0..remaining {
+            out.push((data[vals_start + i] as i8 as f32) * scale);
+        }
+    }
+    out
+}
+
+/// Q4_0 block: 2-byte f16 scale + 16 packed int4 nibbles = 18 bytes per 32 elements.
+const Q4_0_BLOCK_SIZE: usize = 32;
+const Q4_0_BYTES_PER_BLOCK: usize = 18;
+
+/// Dequantize a GGML Q4_0 tensor to f32.
+fn dequantize_ggml_q4_0(data: &[u8], num_elements: usize) -> Vec<f32> {
+    let block_count = (num_elements + Q4_0_BLOCK_SIZE - 1) / Q4_0_BLOCK_SIZE;
+    let mut out = Vec::with_capacity(num_elements);
+    for b in 0..block_count {
+        let offset = b * Q4_0_BYTES_PER_BLOCK;
+        if offset + Q4_0_BYTES_PER_BLOCK > data.len() { break; }
+        let scale_bits = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let scale = f16::from_bits(scale_bits).to_f32();
+        let nibbles_start = offset + 2;
+        let remaining = num_elements.saturating_sub(b * Q4_0_BLOCK_SIZE).min(Q4_0_BLOCK_SIZE);
+        for i in 0..remaining {
+            let byte = data[nibbles_start + i / 2];
+            let nibble = if i % 2 == 0 { byte & 0x0F } else { byte >> 4 };
+            out.push(((nibble as i8 - 8) as f32) * scale);
+        }
+    }
+    out
+}
+
+// ── Tensor data reading ───────────────────────────────────────────────────
+
+/// Read a single tensor from a GGUF file and dequantize to f32.
+/// Uses mmap for zero-copy access.
+pub fn read_gguf_tensor_f32(path: &Path, meta: &GgufTensorMeta) -> Result<Vec<f32>, String> {
+    let file = File::open(path)
+        .map_err(|e| format!("Cannot open GGUF file for tensor read: {}", e))?;
+    let mmap = unsafe {
+        memmap2::Mmap::map(&file)
+            .map_err(|e| format!("Cannot mmap GGUF file: {}", e))?
+    };
+    let start = meta.byte_offset as usize;
+    let end = start + meta.byte_size as usize;
+    if end > mmap.len() {
+        return Err(format!(
+            "Tensor {} offset {} size {} exceeds file size {}",
+            meta.name, meta.byte_offset, meta.byte_size, mmap.len()
+        ));
+    }
+    let raw = &mmap[start..end];
+    let num_elements: usize = meta.shape.iter().map(|&d| d as usize).product();
+    dequantize_ggml_tensor(raw, &meta.dtype, num_elements)
+}
+
+// ── Tensor name mapping (GGUF → HF) ───────────────────────────────────────
+
+/// Architecture-family prefix map.
+fn hf_prefix_for_arch(arch: &str) -> &'static str {
+    match arch {
+        "gemma4" => "language_model.model",
+        "qwen3" | "qwen3_5" => "model.language_model",
+        _ => "model",
+    }
+}
+
+/// Map a GGUF tensor name to its HuggingFace-style equivalent.
+pub fn gguf_name_to_hf_name(gguf_name: &str, arch: &str) -> Option<String> {
+    let prefix = hf_prefix_for_arch(arch);
+    match gguf_name {
+        "token_embd.weight" => return Some(format!("{prefix}.embed_tokens.weight")),
+        "token_embd_norm.weight" => return Some(format!("{prefix}.norm.weight")),
+        "output_norm.weight" => return Some(format!("{prefix}.norm.weight")),
+        "output.weight" => return Some(format!("{prefix}.lm_head.weight")),
+        _ => {}
+    }
+    if let Some(rest) = gguf_name.strip_prefix("blk.") {
+        let dot = rest.find('.')?;
+        let layer: u32 = rest[..dot].parse().ok()?;
+        let kind = &rest[dot + 1..];
+        let lp = format!("{prefix}.layers.{layer}");
+        return match kind {
+            "attn_q.weight" => Some(format!("{lp}.self_attn.q_proj.weight")),
+            "attn_k.weight" => Some(format!("{lp}.self_attn.k_proj.weight")),
+            "attn_v.weight" => Some(format!("{lp}.self_attn.v_proj.weight")),
+            "attn_output.weight" => Some(format!("{lp}.self_attn.o_proj.weight")),
+            "attn_q_norm.weight" => Some(format!("{lp}.self_attn.q_norm.weight")),
+            "attn_k_norm.weight" => Some(format!("{lp}.self_attn.k_norm.weight")),
+            "ffn_gate.weight" => Some(format!("{lp}.mlp.gate_proj.weight")),
+            "ffn_up.weight" => Some(format!("{lp}.mlp.up_proj.weight")),
+            "ffn_down.weight" => Some(format!("{lp}.mlp.down_proj.weight")),
+            "attn_norm.weight" => Some(format!("{lp}.input_layernorm.weight")),
+            "ffn_norm.weight" => Some(format!("{lp}.post_attention_layernorm.weight")),
+            _ => None,
+        };
+    }
+    None
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -756,5 +977,55 @@ mod tests {
         assert!(tensors.is_empty());
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_dequantize_q8_0() {
+        let mut buf = Vec::with_capacity(Q8_0_BYTES_PER_BLOCK);
+        buf.extend_from_slice(&0x4000u16.to_le_bytes()); // scale = 2.0
+        for i in 0..32u8 { buf.push(i); }
+        let result = dequantize_ggml_q8_0(&buf, 32);
+        assert_eq!(result.len(), 32);
+        for i in 0..32 {
+            assert!((result[i] - (i as i8 as f32 * 2.0)).abs() < 1e-4, "mismatch at {i}");
+        }
+    }
+
+    #[test]
+    fn test_dequantize_q4_0() {
+        let mut buf = Vec::with_capacity(Q4_0_BYTES_PER_BLOCK);
+        buf.extend_from_slice(&0x3C00u16.to_le_bytes()); // scale = 1.0
+        for _ in 0..16 { buf.push(0x10); }
+        let result = dequantize_ggml_q4_0(&buf, 32);
+        assert_eq!(result.len(), 32);
+        for i in 0..32 {
+            let expected = if i % 2 == 0 { -8.0 } else { -7.0 };
+            assert!((result[i] - expected).abs() < 1e-4, "mismatch at {i}: {} != {}", result[i], expected);
+        }
+    }
+
+    #[test]
+    fn test_dequantize_f32() {
+        let data: Vec<u8> = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32]
+            .iter().flat_map(|v| v.to_le_bytes()).collect();
+        let result = dequantize_ggml_tensor(&data, "f32", 4).unwrap();
+        assert_eq!(result.len(), 4);
+        assert!((result[2] - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_gguf_name_to_hf_llama() {
+        assert_eq!(gguf_name_to_hf_name("token_embd.weight", "llama").unwrap(), "model.embed_tokens.weight");
+        assert_eq!(gguf_name_to_hf_name("output.weight", "llama").unwrap(), "model.lm_head.weight");
+        assert_eq!(gguf_name_to_hf_name("blk.0.attn_q.weight", "llama").unwrap(), "model.layers.0.self_attn.q_proj.weight");
+        assert_eq!(gguf_name_to_hf_name("blk.0.ffn_gate.weight", "llama").unwrap(), "model.layers.0.mlp.gate_proj.weight");
+        assert_eq!(gguf_name_to_hf_name("blk.0.attn_norm.weight", "llama").unwrap(), "model.layers.0.input_layernorm.weight");
+        assert!(gguf_name_to_hf_name("rope_freqs.weight", "llama").is_none());
+    }
+
+    #[test]
+    fn test_gguf_name_to_hf_gemma4() {
+        assert_eq!(gguf_name_to_hf_name("token_embd.weight", "gemma4").unwrap(), "language_model.model.embed_tokens.weight");
+        assert_eq!(gguf_name_to_hf_name("blk.12.attn_q.weight", "gemma4").unwrap(), "language_model.model.layers.12.self_attn.q_proj.weight");
     }
 }

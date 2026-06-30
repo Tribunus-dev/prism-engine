@@ -145,7 +145,7 @@ impl GgufHeader {
     ///
     /// Returns `None` if the magic is missing or the data slice is too short.
     pub fn parse(data: &[u8]) -> Option<Self> {
-        if data.len() < 20 {
+        if data.len() < 16 {
             return None;
         }
         let magic = &data[0..4];
@@ -166,6 +166,11 @@ impl GgufHeader {
             // v1 used uint32
             u32::from_le_bytes(data[meta_offset..meta_offset + 4].try_into().ok()?) as u64
         };
+        // Verify data is long enough for the header given the format
+        let expected_min = if version >= 2 { 24 } else { 16 };
+        if data.len() < expected_min {
+            return None;
+        }
         Some(GgufHeader {
             version,
             tensor_count,

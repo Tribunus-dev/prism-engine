@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn test_prepare_returns_no_matching_variant_with_empty_programs() {
         // A preparer with zero available programs cannot satisfy any shape.
-        let preparer = ExecutableSessionPreparer::new();
+        let _preparer = ExecutableSessionPreparer::new();
 
         // We cannot construct a real LoadedExecutableImage without the sibling
         // runtime modules (E4A–E4D).  The construction path is validated in

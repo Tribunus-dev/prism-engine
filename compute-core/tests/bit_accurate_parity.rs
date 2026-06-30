@@ -1,6 +1,6 @@
 //! Bit-accurate parity tests validating MLX references vs Core ML predictions.
 
-use tribunus_compute_core::arena::Arena;
+use tribunus_compute_core::arena::{DataType, Arena;
 use tribunus_compute_core::coreml_bridge::CoreMlModel;
 use tribunus_compute_core::coreml_state::CoreMlStateHandle;
 
@@ -62,8 +62,8 @@ async fn test_stateful_async_future_parity() {
     let dim1 = 4u32;
     let n = (dim0 * dim1) as usize;
 
-    let arena_a = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena A");
-    let mut arena_b = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena B");
+    let arena_a = Arena::new(dim0, dim1, DataType::Float16).expect("arena A");
+    let mut arena_b = Arena::new(dim0, dim1, DataType::Float16).expect("arena B");
 
     for i in 0..5 {
         let val = i as f32;
