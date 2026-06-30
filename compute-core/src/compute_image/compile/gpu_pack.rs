@@ -18,6 +18,20 @@ static METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> =
         Some((device.clone(), device.new_command_queue(), pipeline))
     });
 
+static Q8_METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> =
+    LazyLock::new(|| {
+        let device = Device::system_default()?;
+        let src = include_str!("../templates/tile640_pack.metal");
+        let lib = device
+            .new_library_with_source(src, &CompileOptions::new())
+            .ok()?;
+        let kernel = lib.get_function("q8_0_ternary_pack", None).ok()?;
+        let pipeline = device
+            .new_compute_pipeline_state_with_function(&kernel)
+            .ok()?;
+        Some((device.clone(), device.new_command_queue(), pipeline))
+    });
+
 /// GPU-accelerated TernaryTile640 pack with optional direct-to-mmap output.
 ///
 /// When `mmap_output` is `Some((ptr, offset))`, the GPU writes packed u32
@@ -202,4 +216,121 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
         if mmap_output.is_some() { "→ direct mmap" } else { "" },
     );
     Ok(true)
+}
+
+/// GPU-accelerated Q8_0 dequant → transpose → ternary tile640 pack.
+///
+/// Input: Q8_0 blocks in [K, N] order (GGUF native).
+/// The function transposes block indices to [N, K] order on CPU (~0.5ms),
+/// then dispatches the Metal `q8_0_ternary_pack` kernel which dequantizes
+/// to f32 in threadgroup memory, computes per-tile absmax scale,
+/// ternary quantizes, and Base-3 packs — all in one kernel dispatch.
+///
+/// Returns `(packed_u32_bytes, scales_f32_bytes, num_tiles)`.
+/// On failure or missing Metal, returns `None`.
+pub(crate) fn try_q8_0_ternary_pack_gpu(
+q8_bytes: &[u8],
+in_dim: u32,
+out_dim: u32,
+) -> Option<(Vec<u8>, Vec<u8>, u32)> {
+match &Q8_METAL.as_ref() {
+        Some((device, queue, pipeline)) => {
+            let k = in_dim as usize;
+            let n = out_dim as usize;
+            let k_blocks = (k + 31) / 32;
+            let total_blocks = k_blocks * n;
+            let num_tiles = (k + 639) / 640;
+
+            // ── CPU: transpose Q8_0 block indices [K,N] → [N,K] ─────
+            // Each Q8_0 block stays intact (34 bytes).
+            let mut transposed = vec![0u8; total_blocks * 34];
+            for row_n in 0..n {
+                for k_blk in 0..k_blocks {
+                    // Source: element (k_blk*32, row_n) in [K,N] layout
+                    let src_flat = k_blk * 32 * n + row_n;
+                    let src_block = src_flat / 32;
+                    let src_off = src_block * 34;
+                    // Dest: element (row_n, k_blk*32) in [N,K] layout
+                    let dst_block = row_n * k_blocks + k_blk;
+                    let dst_off = dst_block * 34;
+                    transposed[dst_off..dst_off + 34]
+                        .copy_from_slice(&q8_bytes[src_off..src_off + 34]);
+}
+}
+
+            // ── Upload transposed Q8_0 blocks to GPU ────────────────
+            let ingest = device.new_buffer_with_data(
+                transposed.as_ptr() as *const std::ffi::c_void,
+                transposed.len() as u64,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            let total_u32 = n * num_tiles * 32;
+            let egest_packed = device.new_buffer(
+                (total_u32 as u64) * 4,
+                MTLResourceOptions::StorageModeShared,
+            );
+            let egest_scales = device.new_buffer(
+                (n as u64) * (num_tiles as u64) * 4,
+                MTLResourceOptions::StorageModeShared,
+            );
+
+            // ── Dispatch kernel ─────────────────────────────────────
+            let cmd_buf = queue.new_command_buffer();
+            let enc = cmd_buf.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(pipeline);
+            enc.set_buffer(0, Some(&ingest), 0);
+            enc.set_buffer(1, Some(&egest_packed), 0);
+            enc.set_buffer(2, Some(&egest_scales), 0);
+            for (i, &val) in [k as u32, n as u32, num_tiles as u32].iter().enumerate() {
+                let buf = device.new_buffer_with_data(
+                    &val as *const u32 as *const std::ffi::c_void,
+                    4,
+                    MTLResourceOptions::StorageModeShared,
+                );
+                enc.set_buffer(3 + i as u64, Some(&buf), 0);
+}
+            enc.dispatch_threads(
+                MTLSize {
+                    width: (n as u64) * (num_tiles as u64),
+                    height: 1,
+                    depth: 1,
+                },
+                MTLSize { width: 32, height: 1, depth: 1 },
+            );
+            enc.end_encoding();
+            cmd_buf.commit();
+            cmd_buf.wait_until_completed();
+
+            // ── Read back results ───────────────────────────────────
+            let packed_slice = unsafe {
+                std::slice::from_raw_parts(
+                    egest_packed.contents() as *const u32,
+                    total_u32,
+                )
+            };
+            let packed_u32: Vec<u8> = packed_slice
+                .iter()
+                .flat_map(|&w| w.to_le_bytes().to_vec())
+                .collect();
+
+            let scales_slice = unsafe {
+                std::slice::from_raw_parts(
+                    egest_scales.contents() as *const f32,
+                    (n * num_tiles) as usize,
+                )
+            };
+            let scales_f32: Vec<u8> = scales_slice
+                .iter()
+                .flat_map(|&s| s.to_le_bytes().to_vec())
+                .collect();
+
+            eprintln!(
+                "[quantize:gpu] q8_0→ternary {}×{}(K): {} tiles, {} u32",
+                k, n, num_tiles, total_u32,
+            );
+            Some((packed_u32, scales_f32, num_tiles as u32))
+}
+        None => None,
+}
 }

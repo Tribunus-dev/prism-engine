@@ -5,11 +5,13 @@
 //! per row, builds split-block payloads, and writes a `.cimage` file.
 
 use serde_json::json;
+use std::fs::File;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+use crate::compute_image::compile::try_q8_0_ternary_pack_gpu;
 use crate::config::build_execution_plan;
 use crate::config::parse_config;
 use crate::config_namespace::resolve_namespace;
@@ -447,49 +449,74 @@ pub fn compile_gguf_to_cimage(
         }
 
         // Read and dequantize the GGUF tensor to f32
-        let mut f32_vals = gguf::read_gguf_tensor_f32(gguf_path, meta)?;
+        // Read raw Q8_0 bytes from the GGUF file (mmap'd at byte_offset)
+        let raw_q8 = {
+            let f = File::open(gguf_path)
+                .map_err(|e| format!("Couldn't open GGUF: {e}"))?;
+            let mmap = unsafe { memmap2::Mmap::map(&f) }
+                .map_err(|e| format!("mmap: {e}"))?;
+            let start = meta.byte_offset as usize;
+            let end = start + meta.byte_size as usize;
+            mmap[start..end].to_vec()
+        };
 
-        // Transpose: GGUF data is [in×out] row-major, LUT expects [out×in] row-major.
-        if use_dim_m > 1 && use_dim_n > 1 && f32_vals.len() > 1 {
-            let (d_in, d_out) = (gguf_in as usize, gguf_out as usize);
-            let mut t = vec![0.0f32; f32_vals.len()];
-            for i in 0..d_in {
-                let src_row_off = i * d_out;
-                for j in 0..d_out {
-                    t[j * d_in + i] = f32_vals[src_row_off + j];
-                }
-            }
-            f32_vals = t;
-        }
-
+        // Try GPU-accelerated Q8_0 → ternary tile640 pack.
+        // If Metal is unavailable or the kernel fails, fall back to
+        // CPU f32 dequant → transpose → palettize.
         let t0 = std::time::Instant::now();
-        let pal = palettize_matrix(&f32_vals, use_dim_m as usize, use_dim_n as usize, 16, 50);
-        let bpp = pal.effective_bpp();
 
-        // Build payload: codebook (f16) + indices
-        let cb_bytes = pal.rows.len() * 16 * 2;
-        let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
-        let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
-        for row in &pal.rows {
-            for &cb_f32 in &row.codebook {
-                let cb_f16 = half::f16::from_f32(cb_f32);
-                payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
+        let gpu_result = try_q8_0_ternary_pack_gpu(&raw_q8, gguf_in, gguf_out);
+
+        match gpu_result {
+            Some((packed_u32, scales_f32, num_tiles)) => {
+                // GPU succeeded: write ternary-packed data as raw u32 + f32 scales.
+                let scales_name = format!("{}.scales", tb.key.trim_end_matches(".weight"));
+                cimage.append_fp16(&tb.key, &packed_u32, use_dim_m, num_tiles * 32)?;
+                cimage.append_fp16(&scales_name, &scales_f32, use_dim_m, num_tiles)?;
+                emitted_ids.insert(tb.key.clone(), id as u32);
+                eprintln!(
+                    "  [gguf:gpu] {} ({}×{}) → ternary {} tiles {:.2}s",
+                    meta.name, use_dim_m, use_dim_n, num_tiles,
+                    t0.elapsed().as_secs_f64()
+                );
+            }
+            None => {
+                // GPU unavailable — fall back to CPU dequant + palettization
+                let mut f32_vals = gguf::read_gguf_tensor_f32(gguf_path, meta)?;
+                if use_dim_m > 1 && use_dim_n > 1 && f32_vals.len() > 1 {
+                    let (d_in, d_out) = (gguf_in as usize, gguf_out as usize);
+                    let mut t = vec![0.0f32; f32_vals.len()];
+                    for i in 0..d_in {
+                        let src_row_off = i * d_out;
+                        for j in 0..d_out {
+                            t[j * d_in + i] = f32_vals[src_row_off + j];
+                        }
+                    }
+                    f32_vals = t;
+                }
+                let pal = palettize_matrix(&f32_vals, use_dim_m as usize, use_dim_n as usize, 16, 50);
+                let bpp = pal.effective_bpp();
+                let cb_bytes = pal.rows.len() * 16 * 2;
+                let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
+                let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
+                for row in &pal.rows {
+                    for &cb_f32 in &row.codebook {
+                        let cb_f16 = half::f16::from_f32(cb_f32);
+                        payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
+                    }
+                }
+                for row in &pal.rows {
+                    payload.extend_from_slice(&row.indices);
+                }
+                cimage.append_palettized(&tb.key, &payload, use_dim_m, use_dim_n)?;
+                emitted_ids.insert(tb.key.clone(), id as u32);
+                eprintln!(
+                    "  [gguf:cpu] {} ({}×{}) bpp={bpp:.3} {:.2}s",
+                    meta.name, use_dim_m, use_dim_n,
+                    t0.elapsed().as_secs_f64()
+                );
             }
         }
-        for row in &pal.rows {
-            payload.extend_from_slice(&row.indices);
-        }
-
-        cimage.append_palettized(&tb.key, &payload, use_dim_m, use_dim_n)?;
-        emitted_ids.insert(tb.key.clone(), id as u32);
-
-        eprintln!(
-            "  [gguf] {} ({}×{}) bpp={bpp:.3} {:.2}s",
-            meta.name,
-            use_dim_m,
-            use_dim_n,
-            t0.elapsed().as_secs_f64()
-        );
     }
 
     // 7. Build and embed execution plan
