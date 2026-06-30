@@ -241,8 +241,28 @@ match &Q8_METAL.as_ref() {
             let total_blocks = k_blocks * n;
             let num_tiles = (k + 639) / 640;
 
+            // ── Pre-scan scales for p99 clamp threshold ────────────
+            // BF16→f16 overflow in Q8_0 conversion can produce inf/NaN
+            // scales. Clamp non-finite to p99 of finite scales.
+            let mut fin: Vec<f32> = Vec::with_capacity(total_blocks);
+            for b in 0..total_blocks {
+                let o = b * 34;
+                let b0 = u16::from_le_bytes([q8_bytes[o], q8_bytes[o + 1]]);
+                let s = half::f16::from_bits(b0).to_f32();
+                if s.is_finite() { fin.push(s.abs()); }
+}
+            fin.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let clamp = fin.get((fin.len() as f64 * 0.99) as usize)
+                .copied().unwrap_or(65504.0);
+            let clamped_bits = half::f16::from_f32(clamp).to_bits().to_le_bytes();
+            let clamped_count = total_blocks - fin.len()
+                + fin.iter().filter(|&&s| s > clamp).count();
+            if clamped_count > 0 {
+                eprintln!("  [gpu] clamped {} inf/overflow scales to {:.0}", clamped_count, clamp);
+}
+
             // ── CPU: transpose Q8_0 block indices [K,N] → [N,K] ─────
-            // Each Q8_0 block stays intact (34 bytes).
+            // Blocks with inf/NaN scales get clamped to p99 threshold.
             let mut transposed = vec![0u8; total_blocks * 34];
             for row_n in 0..n {
                 for k_blk in 0..k_blocks {
@@ -253,11 +273,20 @@ match &Q8_METAL.as_ref() {
                     // Dest: element (row_n, k_blk*32) in [N,K] layout
                     let dst_block = row_n * k_blocks + k_blk;
                     let dst_off = dst_block * 34;
+                    let b0 = u16::from_le_bytes([q8_bytes[src_off], q8_bytes[src_off + 1]]);
+                    let s = half::f16::from_bits(b0).to_f32();
+                    if !s.is_finite() || s.abs() > clamp {
+                        transposed[dst_off..dst_off + 2].copy_from_slice(&clamped_bits);
+                        transposed[dst_off + 2..dst_off + 34]
+                            .copy_from_slice(&q8_bytes[src_off + 2..src_off + 34]);
+                    } else {
                     transposed[dst_off..dst_off + 34]
                         .copy_from_slice(&q8_bytes[src_off..src_off + 34]);
-}
-}
+                    }
+                }
+            }
 
+            // ── Upload transposed Q8_0 blocks to GPU ────────────────
             // ── Upload transposed Q8_0 blocks to GPU ────────────────
             let ingest = device.new_buffer_with_data(
                 transposed.as_ptr() as *const std::ffi::c_void,
