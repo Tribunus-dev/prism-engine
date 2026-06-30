@@ -13,6 +13,7 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 metal = { version = "0.29", optional = true }
 objc = { version = "0.2", optional = true }
+block = { version = "0.1", optional = true }
 hf-hub = "0.4"
 tribunus-evidence-schema = { path = "../evidence-schema" }
 mlx-rs = { path = "../mlx-rs-fork/mlx-rs" }
@@ -52,7 +53,7 @@ default = []
 prism-backend = ["dep:coreml-proto", "server", "metal-dispatch"]
 ffi = ["server", "metal-dispatch"]
 ane = []
-metal-dispatch = ["dep:metal", "dep:objc"]
+metal-dispatch = ["dep:metal", "dep:objc", "dep:block"]
 server = ["dep:axum", "dep:tower-http"]
 
 # Features referenced in cfg attributes throughout the codebase.

@@ -1515,7 +1515,7 @@ kernel void persistent_decode_worker(
     device uint*          kv_k_nibbles  [[buffer(6)]],  // ternary-packed K nibbles
     device uint*          kv_v_nibbles  [[buffer(7)]],  // ternary-packed V nibbles
     device half*          kv_k_scales   [[buffer(8)]],  // FP16 block scales for K
-    device half*          kv_v_scales   [[buffer(9)]],  // FP16 block scales for V
+    device const half*    kv_v_scales   [[buffer(9)]],  // FP16 block scales for V
     device const uint*    draft_ternary_w   [[buffer(10)]],
     device const half*    draft_scales      [[buffer(11)]],
     device const half*    draft_norms       [[buffer(12)]],
@@ -1603,18 +1603,19 @@ kernel void persistent_decode_worker(
         uint my_token_epoch = 0;
         uint my_kv_generation = 0;
         uint my_page_table_generation = 0;
-        uint idx_ring = 0;
-        uint kind = 0;
 
         while (claim == CLAIM_UNOWNED && retries < max_retries) {
             // Fresh snapshot reloads
             threadgroup_barrier(mem_flags::mem_device);
             uint epoch_close = atomic_load_explicit(
-                &epoch_control->epoch_close_requested, memory_order_relaxed);
+                &epoch_control->epoch_close_requested, memory_order_seq_cst,
+                thread_scope_device);
             uint epoch_limit = atomic_load_explicit(
-                &epoch_control->epoch_enqueue_limit, memory_order_relaxed);
+                &epoch_control->epoch_enqueue_limit, memory_order_seq_cst,
+                thread_scope_device);
             uint fatal_claim = atomic_load_explicit(
-                &epoch_control->epoch_fatal_claim, memory_order_relaxed);
+                &epoch_control->epoch_fatal_claim, memory_order_seq_cst,
+                thread_scope_device);
 
             if (fatal_claim != CLAIM_UNOWNED) {
                 // A previous worker already recorded a fatal fault;
@@ -1624,14 +1625,14 @@ kernel void persistent_decode_worker(
             }
 
             // ── Ring dequeue ──
+            bool dequeued = false;
             uint my_tail = atomic_fetch_add_explicit(
                 ring_tail, 1, memory_order_relaxed);
-            idx_ring = my_tail % RING_SIZE;
+            uint idx_ring = my_tail % RING_SIZE;
             device uint* entry = ring_entries + idx_ring * 4;
             uint entry_state = atomic_load_explicit(
                 (device atomic_uint*)entry, memory_order_relaxed);
-            kind = entry_state >> 2;
-            bool dequeued = false;
+            uint kind = entry_state >> 2;
             if ((entry_state & 3) == 1) {  // SUBMITTED
                 uint expected = entry_state;
                 if (atomic_compare_exchange_weak_explicit(
@@ -1671,7 +1672,8 @@ kernel void persistent_decode_worker(
             // Bounded retry exhausted without finding work.
             // If epoch is closing, exit immediately (drain protocol).
             uint epoch_close = atomic_load_explicit(
-                &epoch_control->epoch_close_requested, memory_order_relaxed);
+                &epoch_control->epoch_close_requested, memory_order_seq_cst,
+                thread_scope_device);
             if (epoch_close != 0) {
                 break;
             }
@@ -1686,13 +1688,14 @@ kernel void persistent_decode_worker(
             // epoch_close_requested, issue cancellation for unresolved sets.
             if (tid == 0) {
                 uint final_enq = atomic_load_explicit(
-                    &receipt->requests_claimed, memory_order_relaxed);
+                    &receipt->requests_claimed, memory_order_seq_cst,
+                    thread_scope_device);
                 atomic_store_explicit(
                     &epoch_control->epoch_enqueue_limit, final_enq,
-                    memory_order_relaxed);
+                    memory_order_seq_cst);
                 atomic_store_explicit(
                     &epoch_control->epoch_close_requested, 1,
-                    memory_order_relaxed);
+                    memory_order_seq_cst);
 
                 // Issue cancellation for all unresolved sets
                 // (Host-side will pick up the cancellation requests)
@@ -1758,7 +1761,8 @@ kernel void persistent_decode_worker(
 
     // --- Compute generation tag for KV pages ---
     uint kv_generation = atomic_load_explicit(
-        &epoch_control->epoch_fatal_fault_generation, memory_order_relaxed);
+        &epoch_control->epoch_fatal_fault_generation, memory_order_seq_cst,
+        thread_scope_device);
     uint page_table_generation = kv_generation;
 
     if (kind == 0) {
@@ -2711,22 +2715,60 @@ kernel void persistent_decode_worker(
 
 
 // ── Generation-Tagged Page Oracle ──────────────────────────────
-// Phase 1 protected by device-scope release/acquire atomics on the
-// scratch header (state + producer_claim + request_outcome).
-// 64-bit page-level oracle deferred — not supported for device
-// address space in Metal v17.6 toolchain (use two 32-bit fields
-// in a future iteration).
-// Write payload with a simple fence: the producer owns the scratch
-// set and no concurrent consumer may write.
-void write_kv_page_simple(
-    device half* payload_dest,
+// Writes a KV page with generation-tagged oracle using atomic_ulong
+// packed [epoch:32|owner:32].  The COMMITTED_BIT (bit 63) marks the
+// entry as definitively published.
+
+#define COMMITTED_BIT (1ull << 63)
+
+/// Atomically write a generation-tagged page descriptor.
+///   page_table[t] holds atomic_ulong packed [committed|epoch|owner].
+///   epoch_tag = packed (generation << 32) | worker_id.
+///   After the payload is fully written, CAS the tag to set COMMITTED_BIT.
+void write_kv_page_with_oracle(
+    device atomic_ulong* page_table,
+    uint page_index,
+    uint generation,
+    uint worker_id,
     device const half* payload_source,
+    device half* payload_dest,
     uint payload_elements,
     uint tid,
     uint tg_sz)
 {
+    // 1. Write the payload data (scratch -> kv cache)
     for (uint i = tid; i < payload_elements; i += tg_sz) {
         payload_dest[i] = payload_source[i];
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+
+    // 2. Build the oracle tag: [committed=0 | generation(32) | worker_id(32)]
+    ulong tag = ((ulong)generation << 32) | (ulong)worker_id;
+    ulong committed_tag = tag | COMMITTED_BIT;
+
+    // 3. CAS from 0 -> uncommitted tag (reserve)
+    if (tid == 0) {
+        ulong expected = 0;
+        bool reserved = atomic_compare_exchange_weak_explicit(
+            &page_table[page_index], &expected, tag,
+            memory_order_seq_cst, memory_order_seq_cst,
+            thread_scope_device);
+        if (reserved) {
+            // 4. Full commit barrier (payload already visible from step 1)
+            //    Set COMMITTED_BIT to signal durability.
+            atomic_store_explicit(&page_table[page_index], committed_tag,
+                memory_order_seq_cst);
+        } else {
+            // Another worker already owns this slot; check if committed.
+            ulong existing = expected;
+            if (existing & COMMITTED_BIT) {
+                // Doubled write detected — already committed by someone else.
+                // (Epoch controller handles this as a duplicate-write event.)
+            } else {
+                // Another worker holds the reservation — the epoch controller
+                // will fence this via generation mismatch detection.
+            }
+        }
     }
     threadgroup_barrier(mem_flags::mem_device);
 }
@@ -2754,24 +2796,27 @@ kernel void persistent_kv_prefetch_worker(
     while (true) {
         // ── Exit conditions ──
         uint epoch_close = atomic_load_explicit(
-            &epoch_control->epoch_close_requested, memory_order_relaxed);
+            &epoch_control->epoch_close_requested, memory_order_seq_cst,
+            thread_scope_device);
         uint epoch_limit = atomic_load_explicit(
-            &epoch_control->epoch_enqueue_limit, memory_order_relaxed);
+            &epoch_control->epoch_enqueue_limit, memory_order_seq_cst,
+            thread_scope_device);
         // (Exit is checked after each page group — fall through to poll)
 
         // 1. Poll for work
         uint deq = atomic_load_explicit(
-            &epoch_control->epoch_fatal_claim, memory_order_relaxed);
+            &epoch_control->epoch_fatal_claim, memory_order_seq_cst,
+            thread_scope_device);
         if (deq != CLAIM_UNOWNED) {
             // ── Helper terminal cleanup: a fatal fault was recorded ──
             // Invalidate any in-flight scratch sets and bail.
             for (uint i = 0; i < 16; ++i) {
                 atomic_store_explicit(&headers[i].control.payload_valid, 0,
-                    memory_order_relaxed);
+                    memory_order_seq_cst);
                 atomic_store_explicit(&headers[i].control.state, KV_STATE_RECLAIMABLE,
-                    memory_order_relaxed);
+                    memory_order_seq_cst);
                 atomic_store_explicit(&headers[i].control.producer_claim, CLAIM_UNOWNED,
-                    memory_order_relaxed);
+                    memory_order_seq_cst);
             }
             return;
         }
@@ -2785,12 +2830,14 @@ kernel void persistent_kv_prefetch_worker(
         bool found = false;
         for (uint i = 0; i < 16; ++i) {
             uint st = atomic_load_explicit(
-                &headers[i].control.state, memory_order_relaxed);
+                &headers[i].control.state, memory_order_seq_cst,
+                thread_scope_device);
             if (st == KV_STATE_QUEUED) {
                 uint expected = KV_STATE_QUEUED;
                 if (atomic_compare_exchange_weak_explicit(
                     &headers[i].control.state, &expected, KV_STATE_FILLING,
-                    memory_order_relaxed, memory_order_relaxed)) {
+                    memory_order_seq_cst, memory_order_seq_cst,
+                    thread_scope_device)) {
                     scratch_idx = i;
                     found = true;
                     break;
@@ -2879,19 +2926,21 @@ kernel void persistent_kv_prefetch_worker(
 
         // ── Cooperative cancellation: check after each page group ──
         uint cancel = atomic_load_explicit(
-            &hdr->control.cancel_requested, memory_order_relaxed);
+            &hdr->control.cancel_requested, memory_order_seq_cst,
+            thread_scope_device);
         if (cancel != 0) {
             // CAS OUTCOME_NONE -> CANCELED
             uint expected_outcome = OUTCOME_NONE;
             uint outcome_won = atomic_compare_exchange_weak_explicit(
                 &hdr->control.request_outcome, &expected_outcome, OUTCOME_CANCELED,
-                memory_order_relaxed, memory_order_relaxed);
+                memory_order_seq_cst, memory_order_seq_cst,
+                thread_scope_device);
             if (outcome_won) {
                 // Invalidate payload and mark canceled
                 atomic_store_explicit(&hdr->control.payload_valid, 0,
-                    memory_order_relaxed);
+                    memory_order_seq_cst);
                 atomic_store_explicit(&hdr->control.state, KV_STATE_CANCELED,
-                    memory_order_relaxed);
+                    memory_order_seq_cst);
                 atomic_fetch_add_explicit(&epoch_control->epoch_fatal_fault_request_id, 1,
                     memory_order_relaxed); // diagnostic
             }  // else: preserve winner's outcome
@@ -2900,9 +2949,9 @@ kernel void persistent_kv_prefetch_worker(
 
         // ── Check exit condition between page groups ──
         uint et = atomic_load_explicit(&epoch_control->epoch_close_requested,
-            memory_order_relaxed);
+            memory_order_seq_cst);
         uint el = atomic_load_explicit(&epoch_control->epoch_enqueue_limit,
-            memory_order_relaxed);
+            memory_order_seq_cst);
         if (et != 0) {
             return;
         }
@@ -2910,17 +2959,18 @@ kernel void persistent_kv_prefetch_worker(
         // ── Ordered Readiness Publication ──
         // 1. Payload is already in scratch — set payload_valid=1 (release)
         atomic_store_explicit(&hdr->control.payload_valid, 1,
-            memory_order_relaxed);
+            memory_order_seq_cst);
 
         // 2. state = Ready (release) — makes it visible to consumers
         atomic_store_explicit(&hdr->control.state, KV_STATE_READY,
-            memory_order_relaxed);
+            memory_order_seq_cst);
 
         // 3. CAS request_outcome None -> ReadyConsumable
         uint expected_outcome = OUTCOME_NONE;
         uint outcome_won = atomic_compare_exchange_weak_explicit(
             &hdr->control.request_outcome, &expected_outcome, OUTCOME_READY_CONSUMABLE,
-            memory_order_relaxed, memory_order_relaxed);
+            memory_order_seq_cst, memory_order_seq_cst,
+            thread_scope_device);
 
         if (outcome_won) {
             // Case A: we won the CAS — increment ready consumable counter
@@ -2933,11 +2983,11 @@ kernel void persistent_kv_prefetch_worker(
             //   - state = Reclaimable
             //   - increment late_ready_discarded
             atomic_store_explicit(&hdr->control.payload_valid, 0,
-                memory_order_relaxed);
+                memory_order_seq_cst);
             atomic_store_explicit(&hdr->control.state, KV_STATE_RECLAIMABLE,
-                memory_order_relaxed);
+                memory_order_seq_cst);
             atomic_store_explicit(&hdr->control.producer_claim, CLAIM_UNOWNED,
-                memory_order_relaxed);
+                memory_order_seq_cst);
             uint discarded = atomic_fetch_add_explicit(
                 &hdr->control.late_publish_rejection_count, 1,
                 memory_order_relaxed);
@@ -2952,7 +3002,7 @@ kernel void persistent_kv_prefetch_worker(
 
         // ── Exit on epoch close condition ──
         epoch_close = atomic_load_explicit(&epoch_control->epoch_close_requested,
-            memory_order_relaxed);
+            memory_order_seq_cst);
         if (epoch_close != 0) {
             return;
         }

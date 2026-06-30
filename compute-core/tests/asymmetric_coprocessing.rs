@@ -345,9 +345,9 @@ fn test_asymmetric_coprocessing() {
 
     // ── 3. Allocate Agent A arenas (ANE input/output) ─────────────────
     let agent_a_input =
-        Arena::new(1, H as u32, mlx_rs::Dtype::Float16).expect("[Arena] Agent A input arena");
+        Arena::new(1, H as u32, DataType::Float16).expect("[Arena] Agent A input arena");
     let agent_a_output =
-        Arena::new(1, FFN as u32, mlx_rs::Dtype::Float16).expect("[Arena] Agent A output arena");
+        Arena::new(1, FFN as u32, DataType::Float16).expect("[Arena] Agent A output arena");
 
     // Fill Agent A input with deterministic data
     unsafe {

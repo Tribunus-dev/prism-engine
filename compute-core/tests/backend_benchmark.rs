@@ -395,8 +395,8 @@ fn bench_coreml_model(
     let load_and_bench = |cu: CoreMlComputeUnits| -> Option<u64> {
         let model = CoreMlModel::load_with_compute_units(model_path, cu).ok()?;
         let (id0, id1, od0, od1) = arena_dims;
-        let arena_in = Arena::new(id0, id1, mlx_rs::Dtype::Float16).ok()?;
-        let arena_out = Arena::new(od0, od1, mlx_rs::Dtype::Float16).ok()?;
+        let arena_in = Arena::new(id0, id1, DataType::Float16).ok()?;
+        let arena_out = Arena::new(od0, od1, DataType::Float16).ok()?;
         let t0 = Instant::now();
         for _ in 0..20 {
             model
@@ -612,14 +612,14 @@ fn bench_ane_direct(results: &mut Vec<AneDirectResult>) {
         };
         let compile_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
-        let arena_in = match Arena::new(ch, seq, mlx_rs::Dtype::Float16) {
+        let arena_in = match Arena::new(ch, seq, DataType::Float16) {
             Ok(a) => a,
             Err(e) => {
                 eprintln!("SKIP ANE: arena failed: {}", e);
                 continue;
             }
         };
-        let arena_out = match Arena::new(ch, seq, mlx_rs::Dtype::Float16) {
+        let arena_out = match Arena::new(ch, seq, DataType::Float16) {
             Ok(a) => a,
             Err(e) => {
                 eprintln!("SKIP ANE: arena failed: {}", e);

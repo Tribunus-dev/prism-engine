@@ -1,0 +1,9 @@
+# Suppress future-incompat warnings from third-party dependencies
+# block v0.1.6 (transitive dep of metal-rs/objc) has an uninhabited static
+# that will become a hard error in a future Rust release.  No patched version
+# exists upstream; this allowance is the pragmatic fix.
+[target.'cfg(all())']
+rustflags = ["-A", "uninhabited-static"]
+
+[future-incompat-report]
+frequency = "never"

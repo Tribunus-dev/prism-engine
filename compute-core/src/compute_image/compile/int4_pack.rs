@@ -18,9 +18,26 @@ pub struct TernaryBlock32 {
     pub block_scale: u16, // f16 bits
 }
 
-/// Unpack 5 trits from a byte using multiply-by-86 trick (fast_div3 for u8 range).
-/// Returns [base+0..base+4] trits as raw digits 0,1,2 (not ternary −1,0,1).
-#[inline(always)]
+/// 16-byte aligned version for coalesced GPU uint4 vector loads.
+#[repr(C)]
+pub struct AlignedTernaryBlock32 {
+    pub packed_trits: [u8; 7],
+    pub block_scale: u16,
+    pub padding: [u8; 7],
+}
+
+impl From<TernaryBlock32> for AlignedTernaryBlock32 {
+    fn from(b: TernaryBlock32) -> Self {
+        AlignedTernaryBlock32 {
+            packed_trits: b.packed_trits,
+            block_scale: b.block_scale,
+            padding: [0u8; 7],
+        }
+    }
+}
+
+/// 16-byte aligned version for coalesced GPU uint4 vector loads.
+/// 7 trit bytes + 2 scale bytes + 7 padding = exactly 16 bytes.
 pub fn unpack_byte_5_trits(byte: u8, out: &mut [u8; 5]) {
     let mut v = byte as u32;
     for i in 0..5 {

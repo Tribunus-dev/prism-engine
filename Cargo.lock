@@ -3028,6 +3028,7 @@ dependencies = [
  "async-trait",
  "axum",
  "blake3",
+ "block",
  "bytemuck",
  "cc",
  "clap",

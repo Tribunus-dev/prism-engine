@@ -727,6 +727,53 @@ impl MilBuilder {
         self
     }
 
+    /// Concatenate tensors along a given axis.
+    ///
+    /// `inputs` — list of SSA value names to concatenate.
+    /// `axis` — axis along which to concatenate (0-based).
+    /// `_use_sequence_length` — placeholder for MIL spec compatibility (unused).
+    pub fn concat(mut self, name_hint: &str, inputs: &[&str], axis: i64, _use_sequence_length: bool) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(inputs[0]).expect("SSA: unknown type");
+
+        // Infer output shape from first input; zero the concat axis since
+        // the actual sum is computed at compile time by coremlcompiler.
+        let dimensions = self.value_types.get(inputs[0])
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => {
+                    let mut dims = tt.dimensions.clone();
+                    if let Some(d) = dims.get_mut(axis as usize) {
+                        d.dimension = Some(dimension::Dimension::Constant(
+                            dimension::ConstantDimension { size: 0 },
+                        ));
+                    }
+                    Some(dims)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let rank = dimensions.len() as i64;
+
+        let vt = value_type_tensor(mil_spec::TensorType {
+            data_type: dtype as i32,
+            rank,
+            dimensions,
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("values".to_string(), multi_named_arg(inputs));
+
+        let mut extra = HashMap::new();
+        extra.insert("axis".to_string(), int_attr(axis));
+
+        let op = make_operation("concat", &name, inputs_map, &[(&name, &vt)], extra);
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
     /// Add an element-wise multiply operation.
     pub fn mul(mut self, a: &str, b: &str) -> Self {
         let name = self.fresh_name("mul");
@@ -1480,6 +1527,18 @@ fn float_attr(val: f32) -> mil_spec::Value {
         value: Some(value::Value::ImmediateValue(value::ImmediateValue {
             value: Some(value::immediate_value::Value::Tensor(float_tensor)),
         })),
+    }
+}
+
+/// Create an [`Argument`] referencing multiple SSA names (e.g. for concat).
+fn multi_named_arg(names: &[&str]) -> mil_spec::Argument {
+    mil_spec::Argument {
+        arguments: names
+            .iter()
+            .map(|n| argument::Binding {
+                binding: Some(argument::binding::Binding::Name(n.to_string())),
+            })
+            .collect(),
     }
 }
 
