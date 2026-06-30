@@ -30,6 +30,8 @@ pub trait WebDriver: Send + Sync {
     fn snapshot(&self) -> Result<String, String>;
     fn interact(&self, id: u32, action: &str, value: Option<&str>) -> Result<String, String>;
     fn evaluate_js(&self, script: &str) -> Result<String, String>;
+    /// Download a URL using the browser's authenticated session (cookies).
+    fn download(&self, url: &str, filename: &str) -> Result<String, String>;
 }
 
 thread_local! {
@@ -48,6 +50,7 @@ pub enum WebRequest {
     Snapshot,
     Interact { id: u32, action: String, value: Option<String> },
     EvaluateJs { script: String },
+    Download { url: String, filename: String },
 }
 
 fn do_web_request(req: WebRequest) -> Result<String, io::Error> {
@@ -61,6 +64,7 @@ fn do_web_request(req: WebRequest) -> Result<String, io::Error> {
             WebRequest::Snapshot => driver.snapshot(),
             WebRequest::Interact { id, action, value } => driver.interact(id, &action, value.as_deref()),
             WebRequest::EvaluateJs { script } => driver.evaluate_js(&script),
+            WebRequest::Download { url, filename } => driver.download(&url, &filename),
         }.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     })
 }
@@ -92,6 +96,12 @@ fn op_web_interact(#[string] args_json: String) -> Result<String, io::Error> {
 #[string]
 fn op_web_evaluate_js(#[string] script: String) -> Result<String, io::Error> {
     do_web_request(WebRequest::EvaluateJs { script })
+}
+
+#[op2]
+#[string]
+fn op_web_download(#[string] url: String, #[string] filename: String) -> Result<String, io::Error> {
+    do_web_request(WebRequest::Download { url, filename })
 }
 
 // ── Ops ───────────────────────────────────────────────────────────────
@@ -169,6 +179,7 @@ extension!(
     ops = [
         op_read_file, op_write_file, op_list_directory, op_console_log,
         op_web_navigate, op_web_snapshot, op_web_interact, op_web_evaluate_js,
+        op_web_download,
     ],
 );
 
@@ -223,6 +234,7 @@ pub fn run_javascript(
         globalThis.webSnapshot = () => Deno.core.ops.op_web_snapshot();
         globalThis.webInteract = (args) => Deno.core.ops.op_web_interact(JSON.stringify(args));
         globalThis.webEvaluateJs = (script) => Deno.core.ops.op_web_evaluate_js(script);
+        globalThis.webDownload = (url, filename) => Deno.core.ops.op_web_download(url, filename);
     "#;
 
     if let Err(e) = runtime.execute_script("bootstrap", bootstrap) {

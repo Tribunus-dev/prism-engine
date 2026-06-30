@@ -279,6 +279,13 @@ typedef void (*UniffiCallbackInterfaceBrowserRuntimeDriverMethod3)(uint64_t, Rus
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD4
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD4
+typedef void (*UniffiCallbackInterfaceBrowserRuntimeDriverMethod4)(uint64_t, RustBuffer, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_COMPILER_PROGRESS_CALLBACK_METHOD0
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_COMPILER_PROGRESS_CALLBACK_METHOD0
 typedef void (*UniffiCallbackInterfaceCompilerProgressCallbackMethod0)(uint64_t, RustBuffer, void* _Nonnull, 
@@ -321,6 +328,7 @@ typedef struct UniffiVTableCallbackInterfaceBrowserRuntimeDriver {
     UniffiCallbackInterfaceBrowserRuntimeDriverMethod1 _Nonnull snapshot;
     UniffiCallbackInterfaceBrowserRuntimeDriverMethod2 _Nonnull interact;
     UniffiCallbackInterfaceBrowserRuntimeDriverMethod3 _Nonnull evaluateJs;
+    UniffiCallbackInterfaceBrowserRuntimeDriverMethod4 _Nonnull download;
     UniffiCallbackInterfaceFree _Nonnull uniffiFree;
 } UniffiVTableCallbackInterfaceBrowserRuntimeDriver;
 
@@ -737,6 +745,12 @@ uint16_t uniffi_prism_bridge_checksum_method_browserruntimedriver_interact(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_EVALUATE_JS
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_EVALUATE_JS
 uint16_t uniffi_prism_bridge_checksum_method_browserruntimedriver_evaluate_js(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_DOWNLOAD
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_DOWNLOAD
+uint16_t uniffi_prism_bridge_checksum_method_browserruntimedriver_download(void
     
 );
 #endif

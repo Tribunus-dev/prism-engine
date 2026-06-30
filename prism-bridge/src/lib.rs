@@ -236,6 +236,19 @@ fn web_tool_defs() -> Vec<tools::ToolDefinition> {
             }),
             required: vec!["id".into()],
         },
+        tools::ToolDefinition {
+            name: "web_download".into(),
+            description: "Download a file from a URL using the browser's authenticated session. Useful for PDFs, CSVs, ZIPs, or any file behind a login portal.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL of the file to download"},
+                    "filename": {"type": "string", "description": "Desired filename for the downloaded file"}
+                },
+                "required": ["url", "filename"]
+            }),
+            required: vec!["url".into(), "filename".into()],
+        },
     ]
 }
 
@@ -419,6 +432,8 @@ pub trait BrowserRuntimeDriver: Send + Sync {
     fn interact(&self, id: u32, action: String, value: Option<String>) -> String;
     /// Evaluate JS in the page. Returns the result, or "ERROR: ...".
     fn evaluate_js(&self, script: String) -> String;
+    /// Download a URL using the browser's authenticated session.
+    fn download(&self, url: String, filename: String) -> String;
 }
 
 /// Run JavaScript in the V8 sandbox with a browser driver for web ops.
@@ -452,6 +467,10 @@ pub fn prism_run_js(
             }
             fn evaluate_js(&self, script: &str) -> Result<String, String> {
                 let r = self.inner.evaluate_js(script.to_string());
+                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+            }
+            fn download(&self, url: &str, filename: &str) -> Result<String, String> {
+                let r = self.inner.download(url.to_string(), filename.to_string());
                 if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
             }
         }

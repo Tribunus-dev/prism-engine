@@ -1236,6 +1236,11 @@ public protocol BrowserRuntimeDriver: AnyObject {
      * Evaluate JS in the page. Returns the result, or "ERROR: ...".
      */
     func evaluateJs(script: String) -> String
+
+    /**
+     * Download a URL using the browser's authenticated session.
+     */
+    func download(url: String, filename: String) -> String
 }
 
 /// Magic number for the Rust proxy to call using the same mechanism as every other method,
@@ -1335,6 +1340,31 @@ private enum UniffiCallbackInterfaceBrowserRuntimeDriver {
                 }
                 return try uniffiObj.evaluateJs(
                     script: FfiConverterString.lift(script)
+                )
+            }
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        download: { (
+            uniffiHandle: UInt64,
+            url: RustBuffer,
+            filename: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrowserRuntimeDriver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.download(
+                    url: FfiConverterString.lift(url),
+                    filename: FfiConverterString.lift(filename)
                 )
             }
 
@@ -1887,6 +1917,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_prism_bridge_checksum_method_browserruntimedriver_evaluate_js() != 31060 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_method_browserruntimedriver_download() != 38235 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_prism_bridge_checksum_method_compilerprogresscallback_on_log() != 45151 {
