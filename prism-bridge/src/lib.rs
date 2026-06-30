@@ -406,6 +406,63 @@ pub trait MultimodalStreamCallback: Send + Sync {
     fn on_error(&self, error: String);
 }
 
+/// Callback interface that lets the V8 sandbox drive the WKWebView.
+/// Implemented in Swift — each method blocks the V8 thread until the
+/// WebKit operation completes on the Main Actor.
+#[uniffi::export(callback_interface)]
+pub trait BrowserRuntimeDriver: Send + Sync {
+    /// Navigate to a URL. Returns "ok" or an error message starting with "ERROR:".
+    fn navigate(&self, url: String) -> String;
+    /// Return the semantic DOM snapshot as JSON, or an error starting with "ERROR:".
+    fn snapshot(&self) -> String;
+    /// Interact with an element. Returns "ok" or an error starting with "ERROR:".
+    fn interact(&self, id: u32, action: String, value: Option<String>) -> String;
+    /// Evaluate JS in the page. Returns the result, or "ERROR: ...".
+    fn evaluate_js(&self, script: String) -> String;
+}
+
+/// Run JavaScript in the V8 sandbox with a browser driver for web ops.
+/// The driver is called synchronously from V8 ops — it must block until
+/// the WKWebView operation completes.
+#[uniffi::export]
+pub fn prism_run_js(
+    code: String,
+    sandbox_root: String,
+    driver: Option<Box<dyn BrowserRuntimeDriver>>,
+) -> String {
+    use tribunus_compute_core::tools::js_runtime::{self, WebDriver};
+    use std::sync::Arc;
+
+    if let Some(d) = driver {
+        struct DriverWrapper {
+            inner: Box<dyn BrowserRuntimeDriver>,
+        }
+        impl WebDriver for DriverWrapper {
+            fn navigate(&self, url: &str) -> Result<String, String> {
+                let r = self.inner.navigate(url.to_string());
+                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+            }
+            fn snapshot(&self) -> Result<String, String> {
+                let r = self.inner.snapshot();
+                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+            }
+            fn interact(&self, id: u32, action: &str, value: Option<&str>) -> Result<String, String> {
+                let r = self.inner.interact(id, action.to_string(), value.map(|s| s.to_string()));
+                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+            }
+            fn evaluate_js(&self, script: &str) -> Result<String, String> {
+                let r = self.inner.evaluate_js(script.to_string());
+                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+            }
+        }
+        js_runtime::set_web_driver(Arc::new(DriverWrapper { inner: d }));
+    }
+
+    let root = if sandbox_root.is_empty() { None } else { Some(std::path::Path::new(&sandbox_root)) };
+    let result = js_runtime::run_javascript(&code, root, None);
+    serde_json::to_string(&result).unwrap_or_default()
+}
+
 /// Run inference with streaming output, using the LUT engine path.
 ///
 /// `cimage_path` — compiled .cimage from `prism_compile_gguf`.

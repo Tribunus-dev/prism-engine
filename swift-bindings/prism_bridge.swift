@@ -1212,12 +1212,30 @@ public func FfiConverterTypeStreamEvent_lower(_ value: StreamEvent) -> RustBuffe
 extension StreamEvent: Equatable, Hashable {}
 
 /**
- * Callback for deterministic compiler progress.
+ * Callback interface that lets the V8 sandbox drive the WKWebView.
+ * Implemented in Swift — each method blocks the V8 thread until the
+ * WebKit operation completes on the Main Actor.
  */
-public protocol CompilerProgressCallback: AnyObject {
-    func onLog(message: String)
+public protocol BrowserRuntimeDriver: AnyObject {
+    /**
+     * Navigate to a URL. Returns "ok" or an error message starting with "ERROR:".
+     */
+    func navigate(url: String) -> String
 
-    func onProgress(percentage: Float)
+    /**
+     * Return the semantic DOM snapshot as JSON, or an error starting with "ERROR:".
+     */
+    func snapshot() -> String
+
+    /**
+     * Interact with an element. Returns "ok" or an error starting with "ERROR:".
+     */
+    func interact(id: UInt32, action: String, value: String?) -> String
+
+    /**
+     * Evaluate JS in the page. Returns the result, or "ERROR: ...".
+     */
+    func evaluateJs(script: String) -> String
 }
 
 /// Magic number for the Rust proxy to call using the same mechanism as every other method,
@@ -1227,6 +1245,154 @@ private let IDX_CALLBACK_FREE: Int32 = 0
 private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
 private let UNIFFI_CALLBACK_ERROR: Int32 = 1
 private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
+
+/// Put the implementation in a struct so we don't pollute the top-level namespace
+private enum UniffiCallbackInterfaceBrowserRuntimeDriver {
+    /// Create the VTable using a series of closures.
+    /// Swift automatically converts these into C callback functions.
+    static var vtable: UniffiVTableCallbackInterfaceBrowserRuntimeDriver = .init(
+        navigate: { (
+            uniffiHandle: UInt64,
+            url: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrowserRuntimeDriver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.navigate(
+                    url: FfiConverterString.lift(url)
+                )
+            }
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        snapshot: { (
+            uniffiHandle: UInt64,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrowserRuntimeDriver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.snapshot(
+                )
+            }
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        interact: { (
+            uniffiHandle: UInt64,
+            id: UInt32,
+            action: RustBuffer,
+            value: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrowserRuntimeDriver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.interact(
+                    id: FfiConverterUInt32.lift(id),
+                    action: FfiConverterString.lift(action),
+                    value: FfiConverterOptionString.lift(value)
+                )
+            }
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        evaluateJs: { (
+            uniffiHandle: UInt64,
+            script: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceBrowserRuntimeDriver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return try uniffiObj.evaluateJs(
+                    script: FfiConverterString.lift(script)
+                )
+            }
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) in
+            let result = try? FfiConverterCallbackInterfaceBrowserRuntimeDriver.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface BrowserRuntimeDriver: handle missing in uniffiFree")
+            }
+        }
+    )
+}
+
+private func uniffiCallbackInitBrowserRuntimeDriver() {
+    uniffi_prism_bridge_fn_init_callback_vtable_browserruntimedriver(&UniffiCallbackInterfaceBrowserRuntimeDriver.vtable)
+}
+
+/// FfiConverter protocol for callback interfaces
+private enum FfiConverterCallbackInterfaceBrowserRuntimeDriver {
+    fileprivate static var handleMap = UniffiHandleMap<BrowserRuntimeDriver>()
+}
+
+extension FfiConverterCallbackInterfaceBrowserRuntimeDriver: FfiConverter {
+    typealias SwiftType = BrowserRuntimeDriver
+    typealias FfiType = UInt64
+
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+/**
+ * Callback for deterministic compiler progress.
+ */
+public protocol CompilerProgressCallback: AnyObject {
+    func onLog(message: String)
+
+    func onProgress(percentage: Float)
+}
 
 /// Put the implementation in a struct so we don't pollute the top-level namespace
 private enum UniffiCallbackInterfaceCompilerProgressCallback {
@@ -1451,6 +1617,48 @@ extension FfiConverterCallbackInterfaceMultimodalStreamCallback: FfiConverter {
     }
 }
 
+private struct FfiConverterOptionString: FfiConverterRustBuffer {
+    typealias SwiftType = String?
+
+    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterString.write(value, into: &buf)
+    }
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+private struct FfiConverterOptionCallbackInterfaceBrowserRuntimeDriver: FfiConverterRustBuffer {
+    typealias SwiftType = BrowserRuntimeDriver?
+
+    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterCallbackInterfaceBrowserRuntimeDriver.write(value, into: &buf)
+    }
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterCallbackInterfaceBrowserRuntimeDriver.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
 private struct FfiConverterOptionCallbackInterfaceCompilerProgressCallback: FfiConverterRustBuffer {
     typealias SwiftType = CompilerProgressCallback?
 
@@ -1620,6 +1828,21 @@ public func prismInferMultimodalStream(cimagePath: String, modelDir: String, pro
     }
 }
 
+/**
+ * Run JavaScript in the V8 sandbox with a browser driver for web ops.
+ * The driver is called synchronously from V8 ops — it must block until
+ * the WKWebView operation completes.
+ */
+public func prismRunJs(code: String, sandboxRoot: String, driver: BrowserRuntimeDriver?) -> String {
+    return try! FfiConverterString.lift(try! rustCall {
+        uniffi_prism_bridge_fn_func_prism_run_js(
+            FfiConverterString.lower(code),
+            FfiConverterString.lower(sandboxRoot),
+            FfiConverterOptionCallbackInterfaceBrowserRuntimeDriver.lower(driver), $0
+        )
+    })
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -1648,7 +1871,22 @@ private var initializationResult: InitializationResult {
     if uniffi_prism_bridge_checksum_func_prism_infer_multimodal_stream() != 510 {
         return InitializationResult.apiChecksumMismatch
     }
+    if uniffi_prism_bridge_checksum_func_prism_run_js() != 17689 {
+        return InitializationResult.apiChecksumMismatch
+    }
     if uniffi_prism_bridge_checksum_constructor_bridgemultiplexer_load() != 59071 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_method_browserruntimedriver_navigate() != 25514 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_method_browserruntimedriver_snapshot() != 41627 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_method_browserruntimedriver_interact() != 57155 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_method_browserruntimedriver_evaluate_js() != 31060 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_prism_bridge_checksum_method_compilerprogresscallback_on_log() != 45151 {
@@ -1667,6 +1905,7 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
 
+    uniffiCallbackInitBrowserRuntimeDriver()
     uniffiCallbackInitCompilerProgressCallback()
     uniffiCallbackInitMultimodalStreamCallback()
     return InitializationResult.ok

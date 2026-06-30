@@ -7,7 +7,7 @@ use deno_core::{extension, op2, JsRuntime, RuntimeOptions};
 use std::cell::RefCell;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Instant;
 
 const _DEFAULT_TIMEOUT_MS: u64 = 30_000;
@@ -23,6 +23,26 @@ struct SandboxCfg {
 
 // ── Web bridge (V8 ↔ WKWebView via shared channel) ───────────────────
 
+/// Trait for driving a real web browser from V8 ops (implemented by
+/// prism-bridge via UniFFI BrowserRuntimeDriver callback).
+pub trait WebDriver: Send + Sync {
+    fn navigate(&self, url: &str) -> Result<String, String>;
+    fn snapshot(&self) -> Result<String, String>;
+    fn interact(&self, id: u32, action: &str, value: Option<&str>) -> Result<String, String>;
+    fn evaluate_js(&self, script: &str) -> Result<String, String>;
+}
+
+thread_local! {
+    static WEB_DRIVER: RefCell<Option<Arc<dyn WebDriver>>> = const { RefCell::new(None) };
+}
+
+/// Set the web driver before running JS (called from prism-bridge).
+pub fn set_web_driver(driver: Arc<dyn WebDriver>) {
+    WEB_DRIVER.with(|cell| {
+        *cell.borrow_mut() = Some(driver);
+    });
+}
+
 pub enum WebRequest {
     Navigate { url: String },
     Snapshot,
@@ -30,39 +50,19 @@ pub enum WebRequest {
     EvaluateJs { script: String },
 }
 
-pub enum WebResponse {
-    Done(String),
-    Error(String),
-}
-
-thread_local! {
-    static WEB_BRIDGE: RefCell<Option<mpsc::Sender<(WebRequest, mpsc::Sender<WebResponse>)>>> =
-        const { RefCell::new(None) };
-}
-
-/// Set the web bridge sender before running JS (called from prism-bridge).
-pub fn set_web_bridge(sender: mpsc::Sender<(WebRequest, mpsc::Sender<WebResponse>)>) {
-    WEB_BRIDGE.with(|cell| {
-        *cell.borrow_mut() = Some(sender);
-    });
-}
-
 fn do_web_request(req: WebRequest) -> Result<String, io::Error> {
-    let (tx, rx) = mpsc::channel();
-    WEB_BRIDGE.with(|cell| {
-        let sender = cell.borrow().as_ref().ok_or_else(|| {
+    WEB_DRIVER.with(|cell| {
+        let guard = cell.borrow();
+        let driver = guard.as_ref().ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotConnected, "web bridge not configured")
-        })?.clone();
-        sender.send((req, tx)).map_err(|_| {
-            io::Error::new(io::ErrorKind::BrokenPipe, "web bridge disconnected")
-        })
-    })?;
-    match rx.recv().map_err(|_| {
-        io::Error::new(io::ErrorKind::BrokenPipe, "web response lost")
-    })? {
-        WebResponse::Done(s) => Ok(s),
-        WebResponse::Error(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-    }
+        })?;
+        match req {
+            WebRequest::Navigate { url } => driver.navigate(&url),
+            WebRequest::Snapshot => driver.snapshot(),
+            WebRequest::Interact { id, action, value } => driver.interact(id, &action, value.as_deref()),
+            WebRequest::EvaluateJs { script } => driver.evaluate_js(&script),
+        }.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    })
 }
 
 #[op2]

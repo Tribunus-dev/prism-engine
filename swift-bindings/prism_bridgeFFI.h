@@ -251,6 +251,34 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureStr
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD0
+typedef void (*UniffiCallbackInterfaceBrowserRuntimeDriverMethod0)(uint64_t, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD1
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD1
+typedef void (*UniffiCallbackInterfaceBrowserRuntimeDriverMethod1)(uint64_t, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD2
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD2
+typedef void (*UniffiCallbackInterfaceBrowserRuntimeDriverMethod2)(uint64_t, uint32_t, RustBuffer, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD3
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER_METHOD3
+typedef void (*UniffiCallbackInterfaceBrowserRuntimeDriverMethod3)(uint64_t, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_COMPILER_PROGRESS_CALLBACK_METHOD0
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_COMPILER_PROGRESS_CALLBACK_METHOD0
 typedef void (*UniffiCallbackInterfaceCompilerProgressCallbackMethod0)(uint64_t, RustBuffer, void* _Nonnull, 
@@ -284,6 +312,17 @@ typedef void (*UniffiCallbackInterfaceMultimodalStreamCallbackMethod1)(uint64_t,
 typedef void (*UniffiCallbackInterfaceMultimodalStreamCallbackMethod2)(uint64_t, RustBuffer, void* _Nonnull, 
         RustCallStatus *_Nonnull uniffiCallStatus
     );
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_BROWSER_RUNTIME_DRIVER
+typedef struct UniffiVTableCallbackInterfaceBrowserRuntimeDriver {
+    UniffiCallbackInterfaceBrowserRuntimeDriverMethod0 _Nonnull navigate;
+    UniffiCallbackInterfaceBrowserRuntimeDriverMethod1 _Nonnull snapshot;
+    UniffiCallbackInterfaceBrowserRuntimeDriverMethod2 _Nonnull interact;
+    UniffiCallbackInterfaceBrowserRuntimeDriverMethod3 _Nonnull evaluateJs;
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+} UniffiVTableCallbackInterfaceBrowserRuntimeDriver;
 
 #endif
 #ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_COMPILER_PROGRESS_CALLBACK
@@ -320,6 +359,11 @@ void uniffi_prism_bridge_fn_free_bridgemultiplexer(void*_Nonnull ptr, RustCallSt
 void*_Nonnull uniffi_prism_bridge_fn_constructor_bridgemultiplexer_load(RustBuffer cimage_path, RustBuffer _model_dir, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_INIT_CALLBACK_VTABLE_BROWSERRUNTIMEDRIVER
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_INIT_CALLBACK_VTABLE_BROWSERRUNTIMEDRIVER
+void uniffi_prism_bridge_fn_init_callback_vtable_browserruntimedriver(UniffiVTableCallbackInterfaceBrowserRuntimeDriver* _Nonnull vtable
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_INIT_CALLBACK_VTABLE_COMPILERPROGRESSCALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_INIT_CALLBACK_VTABLE_COMPILERPROGRESSCALLBACK
 void uniffi_prism_bridge_fn_init_callback_vtable_compilerprogresscallback(UniffiVTableCallbackInterfaceCompilerProgressCallback* _Nonnull vtable
@@ -349,6 +393,11 @@ RustBuffer uniffi_prism_bridge_fn_func_prism_default_tools(RustCallStatus *_Nonn
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_INFER_MULTIMODAL_STREAM
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_INFER_MULTIMODAL_STREAM
 void uniffi_prism_bridge_fn_func_prism_infer_multimodal_stream(RustBuffer cimage_path, RustBuffer model_dir, RustBuffer prompt, uint64_t callback, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_RUN_JS
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_RUN_JS
+RustBuffer uniffi_prism_bridge_fn_func_prism_run_js(RustBuffer code, RustBuffer sandbox_root, RustBuffer driver, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_PRISM_BRIDGE_RUSTBUFFER_ALLOC
@@ -655,9 +704,39 @@ uint16_t uniffi_prism_bridge_checksum_func_prism_infer_multimodal_stream(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_RUN_JS
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_RUN_JS
+uint16_t uniffi_prism_bridge_checksum_func_prism_run_js(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_CONSTRUCTOR_BRIDGEMULTIPLEXER_LOAD
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_CONSTRUCTOR_BRIDGEMULTIPLEXER_LOAD
 uint16_t uniffi_prism_bridge_checksum_constructor_bridgemultiplexer_load(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_NAVIGATE
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_NAVIGATE
+uint16_t uniffi_prism_bridge_checksum_method_browserruntimedriver_navigate(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_SNAPSHOT
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_SNAPSHOT
+uint16_t uniffi_prism_bridge_checksum_method_browserruntimedriver_snapshot(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_INTERACT
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_INTERACT
+uint16_t uniffi_prism_bridge_checksum_method_browserruntimedriver_interact(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_EVALUATE_JS
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_METHOD_BROWSERRUNTIMEDRIVER_EVALUATE_JS
+uint16_t uniffi_prism_bridge_checksum_method_browserruntimedriver_evaluate_js(void
     
 );
 #endif
