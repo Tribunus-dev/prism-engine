@@ -24,11 +24,10 @@ use tribunus_compute_core::backend::placement::ExecutionLane;
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
     AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, AppleTriLaneArtifactManifest,
-    CoreMlArtifactManifest, CpuArtifactManifest, IOSurfaceSlotManifest, MetalArtifactManifest,
+    CoreMlArtifactManifest, IOSurfaceSlotManifest,
 };
 use tribunus_compute_core::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
 use tribunus_compute_core::backend::metal_consumer::{MetalConsumer, MetalSlotBinding};
-use tribunus_compute_core::backend::coreml_iosurface::{CoreMlIOSurfaceExecutable, CoreMlComputePolicy, CoreMlIOSurfaceBinding};
 use tribunus_compute_core::compilation::epoch_scheduler::EpochScheduler;
 use tribunus_compute_core::compilation::tri_lane::{
     AppleTriLaneExecutionPlan, AppleHardwareSignature, ShapeClass, NumericalPolicy,
@@ -252,7 +251,7 @@ fn test_install_cimage_and_run_1000_epochs() {
 fn test_iosurface_mutation_detected() {
     // 1. Create an AppleSharedArena via install() — allocates real IOSurface backing
     let manifest = make_arena_manifest();
-    let mut arena = AppleSharedArena::install(&manifest).unwrap();
+    let arena = AppleSharedArena::install(&manifest).unwrap();
 
     // 2. Write known data to input slot 0 (using per-slot backing)
     let input_slot = arena.slot(0).unwrap();
@@ -337,7 +336,7 @@ fn test_two_slot_isolation() {
     let arena = AppleSharedArena::install(&manifest).unwrap();
 
     // Write distinct patterns to slot 0 and slot 1
-    let offset0 = arena.slot(0).unwrap().manifest.byte_offset as usize;
+    let _offset0 = arena.slot(0).unwrap().manifest.byte_offset as usize;
     let len0 = arena.slot(0).unwrap().manifest.byte_length as usize;
     let ptr0 = unsafe { arena.slot(0).unwrap().backing_arena.as_ref().unwrap().base_ptr() } as *mut u32;
     let slice0 = unsafe { std::slice::from_raw_parts_mut(ptr0, len0 / 4) };
@@ -414,7 +413,6 @@ mod fp16_production_v1 {
         let _ = std::fs::create_dir_all(model_dir);
 
         let weight: Vec<f32> = (0..4096).map(|i| (i % 256) as f32).collect();
-        let mut builder = MilBuilder::new("main");
         // input() uses exact name; const_f16() uses fresh_name() with counter suffix
         // Build MIL program — const_f16 uses fresh_name(), so capture the SSA names
         let mut b = MilBuilder::new("main");
@@ -710,9 +708,9 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
 
     #[test]
     fn test_prism_session_step_with_failure_injector() {
-        use tribunus_compute_core::compilation::failure_injector::{EpochFailureInjector, NoopFailureInjector};
+        use tribunus_compute_core::compilation::failure_injector::EpochFailureInjector;
         use tribunus_compute_core::scheduling::prism_session::{
-            PrismSession, PrismSessionRequest, SessionLogEntry,
+            PrismSession, PrismSessionRequest,
         };
 
         let mut install = create_fp16_install();
@@ -760,7 +758,6 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
             "scheduler must terminate after 105 epochs");
     }
 
-    #[test]
     #[test]
     fn test_prism_session_step_noop_injector_never_fails() {
         use tribunus_compute_core::compilation::failure_injector::NoopFailureInjector;

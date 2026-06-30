@@ -3,6 +3,7 @@
 //! Ops access sandbox configuration via thread-local storage (the
 //! approach that works with deno_core v0.405's public API).
 
+use crate::tools::ast_guard;
 use deno_core::{extension, op2, JsRuntime, RuntimeOptions};
 use std::cell::RefCell;
 use std::io;
@@ -209,6 +210,16 @@ pub fn run_javascript(
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
         });
+
+    // AST security validation — block dangerous dynamic execution patterns
+    if let Err(reason) = ast_guard::validate_agent_script(code) {
+        return JsExecutionResult {
+            ok: false,
+            output: String::new(),
+            error: Some(reason),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+    }
 
     SANDBOX_CFG.with(|c| {
         *c.borrow_mut() = Some(Arc::new(SandboxCfg {

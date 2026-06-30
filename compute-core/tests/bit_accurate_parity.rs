@@ -1,6 +1,6 @@
 //! Bit-accurate parity tests validating MLX references vs Core ML predictions.
 
-use tribunus_compute_core::arena::{DataType, Arena;
+use tribunus_compute_core::arena::{DataType, Arena};
 use tribunus_compute_core::coreml_bridge::CoreMlModel;
 use tribunus_compute_core::coreml_state::CoreMlStateHandle;
 

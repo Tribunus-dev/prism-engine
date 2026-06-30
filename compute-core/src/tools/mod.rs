@@ -13,9 +13,11 @@
 use serde::{Deserialize, Serialize};
 
 pub mod parse;
+pub mod ast_guard;
 pub mod sandbox;
 pub mod dispatch;
 pub mod js_runtime;
+pub mod xray;
 
 /// A tool definition parsed from the OpenAI API request body.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,3 +49,5 @@ pub enum ToolCallResult {
 pub use parse::*;
 pub use dispatch::*;
 pub use sandbox::*;
+pub use ast_guard::*;
+pub use xray::*;

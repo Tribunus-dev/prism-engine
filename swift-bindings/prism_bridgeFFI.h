@@ -408,6 +408,11 @@ void uniffi_prism_bridge_fn_func_prism_infer_multimodal_stream(RustBuffer cimage
 RustBuffer uniffi_prism_bridge_fn_func_prism_run_js(RustBuffer code, RustBuffer sandbox_root, RustBuffer driver, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_XRAY_NAVIGATE
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_XRAY_NAVIGATE
+uint64_t uniffi_prism_bridge_fn_func_prism_xray_navigate(RustBuffer url
+);
+#endif
 #ifndef UNIFFI_FFIDEF_FFI_PRISM_BRIDGE_RUSTBUFFER_ALLOC
 #define UNIFFI_FFIDEF_FFI_PRISM_BRIDGE_RUSTBUFFER_ALLOC
 RustBuffer ffi_prism_bridge_rustbuffer_alloc(uint64_t size, RustCallStatus *_Nonnull out_status
@@ -715,6 +720,12 @@ uint16_t uniffi_prism_bridge_checksum_func_prism_infer_multimodal_stream(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_RUN_JS
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_RUN_JS
 uint16_t uniffi_prism_bridge_checksum_func_prism_run_js(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_XRAY_NAVIGATE
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_XRAY_NAVIGATE
+uint16_t uniffi_prism_bridge_checksum_func_prism_xray_navigate(void
     
 );
 #endif

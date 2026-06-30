@@ -428,6 +428,14 @@ fn bench_one(
 // T E S T
 // ═════════════════════════════════════════════════════════════════════════════
 
+/// Convert an MLX Dtype to the arena DataType (Float16 stays; everything else → Float32).
+fn arena_dtype(dt: Dtype) -> DataType {
+    match dt {
+        Dtype::Float16 => DataType::Float16,
+        _ => DataType::Float32,
+    }
+}
+
 #[test]
 fn ane_quant_io_sweep() {
     println!("\n=== ANE QUANTIZED I/O SWEEP (batch={}) ===", BATCH);
@@ -516,8 +524,8 @@ fn ane_quant_io_sweep() {
         };
         let compile_ms = compile_start.elapsed().as_millis();
         let path_str = model_path.to_str().expect("path");
-        let in_arena = Arena::new(BATCH, H as u32, *in_dtype).expect("in arena");
-        let out_arena = Arena::new(BATCH, FFN as u32, *out_dtype).expect("out arena");
+        let in_arena = Arena::new(BATCH, H as u32, arena_dtype(*in_dtype)).expect("in arena");
+        let out_arena = Arena::new(BATCH, FFN as u32, arena_dtype(*out_dtype)).expect("out arena");
 
         match *in_dtype {
             Dtype::Float16 => {

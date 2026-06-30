@@ -29,6 +29,7 @@ tokenizers = { version = "0.21", default-features = false, features = ["fancy-re
 parking_lot = "0.12"
 notify = "6"
 libc = "0.2"
+lol_html = "2"
 lazy_static = "1.5"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "signal"] }
 tokio-stream = "0.1"
@@ -39,6 +40,9 @@ thiserror = "2"
 coreml-proto = { version = "0.1.0", optional = true }
 prost = "0.14.4"
 prost-types = "0.14.4"
+swc_common = { version = "23", default-features = false, features = [] }
+swc_ecma_ast = { version = "25", default-features = false, features = [] }
+swc_ecma_parser = { version = "41", default-features = false, features = [] }
 tempfile = { version = "3" }
 png = "0.17"
 blake3 = "1"
@@ -49,6 +53,7 @@ clap = { version = "4", features = ["derive"] }
 tar = "0.4"
 walkdir = "2"
 regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 content_inspector = "0.2"
 encoding_rs = "0.8"
 deno_core = "0.405"

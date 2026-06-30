@@ -64,6 +64,7 @@ pub struct BridgeSubagentHandle {
     pub id: u64,
     pub goal: String,
     pub sandbox_subpath: String,
+    pub tool_allowlist: Vec<String>,
     pub max_revisions: u8,
 }
 
@@ -344,6 +345,7 @@ pub fn prism_compile_gguf(
 /// buffers, ECS world, and ANE state.
 #[derive(uniffi::Object)]
 pub struct BridgeMultiplexer {
+    #[allow(dead_code)]
     pub(crate) inner: Arc<MultiplexerState>,
 }
 
@@ -482,6 +484,16 @@ pub fn prism_run_js(
     serde_json::to_string(&result).unwrap_or_default()
 }
 
+/// Fetch and X-Ray sanitize a URL through the Rust proxy.
+/// Returns the sanitized HTML string with scripts neutered and CSP injected.
+#[uniffi::export]
+pub async fn prism_xray_navigate(url: String) -> Result<String, BridgeError> {
+    match tribunus_compute_core::tools::xray::fetch_and_xray_url(&url).await {
+        Ok(html) => Ok(html),
+        Err(e) => Err(BridgeError::CimageLoadFailed(format!("X-Ray failure: {e}"))),
+    }
+}
+
 /// Run inference with streaming output, using the LUT engine path.
 ///
 /// `cimage_path` — compiled .cimage from `prism_compile_gguf`.
@@ -591,6 +603,7 @@ fn bridge_outcome_from(
                     id: handle.id,
                     goal: handle.goal.clone(),
                     sandbox_subpath: handle.sandbox_subpath.clone(),
+                    tool_allowlist: handle.tool_allowlist.clone(),
                     max_revisions: 3,
                 }],
             }

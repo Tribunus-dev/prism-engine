@@ -713,14 +713,16 @@ public struct BridgeSubagentHandle {
     public var id: UInt64
     public var goal: String
     public var sandboxSubpath: String
+    public var toolAllowlist: [String]
     public var maxRevisions: UInt8
 
     /// Default memberwise initializers are never public by default, so we
     /// declare one manually.
-    public init(id: UInt64, goal: String, sandboxSubpath: String, maxRevisions: UInt8) {
+    public init(id: UInt64, goal: String, sandboxSubpath: String, toolAllowlist: [String], maxRevisions: UInt8) {
         self.id = id
         self.goal = goal
         self.sandboxSubpath = sandboxSubpath
+        self.toolAllowlist = toolAllowlist
         self.maxRevisions = maxRevisions
     }
 }
@@ -736,6 +738,9 @@ extension BridgeSubagentHandle: Equatable, Hashable {
         if lhs.sandboxSubpath != rhs.sandboxSubpath {
             return false
         }
+        if lhs.toolAllowlist != rhs.toolAllowlist {
+            return false
+        }
         if lhs.maxRevisions != rhs.maxRevisions {
             return false
         }
@@ -746,6 +751,7 @@ extension BridgeSubagentHandle: Equatable, Hashable {
         hasher.combine(id)
         hasher.combine(goal)
         hasher.combine(sandboxSubpath)
+        hasher.combine(toolAllowlist)
         hasher.combine(maxRevisions)
     }
 }
@@ -757,6 +763,7 @@ public struct FfiConverterTypeBridgeSubagentHandle: FfiConverterRustBuffer {
                 id: FfiConverterUInt64.read(from: &buf),
                 goal: FfiConverterString.read(from: &buf),
                 sandboxSubpath: FfiConverterString.read(from: &buf),
+                toolAllowlist: FfiConverterSequenceString.read(from: &buf),
                 maxRevisions: FfiConverterUInt8.read(from: &buf)
             )
     }
@@ -765,6 +772,7 @@ public struct FfiConverterTypeBridgeSubagentHandle: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.id, into: &buf)
         FfiConverterString.write(value.goal, into: &buf)
         FfiConverterString.write(value.sandboxSubpath, into: &buf)
+        FfiConverterSequenceString.write(value.toolAllowlist, into: &buf)
         FfiConverterUInt8.write(value.maxRevisions, into: &buf)
     }
 }
@@ -1732,6 +1740,28 @@ private struct FfiConverterSequenceFloat: FfiConverterRustBuffer {
     }
 }
 
+private struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            try seq.append(FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
 private struct FfiConverterSequenceTypeBridgeSubagentHandle: FfiConverterRustBuffer {
     typealias SwiftType = [BridgeSubagentHandle]
 
@@ -1795,6 +1825,53 @@ private struct FfiConverterSequenceTypeBridgeToolDefinition: FfiConverterRustBuf
             try seq.append(FfiConverterTypeBridgeToolDefinition.read(from: &buf))
         }
         return seq
+    }
+}
+
+private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
+private let UNIFFI_RUST_FUTURE_POLL_MAYBE_READY: Int8 = 1
+
+private let uniffiContinuationHandleMap = UniffiHandleMap<UnsafeContinuation<Int8, Never>>()
+
+private func uniffiRustCallAsync<F, T>(
+    rustFutureFunc: () -> UInt64,
+    pollFunc: (UInt64, @escaping UniffiRustFutureContinuationCallback, UInt64) -> Void,
+    completeFunc: (UInt64, UnsafeMutablePointer<RustCallStatus>) -> F,
+    freeFunc: (UInt64) -> Void,
+    liftFunc: (F) throws -> T,
+    errorHandler: ((RustBuffer) throws -> Error)?
+) async throws -> T {
+    // Make sure to call uniffiEnsureInitialized() since future creation doesn't have a
+    // RustCallStatus param, so doesn't use makeRustCall()
+    uniffiEnsureInitialized()
+    let rustFuture = rustFutureFunc()
+    defer {
+        freeFunc(rustFuture)
+    }
+    var pollResult: Int8
+    repeat {
+        pollResult = await withUnsafeContinuation {
+            pollFunc(
+                rustFuture,
+                uniffiFutureContinuationCallback,
+                uniffiContinuationHandleMap.insert(obj: $0)
+            )
+        }
+    } while pollResult != UNIFFI_RUST_FUTURE_POLL_READY
+
+    return try liftFunc(makeRustCall(
+        { completeFunc(rustFuture, $0) },
+        errorHandler: errorHandler
+    ))
+}
+
+/// Callback handlers for an async calls.  These are invoked by Rust when the future is ready.  They
+/// lift the return value or error and resume the suspended function.
+private func uniffiFutureContinuationCallback(handle: UInt64, pollResult: Int8) {
+    if let continuation = try? uniffiContinuationHandleMap.remove(handle: handle) {
+        continuation.resume(returning: pollResult)
+    } else {
+        print("uniffiFutureContinuationCallback invalid handle")
     }
 }
 
@@ -1873,6 +1950,24 @@ public func prismRunJs(code: String, sandboxRoot: String, driver: BrowserRuntime
     })
 }
 
+/**
+ * Fetch and X-Ray sanitize a URL through the Rust proxy.
+ * Returns the sanitized HTML string with scripts neutered and CSP injected.
+ */
+public func prismXrayNavigate(url: String) async throws -> String {
+    return
+        try await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_prism_bridge_fn_func_prism_xray_navigate(FfiConverterString.lower(url))
+            },
+            pollFunc: ffi_prism_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_prism_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_prism_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterString.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -1902,6 +1997,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_prism_bridge_checksum_func_prism_run_js() != 17689 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_func_prism_xray_navigate() != 53699 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_prism_bridge_checksum_constructor_bridgemultiplexer_load() != 59071 {

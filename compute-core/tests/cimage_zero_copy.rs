@@ -24,20 +24,14 @@ use tribunus_compute_core::compute_image::manifest::{CImageHeader, CIMAGE_MAGIC}
 fn known_header() -> CImageHeader {
     let mut payload_hash = [0u8; 32];
     payload_hash[0..4].copy_from_slice(b"abcd");
-    CImageHeader {
-        magic: CIMAGE_MAGIC,
-        version: 2,
-        payload_hash,
-        phase_count: 42,
-        layout_offset: 128,
-        phase_offset: 4096,
-        quantization_schema: 0,
-        ane_hidden_dim_limit: 2048,
-        ane_ffn_dim_limit: 4096,
-        ane_max_batch: 131072,
-        ane_keepalive_interval_us: 5000,
-        lane_isolation: true,
-    }
+    let mut hdr = CImageHeader::default();
+    hdr.magic = CIMAGE_MAGIC;
+    hdr.version = 2;
+    hdr.payload_hash = payload_hash;
+    hdr.phase_count = 42;
+    hdr.layout_offset = 128;
+    hdr.phase_offset = 4096;
+    hdr
 }
 
 /// Serialize a CImageHeader to raw bytes (binary, not JSON).
@@ -300,7 +294,7 @@ fn test_cimage_zero_copy_struct_offsets() {
     let magic_off = (&zeroed.magic as *const u32) as usize - base;
     let ver_off = (&zeroed.version as *const u32) as usize - base;
     let hash_off = (&zeroed.payload_hash as *const [u8; 32]) as usize - base;
-    let count_off = (&zeroed.phase_count as *const u64) as usize - base;
+    let count_off = (&zeroed.phase_count as *const u32) as usize - base;
     let lo_off = (&zeroed.layout_offset as *const u64) as usize - base;
     let po_off = (&zeroed.phase_offset as *const u64) as usize - base;
 
