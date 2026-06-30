@@ -7,7 +7,7 @@ use deno_core::{extension, op2, JsRuntime, RuntimeOptions};
 use std::cell::RefCell;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::time::Instant;
 
 const _DEFAULT_TIMEOUT_MS: u64 = 30_000;
@@ -19,6 +19,79 @@ thread_local! {
 struct SandboxCfg {
     root: PathBuf,
     output: RefCell<String>,
+}
+
+// ── Web bridge (V8 ↔ WKWebView via shared channel) ───────────────────
+
+pub enum WebRequest {
+    Navigate { url: String },
+    Snapshot,
+    Interact { id: u32, action: String, value: Option<String> },
+    EvaluateJs { script: String },
+}
+
+pub enum WebResponse {
+    Done(String),
+    Error(String),
+}
+
+thread_local! {
+    static WEB_BRIDGE: RefCell<Option<mpsc::Sender<(WebRequest, mpsc::Sender<WebResponse>)>>> =
+        const { RefCell::new(None) };
+}
+
+/// Set the web bridge sender before running JS (called from prism-bridge).
+pub fn set_web_bridge(sender: mpsc::Sender<(WebRequest, mpsc::Sender<WebResponse>)>) {
+    WEB_BRIDGE.with(|cell| {
+        *cell.borrow_mut() = Some(sender);
+    });
+}
+
+fn do_web_request(req: WebRequest) -> Result<String, io::Error> {
+    let (tx, rx) = mpsc::channel();
+    WEB_BRIDGE.with(|cell| {
+        let sender = cell.borrow().as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotConnected, "web bridge not configured")
+        })?.clone();
+        sender.send((req, tx)).map_err(|_| {
+            io::Error::new(io::ErrorKind::BrokenPipe, "web bridge disconnected")
+        })
+    })?;
+    match rx.recv().map_err(|_| {
+        io::Error::new(io::ErrorKind::BrokenPipe, "web response lost")
+    })? {
+        WebResponse::Done(s) => Ok(s),
+        WebResponse::Error(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+    }
+}
+
+#[op2]
+#[string]
+fn op_web_navigate(#[string] url: String) -> Result<String, io::Error> {
+    do_web_request(WebRequest::Navigate { url })
+}
+
+#[op2]
+#[string]
+fn op_web_snapshot() -> Result<String, io::Error> {
+    do_web_request(WebRequest::Snapshot)
+}
+
+#[op2]
+#[string]
+fn op_web_interact(#[string] args_json: String) -> Result<String, io::Error> {
+    let parsed: serde_json::Value = serde_json::from_str(&args_json)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("web_interact: {e}")))?;
+    let id = parsed.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let value = parsed.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
+    do_web_request(WebRequest::Interact { id, action, value })
+}
+
+#[op2]
+#[string]
+fn op_web_evaluate_js(#[string] script: String) -> Result<String, io::Error> {
+    do_web_request(WebRequest::EvaluateJs { script })
 }
 
 // ── Ops ───────────────────────────────────────────────────────────────
@@ -93,7 +166,10 @@ fn op_console_log(#[string] msg: String) {
 
 extension!(
     prism_sandbox,
-    ops = [op_read_file, op_write_file, op_list_directory, op_console_log],
+    ops = [
+        op_read_file, op_write_file, op_list_directory, op_console_log,
+        op_web_navigate, op_web_snapshot, op_web_interact, op_web_evaluate_js,
+    ],
 );
 
 // ── Result type ───────────────────────────────────────────────────────
@@ -143,6 +219,10 @@ pub fn run_javascript(
         globalThis.readFile = (path) => Deno.core.ops.op_read_file(path);
         globalThis.writeFile = (path, content) => Deno.core.ops.op_write_file(path, content);
         globalThis.listDirectory = (path) => Deno.core.ops.op_list_directory(path);
+        globalThis.webNavigate = (url) => Deno.core.ops.op_web_navigate(url);
+        globalThis.webSnapshot = () => Deno.core.ops.op_web_snapshot();
+        globalThis.webInteract = (args) => Deno.core.ops.op_web_interact(JSON.stringify(args));
+        globalThis.webEvaluateJs = (script) => Deno.core.ops.op_web_evaluate_js(script);
     "#;
 
     if let Err(e) = runtime.execute_script("bootstrap", bootstrap) {
