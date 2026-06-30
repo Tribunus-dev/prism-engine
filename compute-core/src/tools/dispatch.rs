@@ -1,4 +1,5 @@
 use crate::tools::{FunctionCall, ToolDefinition};
+use serde_json::json;
 use std::path::Path;
 
 /// Execute a tool call and return the result as a JSON value.
@@ -19,6 +20,7 @@ pub fn sandbox_execute(call: &FunctionCall, root: Option<&Path>) -> Result<serde
         "glob_files" => crate::tools::sandbox::tool_glob_files(&root, &call.arguments),
         "search_files" => crate::tools::sandbox::tool_search_files(&root, &call.arguments),
         "file_info" => crate::tools::sandbox::tool_file_info(&root, &call.arguments),
+        "run_javascript" => tool_javascript(&root, &call.arguments),
         _ => return Err(format!("unknown tool '{}'", call.name)),
     };
     Ok(result)
@@ -133,5 +135,33 @@ pub fn default_sandbox_tools() -> Vec<ToolDefinition> {
             }),
             required: vec!["path".into()],
         },
+        ToolDefinition {
+            name: "run_javascript".into(),
+            description: "Run JavaScript code in a sandboxed V8 isolate.  Has access to readFile(path), writeFile(path, content), listDirectory(path), and console.log.  No network, no subprocess, no env access.  Use for automation, testing, and web dev tasks.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "JavaScript code to execute"},
+                    "timeout_ms": {"type": "integer", "description": "Max execution time in ms (default: 30000)"}
+                },
+                "required": ["code"]
+            }),
+            required: vec!["code".into()],
+        },
     ]
+}
+
+fn tool_javascript(root: &Path, args: &serde_json::Value) -> serde_json::Value {
+    let code = match args.get("code").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return json!({"ok": false, "error": "missing 'code' argument", "code": "MISSING_ARG"}),
+    };
+    let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
+    let result = crate::tools::js_runtime::run_javascript(code, Some(root), timeout_ms);
+    json!({
+        "ok": result.ok,
+        "output": result.output,
+        "error": result.error,
+        "duration_ms": result.duration_ms,
+    })
 }

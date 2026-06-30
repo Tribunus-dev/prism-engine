@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 pub mod parse;
 pub mod sandbox;
 pub mod dispatch;
+pub mod js_runtime;
 
 /// A tool definition parsed from the OpenAI API request body.
 #[derive(Debug, Clone, Serialize, Deserialize)]

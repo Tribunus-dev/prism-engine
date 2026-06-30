@@ -51,6 +51,8 @@ walkdir = "2"
 regex = "1"
 content_inspector = "0.2"
 encoding_rs = "0.8"
+deno_core = "0.405"
+deno_core_icudata = "0.77"
 
 [features]
 default = []
