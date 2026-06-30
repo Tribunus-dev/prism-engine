@@ -94,3 +94,13 @@ required-features = ["prism-backend"]
 [build-dependencies]
 cc = "1.2"
 tar = "0.4"
+
+[[bin]]
+name = "verify-ternary"
+path = "src/bin/verify_ternary.rs"
+required-features = ["prism-backend"]
+
+[[bin]]
+name = "q8-scale-dump"
+path = "src/bin/q8_scale_dump.rs"
+required-features = ["prism-backend"]
