@@ -1,0 +1,127 @@
+/* Print Overrides */
+@media print {
+  /* Hide UI elements */
+  .screen-toolbar {
+    display: none !important;
+  }
+
+  /* Force background colors and exact color adjustment */
+  * {
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Reset body and container */
+  body {
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+  }
+
+  .zine-container {
+    padding: 0;
+    margin: 0;
+    display: block;
+  }
+
+  /* Page Setup for Print */
+  @page {
+    size: letter portrait;
+    margin: 0; /* Let .page define its own safe zones */
+  }
+
+  /* Individual Page Formatting */
+  .page {
+    /* Dimensions for a single printed panel when cut/folded (Half-letter) */
+    width: var(--page-w);
+    height: var(--page-h);
+
+    /* Remove screen decorations */
+    border: none;
+    border-radius: 0;
+    background-image: none; /* Remove subtle grain */
+    background-color: var(--color-bg); /* Ensure solid background */
+    max-width: none;
+    aspect-ratio: auto;
+
+    /* Print fragmentation */
+    break-after: page;
+    break-inside: avoid;
+
+    /* Center content on physical page depending on print mode.
+       If printing normal reading mode 1 page per Letter, it will appear top-left.
+       If printing imposed mode, it fits the grid.
+       We rely on specific print margins within the page-inner. */
+  }
+
+  .page-inner {
+    /* Enforce strict minimum margins per requirements */
+    padding-inline: var(--safe-inline);
+    padding-block: var(--safe-block);
+    width: 100%;
+    height: 100%;
+
+    /* Reset screen container queries if they cause issues */
+    container-type: normal;
+  }
+
+  /* Typography Adjustments for Print Readability */
+  body {
+    /* Recommended minimum 8.5pt body size */
+    font-size: 9pt;
+    line-height: 1.4;
+  }
+
+  .title { font-size: 24pt; }
+  .page-heading { font-size: 14pt; }
+  .metadata, .page-footer { font-size: 7.5pt; }
+  .status-details, .risk-section p, .problems-list, .core-statement { font-size: 8.5pt; }
+  .architecture-snippet { font-size: 7pt; }
+
+  /* Ensure text colors are high contrast */
+  h1, h2, h3, h4, p, li {
+    color: #000;
+  }
+  .color-accent {
+    color: var(--color-accent); /* Keep accent if printer supports color, else it falls to grayscale naturally */
+  }
+
+  /* QR Codes */
+  .qr-code {
+    /* Ensure QR codes are roughly 0.8 to 1.0 inch square */
+    width: 0.9in;
+    height: 0.9in;
+    min-width: 0.9in;
+    min-height: 0.9in;
+  }
+
+  /* Prevent widows/orphans */
+  p, li, blockquote {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Specifically handle the background of the dark core statement */
+  .core-statement {
+    background-color: #eee;
+    color: #000;
+    border: 1px solid #000;
+  }
+  .core-statement .promise-quote {
+    color: #333;
+  }
+
+  /* Status labels adjust for B&W safety */
+  .status-label {
+    background: transparent;
+    color: #000;
+    border: 1px solid #000;
+  }
+
+  /* Remove scrollbars */
+  .page-content {
+    overflow: visible;
+  }
+}
