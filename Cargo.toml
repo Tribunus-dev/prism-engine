@@ -7,6 +7,7 @@ members = [
     "evidence-schema",
     "prism-ffi",
     "prism-bridge",
+    "prism-napi",
     "mlx-rs-fork/mlx-rs",
     "mlx-rs-fork/mlx-sys",
     "mlx-rs-fork/mlx-macros",

@@ -1,0 +1,20 @@
+[package]
+name = "prism-napi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "napi-rs bindings for the Prism Engine — exposes ComputeEngine and PrismInferenceServer to Node.js"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", features = ["napi8", "serde-json", "async", "tokio_rt"] }
+napi-derive = "3"
+tribunus-compute-core = { path = "../compute-core", features = ["prism-backend"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[features]
+default = []
