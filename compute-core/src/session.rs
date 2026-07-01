@@ -17,7 +17,7 @@
 
 use crate::kv_cache::KvCache;
 
-use crate::grammar::{GrammarFSM, GrammarTokenizer};
+use crate::parsing::{GrammarFSM, GrammarTokenizer};
 
 /// Host-side session state machine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

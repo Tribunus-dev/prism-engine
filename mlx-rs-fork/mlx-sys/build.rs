@@ -317,6 +317,10 @@ pub unsafe extern "C" fn mlx_set_memory_limit(_prev: *mut usize, _limit: usize) 
 #[no_mangle]
 pub unsafe extern "C" fn mlx_metal_is_available(_res: *mut bool) -> i32 { 0 }
 #[no_mangle]
+pub unsafe extern "C" fn mlx_metal_set_capture_dir(_path: *const std::ffi::c_char) -> i32 { 0 }
+#[no_mangle]
+pub unsafe extern "C" fn mlx_level_zero_set_capture_dir(_path: *const std::ffi::c_char) -> i32 { 0 }
+#[no_mangle]
 pub unsafe extern "C" fn mlx_reshape_ffi(_x: mlx_array, _shape_ar: *const i32, _ndim: i32) -> mlx_array { std::ptr::null_mut() }
 #[no_mangle]
 pub unsafe extern "C" fn mlx_transpose_ffi(_x: mlx_array, _axes: *const i32, _n_axes: i32) -> mlx_array { std::ptr::null_mut() }

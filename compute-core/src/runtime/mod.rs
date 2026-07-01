@@ -1,6 +1,10 @@
 //! Runtime executable loader — opens, validates, and prepares
 //! SealedComputeImageExecutable images for execution.
 
+pub mod scheduling;
+pub mod ledger;
+pub mod memory;
+
 pub mod agent_slot;
 pub mod ane_multiplexer;
 pub mod signal_bus;
@@ -8,6 +12,9 @@ pub mod ecore_pump;
 pub mod interceptors;
 pub mod world;
 pub mod components;
+pub mod resources;
+pub mod systems;
+pub mod integration;
 
 pub mod executable_bindings;
 pub mod executable_lane;

@@ -116,11 +116,10 @@ tribunus-compute-core = { path = "compute-core", optional = true }
 
 [features]
 default = []
-metal-dispatch = ["dep:metal", "dep:objc"]
 server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]
 ane = ["dep:coreml-proto"]
-full = ["metal-dispatch", "server", "ane"]
-prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/ffi"]
+full = ["server", "ane"]
+prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend"]
 full-apple = ["prism-backend", "ane", "server"]
 generation-audio = []
 generation-diffusion = []

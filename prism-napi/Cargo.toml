@@ -11,7 +11,8 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3", features = ["napi8", "serde-json", "async", "tokio_rt"] }
 napi-derive = "3"
-tribunus-compute-core = { path = "../compute-core", features = ["prism-backend"] }
+tribunus-compute-core = { path = "../compute-core", features = ["prism-backend"], default-features = false }
+uuid = { workspace = true }
 
 [build-dependencies]
 napi-build = "2"

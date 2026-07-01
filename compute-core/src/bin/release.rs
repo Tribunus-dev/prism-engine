@@ -121,7 +121,11 @@ impl VersionedInstallDir {
     /// `~/.local/share/prism/current`
     pub fn current_link() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        PathBuf::from(home).join(".local").join("share").join("prism").join("current")
+        PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("prism")
+            .join("current")
     }
 
     /// Symlink pointing at the *previously active* release directory.
@@ -129,7 +133,11 @@ impl VersionedInstallDir {
     /// `~/.local/share/prism/previous`
     pub fn previous_link() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        PathBuf::from(home).join(".local").join("share").join("prism").join("previous")
+        PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("prism")
+            .join("previous")
     }
 
     /// Create a versioned release directory at
@@ -151,10 +159,7 @@ impl VersionedInstallDir {
     pub fn activate(version: &str) -> Result<(), String> {
         let target = Self::releases_dir().join(version);
         if !target.is_dir() {
-            return Err(format!(
-                "release directory does not exist: {:?}",
-                target
-            ));
+            return Err(format!("release directory does not exist: {:?}", target));
         }
 
         let current = Self::current_link();
@@ -176,8 +181,7 @@ impl VersionedInstallDir {
         #[cfg(not(unix))]
         {
             // Fallback: copy so we can still read it later.
-            if let Err(e) = fs::copy(&target.join("release.json"), &current.join("release.json"))
-            {
+            if let Err(e) = fs::copy(&target.join("release.json"), &current.join("release.json")) {
                 return Err(format!("failed to stage release reference: {e}"));
             }
         }
@@ -199,8 +203,7 @@ impl VersionedInstallDir {
         let _ = fs::remove_file(&tmp);
 
         // current -> tmp
-        fs::rename(&current, &tmp)
-            .map_err(|e| format!("failed to swap current aside: {e}"))?;
+        fs::rename(&current, &tmp).map_err(|e| format!("failed to swap current aside: {e}"))?;
 
         // previous -> current
         fs::rename(&previous, &current)

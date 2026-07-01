@@ -28,6 +28,10 @@ pub mod fft;
 #[cfg(not(feature = "stub"))]
 pub mod linalg;
 #[cfg(not(feature = "stub"))]
+pub mod metal;
+#[cfg(not(feature = "stub"))]
+pub mod level_zero;
+#[cfg(not(feature = "stub"))]
 pub mod losses;
 #[cfg(not(feature = "stub"))]
 pub mod module;

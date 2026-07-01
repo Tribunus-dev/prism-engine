@@ -54,8 +54,8 @@ use crate::exo::ExoNode;
 #[cfg(feature = "generation-tts")]
 use crate::generation::text_to_speech::pcm_to_wav;
 use crate::generation::video_generation::{TextToImageGenerator, VideoGenerator};
-use crate::grammar::Grammar;
-use crate::grammar::GrammarTokenizer;
+use crate::parsing::Grammar;
+use crate::parsing::GrammarTokenizer;
 use crate::kv_cache::KvCache;
 use crate::profiled_executor::{
     prefill_with_audio, AudioInput, LoadedProfiledModel, ProfiledInferenceSession,
@@ -73,20 +73,15 @@ use crate::exo::NodeInfo;
 use crate::lora::{AdapterInfo, LoraAdapter};
 use crate::metrics::InferenceTelemetry;
 use crate::model_cache::{ModelCache, ModelType};
-
-use crate::worker_protocol::StartGenerationPayload;
-use crate::worker_supervisor::WorkerSupervisor;
-
 use crate::editing::{
     self, AuditItem, AuditRequest, EditBatchRequest, EditRequest, KnowledgeEditor,
 };
 use crate::profiled_executor::StreamConfig;
 use crate::server::admin::ActiveRequestInfo;
 use crate::server::rate_limiter::RateLimiter;
-use crate::tools::{self, FunctionCall, ToolCallResult};
 use axum::extract::Request;
 use axum::middleware::{self, Next};
-use axum::response::sse::{Event, Sse};
+use axum::response::sse::Event;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::Extension;
@@ -95,7 +90,6 @@ use std::convert::Infallible;
 use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 
 
 #[derive(Clone)]
@@ -104,8 +98,6 @@ pub struct AppState {
     pub benchmark: Arc<Mutex<Option<SystemBenchmark>>>,
     /// Model cache for dynamic model loading/unloading.
     pub model_cache: Arc<Mutex<ModelCache>>,
-    /// Inference worker supervisor — manages worker process lifecycle.
-    pub supervisor: Option<Arc<WorkerSupervisor>>,
     /// Real tokenizer for encoding prompts to token IDs.
     pub tokenizer: Option<Arc<TribunusTokenizer>>,
     /// Readiness gates — determines whether /v1/chat/completions is available.
@@ -252,12 +244,8 @@ fn cluster_node_count() -> usize {
 }
 
 async fn health(State(state): State<AppState>) -> (StatusCode, JsonResponse<serde_json::Value>) {
-    let worker_alive = state
-        .supervisor
-        .as_ref()
-        .map_or(false, |s| s.process_ctrl.is_alive());
     let cache = state.model_cache.lock().await;
-    let is_healthy = worker_alive || cache.has_any();
+    let is_healthy = cache.has_any();
 
     let status = if is_healthy { "ok" } else { "loading" };
     let status_code = if is_healthy {
@@ -286,7 +274,7 @@ async fn health(State(state): State<AppState>) -> (StatusCode, JsonResponse<serd
             "memory_usage_pct": mem_pct,
         },
         "model": {
-            "worker_alive": worker_alive,
+            "worker_alive": false,
             "cache_entries": cache.entry_count(),
             "cache_usage_mb": cache.used_memory_bytes / 1_048_576,
         },
@@ -914,7 +902,7 @@ async fn handle_streaming_chat(
             .into_response();
         }
     };
-    let max_tokens = body
+    let _max_tokens = body
         .get("max_tokens")
         .and_then(|v| v.as_u64())
         .unwrap_or(128);
@@ -964,7 +952,7 @@ async fn handle_streaming_chat(
     }
 
     // ── Tokenize prompt ──────────────────────────
-    let prompt_tokens: Vec<u32> = prompt.bytes().map(|b| b as u32).collect();
+    let _prompt_tokens: Vec<u32> = prompt.bytes().map(|b| b as u32).collect();
 
     // ── Token-generation rate limit check ──────
     if !state.token_rate_limiter.check(&client_ip).await {
@@ -977,103 +965,10 @@ async fn handle_streaming_chat(
         .into_response();
     }
 
-    // ── Dispatch to inference worker ────────────
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    let payload = StartGenerationPayload {
-        generation_regime: Default::default(),
-        denoising_steps: None,
-        confidence_threshold: None,
-        canvas_tokens: None,
-        prompt_token_ids: prompt_tokens,
-        max_output_tokens: max_tokens as u32,
-        deadline_ms: now_ms + 300_000,
-        request_id: request_id.clone(),
-        temperature: None,
-        top_k: None,
-        top_p: None,
-        seed: None,
-        stop_token_ids: Vec::new(),
-    };
-
-    let supervisor = match state.supervisor.as_ref() {
-        Some(s) => s,
-        None => {
-            return JsonResponse(serde_json::json!({
-                "error": "no worker supervisor available"
-            }))
-            .into_response();
-        }
-    };
-    let mut handle = match supervisor.start_generation(&payload) {
-        Ok(h) => h,
-        Err(e) => {
-            return JsonResponse(serde_json::json!({
-                "error": format!("inference dispatch failed: {e}")
-            }))
-            .into_response();
-        }
-    };
-
-    // ── Create channel and spawn streaming generation ──────────────────
-    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(64);
-
-    // Track generated tokens for rate limiting.
-    let tokens_generated = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let tokens_generated_clone = tokens_generated.clone();
-
-    // Spawn blocking thread to collect worker events and forward as SSE.
-    tokio::task::block_in_place(|| {
-        let rt = tokio::runtime::Handle::current();
-        let _ = rt.block_on(async {
-            loop {
-                match handle.stream.recv() {
-                    Some(crate::streaming::GenerationEvent::Token(tok)) => {
-                        tokens_generated_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let text: String = std::iter::once(
-                            char::from_u32(tok).unwrap_or(char::REPLACEMENT_CHARACTER),
-                        )
-                        .collect();
-                        if tx.send(Ok(Event::default().data(text))).await.is_err() {
-                            break;
-                        }
-                    }
-                    Some(crate::streaming::GenerationEvent::Chunk(chunk)) => {
-                        if tx.send(Ok(Event::default().data(chunk))).await.is_err() {
-                            break;
-                        }
-                    }
-                    Some(crate::streaming::GenerationEvent::Done) => {
-                        let _ = tx.send(Ok(Event::default().data("[DONE]"))).await;
-                        break;
-                    }
-                    Some(crate::streaming::GenerationEvent::Error(msg)) => {
-                        let _ = tx
-                            .send(Ok(Event::default().data(format!("{{\"error\":\"{msg}\"}}"))))
-                            .await;
-                        break;
-                    }
-                    Some(crate::streaming::GenerationEvent::Cancelled) => {
-                        let _ = tx.send(Ok(Event::default().data("[CANCELLED]"))).await;
-                        break;
-                    }
-                    _ => continue,
-                }
-            }
-        });
-    });
-
-    // Record generated tokens in the token-generation rate limiter.
-    let count = tokens_generated.load(std::sync::atomic::Ordering::Relaxed);
-    if count > 0 {
-        state.token_rate_limiter.check(&client_ip).await;
-    }
-
-    Sse::new(ReceiverStream::new(rx)).into_response()
+    return JsonResponse(serde_json::json!({
+        "error": "streaming chat completions via WorkerSupervisor is no longer available"
+    }))
+    .into_response();
 }
 /// Dispatch wrapper for `/v1/chat/completions` that routes to the streaming
 /// or non-streaming handler based on the `stream` field in the request body.
@@ -1256,7 +1151,7 @@ async fn v1_chat_completions(
                 extract_multimodal_message(messages).unwrap_or((String::new(), Vec::new()));
             let _audio_inputs = extract_audio_inputs(messages);
             let _video_inputs = extract_video_inputs(messages);
-            let prompt_tokens: Vec<u32> = tokenize_prompt(&state, &prompt);
+            let _prompt_tokens: Vec<u32> = tokenize_prompt(&state, &prompt);
 
             // ── Token-generation rate limit check ──────
             if !state.token_rate_limiter.check(&client_ip).await {
@@ -1268,367 +1163,10 @@ async fn v1_chat_completions(
                 }));
             }
 
-            // ── Dispatch to inference worker ────────────
-            let request_id = uuid::Uuid::new_v4().to_string();
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
 
-            let payload = StartGenerationPayload {
-                generation_regime: Default::default(),
-                denoising_steps: None,
-                confidence_threshold: None,
-                canvas_tokens: None,
-                prompt_token_ids: prompt_tokens.clone(),
-                max_output_tokens: max_tokens as u32,
-                deadline_ms: now_ms + 300_000,
-                request_id: request_id.clone(),
-                temperature: body
-                    .get("temperature")
-                    .and_then(|v| v.as_f64())
-                    .map(|v| v as f32),
-                top_k: body.get("top_k").and_then(|v| v.as_u64()).map(|v| v as u32),
-                top_p: body.get("top_p").and_then(|v| v.as_f64()).map(|v| v as f32),
-                seed: body.get("seed").and_then(|v| v.as_u64()),
-                stop_token_ids: vec![],
-            };
-
-            let supervisor = match state.supervisor.as_ref() {
-                Some(s) => s,
-                None => {
-                    return JsonResponse(serde_json::json!({
-                        "error": "no worker supervisor available"
-                    }));
-                }
-            };
-            let mut handle = match supervisor.start_generation(&payload) {
-                Ok(h) => h,
-                Err(e) => {
-                    let err_str = format!("{e}");
-                    if err_str.contains("model loading in progress") {
-                        return JsonResponse(serde_json::json!({
-                            "error": "model loading in progress",
-                            "retry_after_seconds": 1,
-                        }));
-                    }
-                    return JsonResponse(serde_json::json!({
-                        "error": format!("inference dispatch failed: {e}")
-                    }));
-                }
-            };
-
-            // ── Collect generated tokens (blocking) ────
-            let generated = tokio::task::block_in_place(|| {
-                let mut tokens: Vec<u32> = Vec::new();
-                loop {
-                    match handle.stream.recv() {
-                        Some(crate::streaming::GenerationEvent::Token(tok)) => tokens.push(tok),
-                        Some(crate::streaming::GenerationEvent::Done) => break,
-                        Some(crate::streaming::GenerationEvent::Error(msg)) => return Err(msg),
-                        Some(crate::streaming::GenerationEvent::Cancelled) => {
-                            return Err("generation cancelled".to_string());
-                        }
-                        _ => continue,
-                    }
-                }
-                Ok(tokens)
-            });
-
-            let tokens = match generated {
-                Ok(t) => t,
-                Err(e) => {
-                    return JsonResponse(serde_json::json!({
-                        "error": e
-                    }));
-                }
-            };
-
-            let output_text = detokenize(&tokens);
-            let prompt_tokens_count = prompt_tokens.len() as u64;
-            let completion_tokens_count = tokens.len() as u64;
-            // Record generated tokens in the token-generation rate limiter.
-            state.token_rate_limiter.check(&client_ip).await;
-
-            // If the request includes tools (function calling), attempt to
-            // parse and repair the output as a function call.
-            if tools::has_tools_request(&body) {
-                match tools::extract_tool(&body) {
-                    Ok(tool) => {
-                        match tools::parse_and_repair(&output_text, &tool) {
-                            ToolCallResult::Valid(name, args)
-                            | ToolCallResult::Repaired(name, args, _) => {
-                        let call = FunctionCall { name, arguments: args };
-                        // Execute the tool call and return a tool_calls response.
-                        match tools::execute_tool_call(&call) {
-                                    Ok(_tool_result) => {
-                                        // Return the tool call in OpenAI format.
-                                        return JsonResponse(serde_json::json!({
-                                            "id": format!("chatcmpl-{:x}", rand_hex()),
-                                            "object": "chat.completion",
-                                            "model": model_name,
-                                            "choices": [{
-                                                "index": 0,
-                                                "message": {
-                                                    "role": "assistant",
-                                                    "content": null,
-                                                    "tool_calls": [{
-                                                        "id": format!("call_{:x}", rand_hex()),
-                                                        "type": "function",
-                                                        "function": {
-                                                            "name": call.name,
-                                                            "arguments": serde_json::to_string(&call.arguments).unwrap_or_default()
-                                                        }
-                                                    }]
-                                                },
-                                                "finish_reason": "tool_calls"
-                                            }],
-                                            "usage": {
-                                                "prompt_tokens": prompt_tokens_count,
-                                                "completion_tokens": completion_tokens_count,
-                                                "total_tokens": prompt_tokens_count + completion_tokens_count
-                                            }
-                                        }));
-                                    }
-                                    Err(exec_err) => {
-                                        // Tool execution failed; retry with second worker generation.
-                                        let retry_supervisor = match state.supervisor.as_ref() {
-                                            Some(s) => s,
-                                            None => {
-                                                return JsonResponse(serde_json::json!({
-                                                    "error": "no worker supervisor available"
-                                                }));
-                                            }
-                                        };
-                                        let retry_prompt = format!(
-                                            "{}\n{}\nError: {}",
-                                            prompt, output_text, exec_err
-                                        );
-                                        let retry_tokens: Vec<u32> =
-                                            tokenize_prompt(&state, &retry_prompt);
-                                        let retry_payload = StartGenerationPayload {
-                                            generation_regime: Default::default(),
-                                            denoising_steps: None,
-                                            confidence_threshold: None,
-                                            canvas_tokens: None,
-                                            prompt_token_ids: retry_tokens,
-                                            max_output_tokens: max_tokens as u32,
-                                            deadline_ms: now_ms + 300_000,
-                                            request_id: uuid::Uuid::new_v4().to_string(),
-                                            temperature: None,
-                                            top_k: None,
-                                            top_p: None,
-                                            seed: None,
-                                            stop_token_ids: Vec::new(),
-                                        };
-                                        match retry_supervisor.start_generation(&retry_payload) {
-                                            Ok(mut retry_handle) => {
-                                                let retry_gen = tokio::task::block_in_place(|| {
-                                                    let mut retry_toks: Vec<u32> = Vec::new();
-                                                    loop {
-                                                        match retry_handle.stream.recv() {
-                                                        Some(crate::streaming::GenerationEvent::Token(tok)) => retry_toks.push(tok),
-                                                        Some(crate::streaming::GenerationEvent::Done) => break,
-                                                        Some(crate::streaming::GenerationEvent::Error(msg)) => return Err(msg),
-                                                        Some(crate::streaming::GenerationEvent::Cancelled) => return Err("generation cancelled".to_string()),
-                                                        _ => continue,
-                                                    }
-                                                    }
-                                                    Ok(retry_toks)
-                                                });
-                                                match retry_gen {
-                                                    Ok(retry_toks) => {
-                                                        let retry_text = detokenize(&retry_toks);
-                                                        match tools::parse_and_repair(
-                                                            &retry_text,
-                                                            &tool,
-                                                        ) {
-                                                            ToolCallResult::Valid(name, args)
-                                                            | ToolCallResult::Repaired(name, args, _) => {
-                                                            let c = FunctionCall { name, arguments: args };
-                                                                return JsonResponse(
-                                                                    serde_json::json!({
-                                                                        "id": format!("chatcmpl-{:x}", rand_hex()),
-                                                                        "object": "chat.completion",
-                                                                        "model": model_name,
-                                                                        "choices": [{
-                                                                            "index": 0,
-                                                                            "message": {
-                                                                                "role": "assistant",
-                                                                                "content": null,
-                                                                                "tool_calls": [{
-                                                                                    "id": format!("call_{:x}", rand_hex()),
-                                                                                    "type": "function",
-                                                                                    "function": {
-                                                                                        "name": c.name,
-                                                                                        "arguments": serde_json::to_string(&c.arguments).unwrap_or_default()
-                                                                                    }
-                                                                                }]
-                                                                            },
-                                                                            "finish_reason": "tool_calls"
-                                                                        }],
-                                                                        "usage": {
-                                                                            "prompt_tokens": prompt_tokens_count,
-                                                                            "completion_tokens": completion_tokens_count,
-                                                                            "total_tokens": prompt_tokens_count + completion_tokens_count
-                                                                        }
-                                                                    }),
-                                                                )
-                                                            }
-                                                            _ => {
-                                                                return JsonResponse(
-                                                                    serde_json::json!({
-                                                                        "error": format!("tool call failed after retry: {exec_err}")
-                                                                    }),
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(retry_err) => {
-                                                        return JsonResponse(serde_json::json!({
-                                                            "error": format!("tool call failed after retry: {retry_err}")
-                                                        }))
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                return JsonResponse(serde_json::json!({
-                                                    "error": format!("tool call retry dispatch failed: {e}")
-                                                }))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            ToolCallResult::Unrepairable(err) => {
-                                // Cannot repair; retry generation with error context.
-                                let retry_supervisor = match state.supervisor.as_ref() {
-                                    Some(s) => s,
-                                    None => {
-                                        return JsonResponse(serde_json::json!({
-                                            "error": "no worker supervisor available"
-                                        }));
-                                    }
-                                };
-                                let retry_prompt =
-                                    format!("{}\n{}\nError: {}", prompt, output_text, err);
-                                let retry_tokens: Vec<u32> = tokenize_prompt(&state, &retry_prompt);
-                                let retry_payload = StartGenerationPayload {
-                                    generation_regime: Default::default(),
-                                    denoising_steps: None,
-                                    confidence_threshold: None,
-                                    canvas_tokens: None,
-                                    prompt_token_ids: retry_tokens,
-                                    max_output_tokens: max_tokens as u32,
-                                    deadline_ms: now_ms + 300_000,
-                                    request_id: uuid::Uuid::new_v4().to_string(),
-                                    temperature: None,
-                                    top_k: None,
-                                    top_p: None,
-                                    seed: None,
-                                    stop_token_ids: Vec::new(),
-                                };
-                                match retry_supervisor.start_generation(&retry_payload) {
-                                    Ok(mut retry_handle) => {
-                                        let retry_gen = tokio::task::block_in_place(|| {
-                                            let mut retry_toks: Vec<u32> = Vec::new();
-                                            loop {
-                                                match retry_handle.stream.recv() {
-                                                Some(crate::streaming::GenerationEvent::Token(tok)) => retry_toks.push(tok),
-                                                Some(crate::streaming::GenerationEvent::Done) => break,
-                                                Some(crate::streaming::GenerationEvent::Error(msg)) => return Err(msg),
-                                                Some(crate::streaming::GenerationEvent::Cancelled) => return Err("generation cancelled".to_string()),
-                                                _ => continue,
-                                            }
-                                            }
-                                            Ok(retry_toks)
-                                        });
-                                        match retry_gen {
-                                            Ok(retry_toks) => {
-                                                let retry_text = detokenize(&retry_toks);
-                                                match tools::parse_and_repair(&retry_text, &tool) {
-                                                    ToolCallResult::Valid(name, args)
-                                                    | ToolCallResult::Repaired(name, args, _) => {
-                                                    let c = FunctionCall { name, arguments: args };
-                                                        return JsonResponse(serde_json::json!({
-                                                            "id": format!("chatcmpl-{:x}", rand_hex()),
-                                                            "object": "chat.completion",
-                                                            "model": model_name,
-                                                            "choices": [{
-                                                                "index": 0,
-                                                                "message": {
-                                                                    "role": "assistant",
-                                                                    "content": null,
-                                                                    "tool_calls": [{
-                                                                        "id": format!("call_{:x}", rand_hex()),
-                                                                        "type": "function",
-                                                                        "function": {
-                                                                            "name": c.name,
-                                                                            "arguments": serde_json::to_string(&c.arguments).unwrap_or_default()
-                                                                        }
-                                                                    }]
-                                                                },
-                                                                "finish_reason": "tool_calls"
-                                                            }],
-                                                            "usage": {
-                                                                "prompt_tokens": prompt_tokens_count,
-                                                                "completion_tokens": completion_tokens_count,
-                                                                "total_tokens": prompt_tokens_count + completion_tokens_count
-                                                            }
-                                                        }))
-                                                    }
-                                                    _ => {
-                                                        return JsonResponse(serde_json::json!({
-                                                            "error": format!("tool call failed after retry: {err}")
-                                                        }))
-                                                    }
-                                                }
-                                            }
-                                            Err(retry_err) => {
-                                                return JsonResponse(serde_json::json!({
-                                                    "error": format!("tool call failed after retry: {retry_err}")
-                                                }))
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        return JsonResponse(serde_json::json!({
-                                            "error": format!("tool call retry dispatch failed: {e}")
-                                        }))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        return JsonResponse(serde_json::json!({
-                            "error": format!("tool extraction failed: {e}")
-                        }));
-                    }
-                }
-            }
-
-            // Standard non-tool response.
-            let route_profile = crate::projection_executor::drain_route_receipts();
-            JsonResponse(serde_json::json!({
-                "id": format!("chatcmpl-{:x}", rand_hex()),
-                "object": "chat.completion",
-                "model": model_name,
-                "route_profile": route_profile,
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": output_text
-                    },
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": prompt_tokens_count,
-                    "completion_tokens": completion_tokens_count,
-                    "total_tokens": prompt_tokens_count + completion_tokens_count
-                }
-            }))
+            return JsonResponse(serde_json::json!({
+                "error": "inference via WorkerSupervisor is no longer available"
+            }));
         }
         ModelType::ImageGen => JsonResponse(serde_json::json!({
             "error": "image generation not supported via chat completions; use /v1/images/generations"
@@ -1646,7 +1184,7 @@ async fn v1_completions(
         .and_then(|v| v.as_str())
         .unwrap_or("gemma4")
         .to_string();
-    let prompt = match body.get("prompt").and_then(|v| v.as_str()) {
+    let _prompt = match body.get("prompt").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
         None => {
             return JsonResponse(serde_json::json!({
@@ -1654,7 +1192,7 @@ async fn v1_completions(
             }));
         }
     };
-    let max_tokens = body
+    let _max_tokens = body
         .get("max_tokens")
         .and_then(|v| v.as_u64())
         .unwrap_or(128);
@@ -1682,102 +1220,9 @@ async fn v1_completions(
         }
     };
 
-    // ── Check if supervisor is available ──────────────────────────
-    let supervisor = match state.supervisor.as_ref() {
-        Some(s) => s,
-        None => {
-            return JsonResponse(serde_json::json!({
-                "error": "no inference worker available"
-            }));
-        }
-    };
-
-    // ── Tokenize prompt ──────────────────────────────────────────────
-    let prompt_tokens: Vec<u32> = tokenize_prompt(&state, &prompt);
-
-    // ── Dispatch to inference worker ──────────────────────────────
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let payload = crate::worker_protocol::StartGenerationPayload {
-        generation_regime: Default::default(),
-        denoising_steps: None,
-        confidence_threshold: None,
-        canvas_tokens: None,
-        prompt_token_ids: prompt_tokens,
-        max_output_tokens: max_tokens as u32,
-        deadline_ms: now_ms + 300_000,
-        request_id: request_id.clone(),
-        temperature: body
-            .get("temperature")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32),
-        top_k: body.get("top_k").and_then(|v| v.as_u64()).map(|v| v as u32),
-        top_p: body.get("top_p").and_then(|v| v.as_f64()).map(|v| v as f32),
-        seed: body.get("seed").and_then(|v| v.as_u64()),
-        stop_token_ids: vec![],
-    };
-
-    let mut handle = match supervisor.start_generation(&payload) {
-        Ok(h) => h,
-        Err(e) => {
-            return JsonResponse(serde_json::json!({
-                "error": format!("worker rejected request: {:?}", e)
-            }));
-        }
-    };
-
-    let mut generated_tokens: Vec<u32> = Vec::new();
-    loop {
-        let event = handle.stream.recv();
-        match event {
-            Some(crate::streaming::GenerationEvent::Token(tok)) => {
-                generated_tokens.push(tok);
-            }
-            Some(crate::streaming::GenerationEvent::Done) => break,
-            Some(crate::streaming::GenerationEvent::Error(msg)) => {
-                return JsonResponse(serde_json::json!({
-                    "error": format!("generation error: {msg}")
-                }));
-            }
-            Some(crate::streaming::GenerationEvent::Cancelled) => {
-                return JsonResponse(serde_json::json!({
-                    "error": "generation cancelled"
-                }));
-            }
-            None => break,
-            _ => {} // ignore other events
-        }
-    }
-
-    let output_text: String = generated_tokens
-        .iter()
-        .filter(|t| **t >= 32 && **t <= 126)
-        .map(|t| *t as u8 as char)
-        .collect();
-
-    let prompt_tokens_count = prompt.bytes().len() as u64;
-    let completion_tokens_count = output_text.len() as u64;
-
-    let route_profile = crate::projection_executor::drain_route_receipts();
-    JsonResponse(serde_json::json!({
-        "id": format!("cmpl-{:x}", rand_hex()),
-        "object": "text_completion",
-        "model": model_name,
-        "route_profile": route_profile,
-        "choices": [{
-            "index": 0,
-            "text": output_text,
-            "finish_reason": "stop"
-        }],
-        "usage": {
-            "prompt_tokens": prompt_tokens_count,
-            "completion_tokens": completion_tokens_count,
-            "total_tokens": prompt_tokens_count + completion_tokens_count
-        }
-    }))
+    return JsonResponse(serde_json::json!({
+        "error": "text completions via WorkerSupervisor is no longer available"
+    }));
 }
 
 /// `/v1/embeddings` — OpenAI-compatible text embeddings endpoint.

@@ -9,6 +9,7 @@
 
 use std::any::TypeId;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Entity
@@ -16,7 +17,7 @@ use std::collections::HashMap;
 
 /// Unique entity identifier.  The u32 pairs with a generation counter stored
 /// in the World to detect use-after-despawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Entity(pub u32);
 
 // ---------------------------------------------------------------------------
@@ -165,6 +166,8 @@ pub struct World {
     components: HashMap<TypeId, Box<dyn std::any::Any>>,
     /// Resource storage keyed by TypeId.
     resources: HashMap<TypeId, Box<dyn std::any::Any + Send + Sync>>,
+    /// Deserializer functions keyed by TypeId for type-erased insertion.
+    deserializers: HashMap<TypeId, fn(&mut World, Entity, &[u8])>,
 }
 
 unsafe impl Send for World {}
@@ -180,6 +183,7 @@ impl World {
             max_entities,
             components: HashMap::new(),
             resources: HashMap::new(),
+            deserializers: HashMap::new(),
         }
     }
 
@@ -371,6 +375,47 @@ impl World {
             .values()
             .map(|s| crate::runtime::world::component_vec_len(s as &dyn std::any::Any))
             .sum()
+    }
+
+    // -----------------------------------------------------------------------
+    // Type-erased deserialization
+    // -----------------------------------------------------------------------
+
+    /// Register a deserializer for a component type `T`, enabling
+    /// type-erased insertion via [`insert_raw`].
+    ///
+    /// Must be called before any `insert_raw` with this TypeId.
+    pub fn register_deserializer<T: Component + serde::de::DeserializeOwned>(&mut self) {
+        fn deserialize_and_insert<T: Component + serde::de::DeserializeOwned>(
+            world: &mut World,
+            entity: Entity,
+            bytes: &[u8],
+        ) {
+            let value: T = serde_json::from_slice(bytes)
+                .expect("Failed to deserialize component in insert_raw");
+            world.insert::<T>(entity, value);
+        }
+        self.deserializers
+            .insert(TypeId::of::<T>(), deserialize_and_insert::<T>);
+    }
+
+    /// Type-erased component insertion.
+    ///
+    /// Deserializes `bytes` as component type `type_id` and inserts it onto
+    /// `entity`.  Returns an error if no deserializer has been registered for
+    /// `type_id`, or if deserialization fails.
+    pub fn insert_raw(
+        &mut self,
+        entity: Entity,
+        type_id: TypeId,
+        bytes: &[u8],
+    ) -> Result<(), String> {
+        let deserializer = self
+            .deserializers
+            .get(&type_id)
+            .ok_or_else(|| format!("No deserializer registered for TypeId {:?}", type_id))?;
+        deserializer(self, entity, bytes);
+        Ok(())
     }
 }
 

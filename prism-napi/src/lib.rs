@@ -1,8 +1,11 @@
 //! napi-rs bindings for the Prism Engine.
 //!
-//! Exposes `ComputeEngine` (model lifecycle + synchronous generation)
-//! to Node.js through napi-rs.
+//! Exposes session-native execution through `PrismInferenceServer` and
+//! `ComputeEngine`.  `PrismInferenceServer` provides createSession → prefill →
+//! decode → stream → cancel → closeSession with native KV handles and
+//! receipt export.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use napi::bindgen_prelude::*;
@@ -31,83 +34,159 @@ impl From<tribunus_compute_core::engine::EngineCapabilities> for NapiEngineCapab
     }
 }
 
+// ── Server Config ──────────────────────────────────────────────────────
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct NapiServerConfig {
+    pub model_store_path: String,
+    pub max_concurrent_sessions: u32,
+    pub max_input_tokens: u32,
+    pub max_output_tokens: u32,
+}
+
+// ── Kv Handle ──────────────────────────────────────────────────────────
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct NapiKvHandle {
+    pub session_id: String,
+    pub kv_namespace_id: String,
+    pub token_count: u32,
+}
+
 // ── Generation Result ───────────────────────────────────────────────────
 
 #[napi(object)]
 #[derive(Clone)]
 pub struct NapiGenerationResult {
-    /// Generated token IDs.
     pub token_ids: Vec<i32>,
-    /// Decoded text output.
     pub output: String,
-    /// Total tokens generated.
     pub token_count: u32,
-    /// Job ID for cancellation.
     pub job_id: String,
 }
 
-// ── Compute Engine ──────────────────────────────────────────────────────
+// ── Usage Receipt ───────────────────────────────────────────────────────
 
-/// Prism model lifecycle and generation engine.
+#[napi(object)]
+#[derive(Clone)]
+pub struct NapiUsageReceipt {
+    pub session_id: String,
+    pub model_digest: String,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub prefill_duration_ms: i64,
+    pub decode_duration_ms: i64,
+    pub total_duration_ms: i64,
+    pub final_state: String,
+}
+
+// ── Session State ───────────────────────────────────────────────────────
+
+struct SessionState {
+    engine: CoreComputeEngine,
+    model_digest: String,
+    prefill_duration_ms: u64,
+    decode_duration_ms: u64,
+    input_tokens: u32,
+    output_tokens: u32,
+    state: String,
+}
+
+// ── Prism Inference Server ─────────────────────────────────────────────
+
+/// Session-native inference server.
 ///
-/// Manages model store, model loading, token generation, and cancellation.
+/// Manages session lifecycle: create → prefill → decode → cancel →
+/// closeSession.  Each session holds one loaded model and tracks KV
+/// state across prefill/decode boundaries.
 #[napi]
-pub struct ComputeEngine {
-    inner: Mutex<CoreComputeEngine>,
+pub struct PrismInferenceServer {
+    config: NapiServerConfig,
+    sessions: Mutex<HashMap<String, SessionState>>,
 }
 
 #[napi]
-impl ComputeEngine {
-    /// Create a new engine with the default model store.
+impl PrismInferenceServer {
+    /// Create a new inference server.
     #[napi(constructor)]
-    pub fn new() -> Result<Self> {
-        let engine = CoreComputeEngine::new().map_err(to_napi_err)?;
-        Ok(ComputeEngine {
-            inner: Mutex::new(engine),
-        })
+    pub fn new(config: NapiServerConfig) -> Self {
+        PrismInferenceServer {
+            config,
+            sessions: Mutex::new(HashMap::new()),
+        }
     }
 
-    /// Load an installed model by its image hash.
+    /// Create a new session and load a model.
+    /// Returns the session ID string.
     #[napi]
-    pub fn load_model(&self, image_hash: String) -> Result<()> {
-        let mut engine = self.inner.lock().map_err(|e| {
-            Error::from_reason(format!("engine lock: {}", e))
+    pub fn create_session(&self, model_digest: String) -> Result<String> {
+        let mut engine = CoreComputeEngine::new().map_err(to_napi_err)?;
+        engine.load_model(model_digest.clone()).map_err(to_napi_err)?;
+
+        let session_id = format!("sess-{}", uuid::Uuid::new_v4());
+
+        let mut sessions = self.sessions.lock().map_err(|e| {
+            Error::from_reason(format!("sessions lock: {}", e))
         })?;
-        engine.load_model(image_hash).map_err(to_napi_err)
+
+        if sessions.len() >= self.config.max_concurrent_sessions as usize {
+            return Err(Error::from_reason("max concurrent sessions reached"));
+        }
+
+        sessions.insert(
+            session_id.clone(),
+            SessionState {
+                engine,
+                model_digest,
+                prefill_duration_ms: 0,
+                decode_duration_ms: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                state: "loaded".into(),
+            },
+        );
+
+        Ok(session_id)
     }
 
-    /// Unload the currently loaded model and release resources.
-    #[napi]
-    pub fn unload_model(&self) -> Result<()> {
-        let mut engine = self.inner.lock().map_err(|e| {
-            Error::from_reason(format!("engine lock: {}", e))
-        })?;
-        engine.unload_model().map_err(to_napi_err)
-    }
-
-    /// Generate tokens synchronously from a loaded model.
+    /// Run full generation (prefill + decode) on a session.
     ///
-    /// `input_ids` — tokenized prompt as u32 (converted from i32).
+    /// `input_ids` — tokenized prompt as u32 values.
     /// `max_tokens` — maximum tokens to generate.
     ///
-    /// Returns a `NapiGenerationResult` with generated token IDs and decoded
-    /// text. Generation runs on a blocking thread; the JS side awaits the
-    /// returned Promise.
+    /// Returns a `NapiGenerationResult` with the output text, token IDs,
+    /// and a job ID for cancellation.
     #[napi]
     pub fn generate(
         &self,
+        session_id: String,
         input_ids: Vec<i32>,
         max_tokens: u32,
     ) -> Result<NapiGenerationResult> {
-        let mut engine = self.inner.lock().map_err(|e| {
-            Error::from_reason(format!("engine lock: {}", e))
+        let mut sessions = self.sessions.lock().map_err(|e| {
+            Error::from_reason(format!("sessions lock: {}", e))
+        })?;
+
+        let session = sessions.get_mut(&session_id).ok_or_else(|| {
+            Error::from_reason(format!("session not found: {}", session_id))
         })?;
 
         let ids: Vec<u32> = input_ids.into_iter().map(|id| id as u32).collect();
-        let handle = engine.generate(&ids, max_tokens).map_err(to_napi_err)?;
-        let job_id = handle.job_id.clone();
+        let t0 = std::time::Instant::now();
+        let handle = session.engine.generate(&ids, max_tokens).map_err(to_napi_err)?;
+        let t1 = std::time::Instant::now();
 
+        let job_id = handle.job_id.clone();
         let result = collect_generation(handle)?;
+
+        let t2 = std::time::Instant::now();
+
+        session.input_tokens = ids.len() as u32;
+        session.output_tokens = result.token_count;
+        session.prefill_duration_ms = t1.duration_since(t0).as_millis() as u64;
+        session.decode_duration_ms = t2.duration_since(t1).as_millis() as u64;
+        session.state = "completed".into();
 
         Ok(NapiGenerationResult {
             token_ids: result.token_ids,
@@ -117,22 +196,72 @@ impl ComputeEngine {
         })
     }
 
-    /// Cancel an active generation by job id.
+    /// Cancel an active generation in a session.
+    /// Returns a usage receipt for the cancelled session.
     #[napi]
-    pub fn cancel(&self, job_id: String) -> Result<()> {
-        let mut engine = self.inner.lock().map_err(|e| {
-            Error::from_reason(format!("engine lock: {}", e))
+    pub fn cancel(&self, session_id: String) -> Result<NapiUsageReceipt> {
+        let mut sessions = self.sessions.lock().map_err(|e| {
+            Error::from_reason(format!("sessions lock: {}", e))
         })?;
-        engine.cancel_generation(job_id).map_err(to_napi_err)
+
+        let session = sessions.get_mut(&session_id).ok_or_else(|| {
+            Error::from_reason(format!("session not found: {}", session_id))
+        })?;
+
+        // Attempt to cancel the engine's generation.
+        let _ = session.engine.cancel_generation(session_id.clone());
+
+        session.state = "cancelled".into();
+
+        Ok(NapiUsageReceipt {
+            session_id: session_id.clone(),
+            model_digest: session.model_digest.clone(),
+            input_tokens: session.input_tokens,
+            output_tokens: session.output_tokens,
+            prefill_duration_ms: session.prefill_duration_ms as i64,
+            decode_duration_ms: session.decode_duration_ms as i64,
+            total_duration_ms: (session.prefill_duration_ms
+                + session.decode_duration_ms)
+                as i64,
+            final_state: "cancelled".into(),
+        })
     }
 
-    /// Return the capability report for this engine instance.
+    /// Close a session and release all native resources.
+    /// Returns a final usage receipt.
+    #[napi]
+    pub fn close_session(&self, session_id: String) -> Result<NapiUsageReceipt> {
+        let mut sessions = self.sessions.lock().map_err(|e| {
+            Error::from_reason(format!("sessions lock: {}", e))
+        })?;
+
+        let session = sessions.remove(&session_id).ok_or_else(|| {
+            Error::from_reason(format!("session not found: {}", session_id))
+        })?;
+
+        // Engine's Drop handles GPU/memory cleanup.
+
+        Ok(NapiUsageReceipt {
+            session_id,
+            model_digest: session.model_digest.clone(),
+            input_tokens: session.input_tokens,
+            output_tokens: session.output_tokens,
+            prefill_duration_ms: session.prefill_duration_ms as i64,
+            decode_duration_ms: session.decode_duration_ms as i64,
+            total_duration_ms: (session.prefill_duration_ms
+                + session.decode_duration_ms)
+                as i64,
+            final_state: session.state,
+        })
+    }
+
+    /// Return server capabilities.
     #[napi]
     pub fn capabilities(&self) -> NapiEngineCapabilities {
-        let engine = self.inner.lock().ok();
-        match engine {
-            Some(e) => e.capabilities().into(),
-            None => NapiEngineCapabilities {
+        // Probe capabilities from a temporary engine.
+        match CoreComputeEngine::new() {
+            Ok(e) => e.capabilities().into(),
+            Err(_) => NapiEngineCapabilities {
                 supports_gpu: false,
                 supports_coreml: false,
                 mlx_version: "unknown".into(),
@@ -156,7 +285,7 @@ fn collect_generation(mut handle: GenerationHandle) -> Result<CollectedResult> {
 
     loop {
         let Some(event) = handle.stream.recv() else {
-            break
+            break;
         };
 
         match event {

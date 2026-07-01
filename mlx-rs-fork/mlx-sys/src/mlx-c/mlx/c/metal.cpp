@@ -35,3 +35,12 @@ extern "C" int mlx_metal_stop_capture(void) {
   }
   return 0;
 }
+extern "C" int mlx_metal_set_capture_dir(const char* path) {
+  try {
+    mlx::core::metal::set_capture_dir(std::string(path));
+  } catch (std::exception& e) {
+    mlx_error(e.what());
+    return 1;
+  }
+  return 0;
+}

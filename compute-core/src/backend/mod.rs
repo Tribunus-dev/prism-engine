@@ -44,6 +44,8 @@ pub mod metal_iosurface;
 /// Metal consumer — validates Core ML output slots against CPU references.
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod metal_consumer;
+/// NPU abstraction — unified FFI for Apple ANE, Intel VPU, AMD XDNA.
+pub mod npu;
 /// CPU attention scheduler — L2-cache-aware work partition + work-stealing
 /// (ported from vLLM's cpu_attn_impl.hpp).
 #[cfg(feature = "candle-cpu")]

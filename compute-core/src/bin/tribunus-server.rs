@@ -3,12 +3,9 @@ use std::collections::HashMap;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 use std::collections::HashSet;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::Mutex;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-use tribunus_compute_core::engine_policy::ExecutionPolicy;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 use tribunus_compute_core::exo::ExoNode;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
@@ -21,8 +18,6 @@ use tribunus_compute_core::model_cache::ModelCache;
 use tribunus_compute_core::scheduling::HardwareConfig;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 use tribunus_compute_core::server::admin::ActiveRequestInfo;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-use tribunus_compute_core::worker_supervisor::WorkerSupervisor;
 use tribunus_compute_core::{log_error, log_info, log_warn};
 
 use tribunus_compute_core::projection_identity::RuntimeMode;
@@ -46,8 +41,6 @@ use tribunus_compute_core::server::{
     models::{recommend_models, ModelRegistry},
 };
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-use uuid::Uuid;
 
 #[tokio::main]
 async fn main() {
@@ -239,59 +232,6 @@ async fn main() {
             }
         }
 
-        let supervisor = if let Some(mpath) = &model_path {
-            log_info!("Loading model from {}...", mpath);
-            let path = std::path::Path::new(mpath);
-            // Validate model path exists, then spawn worker
-            if path.exists() {
-                let worker_binary = std::env::var("TRIBUNUS_WORKER_BINARY")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| {
-                        std::env::current_exe()
-                            .ok()
-                            .map(|p| p.with_file_name("tribunus-compute-worker"))
-                            .unwrap_or_else(|| PathBuf::from("tribunus-compute-worker"))
-                    });
-
-                let image_hash = "";
-                let worker_id = Uuid::new_v4().to_string();
-                let policy = tribunus_compute_core::engine_policy::qualification_policy();
-
-                match WorkerSupervisor::launch_and_handshake(
-                    policy,
-                    &worker_binary,
-                    path,
-                    image_hash,
-                    &worker_id,
-                ) {
-                    Ok(sup) => {
-                        log_info!("  Worker spawned (pid {})", sup.process_ctrl.pid());
-                        // Load model in the worker and wait for it to be ready.
-                        match sup.load_model(image_hash) {
-                            Ok(()) => {
-                                log_info!("  Model ready");
-                                Some(Arc::new(sup))
-                            }
-                            Err(e) => {
-                                tribunus_compute_core::log_error!("  Model load failed: {:?}", e);
-                                std::process::exit(1);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tribunus_compute_core::log_error!("  Failed to spawn worker: {:?}", e);
-                        log_warn!("  Continuing without worker; chat endpoints will return 503");
-                        None
-                    }
-                }
-            } else {
-                tribunus_compute_core::log_error!("  Model path does not exist: {}", mpath);
-                None
-            }
-        } else {
-            None
-        };
-
         // ── Tokenizer ────────────────────────────────────────────────────
         let tokenizer = model_path.as_ref().and_then(|mpath| {
             let dir = std::path::Path::new(mpath);
@@ -314,7 +254,7 @@ async fn main() {
             _ => RuntimeMode::Safe,
         };
         let mut gates = ReadinessGates::new();
-        gates.run_all(supervisor.as_deref(), tokenizer.as_deref(), runtime_mode);
+        gates.run_all(tokenizer.as_deref(), runtime_mode);
         log_info!("Readiness gates summary: {}", gates.summary());
         let gates = Arc::new(Mutex::new(gates));
 
@@ -331,7 +271,6 @@ async fn main() {
             models: Arc::new(Mutex::new(registry)),
             benchmark: Arc::new(Mutex::new(Some(bench))),
             model_cache: Arc::new(Mutex::new(model_cache)),
-            supervisor,
             tokenizer,
             gates,
             exo_node,

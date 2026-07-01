@@ -1,30 +1,23 @@
 //! ComputeEngine — high-level orchestrator for model lifecycle and generation.
 //!
 //! Thin control surface that resolves policy, checks model state, and
-//! delegates execution to [`WorkerSupervisor`].  The supervisor owns the worker
-//! subprocess which runs the actual model runtime, prefill, and decode loop.
+//! delegates execution to the ECS schedule.  The schedule owns the model
+//! runtime, prefill, and decode loop.
 //!
 //! # Changes from v0
 //!
 //! - `generate()` now accepts `input_ids: &[u32]` and returns
 //!   [`GenerationHandle`] (wrapping the stream + job_id).
-//! - `cancel_generation` accepts a `String` job_id.
-//! - `unload_model()` cancels in-flight requests and waits for the
-//!   cancellation grace period before tearing down the worker.
-//! - Worker restart is transparent: a faulted worker is automatically
-//!   respawned (up to `policy.restart_limit` times) on the next call
-//!   to `generate()`.
-//! - `Drop` calls `shutdown()` for clean teardown.
+//! - ECS-only operation: no worker subprocess, no WorkerSupervisor.
+//! - `Drop` clears loaded model state.
+
 
 use std::path::PathBuf;
 
 use crate::engine_error::{EngineError, EngineErrorCode};
-use crate::engine_policy::{qualification_policy, resolve_generation_budget};
 use crate::model_store::{InstalledModel, ModelStore};
 use crate::streaming::GenerationHandle;
-use crate::worker_protocol::HostCommand;
 use crate::worker_protocol::StartGenerationPayload;
-use crate::worker_supervisor::WorkerSupervisor;
 
 use crate::backend::accelerate::AccelerateBackend;
 use crate::backend::heterogeneous_executor::BackendInstance;
@@ -39,6 +32,8 @@ use crate::hybrid_profile::{HybridExecutor, HybridProfile};
 use crate::scheduling::{
     PhaseKind, Scheduler, SchedulerConfig, TokenBudgetConfig, TokenBudgetScheduler, TokenWorkUnit,
 };
+use crate::runtime::world::World;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -54,7 +49,9 @@ const DEFAULT_BOS_TOKEN: u32 = 2;
 // ---------------------------------------------------------------------------
 
 /// Identity of a loaded model — the worker owns the runtime and session.
+/// Identity of a loaded model.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct LoadedModel {
     /// Hash identifying the model image in the store.
     image_hash: String,
@@ -124,14 +121,10 @@ pub struct EngineCapabilities {
 ///
 /// 1. Call `new()` — opens the default model store at `~/.tribunus/models/`.
 /// 2. `installModel(...)` — copy a compiled ComputeImage into the store.
-/// 3. `setWorkerBinaryPath(...)` — point at the worker subprocess binary.
-/// 4. `loadModel(...)` — verify the seal, spawn a worker process, and load
-///    the model into the worker.
-/// 5. `generate(...)` — resolve policy, validate token IDs, delegate to the
-///    worker supervisor, and return a `GenerationHandle` immediately.
-/// 6. `cancel(...)` / `cancel_generation(...)` — signal the worker to abort.
-/// 7. `unload_model(...)` — cancel active requests, kill the worker, release
-///    all native resources.
+/// 3. `loadModel(...)` — verify the seal and initialise the model.
+/// 4. `generate(...)` — validate token IDs and dispatch through the ECS schedule.
+/// 5. `cancel(...)` / `cancel_generation(...)` — (not yet wired in ECS mode).
+/// 6. `unload_model(...)` — release model resources.
 ///
 /// At most one model may be loaded at a time (v1).
 impl std::fmt::Debug for ComputeEngine {
@@ -139,16 +132,7 @@ impl std::fmt::Debug for ComputeEngine {
         f.debug_struct("ComputeEngine")
             .field("model_store", &self.model_store)
             .field("loaded_model", &self.loaded_model)
-            .field("worker_binary_path", &self.worker_binary_path)
             .field("capabilities", &self.capabilities)
-            .field(
-                "worker_supervisor",
-                &self
-                    .worker_supervisor
-                    .as_ref()
-                    .map(|_| "Some(WorkerSupervisor)"),
-            )
-            .field("restart_count", &self.restart_count)
             .field(
                 "scheduler",
                 &self.scheduler.as_ref().map(|_| "Some(Scheduler)"),
@@ -169,18 +153,22 @@ impl std::fmt::Debug for ComputeEngine {
             )
             .field("backend_routing", &self.backend_routing)
             .field("peak_memory_used", &self.peak_memory_used)
+            .field(
+                "ecs_world",
+                &self.ecs_world.as_ref().map(|_| "Some(World)"),
+            )
+            .field(
+                "ecs_schedule",
+                &self.ecs_schedule.as_ref().map(|_| "Some(Schedule)"),
+            )
             .finish()
     }
 }
 
 pub struct ComputeEngine {
     model_store: ModelStore,
-    worker_supervisor: Option<WorkerSupervisor>,
     loaded_model: Option<LoadedModel>,
-    worker_binary_path: Option<PathBuf>,
     capabilities: EngineCapabilities,
-    /// Number of worker restarts attempted during the current model session.
-    restart_count: u32,
     /// Host-side inference scheduler for Accelerate/ANE batch dispatch.
     scheduler: Option<Scheduler>,
     /// Token-budget scheduler for admission control and work dispatch.
@@ -193,10 +181,12 @@ pub struct ComputeEngine {
     peak_memory_used: u64,
     /// Cumulative number of backend fallback events (read from executor static).
     fallback_count: u64,
+    ecs_world: Option<World>,
+    ecs_schedule: Option<crate::runtime::scheduling::schedule::Schedule>,
 }
 
 impl ComputeEngine {
-    // -- lifecycle ------------------------------------------------------------
+    // -- lifecycle ----------------------------------------------------------
 
     /// Create a new engine with the default model store.
     ///
@@ -208,30 +198,21 @@ impl ComputeEngine {
 
         Ok(Self {
             model_store: store,
-            worker_supervisor: None,
             loaded_model: None,
-            worker_binary_path: None,
             capabilities: EngineCapabilities {
                 supports_gpu: false,
                 supports_coreml: false,
                 mlx_version: "0.1.0".into(),
             },
-            restart_count: 0,
             scheduler: None,
             token_budget_scheduler: None,
             hybrid_executor: None,
             backend_routing: None,
             peak_memory_used: 0,
             fallback_count: 0,
+            ecs_world: None,
+            ecs_schedule: None,
         })
-    }
-
-    /// Set the path to the worker subprocess binary.
-    ///
-    /// Must be called before `loadModel()`.  The binary is spawned by the
-    /// [`WorkerSupervisor`] and communicates over framed JSON IPC.
-    pub fn set_worker_binary_path(&mut self, path: String) {
-        self.worker_binary_path = Some(PathBuf::from(path));
     }
 
     // -- observability -------------------------------------------------------
@@ -496,28 +477,13 @@ impl ComputeEngine {
 
     // -- load / unload --------------------------------------------------------
 
-    /// Load an installed model into a worker process.
+    /// Load an installed model into the engine.
     ///
     /// Steps:
     ///   1. Resolve the model directory from the store.
     ///   2. Verify the installation seal.
-    ///   3. Spawn the worker subprocess via [`WorkerSupervisor::launch_worker`].
-    ///   4. Instruct the worker to load the model and wait for confirmation.
-    ///
-    /// Errors if a model is already loaded or the seal fails.
-    ///
-    /// Requires that [`set_worker_binary_path`](Self::set_worker_binary_path)
-    /// was called first, or the `TRIBUNUS_WORKER_BINARY` environment variable
-    /// is set.
 
     pub fn load_model(&mut self, image_hash: String) -> crate::Result<()> {
-        if self.worker_supervisor.is_some() {
-            return Err(crate::Error::from_reason(format!(
-                "Model already loaded: {}",
-                image_hash
-            )));
-        }
-
         let model_dir = self.model_store.root_dir.join(&image_hash);
         if !model_dir.exists() {
             return Err(crate::Error::from_reason(format!(
@@ -526,38 +492,10 @@ impl ComputeEngine {
             )));
         }
 
-        // Verify integrity before launching the worker.
+        // Verify integrity.
         self.model_store
             .verify_seal(&image_hash)
             .map_err(|e| crate::Error::from_reason(format!("Seal verification failed: {}", e)))?;
-
-        // Resolve the worker binary path.
-        let worker_path = self
-            .worker_binary_path
-            .clone()
-            .or_else(|| std::env::var("TRIBUNUS_WORKER_BINARY").ok().map(PathBuf::from))
-            .ok_or_else(|| {
-                crate::Error::from_reason(
-                    "Worker binary path not set. Call setWorkerBinaryPath() or set TRIBUNUS_WORKER_BINARY",
-                )
-            })?;
-
-        // Create the supervisor with the qualification policy.
-        let policy = qualification_policy();
-        // Launch the worker process and perform Hello/HelloAck handshake.
-        let supervisor = WorkerSupervisor::launch_and_handshake(
-            policy,
-            &worker_path,
-            &model_dir,
-            &image_hash,
-            "compute-worker",
-        )
-        .map_err(|e| crate::Error::from_reason(format!("Failed to launch worker: {}", e)))?;
-
-        // Instruct the worker to load the model and wait for confirmation.
-        supervisor.load_model(&image_hash).map_err(|e| {
-            crate::Error::from_reason(format!("Failed to load model in worker: {}", e))
-        })?;
 
         // TODO: read vocab_size from model metadata / capability record
         let loaded = LoadedModel {
@@ -566,93 +504,30 @@ impl ComputeEngine {
             vocab_size: DEFAULT_VOCAB_SIZE,
         };
 
-        self.worker_supervisor = Some(supervisor);
         self.loaded_model = Some(loaded);
-        self.restart_count = 0;
         Ok(())
     }
 
-    /// Unload a model and release all native resources.
-    ///
-    /// If an active request exists, it is cancelled and the engine waits
-    /// up to `cancellation_grace_period` before tearing down the worker.
-    ///
-    /// After this call the worker process is killed, all GPU memory is
-    /// freed, and a subsequent `loadModel()` is required before generation.
+    /// Unload a model and release model resources.
     pub fn unload_model(&mut self) -> Result<(), EngineError> {
-        // Take ownership of the supervisor so the borrow doesn't prevent
-        // clearing engine state after teardown.
-        let supervisor = self
-            .worker_supervisor
-            .take()
-            .ok_or_else(|| EngineError::new(EngineErrorCode::ModelNotLoaded, "no model loaded"))?;
-
-        let grace = supervisor.policy.cancellation_grace_period;
-
-        // Cancel any active generation and wait briefly for completion.
-        let active_ids: Vec<String> = {
-            let all = supervisor.registry.all_active();
-            all.into_iter().map(|(req_id, _)| req_id).collect()
-        };
-
-        for req_id in &active_ids {
-            supervisor.registry.request_cancellation(req_id);
-            let payload = serde_json::json!({ "request_id": req_id });
-            let _ = supervisor.cmd_writer.send_command_with_request(
-                HostCommand::CancelGeneration,
-                req_id,
-                payload,
-            );
-        }
-
-        // Wait for cancellation grace period if there were active requests.
-        if !active_ids.is_empty() {
-            std::thread::sleep(grace);
-        }
-
-        // Call supervisor.unload_model() which sends UnloadModel + Shutdown
-        // and waits for the process to exit.  The supervisor's Drop then
-        // handles joining background threads.
-        supervisor.unload_model()?;
-        // supervisor is dropped here, triggering WorkerSupervisor::Drop.
-
-        // Clear engine state.
         self.loaded_model = None;
-        self.restart_count = 0;
         Ok(())
     }
 
     // -- generation -----------------------------------------------------------
 
-    /// Generate tokens from a loaded model.
+    /// Generate tokens from a loaded model via the ECS schedule.
     ///
-    /// Policy-driven dispatch:
+    /// Validates token IDs against the model vocabulary (empty `input_ids`
+    /// are filled with a BOS token), then dispatches through
+    /// [`ecs_generate`](Self::ecs_generate).
     ///
-    /// a. Validates every token ID is within the model vocabulary.
-    /// b. Rejects empty `input_ids` — sends `DEFAULT_BOS_TOKEN` (2) as
-    ///    the sole prompt token.
-    /// c. Resolves the execution policy via [`qualification_policy()`].
-    /// d. Resolves the generation budget via [`resolve_generation_budget()`]
-    ///    using `input_ids.len()` as the prompt token count.
-    /// e. Checks that a model is loaded (returns `ModelNotLoaded` otherwise).
-    /// f. Verifies no active generation is in flight (returns `ModelBusy`).
-    /// g. Delegates to [`WorkerSupervisor::start_generation()`] which sends a
-    ///    `StartGeneration` IPC frame to the worker and returns immediately.
-    /// h. Returns the [`GenerationHandle`] — the caller receives the stream
-    ///    through `handle.stream` and the job ID through `handle.job_id`.
-    ///
-    /// # Worker restart
-    ///
-    /// If the worker has faulted (caught by the supervisor's event-reader or
-    /// watchdog), this method transparently restarts the worker up to
-    /// `policy.restart_limit` times.  After the limit is exceeded a
-    /// `WorkerRestartLimitExceeded` error is returned.
     pub fn generate(
         &mut self,
         input_ids: &[u32],
         max_tokens: u32,
     ) -> Result<GenerationHandle, EngineError> {
-        // a. Validate token IDs against vocabulary size.
+        // Validate token IDs against the model vocabulary.
         let vocab_size = self
             .loaded_model
             .as_ref()
@@ -666,67 +541,113 @@ impl ComputeEngine {
             ));
         }
 
-        // b. Handle empty input_ids — default to BOS token.
-        let resolved_ids = if input_ids.is_empty() {
+        // ECS-only path: dispatch directly through the ECS schedule.
+        self.ecs_generate(input_ids, max_tokens)
+    }
+
+    /// ECS-first generation path — bypasses the legacy worker supervisor and
+    /// ECS generation path — dispatches the request through the ECS schedule.
+    ///
+    /// 1. Creates a request entity in the ECS World.
+    /// 2. Pushes an ingress entry to [`WorkerIngressQueue`].
+    /// 3. Ticks [`Schedule::run()`](crate::runtime::scheduling::schedule::Schedule::run)
+    ///    once to process the request through the ECS pipeline.
+    /// 4. Reads [`WorkerOutcome`] from the entity.
+    /// 5. Returns a [`GenerationHandle`] with the result events.
+    ///
+    fn ecs_generate(
+        &mut self,
+        input_ids: &[u32],
+        _max_tokens: u32,
+    ) -> Result<GenerationHandle, EngineError> {
+        use crate::runtime::components::{
+            WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome,
+            WorkerRequest, WorkerStream,
+        };
+        use crate::runtime::components::worker_request::RequestClass;
+        use crate::runtime::resources::{WorkerIngressQueue, IngressEntry};
+        use crate::runtime::resources::WorkerResponseRegistry;
+        use crate::streaming::{generation_channel, GenerationEvent};
+
+        let world = self.ecs_world.as_mut().ok_or_else(|| {
+            EngineError::new(
+                EngineErrorCode::InternalInvariantViolation,
+                "ECS world not initialised",
+            )
+        })?;
+        let schedule = self.ecs_schedule.as_mut().ok_or_else(|| {
+            EngineError::new(
+                EngineErrorCode::InternalInvariantViolation,
+                "ECS schedule not initialised",
+            )
+        })?;
+
+        // -- 1. Create request entity in World -----------------------------
+        let entity = world.spawn().ok_or_else(|| {
+            EngineError::new(
+                EngineErrorCode::InternalInvariantViolation,
+                "ECS world at capacity",
+            )
+        })?;
+
+        let request_id = format!("ecs-{:?}", entity);
+        let prompt_ids: Vec<u32> = if input_ids.is_empty() {
             vec![DEFAULT_BOS_TOKEN]
         } else {
             input_ids.to_vec()
         };
+        let payload =
+            serde_json::to_vec(&prompt_ids).unwrap_or_else(|_| vec![]);
+        let worker_id = format!("ecs-{request_id}");
 
-        let prompt_token_count = resolved_ids.len();
+        world.insert(
+            entity,
+            WorkerRequest::new(&request_id, payload, RequestClass::Generate),
+        );
+        world.insert(entity, WorkerAssignment::new(&worker_id, 0));
+        world.insert(entity, WorkerLifecycle::new());
+        world.insert(entity, WorkerHeartbeat::new(&worker_id, 0));
+        world.insert(entity, WorkerStream::default());
 
-        // c. Resolve policy.
-        let policy = qualification_policy();
-
-        // d. Resolve generation budget using resolved prompt-token count.
-        let admission = resolve_generation_budget(&policy, max_tokens, prompt_token_count);
-        if !admission.admitted {
-            let reason = admission.reason.unwrap_or_else(|| "policy rejected".into());
-            return Err(EngineError::new(EngineErrorCode::PolicyRejected, reason));
+        // -- 2. Push to WorkerIngressQueue --------------------------------
+        let (response_tx, response_rx) =
+            std::sync::mpsc::channel::<String>();
+        if let Some(registry) =
+            world.get_resource::<WorkerResponseRegistry>()
+        {
+            registry.register_pending(&request_id, response_tx);
         }
-        let budget = admission
-            .budget
-            .expect("admitted request must have a budget");
-
-        // e. Ensure worker is active (transparent restart if faulted).
-        let supervisor = self.ensure_active_worker()?;
-
-        // f. Check for active generation.
-        if !supervisor.registry.is_empty() {
-            return Err(EngineError::new(
-                EngineErrorCode::ModelBusy,
-                "a generation is already active",
-            ));
+        if let Some(queue) = world.get_resource_mut::<WorkerIngressQueue>() {
+            queue.push(IngressEntry {
+                entity_id: entity.0,
+                request_id: request_id.clone(),
+                payload: vec![],
+                bridge_correlation_key: String::new(),
+            });
         }
 
-        // g. Build the start-generation payload and delegate.
-        let request_id = format!("gen-{}", prompt_token_count);
-        let payload = StartGenerationPayload {
-            generation_regime: Default::default(),
-            denoising_steps: None,
-            confidence_threshold: None,
-            canvas_tokens: None,
+        // -- 3. Tick Schedule::run() --------------------------------------
+        let _results = schedule.run(world);
 
-            prompt_token_ids: resolved_ids,
-            max_output_tokens: budget.effective_output_token_ceiling,
-            deadline_ms: budget.deadline.as_millis() as u64,
-            request_id,
-            temperature: None,
-            top_k: None,
-            top_p: None,
-            seed: None,
-            stop_token_ids: vec![],
-        };
+        // -- 4. Read WorkerOutcome from entity ----------------------------
+        let outcome = world.get::<WorkerOutcome>(entity).cloned();
 
-        let handle = supervisor.start_generation(&payload).map_err(|e| {
-            EngineError::new(
-                EngineErrorCode::InferenceFailed,
-                format!("Generation failed: {}", e),
-            )
-        })?;
+        // -- 5. Build the GenerationHandle and return ----------------------
+        let (sender, stream) = generation_channel(None);
+        sender.send_terminal(match &outcome {
+            Some(o) if o.is_success() => GenerationEvent::Done,
+            Some(_) => {
+                GenerationEvent::Error("worker failed".to_string())
+            }
+            None => GenerationEvent::Done,
+        });
 
-        // h. Return the GenerationHandle — caller gets stream + job_id.
-        Ok(handle)
+        // Wait for the oneshot response if a channel was registered.
+        let _response_body = response_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .ok();
+
+        Ok(GenerationHandle::new(request_id, stream))
     }
 
     /// Cancel an active generation job by numeric job id.
@@ -740,30 +661,22 @@ impl ComputeEngine {
 
     /// Cancel an active generation job by string job id.
     ///
-    /// Delegates to [`WorkerSupervisor::cancel_generation`] which sends a
-    /// `CancelGeneration` IPC frame to the worker.
+    /// ECS-only mode — not yet wired.  Returns an error.
     pub fn cancel_generation(&mut self, job_id: String) -> Result<(), EngineError> {
-        let supervisor = self
-            .worker_supervisor
-            .as_ref()
-            .ok_or_else(|| EngineError::new(EngineErrorCode::ModelNotLoaded, "no model loaded"))?;
-
-        supervisor.cancel_generation(&job_id)
+        let _ = job_id;
+        Err(EngineError::new(
+            EngineErrorCode::InferenceFailed,
+            "ECS-only mode — cancel not yet wired",
+        ))
     }
 
     // -- shutdown -------------------------------------------------------------
 
-    /// Forcefully shut down: kill the worker process and release all native
-    /// resources.
+    /// Clear loaded model state.
     ///
     /// Called automatically by [`Drop`].  Safe to call multiple times.
     pub fn shutdown(&mut self) {
-        // Dropping the supervisor triggers WorkerSupervisor::Drop which calls
-        // shutdown() + join_threads() — this kills the worker and joins all
-        // background threads.
-        self.worker_supervisor = None;
         self.loaded_model = None;
-        self.restart_count = 0;
     }
 
     /// Check MLX memory pressure and take proactive action.
@@ -867,84 +780,6 @@ impl ComputeEngine {
         }
     }
 
-    /// Ensure the worker is active, transparently restarting if it has
-    /// faulted.
-    ///
-    /// Returns `ModelNotLoaded` when no supervisor exists, or
-    /// `WorkerRestartLimitExceeded` when the restart limit has been hit.
-    fn ensure_active_worker(&mut self) -> Result<&mut WorkerSupervisor, EngineError> {
-        let policy = qualification_policy();
-
-        // Check if we even have a supervisor.
-        if self.worker_supervisor.is_none() {
-            return Err(EngineError::new(
-                EngineErrorCode::ModelNotLoaded,
-                "no model loaded",
-            ));
-        }
-
-        // Check if the current worker has faulted.
-        let is_faulted = self
-            .worker_supervisor
-            .as_ref()
-            .map(|s| s.runtime_state.is_faulted())
-            .unwrap_or(false);
-
-        if is_faulted {
-            if self.restart_count >= policy.restart_limit {
-                return Err(EngineError::new(
-                    EngineErrorCode::WorkerRestartLimitExceeded,
-                    format!(
-                        "worker restart limit ({}) exceeded after {} restart(s)",
-                        policy.restart_limit, self.restart_count,
-                    ),
-                ));
-            }
-            self.restart_count += 1;
-            self.restart_worker()?;
-        }
-
-        Ok(self.worker_supervisor.as_mut().unwrap())
-    }
-
-    /// Restart the worker process for the currently loaded model.
-    ///
-    /// Drops the old supervisor (which kills the old process and joins
-    /// background threads), then spawns a new worker and loads the model.
-    fn restart_worker(&mut self) -> Result<(), EngineError> {
-        // Drop the old supervisor — this triggers WorkerSupervisor::Drop
-        // which calls shutdown() (kills the process) + join_threads().
-        let old_supervisor = self.worker_supervisor.take();
-        drop(old_supervisor);
-
-        let loaded = self.loaded_model.as_ref().ok_or_else(|| {
-            EngineError::new(
-                EngineErrorCode::InternalInvariantViolation,
-                "no loaded model for restart",
-            )
-        })?;
-
-        let worker_path = self.worker_binary_path.clone().ok_or_else(|| {
-            EngineError::new(
-                EngineErrorCode::InternalInvariantViolation,
-                "no worker binary path for restart",
-            )
-        })?;
-
-        let policy = qualification_policy();
-        let new_supervisor = WorkerSupervisor::launch_and_handshake(
-            policy,
-            &worker_path,
-            &loaded.model_path,
-            &loaded.image_hash,
-            "compute-worker",
-        )?;
-
-        new_supervisor.load_model(&loaded.image_hash)?;
-
-        self.worker_supervisor = Some(new_supervisor);
-        Ok(())
-    }
 }
 
 // -- BackendInstance implementations --------------------------------------
@@ -1001,7 +836,8 @@ impl BackendInstance for AccelerateBackend {
 
 impl Drop for ComputeEngine {
     fn drop(&mut self) {
-        self.shutdown();
+        /* no supervisor to clean up — just clear the loaded model */
+        self.loaded_model = None;
     }
 }
 
@@ -1013,10 +849,6 @@ impl Drop for ComputeEngine {
 /// - 500+ prompt tokens → PromptHeavy (prefill dominates)
 /// - 10x more output tokens than expected prompt → DecodeHeavy
 /// - Otherwise → Balanced
-///
-/// Retained for compatibility — called by tests but no longer used by
-/// `ComputeEngine::generate` (the worker supervisor handles profile
-/// selection inside the worker).
 pub fn classify_workload(req: &GenerationRequest) -> crate::model_runtime::WorkloadClass {
     let est_prompt_tokens = req.prompt.split_whitespace().count().max(1) as u32;
     let est_decode_tokens = if req.max_tokens == 0 {

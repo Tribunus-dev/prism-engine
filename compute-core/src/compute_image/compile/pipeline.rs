@@ -134,6 +134,7 @@ pub fn compile_gguf_with_authority(
     target: Option<HardwareTarget>,
     ane_models_dir: Option<&str>,
     metallib_path: Option<&str>,
+    mlx_capture_dir: Option<&str>,
 ) -> crate::Result<CompiledImage> {
     let target = target.unwrap_or_else(HardwareTarget::detect);
 
@@ -163,7 +164,7 @@ pub fn compile_gguf_with_authority(
     let quantize_mode =
         quantize_mode.or_else(|| CompileQuantMode::from_name(target.recommended_quant()));
 
-    compile_gguf_unchecked(gguf_path, output_dir, quantize_mode, ane_models_dir, metallib_path).map(|mut compiled| {
+    compile_gguf_unchecked(gguf_path, output_dir, quantize_mode, ane_models_dir, metallib_path, mlx_capture_dir).map(|mut compiled| {
         compiled.manifest.hardware_target = Some(target);
         compiled
     })
@@ -664,12 +665,17 @@ pub(crate) fn compile_unchecked(
 /// This is the unchecked GGUF entry point. It parses the GGUF header, writes
 /// a temporary config.json for ANE pre-compilation, loads tensors lazily from
 /// the GGUF mmap via `load_gguf_source`, then runs `compile_sequential`.
+///
+/// When `mlx_capture_dir` is provided, checks for a MLX JIT-captured
+/// `generated.metal` file in that directory and compiles it to `.metallib`
+/// as the inference kernel library (overrides template-based compilation).
 pub fn compile_gguf_unchecked(
     gguf_path: &str,
     output_dir: &str,
     quantize_mode: Option<CompileQuantMode>,
     ane_models_dir: Option<&str>,
     metallib_path: Option<&str>,
+    mlx_capture_dir: Option<&str>,
 ) -> crate::Result<CompiledImage> {
     use crate::gguf;
     use std::io::Write;
@@ -767,6 +773,30 @@ pub fn compile_gguf_unchecked(
 
     // 6. Compile inference Metal kernels into temp dir so embed_metallib finds them
     let model_metallib_path = tmp_dir.path().join("model.metallib");
+    // 6a. If an MLX JIT capture directory is provided, check for generated.metal
+    //     and compile it to model.metallib, overriding template-based kernels.
+    if let Some(capture_dir) = mlx_capture_dir {
+        let capture_path = Path::new(capture_dir);
+        match compile_mlx_capture_metallib(capture_path, &model_metallib_path) {
+            Ok(true) => {
+                eprintln!(
+                    "[gguf:metal] compiled MLX JIT-captured kernels -> {}",
+                    model_metallib_path.display()
+                );
+            }
+            Ok(false) => {
+                eprintln!(
+                    "[gguf:metal] no MLX JIT capture found in {} (template fallback)",
+                    capture_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "[gguf:metal] MLX JIT capture compile failed: {e} (template fallback)"
+                );
+            }
+        }
+    }
     match metallib_path {
         Some(src) => {
             std::fs::copy(src, &model_metallib_path).map_err(|e| {
@@ -921,6 +951,29 @@ fn compile_inference_metallib(output_path: &Path) -> Result<(), String> {
         "\n",
     );
     compile_metal_source_to_metallib(source, output_path, "inference_kernels")
+}
+
+/// Compile MLX JIT-captured Metal source into a .metallib.
+///
+/// Looks for `<capture_dir>/generated.metal` (written by the mlx-tribunus
+/// fork's `Device::build_library_` hook).  If the file exists, compiles it
+/// to `output_path` via `xcrun metal + metallib`.  Returns `true` when a
+/// capture was compiled, `false` when no capture file was found.
+fn compile_mlx_capture_metallib(
+    capture_dir: &Path,
+    output_metallib: &Path,
+) -> Result<bool, String> {
+    let metal_path = capture_dir.join("generated.metal");
+    if !metal_path.exists() {
+        return Ok(false);
+    }
+    let source = std::fs::read_to_string(&metal_path)
+        .map_err(|e| format!("read {}: {e}", metal_path.display()))?;
+    if source.trim().is_empty() {
+        return Ok(false);
+    }
+    compile_metal_source_to_metallib(&source, output_metallib, "mlx_jit_capture")?;
+    Ok(true)
 }
 
 /// Tar-archive a .mlmodelc directory into a single `.ane.tar` file.

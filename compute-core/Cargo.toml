@@ -46,6 +46,7 @@ swc_ecma_parser = { version = "41", default-features = false, features = [] }
 tempfile = { version = "3" }
 png = "0.17"
 blake3 = "1"
+serde_json_canonicalizer = "0.3"
 memmap2 = { workspace = true }
 bytemuck = { version = "1", features = ["derive"] }
 half = "2"
@@ -62,7 +63,7 @@ anyhow = "1.0.102"
 
 [features]
 default = []
-prism-backend = ["dep:coreml-proto", "server", "metal-dispatch"]
+prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "mlx-backend"]
 ffi = ["server", "metal-dispatch"]
 ane = []
 metal-dispatch = ["dep:metal", "dep:objc", "dep:block"]
@@ -73,6 +74,7 @@ server = ["dep:axum", "dep:tower-http"]
 candle-cpu = []
 intel = []
 tensix = []
+mlx-backend = []
 storage-adapters = []
 napi = []
 private-development = []

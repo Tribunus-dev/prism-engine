@@ -95,47 +95,72 @@ enum Commands {
     },
     /// Compile a GGUF model file to .cimage.
     CompileGGUF {
-    /// Path to the GGUF file (e.g. ~/Downloads/model.gguf).
+        /// Path to the GGUF file (e.g. ~/Downloads/model.gguf).
         gguf_path: PathBuf,
 
-    /// Output path for the compiled .cimage.
+        /// Output path for the compiled .cimage.
         #[arg(short, long, default_value = "model.cimage")]
         output: PathBuf,
 
-    /// Optional draft GGUF path for speculative decoding (MTP).
+        /// Optional draft GGUF path for speculative decoding (MTP).
         #[arg(long)]
         draft: Option<PathBuf>,
 
-    /// Compilation authority — controls validation gates.
+        /// Compilation authority — controls validation gates.
         #[arg(long, default_value = "test-fixture", value_enum)]
         authority: CliAuthority,
 
-    /// Target hardware (e.g. m1, m1pro, m2, m2ultra, m3ultra). Auto-detected if omitted.
+        /// Target hardware (e.g. m1, m1pro, m2, m2ultra, m3ultra). Auto-detected if omitted.
         #[arg(long)]
         target_hardware: Option<String>,
 
-    /// Quantize mode (e.g. nf4, nf4-128, 8bit, ternary, tile640). Uses target default if omitted.
+        /// Quantize mode (e.g. nf4, nf4-128, 8bit, ternary, tile640). Uses target default if omitted.
         #[arg(long)]
         quantize_mode: Option<String>,
 
-    /// Skip model validation checks.
+        /// Skip model validation checks.
         #[arg(long)]
         skip_validation: bool,
 
-    /// Use legacy LUT-based compilation path.
+        /// Use legacy LUT-based compilation path.
         #[arg(long)]
         legacy_lut: bool,
 
-    /// Directory containing pre-compiled .mlmodelc bundles from the Swift/cross-compilation
-    /// host.  When set, the compiler skips MIL generation and uses these instead.
+        /// Directory containing pre-compiled .mlmodelc bundles from the Swift/cross-compilation
+        /// host.  When set, the compiler skips MIL generation and uses these instead.
         #[arg(long)]
         ane_models_dir: Option<PathBuf>,
 
-    /// Path to a pre-compiled .metallib file (Metal inference kernels) from the
-    /// Swift/cross-compilation host.  When set, the compiler skips xcrun metal
-    /// and embeds this library directly.
+        /// Path to a pre-compiled .metallib file (Metal inference kernels) from the
+        /// Swift/cross-compilation host.  When set, the compiler skips xcrun metal
+        /// and embeds this library directly.
         #[arg(long)]
         metallib_path: Option<PathBuf>,
+
+        /// Directory containing MLX JIT-captured Metal source (generated.metal)
+        /// for AOT compilation.  When set and generated.metal exists, it is
+        /// compiled to .metallib via xcrun metal instead of using template
+        /// kernels.
+        #[arg(long)]
+        mlx_capture_dir: Option<PathBuf>,
+
+        /// Directory for MLX CUDA JIT cache (MLX_PTX_CACHE_DIR).  When set,
+        /// MLX's CUDA backend writes compiled .ptx and source .cu files here
+        /// during the trace, enabling AOT reuse on NVIDIA hardware.
+        #[arg(long)]
+        cuda_cache_dir: Option<PathBuf>,
+
+        /// Directory for MLX ROCm JIT cache (MLX_HIP_CACHE_DIR).  When set,
+        /// MLX's ROCm/hiprtc backend writes compiled .hsaco and source .hip
+        /// files here during the trace, enabling AOT reuse on AMD hardware.
+        #[arg(long)]
+        rocm_cache_dir: Option<PathBuf>,
+
+        /// Directory for MLX Level Zero JIT cache (MLX_L0_CACHE_DIR).  When set,
+        /// MLX's Level Zero/ocloc backend writes compiled .spv and source .cl
+        /// files here during the trace, enabling AOT reuse on Intel GPUs.
+        #[arg(long)]
+        l0_cache_dir: Option<PathBuf>,
     },
     /// Compile ANE subgraphs for an already-downloaded model.
     AncCompile {
@@ -187,6 +212,10 @@ fn main() {
             legacy_lut,
             ane_models_dir,
             metallib_path,
+            mlx_capture_dir,
+            cuda_cache_dir,
+            rocm_cache_dir,
+            l0_cache_dir,
         } => compile_gguf(
             &gguf_path,
             &output,
@@ -198,6 +227,10 @@ fn main() {
             legacy_lut,
             ane_models_dir.as_deref(),
             metallib_path.as_deref(),
+            mlx_capture_dir.as_deref(),
+            cuda_cache_dir.as_deref(),
+            rocm_cache_dir.as_deref(),
+            l0_cache_dir.as_deref(),
         ),
         #[cfg(feature = "prism-backend")]
         Commands::AncCompile { model } => ane_compile(&model),
@@ -511,7 +544,12 @@ fn compile_model(name: &str) {
 
     let out = cimage_path(name);
     eprintln!("[prism:compile] Compiling to {}...", out.display());
-    match tribunus_compute_core::lut::compiler::compile_to_cimage(&graph, &safetensors_dir, &out, &dir.join("config.json")) {
+    match tribunus_compute_core::lut::compiler::compile_to_cimage(
+        &graph,
+        &safetensors_dir,
+        &out,
+        &dir.join("config.json"),
+    ) {
         Ok(()) => {
             let size = std::fs::metadata(&out)
                 .map(|m| m.len() / (1024 * 1024))
@@ -534,6 +572,10 @@ fn compile_gguf(
     legacy_lut: bool,
     ane_models_dir: Option<&Path>,
     metallib_path: Option<&Path>,
+    mlx_capture_dir: Option<&Path>,
+    cuda_cache_dir: Option<&Path>,
+    rocm_cache_dir: Option<&Path>,
+    l0_cache_dir: Option<&Path>,
 ) {
     if !gguf_path.exists() {
         eprintln!("GGUF file not found: {}", gguf_path.display());
@@ -545,18 +587,40 @@ fn compile_gguf(
         std::process::exit(1);
     }
 
+    // Set MLX CUDA PTX cache dir before any MLX operations.
+    // MLX's CUDA backend reads MLX_PTX_CACHE_DIR at Device init and writes
+    // compiled .ptx, .cu, and .txt files to this directory.
+    if let Some(cuda_dir) = cuda_cache_dir {
+        std::env::set_var("MLX_PTX_CACHE_DIR", cuda_dir);
+        eprintln!("[prism:cuda] MLX_PTX_CACHE_DIR = {}", cuda_dir.display());
+    }
+
+    // Set MLX ROCm HIP cache dir before any MLX operations.
+    // MLX's ROCm backend reads MLX_HIP_CACHE_DIR at device init and writes
+    // compiled .hsaco, .hip, and .txt files to this directory.
+    if let Some(rocm_dir) = rocm_cache_dir {
+        std::env::set_var("MLX_HIP_CACHE_DIR", rocm_dir);
+        eprintln!("[prism:rocm] MLX_HIP_CACHE_DIR = {}", rocm_dir.display());
+    }
+
+    // Set MLX Level Zero cache dir for ocloc JIT artifacts.
+    // MLX's Level Zero backend reads MLX_L0_CACHE_DIR and writes
+    // compiled .spv and source .cl files to this directory.
+    if let Some(l0_dir) = l0_cache_dir {
+        std::env::set_var("MLX_L0_CACHE_DIR", l0_dir);
+        eprintln!("[prism:l0] MLX_L0_CACHE_DIR = {}", l0_dir.display());
+    }
+
     // Parse optional target and quantize mode into their rich types.
-    let target = raw_target.and_then(|t| {
-        match t.to_lowercase().as_str() {
-            "m1" => Some(HardwareTarget::M1),
-            "m1pro" => Some(HardwareTarget::M1Pro),
-            "m2" => Some(HardwareTarget::M2),
-            "m2ultra" => Some(HardwareTarget::M2Ultra),
-            "m3ultra" => Some(HardwareTarget::M3Ultra),
-            other => {
-                eprintln!("warning: unknown target '{}', using auto-detect", other);
-                None
-            }
+    let target = raw_target.and_then(|t| match t.to_lowercase().as_str() {
+        "m1" => Some(HardwareTarget::M1),
+        "m1pro" => Some(HardwareTarget::M1Pro),
+        "m2" => Some(HardwareTarget::M2),
+        "m2ultra" => Some(HardwareTarget::M2Ultra),
+        "m3ultra" => Some(HardwareTarget::M3Ultra),
+        other => {
+            eprintln!("warning: unknown target '{}', using auto-detect", other);
+            None
         }
     });
 
@@ -625,6 +689,7 @@ fn compile_gguf(
             let out_str = output_path.to_string_lossy();
             let ane_str = ane_models_dir.map(|p| p.to_string_lossy().into_owned());
             let metal_str = metallib_path.map(|p| p.to_string_lossy().into_owned());
+            let mlx_str = mlx_capture_dir.map(|p| p.to_string_lossy().into_owned());
             tribunus_compute_core::compute_image::compile::compile_gguf_with_authority(
                 &gguf_str,
                 &out_str,
@@ -633,6 +698,7 @@ fn compile_gguf(
                 target,
                 ane_str.as_deref(),
                 metal_str.as_deref(),
+                mlx_str.as_deref(),
             )
             .map(|_| ())
         } else {
@@ -641,12 +707,14 @@ fn compile_gguf(
             let out_str = output_path.to_string_lossy();
             let ane_str = ane_models_dir.map(|p| p.to_string_lossy().into_owned());
             let metal_str = metallib_path.map(|p| p.to_string_lossy().into_owned());
+            let mlx_str = mlx_capture_dir.map(|p| p.to_string_lossy().into_owned());
             tribunus_compute_core::compute_image::compile::compile_gguf_unchecked(
                 &gguf_str,
                 &out_str,
                 quantize_mode,
                 ane_str.as_deref(),
                 metal_str.as_deref(),
+                mlx_str.as_deref(),
             )
             .map(|_| ())
         };
@@ -681,9 +749,18 @@ fn doctor(verify_provider: bool) {
     eprintln!("  Version:              {}", env!("CARGO_PKG_VERSION"));
     eprintln!("  Home:                 {}", prism_home().display());
     eprintln!("  Models dir:           {}", models_dir().display());
-    eprintln!("  Releases dir:         {}", release::VersionedInstallDir::releases_dir().display());
-    eprintln!("  Current link:         {}", release::VersionedInstallDir::current_link().display());
-    eprintln!("  Previous link:        {}", release::VersionedInstallDir::previous_link().display());
+    eprintln!(
+        "  Releases dir:         {}",
+        release::VersionedInstallDir::releases_dir().display()
+    );
+    eprintln!(
+        "  Current link:         {}",
+        release::VersionedInstallDir::current_link().display()
+    );
+    eprintln!(
+        "  Previous link:        {}",
+        release::VersionedInstallDir::previous_link().display()
+    );
 
     if verify_provider {
         eprintln!("  Provider verification: not yet implemented");
@@ -712,7 +789,10 @@ fn capabilities() {
                             Ok(m) => {
                                 println!(
                                     "  {} [{:?}] — prism {} | compute-core {}",
-                                    m.release_version, m.channel, m.prism_version, m.compute_core_version
+                                    m.release_version,
+                                    m.channel,
+                                    m.prism_version,
+                                    m.compute_core_version
                                 );
                                 for plat in &m.supported_platforms {
                                     println!(
@@ -722,7 +802,9 @@ fn capabilities() {
                                 }
                                 println!(
                                     "      schemas: {:?} | checksums: {} | status: {:?}",
-                                    m.artifact_schema_versions, m.checksums.len(), m.signing_status
+                                    m.artifact_schema_versions,
+                                    m.checksums.len(),
+                                    m.signing_status
                                 );
                                 if let Some(digest) = &m.compatibility_manifest_digest {
                                     println!("      compat digest: {digest:?}");
@@ -775,16 +857,16 @@ fn ane_compile(name: &str) {
 
     #[cfg(feature = "prism-backend")]
     {
-    use tribunus_compute_core::ane_compile;
-    match ane_compile::compile_ane_artifacts(&dir) {
-        Ok(paths) => {
-            eprintln!("[prism:ane] Generated {} .mlmodelc file(s):", paths.len());
-            for p in &paths {
-                eprintln!("    {p}");
+        use tribunus_compute_core::ane_compile;
+        match ane_compile::compile_ane_artifacts(&dir) {
+            Ok(paths) => {
+                eprintln!("[prism:ane] Generated {} .mlmodelc file(s):", paths.len());
+                for p in &paths {
+                    eprintln!("    {p}");
+                }
             }
+            Err(e) => eprintln!("[prism:ane] ANE compilation failed: {e}"),
         }
-        Err(e) => eprintln!("[prism:ane] ANE compilation failed: {e}"),
-    }
     }
 }
 
@@ -793,7 +875,10 @@ fn rollback() {
     match release::VersionedInstallDir::rollback() {
         Ok(()) => {
             let current = release::VersionedInstallDir::current_link();
-            println!("Rolled back. Current release link: {:?}", current.read_link().unwrap_or(current));
+            println!(
+                "Rolled back. Current release link: {:?}",
+                current.read_link().unwrap_or(current)
+            );
         }
         Err(e) => {
             eprintln!("[prism] Rollback failed: {e}");

@@ -23,7 +23,6 @@ use tokio::sync::Mutex;
 
 use crate::cache::evolkv::{CalibrationSet, EvolKV};
 use crate::server::routes::AppState;
-use crate::worker_supervisor::WorkerLifecyclePhase;
 
 // ---------------------------------------------------------------------------
 // Request tracking
@@ -135,16 +134,7 @@ async fn admin_status(State(state): State<AppState>) -> JsonResponse<serde_json:
 
     // ── Session ────────────────────────────────────────────────────────
     let sess_info = {
-        match state.supervisor.as_ref() {
-            Some(sup) => json!({
-                "worker_pid": sup.process_ctrl.pid(),
-                "alive": sup.process_ctrl.is_alive(),
-                "active_requests": sup.registry.len(),
-                "model_loaded": sup.runtime_state.phase() == WorkerLifecyclePhase::Ready,
-                "faulted": sup.runtime_state.is_faulted(),
-            }),
-            None => json!({"worker": false}),
-        }
+        json!({"mode": "ecs-only"})
     };
 
     // ── Telemetry ──────────────────────────────────────────────────────
@@ -229,18 +219,8 @@ async fn admin_sessions(State(state): State<AppState>) -> JsonResponse<serde_jso
     drop(registry);
     let cancelled = state.admin_cancelled_requests.lock().await;
 
-    // Report the worker state.
-    let (worker_pid, worker_alive, worker_faulted) = state
-        .supervisor
-        .as_ref()
-        .map(|s| {
-            (
-                s.process_ctrl.pid(),
-                s.process_ctrl.is_alive(),
-                s.runtime_state.is_faulted(),
-            )
-        })
-        .unwrap_or((0, false, false));
+    // Worker supervisor has been removed — report defaults.
+    let (worker_pid, worker_alive, worker_faulted) = (0i32, false, false);
 
     JsonResponse(json!({
         "sessions": sessions,

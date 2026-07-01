@@ -252,7 +252,7 @@ pub mod gpu_worker;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
-pub mod grammar;
+pub mod parsing;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
@@ -528,6 +528,7 @@ pub mod toolchain_attest;
     feature = "prism-backend"
 ))]
 pub mod tools;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod agent;
 pub mod transform_recipe;
 #[cfg(any(
@@ -562,12 +563,6 @@ pub mod worker_dispatch;
 ))]
 pub mod worker_memory;
 pub mod worker_protocol;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
-pub mod worker_supervisor;
-
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"

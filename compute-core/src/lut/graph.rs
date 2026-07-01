@@ -596,6 +596,7 @@ mod tests {
     #[test]
     fn test_qwen3_5_config() {
         #[derive(Deserialize)]
+        #[allow(dead_code)]
         struct RawHfConfigSimple {
             architectures: Option<Vec<String>>,
             text_config: Option<serde_json::Value>,
