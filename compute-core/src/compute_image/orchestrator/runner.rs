@@ -12,13 +12,13 @@ use crate::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
 use crate::compute_image::tree_attention::TreeAttention;
 use crate::compute_image::vm_manager::VmManager;
 use crate::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
-use super::kernel_fusion::{self, FusedLayerGroup};
+use super::kernel_fusion;
 use super::{
     generate_speculative_candidates, sample_argmax,
-    GLOBAL_HEAD_DIM, LAYERS, MAX_CONTEXT, MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS, SLCPhase,
+    GLOBAL_HEAD_DIM, LAYERS, MAX_CONTEXT, MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS,
 };
 use crate::arena::Arena;
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use half::f16;
 use metal::*;
 use std::path::PathBuf;
@@ -44,18 +44,16 @@ pub struct Orchestrator {
     /// slot_seq_pos[slot] tracks how many tokens have been
     /// processed (prefilled + decoded) for that slot.
     pub slot_seq_pos: Vec<u32>,
-    /// Current SLC phase. Used to prevent ANE/GPU SLC thrashing.
-    pub slc_phase: SLCPhase,
     /// Compiled ANE prefill model loaded from the cimage's MIL program.
     /// Set by [`Self::compile_ane_model`] when `deployment.mil_buffer`
     /// is present and compilation succeeds.
     /// One model instance per work queue slot for parallel prefill.
-    pub ane_prefill_models: Vec<Option<CoreMlModel>>,
+    pub ane_prefill_models: Vec<Option<CoreAiModel>>,
     /// Cache path for the compiled .mlmodelc bundle (alongside the cimage).
     pub ane_modelc_path: Option<PathBuf>,
     /// Compiled ANE compaction gather model. Loaded when compaction
     /// MIL program compiles successfully.
-    pub compaction_model: Option<CoreMlModel>,
+    pub compaction_model: Option<CoreAiModel>,
     /// Indices arena for compaction (Int32). Pre-allocated at load time.
     pub compaction_indices_arena: Option<Arena>,
     /// Per-layer input arenas for compaction (FP16, one layer at a time).
@@ -75,7 +73,7 @@ pub struct Orchestrator {
     /// Pre-compiled ANE prefill layer model loaded from embedded
     /// model bytes. Built at ingest time by gemma4_ingest via
     /// coremlcompiler. One model instance per work queue slot.
-    pub prefill_model: Option<CoreMlModel>,
+    pub prefill_model: Option<CoreAiModel>,
 }
 
 impl Orchestrator {
@@ -148,14 +146,14 @@ impl Orchestrator {
 
         // Create additional ANE model instances for other slots (parallel prefill)
         let num_slots = NUM_SLOTS as usize;
-        let mut ane_prefill_models: Vec<Option<CoreMlModel>> = Vec::with_capacity(num_slots);
+        let mut ane_prefill_models: Vec<Option<CoreAiModel>> = Vec::with_capacity(num_slots);
         for i in 0..num_slots {
             if i == 0 {
                 ane_prefill_models.push(first_model.take());
             } else if let Some(ref cache_path) = ane_modelc_path {
-                match CoreMlModel::load_with_compute_units(
+                match CoreAiModel::load_with_compute_units(
                     &cache_path.to_string_lossy(),
-                    CoreMlComputeUnits::CpuAndNeuralEngine,
+                    CoreAiComputeUnits::CpuAndNeuralEngine,
                 ) {
                     Ok(m) => ane_prefill_models.push(Some(m)),
                     Err(e) => {
@@ -201,7 +199,6 @@ impl Orchestrator {
             kernel_buffers,
             batch_size,
             slot_seq_pos: vec![0; NUM_SLOTS as usize],
-            slc_phase: SLCPhase::GPUDecode,
             ane_prefill_models,
             ane_modelc_path,
             compaction_model,
@@ -234,8 +231,6 @@ impl Orchestrator {
             .get(slot)
             .and_then(|m| m.as_ref())
             .ok_or_else(|| format!("prefill_slot: no ANE model for slot {slot_id}"))?;
-
-        self.slc_phase = SLCPhase::ANEPrefill;
 
         // ── 1. Allocate input arena for token IDs ────────────────────
         // The ANE model expects an MLMultiArray of shape [1, prompt_len]
@@ -477,7 +472,6 @@ impl Orchestrator {
     /// contains the prefill positions and attention covers the full
     /// context.
     pub fn decode_slot(&mut self, slot_id: u32, token_id: u32) -> Result<u32, String> {
-        self.slc_phase = SLCPhase::GPUDecode;
         let slot = slot_id as usize;
         let seq_pos = self.slot_seq_pos[slot];
 
@@ -553,8 +547,6 @@ impl Orchestrator {
             let t = self.decode_token(token_id)?;
             return Ok(vec![t]);
         }
-
-        self.slc_phase = SLCPhase::GPUDecode;
 
         // 1. Run primary decode on slot 0
         self.megakernel
@@ -747,7 +739,6 @@ impl Orchestrator {
     }
 
     pub fn decode_speculative(&mut self, token_id: u32, num_draft: u32) -> Result<Vec<u32>, String> {
-        self.slc_phase = SLCPhase::GPUDecode;
         let slot = 0usize;
         let seq_pos = self.slot_seq_pos[slot];
 
@@ -1195,7 +1186,5 @@ impl Orchestrator {
 
     /// Signal that ANE prefill is active (runs concurrently with GPU decode).
     #[deprecated(since = "0.2.0", note = "use prefill_text(&mut self, prompt) instead")]
-    pub fn prefill_from_ane(&mut self) {
-        self.slc_phase = SLCPhase::ANEPrefill;
-    }
+    pub fn prefill_from_ane(&mut self) {}
 }

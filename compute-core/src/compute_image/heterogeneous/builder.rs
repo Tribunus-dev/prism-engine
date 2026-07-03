@@ -96,7 +96,7 @@ impl HeterogeneousImageBuilder {
             hardware_requirements: HardwareRequirements {
                 min_soc_family: String::new(),
                 min_macos_version: String::new(),
-                min_coreml_version: String::new(),
+                min_coreai_version: String::new(),
                 min_ane_count: 0,
                 min_gpu_core_count: 0,
                 required_features: Vec::new(),

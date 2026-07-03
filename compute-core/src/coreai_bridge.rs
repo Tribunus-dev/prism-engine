@@ -6,46 +6,46 @@ use crate::arena_info::ArenaInfo;
 /// Maps to MLComputeUnits in the ObjC bridge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
-pub enum CoreMlComputeUnits {
+pub enum CoreAiComputeUnits {
     CpuOnly = 0,
     CpuAndGpu = 1,
     CpuAndNeuralEngine = 2,
     All = 3,
 }
 
-impl CoreMlComputeUnits {
+impl CoreAiComputeUnits {
     pub fn name(&self) -> &'static str {
         match self {
-            CoreMlComputeUnits::CpuOnly => "cpuOnly",
-            CoreMlComputeUnits::CpuAndGpu => "cpuAndGPU",
-            CoreMlComputeUnits::CpuAndNeuralEngine => "cpuAndNeuralEngine",
-            CoreMlComputeUnits::All => "all",
+            CoreAiComputeUnits::CpuOnly => "cpuOnly",
+            CoreAiComputeUnits::CpuAndGpu => "cpuAndGPU",
+            CoreAiComputeUnits::CpuAndNeuralEngine => "cpuAndNeuralEngine",
+            CoreAiComputeUnits::All => "all",
         }
     }
 }
 
 extern "C" {
-    pub(crate) fn tribunus_coreml_load_model(
+    pub(crate) fn tribunus_coreai_load_model(
         out_model: *mut *mut std::ffi::c_void,
         path: *const i8,
         compute_units: i64,
     ) -> i32;
-    pub(crate) fn tribunus_coreml_free_model(model: *mut std::ffi::c_void);
-    pub(crate) fn tribunus_coreml_predict(
+    pub(crate) fn tribunus_coreai_free_model(model: *mut std::ffi::c_void);
+    pub(crate) fn tribunus_coreai_predict(
         model: *mut std::ffi::c_void,
         input_name: *const i8,
         input_arena: *const ArenaInfo,
         output_name: *const i8,
         output_arena: *const ArenaInfo,
     ) -> i32;
-    pub(crate) fn tribunus_coreml_predict_pixelbuffer(
+    pub(crate) fn tribunus_coreai_predict_pixelbuffer(
         model: *mut std::ffi::c_void,
         input_name: *const i8,
         input_arena: *const ArenaInfo,
         output_name: *const i8,
         output_arena: *mut ArenaInfo,
     ) -> i32;
-    pub(crate) fn tribunus_coreml_predict_multi(
+    pub(crate) fn tribunus_coreai_predict_multi(
         model: *mut std::ffi::c_void,
         input_names: *mut *const i8,
         input_arenas: *mut *const ArenaInfo,
@@ -57,11 +57,11 @@ extern "C" {
 }
 
 /// Owned Core ML model handle.
-pub struct CoreMlModel {
+pub struct CoreAiModel {
     pub(crate) ptr: *mut std::ffi::c_void,
 }
 
-impl CoreMlModel {
+impl CoreAiModel {
     /// Return the raw underlying FFI pointer.
     pub fn raw_ptr(&self) -> *mut std::ffi::c_void {
         self.ptr
@@ -69,22 +69,22 @@ impl CoreMlModel {
 
     /// Load a compiled Core ML model from disk with the given compute unit policy.
     pub fn load(path: &str) -> Result<Self, String> {
-        Self::load_with_compute_units(path, CoreMlComputeUnits::CpuAndNeuralEngine)
+        Self::load_with_compute_units(path, CoreAiComputeUnits::CpuAndNeuralEngine)
     }
 
     /// Load with explicit compute unit policy.
     pub fn load_with_compute_units(
         path: &str,
-        compute_units: CoreMlComputeUnits,
+        compute_units: CoreAiComputeUnits,
     ) -> Result<Self, String> {
         let c_path = std::ffi::CString::new(path).map_err(|e| format!("CString: {}", e))?;
         let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
         let status =
-            unsafe { tribunus_coreml_load_model(&mut ptr, c_path.as_ptr(), compute_units as i64) };
+            unsafe { tribunus_coreai_load_model(&mut ptr, c_path.as_ptr(), compute_units as i64) };
         if status != 0 {
-            return Err(format!("tribunus_coreml_load_model failed: {}", status));
+            return Err(format!("tribunus_coreai_load_model failed: {}", status));
         }
-        Ok(CoreMlModel { ptr })
+        Ok(CoreAiModel { ptr })
     }
 
     /// Run prediction: input arena → model → output arena.
@@ -102,7 +102,7 @@ impl CoreMlModel {
         let c_out_name =
             std::ffi::CString::new(output_name).map_err(|e| format!("CString: {}", e))?;
         let status = unsafe {
-            tribunus_coreml_predict(
+            tribunus_coreai_predict(
                 self.ptr,
                 c_in_name.as_ptr(),
                 input_arena,
@@ -111,7 +111,7 @@ impl CoreMlModel {
             )
         };
         if status != 0 {
-            return Err(format!("tribunus_coreml_predict failed: {}", status));
+            return Err(format!("tribunus_coreai_predict failed: {}", status));
         }
         Ok(())
     }
@@ -133,7 +133,7 @@ impl CoreMlModel {
         let c_out_name =
             std::ffi::CString::new(output_name).map_err(|e| format!("CString: {}", e))?;
         let status = unsafe {
-            tribunus_coreml_predict_pixelbuffer(
+            tribunus_coreai_predict_pixelbuffer(
                 self.ptr,
                 c_in_name.as_ptr(),
                 input_arena,
@@ -143,7 +143,7 @@ impl CoreMlModel {
         };
         if status != 0 {
             return Err(format!(
-                "tribunus_coreml_predict_pixelbuffer failed: {}",
+                "tribunus_coreai_predict_pixelbuffer failed: {}",
                 status
             ));
         }
@@ -151,15 +151,15 @@ impl CoreMlModel {
     }
 }
 
-impl Drop for CoreMlModel {
+impl Drop for CoreAiModel {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
-            unsafe { tribunus_coreml_free_model(self.ptr) };
+            unsafe { tribunus_coreai_free_model(self.ptr) };
         }
     }
 }
 
-impl CoreMlModel {
+impl CoreAiModel {
     /// Run prediction with multiple named inputs and outputs.
     /// All inputs are set up as a feature dictionary, all outputs as backings.
     /// The model is evaluated once with all I/O bound.
@@ -188,7 +188,7 @@ impl CoreMlModel {
             output_infos.iter_mut().map(|a| &mut **a as *mut ArenaInfo).collect();
 
         let status = unsafe {
-            tribunus_coreml_predict_multi(
+            tribunus_coreai_predict_multi(
                 self.ptr,
                 c_in_ptrs.as_mut_ptr(),
                 in_arena_ptrs.as_mut_ptr(),
@@ -199,7 +199,7 @@ impl CoreMlModel {
             )
         };
         if status != 0 {
-            return Err(format!("tribunus_coreml_predict_multi failed: {}", status));
+            return Err(format!("tribunus_coreai_predict_multi failed: {}", status));
         }
         Ok(())
     }
@@ -207,25 +207,25 @@ impl CoreMlModel {
 
 // SAFETY: MLModel is documented by Apple as thread-safe for prediction.
 // The raw ObjC pointer is accessed through Core ML's thread-safe predict API.
-unsafe impl Send for CoreMlModel {}
-unsafe impl Sync for CoreMlModel {}
+unsafe impl Send for CoreAiModel {}
+unsafe impl Sync for CoreAiModel {}
 
 /// Load an .mlmodelc bundle from the given directory path.
 ///
 /// Uses CPU+NeuralEngine compute units by default.
-pub fn load_mlmodelc(path: &std::path::Path) -> Result<CoreMlModel, String> {
+pub fn load_mlmodelc(path: &std::path::Path) -> Result<CoreAiModel, String> {
     let cpath = std::ffi::CString::new(path.to_string_lossy().as_bytes())
         .map_err(|e| format!("CString conversion: {}", e))?;
     let mut out: *mut std::ffi::c_void = std::ptr::null_mut();
     let status = unsafe {
-        tribunus_coreml_load_model(
+        tribunus_coreai_load_model(
             &mut out,
             cpath.as_ptr(),
-            CoreMlComputeUnits::CpuAndNeuralEngine as i64,
+            CoreAiComputeUnits::CpuAndNeuralEngine as i64,
         )
     };
     if status != 0 || out.is_null() {
-        return Err(format!("tribunus_coreml_load_model failed: {}", status));
+        return Err(format!("tribunus_coreai_load_model failed: {}", status));
     }
-    Ok(CoreMlModel { ptr: out })
+    Ok(CoreAiModel { ptr: out })
 }

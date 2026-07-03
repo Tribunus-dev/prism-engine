@@ -17,7 +17,7 @@ pub enum TensorDisposition {
     /// Large data-parallel tensor that should be transformed on GPU.
     GpuTransform { recipe: String },
     /// Tensor participates in Core ML backend island.
-    CoreMlLoweringInput,
+    CoreAiLoweringInput,
     /// Not emitted (e.g., unused multimodal wrapper in text-only profile).
     DiscardWithReason { reason: String },
 }

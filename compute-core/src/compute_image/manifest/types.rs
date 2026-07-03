@@ -478,7 +478,7 @@ pub struct TensorEntry {
     #[serde(default = "default_layout_version")]
     pub layout_version: u32,
     /// Per-backend artifact bindings for this tensor.
-    /// Keyed by backend name ("mlx", "coreml", "accelerate", etc.).
+    /// Keyed by backend name ("mlx", "coreai", "accelerate", etc.).
     #[serde(default)]
     pub artifact_bindings: HashMap<String, Vec<BackendWeightArtifact>>,
 }
@@ -513,7 +513,7 @@ pub enum ArtifactKind {
     /// CPU quantized — block quantized bytes.
     CpuQuantized,
     /// Core ML fp16 external weight file.
-    CoreMlFp16WeightFile,
+    CoreAiFp16WeightFile,
     /// Intel Level Zero packed USM.
     IntelUsmPacked,
     /// Tenstorrent Tensix tiled.

@@ -305,7 +305,7 @@ pub(crate) fn compile_and_pack_god_binary(
         // Reserve the vocabulary slice in the mmap.
         // Capture mmap_base and vocab_file_offset before mutable borrow of builder.
         let mmap_capture = builder.mmap_base();
-        let vocab_file_offset = plan.vocabulary.offset;
+        let _vocab_file_offset = plan.vocabulary.offset;
         let vocab_slice = builder.allocate_slice(plan.vocabulary.length as usize);
         let num_tiles = (vocab_in_dim as u64 + 639) / 640;
         let packed_len = (num_tiles as usize) * 32 * 4 * vocab_out_dim as usize;
@@ -605,7 +605,7 @@ pub fn pack_cimage_from_dir(
         for (pat, kind) in npu_patterns {
             if name_str == *pat || (kind == &SegmentKind::AneArchive && name_str.ends_with(".ane.tar")) {
                 extra_segments.push((*kind, std::fs::read(entry.path())?));
-                matched = true; break;
+                break;
             }
         }
     }

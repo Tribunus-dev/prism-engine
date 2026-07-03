@@ -483,7 +483,7 @@ impl HeterogeneousExecutor {
 
                     let matches_lane = match (hint, variant.lane) {
                         (1, ExecutionLane::MlxGpu) => true,
-                        (2, ExecutionLane::CoreMlAne) => true,
+                        (2, ExecutionLane::CoreAiAne) => true,
                         (3, ExecutionLane::AccelerateCpu) | (3, ExecutionLane::CandleCpu) => true,
                         _ => false,
                     };
@@ -548,7 +548,7 @@ impl HeterogeneousExecutor {
                 ex.submit(request, completion_tx)
                     .map_err(|e| ExecutorError::SubmitFailed(lane, e.to_string()))
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 let ex = self.ane.as_mut().ok_or_else(|| {
                     ExecutorError::SubmitFailed(lane, "ANE executor not available".into())
                 })?;
@@ -685,7 +685,7 @@ impl HeterogeneousExecutor {
                     .metal_in_flight
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 self.metrics
                     .ane_in_flight
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -706,7 +706,7 @@ impl HeterogeneousExecutor {
                     .metal_in_flight
                     .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 self.metrics
                     .ane_in_flight
                     .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);

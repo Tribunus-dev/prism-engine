@@ -82,7 +82,7 @@ pub enum BackendKind {
     /// Intel Level Zero GPU (integrated and discrete).
     LevelZero,
     /// Apple Core ML (ANE via IOSurface).
-    CoreMl,
+    CoreAi,
     /// Apple Neural Engine (direct ANE).
     Ane,
     /// Apple Accelerate framework (CPU BLAS/NEON).
@@ -102,7 +102,7 @@ impl BackendKind {
             Self::Cuda => "CUDA",
             Self::Rocm => "ROCm",
             Self::LevelZero => "Level Zero",
-            Self::CoreMl => "Core ML",
+            Self::CoreAi => "Core ML",
             Self::Ane => "ANE",
             Self::Accelerate => "Accelerate",
             Self::CandleCpu => "Candle CPU",

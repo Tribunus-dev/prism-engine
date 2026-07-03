@@ -405,7 +405,7 @@ fn bench_mlx_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchResul
 /// Real IOSurface-backed inference requires full MIL -> coremlc compilation.
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 #[allow(dead_code)]
-fn bench_coreml_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchResult> {
+fn bench_coreai_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchResult> {
     // Core ML subgraphs require shape-stable, compiled .mlmodelc packages.
     // This is wired during the full compute-image pipeline, not at probe time.
     Vec::new()
@@ -413,7 +413,7 @@ fn bench_coreml_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchRe
 
 /// Non-MLX stub for Core ML.
 #[cfg(not(any(feature = "mlx-backend", feature = "prism-backend")))]
-fn bench_coreml_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchResult> {
+fn bench_coreai_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchResult> {
     Vec::new()
 }
 
@@ -526,7 +526,7 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
     // Real MLX benchmarks when the mlx-backend feature is enabled
     let mlx_results = bench_mlx_candidates(&candidates);
 
-    // Synthetic benchmarks for remaining backends (coreml when MLX disabled, etc.)
+    // Synthetic benchmarks for remaining backends (coreai when MLX disabled, etc.)
     let synthetic_results = run_benchmark_suite(&receipt, &candidates);
 
     // Merge: use real accelerate and MLX results where available, synthetic for everything else
@@ -544,10 +544,10 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
         target_os = "macos",
         any(feature = "mlx-backend", feature = "prism-backend")
     ))]
-    if let Some(coreml_result) =
-        crate::backend::coreml_lane::CoreMlLane::new().bench_minimal_subgraph()
+    if let Some(coreai_result) =
+        crate::backend::coreai_lane::CoreAiLane::new().bench_minimal_subgraph()
     {
-        results.push(coreml_result);
+        results.push(coreai_result);
     }
 
     // ── Record hazard receipts ────────────────────────────────────────────
@@ -727,21 +727,21 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
             .as_nanos()
     ));
     std::fs::create_dir_all(&tmp_dir).ok();
-    let candidates = crate::compute_image::compile::coreml::candidate_subgraphs();
+    let candidates = crate::compute_image::compile::coreai::candidate_subgraphs();
     let mut decompositions = Vec::new();
     for (name, ops) in &candidates {
         let decomp =
-            crate::compute_image::compile::coreml::decompose_subgraph(name, ops, &concurrency);
+            crate::compute_image::compile::coreai::decompose_subgraph(name, ops, &concurrency);
         eprintln!(
             "[hw-assessment] subgraph '{}': {} Core ML ops + {} Accelerate ops",
             name,
-            decomp.coreml_ops.len(),
+            decomp.coreai_ops.len(),
             decomp.accelerate_ops.len()
         );
-        if !decomp.coreml_ops.is_empty() {
-            match crate::compute_image::compile::coreml::compile_subgraph(
+        if !decomp.coreai_ops.is_empty() {
+            match crate::compute_image::compile::coreai::compile_subgraph(
                 name,
-                &decomp.coreml_ops,
+                &decomp.coreai_ops,
                 &std::collections::HashMap::from([
                     ("hidden".to_string(), vec![4096i64]),
                     ("vocab".to_string(), vec![32768i64]),

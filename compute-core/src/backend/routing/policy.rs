@@ -423,7 +423,7 @@ pub struct BoundaryExecutionReceipt {
 pub enum ResearchRoutingPolicy {
     MlxControl,
     AccelerateCandidate,
-    CoreMlCandidate,
+    CoreAiCandidate,
     Shadow {
         authority: BackendId,
         candidate: BackendId,

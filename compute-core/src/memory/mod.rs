@@ -6,7 +6,7 @@
 pub mod allocator;
 pub mod candle_bridge;
 pub mod compute_image_bridge;
-pub mod coreml_warmup;
+pub mod coreai_warmup;
 pub mod enforcer;
 pub mod iosurface_storage;
 pub mod monitor;

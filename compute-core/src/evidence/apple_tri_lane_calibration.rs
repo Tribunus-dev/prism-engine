@@ -124,7 +124,7 @@ mod tests {
         AppleTriLaneCalibrationRecord {
             hardware_signature: hardware.to_string(),
             os_build: "macOS-14.5".into(),
-            coreml_runtime_identity: "CoreML-8.0".into(),
+            coreai_runtime_identity: "CoreML-8.0".into(),
             region_fingerprint: region.to_string(),
             artifact_digest: "sha256-deadbeef".into(),
             shape_class: sample_shape(),

@@ -40,7 +40,7 @@
 pub mod backend;
 pub mod concurrency;
 pub mod core_ai;
-pub mod coreml_opaque_probe;
+pub mod coreai_opaque_probe;
 pub mod evidence;
 pub mod ids;
 pub mod ledger_jsonl;
@@ -101,7 +101,7 @@ pub use tuning::{
 };
 
 pub use core_ai::CoreAIBackendAdapter;
-pub use coreml_opaque_probe::CoreMlOpaqueProbe;
+pub use coreai_opaque_probe::CoreAiOpaqueProbe;
 pub use ledger_jsonl::JsonlEvidenceLedger;
 pub use mlx_probe::MlxProbe;
 pub use reference_backend::CpuReferenceBackend;

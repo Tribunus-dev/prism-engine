@@ -6,6 +6,7 @@
 //! solves, sidecar ranking, deterministic reductions, and receipt hashing.
 
 use crate::calibration::accelerate::dot_product;
+use super::super::receipt::ObjectiveWeights;
 
 /// The Accelerate reducer — runs on the CPU/Accelerate control plane.
 ///
@@ -91,6 +92,26 @@ impl AccelerateReducer {
         } else {
             0.0
         });
+    }
+
+    /// Compute block-level error from stored reduction metrics.
+    ///
+    /// Covers only two of the 8 λ terms: `lambda_output` (MSE) and
+    /// `lambda_residual` (relative error). Cosine similarity is
+    /// available via `self.cosine_similarity` for gates but is not
+    /// a named λ term.
+    ///
+    /// TODO(#distill): Add reducer measurements for the remaining 6:
+    ///   lambda_attention  → attention output divergence
+    ///   lambda_norm       → normalization stats drift (RMS/μ/σ)
+    ///   lambda_logit      → KL divergence on final logits
+    ///   lambda_rollout    → greedy match rate vs teacher
+    ///   lambda_cost       → Core ML dispatch wall time
+    ///   lambda_bytes      → sidecar bytes + page count
+    pub fn block_error(&self, weights: &ObjectiveWeights) -> f64 {
+        let out = self.output_mse.unwrap_or(0.0) * weights.lambda_output;
+        let res = self.residual_relative_error.unwrap_or(0.0) * weights.lambda_residual;
+        out + res
     }
 
     /// Return the hidden dimension this reducer was configured with.

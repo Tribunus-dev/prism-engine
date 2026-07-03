@@ -21,7 +21,7 @@ pub struct InferenceSessionState {
     pub kv_caches: Vec<LiveKvCache>,
     pub sink_states: Vec<SinkState>,
     pub working_set: Option<WorkingSetManager>,
-    pub coreml_models: CoreMlModelRegistryStub,
+    pub coreai_models: CoreAiModelRegistryStub,
     pub lane_registry: LaneRegistryStub,
     pub cancellation: Arc<AtomicBool>,
     pub session_epoch: AtomicU64,
@@ -30,7 +30,7 @@ pub struct InferenceSessionState {
 
 /// Stub for the Core ML model registry.
 /// In a full implementation this loads artifacts once at session creation time.
-pub struct CoreMlModelRegistryStub;
+pub struct CoreAiModelRegistryStub;
 
 /// Stub for the lane registry.
 pub struct LaneRegistryStub;
@@ -43,7 +43,7 @@ impl InferenceSessionState {
             kv_caches: live_caches,
             sink_states,
             working_set: None,
-            coreml_models: CoreMlModelRegistryStub,
+            coreai_models: CoreAiModelRegistryStub,
             lane_registry: LaneRegistryStub,
             cancellation: Arc::new(AtomicBool::new(false)),
             session_epoch: AtomicU64::new(0),

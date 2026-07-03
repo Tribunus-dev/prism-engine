@@ -66,7 +66,7 @@ impl MetalLaneExecutor {
         // a completion handle.
         //
         // For this iteration, we use the MetalConsumer's existing
-        // `verify_coreml_output_accessible` and `validate` methods to
+        // `verify_coreai_output_accessible` and `validate` methods to
         // confirm IOSurface-backed Metal access, then simulate a measurable
         // GPU workload by committing a trivial command buffer.
         //
@@ -93,7 +93,7 @@ impl LaneExecutor for MetalLaneExecutor {
         // Verify Metal can access the output slot.
         let metal_accessible = self
             .metal_consumer
-            .verify_coreml_output_accessible(request.output_slot.0.try_into().unwrap(), unsafe {
+            .verify_coreai_output_accessible(request.output_slot.0.try_into().unwrap(), unsafe {
                 &*self.arena
             })
             .unwrap_or(false);

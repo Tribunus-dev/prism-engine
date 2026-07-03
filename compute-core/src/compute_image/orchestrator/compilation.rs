@@ -4,7 +4,7 @@
 //! `.mlmodelc` bundle via `xcrun coremlcompiler`, with caching support.
 
 use super::Orchestrator;
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -15,14 +15,14 @@ impl Orchestrator {
     /// The `mil_buffer` holds raw MIL program bytes that were embedded
     /// into the cimage during ANE island compilation. These are written
     /// to a temporary `.mlpackage` directory, compiled by `xcrun
-    /// coremlcompiler`, and loaded as a `CoreMlModel` targeting the ANE.
+    /// coremlcompiler`, and loaded as a `CoreAiModel` targeting the ANE.
     ///
     /// If `cache_path` already exists and contains a valid `.mlmodelc`,
     /// loading skips compilation.
     pub(crate) fn compile_ane_model(
         deployment: &crate::compute_image::cimage_loader::CimageDeployment,
         cache_path: &std::path::Path,
-    ) -> Result<CoreMlModel, String> {
+    ) -> Result<CoreAiModel, String> {
         let mil_buf = deployment
             .mil_buffer
             .as_ref()
@@ -30,9 +30,9 @@ impl Orchestrator {
 
         // ── Check cache ──────────────────────────────────────────────
         if cache_path.exists() && cache_path.join("metadata.json").exists() {
-            return CoreMlModel::load_with_compute_units(
+            return CoreAiModel::load_with_compute_units(
                 &cache_path.to_string_lossy(),
-                CoreMlComputeUnits::CpuAndNeuralEngine,
+                CoreAiComputeUnits::CpuAndNeuralEngine,
             );
         }
 
@@ -46,9 +46,9 @@ impl Orchestrator {
         if Self::is_mlmodelc_dir(&mil_bytes) {
             // Pre-compiled .mlmodelc: write to cache path directly
             Self::write_mlmodelc_from_bytes(cache_path, &mil_bytes)?;
-            return CoreMlModel::load_with_compute_units(
+            return CoreAiModel::load_with_compute_units(
                 &cache_path.to_string_lossy(),
-                CoreMlComputeUnits::CpuAndNeuralEngine,
+                CoreAiComputeUnits::CpuAndNeuralEngine,
             );
         }
 
@@ -84,9 +84,9 @@ impl Orchestrator {
         Self::copy_dir_all(&compiled, cache_path)?;
 
         // Keep tmp_dir alive until model loads, then leak it (OS cleans up)
-        let model = CoreMlModel::load_with_compute_units(
+        let model = CoreAiModel::load_with_compute_units(
             &cache_path.to_string_lossy(),
-            CoreMlComputeUnits::CpuAndNeuralEngine,
+            CoreAiComputeUnits::CpuAndNeuralEngine,
         )?;
         std::mem::forget(tmp_dir);
 

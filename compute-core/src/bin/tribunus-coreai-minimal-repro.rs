@@ -5,10 +5,10 @@
 //! model load, preserving all artifacts for analysis.
 //!
 //! Usage:
-//!   cargo run --bin tribunus-coreml-minimal-repro --profile inference-evidence
-//!   cargo run --bin tribunus-coreml-minimal-repro --profile inference-evidence -- \
+//!   cargo run --bin tribunus-coreai-minimal-repro --profile inference-evidence
+//!   cargo run --bin tribunus-coreai-minimal-repro --profile inference-evidence -- \
 //!     --run-id COREML-REPRO-0001 --track elementwise
-//!   cargo run --bin tribunus-coreml-minimal-repro --profile inference-evidence -- \
+//!   cargo run --bin tribunus-coreai-minimal-repro --profile inference-evidence -- \
 //!     --run-id COREML-REPRO-0001 --track all
 
 use std::fs;
@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use tribunus_compute_core::decode_attribution::coreml_minimal_repro::{
+use tribunus_compute_core::decode_attribution::coreai_minimal_repro::{
     graphs_for_track, verify_graph_contract, DiagnosticGraphContract,
 };
 use tribunus_compute_core::mil_builder::MilBuilder;

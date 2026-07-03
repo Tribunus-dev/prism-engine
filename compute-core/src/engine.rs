@@ -265,7 +265,7 @@ impl ComputeEngine {
             backend_artifacts: crate::backend::routing::BackendArtifactManifest {
                 mlx: Vec::new(),
                 accelerate: Vec::new(),
-                coreml: Vec::new(),
+                coreai: Vec::new(),
             },
             execution_boundaries: Vec::new(),
             evidence_basis: Vec::new(),

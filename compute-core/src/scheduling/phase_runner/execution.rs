@@ -202,10 +202,10 @@ impl PhaseRunner for MetalFusedKernelRunner {
 }
 
 /// Core ML graph phase — execute a compiled Core ML subgraph on ANE.
-pub struct CoreMlGraphRunner;
-impl PhaseRunner for CoreMlGraphRunner {
+pub struct CoreAiGraphRunner;
+impl PhaseRunner for CoreAiGraphRunner {
     fn kind(&self) -> PhaseKind {
-        PhaseKind::CoreMlGraph
+        PhaseKind::CoreAiGraph
     }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
         if let Some(backend) = &ctx.backend {
@@ -215,15 +215,15 @@ impl PhaseRunner for CoreMlGraphRunner {
                     .get("subgraph")
                     .cloned()
                     .unwrap_or_else(|| phase.phase_id.clone());
-                let available = rb.coreml_state.can_execute(&subgraph_name);
+                let available = rb.coreai_state.can_execute(&subgraph_name);
                 if available {
                     eprintln!(
-                        "[runner] CoreMlGraph: {} subgraph='{}' available, dispatched",
+                        "[runner] CoreAiGraph: {} subgraph='{}' available, dispatched",
                         phase.phase_id, subgraph_name
                     );
                 } else {
                     eprintln!(
-                        "[runner] CoreMlGraph: {} subgraph='{}' not found",
+                        "[runner] CoreAiGraph: {} subgraph='{}' not found",
                         phase.phase_id, subgraph_name
                     );
                 }
@@ -231,7 +231,7 @@ impl PhaseRunner for CoreMlGraphRunner {
             }
         }
         eprintln!(
-            "[runner] CoreMlGraph: {} — no backend context, logging only",
+            "[runner] CoreAiGraph: {} — no backend context, logging only",
             phase.phase_id
         );
         Ok(())
@@ -705,7 +705,7 @@ impl PhaseRunner for LegacyMlxLayerRunner {
             &plan,
             &plan.route,
             None, // memory_island
-            &[],  // ane_coreml_models
+            &[],  // ane_coreai_models
             &lw.input_layernorm,
             &lw.post_attention_layernorm,
             &lw.q_proj_w,

@@ -5,7 +5,7 @@
 //! serialises it as an `.mlpackage`, and invokes `coremlcompiler` to produce
 //! a `.mlmodelc` bundle ready for IOSurface-backed inference at runtime.
 //!
-//! Unlike the general-purpose `compile::coreml::compile_subgraph` which
+//! Unlike the general-purpose `compile::coreai::compile_subgraph` which
 //! dispatches on op-name strings, these functions accept concrete weights
 //! and dimensions — they are direct MIL-level wrappers for the multimodal
 //! encoder projections (vision, audio) and MTP draft decoder projections /
@@ -13,9 +13,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::compute_image::compile::coreml::validate_ane_program;
 use crate::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
-use crate::coreml_pipeline;
+use crate::coreai_pipeline;
 use crate::mlpackage::{self, ModelMeta};
 use coreml_proto::proto::mil_spec;
 
@@ -76,7 +75,7 @@ fn compile_program(
         .map_err(|e| format!("mlpackage write failed for '{}': {}", name, e))?;
 
     // ── Compile via coremlcompiler ─────────────────────────────────
-    let receipt = coreml_pipeline::compile_mlpackage(
+    let receipt = coreai_pipeline::compile_mlpackage(
         &written_path,
         output_dir,
         name,

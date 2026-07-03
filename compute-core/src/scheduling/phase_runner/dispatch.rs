@@ -7,7 +7,7 @@
 use crate::compute_image::phase_dag::{EmittedPhase, PhaseKind};
 use crate::scheduling::execution_context::ExecutionContext;
 use crate::scheduling::phase_runner::execution::{
-    AccelElementWiseRunner, AccelMatMulRunner, ArenaAllocRunner, CoreMlGraphRunner,
+    AccelElementWiseRunner, AccelMatMulRunner, ArenaAllocRunner, CoreAiGraphRunner,
     LegacyMlxEpilogueRunner, LegacyMlxLayerRunner, LegacyMlxPrologueRunner,
     MetalFusedKernelRunner, MlxDecodeRunner, PhaseRunner, ResidualRmsNormRunner, SamplingRunner,
     SyncBarrierRunner, TransferRunner, WeightResidencyRunner,
@@ -27,7 +27,7 @@ impl PhaseRunnerRegistry {
         let default_runners: Vec<Box<dyn PhaseRunner>> = vec![
             Box::new(MlxDecodeRunner),
             Box::new(MetalFusedKernelRunner),
-            Box::new(CoreMlGraphRunner),
+            Box::new(CoreAiGraphRunner),
             Box::new(AccelMatMulRunner),
             Box::new(AccelElementWiseRunner),
             Box::new(ArenaAllocRunner),

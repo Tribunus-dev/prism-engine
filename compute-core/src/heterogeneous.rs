@@ -12,7 +12,7 @@ use crate::log_debug;
 use crate::memory::allocator::IosurfaceAllocator;
 
 use crate::compute_lane::{spawn_lane, ComputeCommand, ComputeLaneId, DeviceIdentity, LaneHandle};
-use crate::coreml_bridge::CoreMlModel;
+use crate::coreai_bridge::CoreAiModel;
 use parking_lot::Mutex;
 use std::sync::Arc;
 
@@ -472,7 +472,7 @@ pub fn dispatch_attention_ane(
     query: &Array,
     key: &Array,
     value: &Array,
-    model: &CoreMlModel,
+    model: &CoreAiModel,
     island: &SharedMemoryIsland,
 ) -> MlxResult<Array> {
     // 1. Eval and extract Q, K, V as f32 slices
@@ -537,7 +537,7 @@ pub fn dispatch_attention_coreml(
     query: &Array,
     key: &Array,
     value: &Array,
-    ane_models: &[Option<std::sync::Arc<CoreMlModel>>],
+    ane_models: &[Option<std::sync::Arc<CoreAiModel>>],
     layer_idx: usize,
     island: &SharedMemoryIsland,
 ) -> MlxResult<Array> {
@@ -556,7 +556,7 @@ pub fn dispatch_attention_coreml(
 pub struct BackendLanes {
     pub mlx: LaneHandle,
     pub accelerate: LaneHandle,
-    pub coreml: LaneHandle,
+    pub coreai: LaneHandle,
 }
 
 /// Drain commands from a stub backend lane — accepts commands but does
@@ -591,11 +591,11 @@ pub fn create_backend_lanes() -> BackendLanes {
         move |rx| stub_runner(rx),
     );
 
-    let coreml = spawn_lane(
+    let coreai = spawn_lane(
         ComputeLaneId(2),
         DeviceIdentity {
             lane_id: ComputeLaneId(2),
-            backend_name: "coreml".into(),
+            backend_name: "coreai".into(),
             substrate: "stub".into(),
         },
         64,
@@ -605,7 +605,7 @@ pub fn create_backend_lanes() -> BackendLanes {
     BackendLanes {
         mlx,
         accelerate,
-        coreml,
+        coreai,
     }
 }
 

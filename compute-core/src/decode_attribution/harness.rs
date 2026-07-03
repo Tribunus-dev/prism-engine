@@ -7,7 +7,7 @@
 //!
 //! 1. **Materialize** — Build MIL program via `MilBuilder`, write `.mlpackage`.
 //! 2. **Compile** — Invoke `xcrun coremlcompiler` via `compile_mlpackage`.
-//! 3. **Load** — Load compiled model via `CoreMlModel::load_with_compute_units`.
+//! 3. **Load** — Load compiled model via `CoreAiModel::load_with_compute_units`.
 //! 4. **MLComputePlan** — Attempt compute-plan inspection (stub, non-blocking).
 //! 5. **Cold predict** — First prediction (stub — not yet wired).
 //! 6. **Warmup** — Warmup predictions (stub).
@@ -18,14 +18,14 @@
 //! Phases 1–3 are fully implemented. Phases 4–9 are stubs that will be
 //! completed once the Core ML bridge predict API is integrated with
 //! IOSurface arena setup. See the bridge integration TODO in
-//! `coreml_bridge::predict`.
+//! `coreai_bridge::predict`.
 
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::Instant;
 
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
-use crate::coreml_pipeline;
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
+use crate::coreai_pipeline;
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 use crate::worker_memory;
@@ -45,7 +45,7 @@ use std::ffi::c_void;
 use crate::arena_info::ArenaInfo;
 
 use crate::decode_attribution::backend_adapters::{
-    conformance, coreml_adapter, predict_loop, reference_adapter as ref_eval, BackendSupportTier,
+    conformance, coreai_adapter, predict_loop, reference_adapter as ref_eval, BackendSupportTier,
 };
 
 use crate::decode_attribution::backend_adapters::mlx_adapter;
@@ -91,7 +91,7 @@ pub fn run_one(
             macos_version: "unknown".into(),
             xcode_build_version: "unknown".into(),
             coremlcompiler_version: "unknown".into(),
-            coreml_compiler_available: false,
+            coreai_compiler_available: false,
         });
 
     let ts = iso_timestamp();
@@ -176,12 +176,12 @@ pub fn run_one(
     r.source_package_sha256 = sha256_dir(&mlpackage_path);
 
     // ── Phase 2: Compile ──────────────────────────────────────────────────────
-    let compile_result = coreml_pipeline::compile_mlpackage(
+    let compile_result = coreai_pipeline::compile_mlpackage(
         &mlpackage_path,
         temp_dir.path(),
         family.name,
         compute_units,
-        "com.apple.coreml.ops.15_0",
+        "com.apple.coreai.ops.15_0",
     );
 
     let cm_receipt = match compile_result {
@@ -194,7 +194,7 @@ pub fn run_one(
     };
 
     // Copy compile-phase provenance from the pipeline receipt.
-    // Note: CoreMlIslandReceipt stores compile duration inside
+    // Note: CoreAiIslandReceipt stores compile duration inside
     // toolchain.compile_duration_ns (not at the top level).
     r.compile_duration_ns = cm_receipt.toolchain.compile_duration_ns;
     r.compiled_artifact_sha256 = cm_receipt.compiled_hash.clone();
@@ -223,8 +223,8 @@ pub fn run_one(
 
     // ── Phase 3: Load model ──────────────────────────────────────────────────
     let cu = match compute_units {
-        "cpuOnly" => CoreMlComputeUnits::CpuOnly,
-        _ => CoreMlComputeUnits::CpuAndGpu,
+        "cpuOnly" => CoreAiComputeUnits::CpuOnly,
+        _ => CoreAiComputeUnits::CpuAndGpu,
     };
 
     r.runtime_compute_units = cu.name().to_string();
@@ -233,7 +233,7 @@ pub fn run_one(
     r.process_rss_before_load_kb = resident_size_kb();
 
     let load_start = Instant::now();
-    let model = match CoreMlModel::load_with_compute_units(&cm_receipt.compiled_modelc_path, cu) {
+    let model = match CoreAiModel::load_with_compute_units(&cm_receipt.compiled_modelc_path, cu) {
         Ok(m) => m,
         Err(e) => {
             r.load_duration_ns = load_start.elapsed().as_nanos() as u64;
@@ -252,7 +252,7 @@ pub fn run_one(
     // ── Phase 4: MLComputePlan (optional, non-blocking) ──────────────────────
     //
     // Currently a stub: there is no Rust-side API for MLComputePlan
-    // exposed through the coreml_bridge. Returns "unavailable" with a
+    // exposed through the coreai_bridge. Returns "unavailable" with a
     // descriptive summary.
     let plan = inspect_compute_plan(&cm_receipt.compiled_modelc_path);
     r.compute_plan_status = plan.status;
@@ -261,7 +261,7 @@ pub fn run_one(
     // ── Phases 5–9: Prediction and conformance (stubs) ──────────────────────
     //
     // These phases require an IOSurface arena allocated and wired through
-    // the Core ML bridge's prediction API (tribunus_coreml_predict). The
+    // the Core ML bridge's prediction API (tribunus_coreai_predict). The
     // bridge is compiled and linked but the harness does not yet allocate
     // arenas or invoke prediction. See the following TODOs:
     //
@@ -341,7 +341,7 @@ pub fn run_one(
 /// # Arguments
 ///
 /// * `run_id` — Unique identifier for this run.
-/// * `backend` — Backend: `"coreml"`, `"accelerate"`, `"mlx"`, or `"reference"`.
+/// * `backend` — Backend: `"coreai"`, `"accelerate"`, `"mlx"`, or `"reference"`.
 /// * `family` — Graph family topology.
 /// * `profile` — Shape profile.
 /// * `runtime_policy` — Backend-specific runtime policy string.
@@ -358,7 +358,7 @@ pub fn run_one(
 ///
 /// ## Backend behavior
 ///
-/// - **coreml**: materialize+compile+load via `coreml_adapter::prepare()`, then
+/// - **coreai**: materialize+compile+load via `coreai_adapter::prepare()`, then
 ///   cold/warmup/steady prediction via `predict_loop` with ArenaInfo-backed F32
 ///   buffers. Sets phase kind fields and statuses.
 /// - **accelerate**: only matmul is supported. Checks `support_status` first; for
@@ -388,7 +388,7 @@ pub fn run_backend(
         macos_version: "unknown".into(),
         xcode_build_version: "unknown".into(),
         coremlcompiler_version: "unknown".into(),
-        coreml_compiler_available: false,
+        coreai_compiler_available: false,
     });
     let ts = iso_timestamp();
 
@@ -436,7 +436,7 @@ pub fn run_backend(
     r.process_rss_before_materialize_kb = resident_size_kb();
 
     match backend {
-        "coreml" => run_backend_coreml(
+        "coreai" => run_backend_coreml(
             &mut r,
             family,
             profile,
@@ -534,7 +534,7 @@ fn run_backend_coreml(
     r.materialization_kind = "mil_package_write".to_string();
     r.compile_kind = "xcrun_coremlcompiler".to_string();
     r.load_kind = "mlmodel_load".to_string();
-    r.execution_kind = "coreml_predict".to_string();
+    r.execution_kind = "coreai_predict".to_string();
     r.backend_support_status = "supported".to_string();
     r.support_tier = "supported_native".to_string();
 
@@ -561,14 +561,14 @@ fn run_backend_coreml(
     }
 
     // ── Phases 1-3: Materialize + Compile + Load ────────────────────────
-    let prepared = match coreml_adapter::prepare(family, profile, compute_units, output_dir) {
+    let prepared = match coreai_adapter::prepare(family, profile, compute_units, output_dir) {
         Ok(p) => p,
         Err(e) => {
             r.predict_status = "compile_limited".into();
             r.predict_failure_classification = "compile_limited".into();
             r.terminal_phase = "mil_build".into();
-            r.failure_diagnostics = Some(format!("coreml prepare: {e}"));
-            r.mark_compile_limited(format!("coreml prepare failed: {e}"));
+            r.failure_diagnostics = Some(format!("coreai prepare: {e}"));
+            r.mark_compile_limited(format!("coreai prepare failed: {e}"));
             r.materialize_status = "error".into();
             r.compile_status = "error".into();
             r.load_status = "error".into();
@@ -582,15 +582,15 @@ fn run_backend_coreml(
     r.process_rss_before_load_kb = resident_size_kb();
     r.load_duration_ns = prepared.prepare_duration_ns;
     r.load_success = true;
-    r.coreml_mil_build_ns = prepared.coreml_mil_build_ns;
-    r.coreml_package_write_ns = prepared.coreml_package_write_ns;
-    r.coreml_compiler_ns = prepared.coreml_compiler_ns;
-    r.coreml_model_load_ns = prepared.coreml_model_load_ns;
+    r.coreai_mil_build_ns = prepared.coreai_mil_build_ns;
+    r.coreai_package_write_ns = prepared.coreai_package_write_ns;
+    r.coreai_compiler_ns = prepared.coreai_compiler_ns;
+    r.coreai_model_load_ns = prepared.coreai_model_load_ns;
     r.compile_cache_hit = prepared.compile_cache_hit;
     r.source_package_sha256 = prepared.source_package_sha256;
     r.compiled_artifact_sha256 = prepared.compiled_artifact_sha256;
     r.execution_proof = crate::decode_attribution::receipt::ExecutionProof {
-        engine: "coreml".into(),
+        engine: "coreai".into(),
         accelerated_ops: family_ops(family.name),
         cpu_ops: vec![],
         reference_ops: vec![],
@@ -599,9 +599,9 @@ fn run_backend_coreml(
         accelerate_vforce_ops: vec![],
         cpu_glue_ops: vec![],
         bridge_path: prepared
-            .coreml_model
+            .coreai_model
             .as_ref()
-            .map(|_| format!("coreml_predict_bridge")),
+            .map(|_| format!("coreai_predict_bridge")),
         notes: Some(format!(
             "Compiled via coremlcompiler, island={}",
             prepared.compile_cache_hit
@@ -620,14 +620,14 @@ fn run_backend_coreml(
 
     // ── Build predict closure ───────────────────────────────────────────
     let input_data = generate_input_data(profile);
-    let output_name = coreml_output_name(family);
-    let output_len = coreml_output_len(family.name, profile);
+    let output_name = coreai_output_name(family);
+    let output_len = coreai_output_len(family.name, profile);
 
-    let model = match prepared.coreml_model.as_ref() {
+    let model = match prepared.coreai_model.as_ref() {
         Some(m) => m,
         None => {
-            r.mark_predict_blocked("load", "coreml model not loaded".to_string());
-            r.failure_reason = Some("coreml model not loaded".into());
+            r.mark_predict_blocked("load", "coreai model not loaded".to_string());
+            r.failure_reason = Some("coreai model not loaded".into());
             r.load_status = "error".into();
             return;
         }
@@ -658,7 +658,7 @@ fn run_backend_coreml(
         crate::decode_attribution::breadcrumb::write_breadcrumb("predict_call");
         model
             .predict("x", &in_arena, &output_name, &out_arena)
-            .map_err(|e| format!("coreml predict: {e}"))?;
+            .map_err(|e| format!("coreai predict: {e}"))?;
         crate::decode_attribution::breadcrumb::write_breadcrumb("predict_done");
         let dur = start.elapsed().as_nanos() as u64;
         let hash = conformance::hash_output(&output_buffer);
@@ -674,8 +674,8 @@ fn run_backend_coreml(
         }
         Err(e) => {
             r.cold_status = "error".into();
-            r.mark_predict_blocked("predict", format!("coreml cold predict: {e}"));
-            r.failure_diagnostics = Some(format!("coreml cold predict: {e}"));
+            r.mark_predict_blocked("predict", format!("coreai cold predict: {e}"));
+            r.failure_diagnostics = Some(format!("coreai cold predict: {e}"));
             return;
         }
     }
@@ -690,8 +690,8 @@ fn run_backend_coreml(
         }
         Err(e) => {
             r.warmup_status = "error".into();
-            r.mark_predict_blocked("predict", format!("coreml warmup: {e}"));
-            r.failure_diagnostics = Some(format!("coreml warmup: {e}"));
+            r.mark_predict_blocked("predict", format!("coreai warmup: {e}"));
+            r.failure_diagnostics = Some(format!("coreai warmup: {e}"));
             return;
         }
     }
@@ -717,8 +717,8 @@ fn run_backend_coreml(
         }
         Err(e) => {
             r.steady_status = "error".into();
-            r.mark_predict_blocked("predict", format!("coreml steady: {e}"));
-            r.failure_diagnostics = Some(format!("coreml steady: {e}"));
+            r.mark_predict_blocked("predict", format!("coreai steady: {e}"));
+            r.failure_diagnostics = Some(format!("coreai steady: {e}"));
             return;
         }
     };
@@ -1236,8 +1236,8 @@ fn backend_weights(family_name: &str, profile: &ShapeProfile) -> Vec<f32> {
 }
 
 /// Core ML output SSA name for the primary (first) output of a family.
-/// Mirrors [`coreml_adapter::output_info`] (private).
-fn coreml_output_name(family: &GraphFamily) -> String {
+/// Mirrors [`coreai_adapter::output_info`] (private).
+fn coreai_output_name(family: &GraphFamily) -> String {
     match family.name {
         "matmul" => "matmul_1",
         "chain_matmul_add_silu" => "silu_12",
@@ -1247,13 +1247,13 @@ fn coreml_output_name(family: &GraphFamily) -> String {
         "reshape_transpose_matmul" => "matmul_53",
         "softmax_tail" => "softmax_61",
         "identity_passthrough" => "identity_70",
-        other => panic!("coreml_output_name: unknown family '{other}'"),
+        other => panic!("coreai_output_name: unknown family '{other}'"),
     }
     .to_string()
 }
 
 /// Core ML output tensor element count for a family x profile.
-fn coreml_output_len(family_name: &str, profile: &ShapeProfile) -> usize {
+fn coreai_output_len(family_name: &str, profile: &ShapeProfile) -> usize {
     match canonical_family_name(family_name) {
         "identity_passthrough" => profile.input_cols as usize,
         _ => profile.weight_cols as usize,

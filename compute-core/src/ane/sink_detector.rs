@@ -11,7 +11,7 @@
 
 use crate::arena::Arena;
 use crate::arena::DataType;
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 
 /// Input feature name in the compiled Core ML model.
 const INPUT_NAME: &str = "attention_weights";
@@ -25,7 +25,7 @@ const OUTPUT_NAME: &str = "window_grow_prob";
 /// we are in a high-uncertainty region requiring a larger adaptive window.
 pub struct AneSinkDetector {
     /// Core ML model (optional — falls back to CPU heuristic when None).
-    model: Option<CoreMlModel>,
+    model: Option<CoreAiModel>,
     /// Input arena for attention weight distribution.
     input_arena: Option<Arena>,
     /// Output arena for prediction result.
@@ -46,7 +46,7 @@ impl AneSinkDetector {
     /// entropy heuristic.
     pub fn new(model_path: Option<&str>, max_seq_len: u32) -> Result<Self, String> {
         let (model, input_arena, output_arena) = if let Some(path) = model_path {
-            match CoreMlModel::load_with_compute_units(path, CoreMlComputeUnits::CpuAndNeuralEngine)
+            match CoreAiModel::load_with_compute_units(path, CoreAiComputeUnits::CpuAndNeuralEngine)
             {
                 Ok(m) => {
                     let inp = Arena::new(1, max_seq_len, DataType::Float16)?;
@@ -99,7 +99,7 @@ impl AneSinkDetector {
     /// Run the ANE Core ML model to predict window sufficiency.
     fn check_ane(
         &mut self,
-        model: &CoreMlModel,
+        model: &CoreAiModel,
         attention_weights: &[f32],
     ) -> Result<bool, String> {
         let input_arena = self

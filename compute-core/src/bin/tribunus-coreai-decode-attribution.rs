@@ -4,9 +4,9 @@
 //! timing across two primary matrices and one optional matrix.
 //!
 //! Usage:
-//!   cargo run --bin tribunus-coreml-decode-attribution --profile inference-evidence
-//!   cargo run --bin tribunus-coreml-decode-attribution --profile inference-evidence -- --include-gpu-shape-matrix
-//!   cargo run --bin tribunus-coreml-decode-attribution --profile inference-evidence -- --full-catalog --run-id LATTICE-0001
+//!   cargo run --bin tribunus-coreai-decode-attribution --profile inference-evidence
+//!   cargo run --bin tribunus-coreai-decode-attribution --profile inference-evidence -- --include-gpu-shape-matrix
+//!   cargo run --bin tribunus-coreai-decode-attribution --profile inference-evidence -- --full-catalog --run-id LATTICE-0001
 //!
 //! Output: JSONL receipts in decode_attribution_runs/ plus rollup report.
 
@@ -105,10 +105,10 @@ fn main() {
         tribunus_compute_core::log_info!("  {} total rows", lattice.len());
 
         // Validate row count expectation: 48 Core ML + 24 MLX + 24 Accelerate = 96
-        let coreml_count = lattice.iter().filter(|r| r.backend == "coreml").count();
+        let coreai_count = lattice.iter().filter(|r| r.backend == "coreai").count();
         let mlx_count = lattice.iter().filter(|r| r.backend == "mlx").count();
         let accel_count = lattice.iter().filter(|r| r.backend == "accelerate").count();
-        tribunus_compute_core::log_info!("  Core ML: {} rows", coreml_count);
+        tribunus_compute_core::log_info!("  Core ML: {} rows", coreai_count);
         tribunus_compute_core::log_info!("  MLX: {} rows", mlx_count);
         tribunus_compute_core::log_info!("  Accelerate: {} rows", accel_count);
 

@@ -11,13 +11,13 @@ use std::collections::HashMap;
 use crate::compilation::tri_lane::{
     AneAdmission, AneExecutionEvidence, EpochResourceCounters,
     EpochRouteOrigin, AppleTriLaneExecutionPlan,
-    AppleTriLaneExecutionReceipt, CoreMlConfigurationEvidence,
+    AppleTriLaneExecutionReceipt, CoreAiConfigurationEvidence,
     ExecutionEpoch, ExecutionLane, FallbackStatus, LaneExecutionEvent,
     NumericalStatus, OverlapMetrics, SlotEvent,
 };
 
 
-use crate::backend::coreml_iosurface::CoreMlIOSurfaceExecutable;
+use crate::backend::coreai_iosurface::CoreAiIOSurfaceExecutable;
 use crate::backend::metal_consumer::MetalConsumer;
 use crate::backend::metal_iosurface::MetalExecutable;
 use crate::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
@@ -102,7 +102,7 @@ impl ActivationRing {
                 self.slots[idx].total_slots = self.ring_size;
                 self.slots[idx].tensor_name = tensor_name.to_owned();
                 self.slots[idx].byte_size = byte_size;
-                self.slots[idx].producer = ExecutionLane::CoreMlAne;
+                self.slots[idx].producer = ExecutionLane::CoreAiAne;
                 self.slots[idx].consumer = ExecutionLane::MlxGpu;
                 self.slots[idx].released = false;
                 self.slots[idx].epoch_acquired = epoch;
@@ -268,7 +268,7 @@ impl EpochScheduler {
             sync_ns: self.plan.predicted_cost.cpu.sync_ns,
         };
         let ane_event = self.plan.ane_program.as_ref().map(|_| LaneExecutionEvent {
-            lane: ExecutionLane::CoreMlAne,
+            lane: ExecutionLane::CoreAiAne,
             success: true,
             compute_ns: self.plan.predicted_cost.ane.compute_ns,
             memory_ns: self.plan.predicted_cost.ane.memory_ns,
@@ -309,14 +309,14 @@ impl EpochScheduler {
             slot_events: Vec::new(),
             overlap_ns: overlap,
             fallback_used: false,
-            route_origin: EpochRouteOrigin::CoreMlAne,
-            coreml_prediction_completed: false,
+            route_origin: EpochRouteOrigin::CoreAiAne,
+            coreai_prediction_completed: false,
             metal_command_buffer_completed: false,
             numerical_status: NumericalStatus::NotValidated,
             configured_cpu_and_neural_engine: true,
             observed_ane_execution: false,
             fallback_status: FallbackStatus::NotActivated,
-            coreml_configuration: None,
+            coreai_configuration: None,
             ane_execution_evidence: AneExecutionEvidence::ConfiguredOnly,
         }
     }
@@ -395,19 +395,19 @@ impl EpochScheduler {
     pub fn execute_epoch(
         &mut self,
         arena: &mut AppleSharedArena,
-        coreml_exec: &mut CoreMlIOSurfaceExecutable,
+        coreai_exec: &mut CoreAiIOSurfaceExecutable,
         metal_consumer: &mut MetalConsumer,
     ) -> Result<AppleTriLaneExecutionReceipt, String> {
         let epoch = self.current_epoch;
         let start = std::time::Instant::now();
         let mut slot_events: Vec<SlotEvent> = Vec::new();
 
-        let has_inputs = !coreml_exec.input_bindings.is_empty();
-        let has_outputs = !coreml_exec.output_bindings.is_empty();
+        let has_inputs = !coreai_exec.input_bindings.is_empty();
+        let has_outputs = !coreai_exec.output_bindings.is_empty();
 
         // 0a. FP16-only production envelope check
         // Verify the slot dtype is float16 before dispatching.
-        let slot_dtype = coreml_exec.input_bindings.first()
+        let slot_dtype = coreai_exec.input_bindings.first()
             .and_then(|b| arena.slot(b.slot_id))
             .map(|s| s.manifest.dtype.as_str());
         if let Some(dt) = slot_dtype {
@@ -420,23 +420,23 @@ impl EpochScheduler {
 
         // 1. Acquire input slot
         if has_inputs {
-            let in_slot_id = coreml_exec.input_bindings[0].slot_id;
+            let in_slot_id = coreai_exec.input_bindings[0].slot_id;
             if let Some(in_slot) = arena.slot_mut(in_slot_id) {
-                in_slot.mark_writing(epoch, ExecutionLane::CoreMlAne);
+                in_slot.mark_writing(epoch, ExecutionLane::CoreAiAne);
             }
         }
 
         // 2. Run Core ML prediction (real — uses load_model + model.predict)
         let prediction_succeeded = if has_inputs && has_outputs {
-            match coreml_exec.load_model() {
+            match coreai_exec.load_model() {
                 Ok(()) => {
                     // Track Core ML model load
-                    self.resource_counters.coreml_model_loads += 1;
-                    if let Some(model) = &coreml_exec.model {
-                        let in_name = &coreml_exec.input_bindings[0].tensor_id;
-                        let out_name = &coreml_exec.output_bindings[0].tensor_id;
-                        let in_slot_id = coreml_exec.input_bindings[0].slot_id;
-                        let out_slot_id = coreml_exec.output_bindings[0].slot_id;
+                    self.resource_counters.coreai_model_loads += 1;
+                    if let Some(model) = &coreai_exec.model {
+                        let in_name = &coreai_exec.input_bindings[0].tensor_id;
+                        let out_name = &coreai_exec.output_bindings[0].tensor_id;
+                        let in_slot_id = coreai_exec.input_bindings[0].slot_id;
+                        let out_slot_id = coreai_exec.output_bindings[0].slot_id;
 
                         // Extract ArenaInfo from the slot's IOSurface-backed arena.
                         // Falls back to heap memory when backing_arena is None (mock).
@@ -499,17 +499,17 @@ impl EpochScheduler {
 
         // 3. Transition output slot to Ready
         if has_outputs && prediction_succeeded {
-            let out_slot_id = coreml_exec.output_bindings[0].slot_id;
+            let out_slot_id = coreai_exec.output_bindings[0].slot_id;
             if let Some(out_slot) = arena.slot_mut(out_slot_id) {
-                out_slot.mark_ready(epoch, ExecutionLane::CoreMlAne);
+                out_slot.mark_ready(epoch, ExecutionLane::CoreAiAne);
             }
         }
 
         // 4. Validate with Metal consumer
         let validation_matched = if has_outputs && prediction_succeeded {
-            let out_slot_id = coreml_exec.output_bindings[0].slot_id;
+            let out_slot_id = coreai_exec.output_bindings[0].slot_id;
             let accessible = metal_consumer
-                .verify_coreml_output_accessible(out_slot_id, arena)
+                .verify_coreai_output_accessible(out_slot_id, arena)
                 .unwrap_or(false);
             if accessible {
                 metal_consumer
@@ -526,14 +526,14 @@ impl EpochScheduler {
         // 5. Transition through Reading → Retired → release
         if prediction_succeeded {
             if has_outputs {
-                let out_slot_id = coreml_exec.output_bindings[0].slot_id;
+                let out_slot_id = coreai_exec.output_bindings[0].slot_id;
                 if let Some(out_slot) = arena.slot_mut(out_slot_id) {
                     let _ = out_slot.mark_reading(epoch, ExecutionLane::MlxGpu);
                     out_slot.retire(epoch);
                 }
             }
             if has_inputs {
-                let in_slot_id = coreml_exec.input_bindings[0].slot_id;
+                let in_slot_id = coreai_exec.input_bindings[0].slot_id;
                 if let Some(in_slot) = arena.slot_mut(in_slot_id) {
                     in_slot.retire(epoch);
                 }
@@ -570,12 +570,12 @@ impl EpochScheduler {
         // route_origin records which lane attempted execution.
         // Even when prediction fails, execution was attempted on the Core ML ANE lane.
         // MetalFallback is only set when an actual Metal fallback kernel produces output.
-        receipt.route_origin = EpochRouteOrigin::CoreMlAne;
-        receipt.coreml_prediction_completed = prediction_succeeded;
+        receipt.route_origin = EpochRouteOrigin::CoreAiAne;
+        receipt.coreai_prediction_completed = prediction_succeeded;
         receipt.metal_command_buffer_completed = validation_matched;
 
         // Loop-time resource allocation counters MUST remain 0 post-warmup;
-        // incrementing ones like coreml_model_loads are tracked in self.resource_counters.
+        // incrementing ones like coreai_model_loads are tracked in self.resource_counters.
         // These counters are carried on future FP16 production epoch receipts.
         debug_assert!(
             self.resource_counters.iosurface_allocations == 0
@@ -658,7 +658,7 @@ pub fn calculate_overlap(
 pub struct AppleTriLaneExecutor {
     pub plan: AppleTriLaneExecutionPlan,
     pub arena: AppleSharedArena,
-    pub coreml: HashMap<String, CoreMlIOSurfaceExecutable>,
+    pub coreai: HashMap<String, CoreAiIOSurfaceExecutable>,
     pub metal: HashMap<String, MetalExecutable>,
     pub consumers: HashMap<String, MetalConsumer>,
     pub scheduler: EpochScheduler,
@@ -678,7 +678,7 @@ impl AppleTriLaneExecutor {
         Self {
             plan,
             arena,
-            coreml: HashMap::new(),
+            coreai: HashMap::new(),
             metal: HashMap::new(),
             consumers: HashMap::new(),
             scheduler,
@@ -689,8 +689,8 @@ impl AppleTriLaneExecutor {
     }
 
     /// Register a Core ML IOSurface executable.
-    pub fn add_coreml(&mut self, id: &str, exec: CoreMlIOSurfaceExecutable) {
-        self.coreml.insert(id.to_owned(), exec);
+    pub fn add_coreml(&mut self, id: &str, exec: CoreAiIOSurfaceExecutable) {
+        self.coreai.insert(id.to_owned(), exec);
     }
 
     /// Register a Metal executable.
@@ -736,10 +736,10 @@ impl AppleTriLaneExecutor {
         //    (simulating completed execution on the producer lane)
         for slot in self.arena.slots.values_mut() {
             if matches!(&slot.state, SlotState::Writing { epoch: e, .. } if *e == epoch) {
-                slot.mark_ready(epoch, ExecutionLane::CoreMlAne);
+                slot.mark_ready(epoch, ExecutionLane::CoreAiAne);
             } else if matches!(&slot.state, SlotState::Reserved { epoch: e, .. } if *e == epoch) {
-                slot.mark_writing(epoch, ExecutionLane::CoreMlAne);
-                slot.mark_ready(epoch, ExecutionLane::CoreMlAne);
+                slot.mark_writing(epoch, ExecutionLane::CoreAiAne);
+                slot.mark_ready(epoch, ExecutionLane::CoreAiAne);
             }
         }
 
@@ -760,7 +760,7 @@ impl AppleTriLaneExecutor {
             epoch,
             lane_events: vec![
                 LaneExecutionEvent {
-                    lane: ExecutionLane::CoreMlAne,
+                    lane: ExecutionLane::CoreAiAne,
                     success: true,
                     compute_ns: elapsed / 3,
                     memory_ns: 0,
@@ -785,15 +785,15 @@ impl AppleTriLaneExecutor {
                 overlap_fraction: 0.0,
             },
             fallback_used: false,
-            route_origin: EpochRouteOrigin::CoreMlAne,
-            coreml_prediction_completed: false,
+            route_origin: EpochRouteOrigin::CoreAiAne,
+            coreai_prediction_completed: false,
             metal_command_buffer_completed: false,
             numerical_status: NumericalStatus::Pass,
             configured_cpu_and_neural_engine: true,
             observed_ane_execution: false,
             slot_events,
             fallback_status: FallbackStatus::NotActivated,
-            coreml_configuration: Some(CoreMlConfigurationEvidence {
+            coreai_configuration: Some(CoreAiConfigurationEvidence {
                 loaded_with_cpu_and_neural_engine: true,
                 compute_policy: "cpuAndNeuralEngine".into(),
                 configured_at: String::new(),
@@ -839,9 +839,9 @@ mod tests {
 
     fn sample_plan() -> AppleTriLaneExecutionPlan {
         use crate::compilation::tri_lane::{
-            AppleFallbackPlan, AppleHardwareSignature, CoreMlProgramBinding,
-            CoreMlTensorContract, CoreMlShapeContract, CoreMlWarmupContract,
-            CoreMlComputeUnitPolicy, CpuProgramBinding, MetalProgramBinding, ShapeClass,
+            AppleFallbackPlan, AppleHardwareSignature, CoreAiProgramBinding,
+            CoreAiTensorContract, CoreAiShapeContract, CoreAiWarmupContract,
+            CoreAiComputeUnitPolicy, CpuProgramBinding, MetalProgramBinding, ShapeClass,
             NumericalPolicy, TriLaneCostModel, LaneCostEstimate, TriLaneEvidenceRequirements,
         };
 
@@ -850,7 +850,7 @@ mod tests {
             hardware_signature: AppleHardwareSignature {
                 soc_family: "M1".into(),
                 macos_version: "14.5".into(),
-                coreml_version: "7.2.0".into(),
+                coreai_version: "7.2.0".into(),
                 p_core_count: 4,
                 gpu_core_count: 8,
                 ane_core_count: 16,
@@ -871,29 +871,29 @@ mod tests {
                 max_relative_error: 1e-3,
                 allow_mixed_precision: true,
             },
-            ane_program: Some(CoreMlProgramBinding {
+            ane_program: Some(CoreAiProgramBinding {
                 artifact_id: "ane-ffn-v3".into(),
                 package_digest: "abc".into(),
                 compiled_model_digest: "def".into(),
-                compute_unit_policy: CoreMlComputeUnitPolicy::CpuAndNeuralEngineRequired,
-                input_contract: vec![CoreMlTensorContract {
+                compute_unit_policy: CoreAiComputeUnitPolicy::CpuAndNeuralEngineRequired,
+                input_contract: vec![CoreAiTensorContract {
                     name: "hidden_states".into(),
                     shape: vec![1, 4096],
                     layout: "NHWC".into(),
                     dtype: "float16".into(),
                 }],
-                output_contract: vec![CoreMlTensorContract {
+                output_contract: vec![CoreAiTensorContract {
                     name: "ffn_output".into(),
                     shape: vec![1, 4096],
                     layout: "NHWC".into(),
                     dtype: "float16".into(),
                 }],
                 state_contract: None,
-                shape_contract: CoreMlShapeContract {
+                shape_contract: CoreAiShapeContract {
                     static_shape: Some(vec![1, 4096]),
                     dynamic_range: None,
                 },
-                warmup_contract: CoreMlWarmupContract {
+                warmup_contract: CoreAiWarmupContract {
                     min_warmup_predictions: 3,
                     max_warmup_latency_ms: 50,
                     tolerance: 0.01,
@@ -1073,8 +1073,8 @@ mod tests {
     fn test_epoch_scheduler_execute_failing() {
         // Since no real model file exists, prediction fails gracefully.
         // The receipt must reflect the failure via its evidence fields.
-        use crate::backend::coreml_iosurface::{
-            CoreMlIOSurfaceBinding, CoreMlIOSurfaceExecutable, CoreMlComputePolicy,
+        use crate::backend::coreai_iosurface::{
+            CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable, CoreAiComputePolicy,
         };
 
         let plan = sample_plan();
@@ -1096,7 +1096,7 @@ mod tests {
                 physical_shape: vec![1, 4096],
                 strides_bytes: vec![8192],
                 layout: "NHWC".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: SlotReuseClass::RingReuse { ring_depth: 2 },
                 required_alignment: 64,
@@ -1105,19 +1105,19 @@ mod tests {
             generation: 0,
             layout_digest: "abc".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
 
         // Build a Core ML executable with no real model file — load_model() will fail
-        let mut coreml_exec = CoreMlIOSurfaceExecutable::new(
+        let mut coreai_exec = CoreAiIOSurfaceExecutable::new(
             "test-artifact",
             "/nonexistent/model.mlmodelc",
-            CoreMlComputePolicy::CpuAndNeuralEngine,
+            CoreAiComputePolicy::CpuAndNeuralEngine,
         );
-        coreml_exec
-            .add_input_binding(CoreMlIOSurfaceBinding {
+        coreai_exec
+            .add_input_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "hidden_states".into(),
                 slot_id: 0,
                 io_surface_id: 0,
@@ -1125,8 +1125,8 @@ mod tests {
                 contract_digest: String::new(),
             })
             .expect("add input binding");
-        coreml_exec
-            .add_output_binding(CoreMlIOSurfaceBinding {
+        coreai_exec
+            .add_output_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "ffn_output".into(),
                 slot_id: 0,
                 io_surface_id: 0,
@@ -1154,7 +1154,7 @@ mod tests {
         });
 
         let receipt = sched
-            .execute_epoch(&mut arena, &mut coreml_exec, &mut metal_consumer)
+            .execute_epoch(&mut arena, &mut coreai_exec, &mut metal_consumer)
             .expect("execute_epoch should not panic on failing backend");
 
         // Prediction failed because model file doesn't exist
@@ -1234,7 +1234,7 @@ mod tests {
         let plan = sample_plan();
         let mut plan = plan.clone();
         plan.dependencies = vec![LaneDependency {
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
             consumer: ExecutionLane::MlxGpu,
             kind: DependencyKind::DataReady,
             resource: "0".into(),
@@ -1267,7 +1267,7 @@ mod tests {
                 physical_shape: vec![1, 4096],
                 strides_bytes: vec![8192],
                 layout: "NHWC".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: SlotReuseClass::RingReuse { ring_depth: 2 },
                 required_alignment: 64,
@@ -1276,7 +1276,7 @@ mod tests {
             generation: 0,
             layout_digest: "abc".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
@@ -1340,7 +1340,7 @@ mod tests {
         let counters = EpochResourceCounters::default();
         assert_eq!(counters.iosurface_allocations, 0);
         assert_eq!(counters.metal_texture_creations, 0);
-        assert_eq!(counters.coreml_model_loads, 0);
+        assert_eq!(counters.coreai_model_loads, 0);
         assert_eq!(counters.command_queue_creations, 0);
         assert_eq!(counters.command_pipeline_creations, 0);
         assert_eq!(counters.cpu_readbacks, 0);
@@ -1348,8 +1348,8 @@ mod tests {
 
     #[test]
     fn test_execute_epoch_tracks_resource_counters() {
-        use crate::backend::coreml_iosurface::{
-            CoreMlIOSurfaceBinding, CoreMlIOSurfaceExecutable, CoreMlComputePolicy,
+        use crate::backend::coreai_iosurface::{
+            CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable, CoreAiComputePolicy,
         };
         use crate::compute_image::apple_shared_arena::{
             IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
@@ -1372,7 +1372,7 @@ mod tests {
                 physical_shape: vec![1, 4096],
                 strides_bytes: vec![8192],
                 layout: "NHWC".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: SlotReuseClass::RingReuse { ring_depth: 2 },
                 required_alignment: 64,
@@ -1381,19 +1381,19 @@ mod tests {
             generation: 0,
             layout_digest: "abc".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
 
         // Build a Core ML executable (load_model will fail since no real model file)
-        let mut coreml_exec = CoreMlIOSurfaceExecutable::new(
+        let mut coreai_exec = CoreAiIOSurfaceExecutable::new(
             "test-artifact",
             "/nonexistent/model.mlmodelc",
-            CoreMlComputePolicy::CpuAndNeuralEngine,
+            CoreAiComputePolicy::CpuAndNeuralEngine,
         );
-        coreml_exec
-            .add_input_binding(CoreMlIOSurfaceBinding {
+        coreai_exec
+            .add_input_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "hidden_states".into(),
                 slot_id: 0,
                 io_surface_id: 0,
@@ -1401,8 +1401,8 @@ mod tests {
                 contract_digest: String::new(),
             })
             .expect("add input binding");
-        coreml_exec
-            .add_output_binding(CoreMlIOSurfaceBinding {
+        coreai_exec
+            .add_output_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "ffn_output".into(),
                 slot_id: 0,
                 io_surface_id: 0,
@@ -1428,14 +1428,14 @@ mod tests {
         });
 
         // Counters start at zero before execution
-        assert_eq!(sched.resource_counters.coreml_model_loads, 0);
+        assert_eq!(sched.resource_counters.coreai_model_loads, 0);
         assert_eq!(sched.resource_counters.iosurface_allocations, 0);
 
         let _receipt = sched
-            .execute_epoch(&mut arena, &mut coreml_exec, &mut metal_consumer)
+            .execute_epoch(&mut arena, &mut coreai_exec, &mut metal_consumer)
             .expect("execute_epoch should not panic");
 
-        // Acceptance: execute_epoch() tracks resource creation (coreml_model_loads attempted)
+        // Acceptance: execute_epoch() tracks resource creation (coreai_model_loads attempted)
         // load_model() was called but the file doesn't exist, so it may or may not increment.
         // The key invariant is that loop-time allocation counters remain 0.
         assert_eq!(
@@ -1462,8 +1462,8 @@ mod tests {
 
     #[test]
     fn test_receipt_non_optimistic_evidence() {
-        use crate::backend::coreml_iosurface::{
-            CoreMlIOSurfaceBinding, CoreMlIOSurfaceExecutable, CoreMlComputePolicy,
+        use crate::backend::coreai_iosurface::{
+            CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable, CoreAiComputePolicy,
         };
         use crate::compute_image::apple_shared_arena::{
             IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
@@ -1486,7 +1486,7 @@ mod tests {
                 physical_shape: vec![1, 4096],
                 strides_bytes: vec![8192],
                 layout: "NHWC".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: SlotReuseClass::RingReuse { ring_depth: 2 },
                 required_alignment: 64,
@@ -1495,18 +1495,18 @@ mod tests {
             generation: 0,
             layout_digest: "abc".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
 
-        let mut coreml_exec = CoreMlIOSurfaceExecutable::new(
+        let mut coreai_exec = CoreAiIOSurfaceExecutable::new(
             "test-artifact",
             "/nonexistent/model.mlmodelc",
-            CoreMlComputePolicy::CpuAndNeuralEngine,
+            CoreAiComputePolicy::CpuAndNeuralEngine,
         );
-        coreml_exec
-            .add_input_binding(CoreMlIOSurfaceBinding {
+        coreai_exec
+            .add_input_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "hidden_states".into(),
                 slot_id: 0,
                 io_surface_id: 0,
@@ -1514,8 +1514,8 @@ mod tests {
                 contract_digest: String::new(),
             })
             .expect("add input binding");
-        coreml_exec
-            .add_output_binding(CoreMlIOSurfaceBinding {
+        coreai_exec
+            .add_output_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "ffn_output".into(),
                 slot_id: 0,
                 io_surface_id: 0,
@@ -1541,7 +1541,7 @@ mod tests {
         });
 
         let receipt = sched
-            .execute_epoch(&mut arena, &mut coreml_exec, &mut metal_consumer)
+            .execute_epoch(&mut arena, &mut coreai_exec, &mut metal_consumer)
             .expect("execute_epoch should not panic");
 
         // Acceptance: Receipts have non-optimistic evidence.
@@ -1584,7 +1584,7 @@ mod tests {
         // In a real production epoch loop (post-warmup), none of these counters
         // should ever increment: all IOSurfaces, Metal textures, command queues,
         // pipelines, and CPU readback buffers are allocated during installation
-        // and reused across epochs. Only coreml_model_loads may increment.
+        // and reused across epochs. Only coreai_model_loads may increment.
         //
         // This test re-asserts that after default construction, before any epoch
         // execution, the counters are zero. The companion test

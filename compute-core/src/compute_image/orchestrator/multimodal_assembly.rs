@@ -41,6 +41,7 @@ pub struct AudioInputRef {
 }
 
 /// Describes where a modality's embeddings live in the decoder input.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DecoderEmbeddingSpan {
     /// Absolute position in the assembled sequence.
@@ -56,6 +57,7 @@ pub struct DecoderEmbeddingSpan {
 }
 
 /// Metadata for image positional encoding in attention.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ImagePositionRange {
     /// Start position in the assembled decoder sequence.
@@ -75,6 +77,7 @@ pub struct ImagePositionRange {
 }
 
 /// Layout hint for the attention kernel.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttentionLayout {
     /// Text-only sequence — standard causal attention.
@@ -87,6 +90,7 @@ pub enum AttentionLayout {
 }
 
 /// Complete plan for assembling a multimodal prompt into decoder input.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MultimodalPromptPlan {
     /// Total number of embedding vectors in the assembled sequence.
@@ -100,6 +104,7 @@ pub struct MultimodalPromptPlan {
 }
 
 impl MultimodalPromptPlan {
+    #[allow(dead_code)]
     /// Create a text-only prompt plan.
     pub fn text_only(num_tokens: u32) -> Self {
         let span = DecoderEmbeddingSpan {
@@ -118,6 +123,7 @@ impl MultimodalPromptPlan {
     }
 
     /// Validate that all spans are contiguous and cover the full sequence.
+    #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), String> {
         if self.embedding_spans.is_empty() {
             return Err("empty embedding spans".into());
@@ -145,6 +151,7 @@ impl MultimodalPromptPlan {
     }
 
     /// Check whether this plan requires multimodal capabilities.
+    #[allow(dead_code)]
     pub fn is_multimodal(&self) -> bool {
         self.image_positions.iter().any(|_| true)
             || self.embedding_spans.iter().any(|s| s.modality != InputModality::Text)

@@ -1,6 +1,6 @@
 //! Core ML graph backend — compiled model regions.
 //!
-//! Uses the native `coreml_bridge` for MLModel loading, prediction,
+//! Uses the native `coreai_bridge` for MLModel loading, prediction,
 //! and stateful inference.  Models are loaded from compiled `.mlmodelc`
 //! bundles and executed through IOSurface-backed arenas.
 
@@ -8,31 +8,31 @@ use std::time::Instant;
 
 use super::graph::*;
 use crate::backend::routing::*;
-use crate::coreml_bridge::CoreMlModel;
+use crate::coreai_bridge::CoreAiModel;
 
 /// Core ML compute-unit policies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoreMlComputeUnits {
+pub enum CoreAiComputeUnits {
     CpuOnly,
     CpuAndGpu,
     CpuAndNeuralEngine,
     All,
 }
 
-impl CoreMlComputeUnits {
+impl CoreAiComputeUnits {
     pub fn to_requested_substrate(&self) -> RequestedSubstrate {
         match self {
-            CoreMlComputeUnits::CpuOnly => RequestedSubstrate::Cpu,
-            CoreMlComputeUnits::CpuAndGpu => RequestedSubstrate::CpuAndGpu,
-            CoreMlComputeUnits::CpuAndNeuralEngine => RequestedSubstrate::CpuAndNeuralEngine,
-            CoreMlComputeUnits::All => RequestedSubstrate::All,
+            CoreAiComputeUnits::CpuOnly => RequestedSubstrate::Cpu,
+            CoreAiComputeUnits::CpuAndGpu => RequestedSubstrate::CpuAndGpu,
+            CoreAiComputeUnits::CpuAndNeuralEngine => RequestedSubstrate::CpuAndNeuralEngine,
+            CoreAiComputeUnits::All => RequestedSubstrate::All,
         }
     }
 }
 
 /// Shape constraint for a compiled Core ML region.
 #[derive(Debug, Clone)]
-pub struct CoreMlShapeConstraint {
+pub struct CoreAiShapeConstraint {
     pub name: String,
     pub min_dims: Vec<u32>,
     pub max_dims: Vec<u32>,
@@ -40,24 +40,24 @@ pub struct CoreMlShapeConstraint {
 
 /// Compiled Core ML model identity.
 #[derive(Debug, Clone)]
-pub struct CompiledCoreMlModel {
+pub struct CompiledCoreAiModel {
     pub artifact_id: BackendArtifactId,
     pub region_family: OperationFamily,
-    pub compute_units: CoreMlComputeUnits,
-    pub shape_constraints: Vec<CoreMlShapeConstraint>,
+    pub compute_units: CoreAiComputeUnits,
+    pub shape_constraints: Vec<CoreAiShapeConstraint>,
     pub compile_ns: u64,
 }
 
 /// Core ML graph backend with real MLModel execution.
-pub struct CoreMlBackend {
+pub struct CoreAiBackend {
     /// Slot→model mapping.
-    compiled_regions: Vec<Option<CoreMlModel>>,
+    compiled_regions: Vec<Option<CoreAiModel>>,
     /// Per-slot metadata.
-    region_metadata: Vec<Option<CompiledCoreMlModel>>,
+    region_metadata: Vec<Option<CompiledCoreAiModel>>,
     region_generations: Vec<u32>,
 }
 
-impl CoreMlBackend {
+impl CoreAiBackend {
     pub fn new() -> Self {
         Self {
             compiled_regions: Vec::new(),
@@ -75,14 +75,14 @@ impl CoreMlBackend {
     ) -> Result<(CompiledRegionHandle, u64), String> {
         let compile_start = Instant::now();
 
-        let model = CoreMlModel::load(model_path)
-            .map_err(|e| format!("CoreMlBackend: load {}: {}", model_path, e))?;
+        let model = CoreAiModel::load(model_path)
+            .map_err(|e| format!("CoreAiBackend: load {}: {}", model_path, e))?;
         let compile_ns = compile_start.elapsed().as_nanos() as u64;
 
-        let meta = CompiledCoreMlModel {
+        let meta = CompiledCoreAiModel {
             artifact_id: BackendArtifactId(self.compiled_regions.len() as u64),
             region_family: family,
-            compute_units: CoreMlComputeUnits::All,
+            compute_units: CoreAiComputeUnits::All,
             shape_constraints: vec![],
             compile_ns,
         };
@@ -102,13 +102,13 @@ impl CoreMlBackend {
     }
 }
 
-impl Default for CoreMlBackend {
+impl Default for CoreAiBackend {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl GraphBackend for CoreMlBackend {
+impl GraphBackend for CoreAiBackend {
     fn validate_region(&self, region: &GraphRegion) -> Result<BackendLegalityReceipt, String> {
         let start = std::time::Instant::now();
         let mut violations: Vec<String> = Vec::new();
@@ -116,7 +116,7 @@ impl GraphBackend for CoreMlBackend {
 
         if region.operations.is_empty() {
             violations.push("empty region".into());
-            ids.push("coreml:empty_region".into());
+            ids.push("coreai:empty_region".into());
         }
 
         // TODO: add Core ML-specific legality checks once the bridge is integrated
@@ -124,7 +124,7 @@ impl GraphBackend for CoreMlBackend {
         Ok(BackendLegalityReceipt {
             legal: violations.is_empty(),
             region_digest: EvidenceDigest(format!("region_{}", region.region_id)),
-            machine_profile_digest: EvidenceDigest("coreml_macOS".into()),
+            machine_profile_digest: EvidenceDigest("coreai_macOS".into()),
             violations,
             violation_constraint_ids: ids,
             validation_ns: start.elapsed().as_nanos() as u64,
@@ -153,7 +153,7 @@ impl GraphBackend for CoreMlBackend {
             || self.region_generations.get(idx).copied().unwrap_or(0) != generation
         {
             return Err(format!(
-                "CoreMlBackend: stale or invalid region handle slot={} gen={}",
+                "CoreAiBackend: stale or invalid region handle slot={} gen={}",
                 idx, generation,
             ));
         }
@@ -164,7 +164,7 @@ impl GraphBackend for CoreMlBackend {
         // execute_region: full arena-based prediction requires Phase 9
         // materialization resolver (TensorId → ArenaInfo).  The model is
         // loaded and addressable — the lifecycle is proved.
-        Err("CoreMlBackend: execute_region — arena prediction pending Phase 9".into())
+        Err("CoreAiBackend: execute_region — arena prediction pending Phase 9".into())
     }
 
     fn graph_backend_id(&self) -> BackendId {

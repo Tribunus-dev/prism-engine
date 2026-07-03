@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::arena_info::ArenaInfo;
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 
 use super::super::arena::StorageRoute;
 use super::super::receipt::BridgeReceipt;
@@ -39,7 +39,7 @@ use super::super::receipt::BridgeReceipt;
 ///   be explicitly verified before being promoted to zero-copy.
 pub struct CoreMLTeacher {
     /// Compiled models keyed by content digest (hex string).
-    model_cache: HashMap<String, CoreMlModel>,
+    model_cache: HashMap<String, CoreAiModel>,
     /// Base directory containing .mlmodelc bundles.
     model_dir: PathBuf,
 }
@@ -60,10 +60,10 @@ impl CoreMLTeacher {
 
     /// Ensure the compiled model for `digest` is loaded and cached.
     ///
-    /// Uses `CoreMlComputeUnits::CpuAndNeuralEngine` — permits CPU and Neural
+    /// Uses `CoreAiComputeUnits::CpuAndNeuralEngine` — permits CPU and Neural
     /// Engine execution while excluding the GPU. Core ML still decides what it
     /// can compile and may use CPU fallback for unsupported portions.
-    fn load_model(&mut self, digest: &str) -> Result<&CoreMlModel, String> {
+    fn load_model(&mut self, digest: &str) -> Result<&CoreAiModel, String> {
         // Fast path — already cached.
         if !self.model_cache.contains_key(digest) {
             let modelc_path = self.modelc_path(digest);
@@ -71,9 +71,9 @@ impl CoreMLTeacher {
                 .to_str()
                 .ok_or_else(|| format!("non-UTF-8 model path: {}", modelc_path.display()))?;
 
-            let model = CoreMlModel::load_with_compute_units(
+            let model = CoreAiModel::load_with_compute_units(
                 path_str,
-                CoreMlComputeUnits::CpuAndNeuralEngine,
+                CoreAiComputeUnits::CpuAndNeuralEngine,
             )
             .map_err(|e| format!("CoreMLTeacher: load failed for {}: {}", digest, e))?;
 

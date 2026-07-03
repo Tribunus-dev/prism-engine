@@ -151,7 +151,7 @@ impl MetalConsumer {
     /// Checks that the slot exists in the arena and is in the `Ready` state,
     /// which indicates Core ML has completed writing and the buffer is safe
     /// for Metal to consume.
-    pub fn verify_coreml_output_accessible(
+    pub fn verify_coreai_output_accessible(
         &mut self,
         slot_id: u32,
         arena: &crate::compute_image::apple_shared_arena::AppleSharedArena,
@@ -382,7 +382,7 @@ mod tests {
                 strides_bytes: vec![128, 2],
                 layout: "NHWC".into(),
                 producer: ExecutionLane::CandleCpu,
-                consumer: ExecutionLane::CoreMlAne,
+                consumer: ExecutionLane::CoreAiAne,
                 reuse_class: SlotReuseClass::Exclusive,
                 required_alignment: 256,
             },
@@ -390,7 +390,7 @@ mod tests {
             generation: 0,
             layout_digest: "abc123".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         }
@@ -420,7 +420,7 @@ mod tests {
 
         let arena = make_arena_with_slot(1, "abc123", SlotState::Ready {
             epoch: 0,
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
         });
 
         let result = consumer.validate(&arena, 0).unwrap();
@@ -449,7 +449,7 @@ mod tests {
 
         let arena = make_arena_with_slot(1, "different_digest", SlotState::Ready {
             epoch: 0,
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
         });
 
         let err = consumer.validate(&arena, 0).unwrap_err();
@@ -459,33 +459,33 @@ mod tests {
     /// Slot must be Ready for Metal consumer access; non-Ready states are
     /// correctly rejected.
     #[test]
-    fn test_verify_coreml_output_slot_state() {
+    fn test_verify_coreai_output_slot_state() {
         let mut consumer = MetalConsumer::new("test_consumer");
 
         // Slot in Writing state -- not ready
         let arena_writing = make_arena_with_slot(1, "abc123", SlotState::Writing {
             epoch: 0,
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
         });
         let err = consumer
-            .verify_coreml_output_accessible(1, &arena_writing)
+            .verify_coreai_output_accessible(1, &arena_writing)
             .unwrap_err();
         assert!(err.contains("not ready"));
 
         // Slot in Ready state -- accessible
         let arena_ready = make_arena_with_slot(1, "abc123", SlotState::Ready {
             epoch: 0,
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
         });
         let accessible = consumer
-            .verify_coreml_output_accessible(1, &arena_ready)
+            .verify_coreai_output_accessible(1, &arena_ready)
             .unwrap();
         assert!(accessible);
 
         // Missing slot -- error
         let arena_empty = AppleSharedArena::new("empty".into(), 1);
         let err = consumer
-            .verify_coreml_output_accessible(99, &arena_empty)
+            .verify_coreai_output_accessible(99, &arena_empty)
             .unwrap_err();
         assert!(err.contains("slot 99 not found"));
     }

@@ -1,4 +1,4 @@
-//! Write `.mlpackage` directory bundles from `coreml-proto` Model protobufs.
+//! Write `.mlpackage` directory bundles from `coreai-proto` Model protobufs.
 //!
 //! Produces Apple-standard structure:
 //! ```text

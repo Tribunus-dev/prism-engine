@@ -351,8 +351,8 @@ impl OutputBufferHint for Arena {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coreml_bridge::CoreMlModel;
-    use crate::coreml_state::CoreMlStateHandle;
+    use crate::coreai_bridge::CoreAiModel;
+    use crate::coreai_state::CoreAiStateHandle;
     use mlx_rs::Dtype;
     use crate::external_array;
     use std::sync::Arc;
@@ -538,11 +538,11 @@ mod tests {
 
     #[ignore = "requires CoreML modelc artifacts on disk"]
     #[test]
-    fn test_iosurface_phase2_coreml_pixelbuffer_input() {
+    fn test_iosurface_phase2_coreai_pixelbuffer_input() {
         let model_path =
-            "/tmp/tribunus-coreml-nn-identity.mlmodelc/tribunus-coreml-nn-identity.mlmodelc";
+            "/tmp/tribunus-coreai-nn-identity.mlmodelc/tribunus-coreai-nn-identity.mlmodelc";
 
-        let model = CoreMlModel::load(model_path).expect("load Core ML model");
+        let model = CoreAiModel::load(model_path).expect("load Core ML model");
         let dim0 = 1u32;
         let dim1 = 256u32;
         let n = (dim0 * dim1) as usize;
@@ -591,9 +591,9 @@ mod tests {
     #[test]
     fn test_iosurface_phase3_output_backings() {
         let model_path =
-            "/tmp/tribunus-coreml-nn-identity.mlmodelc/tribunus-coreml-nn-identity.mlmodelc";
+            "/tmp/tribunus-coreai-nn-identity.mlmodelc/tribunus-coreai-nn-identity.mlmodelc";
 
-        let model = CoreMlModel::load(model_path).expect("load Core ML model");
+        let model = CoreAiModel::load(model_path).expect("load Core ML model");
         let dim0 = 1u32;
         let dim1 = 256u32;
         let n = (dim0 * dim1) as usize;
@@ -652,9 +652,9 @@ mod tests {
     #[test]
     fn test_iosurface_phase4_full_roundtrip() {
         let model_path =
-            "/tmp/tribunus-coreml-nn-identity.mlmodelc/tribunus-coreml-nn-identity.mlmodelc";
+            "/tmp/tribunus-coreai-nn-identity.mlmodelc/tribunus-coreai-nn-identity.mlmodelc";
 
-        let model = CoreMlModel::load(model_path).expect("load Core ML model");
+        let model = CoreAiModel::load(model_path).expect("load Core ML model");
         let dim0 = 1u32;
         let dim1 = 256u32;
         let n = (dim0 * dim1) as usize;
@@ -772,11 +772,11 @@ mod tests {
         let model_path = "/tmp/tribunus-stateful-toy.mlmodelc/tribunus-stateful-toy.mlmodelc";
         // Hard-fail if the model doesn't exist or can't load.
         // This test is expected to pass in the verified compiler environment.
-        let model = CoreMlModel::load(model_path).expect(&format!(
+        let model = CoreAiModel::load(model_path).expect(&format!(
             "FAIL: stateful model must load from {} — compiler environment not configured?",
             model_path
         ));
-        let state = CoreMlStateHandle::new(model.ptr).expect("create state handle");
+        let state = CoreAiStateHandle::new(model.ptr).expect("create state handle");
 
         let dim0 = 1u32;
         let dim1 = 4u32;
@@ -831,12 +831,12 @@ mod tests {
         let model_path = "/tmp/tribunus-stateful-toy.mlmodelc/tribunus-stateful-toy.mlmodelc";
         // Hard-fail if the model doesn't exist or can't load.
         // This test is expected to pass in the verified compiler environment.
-        let model = CoreMlModel::load(model_path).expect(&format!(
+        let model = CoreAiModel::load(model_path).expect(&format!(
             "FAIL: stateful model must load from {} — compiler environment not configured?",
             model_path
         ));
-        let state_1 = CoreMlStateHandle::new(model.ptr).expect("state 1");
-        let state_2 = CoreMlStateHandle::new(model.ptr).expect("state 2");
+        let state_1 = CoreAiStateHandle::new(model.ptr).expect("state 1");
+        let state_2 = CoreAiStateHandle::new(model.ptr).expect("state 2");
 
         let dim0 = 1u32;
         let dim1 = 4u32;
@@ -967,11 +967,11 @@ mod tests {
         let model_path = "/tmp/tribunus-stateful-toy.mlmodelc/tribunus-stateful-toy.mlmodelc";
         // Hard-fail if the model doesn't exist or can't load.
         // This test is expected to pass in the verified compiler environment.
-        let model = CoreMlModel::load(model_path).expect(&format!(
+        let model = CoreAiModel::load(model_path).expect(&format!(
             "FAIL: stateful model must load from {} — compiler environment not configured?",
             model_path
         ));
-        let state = CoreMlStateHandle::new(model.ptr).expect("create state handle");
+        let state = CoreAiStateHandle::new(model.ptr).expect("create state handle");
 
         let dim0 = 1u32;
         let dim1 = 4u32;
@@ -1038,10 +1038,10 @@ mod tests {
 
     #[ignore = "requires CoreML modelc artifacts on disk"]
     #[test]
-    fn test_gemma_mlp_coreml_prediction() {
+    fn test_gemma_mlp_coreai_prediction() {
         let model_path = "/tmp/tribunus-gemma-mlp.mlmodelc/tribunus-gemma-mlp.mlmodelc";
 
-        let model = CoreMlModel::load(model_path).expect("load Gemma MLP model");
+        let model = CoreAiModel::load(model_path).expect("load Gemma MLP model");
         let dim0 = 1u32;
         let dim1 = 3840u32;
         let n = (dim0 * dim1) as usize;

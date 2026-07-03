@@ -13,11 +13,11 @@ pub struct HostEnvironment {
     /// coremlcompiler version string
     pub coremlcompiler_version: String,
     /// Whether coremlcompiler is reachable via xcrun and returned a valid version.
-    pub coreml_compiler_available: bool,
+    pub coreai_compiler_available: bool,
 }
 
 /// Capture the current machine environment by probing sysctl, sw_vers,
-/// and toolchain_attest. Records coreml_compiler_available = false when
+/// and toolchain_attest. Records coreai_compiler_available = false when
 /// coremlcompiler is unreachable, rather than returning a hard error.
 pub fn capture_host_environment() -> Result<HostEnvironment, String> {
     // ── Host chip ─────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ pub fn capture_host_environment() -> Result<HostEnvironment, String> {
                 macos_version,
                 xcode_build_version: "unknown".into(),
                 coremlcompiler_version: format!("unavailable: {diag}"),
-                coreml_compiler_available: false,
+                coreai_compiler_available: false,
             });
         }
     };
@@ -82,6 +82,6 @@ pub fn capture_host_environment() -> Result<HostEnvironment, String> {
         macos_version,
         xcode_build_version: attest.xcode_build_version,
         coremlcompiler_version: attest.coremlcompiler_version,
-        coreml_compiler_available: true,
+        coreai_compiler_available: true,
     })
 }

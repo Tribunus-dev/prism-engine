@@ -50,7 +50,7 @@ pub enum ActivationRepresentation {
     IOSurfaceTexture(IOSurfaceTextureBinding),
     CpuAccessibleSharedMemory(CpuMemoryBinding),
     MlxArrayCompatibility(MlxArrayBinding),
-    CoreMlTensor(CoreMlTensorBinding),
+    CoreAiTensor(CoreAiTensorBinding),
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +89,7 @@ pub struct MlxArrayBinding {
 }
 
 #[derive(Debug, Clone)]
-pub struct CoreMlTensorBinding {
+pub struct CoreAiTensorBinding {
     pub name: String,
     pub multi_array_id: u64,
 }
@@ -100,7 +100,7 @@ pub enum MaterializationKind {
     MetalTextureToMetalBuffer,
     MetalBufferToMetalTexture,
     CpuAccelerateRepack,
-    CoreMlBoundaryReformat,
+    CoreAiBoundaryReformat,
     MlxCompatibilityViewCreation,
     QuantizedLayoutExpansion,
 }

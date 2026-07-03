@@ -6,11 +6,11 @@ use crate::inference_profile::{
 };
 
 #[derive(Debug, Clone)]
-pub struct CoreMlOpaqueProbe {
+pub struct CoreAiOpaqueProbe {
     pub backend: BackendKind,
 }
 
-impl Default for CoreMlOpaqueProbe {
+impl Default for CoreAiOpaqueProbe {
     fn default() -> Self {
         Self {
             backend: BackendKind::CoreML,
@@ -18,7 +18,7 @@ impl Default for CoreMlOpaqueProbe {
     }
 }
 
-impl CoreMlOpaqueProbe {
+impl CoreAiOpaqueProbe {
     pub fn classify(&self) -> Vec<PhaseEvidenceReceipt> {
         let machine = MachineProfileDigest::from_hex("a".repeat(64)).unwrap();
         let model = ModelProfileDigest::from_hex("b".repeat(64)).unwrap();
@@ -64,7 +64,7 @@ fn receipt(
         backend,
         machine_profile_digest: machine,
         model_profile_digest: model,
-        input_digest: "coreml-probe".into(),
+        input_digest: "coreai-probe".into(),
         output_digest: None,
         started_at: now,
         finished_at: now,
@@ -82,8 +82,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn coreml_probe_classifies_backend_managed() {
-        let probe = CoreMlOpaqueProbe::default();
+    fn coreai_probe_classifies_backend_managed() {
+        let probe = CoreAiOpaqueProbe::default();
         assert_eq!(probe.placement_claim(), PlacementClaim::BackendManaged);
         assert_eq!(probe.classify().len(), 2);
     }

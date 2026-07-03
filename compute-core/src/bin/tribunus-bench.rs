@@ -836,10 +836,10 @@ fn run_capability_report(args: &[String]) -> Result<(), String> {
                 CapabilityReport::detect_accelerate_symbols();
             report.accelerate_state = SubsystemState::Available;
             // Core ML: check if model has ANE models loaded
-            let coreml_models: Vec<_> =
-                model.ane_coreml_models.iter().filter(|m| m.is_some()).collect();
-            report.coreml_compiled_subgraphs = coreml_models.len() as u32;
-            report.coreml_model_load_status = if coreml_models.is_empty() {
+            let coreai_models: Vec<_> =
+                model.ane_coreai_models.iter().filter(|m| m.is_some()).collect();
+            report.coreai_compiled_subgraphs = coreai_models.len() as u32;
+            report.coreai_model_load_status = if coreai_models.is_empty() {
                 SubsystemState::Available
             } else {
                 SubsystemState::Loaded

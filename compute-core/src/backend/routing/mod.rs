@@ -204,7 +204,7 @@ pub enum FallbackPolicy {
 /// Manifest of backend-specific artifacts referenced by a route profile.
 #[derive(Debug, Clone)]
 pub struct BackendArtifactManifest {
-    pub coreml: Vec<BackendArtifactId>,
+    pub coreai: Vec<BackendArtifactId>,
     pub accelerate: Vec<BackendArtifactId>,
     pub mlx: Vec<BackendArtifactId>,
 }

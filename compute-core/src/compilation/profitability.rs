@@ -77,7 +77,7 @@ pub struct DeviceCostEvidence {
     /// macOS version at measurement time, e.g. "14.5"
     pub macos_version: String,
     /// Core ML runtime version, e.g. "7.2.0"
-    pub coreml_version: String,
+    pub coreai_version: String,
     /// Operation name, e.g. "q_proj", "matmul", "rms_norm"
     pub operation: String,
     /// Shape descriptor, e.g. "1x4096x4096"

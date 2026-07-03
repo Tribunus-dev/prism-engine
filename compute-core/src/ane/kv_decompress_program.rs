@@ -11,7 +11,7 @@
 //!   4. Apply inverse Hadamard transform (Hadamard is self-inverse)
 //!   5. Write FP16 output to IOSurface
 
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use crate::arena::Arena;
 use crate::arena::DataType;
 
@@ -244,13 +244,13 @@ pub fn generate_l3_decompress_mil(head_dim: u32, n_kv_heads: u32) -> String {
 /// copies bytes into/from the arenas before/after prediction.
 pub struct AneCompressor {
     /// Compiles FP16 → 3.5-bit (L2 warm tier).
-    pub l2_compress: CoreMlModel,
+    pub l2_compress: CoreAiModel,
     /// Compiles 3.5-bit → FP16 (L2→L1 promotion).
-    pub l2_decompress: CoreMlModel,
+    pub l2_decompress: CoreAiModel,
     /// Compiles FP16 → 2-bit (L3 cold tier).
-    pub l3_compress: CoreMlModel,
+    pub l3_compress: CoreAiModel,
     /// Compiles 2-bit → FP16 (L3→L2/L1 promotion).
-    pub l3_decompress: CoreMlModel,
+    pub l3_decompress: CoreAiModel,
     /// Reusable input IOSurface arena for feeding data to the ANE.
     pub input_arena: Arena,
     /// Reusable output IOSurface arena for reading results from the ANE.
@@ -373,7 +373,7 @@ impl AneCompressor {
     }
 
     /// Run a compress model: copy FP16 bytes into input arena, predict, read output bytes.
-    fn run_compress(&self, model: &CoreMlModel, fp16_data: &[f32], elem_count: usize, input_name: &str, output_name: &str) -> Result<Vec<u8>, String> {
+    fn run_compress(&self, model: &CoreAiModel, fp16_data: &[f32], elem_count: usize, input_name: &str, output_name: &str) -> Result<Vec<u8>, String> {
         // SAFETY: we own the arenas and hold the only references.
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -396,7 +396,7 @@ impl AneCompressor {
     }
 
     /// Run a decompress model: copy packed bytes into input arena, predict, read FP16 output.
-    fn run_decompress(&self, model: &CoreMlModel, packed_data: &[u8], elem_count: usize, input_name: &str, output_name: &str) -> Result<Vec<f32>, String> {
+    fn run_decompress(&self, model: &CoreAiModel, packed_data: &[u8], elem_count: usize, input_name: &str, output_name: &str) -> Result<Vec<f32>, String> {
         let packed_len = packed_data.len();
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -420,7 +420,7 @@ impl AneCompressor {
     /// Predict using the given model. Copies from input_arena → model → output_arena.
     fn predict_raw(
         &self,
-        model: &CoreMlModel,
+        model: &CoreAiModel,
         input_name: &str,
         output_name: &str,
     ) -> Result<(), String> {
@@ -433,7 +433,7 @@ impl AneCompressor {
         let c_out = std::ffi::CString::new(output_name)
             .map_err(|e| format!("CString output_name: {}", e))?;
         let rc = unsafe {
-            crate::coreml_bridge::tribunus_coreml_predict_pixelbuffer(
+            crate::coreai_bridge::tribunus_coreai_predict_pixelbuffer(
                 model.ptr,
                 c_in.as_ptr(),
                 input_info,
@@ -493,7 +493,7 @@ pub fn generate_kv_compress_mil(head_dim: u32, n_kv_heads: u32, bits: u32) -> St
 /// Writes the MIL text to a temporary `.mlmodel` file, loads it via
 /// Core ML's model loading API with `CpuAndNeuralEngine` compute units,
 /// and removes the temp file on success.
-pub fn compile_mil_text(mil_text: &str) -> Result<CoreMlModel, String> {
+pub fn compile_mil_text(mil_text: &str) -> Result<CoreAiModel, String> {
     // Generate a unique temp path under the system temp directory
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -505,9 +505,9 @@ pub fn compile_mil_text(mil_text: &str) -> Result<CoreMlModel, String> {
     std::fs::write(&tmp, mil_text).map_err(|e| format!("write MIL: {}", e))?;
 
     // Load via Core ML with ANE compute units (CpuAndNeuralEngine)
-    let model = CoreMlModel::load_with_compute_units(
+    let model = CoreAiModel::load_with_compute_units(
         tmp.to_str().ok_or_else(|| "bad temp path".to_string())?,
-        CoreMlComputeUnits::CpuAndNeuralEngine,
+        CoreAiComputeUnits::CpuAndNeuralEngine,
     )?;
 
     // Clean up the temp file; ignore cleanup failure

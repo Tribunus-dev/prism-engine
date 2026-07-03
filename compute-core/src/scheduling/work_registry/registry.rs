@@ -517,7 +517,7 @@ mod tests {
         let mut reg = WorkRegistry::new();
         assert!(reg.register(sample_record(WorkId(1))).is_ok());
         assert_eq!(reg.by_lane(ExecutionLane::MlxGpu), vec![WorkId(1)]);
-        assert_eq!(reg.by_lane(ExecutionLane::CoreMlAne), Vec::<WorkId>::new());
+        assert_eq!(reg.by_lane(ExecutionLane::CoreAiAne), Vec::<WorkId>::new());
     }
 
     // ── State machine transitions ──────────────────────────────────────
@@ -697,7 +697,7 @@ mod tests {
         assert!(reg
             .register(WorkRecord {
                 work_id: WorkId(2),
-                lane: ExecutionLane::CoreMlAne,
+                lane: ExecutionLane::CoreAiAne,
                 session_id: "ses-1".into(),
                 ..sample_record(WorkId(2))
             })
@@ -716,7 +716,7 @@ mod tests {
 
         let by_lane = reg.active_count_by_lane();
         assert_eq!(by_lane.get(&ExecutionLane::MlxGpu), Some(&2));
-        assert_eq!(by_lane.get(&ExecutionLane::CoreMlAne), Some(&1));
+        assert_eq!(by_lane.get(&ExecutionLane::CoreAiAne), Some(&1));
 
         // Complete one item.
         assert!(reg.transition(WorkId(1), WorkStatus::Ready).is_ok());

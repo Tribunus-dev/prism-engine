@@ -9,7 +9,7 @@ use crate::backend::unified_arena::ArenaView;
 pub enum ExecutionLane {
     MlxGpu,
     AccelerateCpu,
-    CoreMlAne,
+    CoreAiAne,
     CandleCpu,
     Tensix,
     IntelLevelZero,

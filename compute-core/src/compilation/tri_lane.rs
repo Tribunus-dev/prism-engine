@@ -26,7 +26,7 @@ pub struct AppleHardwareSignature {
     /// macOS version at compile time, e.g. "14.5"
     pub macos_version: String,
     /// Core ML runtime version, e.g. "7.2.0"
-    pub coreml_version: String,
+    pub coreai_version: String,
     /// Number of performance CPU cores
     pub p_core_count: u32,
     /// Number of GPU cores
@@ -84,7 +84,7 @@ pub struct NumericalPolicy {
 /// would allow Core ML to consume GPU capacity and invalidate the three-lane
 /// schedule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CoreMlComputeUnitPolicy {
+pub enum CoreAiComputeUnitPolicy {
     /// Require CPU + Neural Engine (no GPU fallback for this lane).
     /// Corresponds to `MLModelConfiguration.computeUnits = .cpuAndNeuralEngine`
     /// with `setPrecompiledModelAtURLAndConfiguration`.
@@ -120,7 +120,7 @@ pub enum AneRejectionReason {
     /// Layout conversion cost exceeds budget.
     LayoutConversionExceedsBudget(u64),
     /// Core ML compilation failed during qualification.
-    CoreMlCompilationFailure(String),
+    CoreAiCompilationFailure(String),
     /// Runtime Core ML model load failed.
     RuntimeLoadFailure(String),
     /// Output contract mismatch after prediction.
@@ -192,7 +192,7 @@ pub enum AneRejectionReason {
     /// ANE weight allocation would exceed the device budget.
     WeightBudgetExceeded,
     /// The required Core ML model function is unavailable on this runtime.
-    CoreMlFunctionUnavailable,
+    CoreAiFunctionUnavailable,
 }
 
 /// Reasons a region was admitted on an experimental basis.
@@ -243,7 +243,7 @@ pub enum BufferOwnership {
 
 /// Description of a single tensor at a Core ML program boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlTensorContract {
+pub struct CoreAiTensorContract {
     /// Logical tensor name.
     pub name: String,
     /// Expected shape (with symbolic dimensions resolved).
@@ -257,18 +257,18 @@ pub struct CoreMlTensorContract {
 /// State contract for stateful Core ML models that maintain RNN-like state
 /// across invocations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlStateContract {
+pub struct CoreAiStateContract {
     /// Number of state tensors.
     pub state_count: u32,
     /// Per-state tensor contracts.
-    pub states: Vec<CoreMlTensorContract>,
+    pub states: Vec<CoreAiTensorContract>,
     /// Whether state is initially zero or loaded from a checkpoint.
     pub initial_state: String,
 }
 
 /// Shape contract — static or certified dynamic range.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlShapeContract {
+pub struct CoreAiShapeContract {
     /// Fully static shape.
     pub static_shape: Option<Vec<u64>>,
     /// Dynamic range (min/max per dimension).
@@ -277,7 +277,7 @@ pub struct CoreMlShapeContract {
 
 /// Warmup contract — how many predictions to run before the lane is healthy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlWarmupContract {
+pub struct CoreAiWarmupContract {
     /// Minimum warmup predictions required.
     pub min_warmup_predictions: u32,
     /// Maximum allowed warmup latency (per prediction).
@@ -317,7 +317,7 @@ pub struct AneQualificationRecord {
 /// `cimage install`, and executed repeatedly under the declared compute-unit
 /// policy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlProgramBinding {
+pub struct CoreAiProgramBinding {
     /// Artifact identifier (content-addressed).
     pub artifact_id: String,
     /// Digest of the full .mlpackage bundle.
@@ -325,17 +325,17 @@ pub struct CoreMlProgramBinding {
     /// Digest of the compiled .mlmodelc bundle.
     pub compiled_model_digest: String,
     /// Compute-unit policy for this artifact.
-    pub compute_unit_policy: CoreMlComputeUnitPolicy,
+    pub compute_unit_policy: CoreAiComputeUnitPolicy,
     /// Input tensor contracts.
-    pub input_contract: Vec<CoreMlTensorContract>,
+    pub input_contract: Vec<CoreAiTensorContract>,
     /// Output tensor contracts.
-    pub output_contract: Vec<CoreMlTensorContract>,
+    pub output_contract: Vec<CoreAiTensorContract>,
     /// State contract (for stateful models).
-    pub state_contract: Option<CoreMlStateContract>,
+    pub state_contract: Option<CoreAiStateContract>,
     /// Shape contract.
-    pub shape_contract: CoreMlShapeContract,
+    pub shape_contract: CoreAiShapeContract,
     /// Warmup contract.
-    pub warmup_contract: CoreMlWarmupContract,
+    pub warmup_contract: CoreAiWarmupContract,
     /// Qualification evidence.
     pub qualification: AneQualificationRecord,
 }
@@ -344,7 +344,7 @@ pub struct CoreMlProgramBinding {
 
 /// Contract for activation movement at every Core ML boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlBoundaryContract {
+pub struct CoreAiBoundaryContract {
     /// Input tensor identifier.
     pub input_tensor: String,
     /// Output tensor identifier.
@@ -548,7 +548,7 @@ impl TriLaneCostModel {
 
 /// Evidence about how Core ML configuration was applied
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlConfigurationEvidence {
+pub struct CoreAiConfigurationEvidence {
     /// Whether the model was loaded with cpuAndNeuralEngine compute policy
     pub loaded_with_cpu_and_neural_engine: bool,
     /// The actual compute policy string used
@@ -606,7 +606,7 @@ impl Default for FallbackStatus {
 pub struct AppleTriLaneCalibrationRecord {
     pub hardware_signature: String,
     pub os_build: String,
-    pub coreml_runtime_identity: String,
+    pub coreai_runtime_identity: String,
     pub region_fingerprint: String,
     pub artifact_digest: String,
     pub shape_class: ShapeClass,
@@ -721,7 +721,7 @@ pub struct AppleTriLaneExecutionReceipt {
     /// Execution route for this epoch (Core ML ANE or Metal fallback).
     pub route_origin: EpochRouteOrigin,
     /// Whether a Core ML prediction was completed this epoch.
-    pub coreml_prediction_completed: bool,
+    pub coreai_prediction_completed: bool,
     /// Whether a Metal command buffer was completed this epoch.
     pub metal_command_buffer_completed: bool,
     /// Per-slot IO-arena events for this epoch.
@@ -729,7 +729,7 @@ pub struct AppleTriLaneExecutionReceipt {
     /// Detailed fallback status beyond the boolean.
     pub fallback_status: FallbackStatus,
     /// Evidence about how Core ML configuration was applied (if available).
-    pub coreml_configuration: Option<CoreMlConfigurationEvidence>,
+    pub coreai_configuration: Option<CoreAiConfigurationEvidence>,
     /// Level of evidence confirming ANE execution.
     pub ane_execution_evidence: AneExecutionEvidence,
     /// Numerical validation status.
@@ -759,13 +759,13 @@ pub struct AppleTriLaneExecutionPlan {
     /// Numerical policy.
     pub numerical_policy: NumericalPolicy,
     /// ANE lane program (None when no region is ANE-eligible).
-    pub ane_program: Option<CoreMlProgramBinding>,
+    pub ane_program: Option<CoreAiProgramBinding>,
     /// GPU lane program.
     pub gpu_program: MetalProgramBinding,
     /// CPU lane program.
     pub cpu_program: CpuProgramBinding,
     /// All tensor bindings shared across lanes.
-    pub tensors: Vec<CoreMlTensorContract>,
+    pub tensors: Vec<CoreAiTensorContract>,
     /// Lane dependency graph.
     pub dependencies: Vec<LaneDependency>,
     /// Epoch schedule.
@@ -813,7 +813,7 @@ pub enum AneLaneLifecycle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EpochRouteOrigin {
     /// Epoch executed on the ANE via Core ML.
-    CoreMlAne,
+    CoreAiAne,
     /// Epoch executed via Metal fallback.
     MetalFallback,
 }
@@ -827,7 +827,7 @@ pub struct EpochResourceCounters {
     /// Number of Metal texture creations since epoch loop start.
     pub metal_texture_creations: u64,
     /// Number of Core ML model loads since epoch loop start.
-    pub coreml_model_loads: u64,
+    pub coreai_model_loads: u64,
     /// Number of command queue creations since epoch loop start.
     pub command_queue_creations: u64,
     /// Number of command pipeline creations since epoch loop start.
@@ -841,7 +841,7 @@ impl Default for EpochResourceCounters {
         Self {
             iosurface_allocations: 0,
             metal_texture_creations: 0,
-            coreml_model_loads: 0,
+            coreai_model_loads: 0,
             command_queue_creations: 0,
             command_pipeline_creations: 0,
             cpu_readbacks: 0,
@@ -864,7 +864,7 @@ pub struct AppleFp16ProductionEpochReceipt {
     /// Output slot generation at execution time.
     pub output_slot_generation: u64,
     /// Whether the Core ML prediction completed.
-    pub coreml_prediction_completed: bool,
+    pub coreai_prediction_completed: bool,
     /// Whether the Metal command buffer completed.
     pub metal_command_buffer_completed: bool,
     /// Numerical validation status.
@@ -888,7 +888,7 @@ pub struct AppleFp16ProductionInstallationReceipt {
     /// Per-slot IO-arena allocation attestations.
     pub slot_attestations: Vec<crate::compute_image::apple_shared_arena::IOSurfaceAllocationAttestation>,
     /// Digest of the compiled Core ML artifact.
-    pub coreml_artifact_digest: String,
+    pub coreai_artifact_digest: String,
     /// Whether installation completed.
     pub installation_completed: bool,
 }
@@ -906,7 +906,7 @@ mod tests {
             hardware_signature: AppleHardwareSignature {
                 soc_family: "M1".into(),
                 macos_version: "14.5".into(),
-                coreml_version: "7.2.0".into(),
+                coreai_version: "7.2.0".into(),
                 p_core_count: 4,
                 gpu_core_count: 8,
                 ane_core_count: 16,
@@ -939,7 +939,7 @@ mod tests {
                 routine: "vDSP".into(),
                 element_count: 2048,
             },
-            tensors: vec![CoreMlTensorContract {
+            tensors: vec![CoreAiTensorContract {
                 name: "hidden_states".into(),
                 shape: vec![1, 2048],
                 dtype: "float16".into(),
@@ -1006,12 +1006,12 @@ mod tests {
 
     #[test]
     fn test_core_ml_program_binding_serde() {
-        let binding = CoreMlProgramBinding {
+        let binding = CoreAiProgramBinding {
             artifact_id: "test-artifact".into(),
             package_digest: "pkg123".into(),
             compiled_model_digest: "cmp456".into(),
-            compute_unit_policy: CoreMlComputeUnitPolicy::CpuAndNeuralEngineRequired,
-            input_contract: vec![CoreMlTensorContract {
+            compute_unit_policy: CoreAiComputeUnitPolicy::CpuAndNeuralEngineRequired,
+            input_contract: vec![CoreAiTensorContract {
                 name: "input".into(),
                 shape: vec![1, 2048],
                 dtype: "float16".into(),
@@ -1019,11 +1019,11 @@ mod tests {
             }],
             output_contract: vec![],
             state_contract: None,
-            shape_contract: CoreMlShapeContract {
+            shape_contract: CoreAiShapeContract {
                 static_shape: Some(vec![1, 2048]),
                 dynamic_range: None,
             },
-            warmup_contract: CoreMlWarmupContract {
+            warmup_contract: CoreAiWarmupContract {
                 min_warmup_predictions: 3,
                 max_warmup_latency_ms: 100,
                 tolerance: 0.01,
@@ -1042,9 +1042,9 @@ mod tests {
         };
 
         let json = serde_json::to_string_pretty(&binding).unwrap();
-        let back: CoreMlProgramBinding = serde_json::from_str(&json).unwrap();
+        let back: CoreAiProgramBinding = serde_json::from_str(&json).unwrap();
         assert_eq!(back.artifact_id, "test-artifact");
-        assert_eq!(back.compute_unit_policy, CoreMlComputeUnitPolicy::CpuAndNeuralEngineRequired);
+        assert_eq!(back.compute_unit_policy, CoreAiComputeUnitPolicy::CpuAndNeuralEngineRequired);
         assert_eq!(back.input_contract[0].shape, vec![1, 2048]);
     }
 
@@ -1073,13 +1073,13 @@ mod tests {
     #[test]
     fn test_core_ml_compute_unit_policy_serde() {
         let policies = vec![
-            CoreMlComputeUnitPolicy::CpuAndNeuralEngineRequired,
-            CoreMlComputeUnitPolicy::CpuAndNeuralEnginePreferred,
-            CoreMlComputeUnitPolicy::Disabled,
+            CoreAiComputeUnitPolicy::CpuAndNeuralEngineRequired,
+            CoreAiComputeUnitPolicy::CpuAndNeuralEnginePreferred,
+            CoreAiComputeUnitPolicy::Disabled,
         ];
         for p in &policies {
             let json = serde_json::to_string(p).unwrap();
-            let back: CoreMlComputeUnitPolicy = serde_json::from_str(&json).unwrap();
+            let back: CoreAiComputeUnitPolicy = serde_json::from_str(&json).unwrap();
             assert_eq!(*p, back);
         }
     }
@@ -1104,12 +1104,12 @@ mod tests {
                 overlap_fraction: 0.33,
             },
             fallback_used: false,
-            route_origin: EpochRouteOrigin::CoreMlAne,
-            coreml_prediction_completed: false,
+            route_origin: EpochRouteOrigin::CoreAiAne,
+            coreai_prediction_completed: false,
             metal_command_buffer_completed: false,
             slot_events: vec![],
             fallback_status: FallbackStatus::NotActivated,
-            coreml_configuration: None,
+            coreai_configuration: None,
             ane_execution_evidence: AneExecutionEvidence::NotObserved,
             numerical_status: NumericalStatus::Pass,
             configured_cpu_and_neural_engine: false,
@@ -1128,7 +1128,7 @@ mod tests {
         assert!(matches!(back.numerical_status, NumericalStatus::Pass));
         assert!(back.slot_events.is_empty());
         assert!(matches!(back.fallback_status, FallbackStatus::NotActivated));
-        assert!(back.coreml_configuration.is_none());
+        assert!(back.coreai_configuration.is_none());
         assert!(matches!(back.ane_execution_evidence, AneExecutionEvidence::NotObserved));
     }
 }

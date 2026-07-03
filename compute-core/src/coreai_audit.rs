@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// A Core ML island audit report — documents a single ANE-deployable island.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CoreMlIslandReport {
+pub struct CoreAiIslandReport {
     /// Island identifier (e.g. "gemma_mlp", "decoder_layer", "stateful_decode").
     pub island_id: String,
     /// Comma-separated ops included in this island.
@@ -34,10 +34,10 @@ pub struct CoreMlIslandReport {
     /// Measured/projected MLX boundary serialization latency (us).
     pub mlx_boundary_us: u64,
     /// Measured/projected Core ML predict latency (us).
-    pub coreml_predict_us: u64,
+    pub coreai_predict_us: u64,
     /// Measured/projected transfer latency (us).
     pub transfer_us: u64,
-    /// Total boundary latency = mlx_boundary_us + coreml_predict_us + transfer_us.
+    /// Total boundary latency = mlx_boundary_us + coreai_predict_us + transfer_us.
     pub total_boundary_us: u64,
 }
 
@@ -45,23 +45,23 @@ pub struct CoreMlIslandReport {
 ///
 /// Operations: gate_proj + up_proj + SiLU + multiply + down_proj.
 /// Model size: 338 MB. FP16 parity verified against MLX.
-pub fn generate_mlp_island_report() -> CoreMlIslandReport {
+pub fn generate_mlp_island_report() -> CoreAiIslandReport {
     let mlx_boundary_us = 18;
-    let coreml_predict_us = 320;
+    let coreai_predict_us = 320;
     let transfer_us = 12;
-    let total_boundary_us = mlx_boundary_us + coreml_predict_us + transfer_us;
+    let total_boundary_us = mlx_boundary_us + coreai_predict_us + transfer_us;
 
-    CoreMlIslandReport {
+    CoreAiIslandReport {
         island_id: "gemma_mlp".into(),
         ops_included: "gate_proj, up_proj, silu, multiply, down_proj".into(),
-        model_hash: "gemma-4-12b-mlp-coreml-v1".into(),
+        model_hash: "gemma-4-12b-mlp-coreai-v1".into(),
         compute_units: "cpuAndNeuralEngine".into(),
         anticipated_devices: vec!["m1".into(), "m2".into(), "m3".into(), "m4".into()],
         estimated_cost_weight: 42,
         unsupported_ops: vec![],
         boundary_latency_us: total_boundary_us,
         mlx_boundary_us,
-        coreml_predict_us,
+        coreai_predict_us,
         transfer_us,
         total_boundary_us,
     }
@@ -71,13 +71,13 @@ pub fn generate_mlp_island_report() -> CoreMlIslandReport {
 ///
 /// Includes attention + MLP + residual add + RMS norm + rotary embeddings.
 /// Latency reflects a single token decode step on an M-series ANE.
-pub fn generate_decoder_layer_report() -> CoreMlIslandReport {
+pub fn generate_decoder_layer_report() -> CoreAiIslandReport {
     let mlx_boundary_us = 24;
-    let coreml_predict_us = 980;
+    let coreai_predict_us = 980;
     let transfer_us = 16;
-    let total_boundary_us = mlx_boundary_us + coreml_predict_us + transfer_us;
+    let total_boundary_us = mlx_boundary_us + coreai_predict_us + transfer_us;
 
-    CoreMlIslandReport {
+    CoreAiIslandReport {
         island_id: "decoder_layer".into(),
         ops_included: "self_attn_qkv_proj, self_attn_out_proj, rms_norm, residual_add, ".into(),
         model_hash: "gemma-4-12b-decoder-layer-v1".into(),
@@ -87,7 +87,7 @@ pub fn generate_decoder_layer_report() -> CoreMlIslandReport {
         unsupported_ops: vec!["softmax_cross_entropy".into()],
         boundary_latency_us: total_boundary_us,
         mlx_boundary_us,
-        coreml_predict_us,
+        coreai_predict_us,
         transfer_us,
         total_boundary_us,
     }
@@ -98,13 +98,13 @@ pub fn generate_decoder_layer_report() -> CoreMlIslandReport {
 /// Six decoder layers fused into a single stateful Core ML model with
 /// persistent KV-cache state. Latency reflects amortised per-token cost
 /// after state is warm.
-pub fn generate_stateful_decode_report() -> CoreMlIslandReport {
+pub fn generate_stateful_decode_report() -> CoreAiIslandReport {
     let mlx_boundary_us = 30;
-    let coreml_predict_us = 4200;
+    let coreai_predict_us = 4200;
     let transfer_us = 20;
-    let total_boundary_us = mlx_boundary_us + coreml_predict_us + transfer_us;
+    let total_boundary_us = mlx_boundary_us + coreai_predict_us + transfer_us;
 
-    CoreMlIslandReport {
+    CoreAiIslandReport {
         island_id: "stateful_decode".into(),
         ops_included: "6x_decoder_layer_fused, kv_cache_state, rms_norm_invariant".into(),
         model_hash: "gemma-4-12b-stateful-6l-v1".into(),
@@ -114,7 +114,7 @@ pub fn generate_stateful_decode_report() -> CoreMlIslandReport {
         unsupported_ops: vec!["custom_flash_attn".into()],
         boundary_latency_us: total_boundary_us,
         mlx_boundary_us,
-        coreml_predict_us,
+        coreai_predict_us,
         transfer_us,
         total_boundary_us,
     }
@@ -125,7 +125,7 @@ pub fn generate_stateful_decode_report() -> CoreMlIslandReport {
 /// Examines `unsupported_ops` and `ops_included` to classify the island as
 /// one of: "fully_ane_compatible", "mostly_ane_compatible", "ane_unstable",
 /// or "fallback_recommended".
-pub fn classify_ane_ops(report: &CoreMlIslandReport) -> String {
+pub fn classify_ane_ops(report: &CoreAiIslandReport) -> String {
     if report.unsupported_ops.is_empty() {
         return "fully_ane_compatible".into();
     }
@@ -169,7 +169,7 @@ mod tests {
         assert!(r.total_boundary_us > 0);
         assert_eq!(
             r.total_boundary_us,
-            r.mlx_boundary_us + r.coreml_predict_us + r.transfer_us
+            r.mlx_boundary_us + r.coreai_predict_us + r.transfer_us
         );
     }
 
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_classify_mostly_compatible() {
-        let r = CoreMlIslandReport {
+        let r = CoreAiIslandReport {
             unsupported_ops: vec!["some_light_op".into()],
             ..generate_decoder_layer_report()
         };
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_classify_ane_unstable() {
-        let r = CoreMlIslandReport {
+        let r = CoreAiIslandReport {
             unsupported_ops: vec!["custom_flash_attn".into()],
             ..generate_decoder_layer_report()
         };
@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_classify_fallback_recommended() {
-        let r = CoreMlIslandReport {
+        let r = CoreAiIslandReport {
             unsupported_ops: vec![
                 "custom_flash_attn".into(),
                 "dynamic_reshape_unbounded".into(),
@@ -229,7 +229,7 @@ mod tests {
         let r = generate_mlp_island_report();
         assert_eq!(
             r.total_boundary_us,
-            r.mlx_boundary_us + r.coreml_predict_us + r.transfer_us
+            r.mlx_boundary_us + r.coreai_predict_us + r.transfer_us
         );
         assert_eq!(r.boundary_latency_us, r.total_boundary_us);
     }

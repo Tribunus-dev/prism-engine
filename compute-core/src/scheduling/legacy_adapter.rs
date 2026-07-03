@@ -92,7 +92,7 @@ impl<'a> LegacyMlxLayerInvocation<'a> {
             self.layer_plan,
             self.route,
             self.memory_island,
-            &[], // ane_coreml_models — empty; callers configure externally
+            &[], // ane_coreai_models — empty; callers configure externally
             &lw.input_layernorm,
             &lw.post_attention_layernorm,
             &lw.q_proj_w,

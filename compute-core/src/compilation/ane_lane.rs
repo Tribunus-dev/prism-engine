@@ -19,11 +19,11 @@ use std::time::Instant;
 
 use super::phase_ir::{
     ANEArtifactKey, BridgeKind, CompileExecutionReceipt, CompilationId, CompilePlacement,
-    CoreMlComputeUnits, DeviceSignature, EffectiveRoute, PhaseId, ValidationResult,
+    CoreAiComputeUnits, DeviceSignature, EffectiveRoute, PhaseId, ValidationResult,
 };
 use super::staging::StagingRing;
 use crate::arena_info::ArenaInfo;
-use crate::coreml_bridge::CoreMlModel;
+use crate::coreai_bridge::CoreAiModel;
 
 /// Soft memory ceiling for ANE calibration weight buffers (12 GB on 16 GB M1).
 ///
@@ -81,7 +81,7 @@ impl AneCalibrationLane {
     ///
     /// Each block loads the compiled Core ML model (identified by
     /// `self.artifact_key`) with `cpuAndNeuralEngine` compute units,
-    /// runs a blocking prediction via [`CoreMlModel::predict`], and
+    /// runs a blocking prediction via [`CoreAiModel::predict`], and
     /// stages the extracted output features.
     ///
     /// Returns a [`CompileExecutionReceipt`] with per-batch timing
@@ -112,9 +112,9 @@ impl AneCalibrationLane {
 
         // ── 3. Load Core ML model with ANE compute units ─────────────────
         let load_start = Instant::now();
-        let model = CoreMlModel::load_with_compute_units(
+        let model = CoreAiModel::load_with_compute_units(
             &model_path,
-            crate::coreml_bridge::CoreMlComputeUnits::CpuAndNeuralEngine,
+            crate::coreai_bridge::CoreAiComputeUnits::CpuAndNeuralEngine,
         )?;
         let load_ns = load_start.elapsed().as_nanos() as u64;
 
@@ -187,8 +187,8 @@ impl AneCalibrationLane {
         let receipt = CompileExecutionReceipt {
             compilation_id: CompilationId(0),
             phase_id: PhaseId(0),
-            requested_placement: CompilePlacement::CoreMlCandidate,
-            effective_route: EffectiveRoute::CoreMlCpuNe,
+            requested_placement: CompilePlacement::CoreAiCandidate,
+            effective_route: EffectiveRoute::CoreAiCpuNe,
             artifact_key: Some(self.artifact_key.clone()),
             device_signature: self.device_sig.clone(),
             input_elements: total_input_elements,
@@ -206,8 +206,8 @@ impl AneCalibrationLane {
             copied_bytes: total_copied_bytes,
             numerical_validation: ValidationResult::Passed,
             fallback_reason: None,
-            coreml_compute_units: Some(
-                CoreMlComputeUnits::CpuAndNeuralEngine,
+            coreai_compute_units: Some(
+                CoreAiComputeUnits::CpuAndNeuralEngine,
             ),
         };
 
@@ -229,9 +229,9 @@ impl AneCalibrationLane {
     /// from the artifact key).
     pub fn predict(&self, input: &[f32]) -> Result<Vec<f32>, String> {
         let model_path = self.derive_model_path()?;
-        let model = CoreMlModel::load_with_compute_units(
+        let model = CoreAiModel::load_with_compute_units(
             &model_path,
-            crate::coreml_bridge::CoreMlComputeUnits::CpuAndNeuralEngine,
+            crate::coreai_bridge::CoreAiComputeUnits::CpuAndNeuralEngine,
         )?;
 
         let output_len = self.output_dimension();

@@ -37,7 +37,7 @@ pub struct RuntimeBackends {
     /// Accelerate lane state (CPU SIMD ops via vDSP/NEON).
     pub accelerate_state: crate::backend::accelerate_lane::AccelerateLane,
     /// Core ML lane state (ANE subgraph execution).
-    pub coreml_state: crate::backend::coreml_lane::CoreMlLane,
+    pub coreai_state: crate::backend::coreai_lane::CoreAiLane,
     /// Embedding weights for prologue.
     pub emb_w: std::sync::Arc<mlx_rs::Array>,
     /// Embedding scales for quantized lookup.
@@ -56,7 +56,7 @@ pub struct RuntimeBackends {
     pub full_sin: std::sync::Arc<mlx_rs::Array>,
 }
 
-// Safety: Raw pointers in CoreMlLane/AccelerateLane are accessed only on
+// Safety: Raw pointers in CoreAiLane/AccelerateLane are accessed only on
 // the thread that created them. The struct is behind a single-threaded
 // ExecutionContext, never shared across threads concurrently.
 unsafe impl Send for RuntimeBackends {}

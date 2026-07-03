@@ -228,7 +228,7 @@ pub fn compile_prefill_mil(
     let compiled_dir = output_dir.join("compiled");
     std::fs::create_dir_all(&compiled_dir).map_err(|e| format!("create compiled dir: {e}"))?;
 
-    let receipt = crate::coreml_pipeline::compile_mlpackage(
+    let receipt = crate::coreai_pipeline::compile_mlpackage(
         &pkg,
         &compiled_dir,
         tag,
@@ -282,7 +282,7 @@ pub const NUM_WEIGHT_INPUTS: usize = 6;
 /// * `v_arena` — Output V [B, d_v, 1, S]
 /// * `next_hidden_arena` — Output next_hidden [B, C, 1, S]
 pub fn run_prefill_layer(
-    model: &crate::coreml_bridge::CoreMlModel,
+    model: &crate::coreai_bridge::CoreAiModel,
     hidden_arena: &crate::arena::Arena,
     weight_arenas: &[&crate::arena::Arena; NUM_WEIGHT_INPUTS],
     q_arena: &mut crate::arena::Arena,

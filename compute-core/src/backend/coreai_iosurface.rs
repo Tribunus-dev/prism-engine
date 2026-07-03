@@ -5,13 +5,13 @@
 //! Each binding maps a model tensor to an IOSurface arena slot, validated
 //! against a cimage manifest contract.
 
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use std::ffi::c_void;
 use std::io;
 
 /// Core ML compute policy enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoreMlComputePolicy {
+pub enum CoreAiComputePolicy {
     CpuOnly,
     CpuAndNeuralEngine,
     NeuralEngineOnly,
@@ -19,21 +19,21 @@ pub enum CoreMlComputePolicy {
     All,
 }
 
-impl CoreMlComputePolicy {
+impl CoreAiComputePolicy {
     pub fn name(&self) -> &'static str {
         match self {
-            CoreMlComputePolicy::CpuOnly => "cpuOnly",
-            CoreMlComputePolicy::CpuAndNeuralEngine => "cpuAndNeuralEngine",
-            CoreMlComputePolicy::NeuralEngineOnly => "neuralEngine",
-            CoreMlComputePolicy::GpuOnly => "gpuOnly",
-            CoreMlComputePolicy::All => "all",
+            CoreAiComputePolicy::CpuOnly => "cpuOnly",
+            CoreAiComputePolicy::CpuAndNeuralEngine => "cpuAndNeuralEngine",
+            CoreAiComputePolicy::NeuralEngineOnly => "neuralEngine",
+            CoreAiComputePolicy::GpuOnly => "gpuOnly",
+            CoreAiComputePolicy::All => "all",
         }
     }
 }
 
 /// Core ML IOSurface binding — a single tensor's binding to an IOSurface slot.
 #[derive(Debug, Clone)]
-pub struct CoreMlIOSurfaceBinding {
+pub struct CoreAiIOSurfaceBinding {
     pub tensor_id: String,
     pub slot_id: u32,
     pub io_surface_id: u32,
@@ -42,20 +42,20 @@ pub struct CoreMlIOSurfaceBinding {
 }
 
 /// Validated executable binding for Core ML with IOSurface-backed arenas.
-pub struct CoreMlIOSurfaceExecutable {
+pub struct CoreAiIOSurfaceExecutable {
     pub artifact_id: String,
-    pub compute_policy: CoreMlComputePolicy,
-    pub input_bindings: Vec<CoreMlIOSurfaceBinding>,
-    pub output_bindings: Vec<CoreMlIOSurfaceBinding>,
+    pub compute_policy: CoreAiComputePolicy,
+    pub input_bindings: Vec<CoreAiIOSurfaceBinding>,
+    pub output_bindings: Vec<CoreAiIOSurfaceBinding>,
     pub model_path: String,
     /// Whether the underlying Core ML model is loaded.
     pub loaded: bool,
     /// Loaded Core ML model handle, or None before load_model() is called.
-    pub model: Option<CoreMlModel>,
+    pub model: Option<CoreAiModel>,
 }
 
-impl CoreMlIOSurfaceExecutable {
-    pub fn new(artifact_id: &str, model_path: &str, compute_policy: CoreMlComputePolicy) -> Self {
+impl CoreAiIOSurfaceExecutable {
+    pub fn new(artifact_id: &str, model_path: &str, compute_policy: CoreAiComputePolicy) -> Self {
         Self {
             artifact_id: artifact_id.to_string(),
             compute_policy,
@@ -68,7 +68,7 @@ impl CoreMlIOSurfaceExecutable {
     }
 
     /// Add an input binding, returns error if slot_id already bound.
-    pub fn add_input_binding(&mut self, binding: CoreMlIOSurfaceBinding) -> Result<(), String> {
+    pub fn add_input_binding(&mut self, binding: CoreAiIOSurfaceBinding) -> Result<(), String> {
         if self.input_bindings.iter().any(|b| b.slot_id == binding.slot_id) {
             return Err(format!("slot {} already bound as input", binding.slot_id));
         }
@@ -77,7 +77,7 @@ impl CoreMlIOSurfaceExecutable {
     }
 
     /// Add an output binding.
-    pub fn add_output_binding(&mut self, binding: CoreMlIOSurfaceBinding) -> Result<(), String> {
+    pub fn add_output_binding(&mut self, binding: CoreAiIOSurfaceBinding) -> Result<(), String> {
         if self.output_bindings.iter().any(|b| b.slot_id == binding.slot_id) {
             return Err(format!("slot {} already bound as output", binding.slot_id));
         }
@@ -114,19 +114,19 @@ impl CoreMlIOSurfaceExecutable {
             return Ok(());
         }
         let compute_units = match self.compute_policy {
-            CoreMlComputePolicy::CpuAndNeuralEngine => CoreMlComputeUnits::CpuAndNeuralEngine,
-            CoreMlComputePolicy::CpuOnly => CoreMlComputeUnits::CpuOnly,
-            CoreMlComputePolicy::NeuralEngineOnly => {
+            CoreAiComputePolicy::CpuAndNeuralEngine => CoreAiComputeUnits::CpuAndNeuralEngine,
+            CoreAiComputePolicy::CpuOnly => CoreAiComputeUnits::CpuOnly,
+            CoreAiComputePolicy::NeuralEngineOnly => {
                 // Apple does not expose a public MLComputeUnits value
                 // that guarantees exclusive ANE execution. Map to
                 // CpuAndNeuralEngine with a comment documenting this
                 // limitation.
-                CoreMlComputeUnits::CpuAndNeuralEngine
+                CoreAiComputeUnits::CpuAndNeuralEngine
             }
-            CoreMlComputePolicy::GpuOnly => CoreMlComputeUnits::CpuAndGpu,
-            CoreMlComputePolicy::All => CoreMlComputeUnits::All,
+            CoreAiComputePolicy::GpuOnly => CoreAiComputeUnits::CpuAndGpu,
+            CoreAiComputePolicy::All => CoreAiComputeUnits::All,
         };
-        let model = CoreMlModel::load_with_compute_units(&self.model_path, compute_units)?;
+        let model = CoreAiModel::load_with_compute_units(&self.model_path, compute_units)?;
         self.model = Some(model);
         self.loaded = true;
         Ok(())
@@ -135,8 +135,8 @@ impl CoreMlIOSurfaceExecutable {
     /// Reject if any input/output tensor name differs from the cimage contract.
     pub fn validate_against_slots(
         &self,
-        input_contract: &[CoreMlIOSurfaceBinding],
-        output_contract: &[CoreMlIOSurfaceBinding],
+        input_contract: &[CoreAiIOSurfaceBinding],
+        output_contract: &[CoreAiIOSurfaceBinding],
     ) -> Result<(), String> {
         if self.input_bindings.len() != input_contract.len() {
             return Err("input binding count mismatch".into());
@@ -227,16 +227,16 @@ mod tests {
     #[test]
     fn test_bind_add_input_output() {
         let mut exec =
-            CoreMlIOSurfaceExecutable::new("artifact_1", "/tmp/model.mlmodelc", CoreMlComputePolicy::All);
+            CoreAiIOSurfaceExecutable::new("artifact_1", "/tmp/model.mlmodelc", CoreAiComputePolicy::All);
 
-        let input = CoreMlIOSurfaceBinding {
+        let input = CoreAiIOSurfaceBinding {
             tensor_id: "input_0".into(),
             slot_id: 0,
             io_surface_id: 1,
             byte_offset: 0,
             contract_digest: String::new(),
         };
-        let output = CoreMlIOSurfaceBinding {
+        let output = CoreAiIOSurfaceBinding {
             tensor_id: "output_0".into(),
             slot_id: 1,
             io_surface_id: 2,
@@ -254,13 +254,13 @@ mod tests {
 
     #[test]
     fn test_bind_duplicate_slot_rejected() {
-        let mut exec = CoreMlIOSurfaceExecutable::new(
+        let mut exec = CoreAiIOSurfaceExecutable::new(
             "artifact_dup",
             "/tmp/model.mlmodelc",
-            CoreMlComputePolicy::NeuralEngineOnly,
+            CoreAiComputePolicy::NeuralEngineOnly,
         );
 
-        let binding = CoreMlIOSurfaceBinding {
+        let binding = CoreAiIOSurfaceBinding {
             tensor_id: "x".into(),
             slot_id: 5,
             io_surface_id: 1,
@@ -270,7 +270,7 @@ mod tests {
 
         assert!(exec.add_input_binding(binding.clone()).is_ok());
         // Same slot_id 5 on inputs — should fail
-        let dup = CoreMlIOSurfaceBinding {
+        let dup = CoreAiIOSurfaceBinding {
             tensor_id: "y".into(),
             slot_id: 5,
             io_surface_id: 2,
@@ -280,7 +280,7 @@ mod tests {
         assert!(exec.add_input_binding(dup).is_err());
 
         // Different slot_id 5 on outputs — outputs track their own set, so this is fine
-        let out = CoreMlIOSurfaceBinding {
+        let out = CoreAiIOSurfaceBinding {
             tensor_id: "out".into(),
             slot_id: 5,
             io_surface_id: 2,
@@ -290,7 +290,7 @@ mod tests {
         assert!(exec.add_output_binding(out.clone()).is_ok());
 
         // Same slot_id 5 again on outputs — should fail
-        let dup_out = CoreMlIOSurfaceBinding {
+        let dup_out = CoreAiIOSurfaceBinding {
             tensor_id: "out2".into(),
             slot_id: 5,
             io_surface_id: 3,
@@ -303,9 +303,9 @@ mod tests {
     #[test]
     fn test_validate_contract_mismatch_rejected() {
         let mut exec =
-            CoreMlIOSurfaceExecutable::new("contract_test", "/tmp/model.mlmodelc", CoreMlComputePolicy::All);
+            CoreAiIOSurfaceExecutable::new("contract_test", "/tmp/model.mlmodelc", CoreAiComputePolicy::All);
 
-        exec.add_input_binding(CoreMlIOSurfaceBinding {
+        exec.add_input_binding(CoreAiIOSurfaceBinding {
             tensor_id: "input_a".into(),
             slot_id: 0,
             io_surface_id: 1,
@@ -313,7 +313,7 @@ mod tests {
             contract_digest: String::new(),
         })
         .unwrap();
-        exec.add_output_binding(CoreMlIOSurfaceBinding {
+        exec.add_output_binding(CoreAiIOSurfaceBinding {
             tensor_id: "output_a".into(),
             slot_id: 1,
             io_surface_id: 2,
@@ -323,7 +323,7 @@ mod tests {
         .unwrap();
 
         // Input contract with wrong tensor_id
-        let bad_input = CoreMlIOSurfaceBinding {
+        let bad_input = CoreAiIOSurfaceBinding {
             tensor_id: "input_b".into(),
             slot_id: 0,
             io_surface_id: 1,
@@ -339,9 +339,9 @@ mod tests {
 
         // Rebuild exec for output mismatch test
         let mut exec2 =
-            CoreMlIOSurfaceExecutable::new("contract_test_2", "/tmp/model.mlmodelc", CoreMlComputePolicy::All);
+            CoreAiIOSurfaceExecutable::new("contract_test_2", "/tmp/model.mlmodelc", CoreAiComputePolicy::All);
         exec2
-            .add_input_binding(CoreMlIOSurfaceBinding {
+            .add_input_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "input_a".into(),
                 slot_id: 0,
                 io_surface_id: 1,
@@ -350,7 +350,7 @@ mod tests {
             })
             .unwrap();
         exec2
-            .add_output_binding(CoreMlIOSurfaceBinding {
+            .add_output_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "output_a".into(),
                 slot_id: 1,
                 io_surface_id: 2,
@@ -359,7 +359,7 @@ mod tests {
             })
             .unwrap();
 
-        let bad_output = CoreMlIOSurfaceBinding {
+        let bad_output = CoreAiIOSurfaceBinding {
             tensor_id: "output_b".into(),
             slot_id: 1,
             io_surface_id: 2,
@@ -376,9 +376,9 @@ mod tests {
 
     #[test]
     fn test_validate_count_mismatch() {
-        let exec = CoreMlIOSurfaceExecutable::new("count_test", "/tmp/model.mlmodelc", CoreMlComputePolicy::CpuOnly);
+        let exec = CoreAiIOSurfaceExecutable::new("count_test", "/tmp/model.mlmodelc", CoreAiComputePolicy::CpuOnly);
         // Zero input bindings, but pass one contract entry
-        let contract = CoreMlIOSurfaceBinding {
+        let contract = CoreAiIOSurfaceBinding {
             tensor_id: "x".into(),
             slot_id: 0,
             io_surface_id: 0,
@@ -392,35 +392,35 @@ mod tests {
 
     #[test]
     fn test_compute_policy_name() {
-        assert_eq!(CoreMlComputePolicy::CpuOnly.name(), "cpuOnly");
+        assert_eq!(CoreAiComputePolicy::CpuOnly.name(), "cpuOnly");
         assert_eq!(
-            CoreMlComputePolicy::CpuAndNeuralEngine.name(),
+            CoreAiComputePolicy::CpuAndNeuralEngine.name(),
             "cpuAndNeuralEngine"
         );
-        assert_eq!(CoreMlComputePolicy::NeuralEngineOnly.name(), "neuralEngine");
-        assert_eq!(CoreMlComputePolicy::GpuOnly.name(), "gpuOnly");
-        assert_eq!(CoreMlComputePolicy::All.name(), "all");
+        assert_eq!(CoreAiComputePolicy::NeuralEngineOnly.name(), "neuralEngine");
+        assert_eq!(CoreAiComputePolicy::GpuOnly.name(), "gpuOnly");
+        assert_eq!(CoreAiComputePolicy::All.name(), "all");
     }
 
     #[test]
     fn test_executable_new_defaults() {
-        let exec = CoreMlIOSurfaceExecutable::new("test", "/path.mlmodelc", CoreMlComputePolicy::GpuOnly);
+        let exec = CoreAiIOSurfaceExecutable::new("test", "/path.mlmodelc", CoreAiComputePolicy::GpuOnly);
         assert_eq!(exec.artifact_id, "test");
         assert_eq!(exec.model_path, "/path.mlmodelc");
-        assert_eq!(exec.compute_policy, CoreMlComputePolicy::GpuOnly);
+        assert_eq!(exec.compute_policy, CoreAiComputePolicy::GpuOnly);
         assert!(exec.input_bindings.is_empty());
         assert!(exec.output_bindings.is_empty());
         assert!(!exec.loaded);
     }
 
     #[test]
-    fn test_coreml_iosurface_warmup_with_arena() {
-        use crate::backend::coreml_lane::{CoreMlLane, CoreMlSubgraph, CoreMlSubgraphStatus};
+    fn test_coreai_iosurface_warmup_with_arena() {
+        use crate::backend::coreai_lane::{CoreAiLane, CoreAiSubgraph, CoreAiSubgraphStatus};
         use crate::compute_image::apple_shared_arena::{
             AppleSharedArena, LiveIOSurfaceSlot, IOSurfaceSlotManifest, SlotReuseClass,
         };
         use crate::backend::placement::ExecutionLane;
-        use crate::compilation::tri_lane::{CoreMlWarmupContract, AneLaneLifecycle};
+        use crate::compilation::tri_lane::{CoreAiWarmupContract, AneLaneLifecycle};
 
         // Create arena with input/output slots
         let mut arena = AppleSharedArena::new("test-arena".into(), 1);
@@ -436,7 +436,7 @@ mod tests {
                 physical_shape: vec![1, 1],
                 strides_bytes: vec![4, 4],
                 layout: "NHWC".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: SlotReuseClass::Exclusive,
                 required_alignment: 64,
@@ -445,7 +445,7 @@ mod tests {
             generation: 0,
             layout_digest: "digest-00000000".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
@@ -461,7 +461,7 @@ mod tests {
                 physical_shape: vec![1, 1],
                 strides_bytes: vec![4, 4],
                 layout: "NHWC".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: SlotReuseClass::Exclusive,
                 required_alignment: 64,
@@ -470,19 +470,19 @@ mod tests {
             generation: 0,
             layout_digest: "digest-00000000".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
 
         // Create executable with input/output bindings matching arena slots
-        let mut exec = CoreMlIOSurfaceExecutable::new(
+        let mut exec = CoreAiIOSurfaceExecutable::new(
             "warmup_test",
             "/tmp/warmup.mlmodelc",
-            CoreMlComputePolicy::CpuAndNeuralEngine,
+            CoreAiComputePolicy::CpuAndNeuralEngine,
         );
 
-        exec.add_input_binding(CoreMlIOSurfaceBinding {
+        exec.add_input_binding(CoreAiIOSurfaceBinding {
             tensor_id: "input".into(),
             slot_id: 0,
             io_surface_id: 1,
@@ -490,7 +490,7 @@ mod tests {
             contract_digest: String::new(),
         }).unwrap();
 
-        exec.add_output_binding(CoreMlIOSurfaceBinding {
+        exec.add_output_binding(CoreAiIOSurfaceBinding {
             tensor_id: "output".into(),
             slot_id: 1,
             io_surface_id: 2,
@@ -499,14 +499,14 @@ mod tests {
         }).unwrap();
 
         // Create lane with a compiled subgraph
-        let mut lane = CoreMlLane::new();
-        let mut sg = CoreMlSubgraph::new("test_subgraph");
-        sg.status = CoreMlSubgraphStatus::Compiled {
+        let mut lane = CoreAiLane::new();
+        let mut sg = CoreAiSubgraph::new("test_subgraph");
+        sg.status = CoreAiSubgraphStatus::Compiled {
             model_path: "/tmp/warmup.mlmodelc".into(),
         };
         lane.add_subgraph(sg);
 
-        let contract = CoreMlWarmupContract {
+        let contract = CoreAiWarmupContract {
             min_warmup_predictions: 3,
             max_warmup_latency_ms: 1000,
             tolerance: 0.01,
@@ -520,7 +520,7 @@ mod tests {
         // Model file doesn't exist — expect graceful failure
         assert!(result.is_err(), "warmup should fail gracefully with missing model: {:?}", result);
         let err = result.unwrap_err();
-        assert!(err.contains("tribunus_coreml_load_model") || err.contains("load"),
+        assert!(err.contains("tribunus_coreai_load_model") || err.contains("load"),
             "error should mention model loading: {}", err);
 
         // Executable state: model not loaded, but bindings still configured

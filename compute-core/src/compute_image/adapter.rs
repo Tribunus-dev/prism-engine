@@ -2,7 +2,7 @@
 //!
 //! These types form the adapter boundary between the Prism facade (product
 //! types, lifecycle, receipts) and the Compute image provider
-//! (`ComputeCoreMlxImageProvider`). They live on the Compute side of the
+//! (`ComputeCoreAixImageProvider`). They live on the Compute side of the
 //! boundary and are consumed by both the Prism integration and the provider
 //! implementation.
 
@@ -181,7 +181,7 @@ pub struct ImageFixtureManifest {
     pub supported_steps: (u32, u32),
     /// Required feature profile string (e.g. `"generation-image"`).
     pub required_feature_profile: String,
-    /// Provider name (e.g. `"mlx"`, `"coreml"`).
+    /// Provider name (e.g. `"mlx"`, `"coreai"`).
     pub provider: String,
     /// Policy describing how to validate generated output.
     pub expected_output_policy: ImageFixtureOutputPolicy,

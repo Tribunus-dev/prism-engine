@@ -33,7 +33,7 @@ pub enum BackendId {
     /// Accelerate framework (CPU BLAS)
     Accelerate,
     /// CoreML (ANE via IOSurface ring buffer)
-    CoreMl,
+    CoreAi,
     /// Apple Neural Engine (direct ANE, separate from CoreML)
     Ane,
     /// Host CPU (pageable memory, weights)

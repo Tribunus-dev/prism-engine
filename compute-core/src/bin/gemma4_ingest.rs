@@ -8,6 +8,7 @@
 //! Usage:
 //!   cargo run --bin gemma4_ingest -- inspect-checkpoint --model-dir <PATH> [--emit <PATH>]...
 //!   cargo run --bin gemma4_ingest -- --repo google/gemma-4-12b-it --output gemma4_12b.cimage
+//!   cargo run --bin gemma4_ingest -- --repo google/gemma-4-12B-it-qat-q4_0-unquantized --output gemma4_12b_qat.cimage
 //!   cargo run --bin gemma4_ingest -- --local-dir ./gemma4-12B --output gemma4_12b.cimage
 
 #![allow(unused_imports)]
@@ -765,6 +766,7 @@ fn main() {
     if repo.is_none() && local_dir.is_none() {
         eprintln!("Usage:");
         eprintln!("  cargo run --bin gemma4_ingest -- --repo google/gemma-4-12b-it --output gemma4_12b.cimage");
+        eprintln!("  cargo run --bin gemma4_ingest -- --repo google/gemma-4-12B-it-qat-q4_0-unquantized --output gemma4_12b_qat.cimage");
         eprintln!("  cargo run --bin gemma4_ingest -- --local-dir ./gemma4-12B --output gemma4_12b.cimage");
         std::process::exit(1);
     }

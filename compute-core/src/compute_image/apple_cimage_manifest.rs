@@ -31,7 +31,7 @@ pub struct AppleHardwareCompatibility {
     /// Minimum macOS version, e.g. "14.0"
     pub min_macos_version: String,
     /// Minimum Core ML runtime version, e.g. "7.2.0"
-    pub min_coreml_version: String,
+    pub min_coreai_version: String,
     /// Required ANE presence
     pub require_ane: bool,
     /// Required Metal feature set
@@ -85,7 +85,7 @@ pub struct AppleSharedArenaManifest {
 
 /// Core ML artifact manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlArtifactManifest {
+pub struct CoreAiArtifactManifest {
     pub artifact_id: String,
     pub mlmodelc_name: String,
     pub package_digest: String,
@@ -193,7 +193,7 @@ pub fn check_hardware_compatibility(
     compatibility: &AppleHardwareCompatibility,
     _soc_family: &str,
     macos_version: &str,
-    coreml_version: &str,
+    coreai_version: &str,
     has_ane: bool,
 ) -> Result<(), String> {
     if compatibility.require_ane && !has_ane {
@@ -209,10 +209,10 @@ pub fn check_hardware_compatibility(
         ));
     }
 
-    if coreml_version < compatibility.min_coreml_version.as_str() {
+    if coreai_version < compatibility.min_coreai_version.as_str() {
         return Err(format!(
             "Core ML version {} is below minimum {}",
-            coreml_version, compatibility.min_coreml_version
+            coreai_version, compatibility.min_coreai_version
         ));
     }
 
@@ -233,7 +233,7 @@ pub struct AppleTriLaneArtifactManifest {
     pub hardware_compatibility: AppleHardwareCompatibility,
     pub plan_digest: String,
     pub arena: AppleSharedArenaManifest,
-    pub coreml_artifacts: Vec<CoreMlArtifactManifest>,
+    pub coreai_artifacts: Vec<CoreAiArtifactManifest>,
     pub metal_artifacts: Vec<MetalArtifactManifest>,
     pub cpu_artifacts: Vec<CpuArtifactManifest>,
     pub epochs: Vec<crate::compilation::tri_lane::ExecutionEpoch>,
@@ -254,7 +254,7 @@ mod tests {
         AppleHardwareCompatibility {
             min_soc_family: "M1".into(),
             min_macos_version: "14.0".into(),
-            min_coreml_version: "7.2.0".into(),
+            min_coreai_version: "7.2.0".into(),
             require_ane: true,
             required_metal_features: vec!["apple_m1".into()],
             supported_compute_policies: vec!["cpuAndNeuralEngine".into()],
@@ -278,7 +278,7 @@ mod tests {
                 physical_shape: vec![1, 64],
                 strides_bytes: vec![128, 2],
                 layout: "NHWC".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: "exclusive".into(),
                 required_alignment: 16384,
@@ -292,7 +292,7 @@ mod tests {
             hardware_compatibility: minimal_hardware_compatibility(),
             plan_digest: "deadbeef".into(),
             arena: minimal_arena(),
-            coreml_artifacts: vec![],
+            coreai_artifacts: vec![],
             metal_artifacts: vec![],
             cpu_artifacts: vec![],
             epochs: vec![],
@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(deserialized.arena.slots[0].tensor_id, "input_0");
         assert_eq!(
             deserialized.arena.slots[0].producer,
-            ExecutionLane::CoreMlAne
+            ExecutionLane::CoreAiAne
         );
         assert_eq!(
             deserialized.arena.slots[0].consumer,

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use crate::compute_image::hw_assessment::ConcurrencyPlan;
 use crate::compute_image::subgraph_mil;
-use crate::coreml_pipeline;
+use crate::coreai_pipeline;
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 
@@ -32,7 +32,7 @@ use crate::mlpackage::{self, ModelMeta};
 pub struct SubgraphDecomposition {
     pub subgraph_name: String,
     /// Ops assigned to Core ML (ANE).
-    pub coreml_ops: Vec<String>,
+    pub coreai_ops: Vec<String>,
     /// Ops assigned to Accelerate (CPU).
     pub accelerate_ops: Vec<String>,
     /// Whether this subgraph was actually compiled.
@@ -103,7 +103,7 @@ pub fn decompose_subgraph(
     ops: &[&str],
     concurrency_plan: &ConcurrencyPlan,
 ) -> SubgraphDecomposition {
-    let mut coreml_ops = Vec::new();
+    let mut coreai_ops = Vec::new();
     let mut accelerate_ops = Vec::new();
 
     // Build a fast lookup: op -> estimated latency on accelerate_cpu lane.
@@ -141,13 +141,13 @@ pub fn decompose_subgraph(
         if is_tiny {
             accelerate_ops.push(op.to_string());
         } else {
-            coreml_ops.push(op.to_string());
+            coreai_ops.push(op.to_string());
         }
     }
 
     SubgraphDecomposition {
         subgraph_name: name.to_string(),
-        coreml_ops,
+        coreai_ops,
         accelerate_ops,
         compiled: false,
         modelc_path: None,
@@ -161,7 +161,7 @@ pub fn decompose_subgraph(
 /// Builds a MIL program from the op list, serialises it as an `.mlpackage`,
 /// and invokes `xcrun coremlcompiler compile` to produce a `.mlmodelc`
 /// bundle.  The returned path is valid for
-/// [`CoreMlModel::load`](crate::coreml_bridge::CoreMlModel::load).
+/// [`CoreAiModel::load`](crate::coreai_bridge::CoreAiModel::load).
 ///
 /// ## Shape limitations
 ///
@@ -177,7 +177,7 @@ pub fn decompose_subgraph(
 /// coremlcompiler` exits with a non-zero status.
 pub fn compile_subgraph(
     name: &str,
-    _coreml_ops: &[String],
+    _coreai_ops: &[String],
     input_shapes: &HashMap<String, Vec<i64>>,
     weights: &HashMap<String, Vec<f32>>,
     output_dir: &Path,
@@ -325,7 +325,7 @@ pub fn compile_subgraph(
         .map_err(|e| format!("mlpackage write failed: {e}"))?;
 
     // Phase 3: Compile via coremlcompiler
-    let receipt = coreml_pipeline::compile_mlpackage(
+    let receipt = coreai_pipeline::compile_mlpackage(
         &written_path,
         output_dir,
         name,

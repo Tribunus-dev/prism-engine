@@ -59,7 +59,7 @@ struct ReceiptIndexEntry {
 
 fn backend_kind_from_str(s: &str) -> BackendKind {
     match s {
-        "coreml" => BackendKind::CoreMl,
+        "coreai" => BackendKind::CoreAi,
         "mlx" => BackendKind::Mlx,
         "accelerate" => BackendKind::Accelerate,
         "reference" => BackendKind::Reference,
@@ -203,12 +203,12 @@ fn main() {
             || row.family.contains("mlp_gate")
             || row.family.contains("lm_head")
         {
-            if row.backend == "coreml" {
+            if row.backend == "coreai" {
                 // Core ML has compile errors for elementwise ops that may block residual adds
                 if row.family.starts_with("decode_residual") {
-                    Some("cluster_001_coreml_compile_contract".into())
+                    Some("cluster_001_coreai_compile_contract".into())
                 } else if row.family == "decode_mlp_gate_up_silu" {
-                    Some("cluster_001_coreml_compile_contract".into())
+                    Some("cluster_001_coreai_compile_contract".into())
                 } else {
                     None
                 }
@@ -330,7 +330,7 @@ fn main() {
 
     // ── 5. Generate and write KV contracts ─────────────────────────────
     tribunus_compute_core::log_info!("Generating KV contracts...");
-    let kv_backends = ["coreml", "mlx", "accelerate"];
+    let kv_backends = ["coreai", "mlx", "accelerate"];
     let all_kv_contracts: Vec<_> = ALL_DECODE_SHAPES
         .iter()
         .flat_map(|binding| {

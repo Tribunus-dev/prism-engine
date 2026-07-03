@@ -52,7 +52,7 @@ impl AneLaneExecutor {
         Ok(WorkCompletion {
             phase_id: crate::compilation::phase_ir::PhaseId(_epoch_id),
             variant_id: 0,
-            lane: ExecutionLane::CoreMlAne,
+            lane: ExecutionLane::CoreAiAne,
             start_time: std::time::Instant::now(),
             completion_time: std::time::Instant::now(),
             success: true,

@@ -11,7 +11,7 @@ mod download;
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
-pub mod coreml;
+pub mod coreai;
 pub mod hardware;
 pub mod portfolio;
 pub mod ternary;

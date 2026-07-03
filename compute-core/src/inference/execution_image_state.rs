@@ -85,7 +85,7 @@ pub struct ComputeImageState {
     /// Resolved fusion binding dispatch table.
     pub fusion_bindings: Arc<FusionBindingRegistry>,
     /// Core ML artifact bindings for ANE‑routed phases.
-    pub coreml_artifacts: Arc<FusionBindingRegistry>,
+    pub coreai_artifacts: Arc<FusionBindingRegistry>,
     /// Verification bundle containing content-hash and integrity evidence.
     pub verification_bundle: Arc<ManifestVerification>,
 }

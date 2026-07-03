@@ -1,4 +1,4 @@
-//! Pure-Rust MIL program builder using `coreml-proto` + `prost`.
+//! Pure-Rust MIL program builder using `coreai-proto` + `prost`.
 //!
 //! Constructs `mil_spec::Program` protobufs without Python/coremltools.
 //! Generates SSA value names automatically and produces a valid
@@ -1296,7 +1296,7 @@ fn format_value(val: &mil_spec::Value) -> String {
 
 /// Describes a Core ML MIL serialized unary op type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct CoreMlUnaryOpType {
+pub struct CoreAiUnaryOpType {
     /// The MIL op type string accepted by coremlcompiler (e.g., "sigmoid").
     pub mil_op_type: &'static str,
     /// Whether this op requires additional attributes (e.g., gelu may need `approximation`).
@@ -1306,24 +1306,24 @@ pub struct CoreMlUnaryOpType {
 /// Maps Tribunus internal unary semantic modes to compiler-accepted Core ML
 /// MIL serialized op type strings. This is the single authority for unary op
 /// type emission — no code should emit `"element_wise"` as a MIL op type.
-const COREML_MIL_UNARY_OP_TYPE_MAP: &[(&str, CoreMlUnaryOpType)] = &[
+const COREML_MIL_UNARY_OP_TYPE_MAP: &[(&str, CoreAiUnaryOpType)] = &[
     (
         "logistic",
-        CoreMlUnaryOpType {
+        CoreAiUnaryOpType {
             mil_op_type: "sigmoid",
             requires_attrs: false,
         },
     ), // canonical
     (
         "sigmoid",
-        CoreMlUnaryOpType {
+        CoreAiUnaryOpType {
             mil_op_type: "sigmoid",
             requires_attrs: false,
         },
     ), // alias
     (
         "silu",
-        CoreMlUnaryOpType {
+        CoreAiUnaryOpType {
             mil_op_type: "silu",
             requires_attrs: false,
         },
@@ -1335,7 +1335,7 @@ const COREML_MIL_UNARY_OP_TYPE_MAP: &[(&str, CoreMlUnaryOpType)] = &[
 /// Returns `None` if the mode is not recognized. Callers MUST fail closed
 /// (return `MilBuildError::UnsupportedUnaryOpMode`) rather than falling back
 /// to a generic op type.
-pub fn resolve_unary_op_type(mode: &str) -> Option<CoreMlUnaryOpType> {
+pub fn resolve_unary_op_type(mode: &str) -> Option<CoreAiUnaryOpType> {
     COREML_MIL_UNARY_OP_TYPE_MAP
         .iter()
         .find(|(key, _)| *key == mode)
@@ -1680,7 +1680,7 @@ mod tests {
         let result = resolve_unary_op_type("logistic").unwrap();
         assert_eq!(
             result,
-            CoreMlUnaryOpType {
+            CoreAiUnaryOpType {
                 mil_op_type: "sigmoid",
                 requires_attrs: false
             }
@@ -1692,7 +1692,7 @@ mod tests {
         let result = resolve_unary_op_type("sigmoid").unwrap();
         assert_eq!(
             result,
-            CoreMlUnaryOpType {
+            CoreAiUnaryOpType {
                 mil_op_type: "sigmoid",
                 requires_attrs: false
             }
@@ -1704,7 +1704,7 @@ mod tests {
         let result = resolve_unary_op_type("silu").unwrap();
         assert_eq!(
             result,
-            CoreMlUnaryOpType {
+            CoreAiUnaryOpType {
                 mil_op_type: "silu",
                 requires_attrs: false
             }

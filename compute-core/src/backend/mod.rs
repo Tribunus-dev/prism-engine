@@ -26,19 +26,19 @@ pub mod authority;
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
-pub mod coreml;
+pub mod coreai;
 /// Core ML execution lane — compiled subgraph on ANE.
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
-pub mod coreml_iosurface;
+pub mod coreai_iosurface;
 /// Core ML IOSurface binding — validated executable binding.
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
-pub mod coreml_lane;
+pub mod coreai_lane;
 /// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
 pub mod metal_iosurface;
 /// Metal consumer — validates Core ML output slots against CPU references.

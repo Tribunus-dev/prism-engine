@@ -162,7 +162,7 @@ pub mod copy_ledger;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
-pub mod coreml;
+pub mod coreai;
 #[cfg(all(
     target_os = "macos",
     any(
@@ -170,7 +170,7 @@ pub mod coreml;
         feature = "prism-backend"
     )
 ))]
-pub mod coreml_audit;
+pub mod coreai_audit;
 #[cfg(all(
     target_os = "macos",
     any(
@@ -178,7 +178,7 @@ pub mod coreml_audit;
         feature = "prism-backend"
     )
 ))]
-pub mod coreml_bridge;
+pub mod coreai_bridge;
 #[cfg(all(
     target_os = "macos",
     any(
@@ -186,7 +186,7 @@ pub mod coreml_bridge;
         feature = "prism-backend"
     )
 ))]
-pub mod coreml_pipeline;
+pub mod coreai_pipeline;
 #[cfg(all(
     target_os = "macos",
     any(
@@ -194,7 +194,7 @@ pub mod coreml_pipeline;
         feature = "prism-backend"
     )
 ))]
-pub mod coreml_state;
+pub mod coreai_state;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"

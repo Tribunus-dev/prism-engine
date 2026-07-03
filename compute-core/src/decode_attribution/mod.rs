@@ -10,7 +10,7 @@ pub mod artifact_hash;
 pub mod backend_adapters;
 pub mod breadcrumb;
 pub mod compute_plan;
-pub mod coreml_minimal_repro;
+pub mod coreai_minimal_repro;
 pub mod decode_microphase_shape_map;
 pub mod defect_clustering;
 pub mod environment;

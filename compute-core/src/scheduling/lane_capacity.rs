@@ -38,7 +38,7 @@ pub struct LaneCapacityConfig {
     /// Maximum concurrent in-flight command buffers for Metal/GPU lanes
     /// (`MlxGpu`, `Tensix`).
     pub max_in_flight_command_buffers: usize,
-    /// Maximum concurrent in-flight ANE predictions (`CoreMlAne`).
+    /// Maximum concurrent in-flight ANE predictions (`CoreAiAne`).
     pub max_in_flight_ane_predictions: usize,
     /// Maximum concurrent in-flight CPU workers
     /// (`AccelerateCpu`, `CandleCpu`, `IntelLevelZero`).
@@ -125,7 +125,7 @@ impl LaneCapacityManager {
                     return None;
                 }
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 if self.ane_in_flight >= self.config.max_in_flight_ane_predictions {
                     return None;
                 }
@@ -160,7 +160,7 @@ impl LaneCapacityManager {
             ExecutionLane::MlxGpu | ExecutionLane::Tensix => {
                 self.metal_in_flight = self.metal_in_flight.saturating_add(1);
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 self.ane_in_flight = self.ane_in_flight.saturating_add(1);
             }
             ExecutionLane::AccelerateCpu
@@ -189,7 +189,7 @@ impl LaneCapacityManager {
             ExecutionLane::MlxGpu | ExecutionLane::Tensix => {
                 self.metal_in_flight = self.metal_in_flight.saturating_sub(1);
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 self.ane_in_flight = self.ane_in_flight.saturating_sub(1);
             }
             ExecutionLane::AccelerateCpu
@@ -216,7 +216,7 @@ impl LaneCapacityManager {
             ExecutionLane::MlxGpu | ExecutionLane::Tensix => {
                 self.metal_queued = self.metal_queued.saturating_add(1);
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 self.ane_queued = self.ane_queued.saturating_add(1);
             }
             ExecutionLane::AccelerateCpu
@@ -234,7 +234,7 @@ impl LaneCapacityManager {
             ExecutionLane::MlxGpu | ExecutionLane::Tensix => {
                 self.metal_queued = self.metal_queued.saturating_sub(1);
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 self.ane_queued = self.ane_queued.saturating_sub(1);
             }
             ExecutionLane::AccelerateCpu

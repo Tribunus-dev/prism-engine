@@ -21,7 +21,7 @@ use EvidenceRequirement::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RegionAdmission {
     /// Production-qualified on Apple Neural Engine via Core ML.
-    CoreMlProduction,
+    CoreAiProduction,
     /// Production-qualified on Metal GPU.
     MetalProduction,
     /// Production-qualified on CPU.
@@ -96,6 +96,8 @@ pub enum EvidenceRequirement {
 pub struct RegionCatalogueEntry {
     /// Canonical operator family (e.g. "rms_norm", "q_projection").
     pub operator_family: String,
+    /// Modality tag: "text", "image", "audio", "video", or "embedding".
+    pub modality: String,
     /// Required input dtype.
     pub input_dtype: TensorDtype,
     /// Required output dtype.
@@ -117,8 +119,8 @@ pub struct RegionCatalogueEntry {
 }
 
 impl RegionCatalogueEntry {
-    pub fn is_coreml_production(&self) -> bool {
-        matches!(self.primary_admission, RegionAdmission::CoreMlProduction)
+    pub fn is_coreai_production(&self) -> bool {
+        matches!(self.primary_admission, RegionAdmission::CoreAiProduction)
     }
 
     pub fn is_metal_production(&self) -> bool {
@@ -161,21 +163,21 @@ impl RegionCatalogue {
                 Self::make("embedding_lookup", i32, fp16, CpuProduction, None, ConfiguredOnly),
                 Self::make("rms_norm", fp16, fp16, MetalProduction, Some(CpuProduction), Warmed),
                 Self::make("rotary_embedding", fp16, fp16, MetalProduction, Some(CpuProduction), Warmed),
-                Self::make("q_projection", fp16, fp16, CoreMlProduction, Some(MetalProduction), PredictionValidated),
-                Self::make("k_projection", fp16, fp16, CoreMlProduction, Some(MetalProduction), PredictionValidated),
-                Self::make("v_projection", fp16, fp16, CoreMlProduction, Some(MetalProduction), PredictionValidated),
+                Self::make("q_projection", fp16, fp16, CoreAiProduction, Some(MetalProduction), PredictionValidated),
+                Self::make("k_projection", fp16, fp16, CoreAiProduction, Some(MetalProduction), PredictionValidated),
+                Self::make("v_projection", fp16, fp16, CoreAiProduction, Some(MetalProduction), PredictionValidated),
                 Self::make("attention_score", fp16, fp16, MetalProduction, Some(CpuProduction), Warmed),
                 Self::make("attention_mask", fp16, fp16, MetalProduction, None, Warmed),
                 Self::make("softmax", fp16, fp16, MetalProduction, Some(CpuProduction), Warmed),
                 Self::make("attention_value_aggregation", fp16, fp16, MetalProduction, Some(CpuProduction), Warmed),
-                Self::make("output_projection", fp16, fp16, CoreMlProduction, Some(MetalProduction), PredictionValidated),
+                Self::make("output_projection", fp16, fp16, CoreAiProduction, Some(MetalProduction), PredictionValidated),
                 Self::make("residual_add", fp16, fp16, CpuProduction, None, ConfiguredOnly),
-                Self::make("gate_projection", fp16, fp16, CoreMlProduction, Some(MetalProduction), PredictionValidated),
+                Self::make("gate_projection", fp16, fp16, CoreAiProduction, Some(MetalProduction), PredictionValidated),
                 Self::make("silu_activation", fp16, fp16, MetalProduction, Some(CpuProduction), Warmed),
-                Self::make("up_projection", fp16, fp16, CoreMlProduction, Some(MetalProduction), PredictionValidated),
-                Self::make("down_projection", fp16, fp16, CoreMlProduction, Some(MetalProduction), PredictionValidated),
+                Self::make("up_projection", fp16, fp16, CoreAiProduction, Some(MetalProduction), PredictionValidated),
+                Self::make("down_projection", fp16, fp16, CoreAiProduction, Some(MetalProduction), PredictionValidated),
                 Self::make("final_norm", fp16, fp16, MetalProduction, Some(CpuProduction), Warmed),
-                Self::make("logits_projection", fp16, fp16, CoreMlProduction, Some(MetalProduction), PredictionValidated),
+                Self::make("logits_projection", fp16, fp16, CoreAiProduction, Some(MetalProduction), PredictionValidated),
                 Self::make("token_sampling", fp16, i32, CpuProduction, None, ConfiguredOnly),
                 Self::make("kv_cache_append", fp16, fp16, MetalProduction, None, AllocationAttested),
                 Self::make("kv_cache_view", fp16, fp16, MetalProduction, None, AllocationAttested),
@@ -193,6 +195,7 @@ impl RegionCatalogue {
     ) -> RegionCatalogueEntry {
         RegionCatalogueEntry {
             operator_family: op.to_string(),
+            modality: "text".into(),
             input_dtype: input,
             output_dtype: output,
             static_shape_requirements: vec![
@@ -229,8 +232,8 @@ impl RegionCatalogue {
     }
 
     /// Returns all entries admitted for Core ML production.
-    pub fn coreml_production_ops(&self) -> Vec<&RegionCatalogueEntry> {
-        self.entries.iter().filter(|e| e.is_coreml_production()).collect()
+    pub fn coreai_production_ops(&self) -> Vec<&RegionCatalogueEntry> {
+        self.entries.iter().filter(|e| e.is_coreai_production()).collect()
     }
 
     /// Returns all entries admitted for Metal production.
@@ -263,9 +266,9 @@ mod tests {
     }
 
     #[test]
-    fn test_coreml_production_ops_use_fp16() {
+    fn test_coreai_production_ops_use_fp16() {
         let cat = RegionCatalogue::fp16_alpha();
-        for entry in cat.coreml_production_ops() {
+        for entry in cat.coreai_production_ops() {
             assert_eq!(entry.input_dtype, TensorDtype::Float16,
                 "Core ML op {} must use FP16", entry.operator_family);
             assert_eq!(entry.output_dtype, TensorDtype::Float16,
@@ -280,8 +283,8 @@ mod tests {
                      "output_projection", "gate_projection",
                      "up_projection", "down_projection"] {
             let entry = cat.find(op).expect("op must exist");
-            assert!(entry.is_coreml_production(),
-                "{op} must be CoreMlProduction");
+            assert!(entry.is_coreai_production(),
+                "{op} must be CoreAiProduction");
         }
     }
 
@@ -296,9 +299,9 @@ mod tests {
     }
 
     #[test]
-    fn test_every_coreml_op_has_metal_fallback() {
+    fn test_every_coreai_op_has_metal_fallback() {
         let cat = RegionCatalogue::fp16_alpha();
-        for entry in cat.coreml_production_ops() {
+        for entry in cat.coreai_production_ops() {
             assert!(entry.has_fallback(),
                 "Core ML op {} must have fallback", entry.operator_family);
             if let Some(fb) = entry.fallback_admission {

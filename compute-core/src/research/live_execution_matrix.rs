@@ -89,7 +89,7 @@ pub struct PhaseReceiptSnapshot {
     pub phase_id: String,
     /// Phase kind string (e.g. "layer_0_attn", "prologue").
     pub phase_kind: String,
-    /// Executing lane (e.g. "mlx", "metal", "accelerate", "coreml", "fallback").
+    /// Executing lane (e.g. "mlx", "metal", "accelerate", "coreai", "fallback").
     pub executed_subsystem: String,
     /// Concrete native symbol name (e.g. "vDSP_vadd", "matmul_4x4_neon", "SiLU").
     pub native_symbol: Option<String>,
@@ -135,9 +135,9 @@ pub struct CapabilityReport {
     pub accelerate_selected_phases: u32,
 
     // Core ML
-    pub coreml_model_load_status: SubsystemState,
-    pub coreml_compiled_subgraphs: u32,
-    pub coreml_load_failure_reason: Option<String>,
+    pub coreai_model_load_status: SubsystemState,
+    pub coreai_compiled_subgraphs: u32,
+    pub coreai_load_failure_reason: Option<String>,
 
     // KV cache
     pub kv_mode: KvCacheModeState,
@@ -176,9 +176,9 @@ impl CapabilityReport {
             accelerate_native_symbols_available: Vec::new(),
             accelerate_state: SubsystemState::NotAvailable,
             accelerate_selected_phases: 0,
-            coreml_model_load_status: SubsystemState::NotAvailable,
-            coreml_compiled_subgraphs: 0,
-            coreml_load_failure_reason: None,
+            coreai_model_load_status: SubsystemState::NotAvailable,
+            coreai_compiled_subgraphs: 0,
+            coreai_load_failure_reason: None,
             kv_mode: KvCacheModeState::None,
             kv_compression_ratio: None,
             kv_compression_active: false,
@@ -215,8 +215,8 @@ impl CapabilityReport {
         if cfg!(feature = "metal-dispatch") {
             flags.push("metal-dispatch".to_string());
         }
-        if cfg!(feature = "coreml-backend") {
-            flags.push("coreml-backend".to_string());
+        if cfg!(feature = "coreai-backend") {
+            flags.push("coreai-backend".to_string());
         }
         if cfg!(feature = "candle-cpu") {
             flags.push("candle-cpu".to_string());
@@ -263,8 +263,8 @@ impl CapabilityReport {
                 self.metal_state
             ));
         }
-        if (self.coreml_model_load_status as u8) >= (SubsystemState::Selected as u8)
-            && self.coreml_compiled_subgraphs == 0
+        if (self.coreai_model_load_status as u8) >= (SubsystemState::Selected as u8)
+            && self.coreai_compiled_subgraphs == 0
         {
             failures.push("Core ML model selected but zero compiled subgraphs".to_string());
         }
@@ -333,15 +333,15 @@ impl CapabilityReportBuilder {
         self
     }
 
-    pub fn with_coreml_state(
+    pub fn with_coreai_state(
         mut self,
         state: SubsystemState,
         subgraphs: u32,
         failure: Option<String>,
     ) -> Self {
-        self.report.coreml_model_load_status = state;
-        self.report.coreml_compiled_subgraphs = subgraphs;
-        self.report.coreml_load_failure_reason = failure;
+        self.report.coreai_model_load_status = state;
+        self.report.coreai_compiled_subgraphs = subgraphs;
+        self.report.coreai_load_failure_reason = failure;
         self
     }
 

@@ -119,35 +119,65 @@ fn main() {
         any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi")
     ))]
     {
+        let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
+        #[cfg(not(feature = "coreai-backend"))]
         cc::Build::new()
-            .file("src/bridge/coreml_arena.mm")
+            .file("src/bridge/coreai_arena.mm")
             .flag("-fobjc-arc")
             .flag("-std=c++17")
-            .compile("coreml_arena");
+            .compile("coreai_arena");
+        #[cfg(not(feature = "coreai-backend"))]
         cc::Build::new()
-            .file("src/bridge/coreml_exec.mm")
-            .flag("-fobjc-arc")
-            .flag("-fblocks")
-            .flag("-std=c++17")
-            .compile("coreml_exec");
-        cc::Build::new()
-            .file("src/bridge/coreml_state.mm")
+            .file("src/bridge/coreai_exec.mm")
             .flag("-fobjc-arc")
             .flag("-fblocks")
             .flag("-std=c++17")
-            .compile("coreml_state");
+            .compile("coreai_exec");
+        #[cfg(not(feature = "coreai-backend"))]
+        cc::Build::new()
+            .file("src/bridge/coreai_state.mm")
+            .flag("-fobjc-arc")
+            .flag("-fblocks")
+            .flag("-std=c++17")
+            .compile("coreai_state");
         cc::Build::new()
             .file("src/bridge/ane_private.mm")
             .flag("-fobjc-arc")
             .flag("-fblocks")
             .flag("-std=c++17")
             .compile("ane_private");
-        // Framework dependencies for the Core ML / IOSurface bridge.
+        // Framework dependencies.
         println!("cargo:rustc-link-lib=framework=CoreML");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=IOSurface");
         println!("cargo:rustc-link-lib=framework=Metal");
         println!("cargo:rustc-link-lib=framework=CoreVideo");
+
+        // Swift @C bridge prototype. Replaces coreai_exec.mm + coreai_state.mm
+        // when the `coreai-backend` feature is enabled. Core AI's types are
+        // Swift structs — not bridgeable from ObjC++.
+        #[cfg(feature = "coreai-backend")]
+        {
+            let swift_out = format!("{}/libcoreai_bridge.o", out_dir);
+            let swift_src = "src/bridge/coreai_bridge.swift";
+
+            let status = std::process::Command::new("swiftc")
+                .args(["-c", "-emit-object", "-module-name", "CoreAiBridge"])
+                .arg(swift_src)
+                .args(["-o", &swift_out])
+                .args(["-framework", "CoreAI", "-framework", "Foundation"])
+                .arg("-v")
+                .status()
+                .expect("swiftc failed");
+            assert!(status.success(), "swiftc returned non-zero");
+
+            cc::Build::new()
+                .object(&swift_out)
+                .compile("coreai_bridge");
+            println!("cargo:rustc-link-lib=framework=CoreAI");
+            println!("cargo:rustc-link-lib=framework=CoreML");
+            println!("cargo:rustc-link-lib=framework=Foundation");
+        }
     }
     eprintln!("build.rs: END of main() — all link directives emitted");
 }

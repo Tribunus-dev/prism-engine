@@ -4,7 +4,7 @@
 use crate::backend::routing::{BackendId, EvidenceDigest, OperationId, TensorId};
 
 use super::params::{
-    CoreMlTarget, LoweringDiagnostic, MilValueRef, Opcode, PrecisionPolicy, ShapePolicy,
+    CoreAiTarget, LoweringDiagnostic, MilValueRef, Opcode, PrecisionPolicy, ShapePolicy,
 };
 
 // ── MIL lowering receipt ──────────────────────────────────────────────────
@@ -69,7 +69,7 @@ pub struct CompilationReceipt {
 
 // ── Runtime load receipt ─────────────────────────────────────────────────
 
-/// Receipt from CoreMlModel::load: MLModel construction.
+/// Receipt from CoreAiModel::load: MLModel construction.
 #[derive(Debug, Clone)]
 pub struct RuntimeLoadReceipt {
     /// Model path.
@@ -84,7 +84,7 @@ pub struct RuntimeLoadReceipt {
 
 // ── Prediction receipt ───────────────────────────────────────────────────
 
-/// Receipt from CoreMlModel::predict.
+/// Receipt from CoreAiModel::predict.
 #[derive(Debug, Clone)]
 pub struct PredictionReceipt {
     /// Input tensor IDs.
@@ -167,8 +167,8 @@ pub struct TensorSignature {
 
 /// Aggregate report collected at the end of the gate's conformance campaign.
 #[derive(Debug, Clone)]
-pub struct CoreMlLoweringGateReport {
-    pub target: CoreMlTarget,
+pub struct CoreAiLoweringGateReport {
+    pub target: CoreAiTarget,
     pub precision: PrecisionPolicy,
     /// Stage 1 receipt.
     pub lowering: MilLoweringReceipt,

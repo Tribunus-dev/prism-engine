@@ -8,7 +8,7 @@
 //! Admission rules (applied in order):
 //!
 //! 1. **Catalogue presence** — no qualification record for the key →
-//!    [`AneRejectionReason::CoreMlCompilationFailure`].
+//!    [`AneRejectionReason::CoreAiCompilationFailure`].
 //! 2. **Compilation success** — `compile_success` must be `true`.
 //! 3. **Warmup success** — `warmup_success` must be `true` (bypassed
 //!    by [`RiskPolicy::ExperimentalAllowed`]).
@@ -44,7 +44,7 @@ pub struct OsBuild {
 
 /// Core ML runtime version.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct CoreMlRuntimeVersion {
+pub struct CoreAiRuntimeVersion {
     pub major: u32,
     pub minor: u32,
     pub patch: u32,
@@ -81,7 +81,7 @@ pub struct AneQualificationKey {
     /// OS build this key was qualified on.
     pub os_build: OsBuild,
     /// Core ML runtime version at qualification time.
-    pub coreml_runtime: CoreMlRuntimeVersion,
+    pub coreai_runtime: CoreAiRuntimeVersion,
 }
 
 // ── Numerical parity ────────────────────────────────────────────────────
@@ -200,14 +200,14 @@ impl LaneAdmissionGate {
             .ane_qualification_db
             .get(key)
             .ok_or_else(|| {
-                AneRejectionReason::CoreMlCompilationFailure(
+                AneRejectionReason::CoreAiCompilationFailure(
                     "no qualification record in database".into(),
                 )
             })?;
 
         // Compilation success — enforced at every policy level.
         if !record.compile_success {
-            return Err(AneRejectionReason::CoreMlCompilationFailure(
+            return Err(AneRejectionReason::CoreAiCompilationFailure(
                 record
                     .failure_reason
                     .clone()
@@ -308,7 +308,7 @@ mod tests {
                 version: "14.5".into(),
                 build_number: "23F79".into(),
             },
-            coreml_runtime: CoreMlRuntimeVersion {
+            coreai_runtime: CoreAiRuntimeVersion {
                 major: 8,
                 minor: 0,
                 patch: 0,
@@ -377,10 +377,10 @@ mod tests {
         let result = gate.admit(&key, &abi, &bucket);
         assert!(result.is_err());
         match result.unwrap_err() {
-            AneRejectionReason::CoreMlCompilationFailure(msg) => {
+            AneRejectionReason::CoreAiCompilationFailure(msg) => {
                 assert!(msg.contains("no qualification record"));
             }
-            other => panic!("expected CoreMlCompilationFailure, got {other:?}"),
+            other => panic!("expected CoreAiCompilationFailure, got {other:?}"),
         }
     }
 
@@ -398,10 +398,10 @@ mod tests {
         let result = gate.admit(&key, &abi, &bucket);
         assert!(result.is_err());
         match result.unwrap_err() {
-            AneRejectionReason::CoreMlCompilationFailure(msg) => {
+            AneRejectionReason::CoreAiCompilationFailure(msg) => {
                 assert!(msg.contains("MIL operator"), "{msg}");
             }
-            other => panic!("expected CoreMlCompilationFailure, got {other:?}"),
+            other => panic!("expected CoreAiCompilationFailure, got {other:?}"),
         }
     }
 
@@ -507,12 +507,12 @@ mod tests {
         let os_back: OsBuild = serde_json::from_str(&os_json).expect("deserialize os");
         assert_eq!(record.key.os_build, os_back);
 
-        // CoreMlRuntimeVersion round-trip
+        // CoreAiRuntimeVersion round-trip
         let rt_json =
-            serde_json::to_string(&record.key.coreml_runtime).expect("serialize runtime");
-        let rt_back: CoreMlRuntimeVersion =
+            serde_json::to_string(&record.key.coreai_runtime).expect("serialize runtime");
+        let rt_back: CoreAiRuntimeVersion =
             serde_json::from_str(&rt_json).expect("deserialize runtime");
-        assert_eq!(record.key.coreml_runtime, rt_back);
+        assert_eq!(record.key.coreai_runtime, rt_back);
 
         // ArtifactKey round-trip
         let ak_json =

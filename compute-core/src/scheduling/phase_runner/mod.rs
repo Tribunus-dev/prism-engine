@@ -9,7 +9,7 @@ pub mod fallback;
 
 pub use dispatch::PhaseRunnerRegistry;
 pub use execution::{
-    AccelElementWiseRunner, AccelMatMulRunner, ArenaAllocRunner, CoreMlGraphRunner,
+    AccelElementWiseRunner, AccelMatMulRunner, ArenaAllocRunner, CoreAiGraphRunner,
     LegacyMlxEpilogueRunner, LegacyMlxLayerRunner, LegacyMlxPrologueRunner,
     MetalFusedKernelRunner, MlxDecodeRunner, PhaseResult, PhaseRunner, ResidualRmsNormRunner,
     SamplingRunner, SyncBarrierRunner, TransferRunner, WeightResidencyRunner,

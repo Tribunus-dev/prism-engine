@@ -10,7 +10,7 @@
 //!
 //! Usage:
 //!   cargo run --bin tribunus-decode-attribution-measure --output-dir decode_attribution_runs
-//!   cargo run --bin tribunus-decode-attribution-measure --single-row coreml matmul small cpuOnly 2>&1
+//!   cargo run --bin tribunus-decode-attribution-measure --single-row coreai matmul small cpuOnly 2>&1
 //!
 //! Single-row mode writes the receipt JSON to stdout and exits.
 //! Used by the parent loop for crash isolation of Core ML rows.
@@ -76,7 +76,7 @@ const TIER1_FAMILIES: &[&GraphFamily] = &[
 // ── Backend/policy pairs ─────────────────────────────────────────────────
 
 const MEASUREMENT_BACKENDS: &[(&str, &str)] = &[
-    ("coreml", "cpuOnly"),
+    ("coreai", "cpuOnly"),
     ("mlx", "mlx_default"),
     ("accelerate", "accelerate_cpu"),
 ];
@@ -107,7 +107,7 @@ fn main() {
     if single_row {
         // Expect 4 positional args after --single-row: backend, family, shape, policy
         let pos = args.iter().position(|a| a == "--single-row").unwrap();
-        let backend = args.get(pos + 1).map(|s| s.as_str()).unwrap_or("coreml");
+        let backend = args.get(pos + 1).map(|s| s.as_str()).unwrap_or("coreai");
         let family_name = args.get(pos + 2).map(|s| s.as_str()).unwrap_or("matmul");
         let shape_name = args.get(pos + 3).map(|s| s.as_str()).unwrap_or("small");
         let policy = args.get(pos + 4).map(|s| s.as_str()).unwrap_or("cpuOnly");
@@ -241,7 +241,7 @@ fn main() {
             macos_version: "unknown".into(),
             xcode_build_version: "unknown".into(),
             coremlcompiler_version: "unknown".into(),
-            coreml_compiler_available: false,
+            coreai_compiler_available: false,
         });
 
     tribunus_compute_core::log_info!("=== Decode Attribution Measurement Harness ===");
@@ -249,7 +249,7 @@ fn main() {
     tribunus_compute_core::log_info!("Output: {}", base_dir.display());
     tribunus_compute_core::log_info!(
         "Core ML compiler available: {}",
-        env.coreml_compiler_available
+        env.coreai_compiler_available
     );
     tribunus_compute_core::log_info!(
         "Host: {} / macOS {} / Xcode {}",
@@ -289,11 +289,11 @@ fn main() {
                 seq += 1;
                 let row_id = format!("{}-N-{:04}", run_id, seq);
 
-                let r = if backend_name == "coreml" && !env.coreml_compiler_available {
+                let r = if backend_name == "coreai" && !env.coreai_compiler_available {
                     synthetic_env_unavailable_receipt(&row_id, &env, family, shape, backend_name)
-                } else if backend_name == "coreml" {
+                } else if backend_name == "coreai" {
                     // Core ML row: run in subprocess for crash isolation.
-                    run_coreml_row_in_child(
+                    run_coreai_row_in_child(
                         &self_path,
                         &row_id,
                         backend_name,
@@ -339,7 +339,7 @@ fn main() {
                 let mut f = fs::File::create(&receipt_path).expect("create receipt file");
                 f.write_all(receipt_json.as_bytes()).expect("write receipt");
 
-                let cache_hit = if backend_name == "coreml" {
+                let cache_hit = if backend_name == "coreai" {
                     r.compile_cache_hit
                 } else {
                     r.mlx_cache_hit
@@ -394,7 +394,7 @@ fn main() {
 
 /// Runs a single Core ML row in a child process. If the child crashes (SIGBUS
 /// etc.), returns a synthetic receipt with status=predict_crashed.
-fn run_coreml_row_in_child(
+fn run_coreai_row_in_child(
     self_path: &str,
     row_id: &str,
     backend: &str,
@@ -540,8 +540,8 @@ fn classify_child_exit(
 
     let mut r = DecodeAttributionReceipt::default();
     r.run_id = row_id.to_string();
-    r.mark_predict_crashed("coreml_predict_child", signal_desc, diag);
-    r.execution_proof.engine = "coreml".into();
+    r.mark_predict_crashed("coreai_predict_child", signal_desc, diag);
+    r.execution_proof.engine = "coreai".into();
     r.execution_proof.bridge_path = Some(repro_path.to_string_lossy().to_string());
     r.last_completed_predict_breadcrumb = last_crumb;
     r.commit_sha = option_env!("VERGEN_GIT_SHA")

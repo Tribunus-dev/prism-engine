@@ -59,7 +59,7 @@ impl FailureInjector for EpochFailureInjector {
 pub struct FallbackExecutionReceipt {
     /// Epoch index at which fallback was triggered.
     pub epoch: u64,
-    /// Name of the lane that failed (e.g. `"coreml_ane"`).
+    /// Name of the lane that failed (e.g. `"coreai_ane"`).
     pub failed_primary_lane: String,
     /// Name of the lane that executed instead (e.g. `"metal_gpu"`,
     /// `"cpu"`).

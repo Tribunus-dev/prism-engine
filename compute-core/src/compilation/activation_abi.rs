@@ -356,7 +356,7 @@ mod tests {
             slot_index: 3,
             logical_tensor_id: LogicalTensorId("proj_k.weight".into()),
             producer_lane: ExecutionLane::MlxGpu,
-            consumer_candidates: vec![ExecutionLane::CoreMlAne, ExecutionLane::MlxGpu],
+            consumer_candidates: vec![ExecutionLane::CoreAiAne, ExecutionLane::MlxGpu],
             abi: sample_decode_v1_abi(),
             backing: SlotBacking::IOSurface,
             state: SlotState::Free,

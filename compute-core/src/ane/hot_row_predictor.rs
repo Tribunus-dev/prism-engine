@@ -22,7 +22,7 @@
 
 use crate::arena::Arena;
 use crate::arena::DataType;
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 
 // ---------------------------------------------------------------------------
 // Feature-name constants for Core ML binding I/O
@@ -108,7 +108,7 @@ fn f16_to_f32(h: u16) -> f32 {
 /// into ANE SRAM for zero-latency GPU access.
 pub struct HotRowPredictor {
     /// ANE-based predictor Core ML model.
-    model: CoreMlModel,
+    model: CoreAiModel,
     /// Input arena: takes the hidden state as FP16 values, shaped `[1, hidden_size]`.
     input_arena: Arena,
     /// Output arena: returns `[num_candidates, 2]` FP16 pairs (token_id, confidence).
@@ -136,9 +136,9 @@ impl HotRowPredictor {
     /// * `hidden_size` — model's hidden state dimension (e.g. 3840).
     /// * `num_candidates` — number of candidate token IDs to predict (e.g. 64).
     pub fn new(model_path: &str, hidden_size: u32, num_candidates: u32) -> Result<Self, String> {
-        let model = CoreMlModel::load_with_compute_units(
+        let model = CoreAiModel::load_with_compute_units(
             model_path,
-            CoreMlComputeUnits::CpuAndNeuralEngine,
+            CoreAiComputeUnits::CpuAndNeuralEngine,
         )?;
 
         // Input arena: one FP16 value per hidden dimension, shaped [1, hidden_size].

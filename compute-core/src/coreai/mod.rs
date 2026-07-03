@@ -10,7 +10,7 @@ pub mod fixture;
 
 /// Apple Core ML artifact executor — real Core ML runtime on macOS Apple Silicon.
 ///
-/// This module provides [`AppleCoreMlArtifactExecutor`] which wraps the ObjC FFI
+/// This module provides [`AppleCoreAiArtifactExecutor`] which wraps the ObjC FFI
 /// bridge for loading `.mlmodelc` directories and running predictions.
 /// Only available on macOS aarch64 (Apple Silicon).
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
@@ -19,8 +19,8 @@ pub mod executor;
 
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub use fixture::{
-    ArtifactDigest, CoreMlArtifactExecutor, CoreMlArtifactHandle, CoreMlBridgeError,
-    CoreMlExecutionPolicy, CoreMlFixtureManifest, CoreMlPredictionRequest, CoreMlPredictionResult,
-    CoreMlQualificationReceipt, LoadedCoreMlArtifact, MaterializationReceipt, NamedTensorInput,
+    ArtifactDigest, CoreAiArtifactExecutor, CoreAiArtifactHandle, CoreAiBridgeError,
+    CoreAiExecutionPolicy, CoreAiFixtureManifest, CoreAiPredictionRequest, CoreAiPredictionResult,
+    CoreAiQualificationReceipt, LoadedCoreAiArtifact, MaterializationReceipt, NamedTensorInput,
     NamedTensorOutput, OutputDigest, QualificationStatus, ReceiptId,
 };

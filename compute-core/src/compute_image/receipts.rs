@@ -94,7 +94,7 @@ pub struct PrismInstallationReceipt {
     /// Metal resource binding records for each arena slot.
     pub metal_resource_bindings: Vec<MetalBindingEntry>,
     /// Core ML executable warmup results.
-    pub coreml_warmup_results: Vec<WarmupResultEntry>,
+    pub coreai_warmup_results: Vec<WarmupResultEntry>,
     /// Overall installation status.
     pub installation_status: InstallationStatus,
     /// ISO-8601 timestamp when the installation completed.
@@ -115,7 +115,7 @@ pub struct EpochResourceCounters {
     /// Number of Metal compute pipeline state creations.
     pub command_pipeline_creations: u64,
     /// Number of Core ML model loads performed during the epoch.
-    pub coreml_model_loads: u64,
+    pub coreai_model_loads: u64,
     /// Number of CPU readbacks performed during the epoch.
     pub cpu_readbacks: u64,
 }
@@ -137,7 +137,7 @@ pub struct PrismEpochReceipt {
     /// Whether a fallback path was taken during this epoch.
     pub fallback_used: bool,
     /// Whether the Core ML prediction phase completed.
-    pub coreml_prediction_completed: bool,
+    pub coreai_prediction_completed: bool,
     /// Whether the Metal command buffer phase completed.
     pub metal_command_buffer_completed: bool,
     /// Wall-clock time for this epoch in nanoseconds.
@@ -181,7 +181,7 @@ pub struct PlatformMetadata {
     /// System-on-chip identifier (e.g. "Apple M1", "Apple M3 Max").
     pub soc: String,
     /// Core ML framework version, if available.
-    pub coreml_version: Option<String>,
+    pub coreai_version: Option<String>,
     /// Metal feature-set string (e.g. "macOS_GPUFamily2_v1"), if available.
     pub metal_feature_set: Option<String>,
     /// Total system memory in bytes.
@@ -266,7 +266,7 @@ mod tests {
                 texture_id: Some("slot0_tex".into()),
                 bound: true,
             }],
-            coreml_warmup_results: vec![WarmupResultEntry {
+            coreai_warmup_results: vec![WarmupResultEntry {
                 executable_name: "encoder".into(),
                 success: true,
                 load_success: true,
@@ -293,7 +293,7 @@ mod tests {
             emitted_token: Some(42),
             route_origin: "metal".into(),
             fallback_used: false,
-            coreml_prediction_completed: true,
+            coreai_prediction_completed: true,
             metal_command_buffer_completed: true,
             wall_time_ns: 1_234_567,
             resource_counters: EpochResourceCounters {
@@ -301,7 +301,7 @@ mod tests {
                 metal_texture_creations: 1,
                 command_queue_creations: 1,
                 command_pipeline_creations: 2,
-                coreml_model_loads: 0,
+                coreai_model_loads: 0,
                 cpu_readbacks: 1,
             },
         };
@@ -347,13 +347,13 @@ mod tests {
                 metal_texture_creations: 0,
                 command_queue_creations: 0,
                 command_pipeline_creations: 0,
-                coreml_model_loads: 0,
+                coreai_model_loads: 0,
                 cpu_readbacks: 0,
             },
             platform_metadata: PlatformMetadata {
                 os_version: "macOS 15.2".into(),
                 soc: "Apple M1".into(),
-                coreml_version: Some("9.0".into()),
+                coreai_version: Some("9.0".into()),
                 metal_feature_set: Some("macOS_GPUFamily2_v1".into()),
                 memory_bytes: 8_589_934_592,
             },

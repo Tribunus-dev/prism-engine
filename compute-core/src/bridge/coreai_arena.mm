@@ -1,7 +1,7 @@
 // Tribunus SharedTensorArena — IOSurface + CVPixelBuffer backed allocator.
 // Phase 1: Replaces posix_memalign with real IOSurface + CVPixelBuffer storage.
 
-#import "coreml_arena.h"
+#import "coreai_arena.h"
 #import <IOSurface/IOSurface.h>
 #import <CoreVideo/CoreVideo.h>
 #import <Foundation/Foundation.h>

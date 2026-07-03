@@ -192,7 +192,7 @@ impl ModalityAdapter for Gemma4DirectImageProjectionAdapter {
     }
 
     fn project(&self, prepared: &PreparedModality) -> Result<EmbeddedModality, ModalityError> {
-        let num_patches = prepared.shape[0] as u32;
+        let _num_patches = prepared.shape[0] as u32;
         let soft_tokens = self.default_soft_tokens.min(self.max_soft_tokens).max(self.min_soft_tokens);
 
         // Stub: actual projection requires Metal compute or CPU fallback.

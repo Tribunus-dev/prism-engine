@@ -184,7 +184,7 @@ fn classify_shape(
 ) -> AneShapeClass {
     // If the primary entry is NOT Core ML production, the phase is Metal-only
     // regardless of shape.
-    if !primary_entry.is_coreml_production() {
+    if !primary_entry.is_coreai_production() {
         return AneShapeClass::MetalOnly;
     }
 

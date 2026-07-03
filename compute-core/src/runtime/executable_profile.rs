@@ -29,7 +29,7 @@ pub struct RuntimeHardwareCaps {
     /// OS version string for runtime contract comparison (e.g. "14.0").
     pub os_version: String,
     /// Whether Core ML framework is available.
-    pub coreml_available: bool,
+    pub coreai_available: bool,
     /// Whether Metal framework is available.
     pub metal_available: bool,
 }
@@ -223,7 +223,7 @@ fn is_runtime_os_compatible(runtime_os: &str, min_os: &str) -> bool {
 /// on the runtime hardware.
 ///
 /// Known feature names (case-sensitive):
-/// - `"coreml"`          → hw_caps.coreml_available
+/// - `"coreai"`          → hw_caps.coreai_available
 /// - `"metal"`           → hw_caps.metal_available
 /// - `"ane"`             → hw_caps.ane_count > 0
 /// - `"unified_memory"`  → hw_caps.has_unified_memory
@@ -233,7 +233,7 @@ fn is_runtime_os_compatible(runtime_os: &str, min_os: &str) -> bool {
 fn check_feature_flags(feature_flags: &[String], hw_caps: &RuntimeHardwareCaps) -> bool {
     for flag in feature_flags {
         let available = match flag.as_str() {
-            "coreml" => hw_caps.coreml_available,
+            "coreai" => hw_caps.coreai_available,
             "metal" => hw_caps.metal_available,
             "ane" => hw_caps.ane_count > 0,
             "unified_memory" => hw_caps.has_unified_memory,
@@ -285,7 +285,7 @@ mod tests {
         unified: bool,
         ram_gb: u64,
         os: &str,
-        coreml: bool,
+        coreai: bool,
         metal: bool,
     ) -> RuntimeHardwareCaps {
         RuntimeHardwareCaps {
@@ -295,7 +295,7 @@ mod tests {
             has_unified_memory: unified,
             unified_ram_gb: ram_gb,
             os_version: os.into(),
-            coreml_available: coreml,
+            coreai_available: coreai,
             metal_available: metal,
         }
     }
@@ -384,7 +384,7 @@ mod tests {
     fn test_is_profile_compatible_missing_coreml() {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("m1");
-        profile.runtime_contract.feature_flags.push("coreml".into());
+        profile.runtime_contract.feature_flags.push("coreai".into());
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", false, true);
         assert!(!selector.is_profile_compatible(&profile, &caps));
     }
@@ -393,7 +393,7 @@ mod tests {
     fn test_is_profile_compatible_all_feature_flags_present() {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("m1");
-        profile.runtime_contract.feature_flags.push("coreml".into());
+        profile.runtime_contract.feature_flags.push("coreai".into());
         profile.runtime_contract.feature_flags.push("metal".into());
         profile.runtime_contract.feature_flags.push("ane".into());
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", true, true);
@@ -531,7 +531,7 @@ mod tests {
     fn test_all_known_feature_flags() {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("test");
-        for flag in &["coreml", "metal", "ane", "unified_memory"] {
+        for flag in &["coreai", "metal", "ane", "unified_memory"] {
             profile.runtime_contract.feature_flags.push((*flag).into());
         }
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", true, true);

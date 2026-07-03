@@ -320,7 +320,7 @@ mod tests {
         let mut ctrl = BackpressureController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::IOSurfacePool,
-            lane: Some(ExecutionLane::CoreMlAne),
+            lane: Some(ExecutionLane::CoreAiAne),
             affected_session: None,
             timestamp: Instant::now(),
             details: "pool utilization 94%".into(),
@@ -405,7 +405,7 @@ mod tests {
         // A severe event should override moderate
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::AneCapacity,
-            lane: Some(ExecutionLane::CoreMlAne),
+            lane: Some(ExecutionLane::CoreAiAne),
             affected_session: None,
             timestamp: Instant::now(),
             details: "ANE full".into(),
@@ -490,7 +490,7 @@ mod tests {
         });
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::ArtifactCold,
-            lane: Some(ExecutionLane::CoreMlAne),
+            lane: Some(ExecutionLane::CoreAiAne),
             affected_session: None,
             timestamp: Instant::now(),
             details: "cold".into(),
@@ -552,7 +552,7 @@ mod tests {
         });
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::AneCapacity,
-            lane: Some(ExecutionLane::CoreMlAne),
+            lane: Some(ExecutionLane::CoreAiAne),
             affected_session: None,
             timestamp: Instant::now(),
             details: "".into(),

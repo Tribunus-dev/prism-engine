@@ -1,10 +1,10 @@
-// Tribunus Core ML Bridge — consolidated public C API header.
+// Tribunus Core AI Bridge — consolidated public C API header.
 //
 // Thread-safety contract:
 //   All functions are thread-safe unless noted otherwise.
-//   MLModel objects are thread-safe for prediction per Apple documentation.
-//   MLState objects are NOT safe for concurrent prediction — callers must
-//   serialize access to a single MLState.  Different MLState objects may be
+//   AIModel objects are thread-safe for inference per Apple documentation.
+//   InferenceFunction objects are NOT safe for concurrent prediction — callers must
+//   serialize access to a single InferenceFunction.  Different InferenceFunctions may be
 //   used concurrently.
 //   Async completion handlers run on arbitrary dispatch queues — the handler
 //   MUST NOT assume it is on any specific queue.
@@ -16,7 +16,7 @@
 
 #pragma once
 #include <stdint.h>
-#include "coreml_arena.h"
+#include "coreai_arena.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,59 +24,57 @@ extern "C" {
 
 // ── Opaque handles ─────────────────────────────────────────────────────────
 
-/// Opaque handle for a Core ML model (MLModel*).
-/// Created via tribunus_coreml_load_model, released via tribunus_coreml_free_model.
-typedef struct TribunusCoreMlModel TribunusCoreMlModel;
+/// Opaque handle for a Core AI model (AIModel*).
+/// Created via tribunus_coreai_load_model, released via tribunus_coreai_free_model.
+typedef struct TribunusCoreAiModel TribunusCoreAiModel;
 
-/// Opaque handle for a Core ML state object (MLState*).
-/// Created via tribunus_coreml_state_create, released via tribunus_coreml_state_destroy.
-typedef struct TribunusCoreMlState TribunusCoreMlState;
+/// Opaque handle for a Core AI InferenceFunction object.
+/// Created via tribunus_coreai_state_create, released via tribunus_coreai_state_destroy.
+typedef struct TribunusCoreAiState TribunusCoreAiState;
 
-/// Opaque handle for an in-flight stateful prediction request.
-/// Created via tribunus_coreml_predict_stateful_async, released via
-/// tribunus_coreml_stateful_request_destroy (or the refcount-autoreleased callback).
+/// Opaque handle for an in-flight stateful inference request.
+/// Created via tribunus_coreai_predict_stateful_async, released via
+/// tribunus_coreai_stateful_request_destroy (or the refcount-autoreleased callback).
 /// Safe to call destroy from any thread once; the request internally uses a
 /// refcount to prevent use-after-free between the caller and the completion handler.
-typedef struct TribunusCoreMlStatefulRequest TribunusCoreMlStatefulRequest;
+typedef struct TribunusCoreAiStatefulRequest TribunusCoreAiStatefulRequest;
 
 // ── Model lifecycle (stateless) ─────────────────────────────────────────────
 
-/// Load a compiled Core ML model (.mlmodelc directory).
+/// Load a compiled Core AI model (.aimodel file).
 /// Thread-safe: may be called from any thread.
 /// @param out_model  [out] receives the opaque model handle (NULL-terminated on error).
-/// @param model_path path to the .mlmodelc bundle directory.  Must be non-NULL.
-/// @param compute_units MLComputeUnits as int64_t (0=CPU, 1=CPU+GPU, 2=CPU+ANE, 3=All).
+/// @param model_path path to the .aimodel file.  Must be non-NULL.
 /// @return 0 on success, negative on error (error details printed to stderr).
-int tribunus_coreml_load_model(
+int tribunus_coreai_load_model(
     void** out_model,
-    const char* model_path,
-    int64_t compute_units
+    const char* model_path
 );
 
 /// Release a loaded model.  Safe to call with NULL.
-void tribunus_coreml_free_model(void* model_ptr);
+void tribunus_coreai_free_model(void* model_ptr);
 
 // ── State lifecycle ─────────────────────────────────────────────────────────
 
-/// Create a new MLState from a loaded model.
-/// Thread-safe: MLModel's newState may be called from any thread.
+/// Create a new InferenceFunction from a loaded model.
+/// Thread-safe: AIModel's function creation may be called from any thread.
 /// @param out_state [out] receives the opaque state handle (NULL on error).
-/// @param model_ptr opaque model handle from tribunus_coreml_load_model.
+/// @param model_ptr opaque model handle from tribunus_coreai_load_model.
 /// @return 0 on success, negative on error.
-int tribunus_coreml_state_create(
-    TribunusCoreMlState** out_state,
+int tribunus_coreai_state_create(
+    TribunusCoreAiState** out_state,
     void* model_ptr
 );
 
-/// Destroy a state object.  Safe to call with NULL.
-void tribunus_coreml_state_destroy(TribunusCoreMlState* state);
+/// Destroy an InferenceFunction object.  Safe to call with NULL.
+void tribunus_coreai_state_destroy(TribunusCoreAiState* state);
 
-// ── Stateless prediction ───────────────────────────────────────────────────
+// ── Stateless inference ──────────────────────────────────────────────────────
 
-/// Run stateless prediction: input arena -> model -> output arena.
-/// Thread-safe for concurrent calls on the same model (MLModel is reentrant).
+/// Run stateless inference: input NDArray -> model -> output NDArray.
+/// Thread-safe for concurrent calls on the same model.
 /// @return 0 on success, negative on error.
-int tribunus_coreml_predict(
+int tribunus_coreai_predict(
     void* model_ptr,
     const char* input_name,
     const TribunusArenaInfo* input_arena_info,
@@ -84,10 +82,10 @@ int tribunus_coreml_predict(
     const TribunusArenaInfo* output_arena_info
 );
 
-/// Run stateless prediction using IOSurface/CVPixelBuffer input.
+/// Run stateless inference using IOSurface/CVPixelBuffer input.
 /// Thread-safe for concurrent calls on the same model.
 /// @return 0 on success, negative on error.
-int tribunus_coreml_predict_pixelbuffer(
+int tribunus_coreai_predict_pixelbuffer(
     void* model_ptr,
     const char* input_name,
     const TribunusArenaInfo* input_arena,
@@ -95,11 +93,11 @@ int tribunus_coreml_predict_pixelbuffer(
     TribunusArenaInfo* output_arena
 );
 
-/// Run stateless prediction with multiple named inputs and outputs.
+/// Run stateless inference with multiple named inputs and outputs.
 /// All inputs are set up as a feature dictionary, all outputs as backings.
 /// Thread-safe for concurrent calls on the same model.
 /// @return 0 on success, negative on error.
-int tribunus_coreml_predict_multi(
+int tribunus_coreai_predict_multi(
     void* model_ptr,
     const char** input_names,
     const TribunusArenaInfo** input_arenas,
@@ -109,36 +107,36 @@ int tribunus_coreml_predict_multi(
     int num_outputs
 );
 
-// ── Stateful prediction (synchronous) ───────────────────────────────────────
+// ── Stateful inference (synchronous) ────────────────────────────────────────
 
-/// Run stateful prediction: input arena -> model + state -> output arena.
-/// The MLState is read and updated atomically by CoreML.
-/// NOT safe for concurrent calls on the same MLState — serialize access.
-/// Thread-safe for concurrent calls on different MLState objects.
+/// Run stateful inference: input NDArray -> model + state -> output NDArray.
+/// The InferenceFunction state is read and updated atomically by CoreAI.
+/// NOT safe for concurrent calls on the same InferenceFunction — serialize access.
+/// Thread-safe for concurrent calls on different InferenceFunction objects.
 /// @return 0 on success, negative on error.
-int tribunus_coreml_predict_stateful(
+int tribunus_coreai_predict_stateful(
     void* model_ptr,
-    TribunusCoreMlState* state,
+    TribunusCoreAiState* state,
     const char* input_name,
     void* input_arena_info,    // const TribunusArenaInfo*
     const char* output_name,
     void* output_arena_info    // TribunusArenaInfo* (output is written here)
 );
 
-// ── Stateful prediction (asynchronous) ──────────────────────────────────────
+// ── Stateful inference (asynchronous) ───────────────────────────────────────
 
-/// Start an async stateful prediction.  Returns immediately.
+/// Start an async stateful inference.  Returns immediately.
 /// The completion handler runs on an arbitrary dispatch queue.
-/// NOT safe for concurrent calls on the same MLState — serialize access.
+/// NOT safe for concurrent calls on the same InferenceFunction — serialize access.
 ///
 /// @param out_request [out] receives an opaque request handle.
-///        The caller owns one reference; call tribunus_coreml_stateful_request_destroy
+///        The caller owns one reference; call tribunus_coreai_stateful_request_destroy
 ///        to release it (or let the Rust Drop impl handle it).
 /// @return 0 on success, negative on error (request not created).
-int tribunus_coreml_predict_stateful_async(
-    TribunusCoreMlStatefulRequest** out_request,
+int tribunus_coreai_predict_stateful_async(
+    TribunusCoreAiStatefulRequest** out_request,
     void* model_ptr,
-    TribunusCoreMlState* state,
+    TribunusCoreAiState* state,
     const char* input_name,
     void* input_arena_info,
     const char* output_name,
@@ -148,28 +146,28 @@ int tribunus_coreml_predict_stateful_async(
 /// Check if an async request has completed.
 /// Thread-safe (atomic read).
 /// @return 1 if complete, 0 if still pending, -1 on NULL request.
-int tribunus_coreml_stateful_request_is_complete(TribunusCoreMlStatefulRequest* request);
+int tribunus_coreai_stateful_request_is_complete(TribunusCoreAiStatefulRequest* request);
 
 /// Set the Rust waker to wake when the async request completes.
 /// Thread-safe.  May be called from any thread, including from the completion
 /// handler itself.  If the request has already completed, the waker is called
 /// immediately.
-void tribunus_coreml_stateful_request_set_waker(
-    TribunusCoreMlStatefulRequest* request,
+void tribunus_coreai_stateful_request_set_waker(
+    TribunusCoreAiStatefulRequest* request,
     void* waker
 );
 
 /// Block until the async request completes.
 /// NOT safe to call from the completion handler's dispatch queue (deadlock risk).
-/// @return 0 on success, negative on prediction failure, -1 on NULL request.
-int tribunus_coreml_stateful_request_wait(TribunusCoreMlStatefulRequest* request);
+/// @return 0 on success, negative on inference failure, -1 on NULL request.
+int tribunus_coreai_stateful_request_wait(TribunusCoreAiStatefulRequest* request);
 
 /// Release one reference on an async request handle.
 /// Internally uses a refcount — safe to call once from the creator thread even
 /// if the completion handler is still in-flight.  The underlying memory is freed
 /// only when both the creator and the completion handler release their references.
 /// Thread-safe (atomic refcount).
-void tribunus_coreml_stateful_request_destroy(TribunusCoreMlStatefulRequest* request);
+void tribunus_coreai_stateful_request_destroy(TribunusCoreAiStatefulRequest* request);
 
 // ── Shutdown ────────────────────────────────────────────────────────────────
 
@@ -179,10 +177,10 @@ void tribunus_coreml_stateful_request_destroy(TribunusCoreMlStatefulRequest* req
 /// Call once at process shutdown.  After this function returns:
 ///   - No new async requests will be accepted (returns error).
 ///   - All pending requests have been signalled/completed.
-///   - Callers waiting on tribunus_coreml_stateful_request_wait will unblock.
+///   - Callers waiting on tribunus_coreai_stateful_request_wait will unblock.
 ///
 /// Thread-safe.  Idempotent — subsequent calls are no-ops.
-void tribunus_coreml_shutdown(void);
+void tribunus_coreai_shutdown(void);
 
 #ifdef __cplusplus
 }

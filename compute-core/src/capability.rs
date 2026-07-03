@@ -12,13 +12,13 @@ pub const CAP_IOSURFACE_PIXEL_BUFFER: &str = "iosurface_pixel_buffer";
 pub const CAP_FP16_PIXELBUFFER_MULTIARRAYS: &str = "fp16_pixelbuffer_multiarrays";
 pub const CAP_EXTERNAL_HOST_MEMORY: &str = "external_host_memory";
 pub const CAP_IOSURFACE_FP16_BRIDGE: &str = "iosurface_fp16_bridge";
-pub const CAP_COREML_IOSURFACE_INPUT: &str = "coreml_iosurface_input";
-pub const CAP_COREML_OUTPUT_BACKING: &str = "coreml_output_backing";
+pub const CAP_COREML_IOSURFACE_INPUT: &str = "coreai_iosurface_input";
+pub const CAP_COREML_OUTPUT_BACKING: &str = "coreai_output_backing";
 pub const CAP_MLX_IOSURFACE_EXTERNAL_ARRAY: &str = "mlx_iosurface_external_array";
-pub const CAP_MLX_COREML_ROUND_TRIP: &str = "mlx_coreml_round_trip";
-pub const CAP_COREML_STATEFUL_MODELS: &str = "coreml_stateful_models";
-pub const CAP_COREML_MULTIFUNCTION_MODELS: &str = "coreml_multifunction_models";
-pub const CAP_COREML_ASYNC_STATEFUL: &str = "coreml_async_stateful_prediction";
+pub const CAP_MLX_COREML_ROUND_TRIP: &str = "mlx_coreai_round_trip";
+pub const CAP_COREML_STATEFUL_MODELS: &str = "coreai_stateful_models";
+pub const CAP_COREML_MULTIFUNCTION_MODELS: &str = "coreai_multifunction_models";
+pub const CAP_COREML_ASYNC_STATEFUL: &str = "coreai_async_stateful_prediction";
 pub const CAP_ARENA_POOLING: &str = "arena_pooling";
 pub const CAP_STATE_LEASE_ISOLATION: &str = "state_lease_isolation";
 pub const CAP_HYBRID_COMPUTE_IMAGE: &str = "hybrid_compute_image";
@@ -38,19 +38,19 @@ pub struct SharedTensorCapabilityReport {
     pub supports_iosurface_fp16_bridge: bool,
 
     // Core ML paths
-    pub supports_coreml_iosurface_input: bool,
-    pub supports_coreml_output_backing: bool,
+    pub supports_coreai_iosurface_input: bool,
+    pub supports_coreai_output_backing: bool,
 
     // MLX paths
     pub supports_mlx_iosurface_external_array: bool,
 
     // Round trip
-    pub supports_mlx_coreml_round_trip: bool,
+    pub supports_mlx_coreai_round_trip: bool,
 
     // Stateful
-    pub supports_coreml_stateful_models: bool,
-    pub supports_coreml_multifunction_models: bool,
-    pub supports_coreml_async_stateful_prediction: bool,
+    pub supports_coreai_stateful_models: bool,
+    pub supports_coreai_multifunction_models: bool,
+    pub supports_coreai_async_stateful_prediction: bool,
 
     // ANE private API runtime
     pub supports_ane_private_runtime: bool,
@@ -85,19 +85,19 @@ impl SharedTensorCapabilityReport {
             supports_iosurface_fp16_bridge: cfg!(target_os = "macos"),
 
             // Core ML paths — proven by Arena tests Phase 2-3
-            supports_coreml_iosurface_input: cfg!(target_os = "macos") && is_macos_15,
-            supports_coreml_output_backing: cfg!(target_os = "macos") && is_macos_15,
+            supports_coreai_iosurface_input: cfg!(target_os = "macos") && is_macos_15,
+            supports_coreai_output_backing: cfg!(target_os = "macos") && is_macos_15,
 
             // MLX external array — proven by Phase 1 test
             supports_mlx_iosurface_external_array: cfg!(target_os = "macos"),
 
             // Round trip — proven by Phase 4 test
-            supports_mlx_coreml_round_trip: cfg!(target_os = "macos") && is_macos_15,
+            supports_mlx_coreai_round_trip: cfg!(target_os = "macos") && is_macos_15,
 
             // Stateful requires macOS 15
-            supports_coreml_stateful_models: cfg!(target_os = "macos") && is_macos_15,
-            supports_coreml_multifunction_models: cfg!(target_os = "macos") && is_macos_15,
-            supports_coreml_async_stateful_prediction: cfg!(target_os = "macos") && is_macos_15,
+            supports_coreai_stateful_models: cfg!(target_os = "macos") && is_macos_15,
+            supports_coreai_multifunction_models: cfg!(target_os = "macos") && is_macos_15,
+            supports_coreai_async_stateful_prediction: cfg!(target_os = "macos") && is_macos_15,
 
             // ANE private API runtime
             supports_ane_private_runtime: {

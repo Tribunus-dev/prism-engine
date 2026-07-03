@@ -263,7 +263,7 @@ pub struct ArtifactRequirement {
 /// Kind of compiled artifact.
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ArtifactKind {
-    CoreMlModel,
+    CoreAiModel,
     MetalLibrary,
     MetalKernel,
     AccelerateRoutine,
@@ -783,7 +783,7 @@ pub struct CompiledAdmissionPlan {
 pub struct HardwareRequirements {
     pub min_soc_family: String,
     pub min_macos_version: String,
-    pub min_coreml_version: String,
+    pub min_coreai_version: String,
     pub min_ane_count: u32,
     pub min_gpu_core_count: u32,
     pub required_features: Vec<String>,
@@ -1048,7 +1048,7 @@ impl Default for CompiledExecutionPolicies {
                         preference: LanePreferenceKind::Preferred,
                     },
                     LanePreference {
-                        lane: ExecutionLane::CoreMlAne,
+                        lane: ExecutionLane::CoreAiAne,
                         preference: LanePreferenceKind::Allowed,
                     },
                     LanePreference {
@@ -1081,7 +1081,7 @@ impl Default for CompiledExecutionPolicies {
                         preference: LanePreferenceKind::Preferred,
                     },
                     LanePreference {
-                        lane: ExecutionLane::CoreMlAne,
+                        lane: ExecutionLane::CoreAiAne,
                         preference: LanePreferenceKind::Preferred,
                     },
                     LanePreference {
@@ -1114,7 +1114,7 @@ impl Default for CompiledExecutionPolicies {
                         preference: LanePreferenceKind::Preferred,
                     },
                     LanePreference {
-                        lane: ExecutionLane::CoreMlAne,
+                        lane: ExecutionLane::CoreAiAne,
                         preference: LanePreferenceKind::Allowed,
                     },
                 ],
@@ -1474,7 +1474,7 @@ mod tests {
                 binding: ProgramBinding {
                     program_id: 1,
                     phase_id: 2,
-                    lane: ExecutionLane::CoreMlAne,
+                    lane: ExecutionLane::CoreAiAne,
                     input_slots: vec![0],
                     output_slots: vec![1],
                     input_abi: vec![],
@@ -1499,7 +1499,7 @@ mod tests {
                 group_id: 0,
                 phases: vec![0, 1],
                 required_distinct_slots: vec![0],
-                allowed_lanes: vec![ExecutionLane::MlxGpu, ExecutionLane::CoreMlAne],
+                allowed_lanes: vec![ExecutionLane::MlxGpu, ExecutionLane::CoreAiAne],
                 expected_overlap_kind: OverlapKind::ConcurrentLanes,
             }],
             serialization_edges: vec![],
@@ -1513,7 +1513,7 @@ mod tests {
             hardware_signature_requirements: HardwareRequirements {
                 min_soc_family: "Apple M1".into(),
                 min_macos_version: "14.0".into(),
-                min_coreml_version: "7.0".into(),
+                min_coreai_version: "7.0".into(),
                 min_ane_count: 1,
                 min_gpu_core_count: 8,
                 required_features: vec!["fp16".into(), "iosurface".into()],
