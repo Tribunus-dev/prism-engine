@@ -125,10 +125,12 @@ pub mod compiler;
 ))]
 pub mod compile;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    any(feature = "mlx-backend", feature = "prism-backend", feature = "backend-cpu"),
+    feature = "prism-backend",
 ))]
 pub mod compilation;
+#[cfg(feature = "prism-backend")]
+pub mod calibration;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"

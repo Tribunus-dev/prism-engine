@@ -70,12 +70,6 @@ pub mod intel_usm;
 ))]
 pub mod placement;
 /// Tensor residency tracking — auditable contract for where a tensor lives.
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "candle-cpu",
-    feature = "intel",
-    feature = "tensix"
-))]
 pub mod residency;
 pub mod routing;
 pub mod tensor_registry;

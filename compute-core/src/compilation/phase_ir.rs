@@ -259,6 +259,7 @@ pub struct BoundaryTensorContract {
 // ── Region and edge types ────────────────────────────────────────────────────
 
 /// A region of contiguous PhaseIR operations with a shared ANE eligibility assessment.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PhaseRegion {
     pub region_id: RegionId,
@@ -270,6 +271,7 @@ pub struct PhaseRegion {
 }
 
 /// Edge connecting two PhaseIR phases with ABI contract and materialization plan.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PhaseEdge {
     pub producer: PhaseId,
@@ -281,6 +283,7 @@ pub struct PhaseEdge {
 }
 
 /// How tensor data crosses device boundaries between phases.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MaterializationPlan {
     /// Direct shared memory (IOSurface handoff).
