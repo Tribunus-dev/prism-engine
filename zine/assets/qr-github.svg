@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <!-- Simulated QR Code structure -->
+  <rect x="0" y="0" width="100" height="100" fill="#fff" />
+  <rect x="10" y="10" width="80" height="80" fill="#000" />
+  <rect x="15" y="15" width="70" height="70" fill="#fff" />
+  <rect x="20" y="20" width="20" height="20" fill="#000" />
+  <rect x="60" y="20" width="20" height="20" fill="#000" />
+  <rect x="20" y="60" width="20" height="20" fill="#000" />
+  <!-- Data modules mock -->
+  <rect x="50" y="50" width="10" height="10" fill="#000" />
+  <rect x="65" y="60" width="15" height="15" fill="#000" />
+  <rect x="45" y="25" width="5" height="5" fill="#000" />
+</svg>

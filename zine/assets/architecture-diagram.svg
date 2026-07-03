@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 150" width="100%" height="100%">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#514E49" />
+    </marker>
+  </defs>
+  <style>
+    .box { fill: #F6F1E7; stroke: #191817; stroke-width: 1.5; }
+    .text { font-family: monospace; font-size: 10px; fill: #191817; text-anchor: middle; dominant-baseline: middle; }
+    .line { stroke: #514E49; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+    .dashed { stroke-dasharray: 4,4; }
+  </style>
+
+  <rect x="10" y="60" width="60" height="30" class="box" />
+  <text x="40" y="75" class="text">PhaseIR</text>
+
+  <path d="M 70 75 L 120 75" class="line" />
+
+  <rect x="130" y="40" width="80" height="70" class="box" />
+  <text x="170" y="55" class="text">Compiler</text>
+  <text x="170" y="75" class="text dashed" font-size="8px">Placement</text>
+  <text x="170" y="95" class="text dashed" font-size="8px">Residency</text>
+
+  <path d="M 210 75 L 260 75" class="line" />
+
+  <rect x="270" y="60" width="60" height="30" class="box" />
+  <text x="300" y="75" class="text">Receipt</text>
+
+  <path d="M 170 110 L 170 130" class="line" />
+  <text x="170" y="140" class="text">Lowering / Hardware</text>
+</svg>

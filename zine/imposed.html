@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tribunus Zine - Imposed Layout</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="print.css" media="print">
+  <style>
+    :root {
+      --sheet-width: 11in;
+      --sheet-height: 8.5in;
+      --panel-width: 5.5in;
+      --panel-height: 8.5in;
+      --fold-x: 5.5in;
+      --safe-inline: 0.34in;
+      --safe-block: 0.38in;
+      --fold-safe: 0.42in;
+    }
+
+    /* Base adjustments for the panels since we're embedding index.html content */
+    .panel {
+      width: var(--panel-width);
+      height: var(--panel-height);
+      overflow: hidden;
+      box-sizing: border-box;
+      background: var(--color-bg);
+      position: relative;
+    }
+
+    .panel.left-panel .page-inner {
+      padding: var(--safe-block) var(--fold-safe) var(--safe-block) var(--safe-inline);
+    }
+    .panel.right-panel .page-inner {
+      padding: var(--safe-block) var(--safe-inline) var(--safe-block) var(--fold-safe);
+    }
+
+    /* Screen Preview Styles */
+    @media screen {
+      body {
+        background: #e5e0d8;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 2rem;
+        gap: 2rem;
+        font-family: sans-serif;
+      }
+
+      .screen-only {
+        display: block;
+      }
+
+      .print-guide {
+        max-width: 800px;
+        background: #fff;
+        padding: 1.5rem;
+        border-radius: 4px;
+        box-shadow: 0 4px 10px var(--color-shadow);
+      }
+
+      .sheet {
+        margin-bottom: 2rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .sheet-label {
+        margin-bottom: 0.5rem;
+        font-family: var(--font-mono);
+        color: var(--color-text-secondary);
+      }
+
+      .spread {
+        width: var(--sheet-width);
+        height: var(--sheet-height);
+        display: flex;
+        box-shadow: 0 10px 20px var(--color-shadow);
+        background: #fff;
+        position: relative;
+      }
+
+      .spread::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: var(--fold-x);
+        width: 1px;
+        background: dashed 1px #ccc;
+        pointer-events: none;
+      }
+
+      .panel-label {
+        position: absolute;
+        top: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        font-family: monospace;
+        color: rgba(0,0,0,0.3);
+        font-size: 0.8rem;
+        z-index: 10;
+        pointer-events: none;
+      }
+    }
+
+    /* Print Styles Overrides for Imposition */
+    @page {
+      size: letter landscape;
+      margin: 0;
+    }
+
+    @media print {
+      html, body {
+        width: var(--sheet-width);
+        height: auto;
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        font-size: 9pt; /* match print.css */
+      }
+
+      .screen-only {
+        display: none !important;
+      }
+
+      .sheet { margin: 0; padding: 0; }
+
+      .spread {
+        width: var(--sheet-width);
+        height: var(--sheet-height);
+        display: grid;
+        grid-template-columns: var(--panel-width) var(--panel-width);
+        break-after: page;
+        page-break-after: always;
+        overflow: hidden;
+      }
+
+      .spread:last-child {
+        break-after: auto;
+        page-break-after: auto;
+      }
+
+      .panel {
+        width: var(--panel-width);
+        height: var(--panel-height);
+      }
+    }
+
+    /* Page Numbers */
+    .page-number {
+      position: absolute;
+      bottom: var(--safe-block);
+      font-family: var(--font-mono);
+      font-size: 7.5pt;
+      font-variant-numeric: tabular-nums;
+    }
+    .left-panel .page-number {
+      left: var(--safe-inline);
+    }
+    .right-panel .page-number {
+      right: var(--safe-inline);
+    }
+
+    /* Ensure specific overrides from index.css play well */
+    .page-inner { height: 100%; display: flex; flex-direction: column; }
+  </style>
+</head>
+<body class="imposed-document">
+
+  <aside class="screen-only print-guide">
+    <h2>Imposed Print Workflow</h2>
+    <p>This file is specifically formatted for duplex booklet printing.</p>
+    <ol>
+      <li>Open this file in desktop Google Chrome.</li>
+      <li>Press <strong>Cmd/Ctrl + P</strong> or select Print.</li>
+      <li>Set <strong>Paper size:</strong> US Letter.</li>
+      <li>Set <strong>Orientation:</strong> Landscape.</li>
+      <li>Set <strong>Scale:</strong> 100%.</li>
+      <li>Set <strong>Margins:</strong> None.</li>
+      <li>Enable <strong>Background graphics</strong>.</li>
+      <li>Set <strong>Pages per sheet:</strong> 1.</li>
+      <li>Enable <strong>Two-sided printing</strong> and choose <strong>Flip on short edge</strong>.</li>
+      <li>Print all pages.</li>
+      <li>Fold each printed Letter sheet in half vertically.</li>
+      <li>Nest Sheet 2 inside Sheet 1 in numerical order.</li>
+      <li>Staple along the fold or leave unstapled.</li>
+    </ol>
+  </aside>
+
+  <main class="booklet">
+
+    <!-- Sheet 1 Front -->
+    <section class="sheet sheet-1">
+      <div class="screen-only sheet-label">Sheet 1 — Front</div>
+      <div class="spread spread-front">
+        <!-- Page 8 Left -->
+        <div class="panel left-panel">
+          <div class="screen-only panel-label">Page 8</div>
+          <article class="panel-content page-back-cover">
+      <div class="page-inner">
+        <header class="page-header">
+          <h2 class="page-heading">Inspect the system beneath the output.</h2>
+        </header>
+
+        <main class="page-content back-cover-content">
+          <p class="closing-statement">
+            Tribunus is an open research and software effort focused on making AI execution explicit, inspectable, and accountable across agents, local systems, and heterogeneous hardware.
+          </p>
+
+          <div class="qr-grid">
+            <div class="qr-item">
+              <img src="assets/qr-research.svg" alt="QR Code to Research Site" class="qr-code" />
+              <span class="qr-label">Research site<br>Research.tribunus.dev</span>
+            </div>
+            <div class="qr-item">
+              <img src="assets/qr-github.svg" alt="QR Code to GitHub" class="qr-code" />
+              <span class="qr-label">GitHub<br>Tribunus-dev</span>
+            </div>
+            <div class="qr-item">
+              <img src="assets/qr-evidence.svg" alt="QR Code to Evidence Registry" class="qr-code" />
+              <span class="qr-label">Evidence registry<br>Research evidence and results</span>
+            </div>
+            <div class="qr-item">
+              <img src="assets/qr-tribunus.svg" alt="QR Code for Contact" class="qr-code" />
+              <span class="qr-label">Contact<br>Email or contact page</span>
+            </div>
+          </div>
+        </main>
+
+        <footer class="page-footer text-center">
+          <div class="colophon">Field Note 001 · June 2026 · Tribunus Research</div>
+        </footer>
+      </div>
+    </article>
+          <div class="page-number">08</div>
+        </div>
+        <!-- Page 1 Right -->
+        <div class="panel right-panel">
+          <div class="screen-only panel-label">Page 1</div>
+          <article class="panel-content page-cover">
+      <div class="page-inner">
+        <header class="page-header">
+          <div class="metadata">
+            <span class="issue-id">Field Note 001</span>
+            <span class="date">June 2026</span>
+          </div>
+        </header>
+
+        <main class="page-content cover-content">
+          <!-- Subtle compiler graph background element could go here via CSS or SVG -->
+          <img src="assets/tribunus-mark.svg" alt="Tribunus Research" class="tribunus-mark" />
+
+          <h1 class="title">Tribunus Research</h1>
+          <h2 class="subtitle">Verifiable Execution for AI Systems</h2>
+          <p class="supporting-line">A field note on inference, agents, and evidence.</p>
+        </main>
+
+        <footer class="page-footer">
+          <div class="footer-link">research.tribunus.dev</div>
+          <div class="footer-tagline">Open systems research for inspectable AI infrastructure.</div>
+        </footer>
+      </div>
+    </article>
+          <div class="page-number">01</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sheet 1 Back -->
+    <section class="sheet sheet-1">
+      <div class="screen-only sheet-label">Sheet 1 — Back</div>
+      <div class="spread spread-back">
+        <!-- Page 2 Left -->
+        <div class="panel left-panel">
+          <div class="screen-only panel-label">Page 2</div>
+          <article class="panel-content page-interior">
+      <div class="page-inner">
+        <header class="page-header">
+          <h2 class="page-heading">The execution layer is a safety boundary.</h2>
+        </header>
+
+        <main class="page-content">
+          <p class="lead-paragraph">
+            Most AI systems are evaluated at the output layer: did the model answer correctly, did the agent complete the task, did the benchmark improve.
+          </p>
+          <p>
+            Tribunus focuses on what happened beneath that output.
+          </p>
+          <ul class="thesis-list">
+            <li>What model ran.</li>
+            <li>Which backend executed it.</li>
+            <li>Where tensors and state lived.</li>
+            <li>What data crossed a boundary.</li>
+            <li>What authority the agent exercised.</li>
+            <li>What state changed.</li>
+            <li>What evidence remains after execution.</li>
+          </ul>
+
+          <blockquote class="pull-quote">
+            <p>“Outputs alone cannot explain whether an AI system acted within its authority, executed correctly, or can be reproduced.”</p>
+          </blockquote>
+
+          <aside class="callout-box">
+            <strong>Research Question</strong>
+            <p>How can AI systems emit enough structured evidence that a result can be inspected, replayed, compared, or rejected?</p>
+          </aside>
+        </main>
+      </div>
+    </article>
+          <div class="page-number">02</div>
+        </div>
+        <!-- Page 7 Right -->
+        <div class="panel right-panel">
+          <div class="screen-only panel-label">Page 7</div>
+          <article class="panel-content page-interior">
+      <div class="page-inner">
+        <header class="page-header">
+          <h2 class="page-heading">Research questions worth solving.</h2>
+        </header>
+
+        <main class="page-content">
+          <ol class="problems-list">
+            <li>
+              <strong>Numerical validation across hardware.</strong>
+              <p>How should quantized models and fused kernels be admitted when numerical behavior differs across GPU architectures, drivers, libraries, and fallback paths?</p>
+            </li>
+            <li>
+              <strong>Privacy-preserving evidence.</strong>
+              <p>How can execution receipts remain useful for audit and reproduction without exposing private project state, user data, or proprietary model artifacts?</p>
+            </li>
+            <li>
+              <strong>Semi-trusted federated execution.</strong>
+              <p>How can peers contribute inference capacity while making resource claims, execution receipts, and failure modes inspectable?</p>
+            </li>
+            <li>
+              <strong>Agent authority at the OS boundary.</strong>
+              <p>How should local AI systems constrain filesystem, shell, credential, browser, and plugin access so capability scopes remain meaningful outside the model runtime?</p>
+            </li>
+          </ol>
+
+          <p class="collaboration-call">
+            Tribunus is looking for collaborators who can reproduce evidence, inspect backend contracts, validate numerical methods, test real hardware, or challenge the architecture.
+          </p>
+
+          <aside class="collaborators-box">
+            <strong>Relevant collaborators:</strong>
+            <p>ML compiler engineers. GPU/runtime engineers. AI safety researchers. Distributed-systems researchers. Hardware vendors and accelerator teams. Open-source contributors.</p>
+          </aside>
+        </main>
+      </div>
+    </article>
+          <div class="page-number">07</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sheet 2 Front -->
+    <section class="sheet sheet-2">
+      <div class="screen-only sheet-label">Sheet 2 — Front</div>
+      <div class="spread spread-front">
+        <!-- Page 6 Left -->
+        <div class="panel left-panel">
+          <div class="screen-only panel-label">Page 6</div>
+          <article class="panel-content page-interior">
+      <div class="page-inner">
+        <header class="page-header">
+          <h2 class="page-heading">What Tribunus is building and validating.</h2>
+        </header>
+
+        <main class="page-content">
+          <ul class="status-ledger">
+            <li class="status-item">
+              <span class="status-label implemented">Implemented</span>
+              <ul class="status-details">
+                <li>Capability-scoped runtime primitives.</li>
+                <li>Durable execution receipts and coordination patterns.</li>
+                <li>Backend-aware inference abstractions.</li>
+              </ul>
+            </li>
+            <li class="status-item">
+              <span class="status-label experimentally-validated">Experimentally validated</span>
+              <ul class="status-details">
+                <li>Compute-image qualification and numerical oracle workflows.</li>
+                <li>MLX / Metal execution paths and backend evidence collection.</li>
+              </ul>
+            </li>
+            <li class="status-item">
+              <span class="status-label partially-validated">Partially validated</span>
+              <ul class="status-details">
+                <li>Core ML qualification cells and numerical divergence classification.</li>
+                <li>Cross-backend placement and artifact-admission semantics.</li>
+              </ul>
+            </li>
+            <li class="status-item">
+              <span class="status-label in-progress">Designed / in progress</span>
+              <ul class="status-details">
+                <li>Portable PhaseIR and ComputeImage compiler.</li>
+                <li>Heterogeneous Apple, AMD, Intel, CUDA, and accelerator lowering.</li>
+                <li>Federated mutual-aid inference and receipt verification.</li>
+              </ul>
+            </li>
+          </ul>
+
+          <p class="conservative-claim">
+            An early ComputeImage validation artifact covers a Qwen2.5 0.5B workload, NF4 quantization, MLX Metal as the primary route, Accelerate fallback, and oracle-based validation. See the evidence registry for scope and limitations.
+          </p>
+
+          <div class="evidence-status-label">
+            EVIDENCE STATUS: EARLY / EXPERIMENTAL
+          </div>
+        </main>
+      </div>
+    </article>
+          <div class="page-number">06</div>
+        </div>
+        <!-- Page 3 Right -->
+        <div class="panel right-panel">
+          <div class="screen-only panel-label">Page 3</div>
+          <article class="panel-content page-interior">
+      <div class="page-inner">
+        <header class="page-header">
+          <h2 class="page-heading">Opaque execution becomes a systems risk.</h2>
+        </header>
+
+        <main class="page-content">
+          <section class="risk-section">
+            <h3>Hidden materialization</h3>
+            <p>A tensor may appear local, zero-copy, or persistent while a backend silently copies, transforms, or relocates it.</p>
+          </article>
+          <div class="page-number">03</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sheet 2 Back -->
+    <section class="sheet sheet-2">
+      <div class="screen-only sheet-label">Sheet 2 — Back</div>
+      <div class="spread spread-back">
+        <!-- Page 4 Left -->
+        <div class="panel left-panel">
+          <div class="screen-only panel-label">Page 4</div>
+          <article class="panel-content page-interior">
+      <div class="page-inner">
+        <header class="page-header">
+          <h2 class="page-heading">From model graph to execution receipt.</h2>
+        </header>
+
+        <main class="page-content center-content">
+          <figure class="diagram-container">
+            <img src="assets/architecture-diagram.svg" alt="Compiler architecture flow: Model graph to execution receipt" class="architecture-diagram" />
+          </figure>
+
+          <p class="diagram-caption">
+            The portable layer is the compiler and scheduler semantics. The backend-specific layer is lowering, memory model, artifact format, launch mechanism, ABI, and completion integration.
+          </p>
+
+          <pre class="architecture-snippet"><code>common semantics:
+  phase DAG
+  shape classes
+  residency plan
+  artifact identity
+  scheduler dependencies
+  execution receipts
+target lowering:
+  Metal / Core ML / Accelerate
+  ROCm / HIP
+  SYCL / Level Zero
+  CUDA
+  accelerator-native runtimes</code></pre>
+        </main>
+      </div>
+    </article>
+          <div class="page-number">04</div>
+        </div>
+        <!-- Page 5 Right -->
+        <div class="panel right-panel">
+          <div class="screen-only panel-label">Page 5</div>
+          <article class="panel-content page-interior">
+      <div class="page-inner">
+        <header class="page-header">
+          <h2 class="page-heading">Portability does not mean pretending hardware is the same.</h2>
+        </header>
+
+        <main class="page-content">
+          <div class="table-container">
+            <table class="backend-table">
+              <thead>
+                <tr>
+                  <th>Target</th>
+                  <th>Memory reality</th>
+                  <th>Execution reality</th>
+                  <th>What Tribunus must make explicit</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Apple Metal / MLX</td>
+                  <td>Unified memory and platform-specific sharing paths</td>
+                  <td>Metal command encoding and GPU-resident resources</td>
+                  <td>Explicit layout, materialization, artifact, and completion behavior</td>
+                </tr>
+                <tr>
+                  <td>AMD ROCm / HIP</td>
+                  <td>Discrete VRAM with explicit host-device transfer and residency</td>
+                  <td>HIP streams, events, kernels, ROCm libraries</td>
+                  <td>Upload, pinning, stream dependencies, VRAM lifetime</td>
+                </tr>
+                <tr>
+                  <td>Intel XPU / SYCL / Level Zero</td>
+                  <td>Integrated or discrete memory depending on platform</td>
+                  <td>SYCL queues, USM, Level Zero allocation/event semantics</td>
+                  <td>Allocation form, queue/event behavior, locality assumptions</td>
+                </tr>
+                <tr>
+                  <td>Tenstorrent</td>
+                  <td>Accelerator-local memory and explicit data movement</td>
+                  <td>TT-Metal or TT-NN execution topology</td>
+                  <td>Placement, circular buffers, device-resident weights, mesh topology</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="core-statement">
+            <p>The universal promise is not zero-copy everywhere.</p>
+            <p class="promise-quote">“No hidden copies. Explicit materialization whenever required. Target-specific zero-copy only where the backend can prove it.”</p>
+          </div>
+        </main>
+      </div>
+    </article>
+          <div class="page-number">05</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+</body>
+</html>
