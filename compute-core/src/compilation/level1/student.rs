@@ -9,15 +9,14 @@
 //! challenger state, and one fallback state.  No genetic populations, no
 //! unbounded beam search, and no full block autograd graph.
 
-use crate::calibration::accelerate::{dot_product, ternary_threshold};
+#[cfg(feature = "metal-dispatch")]
+use half;
+#[cfg(feature = "metal-dispatch")]
+use crate::compute_image::compile::kernel_dispatch::{create_dispatchers, RegistryRef, TernaryProjectionDispatcher};
+#[cfg(feature = "metal-dispatch")]
+use crate::compute_image::compile::kernel_types::{KernelReceipt, ProjectionParams};
 
-/// The embedded ternary tile640 GEMV Metal shader source.
-///
-/// Path relative to this file:
-///   `this file` → `../../` → `src/` → `compute_image/templates/ternary_tile640_gemv.metal`
-#[cfg(feature = "prism-backend")]
-const TERNARY_TILE640_GEMV_SOURCE: &str =
-    include_str!("../../compute_image/templates/ternary_tile640_gemv.metal");
+use crate::calibration::accelerate::{dot_product, ternary_threshold};
 
 /// Default hidden dimension used for ternary student weights.
 const HIDDEN_DIM: usize = 3840;
@@ -61,6 +60,9 @@ pub struct TernaryStudent {
     output: Vec<f32>,
     in_dim: usize,
     out_dim: usize,
+    /// Shared Metal pipeline registry and ternary dispatcher.
+    #[cfg(feature = "metal-dispatch")]
+    dispatch_state: Option<(TernaryProjectionDispatcher, RegistryRef)>,
 }
 
 impl TernaryStudent {
@@ -76,6 +78,8 @@ impl TernaryStudent {
             output: vec![0.0f32; out_dim],
             in_dim,
             out_dim,
+            #[cfg(feature = "metal-dispatch")]
+            dispatch_state: None,
         }
     }
 
@@ -99,31 +103,37 @@ impl TernaryStudent {
 
     /// Attempt to dispatch the real Metal ternary tile640 GEMV kernel.
     ///
-    /// Constructs the packed ternary representation from the FP16 weights,
-    /// allocates Metal buffers, dispatches, and reads back the output.
+    ///
+    /// Constructs the packed ternary representation from the FP16 weights
+    /// and dispatches via `TernaryProjectionDispatcher` (which uses the
+    /// cached pipeline registry instead of recompiling per invocation).
     #[cfg(feature = "prism-backend")]
     fn try_metal_dispatch(&mut self) -> Result<(), String> {
+        #[cfg(not(feature = "metal-dispatch"))]
+        return Err("metal-dispatch feature not enabled".into());
+
+        #[cfg(feature = "metal-dispatch")]
+        {
         use metal::*;
 
-        let device = Device::system_default().ok_or("no Metal device available")?;
-        let library = device
-            .new_library_with_source(TERNARY_TILE640_GEMV_SOURCE, &CompileOptions::new())
-            .map_err(|e| format!("Metal shader compilation failed: {:?}", e))?;
-        let function = library
-            .get_function("ternary_tile640_gemv", None)
-            .map_err(|e| format!("entry point not found: {:?}", e))?;
-        let pipeline = device
-            .new_compute_pipeline_state_with_function(&function)
-            .map_err(|e| format!("pipeline state creation failed: {:?}", e))?;
+        let (dispatcher, registry) = match &self.dispatch_state {
+            Some((d, r)) => (d, r),
+            None => {
+                let device = Device::system_default()
+                    .ok_or_else(|| "no Metal device available".to_string())?;
+                let (reg, ternary, ..) = create_dispatchers(&device);
+                self.dispatch_state = Some((ternary, reg.clone()));
+                let (d, r) = self.dispatch_state.as_ref().unwrap();
+                (d, r)
+            }
+        };
 
+        let device = registry.lock().device().clone();
         let nt = (self.in_dim + PAGE_WIDTH - 1) / PAGE_WIDTH; // pages per row
         let words_per_row = nt * 32;
         let total_words = self.out_dim * words_per_row;
 
-        // Pack FP16 weights into the tile640 ternary format:
-        //   per word (u32): 20 base-3 trits (1.6 bpw)
-        //   per page: 32 words = 640 trits = 640 ternary weights
-        // Scales: one bf16 page-max per page, one int8 relative scale per lane.
+        // Pack FP16 weights into the tile640 ternary format
         let mut packed_buf: Vec<u32> = vec![0u32; total_words];
         let mut page_scales_buf: Vec<u16> = vec![0u16; self.out_dim * nt];
         let mut lane_scales_buf: Vec<u8> = vec![0u8; total_words];
@@ -193,16 +203,17 @@ impl TernaryStudent {
             (packed_buf.len() * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let input_mtl = {
-            let x: Vec<f32> = (0..self.in_dim)
-                .map(|i| ((i as f64).cos() * 0.1) as f32)
+
+        // Input buffer: build an fp16 input vector.
+        let input_vec: Vec<u16> = (0..self.in_dim)
+            .map(|i| half::f16::from_f32(((i as f64).cos() * 0.1) as f32).to_bits())
                 .collect();
-            device.new_buffer_with_data(
-                x.as_ptr() as *const std::ffi::c_void,
-                (x.len() * 4) as u64,
-                MTLResourceOptions::StorageModeShared,
-            )
-        };
+        let input_mtl = device.new_buffer_with_data(
+            input_vec.as_ptr() as *const std::ffi::c_void,
+            (input_vec.len() * 2) as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+
         let page_scales_mtl = device.new_buffer_with_data(
             page_scales_buf.as_ptr() as *const std::ffi::c_void,
             (page_scales_buf.len() * 2) as u64,
@@ -217,46 +228,54 @@ impl TernaryStudent {
             (self.out_dim * 2) as u64, // FP16 = 2 bytes each
             MTLResourceOptions::StorageModeShared,
         );
-        // Metal kernel expects `uint` (32-bit), not `usize` (64-bit on ARM64).
-        let in_dim_u32: u32 = self.in_dim as u32;
-        let out_dim_u32: u32 = self.out_dim as u32;
-        let in_dim_mtl = device.new_buffer_with_data(
-            &in_dim_u32 as *const u32 as *const std::ffi::c_void,
-            4,
-            MTLResourceOptions::StorageModeShared,
-        );
-        let out_dim_mtl = device.new_buffer_with_data(
-            &out_dim_u32 as *const u32 as *const std::ffi::c_void,
-            4,
-            MTLResourceOptions::StorageModeShared,
+
+        let in_dim = self.in_dim as u32;
+        let out_dim = self.out_dim as u32;
+        let page_width = PAGE_WIDTH as u32;
+        let nt_u32 = nt as u32;
+
+        let params = ProjectionParams {
+            in_dim,
+            out_dim,
+            page_count: nt_u32 * out_dim,
+            page_width,
+            mode_flags: 0,
+            probe_seed: 0,
+            reserved: [0u32; 5],
+        };
+
+        let queue = device.new_command_queue();
+        let cmd_buf = queue.new_command_buffer();
+
+        let mut receipt = KernelReceipt {
+            kernel_id: 0,
+            phase_id: 0,
+            page_count: 0,
+            sidecar_hits: 0,
+            sidecar_entries_read: 0,
+            threadgroups: 0,
+            threads_per_threadgroup: 0,
+            output_elements: 0,
+            flags: 0,
+            logical_weight_bytes: 0,
+            logical_sidecar_bytes: 0,
+            logical_activation_bytes: 0,
+        };
+
+        dispatcher.dispatch(
+            &cmd_buf,
+            &packed_mtl,
+            &input_mtl,
+            &page_scales_mtl,
+            &lane_scales_mtl,
+            None,   // sidecar — not used in student forward
+            None,   // sidecar_offsets — not used
+            &output_mtl,
+            &params,
+            &mut receipt,
+            false,  // instrumented — off for student
         );
 
-        let cmd_queue = device.new_command_queue();
-        let cmd_buf = cmd_queue.new_command_buffer();
-        let encoder = cmd_buf.new_compute_command_encoder();
-        encoder.set_compute_pipeline_state(&pipeline);
-        encoder.set_buffer(0, Some(&packed_mtl), 0);
-        encoder.set_buffer(1, Some(&input_mtl), 0);
-        encoder.set_buffer(2, Some(&page_scales_mtl), 0);
-        encoder.set_buffer(3, Some(&lane_scales_mtl), 0);
-        encoder.set_buffer(4, Some(&output_mtl), 0);
-        encoder.set_buffer(5, Some(&in_dim_mtl), 0);
-        encoder.set_buffer(6, Some(&out_dim_mtl), 0);
-
-        // Dispatch: one threadgroup (64 threads) per output row.
-        encoder.dispatch_thread_groups(
-            MTLSize {
-                width: self.out_dim as u64,
-                height: 1,
-                depth: 1,
-            },
-            MTLSize {
-                width: 64,
-                height: 1,
-                depth: 1,
-            },
-        );
-        encoder.end_encoding();
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
 
@@ -265,11 +284,11 @@ impl TernaryStudent {
         let len = self.out_dim;
         let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         for (i, &half_bits) in slice.iter().enumerate() {
-            // Convert Metal's FP16 (stored as u16) to f32 via f16→f32.
             self.output[i] = half_to_f32(half_bits);
         }
 
         Ok(())
+        }
     }
 
     /// CPU simulation of the ternary GEMV forward pass.

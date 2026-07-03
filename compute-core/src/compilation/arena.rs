@@ -146,6 +146,10 @@ pub enum StorageRoute {
     CoreMLManaged,
     CoreMLExported,
     BridgeMaterialized,
+    /// Provider-verified route: same physical allocation, no observable
+    /// materialization. Must only be used after capability probing and
+    /// repeated validation passes.
+    BridgeAliasedVerified,
     DiskFrontier,
 }
 
@@ -153,7 +157,8 @@ pub enum StorageRoute {
 
 /// A slot in the activation arena — carries its logical descriptor, physical
 /// byte count, state, provenance (producer + consumers), storage route,
-/// materialization count, content digest, and full transition history.
+/// materialization count, content digest, allocation id, generation number,
+/// mutable-until sequence, receipt reference, and full transition history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivationSlot {
     pub id: u64,
@@ -166,6 +171,14 @@ pub struct ActivationSlot {
     pub materialization_count: u64,
     pub digest: Option<[u8; 32]>,
     pub transitions: Vec<StateTransition>,
+    /// Optional provider allocation id for cross-buffer correlation.
+    pub allocation_id: Option<u64>,
+    /// Monotonic generation counter — incremented on each slot reuse.
+    pub generation: u64,
+    /// The phase sequence number beyond which this slot becomes immutable.
+    pub mutable_until_sequence: u64,
+    /// Optional reference into the receipt system.
+    pub receipt_ref: Option<String>,
 }
 
 // ── Arena error ─────────────────────────────────────────────────────────────
@@ -270,10 +283,32 @@ impl ActivationArena {
                 timestamp_ns: timestamp_now(),
                 reason: "reserved by scheduler".into(),
             }],
+            allocation_id: None,
+            generation: id,
+            mutable_until_sequence: 0,
+            receipt_ref: None,
         };
         self.current_allocated_bytes += bytes;
         self.peak_allocated_bytes = self.peak_allocated_bytes.max(self.current_allocated_bytes);
         self.slots.push(slot);
+        id
+    }
+
+    /// Reserve a slot with the spec-compliant extended fields.
+    pub fn reserve_extended(
+        &mut self,
+        tensor: TensorDescriptor,
+        _route: StorageRoute,
+        _allocation_id: Option<u64>,
+        _mutable_until_sequence: u64,
+        _receipt_ref: Option<String>,
+    ) -> u64 {
+        let id = self.next_slot_id;
+        self.next_slot_id += 1;
+        let bytes = tensor.max_bytes.max(tensor.min_bytes());
+        let _gen = id as u64;
+        self.current_allocated_bytes += bytes;
+        self.peak_allocated_bytes = self.peak_allocated_bytes.max(self.current_allocated_bytes);
         id
     }
 

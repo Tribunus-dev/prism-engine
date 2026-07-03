@@ -138,7 +138,7 @@ pub struct CalibrationSection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicySection {
-    pub objective_weights: Vec<f64>,
+    pub objective_weights: ObjectiveWeights,
     pub sidecar_limits: SidecarLimits,
     pub scale_policy: String,
     pub deadzone_policy: String,
@@ -148,6 +148,21 @@ pub struct PolicySection {
     pub fallback_decisions: Vec<String>,
 }
 
+/// The 8-term loss function from spec §9:
+/// L = λ_out·L_block_output + λ_res·L_residual_stream + λ_attn·L_attention
+///     + λ_norm·L_normalization_stats + λ_logit·L_KL + λ_rollout·L_generation
+///     + λ_cost·C_runtime + λ_bytes·C_representation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ObjectiveWeights {
+    pub lambda_output: f64,
+    pub lambda_residual: f64,
+    pub lambda_attention: f64,
+    pub lambda_norm: f64,
+    pub lambda_logit: f64,
+    pub lambda_rollout: f64,
+    pub lambda_cost: f64,
+    pub lambda_bytes: f64,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySection {
     pub budget_bytes: u64,
