@@ -1,13 +1,13 @@
 //! Model loading helpers.
 //!
 //! Loads pre-compiled .mlmodelc models from the `.cimage` auxiliary
-//! section (embedded model bytes) into CoreMlModel instances.
+//! section (embedded model bytes) into CoreAiModel instances.
 
 use crate::arena::DataType;
 use super::Orchestrator;
 use crate::arena::Arena;
 use crate::compute_image::compaction;
-use crate::coreml_bridge::CoreMlModel;
+use crate::coreai_bridge::CoreAiModel;
 
 impl Orchestrator {
     /// Load a pre-compiled compaction model from embedded .mlmodelc bytes.
@@ -20,20 +20,20 @@ impl Orchestrator {
         num_kv_heads: u32,
         global_head_dim: u32,
         max_context: u32,
-    ) -> Option<CoreMlModel> {
+    ) -> Option<CoreAiModel> {
         if let Some(bytes) = bytes {
             // Write embedded model bytes to a temp .mlmodelc directory and load.
             // The temp dir is leaked (mem::forget) to keep the directory alive
             // for the model's lifetime — the OS cleans up on reboot.
-            let load_embedded = || -> Option<CoreMlModel> {
+            let load_embedded = || -> Option<CoreAiModel> {
                 let tmp_dir = tempfile::TempDir::new().ok()?;
                 let modelc_dir = tmp_dir.path().join("compaction.mlmodelc");
                 std::fs::create_dir_all(&modelc_dir).ok()?;
                 let model_path = modelc_dir.join("model.mlmodel");
                 std::fs::write(&model_path, bytes).ok()?;
-                let model = CoreMlModel::load_with_compute_units(
+                let model = CoreAiModel::load_with_compute_units(
                     &modelc_dir.to_string_lossy(),
-                    crate::coreml_bridge::CoreMlComputeUnits::CpuAndNeuralEngine,
+                    crate::coreai_bridge::CoreAiComputeUnits::CpuAndNeuralEngine,
                 )
                 .ok()?;
                 eprintln!(
@@ -80,15 +80,15 @@ impl Orchestrator {
     /// Writes the embedded bytes to a temporary `.mlmodelc` directory
     /// and loads via Core ML, leaking the temp directory for the model's
     /// lifetime.
-    pub(crate) fn load_prefill_model(bytes: &[u8]) -> Option<CoreMlModel> {
+    pub(crate) fn load_prefill_model(bytes: &[u8]) -> Option<CoreAiModel> {
         let tmp_dir = tempfile::TempDir::new().ok()?;
         let modelc_dir = tmp_dir.path().join("prefill.mlmodelc");
         std::fs::create_dir_all(&modelc_dir).ok()?;
         let model_path = modelc_dir.join("model.mlmodel");
         std::fs::write(&model_path, bytes).ok()?;
-        let model = CoreMlModel::load_with_compute_units(
+        let model = CoreAiModel::load_with_compute_units(
             &modelc_dir.to_string_lossy(),
-            crate::coreml_bridge::CoreMlComputeUnits::CpuAndNeuralEngine,
+            crate::coreai_bridge::CoreAiComputeUnits::CpuAndNeuralEngine,
         )
         .ok()?;
         eprintln!(
@@ -102,7 +102,7 @@ impl Orchestrator {
     /// Pre-allocate compaction arenas given a loaded compaction model.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn allocate_compaction_arenas(
-        compaction_model: &Option<CoreMlModel>,
+        compaction_model: &Option<CoreAiModel>,
         num_kv_heads: u32,
         global_head_dim: u32,
         max_context: u32,

@@ -126,7 +126,7 @@ pub fn expected_lattice_cells() -> BTreeSet<LatticeCellKey> {
     let mut cells = BTreeSet::new();
     let shapes = [SMALL.name, MEDIUM.name, LARGE.name];
     let backends = [
-        ("coreml", &["cpuOnly", "cpuAndGPU"][..]),
+        ("coreai", &["cpuOnly", "cpuAndGPU"][..]),
         ("mlx", &["mlx_default"][..]),
         ("accelerate", &["accelerate_cpu"][..]),
     ];
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn lattice_cell_id_round_trips() {
-        let key = LatticeCellKey::new("coreml", "matmul", "medium", "cpuOnly");
+        let key = LatticeCellKey::new("coreai", "matmul", "medium", "cpuOnly");
         let parsed =
             LatticeCellKey::parse_cell_id(&key.to_cell_id()).expect("parse lattice cell id");
         assert_eq!(parsed, key);

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KernelBenchResult {
     pub variant_name: String,
-    pub backend: String, // "mlx", "accelerate", "coreml", "neon"
+    pub backend: String, // "mlx", "accelerate", "coreai", "neon"
     pub op_type: String, // "matmul", "rms_norm", "softmax", "rope"
     pub shape: Vec<u32>,
     pub dtype: String,
@@ -24,7 +24,7 @@ pub struct KernelBenchResult {
 /// Per-lane benchmark result for a single op type, used in placement reports.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LaneBenchResult {
-    pub lane: String, // "mlx", "accelerate", "coreml"
+    pub lane: String, // "mlx", "accelerate", "coreai"
     pub median_ns: u64,
     pub min_ns: u64,
     pub bandwidth_gbps: f64,
@@ -56,7 +56,7 @@ pub struct KernelCandidate {
     pub threadgroup_size: Option<[u32; 3]>,
     pub metal_function: Option<String>,
     pub vdsp_function: Option<String>,
-    pub coreml_subgraph: Option<String>,
+    pub coreai_subgraph: Option<String>,
 }
 
 /// Selected kernel configuration promoted to the live process.

@@ -24,7 +24,7 @@ type SlotGeneration = u64;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SlotFailureReason {
     LayoutMismatch { expected: String, actual: String },
-    CoreMlPredictionFailed(String),
+    CoreAiPredictionFailed(String),
     MetalDispatchFailed(String),
     Timeout { deadline_ns: u64 },
     NumericalGuardFailed(String),
@@ -125,7 +125,7 @@ pub struct LiveIOSurfaceSlot {
     pub generation: u64,
     pub layout_digest: String,
     pub metal_view: Option<String>,   // Metal resource view descriptor
-    pub coreml_view: Option<String>, // Core ML IOSurface view descriptor
+    pub coreai_view: Option<String>, // Core ML IOSurface view descriptor
     /// Per-slot IOSurface backing (None when mocked)
     pub backing_arena: Option<crate::arena::Arena>,
     /// Attestation of the real IOSurface allocation against its manifest.
@@ -318,7 +318,7 @@ impl AppleSharedArena {
                 generation: 0,
                 layout_digest: manifest.arena_layout_digest.clone(),
                 metal_view: None,
-                coreml_view: None,
+                coreai_view: None,
                 backing_arena: None,
                 attestation: None,
             };
@@ -416,7 +416,7 @@ mod tests {
                 strides_bytes: vec![128, 2],
                 layout: "NHWC".into(),
                 producer: ExecutionLane::CandleCpu,
-                consumer: ExecutionLane::CoreMlAne,
+                consumer: ExecutionLane::CoreAiAne,
                 reuse_class: SlotReuseClass::Exclusive,
                 required_alignment: 256,
             },
@@ -424,7 +424,7 @@ mod tests {
             generation: 0,
             layout_digest: "abc123".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         }
@@ -449,8 +449,8 @@ mod tests {
         assert_eq!(slot.generation, 1);
 
         // Read (consumer)
-        slot.mark_reading(0, ExecutionLane::CoreMlAne).unwrap();
-        assert!(matches!(slot.state, SlotState::Reading { epoch: 0, consumer: ExecutionLane::CoreMlAne }));
+        slot.mark_reading(0, ExecutionLane::CoreAiAne).unwrap();
+        assert!(matches!(slot.state, SlotState::Reading { epoch: 0, consumer: ExecutionLane::CoreAiAne }));
 
         // Retire
         slot.retire(0);
@@ -483,7 +483,7 @@ mod tests {
 
         // Try reading with wrong epoch
         let err = slot
-            .mark_reading(1, ExecutionLane::CoreMlAne)
+            .mark_reading(1, ExecutionLane::CoreAiAne)
             .unwrap_err();
         assert!(err.contains("not ready for reading"));
     }

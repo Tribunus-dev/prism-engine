@@ -219,7 +219,7 @@ impl LaneQueueSet {
     pub fn new(metal_depth: usize, ane_depth: usize, accel_depth: usize) -> Self {
         Self {
             metal: LaneQueue::new(ExecutionLane::MlxGpu, metal_depth),
-            ane: LaneQueue::new(ExecutionLane::CoreMlAne, ane_depth),
+            ane: LaneQueue::new(ExecutionLane::CoreAiAne, ane_depth),
             accelerate: LaneQueue::new(ExecutionLane::AccelerateCpu, accel_depth),
         }
     }
@@ -231,7 +231,7 @@ impl LaneQueueSet {
     pub fn queue_for(&mut self, lane: ExecutionLane) -> &mut LaneQueue {
         match lane {
             ExecutionLane::MlxGpu => &mut self.metal,
-            ExecutionLane::CoreMlAne => &mut self.ane,
+            ExecutionLane::CoreAiAne => &mut self.ane,
             ExecutionLane::AccelerateCpu
             | ExecutionLane::CandleCpu
             | ExecutionLane::Tensix
@@ -243,7 +243,7 @@ impl LaneQueueSet {
     pub fn queue_for_lane(&self, lane: ExecutionLane) -> &LaneQueue {
         match lane {
             ExecutionLane::MlxGpu => &self.metal,
-            ExecutionLane::CoreMlAne => &self.ane,
+            ExecutionLane::CoreAiAne => &self.ane,
             ExecutionLane::AccelerateCpu
             | ExecutionLane::CandleCpu
             | ExecutionLane::Tensix
@@ -269,7 +269,7 @@ impl LaneQueueSet {
             map.insert(ExecutionLane::MlxGpu, metal_len);
         }
         if ane_len > 0 {
-            map.insert(ExecutionLane::CoreMlAne, ane_len);
+            map.insert(ExecutionLane::CoreAiAne, ane_len);
         }
         if accel_len > 0 {
             map.insert(ExecutionLane::AccelerateCpu, accel_len);
@@ -284,7 +284,7 @@ impl LaneQueueSet {
 fn backpressure_for(lane: ExecutionLane) -> BackpressureReason {
     match lane {
         ExecutionLane::MlxGpu => BackpressureReason::MetalCapacity,
-        ExecutionLane::CoreMlAne => BackpressureReason::AneCapacity,
+        ExecutionLane::CoreAiAne => BackpressureReason::AneCapacity,
         ExecutionLane::AccelerateCpu | ExecutionLane::CandleCpu => BackpressureReason::CpuCapacity,
         ExecutionLane::Tensix => BackpressureReason::ActivationSlots,
         ExecutionLane::IntelLevelZero => BackpressureReason::MetalCapacity,
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn backpressure_when_full() {
-        let mut q = LaneQueue::new(ExecutionLane::CoreMlAne, 2);
+        let mut q = LaneQueue::new(ExecutionLane::CoreAiAne, 2);
         assert!(q
             .try_push(entry(WorkPriority::Normal, next_work_id()))
             .is_ok());
@@ -507,8 +507,8 @@ mod tests {
 
     #[test]
     fn lane_roundtrip() {
-        let q = LaneQueue::new(ExecutionLane::CoreMlAne, 8);
-        assert_eq!(q.lane(), ExecutionLane::CoreMlAne);
+        let q = LaneQueue::new(ExecutionLane::CoreAiAne, 8);
+        assert_eq!(q.lane(), ExecutionLane::CoreAiAne);
         assert_eq!(q.capacity(), 8);
     }
 
@@ -531,8 +531,8 @@ mod tests {
         mq.try_push(entry(WorkPriority::Normal, next_work_id()))
             .unwrap();
 
-        let aq = set.queue_for(ExecutionLane::CoreMlAne);
-        assert_eq!(aq.lane(), ExecutionLane::CoreMlAne);
+        let aq = set.queue_for(ExecutionLane::CoreAiAne);
+        assert_eq!(aq.lane(), ExecutionLane::CoreAiAne);
         aq.try_push(entry(WorkPriority::Normal, next_work_id()))
             .unwrap();
 
@@ -545,7 +545,7 @@ mod tests {
         let snap = set.snapshot();
         assert_eq!(snap.len(), 3);
         assert_eq!(*snap.get(&ExecutionLane::MlxGpu).unwrap(), 1);
-        assert_eq!(*snap.get(&ExecutionLane::CoreMlAne).unwrap(), 1);
+        assert_eq!(*snap.get(&ExecutionLane::CoreAiAne).unwrap(), 1);
         assert_eq!(*snap.get(&ExecutionLane::AccelerateCpu).unwrap(), 1);
     }
 
@@ -577,11 +577,11 @@ mod tests {
         assert_eq!(err, BackpressureReason::MetalCapacity);
 
         assert!(set
-            .queue_for(ExecutionLane::CoreMlAne)
+            .queue_for(ExecutionLane::CoreAiAne)
             .try_push(entry(WorkPriority::Normal, next_work_id()))
             .is_ok());
         let err = set
-            .queue_for(ExecutionLane::CoreMlAne)
+            .queue_for(ExecutionLane::CoreAiAne)
             .try_push(entry(WorkPriority::Normal, next_work_id()))
             .expect_err("ane should be full");
         assert_eq!(err, BackpressureReason::AneCapacity);
@@ -619,7 +619,7 @@ mod tests {
         let snap = set.snapshot();
         assert_eq!(snap.len(), 1);
         assert_eq!(*snap.get(&ExecutionLane::MlxGpu).unwrap(), 1);
-        assert!(snap.get(&ExecutionLane::CoreMlAne).is_none());
+        assert!(snap.get(&ExecutionLane::CoreAiAne).is_none());
         assert!(snap.get(&ExecutionLane::AccelerateCpu).is_none());
     }
 

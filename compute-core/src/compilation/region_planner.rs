@@ -36,9 +36,9 @@ pub struct ScheduledOp {
 
 // ── Core ML island ───────────────────────────────────────────────────────
 
-/// A contiguous block of CoreMlProduction ops compiled into one .mlpackage.
+/// A contiguous block of CoreAiProduction ops compiled into one .mlpackage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlIsland {
+pub struct CoreAiIsland {
     pub island_id: u32,
     pub ops: Vec<ScheduledOp>,
     pub input_slots: Vec<u32>,
@@ -54,8 +54,8 @@ pub struct RegionExecutionPlan {
     pub n_layers: u32,
     /// Flat ordered list of all ops.
     pub ops: Vec<ScheduledOp>,
-    /// Core ML islands (contiguous CoreMlProduction runs).
-    pub coreml_islands: Vec<CoreMlIsland>,
+    /// Core ML islands (contiguous CoreAiProduction runs).
+    pub coreai_islands: Vec<CoreAiIsland>,
     /// Metal production ops.
     pub metal_ops: Vec<ScheduledOp>,
     /// CPU production ops.
@@ -114,7 +114,7 @@ pub fn build_region_plan(
     push_op(&mut ops, &mut op_index, n_layers, "logits_projection", "lm_head", catalogue);
 
     // Partition into Core ML islands
-    let coreml_islands = partition_islands(&ops);
+    let coreai_islands = partition_islands(&ops);
 
     let metal_ops: Vec<ScheduledOp> = ops
         .iter()
@@ -130,7 +130,7 @@ pub fn build_region_plan(
     RegionExecutionPlan {
         n_layers,
         ops,
-        coreml_islands,
+        coreai_islands,
         metal_ops,
         cpu_ops,
     }
@@ -158,14 +158,14 @@ fn push_op(
     *op_index += 1;
 }
 
-fn partition_islands(ops: &[ScheduledOp]) -> Vec<CoreMlIsland> {
+fn partition_islands(ops: &[ScheduledOp]) -> Vec<CoreAiIsland> {
     let mut islands = Vec::new();
     let mut island_id = 0u32;
     let mut i = 0;
     while i < ops.len() {
-        if matches!(ops[i].admission, RegionAdmission::CoreMlProduction) {
+        if matches!(ops[i].admission, RegionAdmission::CoreAiProduction) {
             let start = i;
-            while i < ops.len() && matches!(ops[i].admission, RegionAdmission::CoreMlProduction) {
+            while i < ops.len() && matches!(ops[i].admission, RegionAdmission::CoreAiProduction) {
                 i += 1;
             }
             let island_ops: Vec<ScheduledOp> = ops[start..i]
@@ -176,7 +176,7 @@ fn partition_islands(ops: &[ScheduledOp]) -> Vec<CoreMlIsland> {
                     cloned
                 })
                 .collect();
-            islands.push(CoreMlIsland {
+            islands.push(CoreAiIsland {
                 island_id,
                 ops: island_ops,
                 input_slots: vec![],
@@ -198,8 +198,8 @@ pub fn build_phase_regions(
     // For now: return one PhaseRegion per CoreML island, marked as MetalOnly.
     // Full eligibility integration will run AneEligibility::classify_ane_eligibility().
     let mut regions = Vec::new();
-    for island in &plan.coreml_islands {
-        // Map CoreMlIsland to PhaseRegion
+    for island in &plan.coreai_islands {
+        // Map CoreAiIsland to PhaseRegion
         let region_id = island.island_id as RegionId;
         let ops: Vec<crate::compilation::phase_ir::CompilePhaseDescriptor> = Vec::new(); // stub
         let eligibility = AneEligibility {
@@ -298,16 +298,16 @@ mod tests {
     }
 
     #[test]
-    fn test_coreml_islands_partitioned_correctly() {
+    fn test_coreai_islands_partitioned_correctly() {
         let model = make_test_canonical(1);
         let cat = RegionCatalogue::fp16_alpha();
         let plan = build_region_plan(&model, &cat);
 
         // Core ML ops: q, k, v, output_projection, gate, up, down, logits
         // These should appear as islands when adjacent
-        for island in &plan.coreml_islands {
+        for island in &plan.coreai_islands {
             for op in &island.ops {
-                assert!(matches!(op.admission, RegionAdmission::CoreMlProduction));
+                assert!(matches!(op.admission, RegionAdmission::CoreAiProduction));
                 assert_eq!(op.island_id, Some(island.island_id));
             }
         }
@@ -330,7 +330,7 @@ mod tests {
         let cat = RegionCatalogue::fp16_alpha();
         let plan = build_region_plan(&model, &cat);
 
-        let partitioned: u32 = plan.coreml_islands.iter()
+        let partitioned: u32 = plan.coreai_islands.iter()
             .map(|i| i.ops.len() as u32)
             .sum::<u32>()
             + plan.metal_ops.len() as u32

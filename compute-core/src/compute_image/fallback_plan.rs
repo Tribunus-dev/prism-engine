@@ -12,7 +12,7 @@ use crate::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
 
 
 /// Trait for injecting controlled Core ML failures in production tests.
-pub trait CoreMlFailureInjector: std::fmt::Debug {
+pub trait CoreAiFailureInjector: std::fmt::Debug {
     /// Return `true` when the injector wants to simulate a failure at this epoch.
     fn should_fail(&self, epoch: u64) -> bool;
 }
@@ -23,7 +23,7 @@ pub struct TestFailureInjector {
     pub fail_epoch: Option<u64>,
 }
 
-impl CoreMlFailureInjector for TestFailureInjector {
+impl CoreAiFailureInjector for TestFailureInjector {
     fn should_fail(&self, epoch: u64) -> bool {
         self.fail_epoch == Some(epoch)
     }
@@ -82,7 +82,7 @@ pub struct FallbackPlanManager {
     /// Defaults to 3.  Tune via [`FallbackPlanManager::set_max_consecutive_failures`].
     pub max_consecutive_failures: u32,
     /// Optional failure injector for production tests.
-    pub failure_injector: Option<Box<dyn CoreMlFailureInjector + Send>>,
+    pub failure_injector: Option<Box<dyn CoreAiFailureInjector + Send>>,
 }
 
 impl FallbackPlanManager {
@@ -105,7 +105,7 @@ impl FallbackPlanManager {
     }
 
     /// Set a failure injector for controlled production test failures.
-    pub fn set_failure_injector(&mut self, injector: Box<dyn CoreMlFailureInjector + Send>) {
+    pub fn set_failure_injector(&mut self, injector: Box<dyn CoreAiFailureInjector + Send>) {
         self.failure_injector = Some(injector);
     }
 
@@ -257,7 +257,7 @@ mod tests {
             physical_shape: vec![1, 64],
             strides_bytes: vec![128, 2],
             layout: "nchw".into(),
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
             consumer: ExecutionLane::MlxGpu,
             reuse_class: SlotReuseClass::Exclusive,
             required_alignment: 64,
@@ -270,7 +270,7 @@ mod tests {
             generation: 0,
             layout_digest: String::new(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
@@ -288,7 +288,7 @@ mod tests {
             generation: 1,
             layout_digest: "abc".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
@@ -298,12 +298,12 @@ mod tests {
             manifest: mk_manifest(2),
             state: SlotState::Ready {
                 epoch: 42,
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
             },
             generation: 2,
             layout_digest: "def".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
@@ -313,12 +313,12 @@ mod tests {
             manifest: mk_manifest(3),
             state: SlotState::Poisoned {
                 epoch: 42,
-                reason: SlotFailureReason::CoreMlPredictionFailed("oom".into()),
+                reason: SlotFailureReason::CoreAiPredictionFailed("oom".into()),
             },
             generation: 0,
             layout_digest: "xyz".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
@@ -330,7 +330,7 @@ mod tests {
             generation: 3,
             layout_digest: String::new(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         });
@@ -611,19 +611,19 @@ mod tests {
                 physical_shape: vec![1, 64],
                 strides_bytes: vec![128, 2],
                 layout: "nchw".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: SlotReuseClass::Exclusive,
                 required_alignment: 64,
             },
             state: SlotState::Reserved {
                 epoch: 10,
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
             },
             generation: 0,
             layout_digest: String::new(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         };
@@ -662,7 +662,7 @@ mod tests {
             physical_shape: vec![1, 64, 64],
             strides_bytes: vec![8192, 128, 2],
             layout: "NHWC".into(),
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
             consumer: ExecutionLane::MlxGpu,
             reuse_class: SlotReuseClass::Exclusive,
             required_alignment: 256,

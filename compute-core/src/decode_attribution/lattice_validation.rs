@@ -871,7 +871,7 @@ mod tests {
     #[derive(Clone, Copy)]
     enum WriterOutcome {
         Pass,
-        CoreMlCompileLimited,
+        CoreAiCompileLimited,
         MlxPredictBlocked,
         AccelerateSkippedBySupport,
     }
@@ -1071,7 +1071,7 @@ mod tests {
         receipt
     }
 
-    fn writer_like_coreml_receipt(
+    fn writer_like_coreai_receipt(
         run_id: &str,
         cell: &LatticeCellKey,
         outcome: WriterOutcome,
@@ -1087,7 +1087,7 @@ mod tests {
         {
             "identity_passthrough_cpu".to_string()
         } else {
-            "coreml_predict".to_string()
+            "coreai_predict".to_string()
         };
         receipt.backend_support_status = "supported".to_string();
         receipt.support_tier = "supported_native".to_string();
@@ -1112,10 +1112,10 @@ mod tests {
                 "decode_attribution_runs/{}/{}_stderr.txt",
                 run_id, cell.graph_family
             ));
-            receipt.coreml_mil_build_ns = 10;
-            receipt.coreml_package_write_ns = 20;
-            receipt.coreml_compiler_ns = 30;
-            receipt.coreml_model_load_ns = 40;
+            receipt.coreai_mil_build_ns = 10;
+            receipt.coreai_package_write_ns = 20;
+            receipt.coreai_compiler_ns = 30;
+            receipt.coreai_model_load_ns = 40;
             receipt.load_duration_ns = 1500;
             receipt.cold_status = "ok".to_string();
             receipt.warmup_status = "ok".to_string();
@@ -1124,7 +1124,7 @@ mod tests {
             receipt.cold_output_hashes = output_hashes_for(
                 cell.graph_family.as_str(),
                 cell.shape_profile.as_str(),
-                "coldhash-coreml",
+                "coldhash-coreai",
             );
             receipt.warmup_iterations = receipt.configured_warmup_iterations;
             receipt.warmup_total_ns = 500;
@@ -1160,7 +1160,7 @@ mod tests {
             receipt.compiler_exit_code = Some(0);
             receipt.compute_plan_status = "unavailable".to_string();
             receipt.execution_proof = ExecutionProof {
-                engine: "coreml".into(),
+                engine: "coreai".into(),
                 accelerated_ops: family_ops(cell.graph_family.as_str()),
                 cpu_ops: vec![],
                 reference_ops: vec![],
@@ -1168,7 +1168,7 @@ mod tests {
                 accelerate_vdsp_ops: vec![],
                 accelerate_vforce_ops: vec![],
                 cpu_glue_ops: vec![],
-                bridge_path: Some("coreml_predict_bridge".into()),
+                bridge_path: Some("coreai_predict_bridge".into()),
                 notes: Some(format!("Compiled via coremlcompiler, island=false")),
             };
         } else {
@@ -1187,10 +1187,10 @@ mod tests {
                 "decode_attribution_runs/{}/{}_stderr.txt",
                 run_id, cell.graph_family
             ));
-            receipt.coreml_mil_build_ns = 0;
-            receipt.coreml_package_write_ns = 0;
-            receipt.coreml_compiler_ns = 0;
-            receipt.coreml_model_load_ns = 0;
+            receipt.coreai_mil_build_ns = 0;
+            receipt.coreai_package_write_ns = 0;
+            receipt.coreai_compiler_ns = 0;
+            receipt.coreai_model_load_ns = 0;
             receipt.cold_status.clear();
             receipt.warmup_status.clear();
             receipt.steady_status.clear();
@@ -1226,13 +1226,13 @@ mod tests {
             receipt.predict_failure_classification = "compile_limited".to_string();
             receipt.terminal_phase = "mil_build".to_string();
             receipt.failure_reason =
-                Some("coreml prepare failed: synthetic compiler failure".to_string());
+                Some("coreai prepare failed: synthetic compiler failure".to_string());
             receipt.failure_diagnostics =
-                Some("coreml prepare: synthetic compiler failure".to_string());
+                Some("coreai prepare: synthetic compiler failure".to_string());
             receipt.compiler_exit_code = Some(1);
             receipt.compute_plan_status.clear();
             receipt.execution_proof = ExecutionProof {
-                engine: "coreml".into(),
+                engine: "coreai".into(),
                 accelerated_ops: family_ops(cell.graph_family.as_str()),
                 cpu_ops: vec![],
                 reference_ops: vec![],
@@ -1242,7 +1242,7 @@ mod tests {
                 cpu_glue_ops: vec![],
                 bridge_path: None,
                 notes: Some(format!(
-                    "backend=coreml family={} status=compile_error",
+                    "backend=coreai family={} status=compile_error",
                     cell.graph_family
                 )),
             };
@@ -1516,8 +1516,8 @@ mod tests {
                 cell.shape_profile.as_str(),
                 cell.runtime_policy.as_str(),
             ) {
-                ("coreml", "branch_rejoin", "medium", "cpuOnly") => {
-                    WriterOutcome::CoreMlCompileLimited
+                ("coreai", "branch_rejoin", "medium", "cpuOnly") => {
+                    WriterOutcome::CoreAiCompileLimited
                 }
                 ("mlx", "multi_output", "large", "mlx_default") => WriterOutcome::MlxPredictBlocked,
                 ("accelerate", "softmax_tail", "small", "accelerate_cpu") => {
@@ -1527,7 +1527,7 @@ mod tests {
             };
 
             let receipt = match cell.backend.as_str() {
-                "coreml" => writer_like_coreml_receipt(run_id, &cell, outcome),
+                "coreai" => writer_like_coreai_receipt(run_id, &cell, outcome),
                 "mlx" => writer_like_mlx_receipt(run_id, &cell, outcome),
                 "accelerate" => writer_like_accelerate_receipt(run_id, &cell, outcome),
                 other => panic!("unexpected backend {other}"),
@@ -1593,7 +1593,7 @@ mod tests {
         let mut receipts = Vec::new();
         for cell in expected_lattice_cells() {
             let support_tier = match cell.backend.as_str() {
-                "coreml" => "supported_native",
+                "coreai" => "supported_native",
                 _ => "supported_composed",
             };
             receipts.push(synthetic_receipt(
@@ -1642,38 +1642,38 @@ mod tests {
         assert_eq!(receipt.aggregate_input_summary.excluded_rows, 15);
         assert_eq!(receipt.aggregate_exclusions.len(), 15);
 
-        let coreml_pass = receipts
+        let coreai_pass = receipts
             .iter()
             .find(|r| {
-                r.backend == "coreml"
+                r.backend == "coreai"
                     && r.predict_status == "pass"
                     && canonical_family_name(r.graph_family.as_str())
                         != identity_baseline_family_name()
             })
-            .expect("coreml pass row");
-        assert_eq!(coreml_pass.backend_support_status, "supported");
-        assert_eq!(coreml_pass.support_tier, "supported_native");
-        assert_eq!(coreml_pass.materialization_kind, "mil_package_write");
-        assert_eq!(coreml_pass.compile_kind, "xcrun_coremlcompiler");
-        assert_eq!(coreml_pass.load_kind, "mlmodel_load");
-        assert_eq!(coreml_pass.execution_kind, "coreml_predict");
-        assert_eq!(coreml_pass.load_success, true);
-        assert_eq!(coreml_pass.reference_output_hashes_populated, true);
+            .expect("coreai pass row");
+        assert_eq!(coreai_pass.backend_support_status, "supported");
+        assert_eq!(coreai_pass.support_tier, "supported_native");
+        assert_eq!(coreai_pass.materialization_kind, "mil_package_write");
+        assert_eq!(coreai_pass.compile_kind, "xcrun_coremlcompiler");
+        assert_eq!(coreai_pass.load_kind, "mlmodel_load");
+        assert_eq!(coreai_pass.execution_kind, "coreai_predict");
+        assert_eq!(coreai_pass.load_success, true);
+        assert_eq!(coreai_pass.reference_output_hashes_populated, true);
 
-        let coreml_non_pass = receipts
+        let coreai_non_pass = receipts
             .iter()
-            .find(|r| r.backend == "coreml" && r.predict_status == "compile_limited")
-            .expect("coreml non-pass row");
-        assert_eq!(coreml_non_pass.backend_support_status, "supported");
+            .find(|r| r.backend == "coreai" && r.predict_status == "compile_limited")
+            .expect("coreai non-pass row");
+        assert_eq!(coreai_non_pass.backend_support_status, "supported");
         assert_eq!(
-            coreml_non_pass.predict_failure_classification,
+            coreai_non_pass.predict_failure_classification,
             "compile_limited"
         );
-        assert_eq!(coreml_non_pass.status, "compile_error");
-        assert_eq!(coreml_non_pass.terminal_phase, "mil_build");
-        assert_eq!(coreml_non_pass.materialize_status, "error");
-        assert_eq!(coreml_non_pass.compile_status, "error");
-        assert_eq!(coreml_non_pass.load_status, "error");
+        assert_eq!(coreai_non_pass.status, "compile_error");
+        assert_eq!(coreai_non_pass.terminal_phase, "mil_build");
+        assert_eq!(coreai_non_pass.materialize_status, "error");
+        assert_eq!(coreai_non_pass.compile_status, "error");
+        assert_eq!(coreai_non_pass.load_status, "error");
 
         let mlx_pass = receipts
             .iter()
@@ -1752,7 +1752,7 @@ mod tests {
         assert_eq!(
             receipts
                 .iter()
-                .filter(|r| r.backend == "coreml" && r.predict_status != "pass")
+                .filter(|r| r.backend == "coreai" && r.predict_status != "pass")
                 .count(),
             1
         );
@@ -1784,7 +1784,7 @@ mod tests {
     #[test]
     fn validator_rejects_malformed_lattice_cell_id() {
         let mut receipts = synthetic_complete_lattice("run-1");
-        receipts[0].lattice_cell_id = "coverage-lattice.v2/coreml".to_string();
+        receipts[0].lattice_cell_id = "coverage-lattice.v2/coreai".to_string();
         let receipt = validate_lattice("run-1", &receipts);
         assert!(!receipt.passed);
         assert_eq!(receipt.invalid_cells[0].reason, "malformed_lattice_cell_id");

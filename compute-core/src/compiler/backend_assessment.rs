@@ -362,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_score_backend_coreml_attention() {
+    fn test_score_backend_coreai_attention() {
         let op = make_op(1, OperationFamily::AttentionBlock, None, None, None, false);
         assert_eq!(score_backend(&op, BackendId(2)), 90);
     }

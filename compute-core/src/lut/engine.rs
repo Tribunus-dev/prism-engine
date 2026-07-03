@@ -115,8 +115,8 @@ mod metal_backend {
 ))]
 #[allow(dead_code)]
 struct AneBackend {
-    model: crate::coreml_bridge::CoreMlModel,
-    ctx: crate::coreml_state::StatefulPrefillContext,
+    model: crate::coreai_bridge::CoreAiModel,
+    ctx: crate::coreai_state::StatefulPrefillContext,
     chunk_size: u32,
 }
 
@@ -296,8 +296,8 @@ impl PrismEngine {
     ))]
     pub fn with_ane(&mut self, mc_dir: &str, cs: u32) -> Result<(), String> {
         let mp = format!("{}/k_cache_{}.mlmodelc", mc_dir, cs);
-        let model = crate::coreml_bridge::CoreMlModel::load(&mp)?;
-        let ctx = crate::coreml_state::StatefulPrefillContext::new(model.ptr)?;
+        let model = crate::coreai_bridge::CoreAiModel::load(&mp)?;
+        let ctx = crate::coreai_state::StatefulPrefillContext::new(model.ptr)?;
         self.ane = Some(AneBackend {
             model,
             ctx,

@@ -3,7 +3,7 @@
 //! actual backend dispatch.
 
 use crate::backend::accelerate_lane::AccelerateLane;
-use crate::backend::coreml_lane::CoreMlLane;
+use crate::backend::coreai_lane::CoreAiLane;
 use crate::compute_image::phase_dag::{EmittedPhase, EmittedPhaseGraph, PhaseCompletionStatus};
 use crate::inference::execution_image_state::ComputeImageState;
 use crate::inference::inference_session_state::InferenceSessionState;
@@ -221,7 +221,7 @@ impl PhaseEngine {
                 // TODO: populate metal_kernels from image when ComputeImageState carries them
                 metal_kernels: Arc::new(Vec::new()),
                 accelerate_state: AccelerateLane::new(),
-                coreml_state: CoreMlLane::new(),
+                coreai_state: CoreAiLane::new(),
                 // TODO: populate weight tensors from image when available
                 emb_w: placeholder_arr.clone(),
                 emb_s: placeholder_arr.clone(),

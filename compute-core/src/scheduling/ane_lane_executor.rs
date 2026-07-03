@@ -6,13 +6,13 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
-use crate::backend::coreml_iosurface::{
-    CoreMlComputePolicy, CoreMlIOSurfaceBinding, CoreMlIOSurfaceExecutable,
+use crate::backend::coreai_iosurface::{
+    CoreAiComputePolicy, CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable,
 };
 use crate::backend::placement::ExecutionLane;
 use crate::compilation::tri_lane::NumericalStatus;
 use crate::compute_image::apple_shared_arena::AppleSharedArena;
-use crate::coreml_bridge::CoreMlModel;
+use crate::coreai_bridge::CoreAiModel;
 use crate::scheduling::lane_work::{
     BackendExecutionTiming, LaneExecutionError, LaneExecutor, LaneWorkRequest, TimestampQuality,
     WorkCompletion, WorkSubmission,
@@ -42,10 +42,10 @@ pub struct AneLaneExecutor {
     /// Core ML executable bound to the arena.
     pub artifact_id: String,
     pub model_path: String,
-    pub compute_policy: CoreMlComputePolicy,
-    pub input_bindings: Vec<CoreMlIOSurfaceBinding>,
-    pub output_bindings: Vec<CoreMlIOSurfaceBinding>,
-    pub model: Option<Arc<Mutex<CoreMlModel>>>,
+    pub compute_policy: CoreAiComputePolicy,
+    pub input_bindings: Vec<CoreAiIOSurfaceBinding>,
+    pub output_bindings: Vec<CoreAiIOSurfaceBinding>,
+    pub model: Option<Arc<Mutex<CoreAiModel>>>,
     /// Arena reference for slot access.
     pub arena: *mut AppleSharedArena,
     /// Name for diagnostics.
@@ -60,18 +60,18 @@ unsafe impl Sync for AneLaneExecutor {}
 
 impl AneLaneExecutor {
     pub fn new(
-        mut coreml_exec: CoreMlIOSurfaceExecutable,
+        mut coreai_exec: CoreAiIOSurfaceExecutable,
         arena: &mut AppleSharedArena,
         name: &str,
         runtime_handle: tokio::runtime::Handle,
     ) -> Self {
-        let model = coreml_exec.model.take().map(|m| Arc::new(Mutex::new(m)));
+        let model = coreai_exec.model.take().map(|m| Arc::new(Mutex::new(m)));
         Self {
-            artifact_id: coreml_exec.artifact_id.clone(),
-            model_path: coreml_exec.model_path.clone(),
-            compute_policy: coreml_exec.compute_policy,
-            input_bindings: coreml_exec.input_bindings.clone(),
-            output_bindings: coreml_exec.output_bindings.clone(),
+            artifact_id: coreai_exec.artifact_id.clone(),
+            model_path: coreai_exec.model_path.clone(),
+            compute_policy: coreai_exec.compute_policy,
+            input_bindings: coreai_exec.input_bindings.clone(),
+            output_bindings: coreai_exec.output_bindings.clone(),
             model,
             arena: arena as *mut AppleSharedArena,
             name: name.to_string(),
@@ -215,7 +215,7 @@ impl LaneExecutor for AneLaneExecutor {
                 work_id,
                 phase_id,
                 variant_id,
-                lane: ExecutionLane::CoreMlAne,
+                lane: ExecutionLane::CoreAiAne,
                 success: prediction_ok,
                 output_slot,
                 backend_status: if prediction_ok {
@@ -234,7 +234,7 @@ impl LaneExecutor for AneLaneExecutor {
 
         Ok(WorkSubmission {
             work_id: request.work_id,
-            lane: ExecutionLane::CoreMlAne,
+            lane: ExecutionLane::CoreAiAne,
             submission_time: submit_time,
         })
     }

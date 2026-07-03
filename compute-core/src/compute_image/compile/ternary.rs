@@ -119,7 +119,7 @@ impl ModelArtifactEntry {
         out.extend_from_slice(data);
     }
 
-    pub fn iter_entries(blob: &[u8]) -> ModelArtifactIter {
+    pub fn iter_entries(blob: &[u8]) -> ModelArtifactIter<'_> {
         ModelArtifactIter { blob, pos: 0 }
     }
 }

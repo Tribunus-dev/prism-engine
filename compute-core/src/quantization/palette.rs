@@ -482,7 +482,7 @@ pub fn palettize_matrix_phased(
         copied_bytes: 0,
         numerical_validation: ValidationResult::Skipped,
         fallback_reason: None,
-        coreml_compute_units: None,
+        coreai_compute_units: None,
     };
 
     let r2 = CompileExecutionReceipt {
@@ -507,7 +507,7 @@ pub fn palettize_matrix_phased(
         copied_bytes: total_elements * 4,
         numerical_validation: ValidationResult::Skipped,
         fallback_reason: None,
-        coreml_compute_units: None,
+        coreai_compute_units: None,
     };
 
     let r3 = CompileExecutionReceipt {
@@ -532,7 +532,7 @@ pub fn palettize_matrix_phased(
         copied_bytes: (total_elements * 4) + codebook_bytes,
         numerical_validation: ValidationResult::Skipped,
         fallback_reason: None,
-        coreml_compute_units: None,
+        coreai_compute_units: None,
     };
 
     let r4 = CompileExecutionReceipt {
@@ -557,7 +557,7 @@ pub fn palettize_matrix_phased(
         copied_bytes: 0,
         numerical_validation: ValidationResult::Skipped,
         fallback_reason: None,
-        coreml_compute_units: None,
+        coreai_compute_units: None,
     };
 
     let receipts = vec![r1, r2, r3, r4];

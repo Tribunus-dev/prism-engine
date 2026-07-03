@@ -13,7 +13,7 @@ use crate::backend::placement::ExecutionLane;
 use crate::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
 use crate::compilation::phase_ir::PhaseId;
 use crate::compilation::tri_lane::NumericalStatus;
-use crate::compute_image::compile::portfolio::CoreMlArtifactKey;
+use crate::compute_image::compile::portfolio::CoreAiArtifactKey;
 use crate::scheduling::tri_lane_orchestrator::{EpochId, VariantId};
 
 // ── Work ID ─────────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ pub struct LaneWorkRequest {
     pub output_slot: SlotLeaseId,
     pub input_abi: ActivationAbi,
     pub output_abi: ActivationAbi,
-    pub artifact_key: Option<CoreMlArtifactKey>,
+    pub artifact_key: Option<CoreAiArtifactKey>,
     pub metal_pipeline: Option<MetalPipelineRef>,
     pub completion_clock: CompletionClock,
 }

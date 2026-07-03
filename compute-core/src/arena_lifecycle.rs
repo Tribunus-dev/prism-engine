@@ -35,11 +35,11 @@ pub enum LifecycleState {
     Free,
     MlxWriteLeased,
     MlxWritePending,
-    CoreMlWriteLeased,
-    CoreMlWritePending,
+    CoreAiWriteLeased,
+    CoreAiWritePending,
     Produced,
     MlxReadLeased,
-    CoreMlReadLeased,
+    CoreAiReadLeased,
     Retiring,
     Released,
 }
@@ -59,7 +59,7 @@ pub struct ArenaLease {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeasedBackend {
     Mlx,
-    CoreMl,
+    CoreAi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,15 +97,15 @@ pub fn validate_transition(
     use LifecycleState::*;
     match (current, desired) {
         // Allocation
-        (Free, MlxWriteLeased) | (Free, CoreMlWriteLeased) => Ok(desired),
+        (Free, MlxWriteLeased) | (Free, CoreAiWriteLeased) => Ok(desired),
         // Write submission
-        (MlxWriteLeased, MlxWritePending) | (CoreMlWriteLeased, CoreMlWritePending) => Ok(desired),
+        (MlxWriteLeased, MlxWritePending) | (CoreAiWriteLeased, CoreAiWritePending) => Ok(desired),
         // Write completion -> Produced
-        (MlxWritePending, Produced) | (CoreMlWritePending, Produced) => Ok(desired),
+        (MlxWritePending, Produced) | (CoreAiWritePending, Produced) => Ok(desired),
         // Reader acquisition from Produced
-        (Produced, MlxReadLeased) | (Produced, CoreMlReadLeased) => Ok(desired),
+        (Produced, MlxReadLeased) | (Produced, CoreAiReadLeased) => Ok(desired),
         // Reader returns to Produced
-        (MlxReadLeased, Produced) | (CoreMlReadLeased, Produced) => Ok(desired),
+        (MlxReadLeased, Produced) | (CoreAiReadLeased, Produced) => Ok(desired),
         // Return to Free for reuse
         (Produced, Free) => Ok(Free),
         // Retiring path
@@ -130,8 +130,8 @@ mod tests {
             Ok(LifecycleState::MlxWriteLeased)
         );
         assert_eq!(
-            validate_transition(LifecycleState::Free, LifecycleState::CoreMlWriteLeased),
-            Ok(LifecycleState::CoreMlWriteLeased)
+            validate_transition(LifecycleState::Free, LifecycleState::CoreAiWriteLeased),
+            Ok(LifecycleState::CoreAiWriteLeased)
         );
 
         // WriteLeased -> WritePending
@@ -144,10 +144,10 @@ mod tests {
         );
         assert_eq!(
             validate_transition(
-                LifecycleState::CoreMlWriteLeased,
-                LifecycleState::CoreMlWritePending
+                LifecycleState::CoreAiWriteLeased,
+                LifecycleState::CoreAiWritePending
             ),
-            Ok(LifecycleState::CoreMlWritePending)
+            Ok(LifecycleState::CoreAiWritePending)
         );
 
         // WritePending -> Produced
@@ -156,7 +156,7 @@ mod tests {
             Ok(LifecycleState::Produced)
         );
         assert_eq!(
-            validate_transition(LifecycleState::CoreMlWritePending, LifecycleState::Produced),
+            validate_transition(LifecycleState::CoreAiWritePending, LifecycleState::Produced),
             Ok(LifecycleState::Produced)
         );
 
@@ -166,8 +166,8 @@ mod tests {
             Ok(LifecycleState::MlxReadLeased)
         );
         assert_eq!(
-            validate_transition(LifecycleState::Produced, LifecycleState::CoreMlReadLeased),
-            Ok(LifecycleState::CoreMlReadLeased)
+            validate_transition(LifecycleState::Produced, LifecycleState::CoreAiReadLeased),
+            Ok(LifecycleState::CoreAiReadLeased)
         );
 
         // ReadLeased -> Produced (reader release)
@@ -176,7 +176,7 @@ mod tests {
             Ok(LifecycleState::Produced)
         );
         assert_eq!(
-            validate_transition(LifecycleState::CoreMlReadLeased, LifecycleState::Produced),
+            validate_transition(LifecycleState::CoreAiReadLeased, LifecycleState::Produced),
             Ok(LifecycleState::Produced)
         );
 
@@ -212,7 +212,7 @@ mod tests {
         // Cross-backend transition is illegal
         assert!(validate_transition(
             LifecycleState::MlxWriteLeased,
-            LifecycleState::CoreMlWritePending
+            LifecycleState::CoreAiWritePending
         )
         .is_err());
 

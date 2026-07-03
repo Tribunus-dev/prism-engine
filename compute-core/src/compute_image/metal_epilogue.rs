@@ -59,7 +59,7 @@ pub enum EpilogueSelectionRule {
 /// status.
 ///
 /// Returns:
-/// - `AneWhenQualified` when `consumer_lane` is `CoreMlAne` and `is_qualified`
+/// - `AneWhenQualified` when `consumer_lane` is `CoreAiAne` and `is_qualified`
 ///   is true.
 /// - `AlwaysMetalNative` when the consumer runs on the Metal GPU
 ///   (`MlxGpu`).
@@ -69,7 +69,7 @@ pub fn select_epilogue(
     is_qualified: bool,
 ) -> EpilogueSelectionRule {
     match consumer_lane {
-        ExecutionLane::CoreMlAne if is_qualified => EpilogueSelectionRule::AneWhenQualified,
+        ExecutionLane::CoreAiAne if is_qualified => EpilogueSelectionRule::AneWhenQualified,
         ExecutionLane::MlxGpu => EpilogueSelectionRule::AlwaysMetalNative,
         _ => EpilogueSelectionRule::CanonicalWhenUncertain,
     }
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn test_select_ane_epilogue_for_qualified_ane_consumer() {
-        let rule = select_epilogue(ExecutionLane::CoreMlAne, true);
+        let rule = select_epilogue(ExecutionLane::CoreAiAne, true);
         assert_eq!(rule, EpilogueSelectionRule::AneWhenQualified);
     }
 
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(rule_q, EpilogueSelectionRule::CanonicalWhenUncertain);
 
         // ANE but *not* qualified → canonical
-        let rule_unqualified_ane = select_epilogue(ExecutionLane::CoreMlAne, false);
+        let rule_unqualified_ane = select_epilogue(ExecutionLane::CoreAiAne, false);
         assert_eq!(
             rule_unqualified_ane,
             EpilogueSelectionRule::CanonicalWhenUncertain
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_choose_epilogue_produces_correct_variant() {
-        let ctx = context_with(ExecutionLane::MlxGpu, ExecutionLane::CoreMlAne);
+        let ctx = context_with(ExecutionLane::MlxGpu, ExecutionLane::CoreAiAne);
 
         // AlwaysMetalNative → MetalNative
         let ep = choose_epilogue(&ctx, &EpilogueSelectionRule::AlwaysMetalNative);

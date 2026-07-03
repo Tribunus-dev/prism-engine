@@ -1,4 +1,4 @@
-//! Core ML general lowering — [`BackendLowering`] for `CoreMlLowering`.
+//! Core ML general lowering — [`BackendLowering`] for `CoreAiLowering`.
 //!
 //! Replaces the hardcoded `build_matmul_region` with a typed operation
 //! registry, transactional staged emission, and three-stage pipeline
@@ -18,7 +18,7 @@ use crate::compiler::{
     scheduled::{RegionId, ScheduledRegion},
     BackendLowering, LegalityReceipt, LegalityViolation, LoweringReceipt,
 };
-use crate::coreml_pipeline::{compile_mlpackage, CoreMlIslandReceipt};
+use crate::coreai_pipeline::{compile_mlpackage, CoreAiIslandReceipt};
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 
@@ -82,7 +82,7 @@ impl ConstantPool {
 /// MIL.proto uses HashMap for functions, block_specializations, inputs, etc.
 /// This function sorts those maps by key before re-encoding.
 pub fn canonical_serialize(program: &mil_spec::Program) -> Vec<u8> {
-    // The coreml-proto crate serialization may use HashMap iteration order.
+    // The coreai-proto crate serialization may use HashMap iteration order.
     // When map fields are prost-generated with BTreeMap, this is unnecessary.
     // We rely on the crate's current implementation + deterministic key ordering
     // in HashMap iteration (which Rust does not guarantee).
@@ -266,13 +266,13 @@ struct OpBuilder;
 
 impl OpBuilder {
     fn emit_constant(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         let attrs = match &op.attrs {
             OpAttrs::Constant { data, shape } => (data, shape),
             _ => {
-                return Err(CoreMlLoweringError::new(&ctx.region_identity).with_fatal(
+                return Err(CoreAiLoweringError::new(&ctx.region_identity).with_fatal(
                     LoweringDiagnostic::ConstraintViolation {
                         op_id: op.op_id,
                         constraint: "op_attrs".to_string(),
@@ -352,9 +352,9 @@ impl OpBuilder {
     }
 
     fn emit_identity(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         let ssa = ctx.fresh_ssa_name(op.op_id, 0);
         let input_ref = ctx.require_input(op.op_id, 0, &op.inputs)?;
         let vt = input_ref.value_type.clone();
@@ -383,30 +383,30 @@ impl OpBuilder {
     }
 
     fn emit_add(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         emit_binary(ctx, op, "add")
     }
 
     fn emit_mul(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         emit_binary(ctx, op, "mul")
     }
 
     fn emit_matmul(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         let attrs = match &op.attrs {
             OpAttrs::Matmul {
                 transpose_x,
                 transpose_y,
             } => (*transpose_x, *transpose_y),
             _ => {
-                return Err(CoreMlLoweringError::new(&ctx.region_identity).with_fatal(
+                return Err(CoreAiLoweringError::new(&ctx.region_identity).with_fatal(
                     LoweringDiagnostic::ConstraintViolation {
                         op_id: op.op_id,
                         constraint: "op_attrs".to_string(),
@@ -450,13 +450,13 @@ impl OpBuilder {
     }
 
     fn emit_reshape(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         let target_shape = match &op.attrs {
             OpAttrs::Reshape { target_shape } => target_shape.clone(),
             _ => {
-                return Err(CoreMlLoweringError::new(&ctx.region_identity).with_fatal(
+                return Err(CoreAiLoweringError::new(&ctx.region_identity).with_fatal(
                     LoweringDiagnostic::ConstraintViolation {
                         op_id: op.op_id,
                         constraint: "op_attrs".to_string(),
@@ -498,13 +498,13 @@ impl OpBuilder {
     }
 
     fn emit_transpose(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         let perm = match &op.attrs {
             OpAttrs::Transpose { permutation } => permutation.clone(),
             _ => {
-                return Err(CoreMlLoweringError::new(&ctx.region_identity).with_fatal(
+                return Err(CoreAiLoweringError::new(&ctx.region_identity).with_fatal(
                     LoweringDiagnostic::ConstraintViolation {
                         op_id: op.op_id,
                         constraint: "op_attrs".to_string(),
@@ -545,13 +545,13 @@ impl OpBuilder {
     }
 
     fn emit_softmax(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         let axis = match &op.attrs {
             OpAttrs::Softmax { axis } => *axis,
             _ => {
-                return Err(CoreMlLoweringError::new(&ctx.region_identity).with_fatal(
+                return Err(CoreAiLoweringError::new(&ctx.region_identity).with_fatal(
                     LoweringDiagnostic::ConstraintViolation {
                         op_id: op.op_id,
                         constraint: "op_attrs".to_string(),
@@ -590,9 +590,9 @@ impl OpBuilder {
     }
 
     fn emit_silu(
-        ctx: &mut CoreMlLoweringCtx,
+        ctx: &mut CoreAiLoweringCtx,
         op: &ScheduledOp,
-    ) -> Result<StagedEmission, CoreMlLoweringError> {
+    ) -> Result<StagedEmission, CoreAiLoweringError> {
         let ssa = ctx.fresh_ssa_name(op.op_id, 0);
         let input_ref = ctx.require_input(op.op_id, 0, &op.inputs)?;
         let vt = input_ref.value_type.clone();
@@ -622,10 +622,10 @@ impl OpBuilder {
 }
 
 fn emit_binary(
-    ctx: &mut CoreMlLoweringCtx,
+    ctx: &mut CoreAiLoweringCtx,
     op: &ScheduledOp,
     mil_type: &str,
-) -> Result<StagedEmission, CoreMlLoweringError> {
+) -> Result<StagedEmission, CoreAiLoweringError> {
     let ssa = ctx.fresh_ssa_name(op.op_id, 0);
     let a_ref = ctx.require_input(op.op_id, 0, &op.inputs)?;
     let b_ref = ctx.require_input(op.op_id, 1, &op.inputs)?;
@@ -658,7 +658,7 @@ fn emit_binary(
 // ── Preflight ─────────────────────────────────────────────────────────────
 
 fn preflight_fixed_shape(
-    ctx: &CoreMlLoweringCtx,
+    ctx: &CoreAiLoweringCtx,
     op: &ScheduledOp,
 ) -> Result<(), Vec<LoweringDiagnostic>> {
     let mut diags = Vec::new();
@@ -691,13 +691,13 @@ fn preflight_fixed_shape(
 
 fn preflight_op(
     _opcode: Opcode,
-) -> fn(&CoreMlLoweringCtx, &ScheduledOp) -> Result<(), Vec<LoweringDiagnostic>> {
+) -> fn(&CoreAiLoweringCtx, &ScheduledOp) -> Result<(), Vec<LoweringDiagnostic>> {
     // Shared preflight: checks that inputs are bound, outputs are unbound,
     // number of inputs and outputs match expectations, and shapes are valid.
     //
     // For now, basic structural checks. Op-specific preflight can be added per op.
     fn default_preflight(
-        ctx: &CoreMlLoweringCtx,
+        ctx: &CoreAiLoweringCtx,
         op: &ScheduledOp,
     ) -> Result<(), Vec<LoweringDiagnostic>> {
         let mut diags = Vec::new();
@@ -743,12 +743,12 @@ fn preflight_op(
 // ── OpImpl ────────────────────────────────────────────────────────────────
 
 struct OpImpl {
-    preflight: fn(&CoreMlLoweringCtx, &ScheduledOp) -> Result<(), Vec<LoweringDiagnostic>>,
-    emit: fn(&mut CoreMlLoweringCtx, &ScheduledOp) -> Result<StagedEmission, CoreMlLoweringError>,
+    preflight: fn(&CoreAiLoweringCtx, &ScheduledOp) -> Result<(), Vec<LoweringDiagnostic>>,
+    emit: fn(&mut CoreAiLoweringCtx, &ScheduledOp) -> Result<StagedEmission, CoreAiLoweringError>,
 }
 
 fn make_op_impl(
-    emit: fn(&mut CoreMlLoweringCtx, &ScheduledOp) -> Result<StagedEmission, CoreMlLoweringError>,
+    emit: fn(&mut CoreAiLoweringCtx, &ScheduledOp) -> Result<StagedEmission, CoreAiLoweringError>,
 ) -> OpImpl {
     OpImpl {
         preflight: preflight_op(Opcode::Constant),
@@ -805,9 +805,9 @@ pub struct StagedEmission {
     pub inventory: OpInventoryEntry,
 }
 
-// ── CoreMlLoweringCtx ─────────────────────────────────────────────────────
+// ── CoreAiLoweringCtx ─────────────────────────────────────────────────────
 
-pub struct CoreMlLoweringCtx {
+pub struct CoreAiLoweringCtx {
     /// The MilBuilder owns the program, function, and block.
     pub builder: MilBuilder,
     /// Scheduled-tensor → MIL SSA ref.
@@ -817,7 +817,7 @@ pub struct CoreMlLoweringCtx {
     /// Per-tensor metadata.
     pub tensor_meta: HashMap<TensorId, TensorMeta>,
     /// Validated target profile.
-    pub target: CoreMlTarget,
+    pub target: CoreAiTarget,
     /// Precision policy.
     pub precision: PrecisionPolicy,
     /// Accumuated diagnostics.
@@ -828,16 +828,16 @@ pub struct CoreMlLoweringCtx {
     region_identity: String,
 }
 
-impl CoreMlLoweringCtx {
+impl CoreAiLoweringCtx {
     pub fn new(
         func_name: &str,
         region_identity: &str,
-        target: CoreMlTarget,
+        target: CoreAiTarget,
         precision: PrecisionPolicy,
     ) -> Self {
         let opset = target.opset_identifier();
         let builder = MilBuilder::new(func_name).set_opset(opset);
-        CoreMlLoweringCtx {
+        CoreAiLoweringCtx {
             builder,
             value_bindings: HashMap::new(),
             constant_pool: ConstantPool::new(),
@@ -896,9 +896,9 @@ impl CoreMlLoweringCtx {
         op_id: OperationId,
         idx: usize,
         inputs: &[TensorId],
-    ) -> Result<MilValueRef, CoreMlLoweringError> {
+    ) -> Result<MilValueRef, CoreAiLoweringError> {
         let input_id = inputs.get(idx).ok_or_else(|| {
-            CoreMlLoweringError::new(&self.region_identity).with_fatal(
+            CoreAiLoweringError::new(&self.region_identity).with_fatal(
                 LoweringDiagnostic::ConstraintViolation {
                     op_id,
                     constraint: "input_count".into(),
@@ -907,7 +907,7 @@ impl CoreMlLoweringCtx {
             )
         })?;
         self.value_bindings.get(input_id).cloned().ok_or_else(|| {
-            CoreMlLoweringError::new(&self.region_identity).with_fatal(
+            CoreAiLoweringError::new(&self.region_identity).with_fatal(
                 LoweringDiagnostic::ConstraintViolation {
                     op_id,
                     constraint: "input_bound".into(),
@@ -918,11 +918,11 @@ impl CoreMlLoweringCtx {
     }
 
     /// Commit a staged emission atomically.
-    fn commit(&mut self, staged: StagedEmission) -> Result<(), CoreMlLoweringError> {
+    fn commit(&mut self, staged: StagedEmission) -> Result<(), CoreAiLoweringError> {
         // Validate: proposed outputs must be unbound
         for (tid, _) in &staged.proposed_outputs {
             if self.value_bindings.contains_key(tid) {
-                return Err(CoreMlLoweringError::new(&self.region_identity).with_fatal(
+                return Err(CoreAiLoweringError::new(&self.region_identity).with_fatal(
                     LoweringDiagnostic::ConstraintViolation {
                         op_id: OperationId(tid.0),
                         constraint: "output_already_bound".into(),
@@ -960,7 +960,7 @@ impl CoreMlLoweringCtx {
     fn finalize(
         mut self,
         region: &ScheduledRegion,
-    ) -> Result<(MilBuilder, MilLoweringReceipt), CoreMlLoweringError> {
+    ) -> Result<(MilBuilder, MilLoweringReceipt), CoreAiLoweringError> {
         let mut output_count = 0;
 
         for output_id in &region.outputs {
@@ -968,7 +968,7 @@ impl CoreMlLoweringCtx {
                 self.builder = std::mem::take(&mut self.builder).output(&valref.ssa_name);
                 output_count += 1;
             } else {
-                return Err(CoreMlLoweringError::new(&self.region_identity).with_fatal(
+                return Err(CoreAiLoweringError::new(&self.region_identity).with_fatal(
                     LoweringDiagnostic::ConstraintViolation {
                         op_id: OperationId(output_id.0),
                         constraint: "output_unbound".into(),
@@ -996,17 +996,17 @@ impl CoreMlLoweringCtx {
     }
 }
 
-// ── CoreMlLowering ────────────────────────────────────────────────────────
+// ── CoreAiLowering ────────────────────────────────────────────────────────
 
-pub struct CoreMlLowering {
+pub struct CoreAiLowering {
     registry: OpRegistry,
-    target: CoreMlTarget,
+    target: CoreAiTarget,
     precision: PrecisionPolicy,
 }
 
-impl CoreMlLowering {
-    pub fn new(target: CoreMlTarget) -> Self {
-        CoreMlLowering {
+impl CoreAiLowering {
+    pub fn new(target: CoreAiTarget) -> Self {
+        CoreAiLowering {
             registry: OpRegistry::default_gate(),
             target,
             precision: PrecisionPolicy::F32,
@@ -1018,8 +1018,8 @@ impl CoreMlLowering {
         &self,
         region: &ScheduledRegion,
         ops: &[ScheduledOp],
-    ) -> Result<(CoreMlMilArtifact, MilLoweringReceipt), String> {
-        let mut ctx = CoreMlLoweringCtx::new(
+    ) -> Result<(CoreAiMilArtifact, MilLoweringReceipt), String> {
+        let mut ctx = CoreAiLoweringCtx::new(
             "main",
             &format!("region_{}", region.region_id.0),
             self.target,
@@ -1147,7 +1147,7 @@ impl CoreMlLowering {
             .map_err(|e| format!("MilBuilder::build: {}", e))?;
 
         Ok((
-            CoreMlMilArtifact {
+            CoreAiMilArtifact {
                 program,
                 value_bindings: final_bindings,
                 operation_inventory: vec![],
@@ -1162,7 +1162,7 @@ impl CoreMlLowering {
         &self,
         region: &ScheduledRegion,
         ops: &[ScheduledOp],
-    ) -> Result<(CoreMlCompiledArtifact, LoweringReceipt), String> {
+    ) -> Result<(CoreAiCompiledArtifact, LoweringReceipt), String> {
         let start = Instant::now();
 
         let legality = self.validate(region)?;
@@ -1191,8 +1191,8 @@ impl CoreMlLowering {
                     (format!("input_{}", i), shape)
                 })
                 .collect(),
-            outputs: derive_coreml_outputs(&region.outputs, &mil_artifact.value_bindings),
-            output_name: derive_coreml_output_name(&region.outputs, &mil_artifact.value_bindings),
+            outputs: derive_coreai_outputs(&region.outputs, &mil_artifact.value_bindings),
+            output_name: derive_coreai_output_name(&region.outputs, &mil_artifact.value_bindings),
             ..Default::default()
         };
 
@@ -1225,7 +1225,7 @@ impl CoreMlLowering {
         let compile_duration_ns = start.elapsed().as_nanos() as u64;
         let compiled_hash = island_receipt.compiled_hash.clone();
 
-        let artifact = CoreMlCompiledArtifact {
+        let artifact = CoreAiCompiledArtifact {
             _output_dir: output_dir,
             compiled_modelc_path: std::path::PathBuf::from(&island_receipt.compiled_modelc_path),
             compiled_sha256: compiled_hash.clone(),
@@ -1243,7 +1243,7 @@ impl CoreMlLowering {
                     .fold(0u64, |a, &b| a.wrapping_mul(31).wrapping_add(b as u64)),
             ),
             compile_duration_ns,
-            machine_profile_digest: EvidenceDigest("coreml_macOS".into()),
+            machine_profile_digest: EvidenceDigest("coreai_macOS".into()),
             cache_hit: false,
         };
 
@@ -1251,8 +1251,8 @@ impl CoreMlLowering {
     }
 }
 
-impl BackendLowering for CoreMlLowering {
-    type Artifact = CoreMlCompiledArtifact;
+impl BackendLowering for CoreAiLowering {
+    type Artifact = CoreAiCompiledArtifact;
 
     fn validate(&self, region: &ScheduledRegion) -> Result<LegalityReceipt, String> {
         let mut violations = Vec::new();
@@ -1261,7 +1261,7 @@ impl BackendLowering for CoreMlLowering {
         // Check precision
         if let Err(msg) = self.precision.validate() {
             violations.push(LegalityViolation {
-                constraint_id: "coreml:precision".into(),
+                constraint_id: "coreai:precision".into(),
                 operation_ids: vec![],
                 message: msg.to_string(),
                 fatal: true,
@@ -1271,7 +1271,7 @@ impl BackendLowering for CoreMlLowering {
         // Check that region is non-empty
         if region.operations.is_empty() {
             violations.push(LegalityViolation {
-                constraint_id: "coreml:empty_region".into(),
+                constraint_id: "coreai:empty_region".into(),
                 operation_ids: vec![],
                 message: "region contains no operations".into(),
                 fatal: true,
@@ -1360,7 +1360,7 @@ impl BackendLowering for CoreMlLowering {
         let compiled_hash = island_receipt.compiled_hash.clone();
         let compiled_path = island_receipt.compiled_modelc_path.clone();
 
-        let artifact = CoreMlCompiledArtifact {
+        let artifact = CoreAiCompiledArtifact {
             _output_dir: output_dir,
             compiled_modelc_path: std::path::PathBuf::from(&compiled_path),
             compiled_sha256: compiled_hash.clone(),
@@ -1378,7 +1378,7 @@ impl BackendLowering for CoreMlLowering {
                     .fold(0u64, |a, &b| a.wrapping_mul(31).wrapping_add(b as u64)),
             ),
             compile_duration_ns,
-            machine_profile_digest: EvidenceDigest("coreml_macOS".into()),
+            machine_profile_digest: EvidenceDigest("coreai_macOS".into()),
             cache_hit: false,
         };
 
@@ -1388,24 +1388,24 @@ impl BackendLowering for CoreMlLowering {
 
 // ── Artifact types ────────────────────────────────────────────────────────
 
-pub struct CoreMlMilArtifact {
+pub struct CoreAiMilArtifact {
     pub program: mil_spec::Program,
     pub value_bindings: HashMap<TensorId, MilValueRef>,
     pub operation_inventory: Vec<OpInventoryEntry>,
 }
 
-pub struct CoreMlPackageArtifact {
+pub struct CoreAiPackageArtifact {
     pub _tempdir: tempfile::TempDir,
     pub package_path: std::path::PathBuf,
     pub source_package_sha256: String,
     pub model_meta: ModelMeta,
 }
 
-pub struct CoreMlCompiledArtifact {
+pub struct CoreAiCompiledArtifact {
     pub _output_dir: tempfile::TempDir,
     pub compiled_modelc_path: std::path::PathBuf,
     pub compiled_sha256: String,
-    pub island_receipt: CoreMlIslandReceipt,
+    pub island_receipt: CoreAiIslandReceipt,
 }
 
 // ── Re-export the lowered test helper (preserves backward compat) ─────────
@@ -1417,8 +1417,8 @@ use super::dataset::F32MatmulDataset;
 pub fn lower_matmul_coreml(
     dataset: &F32MatmulDataset,
     _semantic_digest: EvidenceDigest,
-) -> Result<super::CoreMlLoweringReceipt, String> {
-    // Build a matmul op manually and run it through CoreMlLowering
+) -> Result<super::CoreAiLoweringReceipt, String> {
+    // Build a matmul op manually and run it through CoreAiLowering
     let ops = vec![
         ScheduledOp {
             op_id: OperationId(0),
@@ -1458,21 +1458,21 @@ pub fn lower_matmul_coreml(
         is_fence: false,
     };
 
-    let lowering = CoreMlLowering::new(CoreMlTarget::default_gate_target());
+    let lowering = CoreAiLowering::new(CoreAiTarget::default_gate_target());
     let (artifact, lowering_receipt) = lowering.lower_with_ops(&region, &ops)?;
 
     let _compile_ns = lowering_receipt.compile_duration_ns;
     let modelc_path = artifact.compiled_modelc_path.clone();
     let artifact_exists = modelc_path.is_dir() && modelc_path.join("metadata.json").exists();
 
-    Ok(super::CoreMlLoweringReceipt {
+    Ok(super::CoreAiLoweringReceipt {
         lowering: lowering_receipt,
         island_receipt: artifact.island_receipt,
         artifact_exists,
     })
 }
 
-fn derive_coreml_outputs(
+fn derive_coreai_outputs(
     outputs: &[TensorId],
     bindings: &HashMap<TensorId, MilValueRef>,
 ) -> Vec<(String, Vec<i64>)> {
@@ -1489,7 +1489,7 @@ fn derive_coreml_outputs(
         .collect()
 }
 
-fn derive_coreml_output_name(
+fn derive_coreai_output_name(
     outputs: &[TensorId],
     bindings: &HashMap<TensorId, MilValueRef>,
 ) -> String {
@@ -1507,7 +1507,7 @@ mod tests {
 
     /// Core ML matmul compile route preserved through general lowering.
     #[test]
-    fn coreml_preserves_compile_route() {
+    fn coreai_preserves_compile_route() {
         let toolchain = match ToolchainAttestation::probe() {
             Ok(t) => t,
             Err(e) => {
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn target_default_is_oldest() {
-        let target = CoreMlTarget::default_gate_target();
+        let target = CoreAiTarget::default_gate_target();
         assert_eq!(target.spec_version(), 7);
         assert_eq!(target.opset_identifier(), "CoreML6");
         assert_eq!(target.deployment_target(), "macOS13");

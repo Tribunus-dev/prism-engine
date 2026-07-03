@@ -12,12 +12,12 @@ use crate::compute_image::apple_cimage_manifest::{
 use crate::compute_image::apple_shared_arena::{
     AppleSharedArena, IOSurfaceSlotManifest, SlotReuseClass,
 };
-use crate::backend::coreml_iosurface::{CoreMlComputePolicy, CoreMlIOSurfaceExecutable};
+use crate::backend::coreai_iosurface::{CoreAiComputePolicy, CoreAiIOSurfaceExecutable};
 use crate::backend::metal_iosurface::{
     MetalExecutable, MetalResourceFormat, MetalResourceKind, MetalResourceView,
 };
 use crate::backend::metal_consumer::MetalConsumer;
-use crate::compilation::tri_lane::{AneQualificationRecord, CoreMlWarmupContract};
+use crate::compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
 
 // ── Installation result ──────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ pub struct AppleInstallationResult {
     /// The live IOSurface arena with all slots installed.
     pub arena: AppleSharedArena,
     /// Core ML executables bound to arena slots, keyed by artifact id.
-    pub coreml_executables: HashMap<String, CoreMlIOSurfaceExecutable>,
+    pub coreai_executables: HashMap<String, CoreAiIOSurfaceExecutable>,
     /// Metal executables bound to arena slots, keyed by artifact id.
     pub metal_executables: HashMap<String, MetalExecutable>,
     /// Per-artifact warmup qualification results.
@@ -97,7 +97,7 @@ fn cimage_slot_to_arena_slot(slot: &CimageSlotManifest) -> IOSurfaceSlotManifest
 pub fn install_apple_tri_lane(
     manifest: &AppleTriLaneArtifactManifest,
     _model_dir: &std::path::Path,
-    compute_policy: CoreMlComputePolicy,
+    compute_policy: CoreAiComputePolicy,
 ) -> Result<AppleInstallationResult, String> {
     // 1. Allocate arena
     // Install the shared arena from the sealed manifest — allocates real
@@ -123,16 +123,16 @@ pub fn install_apple_tri_lane(
     }
 
     // 3. Create Core ML executables
-    let mut coreml_executables = HashMap::new();
-    for artifact in &manifest.coreml_artifacts {
+    let mut coreai_executables = HashMap::new();
+    for artifact in &manifest.coreai_artifacts {
         let model_path = _model_dir.join(&artifact.mlmodelc_name);
-        let mut executable = CoreMlIOSurfaceExecutable::new(
+        let mut executable = CoreAiIOSurfaceExecutable::new(
             &artifact.artifact_id,
             &model_path.to_string_lossy(),
             compute_policy,
         );
         executable.bind_from_arena(&manifest.arena.slots)?;
-        coreml_executables.insert(artifact.artifact_id.clone(), executable);
+        coreai_executables.insert(artifact.artifact_id.clone(), executable);
     }
 
     // 4. Create Metal executables
@@ -195,7 +195,7 @@ pub fn install_apple_tri_lane(
     // 5. Run warmup (stub: marks all Core ML executables as loaded, returns
     //    success for every artifact).
     let mut warmup_results = HashMap::new();
-    for (id, _exec) in &coreml_executables {
+    for (id, _exec) in &coreai_executables {
         warmup_results.insert(
             id.clone(),
             Ok(AneQualificationRecord {
@@ -214,7 +214,7 @@ pub fn install_apple_tri_lane(
 
     Ok(AppleInstallationResult {
         arena,
-        coreml_executables,
+        coreai_executables,
         metal_executables,
         warmup_results,
         plan_digest: manifest.plan_digest.clone(),
@@ -228,9 +228,9 @@ pub fn install_apple_tri_lane(
 /// arena, marks the model as loaded, runs `min_warmup_predictions` dummy
 /// predictions, and records average latency.
 pub fn warmup_with_arena(
-    executable: &mut CoreMlIOSurfaceExecutable,
+    executable: &mut CoreAiIOSurfaceExecutable,
     arena: &mut AppleSharedArena,
-    warmup: &CoreMlWarmupContract,
+    warmup: &CoreAiWarmupContract,
 ) -> Result<AneQualificationRecord, String> {
     // Validate input/output bindings exist against arena slots
     for binding in &executable.input_bindings {
@@ -251,7 +251,7 @@ pub fn warmup_with_arena(
     let mut total_latency_ns: u64 = 0;
     for i in 0..warmup.min_warmup_predictions {
         let start = std::time::Instant::now();
-        // Actual prediction would call CoreMlModel::predict() here
+        // Actual prediction would call CoreAiModel::predict() here
         let elapsed = start.elapsed().as_nanos() as u64;
         total_latency_ns += elapsed;
         // Validate output presence (stub)
@@ -290,7 +290,7 @@ mod tests {
     use crate::backend::placement::ExecutionLane;
     use crate::compute_image::apple_cimage_manifest::{
         AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
-        AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, CoreMlArtifactManifest,
+        AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, CoreAiArtifactManifest,
         MetalArtifactManifest,
     };
     use crate::compute_image::apple_shared_arena::SlotState;
@@ -301,7 +301,7 @@ mod tests {
         AppleHardwareCompatibility {
             min_soc_family: "M1".into(),
             min_macos_version: "14.0".into(),
-            min_coreml_version: "7.2.0".into(),
+            min_coreai_version: "7.2.0".into(),
             require_ane: true,
             required_metal_features: vec!["apple_m1".into()],
             supported_compute_policies: vec!["cpuAndNeuralEngine".into()],
@@ -326,7 +326,7 @@ mod tests {
                     physical_shape: vec![1, 64],
                     strides_bytes: vec![128, 2],
                     layout: "NHWC".into(),
-                    producer: ExecutionLane::CoreMlAne,
+                    producer: ExecutionLane::CoreAiAne,
                     consumer: ExecutionLane::MlxGpu,
                     reuse_class: "exclusive".into(),
                     required_alignment: 16384,
@@ -342,7 +342,7 @@ mod tests {
                     strides_bytes: vec![128, 2],
                     layout: "NHWC".into(),
                     producer: ExecutionLane::MlxGpu,
-                    consumer: ExecutionLane::CoreMlAne,
+                    consumer: ExecutionLane::CoreAiAne,
                     reuse_class: "exclusive".into(),
                     required_alignment: 16384,
                 },
@@ -356,8 +356,8 @@ mod tests {
             hardware_compatibility: dummy_hardware(),
             plan_digest: "deadbeef01234567".into(),
             arena: dummy_arena(),
-            coreml_artifacts: vec![CoreMlArtifactManifest {
-                artifact_id: "coreml_attn".into(),
+            coreai_artifacts: vec![CoreAiArtifactManifest {
+                artifact_id: "coreai_attn".into(),
                 mlmodelc_name: "attention.mlmodelc".into(),
                 package_digest: "pkg_abc".into(),
                 compiled_model_digest: "cmp_abc".into(),
@@ -405,7 +405,7 @@ mod tests {
         let manifest = dummy_manifest();
         let model_dir = std::path::Path::new("/tmp/models");
 
-        let result = install_apple_tri_lane(&manifest, model_dir, CoreMlComputePolicy::CpuAndNeuralEngine)
+        let result = install_apple_tri_lane(&manifest, model_dir, CoreAiComputePolicy::CpuAndNeuralEngine)
             .expect("installation should succeed");
 
         // Arena should have been created with the ring_depth from the manifest
@@ -424,25 +424,25 @@ mod tests {
         }
     }
 
-    // ── test_install_creates_coreml_executables ──────────────────────────
+    // ── test_install_creates_coreai_executables ──────────────────────────
 
     #[test]
-    fn test_install_creates_coreml_executables() {
+    fn test_install_creates_coreai_executables() {
         let manifest = dummy_manifest();
         let model_dir = std::path::Path::new("/tmp/models");
 
-        let result = install_apple_tri_lane(&manifest, model_dir, CoreMlComputePolicy::CpuAndNeuralEngine)
+        let result = install_apple_tri_lane(&manifest, model_dir, CoreAiComputePolicy::CpuAndNeuralEngine)
             .expect("installation should succeed");
 
         // Should have one Core ML executable matching the artifact
-        assert_eq!(result.coreml_executables.len(), 1);
-        let exec = result.coreml_executables.get("coreml_attn").expect("coreml_attn executable");
-        assert_eq!(exec.artifact_id, "coreml_attn");
-        assert_eq!(exec.compute_policy, CoreMlComputePolicy::CpuAndNeuralEngine);
+        assert_eq!(result.coreai_executables.len(), 1);
+        let exec = result.coreai_executables.get("coreai_attn").expect("coreai_attn executable");
+        assert_eq!(exec.artifact_id, "coreai_attn");
+        assert_eq!(exec.compute_policy, CoreAiComputePolicy::CpuAndNeuralEngine);
         assert!(!exec.loaded, "executable should not be loaded before warmup");
 
         // Warmup results should be present and successful
-        let warmup = result.warmup_results.get("coreml_attn").expect("warmup result");
+        let warmup = result.warmup_results.get("coreai_attn").expect("warmup result");
         let record = warmup.as_ref().expect("warmup should succeed");
         assert!(record.warmup_success);
         assert!(record.compile_success);
@@ -456,15 +456,15 @@ mod tests {
         let manifest = dummy_manifest();
         let model_dir = std::path::Path::new("/tmp/models");
 
-        let mut result = install_apple_tri_lane(&manifest, model_dir, CoreMlComputePolicy::CpuAndNeuralEngine)
+        let mut result = install_apple_tri_lane(&manifest, model_dir, CoreAiComputePolicy::CpuAndNeuralEngine)
             .expect("installation should succeed");
 
         let mut exec = result
-            .coreml_executables
-            .remove("coreml_attn")
-            .expect("coreml_attn executable");
+            .coreai_executables
+            .remove("coreai_attn")
+            .expect("coreai_attn executable");
 
-        let warmup_contract = CoreMlWarmupContract {
+        let warmup_contract = CoreAiWarmupContract {
             min_warmup_predictions: 3,
             max_warmup_latency_ms: 10_000,
             tolerance: 0.01,
@@ -507,7 +507,7 @@ mod tests {
                 physical_shape: vec![64, 64],
                 strides_bytes: vec![128, 2],
                 layout: "NHWC".into(),
-                producer: ExecutionLane::CoreMlAne,
+                producer: ExecutionLane::CoreAiAne,
                 consumer: ExecutionLane::MlxGpu,
                 reuse_class: SlotReuseClass::Exclusive,
                 required_alignment: 256,
@@ -516,7 +516,7 @@ mod tests {
             generation: 0,
             layout_digest: "test_layout".into(),
             metal_view: None,
-            coreml_view: None,
+            coreai_view: None,
             backing_arena: None,
             attestation: None,
         };
@@ -559,7 +559,7 @@ mod tests {
                     physical_shape: vec![64, 64],
                     strides_bytes: vec![128, 2],
                     layout: "NHWC".into(),
-                    producer: ExecutionLane::CoreMlAne,
+                    producer: ExecutionLane::CoreAiAne,
                     consumer: ExecutionLane::MlxGpu,
                     reuse_class: "exclusive".into(),
                     required_alignment: 16384,
@@ -575,7 +575,7 @@ mod tests {
                     strides_bytes: vec![128, 2],
                     layout: "NHWC".into(),
                     producer: ExecutionLane::MlxGpu,
-                    consumer: ExecutionLane::CoreMlAne,
+                    consumer: ExecutionLane::CoreAiAne,
                     reuse_class: "exclusive".into(),
                     required_alignment: 16384,
                 },
@@ -631,7 +631,7 @@ mod tests {
     #[test]
     fn test_precreate_metal_textures_succeeds() {
         let mut result = install_apple_tri_lane(&dummy_manifest(), std::path::Path::new("/tmp/models"),
-            CoreMlComputePolicy::CpuAndNeuralEngine).expect("install should succeed");
+            CoreAiComputePolicy::CpuAndNeuralEngine).expect("install should succeed");
 
         // Assign explicit attestations (step 2 generates synthetic ones, but
         // we use explicit values here for clarity).
@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn test_precreate_metal_textures_fails_missing_attestation() {
         let mut result = install_apple_tri_lane(&dummy_manifest(), std::path::Path::new("/tmp/models"),
-            CoreMlComputePolicy::CpuAndNeuralEngine).expect("install should succeed");
+            CoreAiComputePolicy::CpuAndNeuralEngine).expect("install should succeed");
 
         // Clear attestations from all slots, then give slot 1 a valid one.
         // Slot 0 remains without attestation to trigger the failure path in

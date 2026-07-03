@@ -145,13 +145,11 @@ impl VisionProjectionPipeline {
                 input.soft_token_kernel,
                 weights.max_positions,
             ];
-            unsafe {
-                encoder.set_bytes(
+            encoder.set_bytes(
                     11,
                     std::mem::size_of_val(&constants) as u64,
                     &constants as *const u32 as *const std::ffi::c_void,
                 );
-            }
 
             let threads_per_group = MTLSize::new(256, 1, 1);
             let groups = MTLSize::new(input.num_patches as u64, 1, 1);
@@ -172,13 +170,11 @@ impl VisionProjectionPipeline {
                 input.patches_h,
                 input.soft_token_kernel,
             ];
-            unsafe {
-                encoder.set_bytes(
+            encoder.set_bytes(
                     2,
                     std::mem::size_of_val(&constants) as u64,
                     &constants as *const u32 as *const std::ffi::c_void,
                 );
-            }
 
             let threads_per_group = MTLSize::new(256, 1, 1);
             let groups = MTLSize::new(num_soft_tokens as u64, 1, 1);
@@ -195,13 +191,11 @@ impl VisionProjectionPipeline {
             encoder.set_buffer(2, Some(&weights.embed_proj_scales), 0);
             encoder.set_buffer(3, Some(&output_buf), 0);
 
-            unsafe {
-                encoder.set_bytes(
+            encoder.set_bytes(
                     4,
                     std::mem::size_of::<u32>() as u64,
                     &num_soft_tokens as *const u32 as *const std::ffi::c_void,
                 );
-            }
 
             let threads_per_group = MTLSize::new(256, 1, 1);
             let groups = MTLSize::new(num_soft_tokens as u64, 1, 1);

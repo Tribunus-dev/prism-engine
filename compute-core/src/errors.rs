@@ -41,7 +41,7 @@ pub enum ArenaErrorKind {
     MlxEvaluationFailed {
         details: String,
     },
-    CoreMlPredictionFailed {
+    CoreAiPredictionFailed {
         code: i32,
         details: String,
     },
@@ -88,7 +88,7 @@ impl std::fmt::Display for ArenaErrorKind {
             ArenaErrorKind::MlxEvaluationFailed { details } => {
                 write!(f, "MLX evaluation failed: {}", details)
             }
-            ArenaErrorKind::CoreMlPredictionFailed { code, details } => {
+            ArenaErrorKind::CoreAiPredictionFailed { code, details } => {
                 write!(f, "Core ML prediction failed ({}): {}", code, details)
             }
             ArenaErrorKind::StateConflict { state_id } => {
@@ -175,10 +175,10 @@ mod tests {
             held_by: Some("mlx".into()),
         })
         .with_job(Uuid::new_v4())
-        .with_backend("coreml");
+        .with_backend("coreai");
         let msg = format!("{}", err);
         assert!(msg.contains("lease conflict"));
-        assert!(msg.contains("coreml"));
+        assert!(msg.contains("coreai"));
     }
 
     #[test]

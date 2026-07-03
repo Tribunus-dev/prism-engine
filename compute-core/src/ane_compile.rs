@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::compute_image::compile::SourceTensor;
-use crate::compute_image::compile::coreml::compile_ane_islands;
+use crate::compute_image::compile::coreai::compile_ane_islands;
 use crate::config::{build_execution_plan, parse_config};
 use crate::config_namespace::resolve_namespace;
 

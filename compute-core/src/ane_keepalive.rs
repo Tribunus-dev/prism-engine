@@ -23,8 +23,8 @@ use std::thread;
 
 use crate::arena::Arena;
 use crate::arena::DataType;
-use crate::coreml_bridge::CoreMlModel;
-use crate::coreml_pipeline::build_matmul_region;
+use crate::coreai_bridge::CoreAiModel;
+use crate::coreai_pipeline::build_matmul_region;
 
 /// ANE keepalive — sends dummy predicts at configurable intervals to
 /// prevent the ANE from entering a lower-power idle state.
@@ -41,14 +41,14 @@ use crate::coreml_pipeline::build_matmul_region;
 /// Dropping the instance also stops the keepalive thread.
 pub struct AneKeepalive {
     /// Loaded Core ML model (tiny 64×64 matmul, ANE-targeted).
-    model: Option<Arc<CoreMlModel>>,
+    model: Option<Arc<CoreAiModel>>,
     /// Background thread that sends the pings.
     thread: Option<thread::JoinHandle<()>>,
     /// Shared shutdown flag.
     shutdown: Arc<AtomicBool>,
 }
 
-// Safety: CoreMlModel is Send + Sync.  The thread handle is only joined in
+// Safety: CoreAiModel is Send + Sync.  The thread handle is only joined in
 // `stop()` / `drop()`, and the shutdown flag is atomic.
 unsafe impl Send for AneKeepalive {}
 unsafe impl Sync for AneKeepalive {}
@@ -128,7 +128,7 @@ impl AneKeepalive {
 
     /// Build the 64×64 identity-matmul model, compile it for the ANE,
     /// and load the resulting `.modelc`.
-    fn build_keepalive_model() -> Result<(CoreMlModel, Arena, Arena), String> {
+    fn build_keepalive_model() -> Result<(CoreAiModel, Arena, Arena), String> {
         // Identity matrix — matmul with identity is a pass-through at
         // minimal compute cost (~10 µs per ping on M1 ANE).
         let mut weight_values = vec![0.0_f32; (HIDDEN * HIDDEN) as usize];
@@ -154,7 +154,7 @@ impl AneKeepalive {
             REGION_ID,
         )?;
 
-        let model = CoreMlModel::load(&receipt.compiled_modelc_path)?;
+        let model = CoreAiModel::load(&receipt.compiled_modelc_path)?;
 
         // Allocate zero-initialised IOSurface-backed arenas for the
         // predict loop.  Each arena holds 1×64 Float32 = 256 bytes.
@@ -173,7 +173,7 @@ impl AneKeepalive {
     /// The background loop: sleep → predict → repeat until shutdown is
     /// signalled.
     fn keepalive_loop(
-        model: &CoreMlModel,
+        model: &CoreAiModel,
         region_id: &str,
         input_arena: &crate::arena_info::ArenaInfo,
         output_arena: &crate::arena_info::ArenaInfo,

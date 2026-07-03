@@ -327,7 +327,7 @@ impl MachineProfile {
                     git_commit: None,
                 },
                 BackendVersionInfo {
-                    backend_name: "coreml".into(),
+                    backend_name: "coreai".into(),
                     version: "-".into(),
                     git_commit: None,
                 },
@@ -428,7 +428,7 @@ impl SealedExperimentProfile {
         p.seal();
         p
     }
-    pub fn coreml_ane(c: &F32MatmulContract) -> Self {
+    pub fn coreai_ane(c: &F32MatmulContract) -> Self {
         let mut p = Self {
             profile_name: "F32-MATMUL-COREML-CPU-ANE-v1".into(),
             backend: BackendId(2),
@@ -491,7 +491,7 @@ impl ExperimentManifest {
         for c in &contracts {
             profiles.push(SealedExperimentProfile::mlx_control(c));
             profiles.push(SealedExperimentProfile::accelerate_cpu(c));
-            profiles.push(SealedExperimentProfile::coreml_ane(c));
+            profiles.push(SealedExperimentProfile::coreai_ane(c));
         }
         Self {
             experiment_id: "E0008-F32-MATMUL-3WAY-v1".into(),

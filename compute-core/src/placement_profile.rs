@@ -21,9 +21,9 @@ pub enum CandidateClass {
     /// Accelerate.framework (vDSP/vImage) preferred.
     AcceleratePreferred,
     /// Core ML ANE candidate (Apple Neural Engine via Core ML).
-    /// Renamed from `CoreMlAnePreferred` — this is an experimental candidate
+    /// Renamed from `CoreAiAnePreferred` — this is an experimental candidate
     /// path that benchmarks must validate before dispatch.
-    CoreMlAneCandidate,
+    CoreAiAneCandidate,
     /// Any available backend — no specific preference.
     AllPreferred,
     /// Rust NEON SIMD path preferred (CPU-side inference).
@@ -244,7 +244,7 @@ mod tests {
                 },
                 PlaceRegion {
                     id: "ane-candidate".into(),
-                    candidate: CandidateClass::CoreMlAneCandidate,
+                    candidate: CandidateClass::CoreAiAneCandidate,
                     weight: 80,
                     label: None,
                 },
@@ -308,7 +308,7 @@ mod tests {
                 CandidateClass::AcceleratePreferred,
                 "\"acceleratePreferred\"",
             ),
-            (CandidateClass::CoreMlAneCandidate, "\"coreMlAneCandidate\""),
+            (CandidateClass::CoreAiAneCandidate, "\"coreMlAneCandidate\""),
             (CandidateClass::AllPreferred, "\"allPreferred\""),
             (CandidateClass::RustNeonPreferred, "\"rustNeonPreferred\""),
             (CandidateClass::ControlPlaneCpu, "\"controlPlaneCpu\""),

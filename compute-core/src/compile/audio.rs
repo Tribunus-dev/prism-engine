@@ -14,19 +14,19 @@ use crate::compute_image::manifest::TensorEntry;
 /// # Arguments
 ///
 /// * `safetensors_path`  — Path to the `.safetensors` file containing audio weights.
-/// * `coreml_modelc_path` — Optional path to a pre-compiled CoreML `.mlmodelc` bundle
+/// * `coreai_modelc_path` — Optional path to a pre-compiled CoreML `.mlmodelc` bundle
 ///   for ANE offload. When `Some`, the bundle is tar-archived and embedded.
 /// * `output_cimage`      — Destination path for the serialized cimage JSON manifest.
 pub fn compile_audio_model(
     safetensors_path: &Path,
-    coreml_modelc_path: Option<&Path>,
+    coreai_modelc_path: Option<&Path>,
     output_cimage: &Path,
 ) -> anyhow::Result<()> {
     // 1. Extract audio weights into segments
     let tensor_table = extract_audio_segments(safetensors_path, output_cimage)?;
 
     // 2. Package ANE program
-    let _has_ane = if let Some(mlmodelc) = coreml_modelc_path {
+    let _has_ane = if let Some(mlmodelc) = coreai_modelc_path {
         crate::compile::pipeline::archive_ane_modelc(mlmodelc, output_cimage)?;
         true
     } else {

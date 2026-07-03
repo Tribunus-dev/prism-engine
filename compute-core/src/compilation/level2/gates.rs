@@ -12,9 +12,12 @@
 //!    dense Metal (or the cost/benefit must be actively justified).
 //! 5. **Failure containment** — Forced Core ML load/prediction failure triggers a
 //!    clean Level 1 Metal fallback with no data loss.
+//! 6. **Joint acceptance rate** — Ternary student (main + MTP drafter) acceptance
+//!    rate on a calibration corpus must stay within a threshold of the bf16 reference.
 
 use super::super::level1::scheduler::{Level1Config, Level1Scheduler};
-use super::super::receipt::CertificationSection;
+use super::super::receipt::{CertificationSection, ObjectiveWeights};
+use std::collections::HashMap;
 
 use super::bridge::CoreMLTeacher;
 use super::scheduler::Level2Scheduler;
@@ -55,7 +58,7 @@ pub struct PlacementIsolationResult {
     /// Whether Metal student kernels completed without GPU contention.
     pub gpu_uncontested: bool,
     /// Whether Core ML used only CPU/ANE compute units.
-    pub coreml_on_expected_units: bool,
+    pub coreai_on_expected_units: bool,
     pub failure_reason: Option<String>,
 }
 
@@ -64,10 +67,10 @@ pub struct PlacementIsolationResult {
 pub struct ThroughputResult {
     pub passed: bool,
     /// Average compile time per block using Core ML (ns).
-    pub coreml_avg_ns: u64,
+    pub coreai_avg_ns: u64,
     /// Average compile time per block using dense Metal (ns).
     pub metal_avg_ns: u64,
-    /// Achieved improvement factor (metal_ns / coreml_ns).
+    /// Achieved improvement factor (metal_ns / coreai_ns).
     pub improvement_factor: f64,
     pub failure_reason: Option<String>,
 }
@@ -83,6 +86,53 @@ pub struct FailureContainmentResult {
     /// Whether the bridge evidence records the failure.
     pub failure_recorded_in_evidence: bool,
     pub failure_reason: Option<String>,
+}
+
+/// Result of the joint acceptance rate gate.
+#[derive(Debug, Clone)]
+pub struct JointAcceptanceResult {
+    pub passed: bool,
+    /// Measured speculative decoding acceptance rate.
+    pub acceptance_rate: f64,
+    /// Reference acceptance rate from the bf16 teacher pair.
+    pub reference_acceptance_rate: f64,
+    /// Per-modality acceptance rates, if measured.
+    pub per_modality_rates: HashMap<String, f64>,
+    /// Fraction of tokens whose acceptance rate fell below threshold.
+    pub below_threshold_rate: f64,
+    pub failure_reason: Option<String>,
+}
+
+/// Per-modality pass/fail thresholds for speculative decoding acceptance.
+///
+/// These are intentionally separate from `ObjectiveWeights`: loss weights
+/// control the compile-time optimization surface, while these thresholds
+/// control the certification gate pass/fail criteria. They share per-modality
+/// granularity but serve different stages of the pipeline.
+#[derive(Debug, Clone)]
+pub struct AcceptanceThresholds {
+    /// Minimum overall acceptance rate (default: 0.90).
+    pub min_acceptance_rate: f64,
+    /// Maximum fraction of tokens below threshold (default: 0.10).
+    pub max_below_threshold_rate: f64,
+    /// Per-modality minimum acceptance rates.
+    pub per_modality_min: HashMap<String, f64>,
+}
+
+impl Default for AcceptanceThresholds {
+    fn default() -> Self {
+        let mut per_modality_min = HashMap::new();
+        per_modality_min.insert("text".into(), 0.92);
+        per_modality_min.insert("image".into(), 0.85);
+        per_modality_min.insert("audio".into(), 0.85);
+        per_modality_min.insert("video".into(), 0.85);
+        per_modality_min.insert("embedding".into(), 0.90);
+        AcceptanceThresholds {
+            min_acceptance_rate: 0.90,
+            max_below_threshold_rate: 0.10,
+            per_modality_min,
+        }
+    }
 }
 
 // ── Gate implementations ─────────────────────────────────────────────────────
@@ -122,9 +172,9 @@ pub fn check_scheduler_equivalence() -> SchedulerEquivalenceResult {
     // structural properties without live tensor dispatch.
     let config = Level1Config::default();
     let metal_teacher = CoreMLTeacher::default();
-    let coreml_available = cfg!(target_os = "macos");
+    let coreai_available = cfg!(target_os = "macos");
 
-    let mut l2 = Level2Scheduler::new(config.clone(), 2, metal_teacher, coreml_available);
+    let mut l2 = Level2Scheduler::new(config.clone(), 2, metal_teacher, coreai_available);
     l2.initialize();
 
     // Level 1 reference: check that Level1Scheduler constructs cleanly.
@@ -165,7 +215,7 @@ pub fn check_placement_isolation() -> PlacementIsolationResult {
     PlacementIsolationResult {
         passed: false,
         gpu_uncontested: false,
-        coreml_on_expected_units: false,
+        coreai_on_expected_units: false,
         failure_reason: Some("placement isolation measurement not yet implemented — requires concurrent Core ML and Metal dispatch instrumentation".into()),
     }
 }
@@ -182,7 +232,7 @@ pub fn check_throughput() -> ThroughputResult {
     // For the initial implementation, report the gate as not yet testable.
     ThroughputResult {
         passed: false,
-        coreml_avg_ns: 0,
+        coreai_avg_ns: 0,
         metal_avg_ns: 0,
         improvement_factor: 0.0,
         failure_reason: Some("throughput measurement not yet implemented — requires timed Core ML and Metal dispatch".into()),
@@ -220,20 +270,53 @@ pub fn check_failure_containment() -> FailureContainmentResult {
     }
 }
 
+/// Run the joint acceptance rate gate.
+///
+/// Measures the speculative decoding acceptance rate of the ternary student
+/// (main model + MTP drafter) against the bf16 reference on a calibration
+/// corpus. Uses per-modality objective weights to weight modality-specific
+/// acceptance rates.
+///
+/// A `below_threshold_rate` > 0.10 (more than 10% of tokens below threshold)
+/// is considered a failure. The gate also records per-modality rates which the
+/// per-modality λ profiles can use to reweight calibration phases.
+pub fn check_joint_acceptance_rate(
+    thresholds: &AcceptanceThresholds,
+    teacher_weights: Option<&ObjectiveWeights>,
+) -> JointAcceptanceResult {
+    // TODO(#distill): Wire up real speculative decoding acceptance measurement
+    // once the ternary MTP drafter is loaded. This gate FAILS by default to
+    // prevent silent pass-through without measurement.
+    let _thresholds = thresholds;
+    let _weights = teacher_weights;
+    JointAcceptanceResult {
+        passed: false,
+        acceptance_rate: 0.0,
+        reference_acceptance_rate: 1.0,
+        per_modality_rates: HashMap::new(),
+        below_threshold_rate: 1.0,
+        failure_reason: Some("joint acceptance rate not yet measured — requires live speculative decoding with ternary MTP drafter".into()),
+    }
+}
+
 // ── Combined gate runner ─────────────────────────────────────────────────────
 
-/// Run all five Level 2 gates and produce the certification section.
+/// Run all six Level 2 gates and produce the certification section.
 ///
 /// The certification section is appended to the master manifest after all
 /// Level 2 gates have executed. Level 1 gates must already have passed.
-pub fn run_all_gates() -> CertificationSection {
+pub fn run_all_gates(
+    thresholds: &AcceptanceThresholds,
+    teacher_weights: Option<&ObjectiveWeights>,
+) -> CertificationSection {
     let sem = check_semantic_equivalence();
     let sch = check_scheduler_equivalence();
     let iso = check_placement_isolation();
     let tp = check_throughput();
     let fc = check_failure_containment();
+    let ja = check_joint_acceptance_rate(thresholds, teacher_weights);
 
-    let level2_pass = sem.passed && sch.passed && iso.passed && tp.passed && fc.passed;
+    let level2_pass = sem.passed && sch.passed && iso.passed && tp.passed && fc.passed && ja.passed;
 
     CertificationSection {
         level1_pass: true, // assumed — Level 1 gates run first
@@ -268,8 +351,8 @@ mod tests {
 
     #[test]
     fn test_run_all_gates_produces_certification() {
-        let cert = run_all_gates();
-        assert!(!cert.level2_pass); // gates are placeholder stubs
+        let cert = run_all_gates(&AcceptanceThresholds::default(), None);
+        assert!(!cert.level2_pass); // joint acceptance gate fails by default (not measured)
         assert!(cert.level1_pass);
     }
 }

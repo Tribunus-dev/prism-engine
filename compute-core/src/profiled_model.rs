@@ -13,7 +13,7 @@ use crate::arena::Arena;
 use crate::compute_image::phase_dag::EmittedPhaseGraph;
 use crate::compute_image::{CompiledImageReader, CopyClassification, TensorEntry};
 use crate::config::{ModelExecutionPlan, TextArchitecture, VisionArchitecture};
-use crate::coreml_bridge::CoreMlModel;
+use crate::coreai_bridge::CoreAiModel;
 use crate::external_array::BorrowedStorage;
 use crate::external_array::{new_external_array, ExternalStorage};
 use crate::heterogeneous::SharedMemoryIsland;
@@ -378,7 +378,7 @@ pub struct LoadedProfiledModel {
     /// Pre-loaded CoreML models for ANE-routed attention layers, indexed by
     /// layer index. Fused islands replicate their model (via Arc) across
     /// all covered layer slots.
-    pub ane_coreml_models: Vec<Option<Arc<CoreMlModel>>>,
+    pub ane_coreai_models: Vec<Option<Arc<CoreAiModel>>>,
     /// Shared IOSurface memory island — all runtime memory allocations
     /// (intermediates, KV cache) come from this pool. MLX does NOT manage
     /// memory independently.
@@ -660,19 +660,19 @@ impl LoadedProfiledModel {
 
         // ── Load ANE CoreML models for ANE-routed attention layers ─────
         let n_layers = reader.manifest.execution_plan.layers.len();
-        let mut ane_coreml_models: Vec<Option<Arc<CoreMlModel>>> = vec![None; n_layers];
+        let mut ane_coreai_models: Vec<Option<Arc<CoreAiModel>>> = vec![None; n_layers];
 
         // Load each ANE island's compiled .mlmodelc from disk.
         for island in &reader.manifest.execution_plan.fused_ane_islands {
             let modelc_path = image_dir.join(&island.modelc_relpath);
             let modelc_str = modelc_path.to_string_lossy().to_string();
-            match CoreMlModel::load(&modelc_str) {
+            match CoreAiModel::load(&modelc_str) {
                 Ok(model) => {
                     let model = Arc::new(model);
                     for &layer_idx in &island.layer_indices {
                         let idx = layer_idx as usize;
                         if idx < n_layers {
-                            ane_coreml_models[idx] = Some(model.clone());
+                            ane_coreai_models[idx] = Some(model.clone());
                         }
                     }
                     eprintln!(
@@ -690,7 +690,7 @@ impl LoadedProfiledModel {
             }
         }
 
-        let loaded_count = ane_coreml_models.iter().filter(|m| m.is_some()).count();
+        let loaded_count = ane_coreai_models.iter().filter(|m| m.is_some()).count();
         eprintln!(
             "[profiled-model] ANE CoreML models loaded for {}/{} layers",
             loaded_count, n_layers,
@@ -810,7 +810,7 @@ impl LoadedProfiledModel {
             copied_weight_bytes,
             materialized_bytes,
             handle_baseline,
-            ane_coreml_models,
+            ane_coreai_models,
             memory_island,
             scheduled_module,
             vision_encoder,

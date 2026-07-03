@@ -230,7 +230,7 @@ pub fn tier0_manifest() -> SuiteManifest {
     ];
     let shapes = ["small", "medium"];
     let backends = [
-        ("coreml", "cpuOnly"),
+        ("coreai", "cpuOnly"),
         ("mlx", "mlx_default"),
         ("accelerate", "accelerate_cpu"),
     ];
@@ -278,7 +278,7 @@ pub fn tier0_manifest() -> SuiteManifest {
         ],
         backends: vec![
             BackendEntry {
-                name: "coreml".into(),
+                name: "coreai".into(),
                 policies: vec!["cpuOnly".into()],
             },
             BackendEntry {
@@ -314,7 +314,7 @@ pub fn tier1_manifest() -> SuiteManifest {
         .collect();
     let shapes = ["small", "medium"];
     let backends = [
-        ("coreml", "cpuOnly"),
+        ("coreai", "cpuOnly"),
         ("mlx", "mlx_default"),
         ("accelerate", "accelerate_cpu"),
     ];
@@ -362,7 +362,7 @@ pub fn tier1_manifest() -> SuiteManifest {
         ],
         backends: vec![
             BackendEntry {
-                name: "coreml".into(),
+                name: "coreai".into(),
                 policies: vec!["cpuOnly".into()],
             },
             BackendEntry {
@@ -431,7 +431,7 @@ pub fn tier2_batch1_manifest() -> SuiteManifest {
     const SHAPE_DEFS: &[(&str, &str)] =
         &[("small", "decode_small_v1"), ("medium", "decode_medium_v1")];
     let backends = [
-        ("coreml", "cpuOnly"),
+        ("coreai", "cpuOnly"),
         ("mlx", "mlx_default"),
         ("accelerate", "accelerate_cpu"),
     ];
@@ -474,7 +474,7 @@ pub fn tier2_batch1_manifest() -> SuiteManifest {
             ShapeProfileEntry { name: "medium".into(), rows: 1, cols: 64 },
         ],
         backends: vec![
-            BackendEntry { name: "coreml".into(), policies: vec!["cpuOnly".into()] },
+            BackendEntry { name: "coreai".into(), policies: vec!["cpuOnly".into()] },
             BackendEntry { name: "mlx".into(), policies: vec!["mlx_default".into()] },
             BackendEntry { name: "accelerate".into(), policies: vec!["accelerate_cpu".into()] },
         ],

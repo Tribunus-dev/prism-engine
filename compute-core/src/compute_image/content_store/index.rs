@@ -61,7 +61,7 @@ pub enum ContentObjectKind {
     MetalPackedWeight,
     MetalQuantizationMetadata,
     AcceleratePackedWeight,
-    CoreMlPackagePayload,
+    CoreAiPackagePayload,
     TokenizerPayload,
     KernelArtifactPayload,
     PhaseProgramPayload,

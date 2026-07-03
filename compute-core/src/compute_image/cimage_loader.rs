@@ -150,13 +150,13 @@ pub struct CimageDeployment {
     /// .mlmodelc bundle), embedded in the aux section tail after the metallib.
     /// Present in .cimage v2 format when compilation included ANE compaction.
     /// At runtime the orchestrator writes these bytes to a temp .mlmodelc
-    /// directory and loads via CoreMlModel, avoiding ~3s JIT compilation.
+    /// directory and loads via CoreAiModel, avoiding ~3s JIT compilation.
     pub compaction_model_bytes: Option<Vec<u8>>,
     /// Compiled ANE prefill model bytes (model.mlmodel protobuf from
     /// .mlmodelc bundle), embedded in the aux section tail after the
     /// compaction model. Present in .cimage v2 format when compilation
     /// included ANE prefill. At runtime the orchestrator writes these
-    /// bytes to a temp .mlmodelc directory and loads via CoreMlModel,
+    /// bytes to a temp .mlmodelc directory and loads via CoreAiModel,
     /// avoiding JIT compilation at startup.
     pub prefill_model_bytes: Option<Vec<u8>>,
     /// Total number of weights (original count before 2-bit packing).

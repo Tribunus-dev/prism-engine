@@ -84,7 +84,7 @@ pub struct RuntimeCapabilitySnapshot {
     /// Whether INT8 compute is supported on the primary GPU.
     pub supports_int8: bool,
     /// Whether Core ML is available for model execution.
-    pub coreml_available: bool,
+    pub coreai_available: bool,
     /// Whether Metal is available for GPU compute.
     pub metal_available: bool,
 }
@@ -238,7 +238,7 @@ fn runtime_has_feature(caps: &RuntimeCapabilitySnapshot, feature: &str) -> bool 
     match feature {
         "ane" => caps.has_ane,
         "metal" => caps.metal_available,
-        "coreml" => caps.coreml_available,
+        "coreai" => caps.coreai_available,
         "unified_memory" => caps.has_unified_memory,
         "fp16" => caps.supports_fp16,
         "int8" => caps.supports_int8,
@@ -533,7 +533,7 @@ mod tests {
             has_unified_memory: true,
             supports_fp16: true,
             supports_int8: true,
-            coreml_available: true,
+            coreai_available: true,
             metal_available: true,
         }
     }
@@ -546,7 +546,7 @@ mod tests {
             has_unified_memory: false,
             supports_fp16: false,
             supports_int8: false,
-            coreml_available: false,
+            coreai_available: false,
             metal_available: false,
         }
     }

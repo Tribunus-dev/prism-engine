@@ -1,5 +1,10 @@
-// Tribunus Core ML execution bridge — stateless prediction path.
-// Stateful path requires macOS 15 SDK; will be layered in Phase 5.
+// Tribunus Core AI execution bridge — stateless inference path.
+// Stateful path requires macOS 26 SDK; will be layered in Phase 5.
+//
+// TODO(#coreai): Migrate from Core ML API (<CoreML/CoreML.h>, MLModel, MLMultiArray)
+// to Core AI API (<CoreAI/CoreAI.h>, AIModel, InferenceFunction, NDArray).
+// Core AI's types are Swift structs — this requires converting .mm → .swift files
+// with @C attribute exports for FFI compatibility.
 
 #import <os/log.h>
 #import <os/signpost.h>
@@ -7,16 +12,16 @@
 
 // OSLog handle for signpost instrumentation (visible in Instruments).
 // Separate from JSONL receipts — for interactive profiling, not automated analysis.
-static os_log_t tribunus_coreml_log = os_log_create("com.tribunus.compute", "coreml_bridge");
+static os_log_t tribunus_coreai_log = os_log_create("com.tribunus.compute", "coreai_bridge");
 
-#import <CoreML/CoreML.h>
+#import <CoreML/CoreML.h> // TODO(#coreai): replace with <CoreAI/CoreAI.h>
 #import <Foundation/Foundation.h>
 #import <CoreVideo/CoreVideo.h>
 #import <stdint.h>
 #import <string.h>
 #import <stdio.h>
 
-#import "coreml_arena.h"
+#import "coreai_arena.h"
 
 extern "C" {
 
@@ -58,13 +63,13 @@ static NSString* _assertFeature(MLFeatureDescription* fd,
 
 // ── load ───────────────────────────────────────────────────────────────────
 
-/// Load a compiled Core ML model (.mlmodelc directory).
-/// The path must point directly to the directory containing metadata.json.
+/// Load a compiled (.aimodel) or (.mlmodelc) model bundle.
+/// The path must point directly to the bundle file or directory.
 /// Returns 0 on success.
-int tribunus_coreml_load_model(void** out_model,
+int tribunus_coreai_load_model(void** out_model,
                                 const char* model_path,
                                 int64_t compute_units) {
-    os_signpost_interval_begin(tribunus_coreml_log, 0, "load_model", "path=%s units=%lld", model_path, compute_units);
+    os_signpost_interval_begin(tribunus_coreai_log, 0, "load_model", "path=%s units=%lld", model_path, compute_units);
     if (!out_model || !model_path) return -1;
     *out_model = NULL;
 
@@ -82,16 +87,16 @@ int tribunus_coreml_load_model(void** out_model,
                                                    error:&error];
         if (!model) {
             if (error) {
-                fprintf(stderr, "coreml_load_model: %s\n",
+                fprintf(stderr, "coreai_load_model: %s\n",
                         error.localizedDescription.UTF8String);
             }
-            os_signpost_interval_end(tribunus_coreml_log, 0, "load_model", "error=%s", error ? error.localizedDescription.UTF8String : "nil");
+            os_signpost_interval_end(tribunus_coreai_log, 0, "load_model", "error=%s", error ? error.localizedDescription.UTF8String : "nil");
             return -2;
         }
 
         // Log model interface for debugging.
         MLModelDescription* desc = model.modelDescription;
-        fprintf(stderr, "coreml_load_model: loaded %s\n", path.UTF8String);
+        fprintf(stderr, "coreai_load_model: loaded %s\n", path.UTF8String);
         fprintf(stderr, "  inputs:\n");
         for (NSString* name in desc.inputDescriptionsByName) {
             MLFeatureDescription* ifd = desc.inputDescriptionsByName[name];
@@ -107,35 +112,35 @@ int tribunus_coreml_load_model(void** out_model,
 
         *out_model = (__bridge_retained void*)model;
     } @catch (NSException* exc) {
-        os_signpost_interval_end(tribunus_coreml_log, 0, "load_model", "exception=%s", exc.description.UTF8String);
-        fprintf(stderr, "coreml_load_model EXCEPTION: %s\n",
+        os_signpost_interval_end(tribunus_coreai_log, 0, "load_model", "exception=%s", exc.description.UTF8String);
+        fprintf(stderr, "coreai_load_model EXCEPTION: %s\n",
                 exc.description.UTF8String);
         return -10;
     }
     } // @autoreleasepool
-    os_signpost_interval_end(tribunus_coreml_log, 0, "load_model", "ok");
+    os_signpost_interval_end(tribunus_coreai_log, 0, "load_model", "ok");
     return 0;
 }
 
 /// Release a loaded model.
-void tribunus_coreml_free_model(void* model_ptr) {
+void tribunus_coreai_free_model(void* model_ptr) {
     if (!model_ptr) return;
     CFBridgingRelease(model_ptr);
 }
 
 // ── predict (FP32 MLMultiArray) ────────────────────────────────────────────
 
-int tribunus_coreml_predict(
+int tribunus_coreai_predict(
     void* model_ptr,
     const char* input_name,
     const TribunusArenaInfo* input_arena,
     const char* output_name,
     const TribunusArenaInfo* output_arena) {
 
-    os_signpost_interval_begin(tribunus_coreml_log, 0, "predict", "model=%p", model_ptr);
+    os_signpost_interval_begin(tribunus_coreai_log, 0, "predict", "model=%p", model_ptr);
 
     if (!model_ptr || !input_name || !input_arena || !output_name || !output_arena) {
-        os_signpost_interval_end(tribunus_coreml_log, 0, "predict", "null_args");
+        os_signpost_interval_end(tribunus_coreai_log, 0, "predict", "null_args");
         return -1;
     }
 
@@ -160,7 +165,7 @@ int tribunus_coreml_predict(
             MLMultiArrayDataTypeFloat16,
             shape);
         if (err) {
-            fprintf(stderr, "coreml_predict: input validation failed: %s\n",
+            fprintf(stderr, "coreai_predict: input validation failed: %s\n",
                     err.UTF8String);
             return -11;
         }
@@ -170,7 +175,7 @@ int tribunus_coreml_predict(
             MLMultiArrayDataTypeFloat16,
             @[@(output_arena->logical_dim0), @(output_arena->logical_dim1)]);
         if (err) {
-            fprintf(stderr, "coreml_predict: output validation failed: %s\n",
+            fprintf(stderr, "coreai_predict: output validation failed: %s\n",
                     err.UTF8String);
             return -12;
         }
@@ -183,7 +188,7 @@ int tribunus_coreml_predict(
                     deallocator:^(void* p) { (void)p; }
                           error:&error];
         if (!input_ma) {
-            fprintf(stderr, "coreml_predict: input MLMultiArray failed: %s\n",
+            fprintf(stderr, "coreai_predict: input MLMultiArray failed: %s\n",
                     error.localizedDescription.UTF8String);
             return -2;
         }
@@ -196,7 +201,7 @@ int tribunus_coreml_predict(
                     deallocator:^(void* p) { (void)p; }
                           error:&error];
         if (!output_ma) {
-            fprintf(stderr, "coreml_predict: output MLMultiArray failed: %s\n",
+            fprintf(stderr, "coreai_predict: output MLMultiArray failed: %s\n",
                     error.localizedDescription.UTF8String);
             return -3;
         }
@@ -214,25 +219,24 @@ int tribunus_coreml_predict(
                                                                 options:options
                                                                   error:&error];
         if (!result) {
-            fprintf(stderr, "coreml_predict: prediction failed: %s\n",
+            fprintf(stderr, "coreai_predict: prediction failed: %s\n",
                     error.localizedDescription.UTF8String);
             return -5;
         }
     } @catch (NSException* exc) {
-        fprintf(stderr, "coreml_predict EXCEPTION: %s\n",
+        fprintf(stderr, "coreai_predict EXCEPTION: %s\n",
                 exc.description.UTF8String);
-        os_signpost_interval_end(tribunus_coreml_log, 0, "predict", "exception=%s", exc.description.UTF8String);
+        os_signpost_interval_end(tribunus_coreai_log, 0, "predict", "exception=%s", exc.description.UTF8String);
         return -20;
     }
     } // @autoreleasepool
-    os_signpost_interval_end(tribunus_coreml_log, 0, "predict", "ok");
+    os_signpost_interval_end(tribunus_coreai_log, 0, "predict", "ok");
     return 0;
 }
 
-// ── predict_pixelbuffer (FP16 IOSurface) ───────────────────────────────────
 // ── predict_multi (FP16 MLMultiArray, multiple I/O) ─────────────────────────
 
-int tribunus_coreml_predict_multi(
+int tribunus_coreai_predict_multi(
     void* model_ptr,
     const char** input_names,
     const TribunusArenaInfo** input_arenas,
@@ -241,10 +245,10 @@ int tribunus_coreml_predict_multi(
     TribunusArenaInfo** output_arenas,
     int num_outputs) {
 
-    os_signpost_interval_begin(tribunus_coreml_log, 0, "predict_multi", "model=%p", model_ptr);
+    os_signpost_interval_begin(tribunus_coreai_log, 0, "predict_multi", "model=%p", model_ptr);
 
     if (!model_ptr || !input_names || !input_arenas || !output_names || !output_arenas) {
-        os_signpost_interval_end(tribunus_coreml_log, 0, "predict_multi", "null_args");
+        os_signpost_interval_end(tribunus_coreai_log, 0, "predict_multi", "null_args");
         return -1;
     }
 
@@ -272,7 +276,7 @@ int tribunus_coreml_predict_multi(
                         deallocator:^(void* p) { (void)p; }
                               error:&error];
             if (!ma) {
-                fprintf(stderr, "coreml_predict_multi: input '%s' MLMultiArray failed\n",
+                fprintf(stderr, "coreai_predict_multi: input '%s' MLMultiArray failed\n",
                         input_names[i]);
                 return -2;
             }
@@ -293,7 +297,7 @@ int tribunus_coreml_predict_multi(
                         deallocator:^(void* p) { (void)p; }
                               error:&error];
             if (!ma) {
-                fprintf(stderr, "coreml_predict_multi: output '%s' MLMultiArray failed\n",
+                fprintf(stderr, "coreai_predict_multi: output '%s' MLMultiArray failed\n",
                         output_names[i]);
                 return -3;
             }
@@ -311,24 +315,24 @@ int tribunus_coreml_predict_multi(
                                                                 options:options
                                                                   error:&error];
         if (!result) {
-            fprintf(stderr, "coreml_predict_multi: prediction failed: %s\n",
+            fprintf(stderr, "coreai_predict_multi: prediction failed: %s\n",
                     error.localizedDescription.UTF8String);
             return -5;
         }
     } @catch (NSException* exc) {
-        fprintf(stderr, "coreml_predict_multi EXCEPTION: %s\n",
+        fprintf(stderr, "coreai_predict_multi EXCEPTION: %s\n",
                 exc.description.UTF8String);
-        os_signpost_interval_end(tribunus_coreml_log, 0, "predict_multi", "exception=%s", exc.description.UTF8String);
+        os_signpost_interval_end(tribunus_coreai_log, 0, "predict_multi", "exception=%s", exc.description.UTF8String);
         return -20;
     }
     } // @autoreleasepool
-    os_signpost_interval_end(tribunus_coreml_log, 0, "predict_multi", "ok");
+    os_signpost_interval_end(tribunus_coreai_log, 0, "predict_multi", "ok");
     return 0;
 }
 
 // ── predict_pixelbuffer (FP16 IOSurface) ───────────────────────────────────
 
-int tribunus_coreml_predict_pixelbuffer(
+int tribunus_coreai_predict_pixelbuffer(
     void* model_ptr,
     const char* input_name,
     TribunusArenaInfo* input_arena,
@@ -360,7 +364,7 @@ int tribunus_coreml_predict_pixelbuffer(
             MLMultiArrayDataTypeFloat16,
             shape);
         if (err) {
-            fprintf(stderr, "coreml_predict_pixelbuffer: input validation failed: %s\n",
+            fprintf(stderr, "coreai_predict_pixelbuffer: input validation failed: %s\n",
                     err.UTF8String);
             return -11;
         }
@@ -370,7 +374,7 @@ int tribunus_coreml_predict_pixelbuffer(
             MLMultiArrayDataTypeFloat16,
             @[@(output_arena->logical_dim0), @(output_arena->logical_dim1)]);
         if (err) {
-            fprintf(stderr, "coreml_predict_pixelbuffer: output validation failed: %s\n",
+            fprintf(stderr, "coreai_predict_pixelbuffer: output validation failed: %s\n",
                     err.UTF8String);
             return -12;
         }
@@ -403,12 +407,12 @@ int tribunus_coreml_predict_pixelbuffer(
                                                                 options:options
                                                                   error:&error];
         if (!result) {
-            fprintf(stderr, "coreml_predict_pixelbuffer: prediction failed: %s\n",
+            fprintf(stderr, "coreai_predict_pixelbuffer: prediction failed: %s\n",
                     error.localizedDescription.UTF8String);
             return -5;
         }
     } @catch (NSException* exc) {
-        fprintf(stderr, "coreml_predict_pixelbuffer EXCEPTION: %s\n",
+        fprintf(stderr, "coreai_predict_pixelbuffer EXCEPTION: %s\n",
                 exc.description.UTF8String);
         return -20;
     }

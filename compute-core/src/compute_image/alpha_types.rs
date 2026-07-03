@@ -71,7 +71,7 @@ pub struct CapabilitySignature {
     /// Minimum OS version.
     pub os_version: String,
     /// Core ML runtime version (if ANE route required).
-    pub coreml_runtime_version: Option<String>,
+    pub coreai_runtime_version: Option<String>,
     /// Metal feature set (if GPU route required).
     pub metal_feature_set: Option<String>,
     /// Supported dtypes for this image.
@@ -88,7 +88,7 @@ pub struct CapabilitySignature {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrismArtifactManifest {
     /// Core ML `.mlmodelc` artifacts, keyed by region name.
-    pub coreml_artifacts: Vec<CoreMlArtifactEntry>,
+    pub coreai_artifacts: Vec<CoreAiArtifactEntry>,
     /// Metal shader libraries, keyed by kernel name.
     pub metal_artifacts: Vec<MetalArtifactEntry>,
     /// CPU fallback artifacts (if any).
@@ -99,7 +99,7 @@ pub struct PrismArtifactManifest {
 
 /// A compiled Core ML artifact.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlArtifactEntry {
+pub struct CoreAiArtifactEntry {
     /// Region name matched to catalogue entry.
     pub region_name: String,
     /// Relative path within the image directory.
@@ -208,7 +208,7 @@ pub struct InstallPolicy {
     /// Whether to precreate Metal textures during install.
     pub precreate_metal_textures: bool,
     /// Whether to run Core ML warmup during install.
-    pub run_coreml_warmup: bool,
+    pub run_coreai_warmup: bool,
 }
 
 // ── Import request ───────────────────────────────────────────────────────

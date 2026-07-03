@@ -29,7 +29,7 @@ impl Resolver {
 
         let mut fallback_order = Vec::new();
         // MLX -> CoreML -> Accelerate is the default order for truth and debuggability.
-        for preferred in &["mlx", "coreml", "accelerate"] {
+        for preferred in &["mlx", "coreai", "accelerate"] {
             if let Some(c) = candidates.iter().find(|c| c.backend_name == *preferred) {
                 if c.status == BackendStatus::Pass
                     || (ev.is_kv_phase
@@ -93,9 +93,9 @@ impl Resolver {
         }
 
         // 2. CoreML if fully qualified (pass)
-        if let Some(c) = candidates.iter().find(|c| c.backend_name == "coreml") {
+        if let Some(c) = candidates.iter().find(|c| c.backend_name == "coreai") {
             if c.status == BackendStatus::Pass {
-                return Some("coreml".into());
+                return Some("coreai".into());
             }
         }
 
@@ -131,7 +131,7 @@ mod tests {
             kv_qualification: KvEvidenceQualification::Unqualified,
             backend_evidence: vec![
                 BackendEvidence {
-                    backend_name: "coreml".into(),
+                    backend_name: "coreai".into(),
                     status: BackendStatus::Pass,
                     raw_status_string: "pass".into(),
                 },
@@ -145,11 +145,11 @@ mod tests {
 
         let resolved = resolver.resolve_phase(&ev);
         assert_eq!(resolved.selected_backend, Some("mlx".into()));
-        assert_eq!(resolved.fallback_order, vec!["coreml".to_string()]);
+        assert_eq!(resolved.fallback_order, vec!["coreai".to_string()]);
     }
 
     #[test]
-    fn test_coreml_only_if_fully_qualified() {
+    fn test_coreai_only_if_fully_qualified() {
         let resolver = Resolver::new(false);
         let ev = NormalizedPhaseEvidence {
             phase_name: "test".into(),
@@ -162,7 +162,7 @@ mod tests {
             kv_allowed_operations: vec![],
             kv_qualification: KvEvidenceQualification::Unqualified,
             backend_evidence: vec![BackendEvidence {
-                backend_name: "coreml".into(),
+                backend_name: "coreai".into(),
                 status: BackendStatus::CompileLimited,
                 raw_status_string: "compile_limited".into(),
             }],

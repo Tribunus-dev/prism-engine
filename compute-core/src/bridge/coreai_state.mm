@@ -1,15 +1,20 @@
-// Tribunus Core ML stateful prediction bridge — MLState lifecycle + stateful API.
-// Requires macOS 15+ at runtime for MLState support.
+// Tribunus Core AI stateful inference bridge — InferenceFunction lifecycle + stateful API.
+// Requires macOS 26+ at runtime for Core AI support.
+//
+// TODO(#coreai): Migrate from Core ML API (<CoreML/CoreML.h>, MLModel, MLState, MLMultiArray)
+// to Core AI API (<CoreAI/CoreAI.h>, AIModel, InferenceFunction, NDArray).
+// Core AI's types are Swift structs — this requires converting .mm → .swift files
+// with @C attribute exports for FFI compatibility.
 
-#import <CoreML/CoreML.h>
+#import <CoreML/CoreML.h> // TODO(#coreai): replace with <CoreAI/CoreAI.h>
 #import <Foundation/Foundation.h>
 #import <CoreVideo/CoreVideo.h>
 #import <stdint.h>
 #import <string.h>
 #import <stdio.h>
 
-#import "coreml_arena.h"
-#import "coreml_state.h"
+#import "coreai_arena.h"
+#import "coreai_state.h"
 
 extern "C" {
 
@@ -50,7 +55,7 @@ static NSString* _assertFeature(MLFeatureDescription* fd,
 
 // ── create ────────────────────────────────────────────────────────────────
 
-int tribunus_coreml_state_create(TribunusCoreMlState** out_state, void* model_ptr) {
+int tribunus_coreai_state_create(TribunusCoreAiState** out_state, void* model_ptr) {
     if (!out_state || !model_ptr) return -1;
     *out_state = NULL;
 
@@ -59,13 +64,13 @@ int tribunus_coreml_state_create(TribunusCoreMlState** out_state, void* model_pt
         MLModel* mlmodel = (__bridge MLModel*)model_ptr;
         MLState* state = [mlmodel newState];
         if (!state) {
-            fprintf(stderr, "coreml_state_create: newState failed (returned nil)\n");
+            fprintf(stderr, "coreai_state_create: newState failed (returned nil)\n");
             return -2;
         }
 
-        *out_state = (TribunusCoreMlState*)CFBridgingRetain(state);
+        *out_state = (TribunusCoreAiState*)CFBridgingRetain(state);
     } @catch (NSException* exc) {
-        fprintf(stderr, "coreml_state_create EXCEPTION: %s\n",
+        fprintf(stderr, "coreai_state_create EXCEPTION: %s\n",
                 exc.description.UTF8String);
         return -10;
     }
@@ -75,7 +80,7 @@ int tribunus_coreml_state_create(TribunusCoreMlState** out_state, void* model_pt
 
 // ── destroy ───────────────────────────────────────────────────────────────
 
-void tribunus_coreml_state_destroy(TribunusCoreMlState* state) {
+void tribunus_coreai_state_destroy(TribunusCoreAiState* state) {
     if (!state) return;
     // Ownership transfer: CFBridgingRelease balances the CFBridgingRetain in create.
     // ARC takes over and deallocates the MLState.
@@ -84,9 +89,9 @@ void tribunus_coreml_state_destroy(TribunusCoreMlState* state) {
 
 // ── predict_stateful (FP16 MLMultiArray) ───────────────────────────────────
 
-int tribunus_coreml_predict_stateful(
+int tribunus_coreai_predict_stateful(
     void* model_ptr,
-    TribunusCoreMlState* state,
+    TribunusCoreAiState* state,
     const char* input_name,
     void* input_arena_info,
     const char* output_name,
@@ -114,11 +119,11 @@ int tribunus_coreml_predict_stateful(
         NSDictionary* inputDescriptions = mlmodel.modelDescription.inputDescriptionsByName;
         NSDictionary* outputDescriptions = mlmodel.modelDescription.outputDescriptionsByName;
         if (!inputDescriptions[inName]) {
-            fprintf(stderr, "coreml_predict_stateful_async: missing input name %s\n", [inName UTF8String]);
+            fprintf(stderr, "coreai_predict_stateful_async: missing input name %s\n", [inName UTF8String]);
             return -2;
         }
         if (!outputDescriptions[outName]) {
-            fprintf(stderr, "coreml_predict_stateful_async: missing output name %s\n", [outName UTF8String]);
+            fprintf(stderr, "coreai_predict_stateful_async: missing output name %s\n", [outName UTF8String]);
             return -3;
         }
         NSArray<NSNumber*>* shape = @[
@@ -132,7 +137,7 @@ int tribunus_coreml_predict_stateful(
             MLMultiArrayDataTypeFloat16,
             shape);
         if (err) {
-            fprintf(stderr, "coreml_predict_stateful: input validation failed: %s\n",
+            fprintf(stderr, "coreai_predict_stateful: input validation failed: %s\n",
                     err.UTF8String);
             return -11;
         }
@@ -142,7 +147,7 @@ int tribunus_coreml_predict_stateful(
             MLMultiArrayDataTypeFloat16,
             @[@(output_arena->logical_dim0), @(output_arena->logical_dim1)]);
         if (err) {
-            fprintf(stderr, "coreml_predict_stateful: output validation failed: %s\n",
+            fprintf(stderr, "coreai_predict_stateful: output validation failed: %s\n",
                     err.UTF8String);
             return -12;
         }
@@ -157,7 +162,7 @@ int tribunus_coreml_predict_stateful(
         MLMultiArray* input_ma = [[MLMultiArray alloc]
             initWithPixelBuffer:inPixBuf shape:shape];
         if (!input_ma) {
-            fprintf(stderr, "coreml_predict_stateful: input MLMultiArray failed\n");
+            fprintf(stderr, "coreai_predict_stateful: input MLMultiArray failed\n");
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
             return -2;
@@ -172,7 +177,7 @@ int tribunus_coreml_predict_stateful(
                     deallocator:^(void* p) { (void)p; }
                           error:&error];
         if (!output_ma) {
-            fprintf(stderr, "coreml_predict_stateful: output MLMultiArray failed: %s\n",
+            fprintf(stderr, "coreai_predict_stateful: output MLMultiArray failed: %s\n",
                     error.localizedDescription.UTF8String);
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
@@ -185,7 +190,7 @@ int tribunus_coreml_predict_stateful(
         MLDictionaryFeatureProvider* input_provider =
             [[MLDictionaryFeatureProvider alloc] initWithDictionary:input_dict error:&error];
         if (!input_provider) {
-            fprintf(stderr, "coreml_predict_stateful: input provider failed: %s\n",
+            fprintf(stderr, "coreai_predict_stateful: input provider failed: %s\n",
                     error.localizedDescription.UTF8String);
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
@@ -203,7 +208,7 @@ int tribunus_coreml_predict_stateful(
                                                                 options:options
                                                                   error:&error];
         if (!result) {
-            fprintf(stderr, "coreml_predict_stateful: prediction failed: %s\n",
+            fprintf(stderr, "coreai_predict_stateful: prediction failed: %s\n",
                     error.localizedDescription.UTF8String);
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
@@ -212,7 +217,7 @@ int tribunus_coreml_predict_stateful(
         CVPixelBufferRelease(inPixBuf);
         CVPixelBufferRelease(outPixBuf);
     } @catch (NSException* exc) {
-        fprintf(stderr, "coreml_predict_stateful EXCEPTION: %s\n",
+        fprintf(stderr, "coreai_predict_stateful EXCEPTION: %s\n",
                 exc.description.UTF8String);
         return -20;
     }
@@ -220,9 +225,9 @@ int tribunus_coreml_predict_stateful(
     return 0;
 }
 
-extern "C" void tribunus_coreml_wake_waker(void* waker);
+extern "C" void tribunus_coreai_wake_waker(void* waker);
 
-struct TribunusCoreMlStatefulRequest {
+struct TribunusCoreAiStatefulRequest {
     dispatch_semaphore_t sem;
     int status;
     BOOL completed;
@@ -231,10 +236,10 @@ struct TribunusCoreMlStatefulRequest {
 
 // ── predict_stateful_async ──────────────────────────────────────────
 
-int tribunus_coreml_predict_stateful_async(
-    TribunusCoreMlStatefulRequest** out_request,
+int tribunus_coreai_predict_stateful_async(
+    TribunusCoreAiStatefulRequest** out_request,
     void* model_ptr,
-    TribunusCoreMlState* state,
+    TribunusCoreAiState* state,
     const char* input_name,
     void* input_arena_info,
     const char* output_name,
@@ -263,7 +268,7 @@ int tribunus_coreml_predict_stateful_async(
         // Validate the requested output name against the model description.
         NSDictionary* outputDescriptions = mlmodel.modelDescription.outputDescriptionsByName;
         if (!outputDescriptions[outName]) {
-            fprintf(stderr, "coreml_predict_stateful_async: missing output name %s\n", [outName UTF8String]);
+            fprintf(stderr, "coreai_predict_stateful_async: missing output name %s\n", [outName UTF8String]);
             return -3;
         }
         NSArray<NSNumber*>* shape = @[
@@ -281,7 +286,7 @@ int tribunus_coreml_predict_stateful_async(
         MLMultiArray* input_ma = [[MLMultiArray alloc]
             initWithPixelBuffer:inPixBuf shape:shape];
         if (!input_ma) {
-            fprintf(stderr, "coreml_predict_stateful_async: input MLMultiArray failed\n");
+            fprintf(stderr, "coreai_predict_stateful_async: input MLMultiArray failed\n");
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
             return -2;
@@ -296,7 +301,7 @@ int tribunus_coreml_predict_stateful_async(
                      deallocator:^(void* p) { (void)p; }
                            error:&error];
         if (!output_ma) {
-            fprintf(stderr, "coreml_predict_stateful_async: output MLMultiArray failed: %s\n",
+            fprintf(stderr, "coreai_predict_stateful_async: output MLMultiArray failed: %s\n",
                     error.localizedDescription.UTF8String);
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
@@ -309,7 +314,7 @@ int tribunus_coreml_predict_stateful_async(
         MLDictionaryFeatureProvider* input_provider =
             [[MLDictionaryFeatureProvider alloc] initWithDictionary:input_dict error:&error];
         if (!input_provider) {
-            fprintf(stderr, "coreml_predict_stateful_async: input provider failed: %s\n",
+            fprintf(stderr, "coreai_predict_stateful_async: input provider failed: %s\n",
                     error.localizedDescription.UTF8String);
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
@@ -321,7 +326,7 @@ int tribunus_coreml_predict_stateful_async(
         options.outputBackings = @{ outName: output_ma };
 
         // Allocate request structure
-        TribunusCoreMlStatefulRequest* req = (TribunusCoreMlStatefulRequest*)calloc(1, sizeof(TribunusCoreMlStatefulRequest));
+        TribunusCoreAiStatefulRequest* req = (TribunusCoreAiStatefulRequest*)calloc(1, sizeof(TribunusCoreAiStatefulRequest));
         if (!req) {
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
@@ -340,7 +345,7 @@ int tribunus_coreml_predict_stateful_async(
                                 options:options
                       completionHandler:^(id<MLFeatureProvider> _Nullable result, NSError * _Nullable err_cb) {
             if (!result) {
-                fprintf(stderr, "coreml_predict_stateful_async callback: prediction failed: %s\n",
+                fprintf(stderr, "coreai_predict_stateful_async callback: prediction failed: %s\n",
                         err_cb ? err_cb.localizedDescription.UTF8String : "unknown error");
                 req->status = -5;
             } else {
@@ -349,14 +354,14 @@ int tribunus_coreml_predict_stateful_async(
             req->completed = YES;
             dispatch_semaphore_signal(req->sem);
             if (req->waker) {
-                tribunus_coreml_wake_waker(req->waker);
+                tribunus_coreai_wake_waker(req->waker);
                 req->waker = NULL;
             }
             CVPixelBufferRelease(inPixBuf);
             CVPixelBufferRelease(outPixBuf);
         }];
     } @catch (NSException* exc) {
-        fprintf(stderr, "coreml_predict_stateful_async EXCEPTION: %s\n",
+        fprintf(stderr, "coreai_predict_stateful_async EXCEPTION: %s\n",
                 exc.description.UTF8String);
         return -20;
     }
@@ -366,33 +371,33 @@ int tribunus_coreml_predict_stateful_async(
 
 // ── request lifecycle ───────────────────────────────────────────────
 
-int tribunus_coreml_stateful_request_is_complete(TribunusCoreMlStatefulRequest* request) {
+int tribunus_coreai_stateful_request_is_complete(TribunusCoreAiStatefulRequest* request) {
     if (!request) return -1;
     return request->completed ? 1 : 0;
 }
 
-void tribunus_coreml_stateful_request_set_waker(TribunusCoreMlStatefulRequest* request, void* waker) {
+void tribunus_coreai_stateful_request_set_waker(TribunusCoreAiStatefulRequest* request, void* waker) {
     if (!request) return;
     if (request->waker && request->waker != waker) {
-        tribunus_coreml_wake_waker(request->waker);
+        tribunus_coreai_wake_waker(request->waker);
     }
     request->waker = waker;
     if (request->completed && request->waker) {
-        tribunus_coreml_wake_waker(request->waker);
+        tribunus_coreai_wake_waker(request->waker);
         request->waker = NULL;
     }
 }
 
-int tribunus_coreml_stateful_request_wait(TribunusCoreMlStatefulRequest* request) {
+int tribunus_coreai_stateful_request_wait(TribunusCoreAiStatefulRequest* request) {
     if (!request) return -1;
     dispatch_semaphore_wait(request->sem, DISPATCH_TIME_FOREVER);
     return request->status;
 }
 
-void tribunus_coreml_stateful_request_destroy(TribunusCoreMlStatefulRequest* request) {
+void tribunus_coreai_stateful_request_destroy(TribunusCoreAiStatefulRequest* request) {
     if (!request) return;
     if (request->waker) {
-        tribunus_coreml_wake_waker(request->waker);
+        tribunus_coreai_wake_waker(request->waker);
     }
     free(request);
 }

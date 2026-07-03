@@ -100,7 +100,7 @@ pub enum SemanticOperation {
     Mul,
     RoPE,
     Softmax,
-    CoreMlGraph { graph_id: String },
+    CoreAiGraph { graph_id: String },
     SharedActivation,
     FusedMlpSwiGlu,
     FusedQkvEpilogue,
@@ -111,7 +111,7 @@ pub enum SemanticOperation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExecutionLane {
     Metal,
-    CoreMl,
+    CoreAi,
     Accelerate,
     ControlPlaneCpu,
     FusionOnly,
@@ -147,8 +147,8 @@ pub enum BindingKind {
     ContentStoreObject,
     ActivationArenaRegion,
     KvCacheRegion,
-    CoreMlModelHandle,
-    CoreMlStateHandle,
+    CoreAiModelHandle,
+    CoreAiStateHandle,
     MetalBufferHandle,
     MaterializationRegion,
 }

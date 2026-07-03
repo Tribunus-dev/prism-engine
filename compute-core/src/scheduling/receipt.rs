@@ -430,7 +430,7 @@ mod tests {
         let receipt = HeterogeneousExecutionReceipt::from_timestamps(
             work_id,
             work_key.clone(),
-            ExecutionLane::CoreMlAne,
+            ExecutionLane::CoreAiAne,
             0,
             Some("artifact-key".into()),
             Some("qual-key".into()),
@@ -445,12 +445,12 @@ mod tests {
             false,
             None,
             WorkStatus::Completed,
-            TimingQuality::CoreMlWorkerBoundary,
+            TimingQuality::CoreAiWorkerBoundary,
         );
 
         assert_eq!(receipt.work_id, work_id);
         assert_eq!(receipt.work_key, work_key);
-        assert_eq!(receipt.lane, ExecutionLane::CoreMlAne);
+        assert_eq!(receipt.lane, ExecutionLane::CoreAiAne);
         assert_eq!(receipt.artifact_key.as_deref(), Some("artifact-key"));
         assert_eq!(receipt.input_slots, input_slots);
         assert_eq!(receipt.output_slot, SlotLeaseId(20));
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(receipt.overlap_ns, 0);
         assert!(!receipt.fallback_used);
         assert_eq!(receipt.status, WorkStatus::Completed);
-        assert_eq!(receipt.timing_quality, TimingQuality::CoreMlWorkerBoundary);
+        assert_eq!(receipt.timing_quality, TimingQuality::CoreAiWorkerBoundary);
     }
 
     #[test]

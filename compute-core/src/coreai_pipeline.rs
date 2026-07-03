@@ -15,14 +15,14 @@ use crate::toolchain_attest::ToolchainAttestation;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompileProfile {
     MlXOnly,
-    MlXPlusCoreMlOptional,
+    MlXPlusCoreAiOptional,
     HybridRequired,
 }
 
 /// Compilation receipt that binds source artifact identity,
 /// compiled artifact identity, and toolchain provenance.
 #[derive(Debug, Clone)]
-pub struct CoreMlIslandReceipt {
+pub struct CoreAiIslandReceipt {
     pub island_id: String,
     pub model_hash: String,
     pub compiled_hash: String,
@@ -45,7 +45,7 @@ pub fn compile_mlpackage(
     island_id: &str,
     compute_units: &str,
     opset: &str,
-) -> Result<CoreMlIslandReceipt, String> {
+) -> Result<CoreAiIslandReceipt, String> {
     let start = std::time::Instant::now();
     if !mlpackage_path.is_dir() {
         return Err(format!("not found: {:?}", mlpackage_path));
@@ -84,7 +84,7 @@ pub fn compile_mlpackage(
             Err(_) => String::new(),
         };
 
-    Ok(CoreMlIslandReceipt {
+    Ok(CoreAiIslandReceipt {
         island_id: island_id.to_string(),
         model_hash,
         compiled_hash,
@@ -149,9 +149,9 @@ fn dir_sha256(path: &Path) -> String {
     format!("{:x}", h.finalize())
 }
 
-pub fn emit_coreml_profile(
+pub fn emit_coreai_profile(
     profile: CompileProfile,
-    islands: &[CoreMlIslandReceipt],
+    islands: &[CoreAiIslandReceipt],
 ) -> Result<(), String> {
     if matches!(profile, CompileProfile::HybridRequired) && islands.is_empty() {
         return Err("HybridRequired requires at least one island".into());
@@ -173,7 +173,7 @@ pub fn build_matmul_region(
     weight_shape: &[i64],
     output_dir: &Path,
     region_id: &str,
-) -> Result<CoreMlIslandReceipt, String> {
+) -> Result<CoreAiIslandReceipt, String> {
     let prog = MilBuilder::new("main")
         .input(input_name, mil_spec::DataType::Float32, input_shape)
         .const_f32(weight_name, weight_values, weight_shape)
@@ -212,7 +212,7 @@ pub fn build_and_compile(
     output_dir: &Path,
     region_id: &str,
     compute_units: &str,
-) -> Result<CoreMlIslandReceipt, String> {
+) -> Result<CoreAiIslandReceipt, String> {
     let tmp = tempfile::tempdir().map_err(|e| format!("tempdir: {}", e))?;
     let pkg_path = mlpackage::write_mlpackage(program, tmp.path(), &meta)?;
     compile_mlpackage(&pkg_path, output_dir, region_id, compute_units, "CoreML9")

@@ -14,7 +14,7 @@
 //! |----------------------|---------------------------------------------------------------------|
 //! | MlxGpuPreferred      | q/k/v/o/gate/up/down proj, attention softmax, RoPE, attn matmul, embedding, output proj, sampling (fused GPU path) |
 //! | MlxCpuPreferred      | (none — GPU wins for all large ops)                                |
-//! | CoreMlAneCandidate   | 6-MLP stateful island (experimental)                               |
+//! | CoreAiAneCandidate   | 6-MLP stateful island (experimental)                               |
 //! | AcceleratePreferred  | logits scaling, top-k post-processing                              |
 //! | ControlPlaneCpu      | tokenization, detokenization, KV-cache mgmt, mask construction, sampler, admission, cancellation |
 //! | FusionOnly           | RMSNorm+q_proj, q_norm+k_norm+RoPE, gate*up activation, RMSNorm standalone, residual add |
@@ -111,8 +111,8 @@ pub fn compile_default_m1_profile(image_hash: &str) -> ExecutionPlacementProfile
             // Boundary cost: ANE↔any ~50 µs — high transition penalty means
             // ANE regions should be contiguous in the compute graph.
             PlaceRegion {
-                id: "coreml-ane-candidate".into(),
-                candidate: CandidateClass::CoreMlAneCandidate,
+                id: "coreai-ane-candidate".into(),
+                candidate: CandidateClass::CoreAiAneCandidate,
                 weight: 60,
                 label: Some("6-MLP stateful island (experimental)".into()),
             },
@@ -263,7 +263,7 @@ mod tests {
             profile.regions.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains("mlx-gpu-preferred"));
         assert!(ids.contains("mlx-cpu-preferred"));
-        assert!(ids.contains("coreml-ane-candidate"));
+        assert!(ids.contains("coreai-ane-candidate"));
         assert!(ids.contains("accelerate-preferred"));
         assert!(ids.contains("control-plane-cpu"));
         assert!(ids.contains("fusion-only"));

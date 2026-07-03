@@ -244,7 +244,7 @@ fn run_import(model_path_str: &str) {
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
     {
         println!("=== Region Plan ===");
-        println!("  Core ML islands:  {}", plan.coreml_islands.len());
+        println!("  Core ML islands:  {}", plan.coreai_islands.len());
         println!("  Metal ops:        {}", plan.metal_ops.len());
         println!("  CPU ops:          {}", plan.cpu_ops.len());
     }

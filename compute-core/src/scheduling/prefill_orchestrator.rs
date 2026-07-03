@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::arena::Arena;
 use crate::arena::DataType;
-use crate::coreml_state::StatefulPrefillContext;
+use crate::coreai_state::StatefulPrefillContext;
 use crate::models::embedding::TokenEmbedding;
 
 /// A precompiled Core ML ANE prefill island for a specific chunk size.

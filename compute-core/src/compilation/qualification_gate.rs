@@ -16,8 +16,8 @@ use crate::compilation::phase_ir::{
     BoundaryTensorContract, CompilePhaseDescriptor, CompilePlacement, ShapeClass, TensorDtype,
 };
 use crate::compilation::tri_lane::{
-    AneAdmission, AneExperimentalReason, AneRejectionReason, CoreMlComputeUnitPolicy,
-    CoreMlProgramBinding, CoreMlShapeContract, CoreMlWarmupContract, AneQualificationRecord,
+    AneAdmission, AneExperimentalReason, AneRejectionReason, CoreAiComputeUnitPolicy,
+    CoreAiProgramBinding, CoreAiShapeContract, CoreAiWarmupContract, AneQualificationRecord,
 };
 
 /// Configuration for the ANE qualification gate.
@@ -178,7 +178,7 @@ impl AneQualificationGate {
         }
     }
 
-    /// Build a `CoreMlProgramBinding` for an admitted region.
+    /// Build a `CoreAiProgramBinding` for an admitted region.
     pub fn build_core_ml_binding(
         &self,
         region_id: &str,
@@ -189,20 +189,20 @@ impl AneQualificationGate {
         compile_success: bool,
         load_success: bool,
         warmup_success: bool,
-    ) -> CoreMlProgramBinding {
-        CoreMlProgramBinding {
+    ) -> CoreAiProgramBinding {
+        CoreAiProgramBinding {
             artifact_id: region_id.to_string(),
             package_digest: String::new(),
             compiled_model_digest: String::new(),
-            compute_unit_policy: CoreMlComputeUnitPolicy::CpuAndNeuralEngineRequired,
+            compute_unit_policy: CoreAiComputeUnitPolicy::CpuAndNeuralEngineRequired,
             input_contract: Vec::new(),
             output_contract: Vec::new(),
             state_contract: None,
-            shape_contract: CoreMlShapeContract {
+            shape_contract: CoreAiShapeContract {
                 static_shape: None,
                 dynamic_range: None,
             },
-            warmup_contract: CoreMlWarmupContract {
+            warmup_contract: CoreAiWarmupContract {
                 min_warmup_predictions: 3,
                 max_warmup_latency_ms: 100,
                 tolerance: 0.01,
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(binding.artifact_id, "test_region");
         assert_eq!(
             binding.compute_unit_policy,
-            CoreMlComputeUnitPolicy::CpuAndNeuralEngineRequired
+            CoreAiComputeUnitPolicy::CpuAndNeuralEngineRequired
         );
         assert!(binding.qualification.compile_success);
     }

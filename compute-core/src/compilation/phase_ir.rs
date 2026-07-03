@@ -212,7 +212,7 @@ pub struct CompileExecutionReceipt {
     pub copied_bytes: u64,
     pub numerical_validation: ValidationResult,
     pub fallback_reason: Option<FallbackReason>,
-    pub coreml_compute_units: Option<String>,
+    pub coreai_compute_units: Option<String>,
 }
 
 // ── ANE artifact key ──────────────────────────────────────────────────────

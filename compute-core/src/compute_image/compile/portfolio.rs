@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use crate::compilation::activation_abi::{ActivationAbi, ActivationContract, PhysicalLayout};
 use crate::compilation::ane_eligibility::{ShapeBucket, ShapeBucketFamily};
-use crate::compilation::region_planner::CoreMlIsland;
+use crate::compilation::region_planner::CoreAiIsland;
 
 // ── Public types ──────────────────────────────────────────────────────────
 
@@ -34,12 +34,12 @@ pub enum WeightEncoding {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DeploymentTarget {
     pub minimum_os: String,
-    pub coreml_version: String,
+    pub coreai_version: String,
 }
 
 /// Uniquely identifies a single compiled Core ML packet within a portfolio.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CoreMlArtifactKey {
+pub struct CoreAiArtifactKey {
     pub model_identity: String,
     pub packet_kind: PacketKind,
     pub layer_start: u32,
@@ -54,8 +54,8 @@ pub struct CoreMlArtifactKey {
 
 /// A single compiled .mlpackage artifact in the portfolio.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CoreMlPacketArtifact {
-    pub packet_key: CoreMlArtifactKey,
+pub struct CoreAiPacketArtifact {
+    pub packet_key: CoreAiArtifactKey,
     pub mlpackage_path: PathBuf,
     pub compiled_modelc_path: Option<PathBuf>,
     pub package_digest: String,
@@ -72,8 +72,8 @@ pub struct CoreMlPacketArtifact {
 
 /// Request to compile one Core ML packet.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlPacketCompilationRequest {
-    pub island: CoreMlIsland,
+pub struct CoreAiPacketCompilationRequest {
+    pub island: CoreAiIsland,
     pub shape_buckets: Vec<ShapeBucket>,
     pub input_abi: ActivationAbi,
     pub output_abi: ActivationAbi,
@@ -86,10 +86,10 @@ pub struct CoreMlPacketCompilationRequest {
 /// Key used to qualify an ANE deployment against available hardware.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AneQualificationKey {
-    pub artifact_key: CoreMlArtifactKey,
+    pub artifact_key: CoreAiArtifactKey,
     pub hardware_identifier: String,
     pub os_build: String,
-    pub coreml_runtime: String,
+    pub coreai_runtime: String,
 }
 
 /// Inclusive start / end layer range.
@@ -128,9 +128,9 @@ pub fn build_function_name(
 /// Real implementations will invoke the Core ML compiler toolchain; this stub
 /// fills every field from the request and generates a placeholder digest.
 pub fn compile_packet(
-    request: CoreMlPacketCompilationRequest,
+    request: CoreAiPacketCompilationRequest,
     output_dir: &std::path::Path,
-) -> Result<CoreMlPacketArtifact, String> {
+) -> Result<CoreAiPacketArtifact, String> {
     // Determine layer bounds from the island ops (min/max layer indices).
     let layer_start = request
         .island
@@ -194,8 +194,8 @@ pub fn compile_packet(
 
     let package_digest = format!("placeholder-digest-{function_name}");
 
-    Ok(CoreMlPacketArtifact {
-        packet_key: CoreMlArtifactKey {
+    Ok(CoreAiPacketArtifact {
+        packet_key: CoreAiArtifactKey {
             model_identity: request.model_identity,
             packet_kind,
             layer_start,
@@ -224,19 +224,19 @@ pub fn compile_packet(
 
 /// Compile a portfolio of Core ML artifacts across all islands × shape buckets.
 ///
-/// Each (island, bucket) pair produces one `CoreMlPacketArtifact`. Failed
+/// Each (island, bucket) pair produces one `CoreAiPacketArtifact`. Failed
 /// compilations are logged and skipped, so a partial portfolio is still
 /// returned.
 pub fn build_portfolio(
-    islands: &[CoreMlIsland],
+    islands: &[CoreAiIsland],
     buckets: &[ShapeBucket],
     abi: &ActivationAbi,
     output_dir: &std::path::Path,
-) -> Vec<CoreMlPacketArtifact> {
+) -> Vec<CoreAiPacketArtifact> {
     let mut artifacts = Vec::with_capacity(islands.len() * buckets.len());
     for island in islands {
         for bucket in buckets {
-            let request = CoreMlPacketCompilationRequest {
+            let request = CoreAiPacketCompilationRequest {
                 island: island.clone(),
                 shape_buckets: vec![bucket.clone()],
                 input_abi: abi.clone(),
@@ -245,7 +245,7 @@ pub fn build_portfolio(
                 model_identity: "default".to_string(),
                 deployment_target: DeploymentTarget {
                     minimum_os: "14.0".to_string(),
-                    coreml_version: "7".to_string(),
+                    coreai_version: "7".to_string(),
                 },
                 max_package_bytes: 1_073_741_824, // 1 GiB
             };
@@ -263,7 +263,7 @@ pub fn build_portfolio(
 // ── Private helpers ───────────────────────────────────────────────────────
 
 /// Infer the most likely `PacketKind` from the roles of ops in an island.
-fn infer_packet_kind(island: &CoreMlIsland) -> PacketKind {
+fn infer_packet_kind(island: &CoreAiIsland) -> PacketKind {
     // Check `role` first — it carries the semantically richest label.
     for op in &island.ops {
         match op.role.as_str() {
@@ -341,7 +341,7 @@ mod tests {
     use crate::compilation::phase_ir::TensorDtype;
     use crate::compilation::ane_eligibility::ShapeBucketFamily;
     use crate::compilation::region_catalogue::RegionAdmission;
-    use crate::compilation::region_planner::{CoreMlIsland, ScheduledOp};
+    use crate::compilation::region_planner::{CoreAiIsland, ScheduledOp};
 
     fn sample_shape_bucket() -> ShapeBucket {
         ShapeBucket {
@@ -364,15 +364,15 @@ mod tests {
         })
     }
 
-    fn sample_island() -> CoreMlIsland {
-        CoreMlIsland {
+    fn sample_island() -> CoreAiIsland {
+        CoreAiIsland {
             island_id: 1,
             ops: vec![ScheduledOp {
                 op_index: 0,
                 layer: 0,
                 operator_family: "mlp".into(),
                 role: "gate_proj".into(),
-                admission: RegionAdmission::CoreMlProduction,
+                admission: RegionAdmission::CoreAiProduction,
                 island_id: Some(1),
             }],
             input_slots: vec![0, 1],
@@ -380,15 +380,15 @@ mod tests {
         }
     }
 
-    fn sample_island_vision() -> CoreMlIsland {
-        CoreMlIsland {
+    fn sample_island_vision() -> CoreAiIsland {
+        CoreAiIsland {
             island_id: 2,
             ops: vec![ScheduledOp {
                 op_index: 0,
                 layer: 10,
                 operator_family: "encoder".into(),
                 role: "vision_encoder".into(),
-                admission: RegionAdmission::CoreMlProduction,
+                admission: RegionAdmission::CoreAiProduction,
                 island_id: Some(2),
             }],
             input_slots: vec![0],
@@ -439,7 +439,7 @@ mod tests {
         let bucket = sample_shape_bucket();
         let abi = sample_abi();
 
-        let request = CoreMlPacketCompilationRequest {
+        let request = CoreAiPacketCompilationRequest {
             island,
             shape_buckets: vec![bucket],
             input_abi: abi.clone(),
@@ -448,7 +448,7 @@ mod tests {
             model_identity: "test-model".into(),
             deployment_target: DeploymentTarget {
                 minimum_os: "14.0".into(),
-                coreml_version: "7".into(),
+                coreai_version: "7".into(),
             },
             max_package_bytes: 512_000_000,
         };
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn test_serde_roundtrip() {
-        let key = CoreMlArtifactKey {
+        let key = CoreAiArtifactKey {
             model_identity: "test".into(),
             packet_kind: PacketKind::ResidualNorm,
             layer_start: 4,
@@ -541,12 +541,12 @@ mod tests {
         };
 
         let json = serde_json::to_string(&key).expect("serialize");
-        let deserialized: CoreMlArtifactKey = serde_json::from_str(&json).expect("deserialize");
+        let deserialized: CoreAiArtifactKey = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(key, deserialized, "roundtrip must preserve value");
 
         // Also round-trip a full artifact through JSON.
-        let artifact = CoreMlPacketArtifact {
+        let artifact = CoreAiPacketArtifact {
             packet_key: key,
             mlpackage_path: PathBuf::from("/tmp/test.mlpackage"),
             compiled_modelc_path: None,
@@ -577,12 +577,12 @@ mod tests {
             function_name: "residual_norm_l4-7_seq128_fp16".into(),
             minimum_deployment_target: DeploymentTarget {
                 minimum_os: "15.0".into(),
-                coreml_version: "8".into(),
+                coreai_version: "8".into(),
             },
         };
 
         let json2 = serde_json::to_string(&artifact).expect("serialize artifact");
-        let deserialized2: CoreMlPacketArtifact = serde_json::from_str(&json2).expect("deserialize artifact");
+        let deserialized2: CoreAiPacketArtifact = serde_json::from_str(&json2).expect("deserialize artifact");
         assert_eq!(artifact, deserialized2, "full artifact roundtrip must preserve value");
     }
 }

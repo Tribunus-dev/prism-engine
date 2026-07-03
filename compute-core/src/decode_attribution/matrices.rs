@@ -62,13 +62,13 @@ pub fn run_matrix_lattice(config: &RunConfig) -> Vec<DecodeAttributionReceipt> {
     let shapes = [&SMALL, &MEDIUM, &LARGE];
 
     // ── Core ML: 8 families × 3 shapes × 2 policies = 48 ──────────────
-    let coreml_policies = ["cpuOnly", "cpuAndGPU"];
+    let coreai_policies = ["cpuOnly", "cpuAndGPU"];
     for family in &families {
         for shape in &shapes {
-            for policy in &coreml_policies {
+            for policy in &coreai_policies {
                 let mut r = run_backend(
                     &config.run_id,
-                    "coreml",
+                    "coreai",
                     family,
                     shape,
                     policy,
@@ -79,7 +79,7 @@ pub fn run_matrix_lattice(config: &RunConfig) -> Vec<DecodeAttributionReceipt> {
                     config.tolerance,
                     Path::new(&config.output_dir),
                 );
-                r.lattice_cell_id = lattice_cell_id("coreml", family.name, shape.name, policy);
+                r.lattice_cell_id = lattice_cell_id("coreai", family.name, shape.name, policy);
                 receipts.push(r);
             }
         }
@@ -152,7 +152,7 @@ pub fn run_matrix2(config: &RunConfig) -> Vec<DecodeAttributionReceipt> {
             let run_id = format!("{}-M2-{:04}", config.run_id, seq);
             let r = run_backend(
                 &run_id,
-                "coreml",
+                "coreai",
                 family,
                 shape,
                 "cpuOnly",
@@ -189,7 +189,7 @@ pub fn run_matrix2b(config: &RunConfig) -> Vec<DecodeAttributionReceipt> {
             let run_id = format!("{}-M2b-{:04}", config.run_id, seq);
             let r = run_backend(
                 &run_id,
-                "coreml",
+                "coreai",
                 family,
                 shape,
                 "cpuAndGPU",
@@ -222,8 +222,8 @@ pub fn run_matrix_a(config: &RunConfig) -> Vec<DecodeAttributionReceipt> {
     let family = &NORMAL_FAMILIES[0]; // matmul
     let shapes = [&SMALL, &MEDIUM, &LARGE];
     let backends: &[(&str, &str)] = &[
-        ("coreml", "cpuOnly"),
-        ("coreml", "cpuAndGPU"),
+        ("coreai", "cpuOnly"),
+        ("coreai", "cpuAndGPU"),
         ("accelerate", "accelerate_cpu"),
         ("mlx", "mlx_default"),
         ("mlx", "skipped"),

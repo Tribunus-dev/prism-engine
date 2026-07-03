@@ -8,7 +8,7 @@
 //! feature = "ane"))]`; a stub returning `Err` is provided for all other
 //! build configurations so callers do not need conditional imports.
 
-use crate::coreml_bridge::CoreMlComputeUnits;
+use crate::coreai_bridge::CoreAiComputeUnits;
 
 /// Evidence from a single Core ML → Metal aliasing probe.
 ///
@@ -28,7 +28,7 @@ pub struct AliasingEvidence {
     /// Shape of the output tensor.
     pub output_shape: Vec<u64>,
     /// Core ML compute-unit policy used during loading.
-    pub compute_units: CoreMlComputeUnits,
+    pub compute_units: CoreAiComputeUnits,
     /// IOSurface base address from Core ML output allocation.
     pub iosurface_address: u64,
     /// Metal buffer address from the same allocation.
@@ -42,7 +42,7 @@ pub struct AliasingEvidence {
     /// Wall time spent in materialisation / bridge (nanoseconds).
     pub materialization_ns: u64,
     /// BLAKE3 checksum of output data read via Core ML's output view.
-    pub coreml_checksum: [u8; 32],
+    pub coreai_checksum: [u8; 32],
     /// BLAKE3 checksum of output data read via Metal's view of the same memory.
     pub metal_checksum: [u8; 32],
     /// Whether the two checksums match byte-for-byte.
@@ -80,15 +80,15 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
 
     use crate::arena::Arena;
     use crate::arena::DataType;
-    use crate::coreml_bridge::CoreMlModel;
+    use crate::coreai_bridge::CoreAiModel;
 
-    let compute_units = CoreMlComputeUnits::CpuAndNeuralEngine;
+    let compute_units = CoreAiComputeUnits::CpuAndNeuralEngine;
     let input_name = "input".to_string();
     let output_name = "output".to_string();
 
     // 1. Load the model.
     let model =
-        CoreMlModel::load_with_compute_units(mlmodelc_path, compute_units).map_err(|e| {
+        CoreAiModel::load_with_compute_units(mlmodelc_path, compute_units).map_err(|e| {
             format!("evidence_probe: failed to load model '{}': {}", mlmodelc_path, e)
         })?;
 
@@ -151,13 +151,13 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
         .lock()
         .map_err(|e| format!("evidence_probe: output lock failed: {}", e))?;
 
-    let (coreml_checksum, metal_checksum) = unsafe {
+    let (coreai_checksum, metal_checksum) = unsafe {
         let ptr = output_arena.base_ptr() as *const u8;
         let len = output_arena.byte_len();
         let slice = std::slice::from_raw_parts(ptr, len);
 
         // Core ML view: read directly from the IOSurface output.
-        let coreml_hash = blake3::hash(slice);
+        let coreai_hash = blake3::hash(slice);
 
         // Metal view: the same bytes since they share the same IOSurface
         // backing.  A real probe would map the IOSurface through Metal's
@@ -169,7 +169,7 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
             hasher.finalize()
         };
 
-        (coreml_hash.as_bytes().to_owned(), metal_hash.as_bytes().to_owned())
+        (coreai_hash.as_bytes().to_owned(), metal_hash.as_bytes().to_owned())
     };
 
     output_arena
@@ -178,7 +178,7 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
 
     let materialization_ns = materialization_start.elapsed().as_nanos() as u64;
 
-    let checksums_match = coreml_checksum == metal_checksum;
+    let checksums_match = coreai_checksum == metal_checksum;
     let zero_copy_qualified = same_backing && checksums_match;
 
     Ok(AliasingEvidence {
@@ -194,7 +194,7 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
         copied_bytes: 0, // zero-copy path detected
         prediction_ns,
         materialization_ns,
-        coreml_checksum,
+        coreai_checksum,
         metal_checksum,
         checksums_match,
         producer_completion_observed: true, // predict_pixelbuffer is synchronous
@@ -235,14 +235,14 @@ mod probe_tests_macos {
             output_name: "output".into(),
             input_shape: vec![1, 64],
             output_shape: vec![1, 64],
-            compute_units: CoreMlComputeUnits::CpuAndNeuralEngine,
+            compute_units: CoreAiComputeUnits::CpuAndNeuralEngine,
             iosurface_address: 0x1000,
             metal_address: 0x1000,
             same_backing: true,
             copied_bytes: 0,
             prediction_ns: 1_000_000,
             materialization_ns: 5_000,
-            coreml_checksum: [0; 32],
+            coreai_checksum: [0; 32],
             metal_checksum: [0; 32],
             checksums_match: true,
             producer_completion_observed: true,
@@ -253,7 +253,7 @@ mod probe_tests_macos {
         assert_eq!(evidence.output_name, "output");
         assert_eq!(evidence.input_shape, vec![1, 64]);
         assert_eq!(evidence.output_shape, vec![1, 64]);
-        assert_eq!(evidence.compute_units, CoreMlComputeUnits::CpuAndNeuralEngine);
+        assert_eq!(evidence.compute_units, CoreAiComputeUnits::CpuAndNeuralEngine);
         assert!(evidence.same_backing);
         assert_eq!(evidence.copied_bytes, 0);
         assert!(evidence.checksums_match);

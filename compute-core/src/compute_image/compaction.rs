@@ -191,7 +191,7 @@ pub fn align_dim(dim: u32, element_bytes: u32) -> u32 {
 }
 
 use crate::arena::Arena;
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 
 /// Default compaction target (50x at 1M tokens).
 pub const DEFAULT_TARGET_COUNT: u32 = 20480;
@@ -265,7 +265,7 @@ pub fn compile_compaction_model(
     head_dim: u32,
     max_seq_len: u32,
     target_count: u32,
-) -> Result<CoreMlModel, String> {
+) -> Result<CoreAiModel, String> {
     let mil_text = generate_compaction_mil(n_kv_heads, head_dim, max_seq_len, target_count);
     compile_compaction_mil_inner(&mil_text)
 }
@@ -310,14 +310,14 @@ pub fn compile_compaction_model_optimized(
     head_dim: u32,
     max_seq_len: u32,
     target_count: u32,
-) -> Result<CoreMlModel, String> {
+) -> Result<CoreAiModel, String> {
     let mil_text =
         generate_compaction_mil_optimized(n_kv_heads, head_dim, max_seq_len, target_count);
     compile_compaction_mil_inner(&mil_text)
 }
 
 /// Shared compile logic for compaction MIL programs.
-fn compile_compaction_mil_inner(mil_text: &str) -> Result<CoreMlModel, String> {
+fn compile_compaction_mil_inner(mil_text: &str) -> Result<CoreAiModel, String> {
     // Wrap MIL text in a .mlpackage and compile via coremlc, then load.
     // This supports the program(1.3) format that coremlcompiler accepts.
     let tag = format!("ane_compaction_{:x}", std::time::SystemTime::now()
@@ -363,9 +363,9 @@ fn compile_compaction_mil_inner(mil_text: &str) -> Result<CoreMlModel, String> {
         return Err(format!(".mlmodelc not found at {:?}", modelc_dir));
     }
 
-    let model = CoreMlModel::load_with_compute_units(
+    let model = CoreAiModel::load_with_compute_units(
         &modelc_dir.to_string_lossy(),
-        CoreMlComputeUnits::CpuAndNeuralEngine,
+        CoreAiComputeUnits::CpuAndNeuralEngine,
     )
     .map_err(|e| format!("load compaction model: {}", e))?;
 
@@ -386,7 +386,7 @@ fn compile_compaction_mil_inner(mil_text: &str) -> Result<CoreMlModel, String> {
 /// * `compacted_k_arena` - Output arena for compacted key
 /// * `compacted_v_arena` - Output arena for compacted value
 pub fn run_compaction(
-    model: &CoreMlModel,
+    model: &CoreAiModel,
     k_arena: &Arena,
     v_arena: &Arena,
     indices: &[u32],

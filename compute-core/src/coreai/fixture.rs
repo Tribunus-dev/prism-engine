@@ -104,7 +104,7 @@ impl fmt::Display for ArtifactDigest {
 /// Maps to `MLComputeUnits` in the Apple Core ML runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i64)]
-pub enum CoreMlExecutionPolicy {
+pub enum CoreAiExecutionPolicy {
     /// Let the system choose the default compute units.
     SystemDefault = 0,
     /// Prefer the Apple Neural Engine when available.
@@ -115,7 +115,7 @@ pub enum CoreMlExecutionPolicy {
     AllComputeUnits = 3,
 }
 
-impl CoreMlExecutionPolicy {
+impl CoreAiExecutionPolicy {
     /// Human-readable name for this policy.
     pub fn name(&self) -> &'static str {
         match self {
@@ -155,16 +155,16 @@ pub struct NamedTensorOutput {
 
 /// A prediction request to a Core ML model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlPredictionRequest {
+pub struct CoreAiPredictionRequest {
     /// Named input tensors.
     pub inputs: Vec<NamedTensorInput>,
     /// Execution policy override.
-    pub execution_policy: CoreMlExecutionPolicy,
+    pub execution_policy: CoreAiExecutionPolicy,
 }
 
 /// The result of a Core ML prediction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlPredictionResult {
+pub struct CoreAiPredictionResult {
     /// Named output tensors.
     pub outputs: Vec<NamedTensorOutput>,
     /// Measured provider latency in milliseconds.
@@ -175,7 +175,7 @@ pub struct CoreMlPredictionResult {
 
 /// Detailed manifest describing a Core ML test fixture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlFixtureManifest {
+pub struct CoreAiFixtureManifest {
     /// Unique fixture identifier (e.g. UUID or descriptive slug).
     pub fixture_id: String,
     /// SHA-256 digest of the model file.
@@ -204,7 +204,7 @@ pub struct CoreMlFixtureManifest {
 /// identification, execution parameters, hardware/environment metadata,
 /// numerical validation metrics, and the materialization trail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlQualificationReceipt {
+pub struct CoreAiQualificationReceipt {
     // ── Identity ──────────────────────────────────────────────────────────
     /// Unique receipt identifier.
     pub id: ReceiptId,
@@ -231,7 +231,7 @@ pub struct CoreMlQualificationReceipt {
 
     // ── Execution parameters ──────────────────────────────────────────────
     /// Execution policy used during qualification.
-    pub execution_policy: CoreMlExecutionPolicy,
+    pub execution_policy: CoreAiExecutionPolicy,
 
     // ── Latency measurements (ms) ─────────────────────────────────────────
     /// End-to-end provider latency in milliseconds.
@@ -278,7 +278,7 @@ pub struct CoreMlQualificationReceipt {
 
 /// A handle referencing a Core ML model artifact on disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlArtifactHandle {
+pub struct CoreAiArtifactHandle {
     /// Filesystem path to the `.mlpackage` bundle.
     pub path: String,
     /// SHA-256 digest of the artifact contents.
@@ -287,9 +287,9 @@ pub struct CoreMlArtifactHandle {
 
 /// A loaded Core ML model artifact ready for inference.
 #[derive(Debug, Clone)]
-pub struct LoadedCoreMlArtifact {
+pub struct LoadedCoreAiArtifact {
     /// The handle referencing the source artifact.
-    pub handle: CoreMlArtifactHandle,
+    pub handle: CoreAiArtifactHandle,
 }
 
 // ── Artifact executor trait ────────────────────────────────────────────────
@@ -298,35 +298,35 @@ pub struct LoadedCoreMlArtifact {
 ///
 /// Implementations wrap the Core ML runtime (or a mock) and provide the
 /// standard load/predict lifecycle used by the qualification harness.
-pub trait CoreMlArtifactExecutor {
+pub trait CoreAiArtifactExecutor {
     /// The type of error returned by this executor.
     type Error: std::error::Error;
 
     /// Load a Core ML model from the given artifact handle.
     ///
-    /// Returns a [`LoadedCoreMlArtifact`] on success, or an error if
+    /// Returns a [`LoadedCoreAiArtifact`] on success, or an error if
     /// loading fails (e.g. file not found, invalid model, incompatible
     /// compute units).
-    fn load(&self, handle: &CoreMlArtifactHandle) -> Result<LoadedCoreMlArtifact, Self::Error>;
+    fn load(&self, handle: &CoreAiArtifactHandle) -> Result<LoadedCoreAiArtifact, Self::Error>;
 
     /// Run a prediction on a loaded artifact.
     ///
-    /// Takes a reference to the loaded artifact and a [`CoreMlPredictionRequest`]
+    /// Takes a reference to the loaded artifact and a [`CoreAiPredictionRequest`]
     /// describing the inputs and execution policy. Returns a
-    /// [`CoreMlPredictionResult`] containing output tensors and latency
+    /// [`CoreAiPredictionResult`] containing output tensors and latency
     /// measurements.
     fn predict(
         &self,
-        artifact: &LoadedCoreMlArtifact,
-        request: &CoreMlPredictionRequest,
-    ) -> Result<CoreMlPredictionResult, Self::Error>;
+        artifact: &LoadedCoreAiArtifact,
+        request: &CoreAiPredictionRequest,
+    ) -> Result<CoreAiPredictionResult, Self::Error>;
 }
 
 // ── Bridge error enum ──────────────────────────────────────────────────────
 
 /// Errors that can occur during Core ML Bridge operations.
 #[derive(Debug, Clone)]
-pub enum CoreMlBridgeError {
+pub enum CoreAiBridgeError {
     /// The model file was not found at the specified path.
     ModelNotFound(String),
     /// The model could not be loaded by the Core ML runtime.
@@ -345,14 +345,14 @@ pub enum CoreMlBridgeError {
         actual: Vec<usize>,
     },
     /// The specified execution policy is not supported on this hardware.
-    UnsupportedPolicy(CoreMlExecutionPolicy),
+    UnsupportedPolicy(CoreAiExecutionPolicy),
     /// General execution failure.
     ExecutionFailed(String),
     /// Internal bridge error.
     BridgeError(String),
 }
 
-impl fmt::Display for CoreMlBridgeError {
+impl fmt::Display for CoreAiBridgeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ModelNotFound(path) => {
@@ -389,7 +389,7 @@ impl fmt::Display for CoreMlBridgeError {
     }
 }
 
-impl std::error::Error for CoreMlBridgeError {}
+impl std::error::Error for CoreAiBridgeError {}
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
@@ -415,19 +415,19 @@ mod tests {
     #[test]
     fn test_execution_policy_name() {
         assert_eq!(
-            CoreMlExecutionPolicy::SystemDefault.name(),
+            CoreAiExecutionPolicy::SystemDefault.name(),
             "system_default"
         );
         assert_eq!(
-            CoreMlExecutionPolicy::PreferNeuralEngine.name(),
+            CoreAiExecutionPolicy::PreferNeuralEngine.name(),
             "prefer_neural_engine"
         );
         assert_eq!(
-            CoreMlExecutionPolicy::CpuAndNeuralEngine.name(),
+            CoreAiExecutionPolicy::CpuAndNeuralEngine.name(),
             "cpu_and_neural_engine"
         );
         assert_eq!(
-            CoreMlExecutionPolicy::AllComputeUnits.name(),
+            CoreAiExecutionPolicy::AllComputeUnits.name(),
             "all_compute_units"
         );
     }
@@ -457,21 +457,21 @@ mod tests {
 
     #[test]
     fn test_prediction_request() {
-        let req = CoreMlPredictionRequest {
+        let req = CoreAiPredictionRequest {
             inputs: vec![NamedTensorInput {
                 name: "x".into(),
                 data: vec![0.0; 4],
                 shape: vec![1, 4],
             }],
-            execution_policy: CoreMlExecutionPolicy::AllComputeUnits,
+            execution_policy: CoreAiExecutionPolicy::AllComputeUnits,
         };
         assert_eq!(req.inputs.len(), 1);
-        assert_eq!(req.execution_policy, CoreMlExecutionPolicy::AllComputeUnits);
+        assert_eq!(req.execution_policy, CoreAiExecutionPolicy::AllComputeUnits);
     }
 
     #[test]
     fn test_prediction_result() {
-        let result = CoreMlPredictionResult {
+        let result = CoreAiPredictionResult {
             outputs: vec![NamedTensorOutput {
                 name: "y".into(),
                 data: vec![1.0],
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_artifact_handle() {
-        let handle = CoreMlArtifactHandle {
+        let handle = CoreAiArtifactHandle {
             path: "/tmp/model.mlpackage".into(),
             digest: [0u8; 32],
         };
@@ -495,8 +495,8 @@ mod tests {
 
     #[test]
     fn test_loaded_artifact() {
-        let loaded = LoadedCoreMlArtifact {
-            handle: CoreMlArtifactHandle {
+        let loaded = LoadedCoreAiArtifact {
+            handle: CoreAiArtifactHandle {
                 path: "test.mlpackage".into(),
                 digest: [1u8; 32],
             },
@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn test_qualification_receipt_fields() {
-        let receipt = CoreMlQualificationReceipt {
+        let receipt = CoreAiQualificationReceipt {
             id: ReceiptId::new(),
             fixture_id: "gemma-4-12b".into(),
             status: QualificationStatus::Qualified,
@@ -516,7 +516,7 @@ mod tests {
             compiler_version: "coremltools 7.2".into(),
             hardware_model: "Mac15,9".into(),
             os_version: "macOS 15.2".into(),
-            execution_policy: CoreMlExecutionPolicy::AllComputeUnits,
+            execution_policy: CoreAiExecutionPolicy::AllComputeUnits,
             provider_latency_ms: 42.0,
             cpu_latency_ms: 5.0,
             gpu_latency_ms: 10.0,
@@ -548,11 +548,11 @@ mod tests {
 
     #[test]
     fn test_bridge_error_display() {
-        let err = CoreMlBridgeError::ModelNotFound("/tmp/model.mlpackage".into());
+        let err = CoreAiBridgeError::ModelNotFound("/tmp/model.mlpackage".into());
         let msg = err.to_string();
         assert!(msg.contains("not found"));
 
-        let err = CoreMlBridgeError::ShapeMismatch {
+        let err = CoreAiBridgeError::ShapeMismatch {
             expected: vec![1, 3],
             actual: vec![1, 4],
         };
@@ -560,7 +560,7 @@ mod tests {
         assert!(msg.contains("expected"));
         assert!(msg.contains("got"));
 
-        let err = CoreMlBridgeError::PredictionFailed("oom".into());
+        let err = CoreAiBridgeError::PredictionFailed("oom".into());
         assert!(err.to_string().contains("failed"));
     }
 
@@ -568,7 +568,7 @@ mod tests {
     fn test_artifact_executor_trait_is_object_safe() {
         // Compile-time check: the trait must be usable as a trait object
         // if `Error` is boxed.  This test only verifies the trait compiles.
-        fn _take_executor(_: &dyn CoreMlArtifactExecutor<Error = CoreMlBridgeError>) {}
+        fn _take_executor(_: &dyn CoreAiArtifactExecutor<Error = CoreAiBridgeError>) {}
         let _ = _take_executor;
     }
 }

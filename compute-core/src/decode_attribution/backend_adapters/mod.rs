@@ -12,7 +12,7 @@
 
 pub mod accelerate_adapter;
 pub mod conformance;
-pub mod coreml_adapter;
+pub mod coreai_adapter;
 pub mod mlx_adapter;
 pub mod predict_loop;
 pub mod reference_adapter;
@@ -24,7 +24,7 @@ use std::fmt;
 /// Backend identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BackendKind {
-    CoreMl,
+    CoreAi,
     Accelerate,
     Mlx,
     Reference,
@@ -33,7 +33,7 @@ pub enum BackendKind {
 impl fmt::Display for BackendKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BackendKind::CoreMl => write!(f, "coreml"),
+            BackendKind::CoreAi => write!(f, "coreai"),
             BackendKind::Accelerate => write!(f, "accelerate"),
             BackendKind::Mlx => write!(f, "mlx"),
             BackendKind::Reference => write!(f, "reference"),
@@ -72,9 +72,9 @@ pub enum PredictFailureClass {
     MaterializeLimited,
     /// Core ML compiler (coremlcompiler) failed.
     CompileLimited,
-    /// Load of compiled model failed (CoreMlModel::load).
+    /// Load of compiled model failed (CoreAiModel::load).
     LoadBlocked,
-    /// Prediction bridge (tribunus_coreml_predict) failed.
+    /// Prediction bridge (tribunus_coreai_predict) failed.
     PredictBlocked,
     /// Output diverged from reference beyond tolerance.
     NumericalDivergence,
@@ -101,8 +101,8 @@ impl fmt::Display for PredictFailureClass {
 /// Runtime policy per backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BackendRuntimePolicy {
-    CoreMlCpuOnly,
-    CoreMlCpuAndGpu,
+    CoreAiCpuOnly,
+    CoreAiCpuAndGpu,
     AccelerateCpu,
     MlxDefault,
     MlxCpu,
@@ -112,8 +112,8 @@ pub enum BackendRuntimePolicy {
 impl fmt::Display for BackendRuntimePolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BackendRuntimePolicy::CoreMlCpuOnly => write!(f, "cpuOnly"),
-            BackendRuntimePolicy::CoreMlCpuAndGpu => write!(f, "cpuAndGPU"),
+            BackendRuntimePolicy::CoreAiCpuOnly => write!(f, "cpuOnly"),
+            BackendRuntimePolicy::CoreAiCpuAndGpu => write!(f, "cpuAndGPU"),
             BackendRuntimePolicy::AccelerateCpu => write!(f, "accelerate_cpu"),
             BackendRuntimePolicy::MlxDefault => write!(f, "mlx_default"),
             BackendRuntimePolicy::MlxCpu => write!(f, "mlx_cpu"),
@@ -123,10 +123,10 @@ impl fmt::Display for BackendRuntimePolicy {
 }
 
 impl BackendRuntimePolicy {
-    pub fn coreml_from_str(s: &str) -> Self {
+    pub fn coreai_from_str(s: &str) -> Self {
         match s {
-            "cpuOnly" => BackendRuntimePolicy::CoreMlCpuOnly,
-            _ => BackendRuntimePolicy::CoreMlCpuAndGpu,
+            "cpuOnly" => BackendRuntimePolicy::CoreAiCpuOnly,
+            _ => BackendRuntimePolicy::CoreAiCpuAndGpu,
         }
     }
 }
@@ -170,15 +170,15 @@ pub struct PreparedBackendRun {
     pub mlx_eval_method: String,
     // Backend-specific state kept alive for the duration of the run.
     // CoreML: the loaded model handle.
-    pub coreml_model: Option<crate::coreml_bridge::CoreMlModel>,
+    pub coreai_model: Option<crate::coreai_bridge::CoreAiModel>,
     /// Core ML mil_build time (ns).
-    pub coreml_mil_build_ns: u64,
+    pub coreai_mil_build_ns: u64,
     /// Core ML package_write time (ns).
-    pub coreml_package_write_ns: u64,
+    pub coreai_package_write_ns: u64,
     /// Core ML compiler time (ns).
-    pub coreml_compiler_ns: u64,
+    pub coreai_compiler_ns: u64,
     /// Core ML model load time (ns).
-    pub coreml_model_load_ns: u64,
+    pub coreai_model_load_ns: u64,
     /// Compiler cache hit (key-based).
     pub compile_cache_hit: bool,
     /// SHA-256 of the source .mlpackage directory.

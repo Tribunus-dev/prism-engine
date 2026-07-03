@@ -24,7 +24,7 @@ use super::super::receipt::BridgeReceipt;
 pub struct CapabilityFingerprint {
     pub device: String,
     pub os: String,
-    pub coreml_version: String,
+    pub coreai_version: String,
     pub layout: String,
 }
 
@@ -33,7 +33,7 @@ pub struct CapabilityFingerprint {
 /// Cacheable result of probing the macOS and Core ML runtime versions.
 struct VersionProbe {
     os: String,
-    coreml: String,
+    coreai: String,
 }
 
 /// Lazily probed once; subsequent calls reuse the cached result.
@@ -46,7 +46,7 @@ static VERSION_PROBE: LazyLock<VersionProbe> = LazyLock::new(|| {
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "0.0".to_string());
 
-    let coreml = std::process::Command::new("otool")
+    let coreai = std::process::Command::new("otool")
         .args(["-L", "/System/Library/Frameworks/CoreML.framework/CoreML"])
         .output()
         .ok()
@@ -74,7 +74,7 @@ static VERSION_PROBE: LazyLock<VersionProbe> = LazyLock::new(|| {
         })
         .unwrap_or_else(|| "0.0".to_string());
 
-    VersionProbe { os, coreml }
+    VersionProbe { os, coreai }
 });
 
 /// Return the cached macOS version string (e.g. "14.5").
@@ -83,8 +83,8 @@ pub fn detected_os_version() -> &'static str {
 }
 
 /// Return the cached Core ML version string (e.g. "1.0").
-pub fn detected_coreml_version() -> &'static str {
-    &VERSION_PROBE.coreml
+pub fn detected_coreai_version() -> &'static str {
+    &VERSION_PROBE.coreai
 }
 
 // ── MaterializationProvider ──────────────────────────────────────────────────
@@ -206,13 +206,13 @@ impl SharedRouteProvider {
     fn fingerprint(
         device: &str,
         os: &str,
-        coreml_version: &str,
+        coreai_version: &str,
         layout: &str,
     ) -> CapabilityFingerprint {
         CapabilityFingerprint {
             device: device.to_string(),
             os: os.to_string(),
-            coreml_version: coreml_version.to_string(),
+            coreai_version: coreai_version.to_string(),
             layout: layout.to_string(),
         }
     }
@@ -271,7 +271,7 @@ impl BridgeProvider for SharedRouteProvider {
             source_layout.physical_layout, destination_layout.physical_layout
         );
         let fp =
-            SharedRouteProvider::fingerprint(device, os_key, &detected.coreml, &layout_str);
+            SharedRouteProvider::fingerprint(device, os_key, &detected.coreai, &layout_str);
 
         let is_verified = self.is_verified(&fp);
 
@@ -533,11 +533,11 @@ mod tests {
 
         // Mark the fingerprint as verified.
         let os = detected_os_version();
-        let coreml = detected_coreml_version();
+        let coreai = detected_coreai_version();
         let fp = CapabilityFingerprint {
             device: "AppleM1".to_string(),
             os: os.to_string(),
-            coreml_version: coreml.to_string(),
+            coreai_version: coreai.to_string(),
             layout: "DenseRowMajor->DenseRowMajor".to_string(),
         };
         p.mark_verified(fp);

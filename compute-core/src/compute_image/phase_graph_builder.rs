@@ -415,7 +415,7 @@ fn map_kind_to_v1(kind: EmittedPhaseKind) -> PhaseKind {
         EmittedPhaseKind::ExplicitMaterialization => PhaseKind::Transfer,
         EmittedPhaseKind::Synchronization => PhaseKind::SyncBarrier,
         EmittedPhaseKind::FusedMetalKernel => PhaseKind::MetalFusedKernel,
-        EmittedPhaseKind::CoreMlSubgraph => PhaseKind::CoreMlGraph,
+        EmittedPhaseKind::CoreAiSubgraph => PhaseKind::CoreAiGraph,
         EmittedPhaseKind::AccelerateBlock => PhaseKind::ResidualRmsNorm,
         EmittedPhaseKind::LegacyMlxLayer => PhaseKind::MlxDecode,
     }

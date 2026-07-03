@@ -156,7 +156,7 @@ fn test_topological_order_valid() {
     let phases = vec![
         make_phase("a", PhaseKind::MlxDecode),
         make_phase("b", PhaseKind::MetalFusedKernel),
-        make_phase("c", PhaseKind::CoreMlGraph),
+        make_phase("c", PhaseKind::CoreAiGraph),
         make_phase("d", PhaseKind::MlxDecode),
     ];
     let edges = vec![
@@ -243,7 +243,7 @@ fn test_all_phase_kinds_roundtrip() {
     let kinds = vec![
         PhaseKind::MlxDecode,
         PhaseKind::MetalFusedKernel,
-        PhaseKind::CoreMlGraph,
+        PhaseKind::CoreAiGraph,
         PhaseKind::AccelMatMul,
         PhaseKind::AccelElementWise,
         PhaseKind::ArenaAlloc,

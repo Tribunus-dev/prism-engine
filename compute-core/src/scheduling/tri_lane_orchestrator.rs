@@ -18,7 +18,7 @@ use crate::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
 use crate::compilation::ane_admission_gate::{LaneAdmissionGate, RiskPolicy};
 use crate::compilation::phase_ir::PhaseId;
 use crate::compilation::tri_lane::{EpochRouteOrigin, NumericalStatus};
-use crate::compute_image::compile::portfolio::CoreMlArtifactKey;
+use crate::compute_image::compile::portfolio::CoreAiArtifactKey;
 use crate::scheduling::ane_artifact_cache::{AneArtifactCache, ArtifactKey, ArtifactResidencyState};
 use crate::scheduling::memory_pool::MemoryPoolAllocator;
 
@@ -74,7 +74,7 @@ pub struct PhaseVariant {
     /// Which execution lane this variant targets.
     pub lane: ExecutionLane,
     /// Core ML artifact key for ANE variants.
-    pub artifact_key: Option<CoreMlArtifactKey>,
+    pub artifact_key: Option<CoreAiArtifactKey>,
     /// Metal pipeline function name for GPU variants.
     pub metal_pipeline: Option<String>,
     /// Accelerate kernel name for CPU variants.
@@ -198,7 +198,7 @@ pub struct TriLaneExecutionReceipt {
     /// Lane that executed.
     pub lane: ExecutionLane,
     /// Core ML artifact key (ANE lane only).
-    pub artifact_key: Option<CoreMlArtifactKey>,
+    pub artifact_key: Option<CoreAiArtifactKey>,
     /// Input slot lease ids consumed by this execution.
     pub input_slots: Vec<SlotLeaseId>,
     /// Output slot lease id produced by this execution.
@@ -332,7 +332,7 @@ impl TriLaneOrchestrator {
             ExecutionLane::MlxGpu => {
                 self.lane_queues.metal_queue.push(phase_set.phase_id);
             }
-            ExecutionLane::CoreMlAne => {
+            ExecutionLane::CoreAiAne => {
                 self.lane_queues.ane_queue.push(phase_set.phase_id);
             }
             ExecutionLane::AccelerateCpu => {
@@ -381,13 +381,13 @@ impl TriLaneOrchestrator {
                         continue;
                     }
 
-                    if variant.lane == ExecutionLane::CoreMlAne && !self.is_ane_artifact_warmed(&variant) {
+                    if variant.lane == ExecutionLane::CoreAiAne && !self.is_ane_artifact_warmed(&variant) {
                         continue;
                     }
 
                     let matches_lane = match (hint, variant.lane) {
                         (1, ExecutionLane::MlxGpu) => true,
-                        (2, ExecutionLane::CoreMlAne) => true,
+                        (2, ExecutionLane::CoreAiAne) => true,
                         (3, ExecutionLane::AccelerateCpu) | (3, ExecutionLane::CandleCpu) => true,
                         _ => false,
                     };
@@ -415,7 +415,7 @@ impl TriLaneOrchestrator {
             }
 
             // ANE variants must have a warmed artifact in the cache.
-            if variant.lane == ExecutionLane::CoreMlAne {
+            if variant.lane == ExecutionLane::CoreAiAne {
                 if !self.is_ane_artifact_warmed(&variant) {
                     continue;
                 }
@@ -481,7 +481,7 @@ impl TriLaneOrchestrator {
             return false;
         };
 
-        // Convert the CoreMlArtifactKey to the cache's ArtifactKey format.
+        // Convert the CoreAiArtifactKey to the cache's ArtifactKey format.
         let cache_key = ArtifactKey {
             model_family: core_key.model_identity.clone(),
             packet_kind: format!("{:?}", core_key.packet_kind),
@@ -501,7 +501,7 @@ impl TriLaneOrchestrator {
     fn lane_state_for(&self, lane: ExecutionLane) -> LaneState {
         let queue_depth = match lane {
             ExecutionLane::MlxGpu => self.lane_queues.metal_queue.len() as u32,
-            ExecutionLane::CoreMlAne => self.lane_queues.ane_queue.len() as u32,
+            ExecutionLane::CoreAiAne => self.lane_queues.ane_queue.len() as u32,
             ExecutionLane::AccelerateCpu => self.lane_queues.accelerate_queue.len() as u32,
             _ => self.lane_queues.accelerate_queue.len() as u32,
         };
@@ -538,7 +538,7 @@ impl TriLaneOrchestrator {
                 },
             ),
             fallback_used: false,
-            route_origin: crate::compilation::tri_lane::EpochRouteOrigin::CoreMlAne,
+            route_origin: crate::compilation::tri_lane::EpochRouteOrigin::CoreAiAne,
             numerical_status: crate::compilation::tri_lane::NumericalStatus::Pass,
         };
         self.receipts.receipts.push(receipt);
@@ -571,8 +571,8 @@ mod tests {
         )
     }
 
-    fn sample_artifact_key() -> CoreMlArtifactKey {
-        CoreMlArtifactKey {
+    fn sample_artifact_key() -> CoreAiArtifactKey {
+        CoreAiArtifactKey {
             model_identity: "test-model".into(),
             packet_kind: PacketKind::MlpGateUp,
             layer_start: 0,
@@ -679,7 +679,7 @@ mod tests {
         let phase_set = PhaseVariantSet {
             phase_id: PhaseId(2),
             variants: vec![
-                sample_phase_variant(ExecutionLane::CoreMlAne, 50, AdmissionStatus::Admitted),
+                sample_phase_variant(ExecutionLane::CoreAiAne, 50, AdmissionStatus::Admitted),
                 sample_phase_variant(ExecutionLane::MlxGpu, 150, AdmissionStatus::Admitted),
             ],
         };
@@ -688,7 +688,7 @@ mod tests {
             variants: vec![
                 PhaseVariant {
                     artifact_key: Some(key),
-                    ..sample_phase_variant(ExecutionLane::CoreMlAne, 50, AdmissionStatus::Admitted)
+                    ..sample_phase_variant(ExecutionLane::CoreAiAne, 50, AdmissionStatus::Admitted)
                 },
                 sample_phase_variant(ExecutionLane::MlxGpu, 150, AdmissionStatus::Admitted),
             ],
@@ -735,14 +735,14 @@ mod tests {
             epoch_id: 42,
             phase_id: PhaseId(7),
             variant_id: 0,
-            lane: ExecutionLane::CoreMlAne,
+            lane: ExecutionLane::CoreAiAne,
             artifact_key: Some(sample_artifact_key()),
             input_slots: vec![SlotLeaseId(1), SlotLeaseId(2)],
             output_slot: SlotLeaseId(3),
             input_abi: sample_abi(),
             output_abi: sample_abi(),
             fallback_used: false,
-            route_origin: EpochRouteOrigin::CoreMlAne,
+            route_origin: EpochRouteOrigin::CoreAiAne,
             numerical_status: NumericalStatus::Pass,
         };
 
@@ -754,12 +754,12 @@ mod tests {
         assert_eq!(deserialized.epoch_id, 42);
         assert_eq!(deserialized.phase_id, PhaseId(7));
         assert_eq!(deserialized.variant_id, 0);
-        assert_eq!(deserialized.lane, ExecutionLane::CoreMlAne);
+        assert_eq!(deserialized.lane, ExecutionLane::CoreAiAne);
         assert_eq!(deserialized.artifact_key, Some(sample_artifact_key()));
         assert_eq!(deserialized.input_slots, vec![SlotLeaseId(1), SlotLeaseId(2)]);
         assert_eq!(deserialized.output_slot, SlotLeaseId(3));
         assert_eq!(deserialized.fallback_used, false);
-        assert_eq!(deserialized.route_origin, EpochRouteOrigin::CoreMlAne);
+        assert_eq!(deserialized.route_origin, EpochRouteOrigin::CoreAiAne);
         assert_eq!(deserialized.numerical_status, NumericalStatus::Pass);
     }
 
@@ -802,7 +802,7 @@ mod tests {
         let pinned_cpu_idx = orch.select_best_idx(&orch.phase_dag[0], Some(3));
         assert_eq!(pinned_cpu_idx, Some(1), "lane pinning to CPU should select AccelerateCpu");
 
-        // With invalid/unavailable lane pinning (lane_hint = 2, CoreMlAne not present), should fallback to cost scoring.
+        // With invalid/unavailable lane pinning (lane_hint = 2, CoreAiAne not present), should fallback to cost scoring.
         let invalid_pinned_idx = orch.select_best_idx(&orch.phase_dag[0], Some(2));
         assert_eq!(invalid_pinned_idx, Some(1), "unavailable pinned lane should fall back to cost scoring");
     }

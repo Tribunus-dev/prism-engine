@@ -47,7 +47,7 @@ pub enum TimingQuality {
     MetalCommandBufferCompletion,
     /// Timestamps from the Core ML worker thread entry/exit boundary
     /// (ANE prediction call wall time).
-    CoreMlWorkerBoundary,
+    CoreAiWorkerBoundary,
     /// Timestamps from an Accelerate/CPU worker thread boundary.
     AccelerateWorkerBoundary,
     /// Timestamps captured natively by the backend (callback handler,
@@ -202,16 +202,16 @@ fn derive_work_status(wc: &WorkCompletion) -> Option<WorkStatus> {
 /// Map [`TimestampQuality`] from the backend to the richer [`TimingQuality`].
 ///
 /// * `CommandBufferCompletion` → [`MetalCommandBufferCompletion`](TimingQuality::MetalCommandBufferCompletion)
-/// * `WorkerThreadBoundary`   → [`CoreMlWorkerBoundary`](TimingQuality::CoreMlWorkerBoundary)
-///                              when lane is [`CoreMlAne`](ExecutionLane::CoreMlAne),
+/// * `WorkerThreadBoundary`   → [`CoreAiWorkerBoundary`](TimingQuality::CoreAiWorkerBoundary)
+///                              when lane is [`CoreAiAne`](ExecutionLane::CoreAiAne),
 ///                              otherwise [`AccelerateWorkerBoundary`](TimingQuality::AccelerateWorkerBoundary)
 /// * `BackendCallback`        → [`BackendNativeTimestamp`](TimingQuality::BackendNativeTimestamp)
 /// * `SchedulerApproximation` → [`BackendNativeTimestamp`](TimingQuality::BackendNativeTimestamp)
 fn map_timing_quality(src: TimestampQuality, lane: ExecutionLane) -> TimingQuality {
     match src {
         TimestampQuality::CommandBufferCompletion => TimingQuality::MetalCommandBufferCompletion,
-        TimestampQuality::WorkerThreadBoundary if lane == ExecutionLane::CoreMlAne => {
-            TimingQuality::CoreMlWorkerBoundary
+        TimestampQuality::WorkerThreadBoundary if lane == ExecutionLane::CoreAiAne => {
+            TimingQuality::CoreAiWorkerBoundary
         }
         TimestampQuality::WorkerThreadBoundary => TimingQuality::AccelerateWorkerBoundary,
         TimestampQuality::BackendCallback => TimingQuality::BackendNativeTimestamp,
@@ -375,9 +375,9 @@ mod tests {
         assert_eq!(
             map_timing_quality(
                 TimestampQuality::WorkerThreadBoundary,
-                ExecutionLane::CoreMlAne
+                ExecutionLane::CoreAiAne
             ),
-            TimingQuality::CoreMlWorkerBoundary
+            TimingQuality::CoreAiWorkerBoundary
         );
     }
 
@@ -408,7 +408,7 @@ mod tests {
         assert_eq!(
             map_timing_quality(
                 TimestampQuality::SchedulerApproximation,
-                ExecutionLane::CoreMlAne
+                ExecutionLane::CoreAiAne
             ),
             TimingQuality::BackendNativeTimestamp
         );

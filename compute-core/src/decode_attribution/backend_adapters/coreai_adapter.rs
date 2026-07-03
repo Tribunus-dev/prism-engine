@@ -6,8 +6,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::arena_info::ArenaInfo;
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
-use crate::coreml_pipeline;
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
+use crate::coreai_pipeline;
 use crate::decode_attribution::graph_catalog::{self, is_identity_family};
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
@@ -106,7 +106,7 @@ pub fn prepare(
     let cmc_path = output_dir.join(format!("{}.modelc/{}.mlmodelc", island_id, island_id));
     let cache_hit = cmc_path.exists();
 
-    let compile_result = coreml_pipeline::compile_mlpackage(
+    let compile_result = coreai_pipeline::compile_mlpackage(
         &pkg_path,
         output_dir,
         &island_id,
@@ -116,7 +116,7 @@ pub fn prepare(
     let compile_ns = compile_start.elapsed().as_nanos() as u64;
 
     // Capture compiler stdout/stderr/exit_code.
-    // The coreml_pipeline::compile_mlpackage may use xcrun coremlcompiler internally.
+    // The coreai_pipeline::compile_mlpackage may use xcrun coremlcompiler internally.
     // For now we record whether compilation succeeded and the duration.
     let (compiler_stdout, compiler_stderr, compiler_exit_code) = match &compile_result {
         Ok(_) => (None, None, None),
@@ -125,7 +125,7 @@ pub fn prepare(
 
     // Save artifacts (before error propagation so compile failures are preserved).
     if let Ok(bc_path) = std::env::var("CML_BREADCRUMB_PATH") {
-        save_coreml_artifacts(&pkg_path, &cmc_path, &island_id, &bc_path);
+        save_coreai_artifacts(&pkg_path, &cmc_path, &island_id, &bc_path);
     }
 
     let cm_receipt = compile_result?;
@@ -134,31 +134,31 @@ pub fn prepare(
     let cmc_path = output_dir.join(format!("{}.modelc/{}.mlmodelc", island_id, island_id));
     let load_start = Instant::now();
     let cu = match compute_units {
-        "cpuAndGPU" => CoreMlComputeUnits::CpuAndGpu,
-        _ => CoreMlComputeUnits::CpuOnly,
+        "cpuAndGPU" => CoreAiComputeUnits::CpuAndGpu,
+        _ => CoreAiComputeUnits::CpuOnly,
     };
-    let model = CoreMlModel::load_with_compute_units(&cmc_path.to_string_lossy(), cu)?;
+    let model = CoreAiModel::load_with_compute_units(&cmc_path.to_string_lossy(), cu)?;
     let load_ns = load_start.elapsed().as_nanos() as u64;
 
     let prepare_ns = mil_build_ns + package_write_ns + compile_ns + load_ns;
     let runtime_policy = match cu {
-        CoreMlComputeUnits::CpuAndGpu => BackendRuntimePolicy::CoreMlCpuAndGpu,
-        _ => BackendRuntimePolicy::CoreMlCpuOnly,
+        CoreAiComputeUnits::CpuAndGpu => BackendRuntimePolicy::CoreAiCpuAndGpu,
+        _ => BackendRuntimePolicy::CoreAiCpuOnly,
     };
 
     // Save compiled artifacts to crash repro directory (if breadcrumbs enabled).
     Ok(PreparedBackendRun {
-        backend: super::BackendKind::CoreMl,
+        backend: super::BackendKind::CoreAi,
         runtime_policy,
         prepare_duration_ns: prepare_ns as u64,
         mlx_device: String::new(),
         mlx_eval_forced: false,
         mlx_eval_method: String::new(),
-        coreml_model: Some(model),
-        coreml_mil_build_ns: mil_build_ns,
-        coreml_package_write_ns: package_write_ns,
-        coreml_compiler_ns: compile_ns,
-        coreml_model_load_ns: load_ns,
+        coreai_model: Some(model),
+        coreai_mil_build_ns: mil_build_ns,
+        coreai_package_write_ns: package_write_ns,
+        coreai_compiler_ns: compile_ns,
+        coreai_model_load_ns: load_ns,
         compile_cache_hit: cache_hit,
         source_package_sha256: cm_receipt.model_hash,
         compiled_artifact_sha256: cm_receipt.compiled_hash,
@@ -175,7 +175,7 @@ pub fn cold_predict(
     input_data: &[f32],
     output_len: usize,
 ) -> Result<u64, String> {
-    let model = prepared.coreml_model.as_ref().ok_or("no model loaded")?;
+    let model = prepared.coreai_model.as_ref().ok_or("no model loaded")?;
 
     // Breadcrumb 1: input feature construction
     crate::decode_attribution::breadcrumb::write_breadcrumb("input_feature_construction");
@@ -234,7 +234,7 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
 /// Save .mlpackage and .mlmodelc artifacts to the crash repro directory.
 /// Called before error propagation so artifacts survive both compile failures
 /// and predict crashes.
-fn save_coreml_artifacts(
+fn save_coreai_artifacts(
     pkg_path: &std::path::Path,
     cmc_path: &std::path::Path,
     island_id: &str,

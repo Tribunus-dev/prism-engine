@@ -27,7 +27,7 @@ pub struct HybridProfile {
     /// The MLX execution regions that bracket Core ML islands.
     pub mlx_regions: Vec<MlxRegion>,
     /// The Core ML stateful islands.
-    pub coreml_islands: Vec<CoreMlIsland>,
+    pub coreai_islands: Vec<CoreAiIsland>,
     /// Boundary tensors that cross between MLX and Core ML.
     pub boundary_tensors: Vec<BoundaryTensor>,
     /// Execution order: sequence of region/island references.
@@ -67,7 +67,7 @@ pub enum MlxRegionKind {
 
 /// A Core ML stateful island — persistent state + stateless boundary interface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreMlIsland {
+pub struct CoreAiIsland {
     pub id: String,
     /// Path to the compiled .mlmodelc artifact.
     pub artifact_path: String,
@@ -117,8 +117,8 @@ pub struct BoundaryTensor {
 pub enum ExecutionStep {
     #[serde(rename = "mlx")]
     Mlx { region_id: String },
-    #[serde(rename = "coreml")]
-    CoreMl { island_id: String },
+    #[serde(rename = "coreai")]
+    CoreAi { island_id: String },
     #[serde(rename = "ane")]
     AneInference {
         /// MIL program text to compile.
@@ -138,7 +138,7 @@ pub enum ExecutionStep {
 pub enum FallbackPolicy {
     /// Fail if Core ML is unavailable.
     #[serde(rename = "require")]
-    RequireCoreMl,
+    RequireCoreAi,
     /// Fall back to MLX if Core ML unavailable.
     #[serde(rename = "mlx_fallback")]
     MlxFallback,
@@ -177,12 +177,12 @@ impl HybridProfile {
         for req in &self.required_capabilities {
             let present = match req.as_str() {
                 "iosurface_fp16_bridge" => caps.supports_iosurface_fp16_bridge,
-                "coreml_iosurface_input" => caps.supports_coreml_iosurface_input,
-                "coreml_output_backing" => caps.supports_coreml_output_backing,
+                "coreai_iosurface_input" => caps.supports_coreai_iosurface_input,
+                "coreai_output_backing" => caps.supports_coreai_output_backing,
                 "mlx_external_array" => caps.supports_mlx_iosurface_external_array,
-                "mlx_coreml_round_trip" => caps.supports_mlx_coreml_round_trip,
-                "coreml_stateful" => caps.supports_coreml_stateful_models,
-                "coreml_async" => caps.supports_coreml_async_stateful_prediction,
+                "mlx_coreai_round_trip" => caps.supports_mlx_coreai_round_trip,
+                "coreai_stateful" => caps.supports_coreai_stateful_models,
+                "coreai_async" => caps.supports_coreai_async_stateful_prediction,
                 _ => false,
             };
             if !present {
@@ -217,8 +217,8 @@ impl HybridProfile {
                         }
                     }
                 }
-                ExecutionStep::CoreMl { island_id } => {
-                    if let Some(island) = self.coreml_islands.iter().find(|i| &i.id == island_id) {
+                ExecutionStep::CoreAi { island_id } => {
+                    if let Some(island) = self.coreai_islands.iter().find(|i| &i.id == island_id) {
                         for output in &island.output_names {
                             if producers.contains_key(output.as_str()) {
                                 return Err(format!(
@@ -333,10 +333,10 @@ impl HybridExecutor {
                         ),
                     });
                 }
-                ExecutionStep::CoreMl { island_id } => {
+                ExecutionStep::CoreAi { island_id } => {
                     let _island = self
                         .profile
-                        .coreml_islands
+                        .coreai_islands
                         .iter()
                         .find(|i| &i.id == island_id)
                         .ok_or_else(|| {
@@ -499,8 +499,8 @@ impl HybridExecutor {
                     // Phase 2: wire real Core ML prediction with properly
                     // loaded models.
                     let _ = (|| -> Result<(), String> {
-                        let model = crate::coreml_bridge::CoreMlModel::load("/dev/null")
-                            .map_err(|e| format!("CoreMlModel stub load: {}", e))?;
+                        let model = crate::coreai_bridge::CoreAiModel::load("/dev/null")
+                            .map_err(|e| format!("CoreAiModel stub load: {}", e))?;
                         let mut output_info = arena.info;
                         model
                             .predict_pixelbuffer("input", &arena.info, "output", &mut output_info)
@@ -581,7 +581,7 @@ mod tests {
                 inputs: vec![],
                 outputs: vec!["hidden_in".into()],
             }],
-            coreml_islands: vec![CoreMlIsland {
+            coreai_islands: vec![CoreAiIsland {
                 id: "attn".into(),
                 artifact_path: "/tmp/model.mlmodelc".into(),
                 artifact_hash: "hash".into(),
@@ -604,7 +604,7 @@ mod tests {
                 ExecutionStep::Mlx {
                     region_id: "pre".into(),
                 },
-                ExecutionStep::CoreMl {
+                ExecutionStep::CoreAi {
                     island_id: "attn".into(),
                 },
             ],
@@ -651,7 +651,7 @@ mod tests {
             compute_image_hash: "test".into(),
             version: 1,
             mlx_regions: vec![],
-            coreml_islands: vec![],
+            coreai_islands: vec![],
             boundary_tensors: vec![],
             execution_order: vec![],
             fallback: FallbackPolicy::MlxOnly,

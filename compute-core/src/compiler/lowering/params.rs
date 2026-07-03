@@ -195,7 +195,7 @@ impl StorageEncoding {
 
 /// Validated target profile — indivisible compatibility row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoreMlTarget {
+pub enum CoreAiTarget {
     /// macOS 13 / iOS 16 / Core ML 6 — spec 7, opset CoreML6.
     MacOS13,
     /// macOS 14 / iOS 17 / Core ML 7 — spec 8, opset CoreML7.
@@ -204,32 +204,32 @@ pub enum CoreMlTarget {
     MacOS15,
 }
 
-impl CoreMlTarget {
+impl CoreAiTarget {
     pub fn default_gate_target() -> Self {
-        CoreMlTarget::MacOS13
+        CoreAiTarget::MacOS13
     }
 
     pub fn spec_version(&self) -> u32 {
         match self {
-            CoreMlTarget::MacOS13 => 7,
-            CoreMlTarget::MacOS14 => 8,
-            CoreMlTarget::MacOS15 => 9,
+            CoreAiTarget::MacOS13 => 7,
+            CoreAiTarget::MacOS14 => 8,
+            CoreAiTarget::MacOS15 => 9,
         }
     }
 
     pub fn deployment_target(&self) -> &'static str {
         match self {
-            CoreMlTarget::MacOS13 => "macOS13",
-            CoreMlTarget::MacOS14 => "macOS14",
-            CoreMlTarget::MacOS15 => "macOS15",
+            CoreAiTarget::MacOS13 => "macOS13",
+            CoreAiTarget::MacOS14 => "macOS14",
+            CoreAiTarget::MacOS15 => "macOS15",
         }
     }
 
     pub fn opset_identifier(&self) -> &'static str {
         match self {
-            CoreMlTarget::MacOS13 => "CoreML6",
-            CoreMlTarget::MacOS14 => "CoreML7",
-            CoreMlTarget::MacOS15 => "CoreML8",
+            CoreAiTarget::MacOS13 => "CoreML6",
+            CoreAiTarget::MacOS14 => "CoreML7",
+            CoreAiTarget::MacOS15 => "CoreML8",
         }
     }
 }
@@ -347,14 +347,14 @@ impl LoweringDiagnostic {
 
 /// Structured error from the Core ML lowering pass.
 #[derive(Debug, Clone)]
-pub struct CoreMlLoweringError {
+pub struct CoreAiLoweringError {
     pub region_identity: String,
     pub fatal: Vec<LoweringDiagnostic>,
     pub warnings: Vec<LoweringDiagnostic>,
     pub source: Option<String>,
 }
 
-impl CoreMlLoweringError {
+impl CoreAiLoweringError {
     pub fn new(region_identity: &str) -> Self {
         Self {
             region_identity: region_identity.to_string(),
@@ -380,9 +380,9 @@ impl CoreMlLoweringError {
     }
 }
 
-impl std::fmt::Display for CoreMlLoweringError {
+impl std::fmt::Display for CoreAiLoweringError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CoreMlLoweringError [{}]", self.region_identity)?;
+        write!(f, "CoreAiLoweringError [{}]", self.region_identity)?;
         for d in &self.fatal {
             write!(f, "\n  fatal: {}", d.message())?;
         }

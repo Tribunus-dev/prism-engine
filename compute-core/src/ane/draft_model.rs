@@ -20,7 +20,7 @@
 
 use crate::arena::Arena;
 use crate::arena::DataType;
-use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use crate::speculative::DraftModel;
 use crate::speculative::SampleStrategy;
 
@@ -128,7 +128,7 @@ fn f16_to_f32(h: u16) -> f32 {
 /// logits are used to sample the next token).
 pub struct AneDraftModel {
     /// Loaded Core ML model targeting the Neural Engine.
-    model: CoreMlModel,
+    model: CoreAiModel,
     /// IOSurface-backed input arena — token IDs stored as FP16 values.
     input_arena: Arena,
     /// IOSurface-backed output arena — logits stored as FP16 values,
@@ -160,7 +160,7 @@ impl AneDraftModel {
     /// The output arena holds `seq_len × vocab_size` FP16 logits.
     pub fn load(path: &str, vocab_size: u32, seq_len: u32) -> Result<Self, String> {
         let model =
-            CoreMlModel::load_with_compute_units(path, CoreMlComputeUnits::CpuAndNeuralEngine)?;
+            CoreAiModel::load_with_compute_units(path, CoreAiComputeUnits::CpuAndNeuralEngine)?;
 
         // Input arena: one FP16 token ID per sequence position.
         let input_arena = Arena::new(seq_len, 1, DataType::Float16)?;

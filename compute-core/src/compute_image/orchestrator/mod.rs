@@ -387,7 +387,7 @@ impl MtpKvState {
 /// MTLSharedEvent; Metal reads the surface at a legal verification
 /// boundary without an intermediate CPU copy.
 pub struct AneMtpWorker {
-    pub model: crate::coreml_bridge::CoreMlModel,
+    pub model: crate::coreai_bridge::CoreAiModel,
     pub request_rx: std::sync::mpsc::Receiver<MtpDecodeRequest>,
     pub result_tx: std::sync::mpsc::Sender<MtpDecodeResult>,
     pub session_states: std::collections::HashMap<u64, MtpKvState>,

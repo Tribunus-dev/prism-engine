@@ -1,7 +1,7 @@
 //! Level 3 router with capability fingerprint cache.
 //!
 //! The `Level3Router` maintains a cache of capability fingerprints keyed by
-//! `(device, os, coreml_version, layout)`. On cache miss, it probes all
+//! `(device, os, coreai_version, layout)`. On cache miss, it probes all
 //! available providers and selects the best route by capability rank:
 //!
 //! 1. Stable aliasing route (`SharedRouteProvider` after full validation).
@@ -16,7 +16,7 @@ use super::super::bridge_provider::{
 };
 use super::super::phase_types::TensorDescriptor;
 use super::providers::{
-    detected_coreml_version, CapabilityFingerprint, MaterializationProvider,
+    detected_coreai_version, CapabilityFingerprint, MaterializationProvider,
     SharedRouteProvider, StitchedProvider,
 };
 
@@ -71,7 +71,7 @@ impl Level3Router {
 
     /// Build a capability fingerprint from probe parameters.
     ///
-    /// Uses the same `detected_coreml_version()` that `SharedRouteProvider`'s
+    /// Uses the same `detected_coreai_version()` that `SharedRouteProvider`'s
     /// `probe_capability` uses internally, ensuring cache keys match.
     fn fingerprint(
         device: &str,
@@ -79,7 +79,7 @@ impl Level3Router {
         source_layout: &TensorDescriptor,
         destination_layout: &TensorDescriptor,
     ) -> CapabilityFingerprint {
-        let coreml = detected_coreml_version();
+        let coreai = detected_coreai_version();
         let layout_str = format!(
             "{:?}->{:?}",
             source_layout.physical_layout, destination_layout.physical_layout
@@ -87,7 +87,7 @@ impl Level3Router {
         CapabilityFingerprint {
             device: device.to_string(),
             os: os.to_string(),
-            coreml_version: coreml.to_string(),
+            coreai_version: coreai.to_string(),
             layout: layout_str,
         }
     }

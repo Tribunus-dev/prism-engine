@@ -19,14 +19,14 @@ use std::collections::HashMap;
 
 use crate::compilation::tri_lane::{
     AneLaneLifecycle, AneQualificationRecord, AppleFallbackPlan,
-    AppleTriLaneExecutionReceipt, CoreMlWarmupContract, LaneExecutionEvent,
+    AppleTriLaneExecutionReceipt, CoreAiWarmupContract, LaneExecutionEvent,
     OverlapMetrics, NumericalStatus, FallbackStatus, AneExecutionEvidence,
     EpochRouteOrigin,
 };
 use tempfile::TempDir;
 
 use crate::compute_image::hw_assessment::KernelBenchResult;
-use crate::coreml_pipeline;
+use crate::coreai_pipeline;
 
 /// Compute profile for the Core ML execution lane.
 ///
@@ -55,7 +55,7 @@ impl ComputeProfile {
 
 /// Status of a Core ML compiled subgraph.
 #[derive(Clone, Debug)]
-pub enum CoreMlSubgraphStatus {
+pub enum CoreAiSubgraphStatus {
     /// Compiled and ready for inference
     Compiled { model_path: String },
     /// Compilation failed — will fallback to MLX
@@ -70,22 +70,22 @@ pub enum CoreMlSubgraphStatus {
 }
 
 /// A compiled Core ML subgraph.
-pub struct CoreMlSubgraph {
+pub struct CoreAiSubgraph {
     pub name: String,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
-    pub status: CoreMlSubgraphStatus,
+    pub status: CoreAiSubgraphStatus,
     pub compile_time_ms: f64,
     pub inference_time_ms: f64,
 }
 
-impl CoreMlSubgraph {
+impl CoreAiSubgraph {
     pub fn new(name: &str) -> Self {
-        CoreMlSubgraph {
+        CoreAiSubgraph {
             name: name.to_string(),
             inputs: Vec::new(),
             outputs: Vec::new(),
-            status: CoreMlSubgraphStatus::Pending,
+            status: CoreAiSubgraphStatus::Pending,
             compile_time_ms: 0.0,
             inference_time_ms: 0.0,
         }
@@ -102,11 +102,11 @@ impl CoreMlSubgraph {
     /// Run inference on this compiled subgraph.
     ///
     /// If the subgraph has `Compiled` status, loads the .mlmodelc via the
-    /// coreml bridge and runs prediction. Measures inference wall time.
+    /// coreai bridge and runs prediction. Measures inference wall time.
     /// Returns inference time in milliseconds.
     pub fn infer(&self, input_data: &[f32], output_data: &mut [f32]) -> Result<f64, String> {
         let model_path = match &self.status {
-            CoreMlSubgraphStatus::Compiled { model_path } => model_path.clone(),
+            CoreAiSubgraphStatus::Compiled { model_path } => model_path.clone(),
             _ => return Err("Core ML subgraph not compiled".to_string()),
         };
         let dim = input_data.len();
@@ -119,7 +119,7 @@ impl CoreMlSubgraph {
         }
 
         let start = Instant::now();
-        let model = crate::coreml_bridge::CoreMlModel::load(&model_path)?;
+        let model = crate::coreai_bridge::CoreAiModel::load(&model_path)?;
 
         let input_arena = crate::arena_info::ArenaInfo {
             width: 1,
@@ -153,9 +153,9 @@ impl CoreMlSubgraph {
 }
 
 /// Core ML execution lane.
-pub struct CoreMlLane {
+pub struct CoreAiLane {
     pub name: String,
-    pub subgraphs: Vec<CoreMlSubgraph>,
+    pub subgraphs: Vec<CoreAiSubgraph>,
     pub is_available: bool,
     pub compute_profile: ComputeProfile,
     /// ANE lane lifecycle state.
@@ -166,12 +166,12 @@ pub struct CoreMlLane {
     pub fallback_plan: Option<AppleFallbackPlan>,
 }
 
-impl CoreMlLane {
+impl CoreAiLane {
     pub fn new() -> Self {
         // Probe for Core ML availability
         let is_available = cfg!(target_os = "macos");
-        CoreMlLane {
-            name: "coreml-ane".into(),
+        CoreAiLane {
+            name: "coreai-ane".into(),
             subgraphs: Vec::new(),
             is_available,
             compute_profile: ComputeProfile::CpuAndNeuralEngine,
@@ -184,17 +184,17 @@ impl CoreMlLane {
     /// Check if a subgraph is compiled and ready for the given input shape.
     pub fn can_execute(&self, subgraph_name: &str) -> bool {
         self.subgraphs.iter().any(|sg| {
-            sg.name == subgraph_name && matches!(sg.status, CoreMlSubgraphStatus::Compiled { .. })
+            sg.name == subgraph_name && matches!(sg.status, CoreAiSubgraphStatus::Compiled { .. })
         })
     }
 
-    pub fn add_subgraph(&mut self, subgraph: CoreMlSubgraph) {
+    pub fn add_subgraph(&mut self, subgraph: CoreAiSubgraph) {
         self.subgraphs.push(subgraph);
     }
 
     /// Compile a minimal test subgraph and benchmark it.
     ///
-    /// Compiles a 256x256 F32 matmul via [`coreml_pipeline::build_matmul_region`]
+    /// Compiles a 256x256 F32 matmul via [`coreai_pipeline::build_matmul_region`]
     /// (which uses `cpuAndNeuralEngine` compute profile), loads the compiled
     /// `.mlmodelc`, runs 1 warmup + 10 timed iterations, and returns measured
     /// latency statistics.
@@ -202,7 +202,7 @@ impl CoreMlLane {
     /// Returns None if Core ML is unavailable, compilation fails, or inference fails.
     pub fn bench_minimal_subgraph(&self) -> Option<KernelBenchResult> {
         eprintln!(
-            "[coreml-bench] using {} compute profile",
+            "[coreai-bench] using {} compute profile",
             self.compute_profile.name()
         );
 
@@ -211,27 +211,27 @@ impl CoreMlLane {
         }
 
         // Compile a minimal matmul benchmark model with cpuAndNeuralEngine profile.
-        eprintln!("[coreml-bench] compiling benchmark subgraph...");
+        eprintln!("[coreai-bench] compiling benchmark subgraph...");
         let compile_dir = TempDir::new().ok()?;
         let compile_dir_path = compile_dir.path().to_path_buf();
 
-        let receipt = coreml_pipeline::build_matmul_region(
+        let receipt = coreai_pipeline::build_matmul_region(
             "input",
             &[256, 256],
             "weight",
             &[1.0f32; 256 * 256],
             &[256, 256],
             &compile_dir_path,
-            "coreml-bench-identity",
+            "coreai-bench-identity",
         )
         .ok()?;
 
         eprintln!(
-            "[coreml-bench] compiled: {} (hash={})",
+            "[coreai-bench] compiled: {} (hash={})",
             receipt.compiled_modelc_path, receipt.compiled_hash
         );
 
-        let model = crate::coreml_bridge::CoreMlModel::load(&receipt.compiled_modelc_path).ok()?;
+        let model = crate::coreai_bridge::CoreAiModel::load(&receipt.compiled_modelc_path).ok()?;
 
         // 256x256 float32 — large enough to measure real ANE dispatch.
         let dim = 256u32;
@@ -298,8 +298,8 @@ impl CoreMlLane {
         let throughput_ops_per_sec = n as f64 / avg_ns as f64 * 1e9;
 
         Some(KernelBenchResult {
-            variant_name: "coreml-bench-identity".into(),
-            backend: "coreml".into(),
+            variant_name: "coreai-bench-identity".into(),
+            backend: "coreai".into(),
             op_type: "matmul".into(),
             shape: vec![dim, dim],
             dtype: "f32".into(),
@@ -334,7 +334,7 @@ impl CoreMlLane {
     pub fn warmup(
         &mut self,
         subgraph_name: &str,
-        warmup_contract: &CoreMlWarmupContract,
+        warmup_contract: &CoreAiWarmupContract,
     ) -> Result<(), String> {
         // Find the compiled subgraph.
         let model_path = self
@@ -342,13 +342,13 @@ impl CoreMlLane {
             .iter()
             .find(|sg| sg.name == subgraph_name)
             .and_then(|sg| match &sg.status {
-                CoreMlSubgraphStatus::Compiled { model_path } => Some(model_path.clone()),
+                CoreAiSubgraphStatus::Compiled { model_path } => Some(model_path.clone()),
                 _ => None,
             })
             .ok_or_else(|| format!("subgraph '{}' is not compiled", subgraph_name))?;
 
         // Load the Core ML model.
-        let model = crate::coreml_bridge::CoreMlModel::load(&model_path)?;
+        let model = crate::coreai_bridge::CoreAiModel::load(&model_path)?;
 
         // Allocate temporary buffers for warmup inference.
         // Use a minimal 1x1 float32 buffer — the warmup validates dispatch, not throughput.
@@ -426,9 +426,9 @@ impl CoreMlLane {
     pub fn warmup_with_arena(
         &mut self,
         subgraph_name: &str,
-        warmup_contract: &CoreMlWarmupContract,
+        warmup_contract: &CoreAiWarmupContract,
         arena: &mut crate::compute_image::apple_shared_arena::AppleSharedArena,
-        binding: &mut crate::backend::coreml_iosurface::CoreMlIOSurfaceExecutable,
+        binding: &mut crate::backend::coreai_iosurface::CoreAiIOSurfaceExecutable,
     ) -> Result<AneQualificationRecord, String> {
         // Validate the subgraph exists
         let _model_path = self
@@ -436,7 +436,7 @@ impl CoreMlLane {
             .iter()
             .find(|s| s.name == subgraph_name)
             .and_then(|sg| match &sg.status {
-                CoreMlSubgraphStatus::Compiled { model_path } => Some(model_path.clone()),
+                CoreAiSubgraphStatus::Compiled { model_path } => Some(model_path.clone()),
                 _ => None,
             })
             .ok_or_else(|| format!("subgraph '{}' is not compiled", subgraph_name))?;
@@ -568,8 +568,8 @@ impl CoreMlLane {
             .subgraphs
             .iter()
             .map(|sg| LaneExecutionEvent {
-                lane: crate::backend::placement::ExecutionLane::CoreMlAne,
-                success: matches!(sg.status, CoreMlSubgraphStatus::Compiled { .. }),
+                lane: crate::backend::placement::ExecutionLane::CoreAiAne,
+                success: matches!(sg.status, CoreAiSubgraphStatus::Compiled { .. }),
                 compute_ns: (sg.inference_time_ms * 1_000_000.0) as u64,
                 memory_ns: 0,
                 sync_ns: 0,
@@ -596,20 +596,20 @@ impl CoreMlLane {
                 overlap_fraction: 0.0,
             },
             fallback_used,
-            route_origin: EpochRouteOrigin::CoreMlAne,
-            coreml_prediction_completed: false,
+            route_origin: EpochRouteOrigin::CoreAiAne,
+            coreai_prediction_completed: false,
             metal_command_buffer_completed: false,
             numerical_status: NumericalStatus::Pass,
             configured_cpu_and_neural_engine: healthy,
             observed_ane_execution: self.is_available && healthy,
             fallback_status: FallbackStatus::NotActivated,
-            coreml_configuration: None,
+            coreai_configuration: None,
             ane_execution_evidence: AneExecutionEvidence::NotObserved,
         }
     }
 }
 
-impl Default for CoreMlLane {
+impl Default for CoreAiLane {
     fn default() -> Self {
         Self::new()
     }

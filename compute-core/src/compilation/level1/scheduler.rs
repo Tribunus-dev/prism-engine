@@ -15,7 +15,7 @@ use super::super::memory_budget::MemoryBudget;
 use super::super::phase_types::{
     ElementType, PhysicalLayout, ProviderKind, ResidencyClass, TensorDescriptor,
 };
-use super::super::receipt::PhaseExecutionRecord;
+use super::super::receipt::{ObjectiveWeights, PhaseExecutionRecord};
 use super::super::phase_types::PhaseId;
 
 use super::teacher::MetalTeacher;
@@ -34,6 +34,8 @@ pub struct Level1Config {
     pub pages_per_row: usize,
     /// Memory budget.
     pub budget: MemoryBudget,
+    /// Per-modality objective weights for weighted loss reduction.
+    pub objective_weights: Option<ObjectiveWeights>,
 }
 
 impl Default for Level1Config {
@@ -43,6 +45,7 @@ impl Default for Level1Config {
             hidden_dim: 3840,
             pages_per_row: 2, // 1280 / 640
             budget: MemoryBudget::m1_16gb_default(),
+            objective_weights: None,
         }
     }
 }
@@ -50,6 +53,7 @@ impl Default for Level1Config {
 // ── Compile region state ────────────────────────────────────────────────────
 
 /// The state of one compile region being processed.
+#[allow(dead_code)]
 pub(crate) struct RegionState {
     /// Index of the current microbatch being processed.
     pub(crate) current_microbatch: usize,
@@ -94,7 +98,6 @@ impl RegionState {
 pub struct Level1Scheduler {
     pub(crate) config: Level1Config,
     pub(crate) arena: ActivationArena,
-    pub(crate) budget: MemoryBudget,
     pub(crate) teacher: MetalTeacher,
     pub(crate) student: TernaryStudent,
     pub(crate) reducer: AccelerateReducer,
@@ -123,7 +126,6 @@ impl Level1Scheduler {
         let empty = vec![0.0f32; hidden_dim];
         Level1Scheduler {
             arena: ActivationArena::new(),
-            budget: config.budget.clone(),
             config,
             teacher,
             student,
@@ -219,6 +221,13 @@ impl Level1Scheduler {
                 &self.teacher_outputs[slot_idx],
                 &self.student_outputs[slot_idx],
             );
+
+            // Apply per-modality block error after reduction.
+            if let Some(weights) = &self.config.objective_weights {
+                let resolved = weights.resolve("text"); // TODO(#distill): get modality from region catalogue
+                let _error = self.reducer.block_error(resolved);
+                // block error is logged to receipt metrics in a future change
+            }
 
             self.arena.seal(reducer_slot, [0u8; 32]).ok();
 

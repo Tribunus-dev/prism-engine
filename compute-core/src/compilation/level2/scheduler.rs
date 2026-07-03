@@ -75,7 +75,7 @@ pub struct Level2Scheduler {
     config: Level1Config,
     arena: ActivationArena,
     _budget: MemoryBudget,
-    coreml_teacher: CoreMLTeacher,
+    coreai_teacher: CoreMLTeacher,
     metal_teacher: MetalTeacher,
     student: TernaryStudent,
     reducer: AccelerateReducer,
@@ -92,7 +92,7 @@ pub struct Level2Scheduler {
     teacher_slot_valid: [bool; 3],
     student_slot_valid: [bool; 3],
     /// Whether Core ML is available on this device.
-    coreml_available: bool,
+    coreai_available: bool,
 }
 
 impl Level2Scheduler {
@@ -100,8 +100,8 @@ impl Level2Scheduler {
     pub fn new(
         config: Level1Config,
         total_microbatches: usize,
-        coreml_teacher: CoreMLTeacher,
-        coreml_available: bool,
+        coreai_teacher: CoreMLTeacher,
+        coreai_available: bool,
     ) -> Self {
         let hidden_dim = config.hidden_dim;
         let metal_teacher = MetalTeacher::with_shape(hidden_dim, hidden_dim);
@@ -113,7 +113,7 @@ impl Level2Scheduler {
             arena: ActivationArena::new(),
             _budget: config.budget.clone(),
             config,
-            coreml_teacher,
+            coreai_teacher,
             metal_teacher,
             student,
             reducer,
@@ -126,7 +126,7 @@ impl Level2Scheduler {
             student_outputs: [empty.clone(), empty.clone(), empty],
             teacher_slot_valid: [false, false, false],
             student_slot_valid: [false, false, false],
-            coreml_available,
+            coreai_available,
         }
     }
 
@@ -185,7 +185,7 @@ impl Level2Scheduler {
         microbatch: usize,
         _slot_idx: usize,
     ) -> bool {
-        if !self.coreml_available {
+        if !self.coreai_available {
             self.bridge_receipts.push(
                 CoreMLTeacher::fallback_to_level1("Core ML not available"),
             );
@@ -210,7 +210,7 @@ impl Level2Scheduler {
         // Digest derived from microbatch index for cache exercise.
         let digest = format!("teacher-region-{:04x}", microbatch);
 
-        let receipt = self.coreml_teacher.forward(
+        let receipt = self.coreai_teacher.forward(
             &digest,
             "hidden_states",
             &info,
@@ -416,7 +416,7 @@ impl Level2Scheduler {
             .count();
         let total = self.bridge_receipts.len();
         let proof_status = if fallback_count == 0 && total > 0 {
-            "all-coreml".into()
+            "all-coreai".into()
         } else if total == 0 {
             "none".into()
         } else {

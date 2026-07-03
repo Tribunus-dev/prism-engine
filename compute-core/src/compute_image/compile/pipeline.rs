@@ -634,7 +634,7 @@ pub(crate) fn compile_unchecked(
         let namespace = crate::config::resolve_namespace(&[]).unwrap_or_default();
         let mut ane_plan = crate::config::build_execution_plan(&arch, &namespace, &empty_ids);
         ane_plan.build_ane_fusion_plan();
-        super::coreml::compile_ane_islands(&ane_plan, &arch, output_dir, false)
+        super::coreai::compile_ane_islands(&ane_plan, &arch, output_dir, false)
             .map_err(|e| crate::Error::from_reason(format!("ANE pre-compilation failed: {e}")))?;
     }
 
@@ -757,7 +757,7 @@ pub fn compile_gguf_unchecked(
         let mut ane_plan =
             crate::config::build_execution_plan(&arch_ane, &namespace, &empty_ids);
         ane_plan.build_ane_fusion_plan();
-        super::coreml::compile_ane_islands(&ane_plan, &arch_ane, output_dir, false)
+        super::coreai::compile_ane_islands(&ane_plan, &arch_ane, output_dir, false)
             .map_err(|e| crate::Error::from_reason(format!("ANE pre-compilation failed: {e}")))?;
         }
         Some(dir) => {
@@ -989,7 +989,7 @@ fn compile_mlx_capture_metallib(
 
 /// Tar-archive a .mlmodelc directory into a single `.ane.tar` file.
 /// The resulting archive can be extracted to a temp dir at runtime and loaded
-/// via CoreMlModel::load (which expects a .mlmodelc directory on disk).
+/// via CoreAiModel::load (which expects a .mlmodelc directory on disk).
 pub(crate) fn archive_ane_modelc(src: &Path, dst: &Path) -> std::io::Result<()> {
     let file = std::fs::File::create(dst)?;
     let mut builder = tar::Builder::new(std::io::BufWriter::new(file));
@@ -1672,7 +1672,7 @@ pub fn compile_differential(
     plan_with_fusion.build_ane_fusion_plan();
     plan_with_fusion.apply_fusion_pass();
     // ── Compile ANE subgraphs (new 3-param signature) ────────────────
-        super::coreml::compile_ane_islands(&plan_with_fusion, &loaded.arch, output_dir_path, false)
+        super::coreai::compile_ane_islands(&plan_with_fusion, &loaded.arch, output_dir_path, false)
             .map_err(crate::Error::from_reason)?;
     builder.set_execution_plan(plan_with_fusion);
 

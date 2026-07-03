@@ -81,7 +81,7 @@ napi = []
 private-development = []
 image = []
 msgpack = []
-coreml-backend = []
+coreai-backend = []
 
 # Positive capability gates — independent of execution path.
 # Each gates a generation module. Enable with the backend of your choice.
@@ -104,11 +104,6 @@ path = "src/bin/prism_alpha.rs"
 [[bin]]
 name = "check-gguf-meta"
 path = "src/bin/check_gguf_meta.rs"
-required-features = ["prism-backend"]
-
-[[bin]]
-name = "tribunus-minimal-bench"
-path = "src/bin/tribunus-minimal-bench.rs"
 required-features = ["prism-backend"]
 
 [build-dependencies]

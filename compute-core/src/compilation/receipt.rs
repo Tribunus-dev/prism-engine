@@ -109,9 +109,11 @@ pub struct PhaseExecutionRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceSection {
     pub dense_checkpoint_digest: [u8; 32],
+    pub qat_checkpoint: bool,
+    pub qat_checkpoint_digest: [u8; 32],
     pub tokenizer_digest: [u8; 32],
     pub model_architecture_digest: [u8; 32],
-    pub coreml_teacher_digests: Vec<(String, [u8; 32])>,
+    pub coreai_teacher_digests: Vec<(String, [u8; 32])>,
     pub compiler_binary_digest: [u8; 32],
 }
 
@@ -120,7 +122,7 @@ pub struct TargetSection {
     pub device_family: String,
     pub os_build: String,
     pub metal_feature_set: String,
-    pub coreml_configuration: String,
+    pub coreai_configuration: String,
     pub page_geometry: PageGeometry,
     pub kernel_abi: u32,
     pub allowed_backends: Vec<String>,
@@ -162,7 +164,20 @@ pub struct ObjectiveWeights {
     pub lambda_rollout: f64,
     pub lambda_cost: f64,
     pub lambda_bytes: f64,
+    /// Per-modality weight overrides. Keys: "text", "image", "audio", "video", "embedding".
+    /// Absent keys fall through to the top-level lambda values.
+    pub per_modality: HashMap<String, ObjectiveWeights>,
 }
+
+impl ObjectiveWeights {
+    /// Resolve the effective weights for a given modality.
+    ///
+    /// Returns the per-modality weights if present, otherwise the top-level defaults.
+    pub fn resolve(&self, modality: &str) -> &ObjectiveWeights {
+        self.per_modality.get(modality).unwrap_or(self)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySection {
     pub budget_bytes: u64,
