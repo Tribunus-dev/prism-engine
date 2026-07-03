@@ -1,6 +1,7 @@
 #[cfg(feature = "ane")]
 pub mod ane;
 pub mod audio;
+pub mod compute_backend;
 pub mod diffusion;
 pub mod embedding;
 pub mod image;
