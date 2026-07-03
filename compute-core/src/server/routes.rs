@@ -91,6 +91,8 @@ use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
 
+use crate::server::distill_worker::{DistillationEngine, DistillationRequest, DistillationJobStatus};
+
 
 #[derive(Clone)]
 pub struct AppState {
@@ -122,6 +124,7 @@ pub struct AppState {
     pub admin_request_registry: Arc<Mutex<HashMap<String, ActiveRequestInfo>>>,
     /// Set of request IDs that have been cancelled via the admin API.
     pub admin_cancelled_requests: Arc<Mutex<HashSet<String>>>,
+    pub distill_engine: Arc<Mutex<DistillationEngine>>,
 }
 
 /// Tokenize a prompt string using the app state's tokenizer if available.
@@ -149,6 +152,12 @@ pub fn create_router(state: AppState) -> Router {
     let v1_routes = v1_routes.route("/v1/audio/transcriptions", post(audio_transcriptions));
     #[cfg(feature = "generation-image")]
     let v1_routes = v1_routes.route("/v1/images/generations", post(image_generations));
+    #[cfg(feature = "prism-backend")]
+    let v1_routes = v1_routes
+        .route("/v1/distill", post(post_distill))
+        .route("/v1/distill/{job_id}", get(get_distill_status));
+
+
     let v1_routes = v1_routes
         .route("/v1/video/generations", post(video_generations))
         .route("/v1/video/edits", post(video_edits))
@@ -1324,6 +1333,34 @@ async fn cluster_status(
 /// `/v1/cluster/nodes` — EXO cluster node list (only when --exo is enabled).
 ///
 /// Returns detailed information about each node in the EXO cluster.
+// ── Distillation ────────────────────────────────────────────────────────────
+#[cfg(feature = "prism-backend")]
+async fn post_distill(
+    State(state): State<AppState>,
+    Json(payload): Json<DistillationRequest>,
+) -> Result<JsonResponse<DistillationJobStatus>, (StatusCode, String)> {
+    let job_id = payload.job_id.clone();
+    let engine = state.distill_engine.lock().await;
+    engine.submit(payload).await.map_err(|e| (StatusCode::CONFLICT, e))?;
+    match engine.status(&job_id).await {
+        Some(status) => Ok(JsonResponse(status)),
+        None => Err((StatusCode::INTERNAL_SERVER_ERROR, "job created but not found".into())),
+    }
+}
+
+#[cfg(feature = "prism-backend")]
+async fn get_distill_status(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<JsonResponse<DistillationJobStatus>, (StatusCode, String)> {
+    let engine = state.distill_engine.lock().await;
+    match engine.status(&job_id).await {
+        Some(status) => Ok(JsonResponse(status)),
+        None => Err((StatusCode::NOT_FOUND, format!("job {} not found", job_id))),
+    }
+}
+
+
 async fn cluster_nodes(
     State(state): State<AppState>,
 ) -> Result<JsonResponse<Vec<NodeInfo>>, (StatusCode, String)> {

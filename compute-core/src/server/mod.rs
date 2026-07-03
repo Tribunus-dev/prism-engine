@@ -10,3 +10,7 @@ pub mod admin;
 pub mod engine;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod routes;
+#[cfg(feature = "prism-backend")]
+pub mod distill_worker;
+#[cfg(feature = "prism-backend")]
+pub mod state;

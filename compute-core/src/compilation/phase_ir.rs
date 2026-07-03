@@ -381,3 +381,16 @@ mod tests {
         assert_eq!(key, restored);
     }
 }
+
+
+// ── Distillation phase taxonomy ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DistillationPhaseKind {
+    TeacherForward,
+    StudentCandidateForward,
+    ActivationCompare,
+    TritCommit,
+    ReceiptSeal,
+    ScaleSolve,
+}

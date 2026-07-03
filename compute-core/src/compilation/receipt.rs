@@ -321,3 +321,43 @@ impl MasterManifest {
         }
     }
 }
+
+// ── Distillation processing receipt ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessingReceipt {
+    pub manifest_version: String,
+    pub artifact_digest: String,
+    pub source_checkpoint_digest: String,
+    pub calibration_corpus_digest: String,
+    pub deterministic_seed: u64,
+    pub block_receipts: Vec<BlockReceipt>,
+    pub global_metrics: GlobalMetrics,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockReceipt {
+    pub block_index: usize,
+    pub modality_tag: String,
+    pub input_frontier_hash: String,
+    pub output_frontier_hash: String,
+    pub sidecar_fraction: f32,
+    pub optimal_scale_dtype: String,
+    pub numerical_drift: HashMap<String, f32>,
+    pub execution_provenance: EngineExecutionLog,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngineExecutionLog {
+    pub backend_requested: String,
+    pub backend_observed: String,
+    pub zero_copy_verified: bool,
+    pub wall_time_ms: f64,
+    pub peak_arena_bytes: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalMetrics {
+    pub final_perplexity: f32,
+    pub mtp_baseline_acceptance_rate: f32,
+    pub student_mtp_acceptance_rate: f32,
+    pub tokens_per_joule_estimate: f32,
+    pub bits_per_weight_effective: f32,
+}
