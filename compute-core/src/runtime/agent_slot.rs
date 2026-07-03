@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::Mutex;
 use parking_lot::RwLock;
+use super::npu_pump::NpuWeightPump;
 
 pub const STATE_IDLE: u8 = 0;
 pub const STATE_PREFETCHING: u8 = 1;
@@ -51,8 +54,12 @@ pub struct MultiplexerState {
     /// Written once at init; the pump casts to `&mut [u8]` each cycle.
     /// Safe because only one writer (the E-core pump) ever touches it.
     pub slc_buf_ptr: Option<*mut u8>,
-    /// Tensor dimensions from cimage: (hidden_dim, intermediate_dim).
+    /// Tensor dimensions from cimage
     pub tensor_dims: Option<(u32, u32)>,
+    /// NPU weight pump — converts tile640 weights into native NPU format.
+    pub weight_pump: Option<Arc<dyn NpuWeightPump>>,
+    /// Written by prism_execute_multimodal_ex, read by tri-lane orchestrator.
+    pub agent_hints: Mutex<HashMap<u32, (u32, u32)>>,
 }
 
 unsafe impl Send for MultiplexerState {}
@@ -65,12 +72,15 @@ impl MultiplexerState {
         world.register_component::<crate::runtime::components::KVCacheRef>();
         world.register_component::<crate::runtime::components::AgentPayload>();
         world.register_component::<crate::runtime::components::ToolRegistry>();
+        world.register_component::<crate::runtime::components::AgentConfig>();
         Self {
             world: RwLock::new(world),
             cimage_mmap: None,
             slc_buf: None,
             slc_buf_ptr: None,
             tensor_dims: None,
+            weight_pump: None,
+            agent_hints: Mutex::new(HashMap::new()),
         }
     }
 
@@ -79,7 +89,7 @@ impl MultiplexerState {
     pub fn init_from_cimage(
         &mut self,
         mmap: Arc<memmap2::Mmap>,
-        header: &crate::compute_image::compile::ternary::PrismCimageHeader,
+        header: &crate::compute_image::compile::ternary::CimageHeader,
         hidden_dim: u32,
         intermediate_dim: u32,
     ) {
@@ -96,17 +106,21 @@ impl MultiplexerState {
         self.slc_buf_ptr = Some(buf.as_mut_ptr());
         self.slc_buf = Some(buf);
 
-        let main_bytes = header.main_weights_len as usize;
-        let slot_size = main_bytes / 32;
+        use crate::compute_image::compile::ternary::SegmentKind;
+        let weights = header.segment(SegmentKind::TernaryWeights)
+            .expect("cimage must have TernaryWeights segment");
+        let main_bytes = weights.length as usize;
+        let slot_size = (main_bytes / 32).max(1);
         let mut world = self.world.write();
         for i in 0..32 {
             if let Some(entity) = world.spawn() {
                 world.insert(entity, AgentSlot::new(
                     i as u32,
-                    (header.main_weights_offset as usize) + i * slot_size,
+                    (weights.offset as usize) + i * slot_size,
                 ));
                 world.insert(entity, crate::runtime::components::KVCacheRef::new(4096));
                 world.insert(entity, crate::runtime::components::ToolRegistry::new());
+                world.insert(entity, crate::runtime::components::AgentConfig::new());
             }
         }
     }

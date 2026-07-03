@@ -25,27 +25,27 @@ impl CoreMlComputeUnits {
 }
 
 extern "C" {
-    fn tribunus_coreml_load_model(
+    pub(crate) fn tribunus_coreml_load_model(
         out_model: *mut *mut std::ffi::c_void,
         path: *const i8,
         compute_units: i64,
     ) -> i32;
-    fn tribunus_coreml_free_model(model: *mut std::ffi::c_void);
-    fn tribunus_coreml_predict(
+    pub(crate) fn tribunus_coreml_free_model(model: *mut std::ffi::c_void);
+    pub(crate) fn tribunus_coreml_predict(
         model: *mut std::ffi::c_void,
         input_name: *const i8,
         input_arena: *const ArenaInfo,
         output_name: *const i8,
         output_arena: *const ArenaInfo,
     ) -> i32;
-    fn tribunus_coreml_predict_pixelbuffer(
+    pub(crate) fn tribunus_coreml_predict_pixelbuffer(
         model: *mut std::ffi::c_void,
         input_name: *const i8,
         input_arena: *const ArenaInfo,
         output_name: *const i8,
         output_arena: *mut ArenaInfo,
     ) -> i32;
-    fn tribunus_coreml_predict_multi(
+    pub(crate) fn tribunus_coreml_predict_multi(
         model: *mut std::ffi::c_void,
         input_names: *mut *const i8,
         input_arenas: *mut *const ArenaInfo,
@@ -205,6 +205,27 @@ impl CoreMlModel {
     }
 }
 
-// Safety: MLModel is documented as thread-safe for prediction.
+// SAFETY: MLModel is documented by Apple as thread-safe for prediction.
+// The raw ObjC pointer is accessed through Core ML's thread-safe predict API.
 unsafe impl Send for CoreMlModel {}
 unsafe impl Sync for CoreMlModel {}
+
+/// Load an .mlmodelc bundle from the given directory path.
+///
+/// Uses CPU+NeuralEngine compute units by default.
+pub fn load_mlmodelc(path: &std::path::Path) -> Result<CoreMlModel, String> {
+    let cpath = std::ffi::CString::new(path.to_string_lossy().as_bytes())
+        .map_err(|e| format!("CString conversion: {}", e))?;
+    let mut out: *mut std::ffi::c_void = std::ptr::null_mut();
+    let status = unsafe {
+        tribunus_coreml_load_model(
+            &mut out,
+            cpath.as_ptr(),
+            CoreMlComputeUnits::CpuAndNeuralEngine as i64,
+        )
+    };
+    if status != 0 || out.is_null() {
+        return Err(format!("tribunus_coreml_load_model failed: {}", status));
+    }
+    Ok(CoreMlModel { ptr: out })
+}

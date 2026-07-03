@@ -9,6 +9,8 @@ pub mod agent_slot;
 pub mod ane_multiplexer;
 pub mod signal_bus;
 pub mod ecore_pump;
+pub mod pump_pool;
+pub mod npu_pump;
 pub mod interceptors;
 pub mod world;
 pub mod components;

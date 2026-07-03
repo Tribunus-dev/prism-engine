@@ -108,6 +108,8 @@ pub struct SessionSubmitRequest {
     pub priority: RequestPriority,
     /// External cancellation token; the caller may signal abort at any time.
     pub cancelled: Arc<std::sync::atomic::AtomicBool>,
+    /// Hard pinning lane preference hint.
+    pub lane_preference: Option<u32>,
 }
 
 /// Dispatch priority for an epoch.
@@ -361,7 +363,7 @@ impl HeterogeneousExecutor {
             }
 
             // Select best admissible variant.
-            let (variant_idx, variant) = self.select_best_variant(phase_set)?;
+            let (variant_idx, variant) = self.select_best_variant(phase_set, request.lane_preference)?;
 
             // Reserve lane capacity.
             let permit = self
@@ -466,10 +468,45 @@ impl HeterogeneousExecutor {
     fn select_best_variant<'a>(
         &self,
         phase_set: &'a PhaseVariantSet,
+        lane_hint: Option<u32>,
     ) -> Result<(usize, &'a PhaseVariant), ExecutorError> {
         let mut best_idx: Option<usize> = None;
         let mut best_score: f64 = f64::NEG_INFINITY;
 
+        // If a lane hint is specified and is non-zero, search for a matching admitted variant.
+        if let Some(hint) = lane_hint {
+            if hint > 0 {
+                for (i, variant) in phase_set.variants.iter().enumerate() {
+                    if !matches!(variant.admission, AdmissionStatus::Admitted) {
+                        continue;
+                    }
+
+                    let matches_lane = match (hint, variant.lane) {
+                        (1, ExecutionLane::MlxGpu) => true,
+                        (2, ExecutionLane::CoreMlAne) => true,
+                        (3, ExecutionLane::AccelerateCpu) | (3, ExecutionLane::CandleCpu) => true,
+                        _ => false,
+                    };
+
+                    if matches_lane {
+                        let exec_cost = variant.cost_estimate.execution_ns as f64;
+                        let risk_penalty = variant.cost_estimate.qualification_risk as f64 * 100.0;
+                        let queue_penalty = 50.0;
+                        let score = -(exec_cost + risk_penalty + queue_penalty);
+
+                        if score > best_score {
+                            best_score = score;
+                            best_idx = Some(i);
+                        }
+                    }
+                }
+                if let Some(idx) = best_idx {
+                    return Ok((idx, &phase_set.variants[idx]));
+                }
+            }
+        }
+
+        best_score = f64::NEG_INFINITY;
         for (i, variant) in phase_set.variants.iter().enumerate() {
             if !matches!(variant.admission, AdmissionStatus::Admitted) {
                 continue;

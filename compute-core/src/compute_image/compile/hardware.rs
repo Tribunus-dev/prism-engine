@@ -749,6 +749,7 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
                 ]),
                 &std::collections::HashMap::new(),
                 &tmp_dir,
+                false,
             ) {
                 Ok(modelc_path) => {
                     eprintln!("[hw-assessment]   compiled: {}", modelc_path);

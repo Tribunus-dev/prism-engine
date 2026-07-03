@@ -343,8 +343,10 @@ impl PrismSession {
             return Err("session terminated".into());
         }
 
+        // Parse session_id as agent_id to extract lane hint (if it's a numeric agent ID)
+        let lane_hint = request.session_id.parse::<u32>().ok();
         // 1. Submit phase to orchestrator — selects best variant, enqueues on lane
-        let completion = orchestrator.submit(phase_set)?;
+        let completion = orchestrator.submit(phase_set, lane_hint)?;
 
         // 2. Process all available lane completions from the channel
         //    In production, this runs in a Tokio select loop with timeout.

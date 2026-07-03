@@ -25,8 +25,18 @@
 mod runner;
 mod compilation;
 mod loading;
+mod multimodal_assembly;
+pub mod vision_projection;
+pub mod multimodal_receipt;
+pub mod kernel_fusion;
 
 pub use runner::Orchestrator;
+
+pub use crate::compute_image::multimodal::{
+    InputModality, ModalityError, MultimodalCapabilities, MultimodalArtifactSummary,
+    ProjectionBackend, ProjectionPrecision,
+};
+use multimodal_assembly::PromptPart;
 
 // ── Architecture constants (shared with megakernel) ───────────────
 
@@ -43,6 +53,21 @@ pub(crate) const LAYERS: u32 = 48;
 pub(crate) const NUM_SLOTS: u32 = 32;
 /// Maximum survivor count per slot (20480 = ~1M context at 50:1 compaction).
 pub const MAX_SURVIVORS: u32 = 20480;
+
+// ── Execution phase kinds ─────────────────────────────────────────
+
+/// Execution phases for the compute orchestrator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComputePhaseKind {
+    /// Multimodal preparation — resize, patchify, normalize.
+    MultimodalPrepare,
+    /// Multimodal projection — patch embedding → decoder-width activations.
+    MultimodalProject,
+    /// Decoder prefill over assembled embeddings.
+    DecoderPrefill,
+    /// Autoregressive single-token decode.
+    DecoderDecode,
+}
 
 // ── Half-precision conversion helpers ──────────────────────────────
 
@@ -131,21 +156,240 @@ pub fn generate_speculative_candidates(logits: &[u16], count: usize) -> Vec<u32>
     indices
 }
 
-// ── Scheduling phase ───────────────────────────────────────────────
+// ── Concurrency policy ───────────────────────────────────────────
 
-/// Scheduling phase — controls SLC occupancy on M1.
-///
-/// The M1's 8 MB System Level Cache is shared across CPU, GPU, and ANE.
-/// When the GPU streams ~2.7 GB of Base-3 ternary weights for a single
-/// decode pass it evicts the ANE working set (~2 MB+) from the SLC.
-/// These phases are informational/diagnostic — the ANE and GPU run
-/// concurrently without blocking.
+/// Encodes chip-family bandwidth and cache class.
+/// Drives default scheduling policy rather than per-model guesswork.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppleMemoryPressureClass {
+    /// Base M1: ~68 GB/s, 8–16 MB SLC — tight bandwidth, high contention risk.
+    BaseM1Constrained,
+    /// M1 Pro: ~200 GB/s, 24 MB SLC — moderate headroom.
+    ProClassModerate,
+    /// M1 Max: ~400 GB/s, 48 MB SLC — wide fabric.
+    MaxClassWide,
+    /// M1 Ultra: ~800 GB/s, 96 MB SLC — very wide, dual-die.
+    UltraClassVeryWide,
+    /// M2/M3/M4/M5 or unidentifiable device.
+    Unknown,
+}
+
+/// GPU weight-streaming cache mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuWeightCacheMode {
+    /// Streaming / cache-hostile: weights have no temporal reuse;
+    /// prevent them from polluting the SLC.
+    Streaming,
+    /// Metal-default cache policy.
+    Default,
+    /// Aggressive cache retention for small-model or fine-tuned paths.
+    AggressiveReuse,
+}
+
+/// Per-device decode policy — replaces binary SLCPhase gating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppleDecodePolicy {
+    pub gpu_weight_cache_mode: GpuWeightCacheMode,
+    pub allow_ane_gpu_overlap: bool,
+    pub require_overlap_benchmark: bool,
+    pub max_ane_inflight: u8,
+}
+
+impl AppleDecodePolicy {
+    pub const fn for_pressure_class(pc: AppleMemoryPressureClass) -> Self {
+        match pc {
+            AppleMemoryPressureClass::BaseM1Constrained => Self {
+                gpu_weight_cache_mode: GpuWeightCacheMode::Streaming,
+                allow_ane_gpu_overlap: false,
+                require_overlap_benchmark: true,
+                max_ane_inflight: 1,
+            },
+            AppleMemoryPressureClass::ProClassModerate => Self {
+                gpu_weight_cache_mode: GpuWeightCacheMode::Default,
+                allow_ane_gpu_overlap: true,
+                require_overlap_benchmark: true,
+                max_ane_inflight: 1,
+            },
+            AppleMemoryPressureClass::MaxClassWide
+            | AppleMemoryPressureClass::UltraClassVeryWide => Self {
+                gpu_weight_cache_mode: GpuWeightCacheMode::Default,
+                allow_ane_gpu_overlap: true,
+                require_overlap_benchmark: false,
+                max_ane_inflight: 1,
+            },
+            AppleMemoryPressureClass::Unknown => Self {
+                gpu_weight_cache_mode: GpuWeightCacheMode::Default,
+                allow_ane_gpu_overlap: false,
+                require_overlap_benchmark: true,
+                max_ane_inflight: 1,
+            },
+        }
+    }
+}
+
+/// Legacy diagnostic phase — kept for backward compat in existing callers.
+/// Write-only; dispatch is gated by AppleDecodePolicy, not this enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[deprecated(since = "0.3.0", note = "use AppleDecodePolicy instead")]
 pub enum SLCPhase {
-    /// ANE owns the SLC (prefill). GPU dispatches are forbidden.
     ANEPrefill,
-    /// GPU owns the SLC (decode). ANE dispatches are forbidden.
     GPUDecode,
-    /// No active compute — idle.
     Idle,
+}
+
+// ── ANE Worker types ──────────────────────────────────────────────
+
+/// Request sent to the dedicated ANE MTP decode worker.
+#[derive(Debug, Clone)]
+pub struct MtpDecodeRequest {
+    pub session_id: u64,
+    pub token_id: u32,
+    pub position: u32,
+    pub kv_generation: u64,
+}
+
+/// Result from one ANE MTP decode step.
+#[derive(Debug, Clone)]
+pub struct MtpDecodeResult {
+    pub session_id: u64,
+    /// The KV generation this result corresponds to.
+    pub kv_generation: u64,
+    /// Draft token IDs produced by the MTP model.
+    pub draft_tokens: Vec<u32>,
+    /// Wall-clock ANE execution time in nanoseconds.
+    pub elapsed_ns: u64,
+}
+
+/// A structured multi-token candidate proposal produced by the ANE MTP model.
+///
+/// The MTP model predicts a bounded continuation of up to 3 future tokens
+/// per invocation. Verification by the main 12B model treats this as a
+/// candidate chain: positions are accepted in prefix order, stopping at the
+/// first rejection.
+#[derive(Debug, Clone)]
+pub struct MtpProposal {
+    /// Absolute sequence position of the first proposed token (t+1).
+    pub base_position: u32,
+    /// KV generation this proposal was built from. Must match the main model's
+    /// generation for verification to proceed.
+    pub kv_generation: u64,
+    /// Proposed token IDs for positions t+1, t+2, t+3.
+    pub tokens: [u32; 3],
+    /// Number of proposed tokens (1-3).
+    pub token_count: u8,
+    /// Per-token confidence (FP16, higher = more certain).
+    pub confidence: [u16; 3],
+    /// SHA-256 digest of the raw logits buffer for diagnosability.
+    pub logits_digest: [u8; 32],
+}
+
+/// IOSurface-backed MTP proposal transport -- written by ANE, read by Metal.
+///
+/// Allocated as a shared IOSurface, bound to both Core ML (as output) and
+/// Metal (as a MTLBuffer or MTLTexture). The E-core only writes `epoch`
+/// and signals `MTLSharedEvent` after Core ML completion; the payload
+/// itself is populated directly by the ANE.
+///
+/// Fixed size to avoid dynamic allocation in the hot path.
+#[repr(C, align(64))]
+pub struct MtpTreeSurface {
+    /// Monotonically increasing proposal epoch. Metal waits on this value
+    /// via MTLSharedEvent before consuming the tree.
+    pub epoch: u64,
+    /// Session identifier -- must match the active decode session.
+    pub session_id: u64,
+    /// KV generation this tree was built from.
+    pub kv_generation: u64,
+    /// Number of active nodes in the tree (1-16).
+    pub node_count: u16,
+    /// Tree depth (1-3).
+    pub tree_depth: u8,
+    /// Flags: bit 0 = ready, bit 1 = stale, bits 2-7 reserved.
+    pub flags: u8,
+    /// Token IDs indexed by node (0 = root/input token).
+    pub token_ids: [u32; 16],
+    /// Parent node index for each node. Root has parent_id = 0xFF.
+    pub parent_ids: [u8; 16],
+    /// Rank within sibling group (0 = best).
+    pub rank: [u8; 16],
+    /// Confidence in Q2.15 fixed-point (higher = more certain).
+    pub confidence_q15: [u16; 16],
+    /// Set to 1 by the E-core after all fields including epoch are valid.
+    pub ready: u32,
+    /// Padding to reach 64-byte alignment boundary.
+    pub _pad: [u8; 96],
+}
+
+// Compile-time size check -- IOSurface allocations need exact size.
+const _: () = assert!(std::mem::size_of::<MtpTreeSurface>() == 256);
+
+impl Default for MtpTreeSurface {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+// ── Orchestrator methods (multimodal validation) ───────────────────
+
+impl Orchestrator {
+    /// Validate that this deployment can handle the given prompt parts.
+    pub fn validate_multimodal_prompt(&self, parts: &[PromptPart]) -> Result<(), String> {
+        let has_image = parts.iter().any(|p| matches!(p, PromptPart::Image(_)));
+        let has_audio = parts.iter().any(|p| matches!(p, PromptPart::Audio(_)));
+
+        if has_image && !self.deployment.multimodal_capabilities().image {
+            return Err("image prompt requires multimodal capabilities".into());
+        }
+        if has_audio && !self.deployment.multimodal_capabilities().audio {
+            return Err("audio modality is feature-gated".into());
+        }
+        Ok(())
+    }
+}
+/// Per-session MTP KV state with speculative rollback.
+///
+/// The ANE worker MUST NOT advance its local KV state irreversibly
+/// until the main-model verification commits. Rejection sampling can
+/// roll back the speculative generation.
+#[derive(Debug, Clone)]
+pub struct MtpKvState {
+    pub committed_generation: u64,
+    pub speculative_generation: u64,
+}
+
+impl MtpKvState {
+    pub fn new() -> Self {
+        Self { committed_generation: 0, speculative_generation: 0 }
+    }
+
+    /// Record a new speculative step. Does not commit.
+    pub fn speculate(&mut self, gen: u64) {
+        self.speculative_generation = gen;
+    }
+
+    /// Commit the speculative generation as the new baseline.
+    pub fn commit(&mut self) {
+        self.committed_generation = self.speculative_generation;
+    }
+
+    /// Revert speculative state after rejection.
+    pub fn rollback(&mut self) {
+        self.speculative_generation = self.committed_generation;
+    }
+}
+
+/// Dedicated ANE MTP decode worker -- owns the Core ML model permanently.
+///
+/// Designed to be pinned to an E-core. Uses cpuAndNeuralEngine mode to
+/// exclude the GPU. Produces MtpProposal blocks via IOSurface-backed
+/// transport: the ANE writes candidate tokens directly into a shared
+/// MtpTreeSurface; the E-core advances the epoch and signals
+/// MTLSharedEvent; Metal reads the surface at a legal verification
+/// boundary without an intermediate CPU copy.
+pub struct AneMtpWorker {
+    pub model: crate::coreml_bridge::CoreMlModel,
+    pub request_rx: std::sync::mpsc::Receiver<MtpDecodeRequest>,
+    pub result_tx: std::sync::mpsc::Sender<MtpDecodeResult>,
+    pub session_states: std::collections::HashMap<u64, MtpKvState>,
+    pub handle: Option<std::thread::JoinHandle<()>>,
 }

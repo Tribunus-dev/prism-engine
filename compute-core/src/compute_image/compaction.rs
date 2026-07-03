@@ -333,7 +333,15 @@ fn compile_compaction_mil_inner(mil_text: &str) -> Result<CoreMlModel, String> {
     // Write minimal Manifest.json (needed for .mlpackage format)
     let manifest = serde_json::json!({
         "fileFormatVersion": "1.0.0",
-        "specificationVersion": 9
+        "specificationVersion": 9,
+        "rootModelSpecification": {
+            "items": [{
+                "author": "prism-engine",
+                "description": "KV compaction gather",
+                "name": "compaction_gather",
+                "version": "1.0.0"
+            }]
+        }
     });
     std::fs::write(tmp.join("Manifest.json"), serde_json::to_string_pretty(&manifest).unwrap())
         .map_err(|e| format!("write Manifest.json: {}", e))?;

@@ -16,7 +16,6 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 mod release;
 
-use tribunus_compute_core::compute_image::manifest::CompilationAuthority;
 use tribunus_compute_core::config::CompileQuantMode;
 use tribunus_compute_core::config::HardwareTarget;
 
@@ -61,15 +60,6 @@ enum CliAuthority {
     Sealed,
 }
 
-impl From<CliAuthority> for CompilationAuthority {
-    fn from(a: CliAuthority) -> Self {
-        match a {
-            CliAuthority::TestFixture => CompilationAuthority::TestFixture,
-            CliAuthority::Sealed => CompilationAuthority::SealedComputeImage,
-        }
-    }
-}
-
 #[derive(Subcommand)]
 enum Commands {
     /// Start the OpenAI-compatible server with a compiled model.
@@ -83,6 +73,12 @@ enum Commands {
     },
     /// List available models.
     List,
+    /// List all available compute devices (GPUs, CPUs, NPUs).
+    ListDevices {
+        /// Output as JSON (for headless/config consumption).
+        #[arg(long)]
+        json: bool,
+    },
     /// Download + compile a model from HuggingFace.
     Pull {
         /// HuggingFace repo ID (e.g. "Qwen/Qwen2.5-0.5B").
@@ -199,6 +195,7 @@ fn main() {
     match cli.command {
         Commands::Run { model, port } => run(model, port),
         Commands::List => list(),
+        Commands::ListDevices { json } => list_devices(json),
         Commands::Pull { repo } => pull(&repo),
         Commands::Compile { model } => compile_model(&model),
         Commands::CompileGGUF {
@@ -216,11 +213,12 @@ fn main() {
             cuda_cache_dir,
             rocm_cache_dir,
             l0_cache_dir,
-        } => compile_gguf(
+        } => {
+            compile_gguf(
             &gguf_path,
             &output,
             draft.as_deref(),
-            authority.into(),
+            authority,
             target_hardware.as_deref(),
             quantize_mode.as_deref(),
             skip_validation,
@@ -231,7 +229,8 @@ fn main() {
             cuda_cache_dir.as_deref(),
             rocm_cache_dir.as_deref(),
             l0_cache_dir.as_deref(),
-        ),
+            )
+        }
         #[cfg(feature = "prism-backend")]
         Commands::AncCompile { model } => ane_compile(&model),
         #[cfg(not(feature = "prism-backend"))]
@@ -299,6 +298,55 @@ fn list() {
     }
     if !found {
         eprintln!("No models found.");
+    }
+}
+
+fn list_devices(json_output: bool) {
+    let registry = tribunus_compute_core::device::DeviceRegistry::discover();
+
+    if json_output {
+        println!("{}", registry.to_json_pretty());
+        return;
+    }
+
+    let count = registry.count();
+    println!("Discovered {} compute device(s):\n", count);
+
+    for device in registry.enumerate() {
+        let kind = device.kind.label();
+        let backend = device.backend.label();
+        let mem_gb = device.memory.total_bytes as f64 / 1_000_000_000.0;
+        let mem_str = if mem_gb > 0.0 {
+            format!("{:.1} GB", mem_gb)
+        } else {
+            "unknown".to_string()
+        };
+        let pcie = device.pcie_link.as_ref().map(|l| {
+            format!(" (PCIe {}.{} x{})", l.generation, 0, l.lanes)
+        }).unwrap_or_default();
+
+        println!("  Device {}: {} — {}", device.id.0, device.name, kind);
+        println!("           backend:   {}", backend);
+        println!("           vendor:    {}", device.vendor);
+        println!("           memory:    {}{}", mem_str, pcie);
+        println!("           compute:   {} units @ {} MHz", device.compute_units, device.clock_mhz);
+        println!("           formats:   {}f16 {}bf16 {}int8 {}ternary",
+            if device.supports_f16 { "✓" } else { "✗" },
+            if device.supports_bf16 { "✓" } else { "✗" },
+            if device.supports_int8 { "✓" } else { "✗" },
+            if device.supports_ternary { "✓" } else { "✗" },
+        );
+        if device.ane_cores > 0 {
+            println!("           ane cores: {}", device.ane_cores);
+        }
+        if !device.driver_version.is_empty() {
+            println!("           driver:    {}", device.driver_version);
+        }
+        println!();
+    }
+
+    if let Some(default) = registry.default() {
+        println!("Default device: {} ({})", default.name, default.id);
     }
 }
 
@@ -565,14 +613,14 @@ fn compile_gguf(
     gguf_path: &Path,
     output_path: &Path,
     draft: Option<&Path>,
-    authority: CompilationAuthority,
+    _authority: CliAuthority,
     raw_target: Option<&str>,
     raw_quant: Option<&str>,
     _skip_validation: bool,
     legacy_lut: bool,
-    ane_models_dir: Option<&Path>,
-    metallib_path: Option<&Path>,
-    mlx_capture_dir: Option<&Path>,
+    _ane_models_dir: Option<&Path>,
+    _metallib_path: Option<&Path>,
+    _mlx_capture_dir: Option<&Path>,
     cuda_cache_dir: Option<&Path>,
     rocm_cache_dir: Option<&Path>,
     l0_cache_dir: Option<&Path>,
@@ -634,6 +682,8 @@ fn compile_gguf(
             None
         }
     });
+    #[cfg(not(feature = "prism-backend"))]
+    let _ = (&target, &quantize_mode);
 
     eprintln!(
         "[prism:compile-gguf] Compiling {} → {}",
@@ -643,19 +693,29 @@ fn compile_gguf(
 
     // ── Legacy LUT path (always available) ─────────────────────────
     if legacy_lut {
-        match tribunus_compute_core::lut::compiler::compile_gguf_to_cimage(gguf_path, output_path) {
-            Ok(()) => {
-                let size = std::fs::metadata(output_path)
-                    .map(|m| m.len() / (1024 * 1024))
-                    .unwrap_or(0);
-                eprintln!("[prism:compile-gguf] Done — {} MB", size);
+        #[cfg(feature = "prism-backend")]
+        {
+            match tribunus_compute_core::lut::compiler::compile_gguf_to_cimage(gguf_path, output_path) {
+                Ok(()) => {
+                    let size = std::fs::metadata(output_path)
+                        .map(|m| m.len() / (1024 * 1024))
+                        .unwrap_or(0);
+                    eprintln!("[prism:compile-gguf] Done — {} MB", size);
+                }
+                Err(e) => {
+                    eprintln!("Compilation failed: {e}");
+                    std::process::exit(1);
+                }
             }
-            Err(e) => {
-                eprintln!("Compilation failed: {e}");
-                std::process::exit(1);
-            }
+            return;
         }
-        return;
+        #[cfg(not(feature = "prism-backend"))]
+        {
+            eprintln!(
+                "[prism:compile-gguf] LUT GGUF compilation requires the `prism-backend` feature"
+            );
+            std::process::exit(1);
+        }
     }
 
     // ── New GGUF pipeline requires prism-backend ───────────────────
@@ -669,6 +729,15 @@ fn compile_gguf(
 
     #[cfg(feature = "prism-backend")]
     {
+        use tribunus_compute_core::compute_image::manifest::CompilationAuthority;
+        let authority: CompilationAuthority = match _authority {
+            CliAuthority::TestFixture => CompilationAuthority::TestFixture,
+            CliAuthority::Sealed => CompilationAuthority::SealedComputeImage,
+        };
+        // silence unused-variable warning when the inner branches
+        // reference `authority` through the `cfg` block only
+        let _ = &authority;
+
         let new_pipeline_result = if let Some(draft_path) = draft {
             // Speculative compilation with draft GGUF.
             let gguf_str = gguf_path.to_string_lossy();
@@ -687,9 +756,9 @@ fn compile_gguf(
             // Authority-gated compilation.
             let gguf_str = gguf_path.to_string_lossy();
             let out_str = output_path.to_string_lossy();
-            let ane_str = ane_models_dir.map(|p| p.to_string_lossy().into_owned());
-            let metal_str = metallib_path.map(|p| p.to_string_lossy().into_owned());
-            let mlx_str = mlx_capture_dir.map(|p| p.to_string_lossy().into_owned());
+            let ane_str = _ane_models_dir.map(|p| p.to_string_lossy().into_owned());
+            let metal_str = _metallib_path.map(|p| p.to_string_lossy().into_owned());
+            let mlx_str = _mlx_capture_dir.map(|p| p.to_string_lossy().into_owned());
             tribunus_compute_core::compute_image::compile::compile_gguf_with_authority(
                 &gguf_str,
                 &out_str,
@@ -705,9 +774,9 @@ fn compile_gguf(
             // Unchecked default path.
             let gguf_str = gguf_path.to_string_lossy();
             let out_str = output_path.to_string_lossy();
-            let ane_str = ane_models_dir.map(|p| p.to_string_lossy().into_owned());
-            let metal_str = metallib_path.map(|p| p.to_string_lossy().into_owned());
-            let mlx_str = mlx_capture_dir.map(|p| p.to_string_lossy().into_owned());
+            let ane_str = _ane_models_dir.map(|p| p.to_string_lossy().into_owned());
+            let metal_str = _metallib_path.map(|p| p.to_string_lossy().into_owned());
+            let mlx_str = _mlx_capture_dir.map(|p| p.to_string_lossy().into_owned());
             tribunus_compute_core::compute_image::compile::compile_gguf_unchecked(
                 &gguf_str,
                 &out_str,

@@ -15,6 +15,7 @@ use half::{bf16, f16};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use crate::config::ManifestModality;
 
 /// Minimum GGUF version supported for import.
 pub const MIN_GGUF_VERSION: u32 = 3;
@@ -616,6 +617,8 @@ pub fn gguf_to_manifest(
     let file_type = meta_u64(metadata, keys::FILE_TYPE);
 
     Ok(crate::config::ModelManifest {
+        modality: ManifestModality::Text,
+        architecture: None,
         config_path: String::new(),
         config_hash,
         model_type,

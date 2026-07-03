@@ -228,10 +228,7 @@ impl CImageReader {
         file.read_exact(&mut magic)
             .map_err(|e| format!("read magic: {e}"))?;
         if &magic != MAGIC {
-            return Err(format!(
-                "Invalid magic: expected TRB_CIMG, got {:?}",
-                &magic
-            ));
+            return Err(format!("Invalid magic: expected TRB_CIMG, got {:?}", &magic));
         }
 
         // Read header size

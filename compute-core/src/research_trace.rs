@@ -204,9 +204,8 @@ impl std::fmt::Debug for TraceBuffer {
     }
 }
 
-// TraceEvent is Copy (all fields are primitives), so UnsafeCell<TraceEvent>
-// is Send + Sync.  Synchronisation of the slot writes is handled by the
-// atomic write_pos.
+// SAFETY: Only one of push() or drain() may be active at a time.
+// The atomic write_pos provides synchronization for the single writer.
 unsafe impl Send for TraceBuffer {}
 unsafe impl Sync for TraceBuffer {}
 

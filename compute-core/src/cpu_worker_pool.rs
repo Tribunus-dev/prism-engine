@@ -79,9 +79,8 @@ fn pin_to_p_core(core_id: usize) {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct WorkItem {
-    /// Raw function pointer.  The receiving worker transmutes this to
-    /// `unsafe extern "C" fn(arg_ptr: usize, arg_len: usize)`.
-    pub fn_ptr: usize,
+    /// Function pointer dispatched to workers.
+    pub fn_ptr: unsafe fn(usize, usize),
     /// Raw argument pointer (first parameter of the function).
     pub arg_ptr: usize,
     /// Argument length in bytes (second parameter of the function).
@@ -238,9 +237,7 @@ impl PinnedWorkerPool {
                             // function pointer — pass-through Rust ABI
                             // (supports catch_unwind / panic isolation).
                             // arg_ptr/arg_len must be valid for that function.
-                            let func: unsafe fn(usize, usize) = unsafe {
-                                mem::transmute::<usize, unsafe fn(usize, usize)>(item.fn_ptr)
-                            };
+                            let func = item.fn_ptr;
 
                             let result =
                                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
@@ -393,7 +390,7 @@ mod tests {
 
         let items: Vec<WorkItem> = (0..8)
             .map(|_| WorkItem {
-                fn_ptr: increment_counter as *const () as usize,
+                fn_ptr: increment_counter as unsafe fn(usize, usize),
                 arg_ptr: counter_ptr,
                 arg_len: 0,
             })
@@ -414,7 +411,7 @@ mod tests {
         const N: usize = 1000;
         let items: Vec<WorkItem> = (0..N)
             .map(|_| WorkItem {
-                fn_ptr: increment_counter as *const () as usize,
+                fn_ptr: increment_counter as unsafe fn(usize, usize),
                 arg_ptr: ptr,
                 arg_len: 0,
             })
@@ -434,7 +431,7 @@ mod tests {
         let items: Vec<WorkItem> = data
             .chunks_mut(8)
             .map(|chunk| WorkItem {
-                fn_ptr: scale_value as *const () as usize,
+                fn_ptr: scale_value as unsafe fn(usize, usize),
                 arg_ptr: chunk.as_mut_ptr() as usize,
                 arg_len: chunk.len() * 4,
             })
@@ -456,7 +453,7 @@ mod tests {
 
         let items: Vec<WorkItem> = (0..2)
             .map(|_| WorkItem {
-                fn_ptr: increment_counter as *const () as usize,
+                fn_ptr: increment_counter as unsafe fn(usize, usize),
                 arg_ptr: ptr,
                 arg_len: 0,
             })
@@ -478,7 +475,7 @@ mod tests {
         for _ in 0..10 {
             let items: Vec<WorkItem> = (0..4)
                 .map(|_| WorkItem {
-                    fn_ptr: increment_counter as *const () as usize,
+                    fn_ptr: increment_counter as unsafe fn(usize, usize),
                     arg_ptr: ptr,
                     arg_len: 0,
                 })
@@ -507,7 +504,7 @@ mod tests {
 
         let items: Vec<WorkItem> = (0..4)
             .map(|_| WorkItem {
-                fn_ptr: panicking_fn as *const () as usize,
+                fn_ptr: panicking_fn as unsafe fn(usize, usize),
                 arg_ptr: 0,
                 arg_len: 0,
             })
@@ -544,7 +541,7 @@ mod tests {
         // Benchmark dispatch latency
         let items: Vec<WorkItem> = (0..8)
             .map(|_| WorkItem {
-                fn_ptr: increment_counter as *const () as usize,
+                fn_ptr: increment_counter as unsafe fn(usize, usize),
                 arg_ptr: ptr,
                 arg_len: 0,
             })
@@ -581,7 +578,7 @@ mod tests {
         let ptr = Arc::as_ptr(&counter) as usize;
         let items: Vec<WorkItem> = (0..4)
             .map(|_| WorkItem {
-                fn_ptr: increment_counter as *const () as usize,
+                fn_ptr: increment_counter as unsafe fn(usize, usize),
                 arg_ptr: ptr,
                 arg_len: 0,
             })

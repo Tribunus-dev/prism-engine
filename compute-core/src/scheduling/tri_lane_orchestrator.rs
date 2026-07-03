@@ -314,9 +314,9 @@ impl TriLaneOrchestrator {
     ///
     /// `select_best_idx` returns `Option<usize>` (not a reference into self),
     /// so we clone before the mutable borrow on `self.lane_queues`.
-    pub fn submit(&mut self, phase_set: &PhaseVariantSet) -> Result<WorkCompletion, String> {
+    pub fn submit(&mut self, phase_set: &PhaseVariantSet, lane_hint: Option<u32>) -> Result<WorkCompletion, String> {
         let best_idx = self
-            .select_best_idx(phase_set)
+            .select_best_idx(phase_set, lane_hint)
             .ok_or_else(|| "no admissible variant".to_string())?;
 
         let variant = phase_set.variants[best_idx].clone();
@@ -369,10 +369,45 @@ impl TriLaneOrchestrator {
     /// highest score.
     ///
     /// Returns `None` when no variant passes the filters.
-    pub fn select_best_idx(&self, phase_set: &PhaseVariantSet) -> Option<usize> {
+    pub fn select_best_idx(&self, phase_set: &PhaseVariantSet, lane_hint: Option<u32>) -> Option<usize> {
         let mut best_idx: Option<usize> = None;
         let mut best_score: f64 = f64::NEG_INFINITY;
 
+        // If a lane hint is specified and is non-zero, search for a matching admitted and warmed variant.
+        if let Some(hint) = lane_hint {
+            if hint > 0 {
+                for (i, variant) in phase_set.variants.iter().enumerate() {
+                    if !matches!(variant.admission, AdmissionStatus::Admitted) {
+                        continue;
+                    }
+
+                    if variant.lane == ExecutionLane::CoreMlAne && !self.is_ane_artifact_warmed(&variant) {
+                        continue;
+                    }
+
+                    let matches_lane = match (hint, variant.lane) {
+                        (1, ExecutionLane::MlxGpu) => true,
+                        (2, ExecutionLane::CoreMlAne) => true,
+                        (3, ExecutionLane::AccelerateCpu) | (3, ExecutionLane::CandleCpu) => true,
+                        _ => false,
+                    };
+
+                    if matches_lane {
+                        let lane_state = self.lane_state_for(variant.lane);
+                        let score = self.score(variant, &lane_state);
+                        if score > best_score {
+                            best_score = score;
+                            best_idx = Some(i);
+                        }
+                    }
+                }
+                if best_idx.is_some() {
+                    return best_idx;
+                }
+            }
+        }
+
+        best_score = f64::NEG_INFINITY;
         for (i, variant) in phase_set.variants.iter().enumerate() {
             // Must be fully admitted.
             if !matches!(variant.admission, AdmissionStatus::Admitted) {
@@ -634,7 +669,7 @@ mod tests {
         };
         let orch = make_orchestrator(vec![phase_set]);
 
-        let idx = orch.select_best_idx(&orch.phase_dag[0]);
+        let idx = orch.select_best_idx(&orch.phase_dag[0], None);
         assert_eq!(idx, Some(1), "should select the admitted variant (index 1), not the denied one");
     }
 
@@ -662,7 +697,7 @@ mod tests {
         let orch = make_orchestrator(vec![phase_set]);
 
         // Cache is empty → ANE variant is cold → filtered → selects metal.
-        let idx = orch.select_best_idx(&orch.phase_dag[0]);
+        let idx = orch.select_best_idx(&orch.phase_dag[0], None);
         assert_eq!(idx, Some(1), "should select the metal variant (index 1) because ANE is cold");
     }
 
@@ -677,7 +712,7 @@ mod tests {
         };
         let mut orch = make_orchestrator(vec![phase_set]);
 
-        let result = orch.submit(&orch.phase_dag[0].clone());
+        let result = orch.submit(&orch.phase_dag[0].clone(), None);
         assert!(result.is_ok(), "submit should succeed: {:?}", result);
 
         // The best variant is MlxGpu (cost 100), so it goes to metal_queue.
@@ -739,7 +774,36 @@ mod tests {
         };
         let orch = make_orchestrator(vec![phase_set]);
 
-        let idx = orch.select_best_idx(&orch.phase_dag[0]);
+        let idx = orch.select_best_idx(&orch.phase_dag[0], None);
         assert!(idx.is_none(), "no variant admitted → should return None");
+    }
+
+    #[test]
+    fn test_select_best_idx_with_lane_pinning() {
+        // GPU is extremely expensive (5000ns), CPU is cheap (100ns)
+        let phase_set = PhaseVariantSet {
+            phase_id: PhaseId(101),
+            variants: vec![
+                sample_phase_variant(ExecutionLane::MlxGpu, 5000, AdmissionStatus::Admitted),
+                sample_phase_variant(ExecutionLane::AccelerateCpu, 100, AdmissionStatus::Admitted),
+            ],
+        };
+        let orch = make_orchestrator(vec![phase_set]);
+
+        // Without lane pinning, CPU should be preferred due to lower cost.
+        let default_idx = orch.select_best_idx(&orch.phase_dag[0], None);
+        assert_eq!(default_idx, Some(1), "cost model should select AccelerateCpu (index 1)");
+
+        // With GPU pinning (lane_hint = 1), GPU variant (index 0) must be forced regardless of higher cost.
+        let pinned_gpu_idx = orch.select_best_idx(&orch.phase_dag[0], Some(1));
+        assert_eq!(pinned_gpu_idx, Some(0), "lane pinning to GPU should bypass cost scoring and select MlxGpu");
+
+        // With CPU pinning (lane_hint = 3), CPU variant (index 1) must be forced.
+        let pinned_cpu_idx = orch.select_best_idx(&orch.phase_dag[0], Some(3));
+        assert_eq!(pinned_cpu_idx, Some(1), "lane pinning to CPU should select AccelerateCpu");
+
+        // With invalid/unavailable lane pinning (lane_hint = 2, CoreMlAne not present), should fallback to cost scoring.
+        let invalid_pinned_idx = orch.select_best_idx(&orch.phase_dag[0], Some(2));
+        assert_eq!(invalid_pinned_idx, Some(1), "unavailable pinned lane should fall back to cost scoring");
     }
 }

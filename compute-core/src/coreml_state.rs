@@ -283,5 +283,7 @@ impl StatefulPrefillContext {
     }
 }
 
+// SAFETY: StatefulPrefillContext wraps a CoreMlStateHandle which is thread-safe for prediction.
+// The underlying MLState ObjC pointer is accessed through Core ML's thread-safe predict API.
 unsafe impl Send for StatefulPrefillContext {}
 unsafe impl Sync for StatefulPrefillContext {}

@@ -79,8 +79,10 @@ impl ExternalStorage for Arena {
     }
 }
 
-// Safety: Arena memory is IOSurface-backed and accessed through MLX/Core ML
-// APIs that are thread-safe. The raw pointer is valid for the Arena's lifetime.
+// SAFETY: Arena access is serialized by the lease mechanism.
+// The raw pointer is valid for the Arena's lifetime.
+// Two threads may read through the pointer concurrently but only one may write,
+// enforced by the lease system.
 unsafe impl Send for Arena {}
 unsafe impl Sync for Arena {}
 

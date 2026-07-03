@@ -6,17 +6,45 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+/// Import TensorEntry from compute_image when prism-backend is active.
+#[cfg(feature = "prism-backend")]
+use std::path::Path;
+#[cfg(feature = "prism-backend")]
+use crate::compute_image::TensorEntry;
 
 use super::hardware::{
     AttentionKind, AudioArchitecture, MoEConfig, QuantizationMeta,
     QuantizationMode, RopeSpec, TextArchitecture, VisionArchitecture,
 };
 
-// ── Layer 1: Raw Manifest ──────────────────────────────────────────────────
+// ── Modality Discriminator ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ManifestModality {
+    Text,
+    Vision,
+    Audio,
+    Multimodal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ArchitectureConfig {
+    Text(TextArchitecture),
+    Vision(VisionArchitecture),
+    Audio(AudioArchitecture),
+}
+
+// ── Layer 1: Raw Manifest ──────────────────────────────────────────────
 
 /// Raw model manifest read from config.json.
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ModelManifest {
+    /// Modality discriminator — determines runtime dispatch path.
+    pub modality: ManifestModality,
+    /// Architecture config, typed by modality.
+    pub architecture: Option<ArchitectureConfig>,
     pub config_path: String,
     pub config_hash: String,
     pub model_type: String,
@@ -32,7 +60,7 @@ pub struct ModelManifest {
     pub safetensors_shards: Vec<ShardManifest>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ShardManifest {
     pub path: String,
     pub sha256: String,
@@ -339,6 +367,8 @@ pub fn parse_config(
     });
 
     let manifest = ModelManifest {
+        modality: ManifestModality::Text,
+        architecture: None,
         config_path: config_path.into(),
         config_hash,
         model_type: raw.model_type.unwrap_or_default(),
@@ -356,3 +386,31 @@ pub fn parse_config(
 
     Ok((arch, quant, manifest))
 }
+
+#[cfg(feature = "prism-backend")]
+// ── CimageManifest — compile-target manifest ────────────────────────────
+
+/// Compile-target manifest for standalone audio cimage builds.
+///
+/// A lightweight, modality-typed manifest that pairs with the audio
+/// compilation pipeline ([`crate::compile::audio::compile_audio_model`])
+/// to produce a serialized cimage artifact on disk.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CimageManifest {
+    pub modality: ManifestModality,
+    pub architecture: ArchitectureConfig,
+    pub tensor_table: Vec<TensorEntry>,
+}
+
+#[cfg(feature = "prism-backend")]
+impl CimageManifest {
+    /// Serialize this manifest to a JSON file at `path`.
+    pub fn write_to(&self, path: &Path) -> anyhow::Result<()> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| anyhow::anyhow!("failed to serialize cimage manifest: {e}"))?;
+        std::fs::write(path, &json)
+            .map_err(|e| anyhow::anyhow!("failed to write cimage manifest: {e}"))?;
+        Ok(())
+    }
+}
+

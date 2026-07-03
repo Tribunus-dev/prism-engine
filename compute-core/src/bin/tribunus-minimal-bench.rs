@@ -1,47 +1,62 @@
 use std::path::Path;
 use std::time::Instant;
-use tribunus_compute_core::kv_cache::KvCache;
-use tribunus_compute_core::profiled_executor::{LoadedProfiledModel, ProfiledInferenceSession};
 
 fn main() {
-    // Need to set this env var because we patched the manifest
-    unsafe {
-        std::env::set_var("TRIBUNUS_SKIP_MANIFEST_HASH", "1");
+    let args: Vec<String> = std::env::args().collect();
+    let cimage_path = args
+        .iter()
+        .position(|a| a == "--cimage")
+        .and_then(|i| args.get(i + 1))
+        .map(Path::new)
+        .unwrap_or_else(|| Path::new("gemma4-12b-it.cimage"));
+
+    let decode_tokens: usize = args
+        .iter()
+        .position(|a| a == "--decode-tokens")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1000);
+
+    if !cimage_path.exists() {
+        eprintln!("cimage not found: {}", cimage_path.display());
+        eprintln!("Usage: tribunus-minimal-bench --cimage <path> [--decode-tokens N]");
+        std::process::exit(1);
     }
 
-    let image_dir = Path::new("compute-native/models/qwen-compiled");
-    let model = LoadedProfiledModel::new(image_dir).expect("Failed to load model");
+    println!("Loading cimage: {}", cimage_path.display());
+    let load_start = Instant::now();
+    let deployment = tribunus_compute_core::compute_image::cimage_loader::CimageDeployment::load(cimage_path)
+        .expect("Failed to load cimage");
+    println!("  Loaded in {:.1}s ({:.1} GB)", load_start.elapsed().as_secs_f64(),
+        deployment.total_size() as f64 / 1_073_741_824.0);
 
-    let n_layers = model.reader.manifest.execution_plan.layers.len();
-    let kv_caches: Vec<KvCache> = (0..n_layers)
-        .map(|_| KvCache::new(2048, 128, 64, false))
-        .collect();
-    let mut session = ProfiledInferenceSession::new("bench".into(), kv_caches);
-    session.setup_from_model(&model);
-
-    println!("Model loaded: {} layers", n_layers);
-
-    // Warmup
-    let prompt = vec![1u32; 10];
-    let mut next = session.prefill(&prompt, &model).expect("warmup prefill");
-    for _step in 0..2 {
-        next = session.decode_one(next, &model).expect("warmup decode");
+    // ── Warmup ──────────────────────────────────────────────────
+    let prompt = vec![1u32; 4];
+    println!("Warmup: {} prompt tokens", prompt.len());
+    let warmup = deployment.prefill(&prompt).expect("warmup prefill");
+    let mut next = warmup;
+    for _ in 0..2 {
+        next = deployment.decode_one(next).expect("warmup decode");
     }
 
-    // Benchmark
-    let prompt = vec![1u32; 10];
-    let mut next = session.prefill(&prompt, &model).expect("bench prefill");
-    let n_gen = 50;
-    let start = Instant::now();
-    for _step in 0..n_gen {
-        next = session.decode_one(next, &model).expect("bench decode");
+    // ── Benchmark ───────────────────────────────────────────────
+    let prompt = vec![1u32; 4];
+    println!("Benchmark: {} prompt → {} decode tokens", prompt.len(), decode_tokens);
+    let prefill_start = Instant::now();
+    let mut next = deployment.prefill(&prompt).expect("bench prefill");
+    let prefill_ms = prefill_start.elapsed().as_secs_f64() * 1000.0;
+
+    let decode_start = Instant::now();
+    for _step in 0..decode_tokens {
+        next = deployment.decode_one(next).expect("bench decode");
     }
-    let elapsed = start.elapsed();
-    let tok_s = (n_gen as f64) / elapsed.as_secs_f64();
-    println!(
-        "{} tokens in {:.2}s = {:.1} tok/s",
-        n_gen,
-        elapsed.as_secs_f64(),
-        tok_s
-    );
+    let decode_elapsed = decode_start.elapsed();
+    let tok_s = (decode_tokens as f64) / decode_elapsed.as_secs_f64();
+
+    println!();
+    println!("═══════════════════════════════════════════════");
+    println!("  Prefill:  {:.1} ms ({} tokens)", prefill_ms, prompt.len());
+    println!("  Decode:   {} tokens in {:.2}s = {:.1} tok/s", decode_tokens, decode_elapsed.as_secs_f64(), tok_s);
+    println!("  Total:    {:.2}s", (prefill_start.elapsed().as_secs_f64()));
+    println!("═══════════════════════════════════════════════");
 }

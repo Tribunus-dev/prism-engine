@@ -104,6 +104,12 @@ pub struct VisionArchitecture {
     pub num_channels: u32,
     #[serde(default)]
     pub projection_dim: u32,
+    /// Cimage model family identifier (e.g. "clip-vit-b32").
+    #[serde(default)]
+    pub model_family: String,
+    /// Whether a pre-compiled ANE program is embedded in the cimage.
+    #[serde(default)]
+    pub has_ane_program: bool,
 }
 
 /// Audio encoder configuration from a model's audio_config.

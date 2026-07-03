@@ -131,7 +131,7 @@ pub fn compile_ane_artifacts(model_dir: &Path) -> Result<Vec<String>, String> {
     compile_ane_islands(
         &plan_with_fusion,
         &arch,
-        &output_dir,
+        &output_dir, true,
     )
     .map_err(|e| format!("ANE compilation failed: {}", e))?;
 

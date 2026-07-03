@@ -15,13 +15,14 @@
 //! [`TernaryCImageCompiler`]: crate::compute_image::compile::ternary::TernaryCImageCompiler
 
 use crate::compute_image::compile::ternary::{
-    verify_prism_cimage, TensorRecord, PRISM_MAGIC, PRISM_PAGE_SIZE,
+    verify_cimage, SegmentEntry, SegmentKind, PRISM_MAGIC,
 };
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
 use crate::compute_image::megakernel::kernels::HIDDEN_DIM;
 use std::fs::File;
 use std::io;
+use crate::compute_image::multimodal::descriptor::MultimodalCapabilities;
 use std::path::Path;
 
 // O_ROWS and DOWN_ROWS are defined as private const in kernels.rs;
@@ -307,324 +308,59 @@ impl CimageDeployment {
     /// tensor sections (embed_ternary, embed_scales, ternary_weights, block_scales, norms,
     /// scalars).
     fn load_v2(bytes: Vec<u8>, device: &metal::Device) -> Result<Self, String> {
-        let min_size = PRISM_PAGE_SIZE as usize;
-        if bytes.len() < min_size {
-            return Err(format!(
-                "prism cimage too small: {} bytes (need >= {})",
-                bytes.len(),
-                min_size
-            ));
-        }
+        let (header, _layout) = verify_cimage(&bytes)?;
 
-        // Verify integrity via verify_prism_cimage (magic + SHA-256).
-        // The header and layout are parsed once here; we keep the raw bytes
-        // alive in mmap_data.
-        let (header, layout) = verify_prism_cimage(&bytes)?;
-
-        // ── Bounds-check each tensor section ─────────────────────────────
-        let check_section = |name: &str, rec: &TensorRecord| -> Result<(), String> {
-            let end = rec
-                .offset
-                .checked_add(rec.length)
-                .ok_or_else(|| format!("{} section offset+length overflow", name))?;
-            if end > bytes.len() as u64 {
-                return Err(format!(
-                    "{} section out of range: offset={} length={} file_size={}",
-                    name,
-                    rec.offset,
-                    rec.length,
-                    bytes.len()
-                ));
-            }
-            Ok(())
+        // ══ Segment-directory based loader (avoids CimageLayoutMeta) ══
+        let find_seg = |kind: u32| -> Result<&SegmentEntry, String> {
+            header.segments.iter()
+                .find(|s| s.kind == kind && s.length > 0)
+                .ok_or_else(|| format!("segment kind {} not found", kind))
         };
+        let sg0 = find_seg(SegmentKind::MetalLib as u32)?;
+        let sg1 = find_seg(SegmentKind::TernaryWeights as u32)?;
+        let sg2 = find_seg(SegmentKind::BlockScales as u32)?;
 
-        check_section("embed_clustered", &layout.embed_clustered)?;
-        check_section("centroid_table", &layout.centroid_table)?;
-        check_section("cluster_map", &layout.cluster_map)?;
-        check_section("ternary_weights", &layout.ternary_weights)?;
-        check_section("block_scales", &layout.block_scales)?;
-        check_section("aux", &layout.aux)?;
-
-        // ── Create Metal shared-memory buffers for each section ─────────
-        let embed_start = layout.embed_clustered.offset as usize;
-        let embed_buffer = {
-            let src = &bytes[embed_start..embed_start + layout.embed_clustered.length as usize];
+        let mk_buf = |seg: &SegmentEntry| -> metal::Buffer {
+            let off = seg.offset as usize;
+            let len = seg.length as usize;
+            let src = &bytes[off..off + len];
             device.new_buffer_with_data(
                 src.as_ptr() as *const std::ffi::c_void,
-                layout.embed_clustered.length,
+                len as u64,
                 metal::MTLResourceOptions::StorageModeShared,
             )
         };
 
-        // centroid_table buffer
-        let centroid_start = layout.centroid_table.offset as usize;
-        let centroid_buffer = {
-            let src =
-                &bytes[centroid_start..centroid_start + layout.centroid_table.length as usize];
-            device.new_buffer_with_data(
-                src.as_ptr() as *const std::ffi::c_void,
-                layout.centroid_table.length,
-                metal::MTLResourceOptions::StorageModeShared,
-            )
-        };
-
-        // cluster_map buffer
-        let cluster_start = layout.cluster_map.offset as usize;
-        let cluster_map_buffer = {
-            let src = &bytes[cluster_start..cluster_start + layout.cluster_map.length as usize];
-            device.new_buffer_with_data(
-                src.as_ptr() as *const std::ffi::c_void,
-                layout.cluster_map.length,
-                metal::MTLResourceOptions::StorageModeShared,
-            )
-        };
-
-        let weights_start = layout.ternary_weights.offset as usize;
-        let weights_buffer = {
-            let src = &bytes[weights_start..weights_start + layout.ternary_weights.length as usize];
-            device.new_buffer_with_data(
-                src.as_ptr() as *const std::ffi::c_void,
-                layout.ternary_weights.length,
-                metal::MTLResourceOptions::StorageModeShared,
-            )
-        };
-
-        let scales_start = layout.block_scales.offset as usize;
-        // Split block_scales into layer_scales + embed_scales + centroid_scales buffers.
-        // The ingest pipeline appends embed_scales then centroid_scales after layer scales.
-        let total_scales_length = layout.block_scales.length as usize;
-        let embed_blocks = (header.vocab_size as u64 * header.hidden_dim as u64 + 255) / 256;
-        let embed_scales_bytes = (embed_blocks * 2) as usize;
-        let centroid_blocks = (256u64 * header.hidden_dim as u64 + 255) / 256;
-        let centroid_scales_bytes = (centroid_blocks * 2) as usize;
-        let layer_scales_bytes = total_scales_length - embed_scales_bytes - centroid_scales_bytes;
-        let layer_scales_end = scales_start + layer_scales_bytes;
-        let embed_scales_end = layer_scales_end + embed_scales_bytes;
-
-        let scales_buffer = {
-            let src = &bytes[scales_start..layer_scales_end];
-            device.new_buffer_with_data(
-                src.as_ptr() as *const std::ffi::c_void,
-                layer_scales_bytes as u64,
-                metal::MTLResourceOptions::StorageModeShared,
-            )
-        };
-
-        let embed_scales_buffer = {
-            let src = &bytes[layer_scales_end..embed_scales_end];
-            device.new_buffer_with_data(
-                src.as_ptr() as *const std::ffi::c_void,
-                embed_scales_bytes as u64,
-                metal::MTLResourceOptions::StorageModeShared,
-            )
-        };
-
-        // Centroid scales are the last portion of block_scales.
-        let centroid_scales_start = embed_scales_end;
-        let centroid_scales_buffer = {
-            let src = &bytes[centroid_scales_start..embed_scales_end + centroid_scales_bytes];
-            device.new_buffer_with_data(
-                src.as_ptr() as *const std::ffi::c_void,
-                centroid_scales_bytes as u64,
-                metal::MTLResourceOptions::StorageModeShared,
-            )
-        };
-
-        // ── Split aux section into norms + scalars ───────────────────
-        // Norms: 48 layers × (4 × 3840 + 2 × 512) FP16 + final_norm 3840 FP16 = 1,580,544 bytes
-        // Scalars: 48 × 2 bytes FP16 = 96 bytes
-        // MIL: 256-byte placeholder (ANE Core ML program)
-        // Metallib: remaining bytes (pre-compiled Metal kernel library)
-        let aux_start = layout.aux.offset as usize;
-        let aux_len = layout.aux.length as usize;
-        let norms_byte_len = 48 * (4 * 3840 + 2 * 512) * 2 + 3840 * 2; // 1,580,544
-        let scalars_byte_len = 48 * 2; // 96 bytes
-        let mil_byte_len: usize = 256; // fixed ANE MIL placeholder size
-        let (norms_buffer, scalars_buffer, mil_buffer, metallib_buffer, compaction_model_bytes) =
-            if aux_len >= norms_byte_len + scalars_byte_len + mil_byte_len {
-                let nb = {
-                    let src = &bytes[aux_start..aux_start + norms_byte_len];
-                    device.new_buffer_with_data(
-                        src.as_ptr() as *const std::ffi::c_void,
-                        norms_byte_len as u64,
-                        metal::MTLResourceOptions::StorageModeShared,
-                    )
-                };
-                let sb = {
-                    let src = &bytes
-                        [aux_start + norms_byte_len..aux_start + norms_byte_len + scalars_byte_len];
-                    device.new_buffer_with_data(
-                        src.as_ptr() as *const std::ffi::c_void,
-                        scalars_byte_len as u64,
-                        metal::MTLResourceOptions::StorageModeShared,
-                    )
-                };
-                let mil_start = aux_start + norms_byte_len + scalars_byte_len;
-                let metallib_start = mil_start + mil_byte_len;
-                let mb = {
-                    let src = &bytes[mil_start..mil_start + mil_byte_len];
-                    Some(device.new_buffer_with_data(
-                        src.as_ptr() as *const std::ffi::c_void,
-                        mil_byte_len as u64,
-                        metal::MTLResourceOptions::StorageModeShared,
-                    ))
-                };
-                let tail_remaining = aux_start + aux_len - metallib_start;
-                let (metallib_buf, comp_bytes) = if tail_remaining >= 4
-                    && bytes[metallib_start..metallib_start + 4] == [0x4D, 0x54, 0x4C, 0x42]
-                {
-                    // Old format: MTLB magic directly, whole tail is metallib
-                    let src = &bytes[metallib_start..aux_start + aux_len];
-                    (
-                        Some(device.new_buffer_with_data(
-                            src.as_ptr() as *const std::ffi::c_void,
-                            (aux_start + aux_len - metallib_start) as u64,
-                            metal::MTLResourceOptions::StorageModeShared,
-                        )),
-                        None,
-                    )
-                } else if tail_remaining >= 8 {
-                    // New format: first 4 bytes = metallib length (u32le)
-                    let metal_len = u32::from_le_bytes([
-                        bytes[metallib_start],
-                        bytes[metallib_start + 1],
-                        bytes[metallib_start + 2],
-                        bytes[metallib_start + 3],
-                    ]) as usize;
-                    let metal_data_start = metallib_start + 4;
-                    let after_metal = metal_data_start + metal_len;
-                    let mb = if tail_remaining >= 4 + metal_len {
-                        let src = &bytes[metal_data_start..after_metal];
-                        Some(device.new_buffer_with_data(
-                            src.as_ptr() as *const std::ffi::c_void,
-                            metal_len as u64,
-                            metal::MTLResourceOptions::StorageModeShared,
-                        ))
-                    } else {
-                        None
-                    };
-                    // After metallib: comp_len(u32le) + compaction_bytes
-                    // After compaction model: prefill_len(u32le) + prefill_model bytes
-                    let comp_bytes = if after_metal + 4 <= aux_start + aux_len {
-                        let comp_len = u32::from_le_bytes([
-                            bytes[after_metal],
-                            bytes[after_metal + 1],
-                            bytes[after_metal + 2],
-                            bytes[after_metal + 3],
-                        ]) as usize;
-                        let comp_data_start = after_metal + 4;
-                        if comp_len > 0 && comp_data_start + comp_len <= aux_start + aux_len {
-                            Some(bytes[comp_data_start..comp_data_start + comp_len].to_vec())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    (mb, comp_bytes)
-                } else {
-                    (None, None)
-                };
-                (Some(nb), Some(sb), mb, metallib_buf, comp_bytes)
-            } else {
-                (None, None, None, None, None)
-            };
-
-        // ── Parse prefill model bytes from aux tail ────────────────
-        // The aux section tail is structured as:
-        //   metallib_len(u32le) + metallib_bytes + comp_len(u32le) + comp_bytes + prefill_len(u32le) + prefill_bytes
-        // We skip past norms/scalars/MIL-placeholder/metallib/compaction to reach prefill bytes.
-        let prefill_model_bytes: Option<Vec<u8>> = if aux_len
-            >= norms_byte_len + scalars_byte_len + mil_byte_len + 8
-        {
-            let metallib_start = aux_start + norms_byte_len + scalars_byte_len + mil_byte_len;
-            let tail_remaining = aux_start + aux_len - metallib_start;
-            if tail_remaining < 8 {
-                None
-            } else if bytes[metallib_start..metallib_start + 4] == [0x4D, 0x54, 0x4C, 0x42] {
-                // Old format: no compaction/prefill data
-                None
-            } else {
-                // Skip metallib: first 4 bytes = length
-                let metal_len = u32::from_le_bytes([
-                    bytes[metallib_start],
-                    bytes[metallib_start + 1],
-                    bytes[metallib_start + 2],
-                    bytes[metallib_start + 3],
-                ]) as usize;
-                let after_metal = metallib_start + 4 + metal_len;
-                // Skip compaction model: at after_metal, 4 bytes = length + bytes
-                if after_metal + 8 <= aux_start + aux_len {
-                    let comp_len = u32::from_le_bytes([
-                        bytes[after_metal],
-                        bytes[after_metal + 1],
-                        bytes[after_metal + 2],
-                        bytes[after_metal + 3],
-                    ]) as usize;
-                    let after_comp = after_metal + 4 + comp_len;
-                    // Read prefill model: at after_comp, 4 bytes = length + bytes
-                    if after_comp + 4 <= aux_start + aux_len {
-                        let prefill_len = u32::from_le_bytes([
-                            bytes[after_comp],
-                            bytes[after_comp + 1],
-                            bytes[after_comp + 2],
-                            bytes[after_comp + 3],
-                        ]) as usize;
-                        let prefill_start = after_comp + 4;
-                        if prefill_len > 0 && prefill_start + prefill_len <= aux_start + aux_len {
-                            Some(bytes[prefill_start..prefill_start + prefill_len].to_vec())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        // Compute num_weights from scales (each FP16 scale byte-pair covers
-        // 256 weights).  The stored length is page-aligned, so the result
-        // slightly over-counts, but this is harmless for tile allocation.
-        let num_weights = (layer_scales_bytes as u64 / 2) * 256;
-        let num_layers = header.num_layers;
+        let num_weights = (sg2.length / 2) * 256;
 
         Ok(Self {
-            // v1 header/layout are placeholders; all v2 metadata lives
-            // in mmap_data for zero-copy reinterpretation by callers.
             header: crate::compute_image::manifest::CImageHeader::default(),
-            layout: unsafe {
-                let mut v1_layout: V1CImageLayoutMeta = std::mem::zeroed();
-                v1_layout.num_layers = num_layers;
-                v1_layout.num_weights = num_weights as u32;
-                v1_layout.num_blocks = (num_weights / 256) as u32;
-                v1_layout
-            },
-            weights_buffer,
-            scales_buffer,
-            embed_buffer: Some(embed_buffer),
-            embed_scales_buffer: Some(embed_scales_buffer),
-            centroid_scales_buffer: Some(centroid_scales_buffer),
-            centroid_buffer: Some(centroid_buffer),
-            cluster_map_buffer: Some(cluster_map_buffer),
-            norms_buffer,
-            scalars_buffer,
-            mil_buffer,
-            metallib_buffer,
-            compaction_model_bytes,
-            prefill_model_bytes,
+            layout: unsafe { std::mem::zeroed() },
+            weights_buffer: mk_buf(sg1),
+            scales_buffer: mk_buf(sg2),
             weights_int4_buffer: None,
             fused_int4_buffer: None,
-            num_weights,
-            num_layers,
+            embed_buffer: None,
+            embed_scales_buffer: None,
+            centroid_scales_buffer: None,
+            centroid_buffer: None,
+            cluster_map_buffer: None,
+            norms_buffer: None,
+            scalars_buffer: None,
+            mil_buffer: None,
+            metallib_buffer: Some(mk_buf(sg0)),
+            compaction_model_bytes: None,
+            prefill_model_bytes: None,
+            num_weights: num_weights as u64,
+            num_layers: header.num_layers,
             mmap_data: bytes,
         })
     }
+    pub fn multimodal_capabilities(&self) -> MultimodalCapabilities {
+        MultimodalCapabilities::default()
+    }
+
+
 
     /// If running on M5+ (Apple10 GPU family), expand ternary weights to INT4
     /// block-quantized format in a GPU-readable shared buffer.

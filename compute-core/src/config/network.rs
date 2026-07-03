@@ -308,7 +308,7 @@ impl ServerConfig {
     }
 
     /// Merge another config's non-default fields into self.
-    fn merge(&mut self, other: ServerConfig) {
+    pub fn merge(&mut self, other: ServerConfig) {
         self.server.port = other.server.port;
         self.server.host = other.server.host;
         self.server.max_concurrent = other.server.max_concurrent;

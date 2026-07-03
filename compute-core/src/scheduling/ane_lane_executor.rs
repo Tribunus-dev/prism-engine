@@ -27,33 +27,10 @@ use std::ffi::c_void;
 struct SendRawPtr<T>(*mut T);
 unsafe impl<T> Send for SendRawPtr<T> {}
 
-/// Allocate a page-aligned zero-initialized buffer via anonymous mmap.
-/// The returned pointer is always 16 KB aligned (Apple Silicon page size),
-/// which avoids kernel shadow copies during IOSurface creation.
-/// The caller is responsible for freeing the memory with `libc::munmap`.
-fn allocate_page_aligned_buffer(byte_len: usize) -> *mut u8 {
-    if byte_len == 0 {
-        return std::ptr::null_mut();
-    }
-    unsafe {
-        let ptr = libc::mmap(
-            std::ptr::null_mut(),
-            byte_len,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-            -1,
-            0,
-        );
-        if ptr == libc::MAP_FAILED {
-            // Fall back to heap allocation if mmap fails
-            let mut heap: Vec<u8> = vec![0u8; byte_len];
-            let ptr = heap.as_mut_ptr();
-            std::mem::forget(heap);
-            ptr
-        } else {
-            ptr as *mut u8
-        }
-    }
+/// Allocate a zero-initialized heap buffer for fallback arena info.
+/// Returns an owned [`Vec<u8>`] whose memory is freed on drop.
+fn allocate_page_aligned_buffer(byte_len: usize) -> Vec<u8> {
+    vec![0u8; byte_len]
 }
 
 /// Real ANE lane executor that runs Core ML predictions on a worker thread.
@@ -147,64 +124,69 @@ impl LaneExecutor for AneLaneExecutor {
                 let in_name = &in_bindings[0].tensor_id;
                 let out_name = &out_bindings[0].tensor_id;
 
-                let in_info = arena
-                    .slot(in_slot_id)
-                    .and_then(|s| s.backing_arena.as_ref())
-                    .map(|a| a.info)
-                    .unwrap_or_else(|| {
-                        let s = arena.slot(in_slot_id).expect("slot exists");
-                        let byte_len = s.manifest.byte_length.max(1) as usize;
-                        crate::arena_info::ArenaInfo {
-                            width: 1,
-                            height: 1,
-                            logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1)
-                                as i32,
-                            logical_dim1: s.manifest.logical_shape.get(1).copied().unwrap_or(1)
-                                as i32,
-                            pixel_format: 0,
-                            byte_size: byte_len as i32,
-                            bytes_per_row: s
-                                .manifest
-                                .strides_bytes
-                                .first()
-                                .copied()
-                                .unwrap_or(byte_len as u64)
-                                as i32,
-                            dtype: 9,
-                            base_address: allocate_page_aligned_buffer(byte_len) as *mut c_void,
-                            cv_buffer: std::ptr::null_mut(),
-                            io_surface: std::ptr::null_mut(),
+
+                let (mut _in_heap, in_info) =
+                    match arena.slot(in_slot_id).and_then(|s| s.backing_arena.as_ref()) {
+                        Some(a) => (None, a.info),
+                        None => {
+                            let s = arena.slot(in_slot_id).expect("slot exists");
+                            let byte_len = s.manifest.byte_length.max(1) as usize;
+                            let mut heap = allocate_page_aligned_buffer(byte_len);
+                            let ptr = heap.as_mut_ptr();
+                            (Some(heap), crate::arena_info::ArenaInfo {
+                                width: 1,
+                                height: 1,
+                                logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1)
+                                    as i32,
+                                logical_dim1: s.manifest.logical_shape.get(1).copied().unwrap_or(1)
+                                    as i32,
+                                pixel_format: 0,
+                                byte_size: byte_len as i32,
+                                bytes_per_row: s
+                                    .manifest
+                                    .strides_bytes
+                                    .first()
+                                    .copied()
+                                    .unwrap_or(byte_len as u64)
+                                    as i32,
+                                dtype: 9,
+                                base_address: ptr as *mut c_void,
+                                cv_buffer: std::ptr::null_mut(),
+                                io_surface: std::ptr::null_mut(),
+                            })
                         }
-                    });
-                let out_info = arena
-                    .slot(out_slot_id)
-                    .and_then(|s| s.backing_arena.as_ref())
-                    .map(|a| a.info)
-                    .unwrap_or_else(|| {
-                        let s = arena.slot(out_slot_id).expect("slot exists");
-                        let byte_len = s.manifest.byte_length.max(1) as usize;
-                        crate::arena_info::ArenaInfo {
-                            width: 1,
-                            height: 1,
-                            logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1)
-                                as i32,
-                            logical_dim1: s.manifest.logical_shape.get(1).copied().unwrap_or(1)
-                                as i32,
-                            pixel_format: 0,
-                            byte_size: byte_len as i32,
-                            bytes_per_row: s
-                                .manifest
-                                .strides_bytes
-                                .first()
-                                .copied()
-                                .unwrap_or(byte_len as u64)
-                                as i32,
-                            dtype: 9,
-                            base_address: allocate_page_aligned_buffer(byte_len) as *mut c_void,
-                            cv_buffer: std::ptr::null_mut(),
-                            io_surface: std::ptr::null_mut(),
+                    };
+                let (mut _out_heap, out_info) =
+                    match arena.slot(out_slot_id).and_then(|s| s.backing_arena.as_ref()) {
+                        Some(a) => (None, a.info),
+                        None => {
+                            let s = arena.slot(out_slot_id).expect("slot exists");
+                            let byte_len = s.manifest.byte_length.max(1) as usize;
+                            let mut heap = allocate_page_aligned_buffer(byte_len);
+                            let ptr = heap.as_mut_ptr();
+                            (Some(heap), crate::arena_info::ArenaInfo {
+                                width: 1,
+                                height: 1,
+                                logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1)
+                                    as i32,
+                                logical_dim1: s.manifest.logical_shape.get(1).copied().unwrap_or(1)
+                                    as i32,
+                                pixel_format: 0,
+                                byte_size: byte_len as i32,
+                                bytes_per_row: s
+                                    .manifest
+                                    .strides_bytes
+                                    .first()
+                                    .copied()
+                                    .unwrap_or(byte_len as u64)
+                                    as i32,
+                                dtype: 9,
+                                base_address: ptr as *mut c_void,
+                                cv_buffer: std::ptr::null_mut(),
+                                io_surface: std::ptr::null_mut(),
+                            })
                         }
-                    });
+                    };
 
                 if let Some(model_arc) = &model_arc {
                     let model = model_arc.lock();

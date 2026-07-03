@@ -10,6 +10,7 @@ name = "prism_bridge"
 
 [dependencies]
 tribunus-compute-core = { path = "../compute-core", features = ["prism-backend"] }
+prism-ffi = { path = "../prism-ffi", features = ["compute-core"] }
 uniffi = { version = "0.27", features = ["cli"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

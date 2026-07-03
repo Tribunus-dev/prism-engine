@@ -14,6 +14,10 @@ pub mod legacy_worker_bridge;
 pub mod worker_supervision_config;
 pub mod worker_process_manager;
 pub mod kv_cache_coordinator;
+pub mod npu_completion_port;
+pub mod audio;
+pub mod text_to_speech;
+pub mod vision;
 
 pub use worker_pool::WorkerPoolResource;
 pub use worker_ingress_queue::{IngressEntry, WorkerIngressQueue};
@@ -27,6 +31,10 @@ pub use worker_supervision_config::{
 };
 pub use worker_process_manager::{WorkerProcessManager, WorkerProcessHandles, WorkerId};
 pub use kv_cache_coordinator::{KVCacheCoordinator, LiveKvCache};
+pub use npu_completion_port::NpuCompletionPort;
+pub use audio::AudioEncoderResource;
+pub use text_to_speech::TextToSpeechResource;
+pub use vision::VisionEncoderResource;
 
 // ── Stable resource IDs ───────────────────────────────────────────────
 
@@ -42,6 +50,13 @@ pub const WORKER_SUPERVISION_CONFIG_RESOURCE: crate::runtime::scheduling::compon
 pub const WORKER_PROCESS_MANAGER_RESOURCE: crate::runtime::scheduling::component_id::ResourceId = 18;
 
 pub const KV_CACHE_COORDINATOR_RESOURCE: crate::runtime::scheduling::component_id::ResourceId = 19;
+
+pub const NPU_COMPLETION_PORT_RESOURCE: crate::runtime::scheduling::component_id::ResourceId = 20;
+
+pub const AUDIO_ENCODER_RESOURCE: crate::runtime::scheduling::component_id::ResourceId = 21;
+
+pub const TEXT_TO_SPEECH_RESOURCE: crate::runtime::scheduling::component_id::ResourceId = 22;
+pub const VISION_ENCODER_RESOURCE: crate::runtime::scheduling::component_id::ResourceId = 23;
 
 // ── SchedulableResource impls ─────────────────────────────────────────
 
@@ -91,3 +106,10 @@ impl SchedulableResource for WorkerProcessManager {
     const RESOURCE_ID: ResourceId = WORKER_PROCESS_MANAGER_RESOURCE;
     const NAME: &'static str = "WorkerProcessManager";
 }
+
+impl SchedulableResource for NpuCompletionPort {
+    const RESOURCE_ID: ResourceId = NPU_COMPLETION_PORT_RESOURCE;
+    const NAME: &'static str = "NpuCompletionPort";
+}
+
+

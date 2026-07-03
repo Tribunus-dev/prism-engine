@@ -19,6 +19,7 @@ pub mod int4_pack;
 pub mod draft_loader;
 #[cfg(feature = "tensix")]
 pub mod tensix;
+pub mod execution_graph;
 
 pub use source::*;
 pub use quantize::*;

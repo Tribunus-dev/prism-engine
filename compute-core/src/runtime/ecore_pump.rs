@@ -1,12 +1,10 @@
 //! E-core prefetch pump — ECS system.
 //!
-//! Phase 1: reads ternary u32 packs from .cimage mmap (GPU tile64 format)
-//! and re-packs into 16×16 block-swizzled u8 in the pre-allocated SLC
-//! WriteCombined buffer for ANE consumption.
+//! Phase 1: reads ternary u32 packs from .cimage mmap (tile640 format)
+//! and re-packs into the NPU's native weight format via `NpuWeightPump`.
 //!
-//! Phase 2: during idle cycles, requantizes FP16 KV cache from the ANE's
-//! output surface into swizzled u8 ternary format, enabling DRAM-efficient
-//! KV storage that the ANE can read back via the gather LUT.
+//! Phase 2: during idle cycles, requantizes FP16 KV cache from the NPU's
+//! output surface into swizzled u8 ternary format (ANE-specific).
 //!
 //! State machine: IDLE → PREFETCHING → READY, lock-free atomics.
 
@@ -16,10 +14,6 @@ use std::thread::{self, JoinHandle};
 use super::agent_slot::{MultiplexerState, STATE_IDLE, STATE_PREFETCHING, STATE_READY};
 use crate::runtime::world::Entity;
 use crate::runtime::components::AgentSlot;
-use crate::compute_image::compile::ternary::{
-    swizzled_buffer_size,
-    repack_ternary_to_swizzled_u8,
-};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +34,12 @@ pub struct CImageTopologyTable {
 }
 
 /// Spawn the E-core prefetch pump on a dedicated thread.
+///
+/// The pump reads tile640 ternary weights from the cimage mmap and calls
+/// the NPU weight pump (stored in `MultiplexerState.weight_pump`) to
+/// convert them into the NPU's native format.  Block scales (`&[]`) are
+/// passed through — NPUs that need them (all except ANE) will receive
+/// them once their pump implementations are wired.
 pub fn spawn_ecore_prefetch_pump(state: Arc<MultiplexerState>) -> JoinHandle<()> {
     thread::spawn(move || loop {
         let world = state.world.read();
@@ -62,6 +62,11 @@ pub fn spawn_ecore_prefetch_pump(state: Arc<MultiplexerState>) -> JoinHandle<()>
             let offset = slot.weight_offset;
             if offset >= mmap.len() { slot.store_state(STATE_READY); continue; }
 
+            let pump = match state.weight_pump.as_deref() {
+                Some(p) => p,
+                None => { slot.store_state(STATE_READY); continue; }
+            };
+
             let phase = slot.prefetch_phase;
             let out_dim = if phase == 0 { hd } else { id } as usize;
             let in_dim  = if phase == 0 { hd } else { id } as usize;
@@ -71,10 +76,10 @@ pub fn spawn_ecore_prefetch_pump(state: Arc<MultiplexerState>) -> JoinHandle<()>
             let rows = rows_per.min(avail);
             if rows > 0 {
                 let ternary_data = &mmap[offset..offset + rows * tile_stride];
-                let swz_size = swizzled_buffer_size(rows, in_dim);
-                if slc_len >= swz_size {
-                    let slc = unsafe { std::slice::from_raw_parts_mut(slc_ptr, swz_size) };
-                    repack_ternary_to_swizzled_u8(ternary_data, rows, in_dim, slc, in_dim);
+                let out_size = pump.output_buffer_size(rows, in_dim);
+                if slc_len >= out_size {
+                    let slc = unsafe { std::slice::from_raw_parts_mut(slc_ptr, out_size) };
+                    pump.repack(ternary_data, &[], rows, in_dim, slc);
                     std::hint::black_box(unsafe { *slc_ptr });
                 }
             }

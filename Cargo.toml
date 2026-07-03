@@ -81,8 +81,8 @@ path = "src/bin/prism.rs"
 
 [[bin]]
 name = "prism-server"
-path = "src/bin/prism_server.rs"
-required-features = ["server"]
+path = "compute-core/src/bin/prism_server.rs"
+required-features = ["prism-backend"]
 
 [dependencies]
 metal = { version = "0.29", optional = true }
@@ -133,3 +133,4 @@ cc = "1.2"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
+required-features = ["prism-backend"]

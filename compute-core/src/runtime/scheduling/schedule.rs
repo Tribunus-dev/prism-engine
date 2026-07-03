@@ -21,8 +21,8 @@ use crate::runtime::scheduling::manifest::{
     ManifestBuilder, ManifestWarningKind, ScheduleManifest,
 };
 use crate::runtime::scheduling::metadata::{
-    ErasedSystem, Stage, SystemId, SystemMetadata, SystemResult,
-    SerializationPolicy,
+    ErasedSystem, ExecutionClass, Stage, SystemId, SystemMetadata,
+    SystemResult, SerializationPolicy,
 };
 use crate::runtime::world::World;
 use crate::runtime::ledger::{
@@ -85,6 +85,28 @@ fn priority_key(s: &SystemMetadata) -> PriorityKey {
         stage: s.stage as u8,
         order: s.order,
         system_id: s.id.0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ParallelBatch
+// ---------------------------------------------------------------------------
+
+/// Describes a group of systems that can run in parallel within a stage.
+pub struct ParallelBatch {
+    /// System indices within the stage.
+    pub system_indices: Vec<usize>,
+    /// Completion signal per system: the index of the completion port
+    /// or resource to poll. 0 = serial (immediately completes).
+    pub completion_lane: u32,
+}
+
+impl Default for ParallelBatch {
+    fn default() -> Self {
+        Self {
+            system_indices: Vec::new(),
+            completion_lane: 0,
+        }
     }
 }
 
@@ -560,14 +582,14 @@ impl Schedule {
     ) -> Vec<(SystemId, SystemResult)> {
         let mut results = Vec::with_capacity(self.systems.len());
         let scheduler_epoch: u64 = 1;
-        // Track the current stage — when it changes, drain the previous
-        // stage's buffer.
         let mut previous_stage: Option<Stage> = None;
 
-        for idx in 0..self.systems.len() {
+        let mut idx = 0;
+        while idx < self.systems.len() {
             let stage_idx = self.metadata[idx].stage as usize;
             let meta_stage = self.metadata[idx].stage;
             let meta_id = self.metadata[idx].id;
+            let exec_class = self.metadata[idx].execution_class;
 
             // Stage boundary: process commands through ledger.
             if let Some(prev) = previous_stage {
@@ -601,13 +623,61 @@ impl Schedule {
             }
             previous_stage = Some(meta_stage);
 
-            // Create the command writer for this system.
+            // PARALLEL DISPATCH: consecutive Parallel-class systems run with
+            // individual command buffers, merged afterward.
+            if exec_class == ExecutionClass::Parallel {
+                let batch_start = idx;
+                let mut batch_end = idx + 1;
+                while batch_end < self.systems.len()
+                    && self.metadata[batch_end].execution_class == ExecutionClass::Parallel
+                    && self.metadata[batch_end].stage == meta_stage
+                {
+                    batch_end += 1;
+                }
+
+                let _batch = ParallelBatch {
+                    system_indices: (batch_start..batch_end).collect(),
+                    completion_lane: 0,
+                };
+
+                // Cooperative dispatch: sequential but with per-system buffers.
+                // True thread-level parallelism requires Send bounds on ErasedSystem.
+                let mut merged_buffer: Vec<
+                    crate::runtime::scheduling::command::StampedCommand,
+                > = Vec::new();
+
+                for &sys_idx in &_batch.system_indices {
+                    let mut local_buffer: Vec<
+                        crate::runtime::scheduling::command::StampedCommand,
+                    > = Vec::new();
+                    {
+                        let mut writer = CommandWriter::new(
+                            &mut local_buffer,
+                            meta_stage,
+                            self.metadata[sys_idx].id,
+                        );
+                        let result = self.systems[sys_idx].run(world, &mut writer);
+                        results.push((self.metadata[sys_idx].id, result));
+                    }
+                    merged_buffer.extend(local_buffer);
+                }
+
+                self.command_buffers[stage_idx].extend(merged_buffer);
+                idx = batch_end;
+                continue;
+            }
+
+            // SERIAL PATH: shared stage command buffer.
             {
-                let mut writer: CommandWriter<'_> =
-                    CommandWriter::new(&mut self.command_buffers[stage_idx], meta_stage, meta_id);
+                let mut writer = CommandWriter::new(
+                    &mut self.command_buffers[stage_idx],
+                    meta_stage,
+                    meta_id,
+                );
                 let result = self.systems[idx].run(world, &mut writer);
                 results.push((meta_id, result));
             }
+            idx += 1;
         }
 
         // Drain the final stage's buffer through ledger.

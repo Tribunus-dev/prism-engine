@@ -24,15 +24,9 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use tribunus_compute_core::lut::engine::PrismEngine;
-use tribunus_compute_core::lut::graph::{ModelGraph, UnifiedConfig};
+use tribunus_compute_core::compute_image::orchestrator::Orchestrator;
+use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
-
-use tribunus_compute_core::runtime::agent_slot::MultiplexerState;
-use tribunus_compute_core::runtime::ecore_pump::spawn_ecore_prefetch_pump;
-use tribunus_compute_core::runtime::ane_multiplexer::spawn_ane_multiplexer;
-use tribunus_compute_core::runtime::ane_multiplexer::DynamicMultiplexer;
-use tribunus_compute_core::compute_image::cimage_loader::load_cimage_mmap;
 
 // ── CLI ─────────────────────────────────────────────────────────────────
 
@@ -55,9 +49,7 @@ struct Args {
 // ── State ───────────────────────────────────────────────────────────────
 
 struct AppState {
-    engine: PrismEngine,
-    #[allow(dead_code)]
-    graph: ModelGraph,
+    orchestrator: Orchestrator,
     tokenizer: TribunusTokenizer,
 }
 
@@ -168,15 +160,38 @@ async fn chat_completions(
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
     let prompt_len = input_ids.len();
 
-    let stats = state.engine.generate(&input_ids, max_tokens).map_err(|e| {
-        eprintln!("[prism-server] generate error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    // V2 orchestrator: prefill prompt, then autoregressive decode
+    let start = std::time::Instant::now();
+    // Sequential GPU prefill: each decode_token builds KV cache row
+    for i in 0..input_ids.len().saturating_sub(1) {
+        state.orchestrator.decode_token(input_ids[i]).map_err(|e| {
+            eprintln!("[prism-server] prefill step {} error: {}", i, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    }
+    let mut last_token = *input_ids.last().unwrap_or(&0);
+    let mut generated_tokens = Vec::with_capacity(max_tokens);
+    for _ in 0..max_tokens {
+        last_token = state.orchestrator.decode_token(last_token).map_err(|e| {
+            eprintln!("[prism-server] decode error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        generated_tokens.push(last_token);
+        if last_token == 1 {
+            // EOS token
+            break;
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let tok_s = generated_tokens.len() as f64 / elapsed.as_secs_f64();
+    eprintln!("[prism-server] {} tokens in {:.2}s = {:.1} tok/s",
+        generated_tokens.len(), elapsed.as_secs_f64(), tok_s);
 
     let output_text = state
         .tokenizer
-        .decode(&stats.generated_tokens)
-        .unwrap_or_else(|_| format!("[prism] {} tokens generated", stats.generated_tokens.len()));
+        .decode(&generated_tokens)
+        .unwrap_or_else(|_| format!("[prism] {} tokens generated", generated_tokens.len()));
 
     Ok(Json(ChatResponse {
         id: "cmpl-1".to_string(),
@@ -196,8 +211,8 @@ async fn chat_completions(
         }],
         usage: Usage {
             prompt_tokens: prompt_len as u32,
-            completion_tokens: stats.generated_tokens.len() as u32,
-            total_tokens: (prompt_len + stats.generated_tokens.len()) as u32,
+            completion_tokens: generated_tokens.len() as u32,
+            total_tokens: (prompt_len + generated_tokens.len()) as u32,
         },
     }))
 }
@@ -208,77 +223,27 @@ async fn chat_completions(
 async fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    println!(
-        "[prism-server] Loading config from {}/config.json",
-        args.model_dir.display()
-    );
-    let config_path = args.model_dir.join("config.json");
-    let config = UnifiedConfig::from_file(&config_path)?;
+    println!("[prism-server] Loading V2 cimage from {}...", args.cimage.display());
+    let orchestrator = Orchestrator::from_cimage(&args.cimage, 1, false)
+        .map_err(|e| format!("cimage load failed: {e}"))?;
 
-    println!(
-        "[prism-server] Building model graph ({} layers)...",
-        config.num_layers
-    );
-    let graph = ModelGraph::build(&config);
-
-    println!(
-        "[prism-server] Loading .cimage from {}...",
-        args.cimage.display()
-    );
-    let mut engine = PrismEngine::load(&args.cimage, graph.clone())?;
-    #[cfg(feature = "metal-dispatch")]
-    {
-        if engine.with_metal().is_err() {
-            eprintln!("[prism-server] Metal acceleration not available, using CPU");
-        }
-    }
-
-    // ── Atomic Scheduler Boot ──────────────────────────────────────
-    // Initialise the 32-agent multiplexer from the .cimage header.
-    let mut multiplexer = Arc::new(MultiplexerState::new());
-    {
-        let mmap = load_cimage_mmap(&args.cimage)
-            .expect("failed to load .cimage for atomic scheduler");
-        Arc::get_mut(&mut multiplexer)
-            .expect("multiplexer has no references yet")
-            .init_from_cimage(mmap.0.into(), &mmap.1, 3840, 18432);
-    }
-
-    // Spawn the two dedicated threads.
-    let _pump = spawn_ecore_prefetch_pump(multiplexer.clone());
-    let dynamic_mux = Arc::new(std::sync::Mutex::new(DynamicMultiplexer::new()));
-    let _mux = spawn_ane_multiplexer(multiplexer, dynamic_mux);
-
-    eprintln!("[prism] Atomic scheduler running: E-core prefetch + P-core ANE multiplexer");
-
-    println!(
-        "[prism-server] Loading tokenizer from {}...",
-        args.model_dir.display()
-    );
+    println!("[prism-server] Loading tokenizer from {}...", args.model_dir.display());
     let tokenizer = TribunusTokenizer::from_dir(&args.model_dir)?;
 
-    let state = Arc::new(Mutex::new(AppState {
-        engine,
-        graph,
-        tokenizer,
-    }));
+    let state = Arc::new(Mutex::new(AppState { orchestrator, tokenizer }));
 
     let app = Router::new()
         .route("/v1/models", get(list_models))
         .route("/v1/chat/completions", post(chat_completions))
-        .route("/v1/completions", post(chat_completions))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", args.port);
     println!("[prism-server] Listening on http://{}", addr);
-    println!(
-        "[prism-server] Try: curl http://localhost:{}/v1/models",
-        args.port
-    );
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("bind: {e}"))?;
+
     axum::serve(listener, app)
         .await
         .map_err(|e| format!("serve: {e}"))?;

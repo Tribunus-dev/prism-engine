@@ -1,3 +1,18 @@
+//! Multimodal processing pipeline.
+//!
+//! # Architecture
+//!
+//! The Legacy path (`VisionEncoderConfig` -> `ProjectorConfig` -> `multimodal_forward()`)
+//! serves PaliGemma/LLaVA/Pixtral-class encoder-decoder models.
+//!
+//! Gemma 4 Unified uses a direct modality-to-decoder embedding adapter path defined
+//! in `tribunus_compute_core::compute_image::multimodal::adapter`:
+//! - `Gemma4DirectImageProjectionAdapter`: encoder-free image → decoder embedding
+//! - `Gemma4DirectAudioProjectionAdapter`: encoder-free audio → decoder embedding
+//!
+//! The model-family-specific adapters replace the need for a separate vision encoder
+//! artifact for encoder-free models.
+
 pub mod dynamic_tiling;
 pub mod projector;
 pub mod vision_encoder;

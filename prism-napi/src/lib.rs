@@ -13,6 +13,84 @@ use napi_derive::napi;
 
 use tribunus_compute_core::engine::ComputeEngine as CoreComputeEngine;
 use tribunus_compute_core::streaming::GenerationHandle;
+use tribunus_compute_core::device;
+use tribunus_compute_core::config::ServerConfig;
+
+
+// ── Device Enumeration ───────────────────────────────────────────────────
+
+/// Device information exposed to Node.js via napi-rs.
+#[napi(object)]
+pub struct NapiDeviceInfo {
+    pub id: u32,
+    pub name: String,
+    pub kind: String,
+    pub backend: String,
+    pub vendor: String,
+    pub driver_version: String,
+    pub memory_total_bytes: i64,
+    pub memory_free_bytes: i64,
+    pub memory_bandwidth_gb_per_sec: f64,
+    pub unified_with_cpu: bool,
+    pub compute_units: u32,
+    pub clock_mhz: u32,
+    pub ane_cores: u32,
+    pub supports_f16: bool,
+    pub supports_bf16: bool,
+    pub supports_int8: bool,
+    pub supports_ternary: bool,
+}
+
+#[napi]
+pub fn list_devices() -> Vec<NapiDeviceInfo> {
+    device::global_registry()
+        .enumerate()
+        .iter()
+        .map(|d| NapiDeviceInfo {
+            id: d.id.0,
+            name: d.name.clone(),
+            kind: d.kind.label().to_string(),
+            backend: d.backend.label().to_string(),
+            vendor: d.vendor.clone(),
+            driver_version: d.driver_version.clone(),
+            memory_total_bytes: d.memory.total_bytes as i64,
+            memory_free_bytes: d.memory.free_bytes as i64,
+            memory_bandwidth_gb_per_sec: d.memory.bandwidth_gb_per_sec,
+            unified_with_cpu: d.memory.unified_with_cpu,
+            compute_units: d.compute_units,
+            clock_mhz: d.clock_mhz,
+            ane_cores: d.ane_cores,
+            supports_f16: d.supports_f16,
+            supports_bf16: d.supports_bf16,
+            supports_int8: d.supports_int8,
+            supports_ternary: d.supports_ternary,
+        })
+        .collect()
+}
+
+/// Return device inventory as a JSON string.
+#[napi]
+pub fn list_devices_json() -> String {
+    device::global_registry().to_json()
+}
+
+#[napi]
+pub fn load_config() -> NapiServerConfig {
+    ServerConfig::load().into()
+}
+
+#[napi]
+pub fn load_config_from(path: String) -> NapiServerConfig {
+    let mut config = ServerConfig::load_config_toml(&path).unwrap_or_default();
+    config.load_env_overrides();
+    config.into()
+}
+
+#[napi]
+pub fn config_json() -> String {
+    serde_json::to_string_pretty(&ServerConfig::load())
+        .unwrap_or_else(|_| "{}".to_string())
+}
 
 // ── Capabilities ────────────────────────────────────────────────────────
 
@@ -39,10 +117,55 @@ impl From<tribunus_compute_core::engine::EngineCapabilities> for NapiEngineCapab
 #[napi(object)]
 #[derive(Clone)]
 pub struct NapiServerConfig {
-    pub model_store_path: String,
-    pub max_concurrent_sessions: u32,
-    pub max_input_tokens: u32,
-    pub max_output_tokens: u32,
+    pub port: u16,
+    pub host: String,
+    pub max_concurrent: u32,
+    pub rate_limit_per_min: u32,
+    pub rate_limit_tokens_per_sec: f64,
+    pub rate_limit_burst: u32,
+    pub log_level: String,
+    pub runtime_mode: String,
+    pub model_path: Option<String>,
+    pub auto_download: bool,
+    pub max_model_cache_gb: f64,
+    pub kv_cache_tiers: u32,
+    pub compression_ratio: f64,
+    pub evolkv_enabled: bool,
+    pub draft_count: u32,
+    pub draft_length: u32,
+    pub spechub_enabled: bool,
+    pub exo_enabled: bool,
+    pub exo_port: u16,
+    pub autoscale_min: u32,
+    pub autoscale_max: u32,
+}
+
+impl From<ServerConfig> for NapiServerConfig {
+    fn from(c: ServerConfig) -> Self {
+        Self {
+            port: c.server.port,
+            host: c.server.host,
+            max_concurrent: c.server.max_concurrent,
+            rate_limit_per_min: c.server.rate_limit_per_min,
+            rate_limit_tokens_per_sec: c.server.rate_limit_tokens_per_sec,
+            rate_limit_burst: c.server.rate_limit_burst as u32,
+            log_level: c.server.log_level,
+            runtime_mode: c.server.runtime_mode,
+            model_path: c.model.model_path,
+            auto_download: c.model.auto_download,
+            max_model_cache_gb: c.model.max_model_cache_gb,
+            kv_cache_tiers: c.cache.kv_cache_tiers,
+            compression_ratio: c.cache.compression_ratio,
+            evolkv_enabled: c.cache.evolkv_enabled,
+            draft_count: c.speculation.draft_count,
+            draft_length: c.speculation.draft_length,
+            spechub_enabled: c.speculation.spechub_enabled,
+            exo_enabled: c.cluster.exo_enabled,
+            exo_port: c.cluster.exo_port,
+            autoscale_min: c.cluster.autoscale_min,
+            autoscale_max: c.cluster.autoscale_max,
+        }
+    }
 }
 
 // ── Kv Handle ──────────────────────────────────────────────────────────
@@ -130,7 +253,7 @@ impl PrismInferenceServer {
             Error::from_reason(format!("sessions lock: {}", e))
         })?;
 
-        if sessions.len() >= self.config.max_concurrent_sessions as usize {
+        if sessions.len() >= self.config.max_concurrent as usize {
             return Err(Error::from_reason("max concurrent sessions reached"));
         }
 

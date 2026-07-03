@@ -138,6 +138,19 @@ pub struct ToolDef {
     pub description: String,
 }
 
+/// Per-agent scheduling hints set by the FFI layer.
+#[derive(Debug, Clone)]
+pub struct AgentConfig {
+    pub lane_hint: u32,
+    pub priority: u32,
+}
+
+impl AgentConfig {
+    pub fn new() -> Self {
+        Self { lane_hint: 0, priority: 0 }
+    }
+}
+
 impl ToolRegistry {
     pub fn new() -> Self {
         Self { tools: Vec::new() }

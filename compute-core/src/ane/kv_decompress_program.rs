@@ -94,7 +94,7 @@ pub fn generate_attention_mil(
     // Inputs
     let q_size = n_heads * head_dim;
     let kv_size = n_kv_heads * head_dim;
-    let seq_len = window;
+    let _seq_len = window;
 
     mil.push_str(&format!(
         "input @ \"query\" (float16, {}) read write\n",

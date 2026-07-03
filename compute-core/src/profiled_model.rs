@@ -723,6 +723,8 @@ impl LoadedProfiledModel {
                 patch_size: 14,
                 num_channels: 3,
                 projection_dim: reader.manifest.architecture.hidden_size,
+                model_family: String::new(),
+                has_ane_program: false,
             };
             // Override with actual config from manifest if available.
             let vc = vision_config;

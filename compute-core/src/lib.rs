@@ -124,6 +124,11 @@ pub mod compiler;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+pub mod compile;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod compilation;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -140,6 +145,8 @@ pub mod compute_lane;
 pub mod compute_service;
 pub mod config;
 pub mod config_namespace;
+/// Device registry — runtime hardware enumeration and capability discovery.
+pub mod device;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"

@@ -55,6 +55,7 @@ use parking_lot::Mutex;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Execution mode for the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,12 +160,12 @@ impl WorkingSetManager {
 
         // 2. Check KV cache pressure, evict cold pages to disk
         if self.disk_eviction_enabled {
-            self.kv_page_migration.check_and_evict()?;
+            self.kv_page_migration.check_and_evict(Duration::from_secs(30))?;
         }
 
         // 3. Prefetch KV pages predicted to be needed next
         if self.disk_eviction_enabled {
-            self.kv_page_migration.prefetch_predicted()?;
+            self.kv_page_migration.prefetch_predicted(Duration::from_secs(5))?;
         }
 
         Ok(())
@@ -172,12 +173,12 @@ impl WorkingSetManager {
 
     /// Memory status for debugging.
     pub fn status(&self) -> String {
-        let (l1, l2, l3, l4) = self.kv_page_migration.tier_counts();
+        let (l0, l1, l2, l3) = self.kv_page_migration.tier_counts();
         format!(
-            "WorkingSet: weights={} layers active, ~{}MB; KV pages: L1={} L2={} L3={} L4={}; max={}MB",
+            "WorkingSet: weights={} layers active, ~{}MB; KV pages: L0={} L1={} L2={} L3={}; max={}MB",
             self.weight_streamer.active_weights.len(),
             self.weight_streamer.active_memory_bytes() / (1024 * 1024),
-            l1, l2, l3, l4,
+            l0, l1, l2, l3,
             self.max_working_set_bytes / (1024 * 1024),
         )
     }
@@ -382,7 +383,7 @@ impl ProfiledInferenceSession {
     ///
     ///  — path to the compiled model image directory.
     ///  — the loaded model (provides mapped_image, reader, and plan).
-    ///  — ANE-driven KV cache page migration service.
+    ///  — KV cache page migration service.
     pub fn enable_weight_streaming(
         &mut self,
         model_path: &str,

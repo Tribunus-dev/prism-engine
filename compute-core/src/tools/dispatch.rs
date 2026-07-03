@@ -1,4 +1,5 @@
 use crate::tools::{FunctionCall, ToolDefinition};
+use crate::tools::list_devices::tool_list_devices;
 use serde_json::json;
 use std::path::Path;
 
@@ -21,6 +22,7 @@ pub fn sandbox_execute(call: &FunctionCall, root: Option<&Path>) -> Result<serde
         "search_files" => crate::tools::sandbox::tool_search_files(&root, &call.arguments),
         "file_info" => crate::tools::sandbox::tool_file_info(&root, &call.arguments),
         "run_javascript" => tool_javascript(&root, &call.arguments),
+        "list_devices" => tool_list_devices(&root, &call.arguments),
         _ => return Err(format!("unknown tool '{}'", call.name)),
     };
     Ok(result)
@@ -148,6 +150,7 @@ pub fn default_sandbox_tools() -> Vec<ToolDefinition> {
             }),
             required: vec!["code".into()],
         },
+        crate::tools::list_devices::tool_def(),
     ]
 }
 

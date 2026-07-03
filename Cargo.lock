@@ -2960,6 +2960,7 @@ dependencies = [
 name = "prism-bridge"
 version = "0.1.0"
 dependencies = [
+ "prism-ffi",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3016,6 +3017,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "serde_json",
  "tribunus-compute-core",
  "uuid",
 ]

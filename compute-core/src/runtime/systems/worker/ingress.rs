@@ -142,7 +142,13 @@ impl ErasedSystem for WorkerIngressSystem {
                 entry.payload.clone(),
                 DEFAULT_REQUEST_CLASS,
             ));
-            world.insert(entity, WorkerLifecycle::new());
+            // Only insert lifecycle if the entity doesn't have one yet.
+            // Entities passed from the caller (e.g. engine.rs) already have
+            // a lifecycle initialized to Queued — overwriting it would
+            // silently reset any phase advance that occurred.
+            if world.get::<WorkerLifecycle>(entity).is_none() {
+                world.insert(entity, WorkerLifecycle::new());
+            }
 
             // ---- 2c. Validate entity is alive and Queued ----
             if !world.is_alive(entity) {

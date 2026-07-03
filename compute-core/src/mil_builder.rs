@@ -1045,6 +1045,14 @@ impl MilBuilder {
         name
     }
 
+    /// Bump the SSA counter by `count` without creating any operation.
+    /// Used when `input()` replaces `const_f32()` (stateless weights) but
+    /// downstream SSA names must stay stable.
+    pub fn reserve_names(mut self, count: u64) -> Self {
+        self.counter += count;
+        self
+    }
+
     /// Return the SSA name most recently generated.
     pub fn last_name(&self) -> Option<&str> {
         self.ops

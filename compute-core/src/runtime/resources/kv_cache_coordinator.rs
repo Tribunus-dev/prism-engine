@@ -10,6 +10,7 @@
 //! Commit/rollback: append() writes to a staging region tracked by total_appended;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use mlx_rs::error::Result as MlxResult;
 use mlx_rs::ops::indexing::IndexMutOp;
@@ -22,6 +23,7 @@ use crate::memory::allocator::BlockHandle;
 use crate::quantization::turboquant_kv::{
     AsymmetricQuantMode, KvQuantMode, QjlCorrection, TurboQuantKvCache,
 };
+use std::time::Instant;
 use crate::runtime::scheduling::component_id::{SchedulableResource, ResourceId};
 
 /// Resource ID for KVCacheCoordinator.
@@ -90,7 +92,7 @@ impl KVCacheCoordinator {
     /// Returns the number of pages evicted.
     pub fn evict(&mut self) -> Result<usize, String> {
         match &mut self.migration {
-            Some(m) => m.check_and_evict(),
+            Some(m) => m.check_and_evict(Duration::from_secs(30)),
             None => Ok(0),
         }
     }
@@ -957,31 +959,71 @@ impl KvCache {
 
 /// Tier identifier for KV cache page location.
 ///
-/// Pages migrate between tiers based on access frequency:
-/// - **L1** (ANE private SRAM): hottest pages, FP16, instant access
-/// - **L2** (IOSurface): warm pages, 3.5-bit TurboQuant, GPU-readable
-/// - **L3** (DRAM heap): cold pages, 2-bit TurboQuant, CPU-only
+/// Pages migrate between tiers based on access frequency.
+/// Tiers are platform-agnostic: the lowest-numbered tier is the fastest
+/// device-local memory (dGPU VRAM, ANE SRAM, etc.). Platform-specific
+/// mapping is configured at runtime via MemoryDomain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KVCacheTier {
-    /// ANE private SRAM — hottest pages, FP16, instant access
-    L1AneSram,
-    /// IOSurface — warm pages, 3.5-bit TurboQuant, GPU-readable
-    L2Iosurface,
-    /// DRAM heap — cold pages, 2-bit TurboQuant, CPU-only
-    L3DramHeap,
-    /// Disk-backed (L4) — cold pages evicted to /tmp/tribunus-kv-cache/.
-    /// Only loaded back to L3 (DRAM) on demand.
-    L4Disk,
+    /// Fastest device-local memory: dGPU VRAM, ANE SRAM, etc.
+    L0Device,
+    /// Shared/unified memory accessible by CPU and GPU (IOSurface, CUDA Managed, etc.)
+    L1Shared,
+    /// Host system DRAM
+    L2System,
+    /// Disk-backed cold storage
+    L3Disk,
 }
 
 impl KVCacheTier {
     /// Human-readable label for this tier.
     pub const fn name(&self) -> &'static str {
         match self {
-            Self::L1AneSram => "L1-ANE-SRAM",
-            Self::L2Iosurface => "L2-IOSurface",
-            Self::L3DramHeap => "L3-DRAM-Heap",
-            Self::L4Disk => "L4-Disk",
+            Self::L0Device => "L0-Device",
+            Self::L1Shared => "L1-Shared",
+            Self::L2System => "L2-System",
+            Self::L3Disk => "L3-Disk",
+        }
+    }
+
+    /// Human-readable description of what this tier represents.
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::L0Device => "Fastest device-local memory (dGPU VRAM, ANE SRAM)",
+            Self::L1Shared => "Shared/unified memory (IOSurface, CUDA Managed)",
+            Self::L2System => "Host system DRAM",
+            Self::L3Disk => "Disk-backed cold storage",
+        }
+    }
+}
+
+/// Platform-agnostic backing handle for a KV cache page.
+///
+/// Each variant corresponds to a different physical memory type.
+/// The tier enum describes the *semantic* level; this enum carries
+/// the platform-specific handle for the actual storage.
+#[derive(Debug, Clone)]
+pub enum PageBacking {
+    /// No backing storage (page has no resident data).
+    None,
+    /// Device-local memory buffer (dGPU VRAM, ANE SRAM).
+    DeviceBuffer { handle: u64, byte_size: u64 },
+    /// Shared/unified memory accessible by CPU and GPU.
+    SharedBuffer { handle: u64, byte_size: u64, domain_tag: u32 },
+    /// Host system DRAM (resident in process heap).
+    SystemHeap { byte_size: u64 },
+    /// Disk-backed (no resident data, token_start encodes the path).
+    Disk,
+}
+
+impl PageBacking {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::DeviceBuffer { .. } => "device-buffer",
+            Self::SharedBuffer { .. } => "shared-buffer",
+            Self::SystemHeap { .. } => "system-heap",
+            Self::Disk => "disk",
         }
     }
 }
@@ -997,9 +1039,9 @@ pub fn evict_page_to_disk(page: &TiersPage) -> Result<String, String> {
     let filename = format!("{}/page_{:x}.kvp", KV_CACHE_DISK_DIR, page.token_start);
 
     let compressed = page
-        .l3_data
+        .data
         .as_ref()
-        .ok_or_else(|| "evict_page_to_disk: page has no l3_data".to_string())?;
+        .ok_or_else(|| "evict_page_to_disk: page has no data".to_string())?;
 
     std::fs::write(&filename, compressed).map_err(|e| format!("write KV page: {}", e))?;
 
@@ -1017,21 +1059,22 @@ pub fn load_page_from_disk(filename: &str) -> Result<Vec<u8>, String> {
 /// A KV page tracked across tiers, holding data at up to one tier at a time.
 ///
 /// Each page covers a contiguous range of token IDs (`token_start`..`token_end`).
-/// The `current_tier` field indicates which of `l1_data`, `l2_handle`, or
-/// `l3_data` is populated. Promotion moves data from higher-numbered to
-/// lower-numbered tiers (e.g. L3 → L2, L2 → L1). Demotion moves the opposite
-/// direction.
+/// The `current_tier` field indicates which tier the data is resident in.
+/// The `data` field holds the opaque byte payload for tiers that keep data
+/// in the process heap. The `backing` field holds a platform-specific handle
+/// for tiers that use device or shared memory.
+/// Promotion moves data from higher-numbered to lower-numbered tiers
+/// (e.g. L2System → L1Shared → L0Device). Demotion moves the opposite direction.
 pub struct TiersPage {
-    /// Page content in L1 (FP16, ANE SRAM) — None if not resident in L1.
-    pub l1_data: Option<Vec<f32>>,
-    /// Page content in L2 (3.5-bit compressed, IOSurface handles) — None if not in L2.
-    pub l2_handle: Option<crate::memory::allocator::BlockHandle>,
-    /// Page content in L3 (2-bit compressed, heap bytes) — None if not in L3.
-    pub l3_data: Option<Vec<u8>>,
+    /// Opaque page data payload (compressed bytes, raw FP16, etc.).
+    /// The format is determined by the current tier and the compressor.
+    pub data: Option<Vec<u8>>,
+    /// Platform-specific backing handle (device buffer, shared buffer, etc.).
+    pub backing: PageBacking,
     /// Current tier (the fastest one with data).
     pub current_tier: KVCacheTier,
     /// Last access time for promotion/demotion decisions.
-    pub last_access: std::time::Instant,
+    pub last_access: Instant,
     /// Token ID range this page covers.
     pub token_start: u32,
     /// End token (exclusive) for this page's range.
@@ -1044,20 +1087,18 @@ impl TiersPage {
     /// All data fields are set to `None` except the one matching `initial_tier`.
     /// The caller must fill in the appropriate data after creation.
     pub fn new(token_start: u32, token_end: u32, initial_tier: KVCacheTier) -> Self {
+        let (data, backing) = match initial_tier {
+            KVCacheTier::L2System => (Some(Vec::new()), PageBacking::SystemHeap { byte_size: 0 }),
+            KVCacheTier::L3Disk => (None, PageBacking::Disk),
+            // L0Device and L1Shared require platform-specific handles,
+            // so they start with no heap data and no backing.
+            _ => (None, PageBacking::None),
+        };
         Self {
-            l1_data: if initial_tier == KVCacheTier::L1AneSram {
-                Some(Vec::new())
-            } else {
-                None
-            },
-            l2_handle: None,
-            l3_data: if initial_tier == KVCacheTier::L3DramHeap {
-                Some(Vec::new())
-            } else {
-                None
-            },
+            data,
+            backing,
             current_tier: initial_tier,
-            last_access: std::time::Instant::now(),
+            last_access: Instant::now(),
             token_start,
             token_end,
         }
@@ -1065,7 +1106,7 @@ impl TiersPage {
 
     /// Record an access to this page, updating the last-access timestamp.
     pub fn touch(&mut self) {
-        self.last_access = std::time::Instant::now();
+        self.last_access = Instant::now();
     }
 
     /// Returns `true` if this page covers the given token position.
@@ -1081,50 +1122,45 @@ impl TiersPage {
     /// Returns an estimate of the allocated bytes for this page at its current tier.
     pub fn allocated_bytes(&self) -> u64 {
         let overhead = std::mem::size_of::<Self>() as u64;
-        match self.current_tier {
-            KVCacheTier::L1AneSram => {
-                self.l1_data.as_ref().map_or(0, |d| d.len() as u64 * 4) + overhead
-            }
-            KVCacheTier::L2Iosurface => {
-                // The IOSurface block handle itself is small; the IOSurface
-                // backing storage is tracked by the allocator.
-                self.l2_handle.is_some() as u64 * std::mem::size_of::<BlockHandle>() as u64
-                    + overhead
-            }
-            KVCacheTier::L3DramHeap => {
-                self.l3_data.as_ref().map_or(0, |d| d.len() as u64) + overhead
-            }
-            KVCacheTier::L4Disk => {
-                // Disk pages have no resident memory
-                overhead
-            }
-        }
+        let data_bytes = self.data.as_ref().map_or(0, |d| d.len() as u64);
+        let backing_bytes = match &self.backing {
+            PageBacking::None | PageBacking::Disk => 0,
+            PageBacking::DeviceBuffer { byte_size, .. }
+            | PageBacking::SharedBuffer { byte_size, .. }
+            | PageBacking::SystemHeap { byte_size, .. } => *byte_size,
+        };
+        data_bytes + backing_bytes + overhead
     }
 }
 
-/// ANE-driven KV cache page migration service.
+/// Platform-agnostic policy for KV cache page migration decisions.
 ///
-/// Examines access patterns and migrates pages between tiers.
-/// Promotes hot pages to L1 (decompressed FP16 in ANE SRAM), demotes cold
-/// pages to L3 (2-bit compressed in DRAM). Uses the ANE for compress/decompress
-/// operations, keeping the GPU free for attention computation.
+/// Implementations provide platform-specific promotion, demotion, and
+/// access-pattern evaluation logic. The [`PageMigrationService`] calls
+/// this trait on every `tick()`.
+pub trait PageMigrationPolicy: Send + Sync {
+    /// Evaluate a single page and decide what action to take.
+    ///
+    /// Called for each tracked page during [`PageMigrationService::tick()`].
+    /// The implementation may modify the page (promote, demote, keep) and
+    /// returns `Ok(())` on success.
+    fn evaluate_tick(&self, page: &mut TiersPage, now: Instant) -> Result<(), String>;
+
+    /// Human-readable name for diagnostics.
+    fn name(&self) -> &'static str;
+}
+
+/// Generic KV cache page migration service.
 ///
-/// The caller calls [`tick()`](Self::tick) periodically (e.g. after every decode
-/// step) to evaluate each tracked page and trigger promotion or demotion when
-/// thresholds are crossed.
+/// Manages a collection of [`TiersPage`] instances and delegates tier-specific
+/// promotion/demotion decisions to a [`PageMigrationPolicy`].
+/// Platform-agnostic logic (page registration, access tracking, disk eviction,
+/// prefetch, EvolKV budget search) lives here.
 pub struct PageMigrationService {
     /// All pages tracked across tiers.
     pub pages: Vec<TiersPage>,
-    /// Pages accessed within this window are considered hot → promote to L1.
-    pub hot_threshold: std::time::Duration,
-    /// Pages not accessed within this window are considered cold → demote to L3.
-    pub cold_threshold: std::time::Duration,
-    /// ANE compression program reference.
-    pub ane_compressor: crate::compiler::ane::kv_decompress_program::AneCompressor,
-    /// KV cache dimensions for compress/decompress operations.
-    pub head_dim: u32,
-    /// Number of KV heads.
-    pub n_kv_heads: u32,
+    /// Platform-specific page migration policy.
+    pub policy: Box<dyn PageMigrationPolicy>,
     /// Total cache budget in bytes for EvolKV optimization.
     pub total_cache_budget: usize,
     /// Best EvolKV budget found during search (None until first search).
@@ -1134,27 +1170,16 @@ pub struct PageMigrationService {
 impl PageMigrationService {
     /// Create a new page migration service.
     ///
-    /// `hot_threshold` — pages accessed within this window are promoted to L1.
-    /// `cold_threshold` — pages not accessed within this window are demoted to L3.
-    /// `head_dim` / `n_kv_heads` — KV cache dimensions passed to ANE programs.
-    /// `ane_compressor` — initialized ANE compressor holding all four MIL models.
-    ///
-    /// Default thresholds if none provided: hot = 5 seconds, cold = 30 seconds.
+    /// `policy` — the platform-specific migration policy that handles
+    /// compress/decompress and tier promotion/demotion.
+    /// `total_cache_budget` — total cache budget for EvolKV optimization.
     pub fn new(
-        ane_compressor: crate::compiler::ane::kv_decompress_program::AneCompressor,
-        head_dim: u32,
-        n_kv_heads: u32,
-        hot_threshold: Option<std::time::Duration>,
-        cold_threshold: Option<std::time::Duration>,
+        policy: Box<dyn PageMigrationPolicy>,
         total_cache_budget: usize,
     ) -> Self {
         Self {
             pages: Vec::new(),
-            hot_threshold: hot_threshold.unwrap_or(std::time::Duration::from_secs(5)),
-            cold_threshold: cold_threshold.unwrap_or(std::time::Duration::from_secs(30)),
-            ane_compressor,
-            head_dim,
-            n_kv_heads,
+            policy,
             total_cache_budget,
             evolvk_budget: None,
         }
@@ -1202,125 +1227,14 @@ impl PageMigrationService {
     /// Called periodically (e.g. after every decode step) to examine all
     /// pages and promote/demote based on access time.
     ///
-    /// Returns `Ok(())` on success. Returns `Err(String)` if any ANE
-    /// operation fails; the migration service is left in a consistent state
-    /// — a failed promotion leaves the page at its current tier.
+    /// Delegates per-page evaluation to the [`PageMigrationPolicy`].
+    /// A failed promotion leaves the page at its current tier.
     pub fn tick(&mut self) -> Result<(), String> {
-        let now = std::time::Instant::now();
-        let hot_threshold = self.hot_threshold;
-        let cold_threshold = self.cold_threshold;
+        let now = Instant::now();
         let pages = std::mem::take(&mut self.pages);
         for mut page in pages {
-            let age = now.duration_since(page.last_access);
-
-            // Skip pages that are already in their optimal tier.
-            if age < hot_threshold && page.current_tier != KVCacheTier::L1AneSram {
-                // Promote to L1: decompress via ANE, store FP16.
-                self.promote_to_l1(&mut page)?;
-            } else if age > cold_threshold && page.current_tier != KVCacheTier::L3DramHeap {
-                // Demote to L3: compress to 2-bit via ANE.
-                self.demote_to_l3(&mut page)?;
-            }
-
-            // Pages at L1 that have aged past cold_threshold → demote.
-            if age > cold_threshold && page.current_tier == KVCacheTier::L1AneSram {
-                self.demote_to_l3(&mut page)?;
-            }
+            self.policy.evaluate_tick(&mut page, now)?;
             self.pages.push(page);
-        }
-        Ok(())
-    }
-
-    /// Promote a page from its current tier toward L1.
-    ///
-    /// If the page is at L3, decompress to L2 first (2-bit → FP16 via ANE),
-    /// then (if hot enough) to L1. If at L2, decompress directly to L1 via ANE.
-    fn promote_to_l1(&self, page: &mut TiersPage) -> Result<(), String> {
-        match page.current_tier {
-            KVCacheTier::L3DramHeap => {
-                // Step 1: L3 → L2 — decompress 2-bit packed bytes to FP16.
-                let l3_bytes = page
-                    .l3_data
-                    .as_ref()
-                    .ok_or_else(|| "promote_to_l1: L3 page has no l3_data".to_string())?;
-
-                let fp16_bytes = self.ane_compressor.decompress_from_l3(l3_bytes);
-                let fp16: Vec<f32> = fp16_bytes
-                    .chunks_exact(4)
-                    .map(|c| f32::from_ne_bytes(c.try_into().unwrap()))
-                    .collect();
-
-                // At L2 the data lives in the IOSurface, so we don't keep a
-                // separate Vec copy — just record the transition. The BlockHandle
-                // would be filled by the allocator. For now we store the FP16
-                // in l1_data directly and advance tier.
-                page.l1_data = Some(fp16);
-                page.l3_data = None;
-                page.current_tier = KVCacheTier::L1AneSram;
-            }
-            KVCacheTier::L2Iosurface => {
-                // L2 → L1 — decompress 3.5-bit IOSurface data to FP16.
-                // In practice this reads from the IOSurface block and runs
-                // the L2 decompress MIL program on the ANE.
-                let _handle = page
-                    .l2_handle
-                    .as_ref()
-                    .ok_or_else(|| "promote_to_l1: L2 page has no l2_handle".to_string())?;
-
-                // For the L2→L1 path we would read bytes from the IOSurface
-                // via the block handle, decompress through l2_decompress,
-                // and store the result. This is a placeholder for that flow.
-                page.l2_handle = None;
-                page.current_tier = KVCacheTier::L1AneSram;
-            }
-            KVCacheTier::L1AneSram => {
-                // Already at L1 — nothing to do.
-            }
-            KVCacheTier::L4Disk => {
-                // L4 → L1 — need to load from disk first, then decompress.
-                // This path requires first loading from disk to L3 (get l3_data),
-                // then decompressing from L3 → L1. For now, skip — the prefetch
-                // path (check_and_evict/prefetch_predicted) handles L4→L3.
-            }
-        }
-        Ok(())
-    }
-
-    /// Demote a page to L3 (compress to 2-bit via ANE).
-    ///
-    /// If the page is at L1, compress FP16 → 2-bit via L3 ANE model. If at L2,
-    /// first decompress the 3.5-bit IOSurface data to FP16, then compress.
-    fn demote_to_l3(&self, page: &mut TiersPage) -> Result<(), String> {
-        match page.current_tier {
-            KVCacheTier::L1AneSram => {
-                // L1 → L3 — compress FP16 to 2-bit packed bytes via ANE.
-                let fp16 = page
-                    .l1_data
-                    .as_ref()
-                    .ok_or_else(|| "demote_to_l3: L1 page has no l1_data".to_string())?;
-
-                // Reinterpret FP16 data as byte slice for ANE compressor
-                let fp16_slice = fp16.as_slice();
-                let (_, fp16_bytes, _) = unsafe { fp16_slice.align_to::<u8>() };
-                let packed = self.ane_compressor.compress_to_l3(fp16_bytes);
-
-                page.l3_data = Some(packed);
-                page.l1_data = None;
-                page.current_tier = KVCacheTier::L3DramHeap;
-            }
-            KVCacheTier::L2Iosurface => {
-                // L2 → L3 — the page is in 3.5-bit IOSurface; for demotion to
-                // 2-bit we would first decompress to FP16 (via L2 decompress)
-                // and then compress to 2-bit via L3 compress. Placeholder.
-                page.l2_handle = None;
-                page.current_tier = KVCacheTier::L3DramHeap;
-            }
-            KVCacheTier::L3DramHeap => {
-                // Already at L3 — nothing to do.
-            }
-            KVCacheTier::L4Disk => {
-                // Already at L4 (disk) — no further demotion possible.
-            }
         }
         Ok(())
     }
@@ -1334,33 +1248,33 @@ impl PageMigrationService {
 
     /// Return counts of pages at each tier.
     pub fn tier_counts(&self) -> (usize, usize, usize, usize) {
+        let mut l0 = 0usize;
         let mut l1 = 0usize;
         let mut l2 = 0usize;
         let mut l3 = 0usize;
-        let mut l4 = 0usize;
         for page in &self.pages {
             match page.current_tier {
-                KVCacheTier::L1AneSram => l1 += 1,
-                KVCacheTier::L2Iosurface => l2 += 1,
-                KVCacheTier::L3DramHeap => l3 += 1,
-                KVCacheTier::L4Disk => l4 += 1,
+                KVCacheTier::L0Device => l0 += 1,
+                KVCacheTier::L1Shared => l1 += 1,
+                KVCacheTier::L2System => l2 += 1,
+                KVCacheTier::L3Disk => l3 += 1,
             }
         }
-        (l1, l2, l3, l4)
+        (l0, l1, l2, l3)
     }
 
-    /// Check KV cache pressure, evict cold L1/L2/L3 pages to disk (L4).
+    /// Check KV cache pressure, evict cold pages to disk.
     /// Pages not accessed for >cold_threshold are candidates for disk eviction.
     /// Returns the number of pages evicted to disk.
-    pub fn check_and_evict(&mut self) -> Result<usize, String> {
-        let now = std::time::Instant::now();
+    pub fn check_and_evict(&mut self, cold_threshold: Duration) -> Result<usize, String> {
+        let now = Instant::now();
         let mut evicted = 0usize;
         let mut to_evict: Vec<usize> = Vec::new();
 
         for (i, page) in self.pages.iter().enumerate() {
             let age = now.duration_since(page.last_access);
-            // Pages already at L3 that are cold enough for disk eviction
-            if age > self.cold_threshold && page.current_tier == KVCacheTier::L3DramHeap {
+            // Pages already at L2System that are cold enough for disk eviction
+            if age > cold_threshold && page.current_tier == KVCacheTier::L2System {
                 to_evict.push(i);
             }
         }
@@ -1368,12 +1282,9 @@ impl PageMigrationService {
         // Evict in reverse order so indices stay valid
         for &idx in to_evict.iter().rev() {
             let _filename = evict_page_to_disk(&self.pages[idx])?;
-            // Mark as L4Disk — l3_data is consumed by evict_page_to_disk
-            self.pages[idx].l3_data = None;
-            self.pages[idx].current_tier = KVCacheTier::L4Disk;
-            // Store the filename in l3_data as a marker (will be reloaded)
-            // Since we don't have a dedicated filename field, we keep the
-            // page tracked by its token_start and can reconstruct the path
+            self.pages[idx].data = None;
+            self.pages[idx].backing = PageBacking::Disk;
+            self.pages[idx].current_tier = KVCacheTier::L3Disk;
             evicted += 1;
         }
 
@@ -1381,36 +1292,35 @@ impl PageMigrationService {
     }
 
     /// Prefetch KV pages predicted to be needed next.
-    /// Loads L4Disk pages back to L3DramHeap based on predicted access.
+    /// Loads disk pages back to L2System based on predicted access.
     /// Currently uses a simple heuristic: pages adjacent to recently accessed
     /// tokens are prefetched.
-    pub fn prefetch_predicted(&mut self) -> Result<usize, String> {
-        let now = std::time::Instant::now();
+    pub fn prefetch_predicted(&mut self, hot_threshold: Duration) -> Result<usize, String> {
+        let now = Instant::now();
         let mut prefetched = 0usize;
         let hot_tokens: Vec<u32> = self
             .pages
             .iter()
             .filter(|p| {
                 let age = now.duration_since(p.last_access);
-                age < self.hot_threshold && p.current_tier != KVCacheTier::L4Disk
+                age < hot_threshold && p.current_tier != KVCacheTier::L3Disk
             })
             .map(|p| p.token_start)
             .collect();
 
-        // For each hot token range, prefetch adjacent L4 pages
+        // For each hot token range, prefetch adjacent disk pages
         for &hot_start in &hot_tokens {
-            // Check page before and after the hot range
             for adj in [hot_start.saturating_sub(256), hot_start + 256] {
                 if let Some(page) = self
                     .pages
                     .iter_mut()
-                    .find(|p| p.current_tier == KVCacheTier::L4Disk && p.contains_token(adj))
+                    .find(|p| p.current_tier == KVCacheTier::L3Disk && p.contains_token(adj))
                 {
-                    // Reconstruct the filename from token_start
                     let filename = format!("{}/page_{:x}.kvp", KV_CACHE_DISK_DIR, page.token_start);
-                    let data = load_page_from_disk(&filename)?;
-                    page.l3_data = Some(data);
-                    page.current_tier = KVCacheTier::L3DramHeap;
+                    let raw_data = load_page_from_disk(&filename)?;
+                    page.data = Some(raw_data);
+                    page.backing = PageBacking::SystemHeap { byte_size: 0 };
+                    page.current_tier = KVCacheTier::L2System;
                     page.touch();
                     prefetched += 1;
                 }

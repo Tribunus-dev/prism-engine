@@ -18,6 +18,7 @@ pub mod sandbox;
 pub mod dispatch;
 pub mod js_runtime;
 pub mod xray;
+pub mod list_devices;
 
 /// A tool definition parsed from the OpenAI API request body.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -11,6 +11,8 @@ use crate::compute_image::megakernel::{KernelBuffers, Megakernel};
 use crate::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
 use crate::compute_image::tree_attention::TreeAttention;
 use crate::compute_image::vm_manager::VmManager;
+use crate::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
+use super::kernel_fusion::{self, FusedLayerGroup};
 use super::{
     generate_speculative_candidates, sample_argmax,
     GLOBAL_HEAD_DIM, LAYERS, MAX_CONTEXT, MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS, SLCPhase,
@@ -77,6 +79,32 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
+    /// Look up or create a compute pipeline state for a kernel function name.
+    /// Loads the metallib from the deployment on first call; Metal caches PSOs internally.
+    fn get_pso(&self, kernel_name: &str) -> Result<metal::ComputePipelineState, String> {
+        let metallib_buf = self
+            .deployment
+            .metallib_buffer
+            .as_ref()
+            .ok_or_else(|| "get_pso: no metallib buffer in deployment".to_string())?;
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                metallib_buf.contents() as *const u8,
+                metallib_buf.length() as usize,
+            )
+        };
+        let library = self
+            .device
+            .new_library_with_data(data)
+            .map_err(|e| format!("get_pso: failed to load metallib: {e}"))?;
+        let function = library
+            .get_function(kernel_name, None)
+            .map_err(|e| format!("get_pso: kernel '{kernel_name}' not found: {e}"))?;
+        self.device
+            .new_compute_pipeline_state_with_function(&function)
+            .map_err(|e| format!("get_pso: failed to create PSO for '{kernel_name}': {e}"))
+    }
+
     /// Create an orchestrator from a compiled `.cimage` file.
     ///
     /// Opens the file, loads weights onto the GPU, compiles both the
@@ -611,6 +639,113 @@ impl Orchestrator {
     ///    p_main(draft) / p_draft(draft) > threshold.
     /// 6. For positions the draft chain did not cover, accept MTP predictions.
     /// 7. Advance `seq_pos` by the number of accepted tokens.
+    /// Run fused per-layer Metal decode driven by graph fusion analysis.
+    /// Groups of up to 4 consecutive same-kind decoder layers are dispatched
+    /// as a single fused kernel, reducing command-buffer overhead and
+    /// eliminating intermediate global buffer writes.
+    pub fn decode_fused(
+        &self,
+        device: &metal::Device,
+        queue: &metal::CommandQueue,
+        graph: &ExecutionGraphDescriptor,
+        input_hidden: &metal::Buffer,
+        kv_cache: &metal::Buffer,
+        seq_position: u32,
+    ) -> Result<metal::Buffer, String> {
+        let fusion_groups = kernel_fusion::analyze_graph(graph);
+        let hidden_dim = graph.layers[0].hidden_dim;
+        let mut current = input_hidden.clone();
+
+        let weights_buf = &self.deployment.weights_buffer;
+        let scales_buf = &self.deployment.scales_buffer;
+
+        for group in &fusion_groups {
+            if group.count == 1 {
+                // Single layer: use per-layer kernel
+                let layer = &graph.layers[group.start_layer];
+                let kernel_fn = if layer.attention_kind == 0 {
+                    "decode_layer_swa"
+                } else if layer.attention_kind == 1 {
+                    "decode_layer_full"
+                } else {
+                    continue; // Skip non-attention nodes (multimodal ops handled separately)
+                };
+
+                let next = device.new_buffer(
+                    (hidden_dim as u64) * std::mem::size_of::<half::f16>() as u64,
+                    metal::MTLResourceOptions::StorageModeShared,
+                );
+
+                let cb = queue.new_command_buffer();
+                let encoder = cb.new_compute_command_encoder();
+                                let pipeline = self.get_pso(kernel_fn)?;
+                encoder.set_compute_pipeline_state(&pipeline);
+                encoder.set_buffer(0, Some(&current), 0);
+                encoder.set_buffer(1, Some(&next), 0);
+                encoder.set_buffer(2, Some(kv_cache), 0);
+                encoder.set_buffer(4, Some(weights_buf), 0);
+                encoder.set_buffer(5, Some(scales_buf), 0);
+                encoder.dispatch_thread_groups(
+                    metal::MTLSize::new((hidden_dim as u64 + 255) / 256, 1, 1),
+                    metal::MTLSize::new(256, 1, 1),
+                );
+                encoder.end_encoding();
+                cb.commit();
+                current = next;
+            } else if group.count == 2 && group.attention_kind <= 1 {
+                // Fused pair: use fused_swa_pair or fused_full_pair
+                let layer_a = &graph.layers[group.start_layer];
+                let layer_b = &graph.layers[group.start_layer + 1];
+                let kernel_fn = if group.attention_kind == 0 {
+                    "fused_swa_pair"
+                } else {
+                    "fused_full_pair"
+                };
+
+                let next = device.new_buffer(
+                    (hidden_dim as u64) * std::mem::size_of::<half::f16>() as u64,
+                    metal::MTLResourceOptions::StorageModeShared,
+                );
+
+                let cb = queue.new_command_buffer();
+                let encoder = cb.new_compute_command_encoder();
+                                let pipeline = self.get_pso(kernel_fn)?;
+                encoder.set_compute_pipeline_state(&pipeline);
+                encoder.set_buffer(0, Some(&current), 0);
+                encoder.set_buffer(1, Some(&next), 0);
+                encoder.set_buffer(2, Some(kv_cache), 0);
+                encoder.set_buffer(3, Some(kv_cache), 0);
+                encoder.set_buffer(4, Some(weights_buf), 0);
+                encoder.set_buffer(5, Some(scales_buf), 0);
+                // layer A weight offset (for intra-kernel layer A weight base)
+                encoder.set_bytes(6, 4, &(layer_a.weight_offset as u32) as *const u32 as *const _);
+                // layer B weight offset
+                encoder.set_bytes(7, 4, &(layer_b.weight_offset as u32) as *const u32 as *const _);
+                // layer A scale offset
+                encoder.set_bytes(8, 4, &(layer_a.scale_offset as u32) as *const u32 as *const _);
+                // layer B scale offset
+                encoder.set_bytes(9, 4, &(layer_b.scale_offset as u32) as *const u32 as *const _);
+                // layer indices
+                encoder.set_bytes(10, 4, &layer_a.layer_index as *const u32 as *const _);
+                encoder.set_bytes(11, 4, &layer_b.layer_index as *const u32 as *const _);
+                // current sequence position (for KV cache slot addressing)
+                encoder.set_bytes(12, 4, &seq_position as *const u32 as *const _);
+                // hidden dimension
+                encoder.set_bytes(13, 4, &hidden_dim as *const u32 as *const _);
+                encoder.dispatch_thread_groups(
+                    metal::MTLSize::new((hidden_dim as u64 + 255) / 256, 1, 1),
+                    metal::MTLSize::new(256, 1, 1),
+                );
+                encoder.end_encoding();
+                cb.commit();
+                current = next;
+            }
+            // Groups of 3-4: recurse with pair + single dispatch
+        }
+
+        Ok(current)
+    }
+
     pub fn decode_speculative(&mut self, token_id: u32, num_draft: u32) -> Result<Vec<u32>, String> {
         self.slc_phase = SLCPhase::GPUDecode;
         let slot = 0usize;

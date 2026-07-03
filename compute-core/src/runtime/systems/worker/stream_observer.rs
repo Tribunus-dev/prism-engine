@@ -57,6 +57,9 @@ impl SystemSpec for StreamObservationSystem {
 // Static metadata (lazy_static per assignment requirements)
 // ---------------------------------------------------------------------------
 
+// SAFETY: SystemMetadata is read-only after initialization — all fields are
+// immutable configuration values (ids, names, masks, stages, ordering).
+// Sharing via a static reference across threads is safe.
 lazy_static! {
     static ref STREAM_OBSERVER_META: SystemMetadata = SystemMetadata {
         id: SystemId(105),

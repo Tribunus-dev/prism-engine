@@ -12,7 +12,7 @@ tribunus-compute-core = { path = "../compute-core", optional = true }
 
 [features]
 default = []
-compute-core = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend"]
+compute-core = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/ffi"]
 
 [package.metadata]
 docs = "C ABI bridge for the Prism Engine Swift menu bar app"

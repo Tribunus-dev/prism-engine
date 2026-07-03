@@ -181,6 +181,7 @@ pub fn compile_subgraph(
     input_shapes: &HashMap<String, Vec<i64>>,
     weights: &HashMap<String, Vec<f32>>,
     output_dir: &Path,
+    stateless: bool,
 ) -> Result<String, String> {
     // Extract dimensions from input_shapes.
     let hidden_dim = input_shapes
@@ -223,7 +224,7 @@ pub fn compile_subgraph(
             let weight_values = weights
                 .get("weight_values")
                 .map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_matmul_mil("x", "w", "out", 1, k, n, weight_values)?
+            subgraph_mil::build_matmul_mil("x", "w", "out", 1, k, n, weight_values, stateless)?
         }
         "mlp_block" => {
             let gate_w = weights
@@ -238,20 +239,21 @@ pub fn compile_subgraph(
             intermediate_dim,
             gate_w,
             up_w,
-            down_w,)?
+            down_w,
+            stateless,)?
         }
         "rmsnorm_qkv" => {
             let rms_w = weights.get("rms_w").map_or(&[] as &[f32], |v| v.as_slice());
             let q_w = weights.get("q_w").map_or(&[] as &[f32], |v| v.as_slice());
             let k_w = weights.get("k_w").map_or(&[] as &[f32], |v| v.as_slice());
             let v_w = weights.get("v_w").map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_rmsnorm_qkv_mil("x", hidden_dim, n_heads, n_kv_heads, head_dim, rms_w, q_w, k_w, v_w,)?
+            subgraph_mil::build_rmsnorm_qkv_mil("x", hidden_dim, n_heads, n_kv_heads, head_dim, rms_w, q_w, k_w, v_w, stateless,)?
         }
         "output_proj" => {
             let weight_values = weights
                 .get("weight_values")
                 .map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_output_proj_mil("x", hidden_dim, vocab_dim, weight_values)?
+            subgraph_mil::build_output_proj_mil("x", hidden_dim, vocab_dim, weight_values, stateless)?
         }
         "ffn_output" => {
             let gate_w = weights
@@ -271,13 +273,14 @@ pub fn compile_subgraph(
             gate_w,
             up_w,
             down_w,
-            lm_head_w,)?
+            lm_head_w,
+            stateless,)?
         }
         "qkv_bundle" => {
             let q_w = weights.get("q_w").map_or(&[] as &[f32], |v| v.as_slice());
             let k_w = weights.get("k_w").map_or(&[] as &[f32], |v| v.as_slice());
             let v_w = weights.get("v_w").map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_qkv_bundle_mil("x", hidden_dim, n_heads, n_kv_heads, head_dim, q_w, k_w, v_w,)?
+            subgraph_mil::build_qkv_bundle_mil("x", hidden_dim, n_heads, n_kv_heads, head_dim, q_w, k_w, v_w, stateless,)?
         }
         _ => {
             return Err(format!(
@@ -614,6 +617,7 @@ pub fn compile_ane_islands(
     execution_plan: &crate::config::ModelExecutionPlan,
     arch: &crate::config::TextArchitecture,
     output_dir: &std::path::Path,
+    stateless: bool,
 ) -> Result<(), String> {
     fn placeholder_f32(rows: u32, cols: u32) -> Vec<f32> {
         vec![0.0f32; (rows as usize) * (cols as usize)]
@@ -719,7 +723,7 @@ pub fn compile_ane_islands(
         };
 
         // ── Compile subgraph with weights ──────────────────────────────
-        let modelc_path = compile_subgraph(&island.island_id, &ops, &shapes, &weights, output_dir)?;
+        let modelc_path = compile_subgraph(&island.island_id, &ops, &shapes, &weights, output_dir, stateless)?;
         eprintln!(
             "[compile_coreml] compiled {} → {}/{}",
             island.island_id,

@@ -8,11 +8,217 @@ pub const STATE_EXECUTING: u8 = 3;
 // ── V2 (Prism) types ──────────────────────────────────────────────
 
 pub const PRISM_MAGIC: [u8; 8] = *b"PRISM\0\0\0";
-pub const PRISM_PAGE_SIZE: u64 = 4096;
+pub const CIMAGE_PAGE_SIZE: u64 = 16384;
+/// Deprecated alias; use CIMAGE_PAGE_SIZE
+pub const PRISM_PAGE_SIZE: u64 = CIMAGE_PAGE_SIZE;
+
+/// Encodes the type of content in a cimage segment.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentKind {
+    /// Compiled Metal kernel library (.metallib)
+    MetalLib = 0,
+    /// Ternary tile640 packed weights
+    TernaryWeights = 1,
+    /// FP16 block scales for ternary weights
+    BlockScales = 2,
+    /// CimageLayoutMeta — tensor records, per-layer metadata
+    LayoutMeta = 3,
+    /// Vocabulary / embedding table
+    Vocabulary = 4,
+    /// Apple ANE .mlmodelc or .ane.tar archive
+    AneArchive = 5,
+    /// Stride/prefetch topology table
+    TopologyTable = 6,
+    /// Compiled CUDA kernel blob (.cubin, .fatbin)
+    CudaLib = 7,
+    /// Compiled ROCm kernel blob (.co, .hsaco)
+    RocmLib = 8,
+    /// Compiled Level Zero / SPIR-V kernel (.spv)
+    LevelZeroLib = 9,
+    /// Compiled Vulkan shader (.spv)
+    VulkanLib = 10,
+    /// Intel NPU compiled model blob
+    IntelNpuBlob = 11,
+    /// AMD NPU (XDNA) compiled model blob
+    AmdNpuBlob = 12,
+    /// Qualcomm Hexagon / HTP compiled model
+    QualcommNpuBlob = 13,
+    /// Google TPU compiled model
+    GoogleTpuBlob = 14,
+    /// Compiled WebGPU / WGSL shader
+    WebGpuLib = 15,
+    /// Huawei Ascend NPU (DaVinci) compiled model (.om)
+    HuaweiAscendBlob = 16,
+    /// Hailo NPU compiled executable (.hef)
+    HailoBlob = 17,
+    /// Per-layer weight offset table (array of LayerDirectoryEntry).
+    /// Enables layer-granular scheduling and ANE/GPU interleaving.
+    LayerDirectory = 18,
+    /// Packed ternary projection weight matrices for multimodal input adapters.
+    /// Supports multiple logical tensors indexed via MultimodalInputDescriptor.
+    MultimodalProjectionWeights = 19,
+    /// FP16 block scales corresponding to MultimodalProjectionWeights.
+    MultimodalProjectionScales = 20,
+    /// Versioned binary descriptor (MultimodalInputDescriptorV1) describing
+    /// modality support, tensor layout, and processor contract.
+    MultimodalInputDescriptor = 21,
+    /// Learned two-dimensional position embeddings for image patches.
+    MultimodalPositionEmbeddings = 22,
+    /// Biases, layer norms, pooling kernels, and small affine parameters
+    /// that do not fit the primary projection matrix category.
+    MultimodalAuxiliaryWeights = 23,
+    /// Binary execution graph descriptor encoding per-layer DAG,
+    /// device routing capabilities, KV compaction epochs, and MTP
+    /// draft sub-graph references. Self-describing for the runtime.
+    ExecutionGraph = 24,
+    /// Tokenizer, multimodal special token map, audio codebook,
+    /// and chat template. Type-tagged entries — see ModelArtifactEntry.
+    ModelArtifacts = 25,
+}
+
+/// One entry in the cimage segment directory.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SegmentEntry {
+    pub kind: u32,
+    pub offset: u64,
+    pub length: u64,
+}
+/// Type tags for ModelArtifacts segment entries.
+pub mod model_artifact_tag {
+    pub const TOKENIZER: u32 = 0x01;     // SentencePiece .model proto
+    pub const TOKEN_MAP: u32 = 0x04;     // Multimodal special token map (JSON)
+    pub const CHAT_TEMPLATE: u32 = 0x05; // Chat prompt template string
+    pub const GENERATION_CONFIG: u32 = 0x06; // Sampling params (JSON)
+}
+
+/// One entry in the ModelArtifacts segment. Flat binary: tag + length + data.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ModelArtifactEntry;
+
+impl ModelArtifactEntry {
+    pub const HEADER_SIZE: usize = 8;
+
+    pub fn encode(tag: u32, data: &[u8], out: &mut Vec<u8>) {
+        out.extend_from_slice(&tag.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(data);
+    }
+
+    pub fn iter_entries(blob: &[u8]) -> ModelArtifactIter {
+        ModelArtifactIter { blob, pos: 0 }
+    }
+}
+
+/// Iterator over ModelArtifacts segment entries.
+pub struct ModelArtifactIter<'a> {
+    blob: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Iterator for ModelArtifactIter<'a> {
+    type Item = (u32, &'a [u8]);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos + 8 > self.blob.len() { return None; }
+        let tag = u32::from_le_bytes([
+            self.blob[self.pos], self.blob[self.pos+1],
+            self.blob[self.pos+2], self.blob[self.pos+3],
+        ]);
+        let len = u32::from_le_bytes([
+            self.blob[self.pos+4], self.blob[self.pos+5],
+            self.blob[self.pos+6], self.blob[self.pos+7],
+        ]) as usize;
+        self.pos += 8;
+        if self.pos + len > self.blob.len() { return None; }
+        let data = &self.blob[self.pos..self.pos + len];
+        self.pos += len;
+        Some((tag, data))
+    }
+}
+
+impl SegmentEntry {
+    pub fn new(kind: SegmentKind, offset: u64, length: u64) -> Self {
+        Self { kind: kind as u32, offset, length }
+    }
+}
+
+/// One entry in the layer directory — exact byte range of a single
+/// transformer layer's packed weights, block scales, layer kind, and flags.
+///
+/// Enables the orchestrator to schedule per-layer Metal barriers and
+/// run the ANE MTP model concurrently with GPU weight streaming.
+///
+/// Total size: 6 × u64 = 48 bytes, alignment-friendly.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LayerDirectoryEntry {
+    /// Byte offset from start of TernaryWeights segment data.
+    pub weights_offset: u64,
+    /// Byte length of this layer's packed u32 weights.
+    pub weights_length: u64,
+    /// Byte offset from start of BlockScales segment data.
+    pub scales_offset: u64,
+    /// Byte length of this layer's FP16 block scales.
+    pub scales_length: u64,
+    /// Kind identifier for this layer (e.g. attention vs. feed-forward).
+    pub layer_kind: u64,
+    /// Flags for this layer entry.
+    pub flags: u64,
+}
+
+impl LayerDirectoryEntry {
+    pub fn new(
+        weights_offset: u64,
+        weights_length: u64,
+        scales_offset: u64,
+        scales_length: u64,
+        layer_kind: u64,
+        flags: u64,
+    ) -> Self {
+        Self {
+            weights_offset,
+            weights_length,
+            scales_offset,
+            scales_length,
+            layer_kind,
+            flags,
+        }
+    }
+}
+
+/// Role of an embedded ANE/NPU model within the cimage.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AneModelRole {
+    Prefill = 0,
+    MtpDecode = 1,
+    VisionEncoder = 2,
+    #[default]
+    Unknown = 0xFF,
+}
+
+/// Describes the I/O contract of an embedded ANE/NPU model segment.
+/// Stored alongside AneArchive segments so the orchestrator can dispatch
+/// without introspecting Core ML metadata at runtime.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AneModelDescriptor {
+    pub role: u32,
+    pub input_schema_digest: [u8; 32],
+    pub output_schema_digest: [u8; 32],
+    pub supports_stateful_decode: u8,
+    pub max_sequence_length: u32,
+    pub token_input_name_offset: u32,
+    pub logits_output_name_offset: u32,
+    pub _pad: [u8; 9],
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct PrismCimageHeader {
+pub struct CimageHeader {
     pub magic: [u8; 8],
     pub version: u32,
     pub segment_count: u32,
@@ -25,26 +231,24 @@ pub struct PrismCimageHeader {
     pub intermediate_dim: u32,
     pub vocab_size: u32,
     pub quantization_schema: u32,
-    // Segment offsets (from V1 layout)
-    pub metal_lib_offset: u64,
-    pub metal_lib_len: u64,
-    pub main_graph_offset: u64,
-    pub main_graph_len: u64,
-    pub main_weights_offset: u64,
-    pub main_weights_len: u64,
-    pub mtp_graph_offset: u64,
-    pub mtp_graph_len: u64,
-    pub mtp_weights_offset: u64,
-    pub mtp_weights_len: u64,
-    pub topology_table_offset: u64,
-    pub topology_table_len: u64,
-    pub lane_isolation: u8,
-    pub _pad: [u8; 111],
+    /// Number of layers in the MTP draft decoder (0 = no draft model).
+    pub draft_num_layers: u32,
+    // Segment directory
+    pub segments: [SegmentEntry; 9],
+    pub _pad: [u8; 8],
+}
+
+impl CimageHeader {
+    /// Look up a segment by kind. Returns the entry if found, None otherwise.
+    pub fn segment(&self, kind: SegmentKind) -> Option<SegmentEntry> {
+        let kind_u32 = kind as u32;
+        self.segments.iter().find(|s| s.kind == kind_u32).copied()
+    }
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct PrismCimageLayoutMeta {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CimageLayoutMeta {
     pub embed_clustered: TensorRecord,
     pub centroid_table: TensorRecord,
     pub cluster_map: TensorRecord,
@@ -65,13 +269,28 @@ impl TensorRecord {
     pub fn new(offset: u64, length: u64) -> Self { Self { offset, length } }
 }
 
+/// Backward-compatible type aliases
+pub type PrismCimageHeader = CimageHeader;
+pub type PrismCimageLayoutMeta = CimageLayoutMeta;
+/// Backward-compatible function alias
 pub fn verify_prism_cimage(bytes: &[u8]) -> Result<(PrismCimageHeader, PrismCimageLayoutMeta), String> {
-    if bytes.len() < core::mem::size_of::<PrismCimageHeader>() { return Err("too small".into()); }
-    let header: PrismCimageHeader = unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const PrismCimageHeader) };
+    verify_cimage(bytes)
+}
+
+pub fn verify_cimage(bytes: &[u8]) -> Result<(CimageHeader, CimageLayoutMeta), String> {
+    if bytes.len() < core::mem::size_of::<CimageHeader>() { return Err("too small".into()); }
+    let header: CimageHeader = unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const CimageHeader) };
     if &header.magic != &PRISM_MAGIC { return Err("bad magic".into()); }
-    let lo = core::mem::size_of::<PrismCimageHeader>();
-    if lo + core::mem::size_of::<PrismCimageLayoutMeta>() > bytes.len() { return Err("layout past end".into()); }
-    let layout: PrismCimageLayoutMeta = unsafe { std::ptr::read_unaligned(bytes.as_ptr().add(lo) as *const PrismCimageLayoutMeta) };
+    // Try to find LayoutMeta segment in directory; return default if absent
+    let layout = header.segment(SegmentKind::LayoutMeta)
+        .and_then(|entry| {
+            let end = (entry.offset as usize).checked_add(entry.length as usize)?;
+            if end > bytes.len() || entry.length as usize != core::mem::size_of::<CimageLayoutMeta>() {
+                return None;
+            }
+            Some(unsafe { std::ptr::read_unaligned(bytes.as_ptr().add(entry.offset as usize) as *const CimageLayoutMeta) })
+        })
+        .unwrap_or_default();
     Ok((header, layout))
 }
 
@@ -522,6 +741,47 @@ mod tests {
             let exp = (snapped / mag).round() as i8;
             assert!((decoded - exp).abs() <= 1, "Embed mismatch at [{row},{col}]: got {decoded} exp {exp} v={v}");
         }
+    }
+
+    #[test]
+    fn layer_directory_round_trip() {
+        let entry = LayerDirectoryEntry {
+            weights_offset: 0x1000,
+            weights_length: 0x28A_0000,    // ~40.7 MB per layer (48 layers of 12B)
+            scales_offset: 0x200,
+            scales_length: 318_048,         // ~318K scales per layer
+            layer_kind: 0,                  // decoder block
+            flags: 0,
+        };
+
+        // Serialize to raw bytes
+        let bytes: [u8; 48] = unsafe { std::mem::transmute(entry) };
+
+        // Deserialize
+        let round_tripped: LayerDirectoryEntry = unsafe { std::mem::transmute(bytes) };
+
+        assert_eq!(round_tripped.weights_offset, entry.weights_offset);
+        assert_eq!(round_tripped.weights_length, entry.weights_length);
+        assert_eq!(round_tripped.scales_offset, entry.scales_offset);
+        assert_eq!(round_tripped.scales_length, entry.scales_length);
+        assert_eq!(round_tripped.layer_kind, entry.layer_kind);
+        assert_eq!(round_tripped.flags, entry.flags);
+    }
+
+    #[test]
+    fn layer_directory_entry_size() {
+        assert_eq!(std::mem::size_of::<LayerDirectoryEntry>(), 48);
+    }
+
+    #[test]
+    fn layer_directory_entry_default_zeroed() {
+        let e = LayerDirectoryEntry::default();
+        assert_eq!(e.weights_offset, 0);
+        assert_eq!(e.weights_length, 0);
+        assert_eq!(e.scales_offset, 0);
+        assert_eq!(e.scales_length, 0);
+        assert_eq!(e.layer_kind, 0);
+        assert_eq!(e.flags, 0);
     }
 
 }

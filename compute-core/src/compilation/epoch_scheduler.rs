@@ -440,17 +440,16 @@ impl EpochScheduler {
 
                         // Extract ArenaInfo from the slot's IOSurface-backed arena.
                         // Falls back to heap memory when backing_arena is None (mock).
-                        let in_info = arena.slot(in_slot_id)
-                            .and_then(|s| s.backing_arena.as_ref())
-                            .map(|a| a.info)
-                            .unwrap_or_else(|| {
+                        let (mut _in_heap, in_info) =
+                            match arena.slot(in_slot_id).and_then(|s| s.backing_arena.as_ref()) {
+                                Some(a) => (None, a.info),
+                                None => {
                                 let s = arena.slot(in_slot_id)
                                     .expect("in_slot for prediction must exist");
                                 let byte_len = s.manifest.byte_length.max(1) as usize;
                                 let mut heap: Vec<u8> = vec![0u8; byte_len];
                                 let ptr = heap.as_mut_ptr();
-                                std::mem::forget(heap);
-                                crate::arena_info::ArenaInfo {
+                                    (Some(heap), crate::arena_info::ArenaInfo {
                                     width: 1,
                                     height: 1,
                                     logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1) as i32,
@@ -461,19 +460,19 @@ impl EpochScheduler {
                                     base_address: ptr as *mut std::ffi::c_void,
                                     cv_buffer: std::ptr::null_mut(),
                                     io_surface: std::ptr::null_mut(),
+                                    })
                                 }
-                            });
-                        let out_info = arena.slot(out_slot_id)
-                            .and_then(|s| s.backing_arena.as_ref())
-                            .map(|a| a.info)
-                            .unwrap_or_else(|| {
+                            };
+                        let (mut _out_heap, out_info) =
+                            match arena.slot(out_slot_id).and_then(|s| s.backing_arena.as_ref()) {
+                                Some(a) => (None, a.info),
+                                None => {
                                 let s = arena.slot(out_slot_id)
                                     .expect("out_slot for prediction must exist");
                                 let byte_len = s.manifest.byte_length.max(1) as usize;
                                 let mut heap: Vec<u8> = vec![0u8; byte_len];
                                 let ptr = heap.as_mut_ptr();
-                                std::mem::forget(heap);
-                                crate::arena_info::ArenaInfo {
+                                    (Some(heap), crate::arena_info::ArenaInfo {
                                     width: 1,
                                     height: 1,
                                     logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1) as i32,
@@ -484,8 +483,9 @@ impl EpochScheduler {
                                     base_address: ptr as *mut std::ffi::c_void,
                                     cv_buffer: std::ptr::null_mut(),
                                     io_surface: std::ptr::null_mut(),
+                                    })
                                 }
-                            });
+                            };
                         model.predict(in_name, &in_info, out_name, &out_info).is_ok()
                     } else {
                         false

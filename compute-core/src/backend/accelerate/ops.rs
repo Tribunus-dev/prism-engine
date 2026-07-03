@@ -566,10 +566,9 @@ impl TensorBackend for AccelerateBackend {
                 if data.len() % 4 != 0 {
                     return Err("create_owned_from_bytes: U32 data length not multiple of 4".into());
                 }
-                let n = data.len() / 4;
-                // SAFETY: reinterpret U32 bytes as u32 slice
+                // SAFETY: align_to is safe — it handles alignment and returns properly aligned slices
                 let data_u32: &[u32] =
-                    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u32, n) };
+                    unsafe { data.align_to::<u32>() }.1;
                 let data_f32: Vec<f32> = data_u32.iter().map(|&v| v as f32).collect();
                 self.create_f32(&data_f32, shape)
             }

@@ -17,7 +17,7 @@ pub use worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase};
 pub use worker_stream::WorkerStream;
 pub use worker_stream::HardwareStreamHandle;
 pub use worker_health::{WorkerHeartbeat, WorkerOutcome};
-pub use agent_core::{AgentSlot, AgentPayload, KVCacheRef, ToolRegistry, ToolDef, AgentStatus};
+pub use agent_core::{AgentSlot, AgentPayload, KVCacheRef, ToolRegistry, ToolDef, AgentStatus, AgentConfig};
 
 // ── Stable component IDs ──────────────────────────────────────────────
 

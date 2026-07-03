@@ -4,3 +4,5 @@ pub mod worker;
 pub mod npu;
 pub mod inference;
 pub mod inference_step;
+pub mod vision;
+pub mod audio;

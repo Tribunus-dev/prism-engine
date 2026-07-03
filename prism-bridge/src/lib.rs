@@ -19,6 +19,9 @@
 
 use tribunus_compute_core::agent;
 use tribunus_compute_core::tools;
+use tribunus_compute_core::config::{self, ServerConfig, HardwareTarget, CompileQuantMode, GenerationRegime, KvCacheMode};
+use tribunus_compute_core::config::operation_route::OperationRoute;
+use tribunus_compute_core::device::{self, DeviceKind, BackendKind, DeviceMemoryInfo, PcieLinkInfo};
 use tribunus_compute_core::runtime::agent_slot::MultiplexerState;
 use tribunus_compute_core::compute_image::cimage_loader::load_cimage_mmap;
 use std::sync::Arc;
@@ -313,6 +316,7 @@ pub fn prism_compile_gguf(
         None,   // quantize_mode — auto-detect from target
         None,   // ane_models_dir — optional pre-compiled ANE models
         None,   // metallib_path — optional pre-compiled Metal kernels
+        None,   // mlx_capture_dir — optional MLX capture output
     );
 
     match result {
@@ -565,6 +569,535 @@ pub fn prism_infer_multimodal_stream(
             }
         }
     });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Device enumeration (DeviceRegistry)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Bridge version of DeviceKind for UniFFI export.
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum BridgeDeviceKind {
+    Cpu,
+    GpuDiscrete,
+    GpuIntegrated,
+    GpuUnified,
+    Npu,
+    Accelerator,
+}
+
+impl From<DeviceKind> for BridgeDeviceKind {
+    fn from(k: DeviceKind) -> Self {
+        match k {
+            DeviceKind::Cpu => Self::Cpu,
+            DeviceKind::GpuDiscrete => Self::GpuDiscrete,
+            DeviceKind::GpuIntegrated => Self::GpuIntegrated,
+            DeviceKind::GpuUnified => Self::GpuUnified,
+            DeviceKind::Npu => Self::Npu,
+            DeviceKind::Accelerator => Self::Accelerator,
+}
+    }
+}
+
+/// Bridge version of BackendKind for UniFFI export.
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum BridgeBackendKind {
+    Metal,
+    Cuda,
+    Rocm,
+    LevelZero,
+    CoreMl,
+    Ane,
+    Accelerate,
+    CandleCpu,
+    Cpu,
+    Tensix,
+}
+
+impl From<BackendKind> for BridgeBackendKind {
+    fn from(k: BackendKind) -> Self {
+        match k {
+            BackendKind::Metal => Self::Metal,
+            BackendKind::Cuda => Self::Cuda,
+            BackendKind::Rocm => Self::Rocm,
+            BackendKind::LevelZero => Self::LevelZero,
+            BackendKind::CoreMl => Self::CoreMl,
+            BackendKind::Ane => Self::Ane,
+            BackendKind::Accelerate => Self::Accelerate,
+            BackendKind::CandleCpu => Self::CandleCpu,
+            BackendKind::Cpu => Self::Cpu,
+            BackendKind::Tensix => Self::Tensix,
+    }
+    }
+}
+
+/// Bridge version of DeviceInfo for UniFFI export.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeDeviceMemoryInfo {
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+    pub bandwidth_gb_per_sec: f64,
+    pub unified_with_cpu: bool,
+}
+
+impl From<DeviceMemoryInfo> for BridgeDeviceMemoryInfo {
+    fn from(m: DeviceMemoryInfo) -> Self {
+        Self {
+            total_bytes: m.total_bytes,
+            free_bytes: m.free_bytes,
+            bandwidth_gb_per_sec: m.bandwidth_gb_per_sec,
+            unified_with_cpu: m.unified_with_cpu,
+}
+    }
+}
+
+/// Bridge version of PcieLinkInfo for UniFFI export.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgePcieLinkInfo {
+    pub generation: u32,
+    pub lanes: u32,
+    pub max_speed_gb_per_sec: f64,
+}
+
+impl From<PcieLinkInfo> for BridgePcieLinkInfo {
+    fn from(p: PcieLinkInfo) -> Self {
+        Self {
+            generation: p.generation,
+            lanes: p.lanes,
+            max_speed_gb_per_sec: p.max_speed_gb_per_sec,
+        }
+    }
+}
+
+/// Device information for host-app consumption across the FFI bridge.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeDeviceInfo {
+    /// Numeric device id.
+    pub id: u32,
+    /// Broad device category.
+    pub kind: BridgeDeviceKind,
+    /// Specific compute backend.
+    pub backend: BridgeBackendKind,
+    /// Human-readable name.
+    pub name: String,
+    /// Vendor string.
+    pub vendor: String,
+    /// Driver version.
+    pub driver_version: String,
+    /// Memory properties.
+    pub memory: BridgeDeviceMemoryInfo,
+    /// Compute units / cores.
+    pub compute_units: u32,
+    /// Core clock in MHz.
+    pub clock_mhz: u32,
+    /// NPU/ANE core count.
+    pub ane_cores: u32,
+    /// Supported data formats.
+    pub supports_f16: bool,
+    pub supports_bf16: bool,
+    pub supports_int8: bool,
+    pub supports_ternary: bool,
+    /// PCIe link for discrete devices.
+    pub pcie_link: Option<BridgePcieLinkInfo>,
+}
+
+/// List all compute devices available on this host.
+#[uniffi::export]
+pub fn prism_list_devices() -> Vec<BridgeDeviceInfo> {
+    device::global_registry()
+        .enumerate()
+        .iter()
+        .map(|d| BridgeDeviceInfo {
+            id: d.id.0,
+            kind: d.kind.into(),
+            backend: d.backend.into(),
+            name: d.name.clone(),
+            vendor: d.vendor.clone(),
+            driver_version: d.driver_version.clone(),
+            memory: BridgeDeviceMemoryInfo::from(d.memory.clone()),
+            compute_units: d.compute_units,
+            clock_mhz: d.clock_mhz,
+            ane_cores: d.ane_cores,
+            supports_f16: d.supports_f16,
+            supports_bf16: d.supports_bf16,
+            supports_int8: d.supports_int8,
+            supports_ternary: d.supports_ternary,
+            pcie_link: d.pcie_link.as_ref().map(|p| BridgePcieLinkInfo::from(p.clone())),
+        })
+        .collect()
+}
+
+/// Return the number of device slots (for Swift-side table sizing).
+#[uniffi::export]
+pub fn prism_device_count() -> u32 {
+    device::global_registry().count() as u32
+}
+
+/// Return a JSON string of all devices (for agent serialization).
+#[uniffi::export]
+pub fn prism_device_json() -> String {
+    device::global_registry().to_json()
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Configuration (ServerConfig + compile-time settings)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Bridge version of HardwareTarget for UniFFI export.
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum BridgeHardwareTarget {
+    M1,
+    M1Pro,
+    M2,
+    M2Ultra,
+    M3Ultra,
+}
+
+impl From<HardwareTarget> for BridgeHardwareTarget {
+    fn from(h: HardwareTarget) -> Self {
+        match h {
+            HardwareTarget::M1 => Self::M1,
+            HardwareTarget::M1Pro => Self::M1Pro,
+            HardwareTarget::M2 => Self::M2,
+            HardwareTarget::M2Ultra => Self::M2Ultra,
+            HardwareTarget::M3Ultra => Self::M3Ultra,
+        }
+    }
+}
+
+impl From<BridgeHardwareTarget> for HardwareTarget {
+    fn from(b: BridgeHardwareTarget) -> Self {
+        match b {
+            BridgeHardwareTarget::M1 => Self::M1,
+            BridgeHardwareTarget::M1Pro => Self::M1Pro,
+            BridgeHardwareTarget::M2 => Self::M2,
+            BridgeHardwareTarget::M2Ultra => Self::M2Ultra,
+            BridgeHardwareTarget::M3Ultra => Self::M3Ultra,
+        }
+    }
+}
+
+/// Bridge version of CompileQuantMode for UniFFI export.
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum BridgeCompileQuantMode {
+    Nf4 { group_size: u32 },
+    Af8 { group_size: u32 },
+    Ternary { group_size: u32 },
+    TernaryTile640 { group_size: u32 },
+    AutoDetect,
+}
+
+impl From<CompileQuantMode> for BridgeCompileQuantMode {
+    fn from(q: CompileQuantMode) -> Self {
+        match q {
+            CompileQuantMode::Nf4 { group_size } => Self::Nf4 { group_size },
+            CompileQuantMode::Af8 { group_size } => Self::Af8 { group_size },
+            CompileQuantMode::Ternary { group_size } => Self::Ternary { group_size },
+            CompileQuantMode::TernaryTile640 { group_size } => Self::TernaryTile640 { group_size },
+        }
+    }
+}
+
+impl From<BridgeCompileQuantMode> for CompileQuantMode {
+    fn from(b: BridgeCompileQuantMode) -> Self {
+        match b {
+            BridgeCompileQuantMode::Nf4 { group_size } => Self::Nf4 { group_size },
+            BridgeCompileQuantMode::Af8 { group_size } => Self::Af8 { group_size },
+            BridgeCompileQuantMode::Ternary { group_size } => Self::Ternary { group_size },
+            BridgeCompileQuantMode::TernaryTile640 { group_size } => Self::TernaryTile640 { group_size },
+            // AutoDetect has no corresponding core variant; choose reasonable default
+            BridgeCompileQuantMode::AutoDetect => Self::Nf4 { group_size: 64 },
+        }
+    }
+}
+
+/// Bridge version of GenerationRegime for UniFFI export.
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum BridgeGenerationRegime {
+    Autoregressive,
+    DiscreteDiffusion,
+}
+
+impl From<GenerationRegime> for BridgeGenerationRegime {
+    fn from(g: GenerationRegime) -> Self {
+        match g {
+            GenerationRegime::Autoregressive => Self::Autoregressive,
+            GenerationRegime::DiscreteDiffusion => Self::DiscreteDiffusion,
+        }
+    }
+}
+
+/// Bridge version of KvCacheMode for UniFFI export.
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum BridgeKvCacheMode {
+    AppendOnly,
+    FullRecompute,
+    BlockCache,
+}
+
+impl From<KvCacheMode> for BridgeKvCacheMode {
+    fn from(k: KvCacheMode) -> Self {
+        match k {
+            KvCacheMode::AppendOnly => Self::AppendOnly,
+            KvCacheMode::FullRecompute => Self::FullRecompute,
+            KvCacheMode::BlockCache => Self::BlockCache,
+        }
+    }
+}
+
+// ── ServerConfig sections ───────────────────────────────────────────
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeServerConfigSection {
+    pub port: u16,
+    pub host: String,
+    pub max_concurrent: u32,
+    pub rate_limit_per_min: u32,
+    pub rate_limit_tokens_per_sec: f64,
+    pub rate_limit_burst: u64,
+    pub log_level: String,
+    pub runtime_mode: String,
+}
+
+impl From<config::network::ServerConfigSection> for BridgeServerConfigSection {
+    fn from(s: config::network::ServerConfigSection) -> Self {
+        Self {
+            port: s.port,
+            host: s.host,
+            max_concurrent: s.max_concurrent,
+            rate_limit_per_min: s.rate_limit_per_min,
+            rate_limit_tokens_per_sec: s.rate_limit_tokens_per_sec,
+            rate_limit_burst: s.rate_limit_burst,
+            log_level: s.log_level,
+            runtime_mode: s.runtime_mode,
+        }
+    }
+}
+
+impl From<BridgeServerConfigSection> for config::network::ServerConfigSection {
+    fn from(b: BridgeServerConfigSection) -> Self {
+        Self {
+            port: b.port,
+            host: b.host,
+            max_concurrent: b.max_concurrent,
+            rate_limit_per_min: b.rate_limit_per_min,
+            rate_limit_tokens_per_sec: b.rate_limit_tokens_per_sec,
+            rate_limit_burst: b.rate_limit_burst,
+            log_level: b.log_level,
+            runtime_mode: b.runtime_mode,
+        }
+    }
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeModelConfigSection {
+    pub model_path: Option<String>,
+    pub auto_download: bool,
+    pub max_model_cache_gb: f64,
+}
+
+impl From<config::network::ModelConfigSection> for BridgeModelConfigSection {
+    fn from(m: config::network::ModelConfigSection) -> Self {
+        Self {
+            model_path: m.model_path,
+            auto_download: m.auto_download,
+            max_model_cache_gb: m.max_model_cache_gb,
+        }
+    }
+}
+
+impl From<BridgeModelConfigSection> for config::network::ModelConfigSection {
+    fn from(b: BridgeModelConfigSection) -> Self {
+        Self {
+            model_path: b.model_path,
+            auto_download: b.auto_download,
+            max_model_cache_gb: b.max_model_cache_gb,
+        }
+    }
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeCacheConfigSection {
+    pub kv_cache_tiers: u32,
+    pub compression_ratio: f64,
+    pub evolkv_enabled: bool,
+}
+
+impl From<config::network::CacheConfigSection> for BridgeCacheConfigSection {
+    fn from(c: config::network::CacheConfigSection) -> Self {
+        Self {
+            kv_cache_tiers: c.kv_cache_tiers,
+            compression_ratio: c.compression_ratio,
+            evolkv_enabled: c.evolkv_enabled,
+        }
+    }
+}
+
+impl From<BridgeCacheConfigSection> for config::network::CacheConfigSection {
+    fn from(b: BridgeCacheConfigSection) -> Self {
+        Self {
+            kv_cache_tiers: b.kv_cache_tiers,
+            compression_ratio: b.compression_ratio,
+            evolkv_enabled: b.evolkv_enabled,
+        }
+    }
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeSpecConfigSection {
+    pub draft_count: u32,
+    pub draft_length: u32,
+    pub spechub_enabled: bool,
+}
+
+impl From<config::network::SpecConfigSection> for BridgeSpecConfigSection {
+    fn from(s: config::network::SpecConfigSection) -> Self {
+        Self {
+            draft_count: s.draft_count,
+            draft_length: s.draft_length,
+            spechub_enabled: s.spechub_enabled,
+        }
+    }
+}
+
+impl From<BridgeSpecConfigSection> for config::network::SpecConfigSection {
+    fn from(b: BridgeSpecConfigSection) -> Self {
+        Self {
+            draft_count: b.draft_count,
+            draft_length: b.draft_length,
+            spechub_enabled: b.spechub_enabled,
+        }
+    }
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeClusterConfigSection {
+    pub exo_enabled: bool,
+    pub exo_port: u16,
+    pub autoscale_min: u32,
+    pub autoscale_max: u32,
+}
+
+impl From<config::network::ClusterConfigSection> for BridgeClusterConfigSection {
+    fn from(c: config::network::ClusterConfigSection) -> Self {
+        Self {
+            exo_enabled: c.exo_enabled,
+            exo_port: c.exo_port,
+            autoscale_min: c.autoscale_min,
+            autoscale_max: c.autoscale_max,
+        }
+    }
+}
+
+impl From<BridgeClusterConfigSection> for config::network::ClusterConfigSection {
+    fn from(b: BridgeClusterConfigSection) -> Self {
+        Self {
+            exo_enabled: b.exo_enabled,
+            exo_port: b.exo_port,
+            autoscale_min: b.autoscale_min,
+            autoscale_max: b.autoscale_max,
+        }
+    }
+}
+
+/// Full server configuration for the Swift host app.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeServerConfig {
+    pub server: BridgeServerConfigSection,
+    pub model: BridgeModelConfigSection,
+    pub cache: BridgeCacheConfigSection,
+    pub speculation: BridgeSpecConfigSection,
+    pub cluster: BridgeClusterConfigSection,
+}
+
+impl From<ServerConfig> for BridgeServerConfig {
+    fn from(c: ServerConfig) -> Self {
+        Self {
+            server: c.server.into(),
+            model: c.model.into(),
+            cache: c.cache.into(),
+            speculation: c.speculation.into(),
+            cluster: c.cluster.into(),
+        }
+    }
+}
+
+impl From<BridgeServerConfig> for ServerConfig {
+    fn from(b: BridgeServerConfig) -> Self {
+        ServerConfig {
+            server: b.server.into(),
+            model: b.model.into(),
+            cache: b.cache.into(),
+            speculation: b.speculation.into(),
+            cluster: b.cluster.into(),
+        }
+    }
+}
+
+// ── OperationRoute ──────────────────────────────────────────────────
+
+/// Per-operation backend routing for decoder layers.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct BridgeOperationRoute {
+    pub rms_norm: u32,
+    pub silu: u32,
+    pub matmul: u32,
+    pub attention: u32,
+    pub softmax: u32,
+    pub rope: u32,
+    pub add: u32,
+    pub multiply: u32,
+    pub transpose: u32,
+    pub reshape: u32,
+}
+
+impl From<OperationRoute> for BridgeOperationRoute {
+    fn from(o: OperationRoute) -> Self {
+        Self {
+            rms_norm: o.rms_norm,
+            silu: o.silu,
+            matmul: o.matmul,
+            attention: o.attention,
+            softmax: o.softmax,
+            rope: o.rope,
+            add: o.add,
+            multiply: o.multiply,
+            transpose: o.transpose,
+            reshape: o.reshape,
+        }
+    }
+}
+
+// ── Exported functions ──────────────────────────────────────────────
+
+/// Load the server configuration from the default config file path
+/// ($HOME/.tribunus/config.toml), environment variables, and defaults.
+#[uniffi::export]
+pub fn prism_load_config() -> BridgeServerConfig {
+    ServerConfig::load().into()
+}
+
+/// Load the server configuration from a specific TOML config file path.
+/// Falls back to defaults if the file cannot be read.
+#[uniffi::export]
+pub fn prism_load_config_from(path: String) -> BridgeServerConfig {
+    let mut config = ServerConfig::default();
+    if let Ok(file_config) = ServerConfig::load_config_toml(&path) {
+        config.server = file_config.server;
+        config.model = file_config.model;
+        config.cache = file_config.cache;
+        config.speculation = file_config.speculation;
+        config.cluster = file_config.cluster;
+    }
+    config.load_env_overrides();
+    config.into()
+}
+
+/// Return the current server configuration as a JSON string.
+#[uniffi::export]
+pub fn prism_config_json() -> String {
+    serde_json::to_string_pretty(&ServerConfig::load())
+        .unwrap_or_else(|_| "{}".to_string())
 }
 
 // ═══════════════════════════════════════════════════════════════════════

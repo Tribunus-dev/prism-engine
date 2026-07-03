@@ -83,7 +83,6 @@ fn minimal_header() -> CImageHeader {
     hdr.ane_keepalive_interval_us = 5000;
     hdr.lane_isolation = true;
     hdr
-    }
 }
 
 /// A synthetic payload buffer simulating segment data after the header.
