@@ -20,6 +20,14 @@ pub mod draft_loader;
 #[cfg(feature = "tensix")]
 pub mod tensix;
 pub mod execution_graph;
+pub mod ternary_pipeline;
+pub mod kernel_types;
+#[cfg(feature = "prism-backend")]
+pub mod kernel_dispatch;
+#[cfg(feature = "prism-backend")]
+pub mod kernel_registry;
+#[cfg(feature = "prism-backend")]
+pub mod validation_matrix;
 
 pub use source::*;
 pub use quantize::*;

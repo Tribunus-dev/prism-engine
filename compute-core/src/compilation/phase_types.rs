@@ -14,7 +14,7 @@ pub use super::phase_ir::{CompilationId, DeviceSignature, PhaseId};
 
 // ── Compile phase type ──────────────────────────────────────────────────────
 
-/// The 14 primitive phase types of the distill-compiler.
+/// The 23 primitive phase types of the distill-compiler (spec §8).
 ///
 /// Every phase has immutable input and output tensor descriptors. The phase
 /// type determines the logical operation; the provider (Metal / Core ML /
@@ -23,18 +23,27 @@ pub use super::phase_ir::{CompilationId, DeviceSignature, PhaseId};
 pub enum PhaseType {
     LoadTeacherRegion,
     LoadStudentCandidate,
+    LoadCalibrationShard,
     TeacherForward,
     StudentForward,
     CompareActivations,
     ProbeAttention,
     ProbeResidual,
     ProbeNorm,
+    ProbeLogits,
     ScaleSolve,
+    EstimateSensitivity,
+    SolveContinuousParameters,
+    ProposeTritChanges,
+    ScoreCandidatePages,
+    RebalanceBlockBudget,
     TritCommit,
     SidecarAllocate,
     AdvanceFrontier,
+    AdvanceStudentFrontier,
     SealStudentRegion,
     SealReceipt,
+    CheckpointRun,
 }
 
 // ── Element type ────────────────────────────────────────────────────────────

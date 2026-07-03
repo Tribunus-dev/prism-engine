@@ -18,6 +18,7 @@ pub enum RegionKind {
     ActivationFrontier,
     AccelerateWorkspace,
     ReceiptBuffer,
+    CoreMLReserve,
     Contingency,
 }
 
@@ -92,7 +93,8 @@ impl MemoryBudget {
         ceilings.insert(RegionKind::ActivationFrontier, 2_000_000_000);   // 2.0 GB
         ceilings.insert(RegionKind::AccelerateWorkspace, 512_000_000);    // 512 MB
         ceilings.insert(RegionKind::ReceiptBuffer, 256_000_000);          // 256 MB
-        ceilings.insert(RegionKind::Contingency, 1_200_000_000);          // ~1.2 GB
+        ceilings.insert(RegionKind::CoreMLReserve, 750_000_000);          // 0.75 GB
+        ceilings.insert(RegionKind::Contingency, 500_000_000);            // 0.50 GB
 
         MemoryBudget {
             process_budget_bytes: 10_000_000_000,      // 10.0 GB
