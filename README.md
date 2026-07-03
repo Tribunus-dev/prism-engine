@@ -30,9 +30,26 @@ curl http://localhost:8080/v1/chat/completions \
 
 ## Features
 
-- `metal-dispatch` — Metal GPU GEMV acceleration (macOS only)
-- `server` — OpenAI-compatible HTTP server
-- `full` — both metal-dispatch and server
+Cargo feature flags (compose as needed):
+
+- `server` — OpenAI-compatible HTTP server (`/v1/chat/completions`)
+- `ane` — Apple Neural Engine backend (macOS only)
+- `metal-dispatch` — Metal GPU GEMV acceleration for the root LUT engine (macOS only; requires the Xcode toolchain)
+- `prism-backend` — full compute-core execution path (Metal + ANE + Accelerate)
+- `full` — `server` + `ane`
+- `full-apple` — `prism-backend` + `ane` + `server` (the complete Apple-Silicon runtime)
+
+## Platform Support
+
+| Platform | Status |
+|----------|--------|
+| macOS (Apple Silicon) | **Supported** — Metal GPU + ANE via `full-apple` |
+| Linux / other (CPU) | **In progress** — portable CPU path; builds without the Metal toolchain |
+| NVIDIA / AMD / Intel GPU | **Planned** — see the cross-platform hardening roadmap |
+
+> Off macOS the Metal kernels cannot be compiled, so the build emits a
+> placeholder kernel library to keep the crate linkable. Set `PRISM_MOCK_BUILD=1`
+> to force this on macOS for a fast, non-GPU dev build — never ship a mock build.
 
 ## Model Format
 
