@@ -118,6 +118,10 @@ tribunus-compute-core = { path = "compute-core", optional = true }
 default = []
 server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]
 ane = ["dep:coreml-proto"]
+# Metal GPU GEMV acceleration for the root-crate LUT engine. macOS only —
+# requires the Xcode toolchain (xcrun) at build time. Off macOS this feature
+# will not compile; use `prism-backend` for the compute-core execution path.
+metal-dispatch = ["dep:metal", "dep:objc"]
 full = ["server", "ane"]
 prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend"]
 full-apple = ["prism-backend", "ane", "server"]
@@ -133,4 +137,3 @@ cc = "1.2"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
-required-features = ["prism-backend"]
