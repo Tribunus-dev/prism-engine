@@ -2,15 +2,14 @@
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[cfg(not(any(
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    ),
+    feature = "backend-cpu",
+    feature = "mlx-backend",
     feature = "prism-backend",
     feature = "candle-cpu",
     feature = "intel",
+    feature = "tensix",
     feature = "stub-backend",
-    feature = "storage-adapters"
+    feature = "storage-adapters",
 )))]
 compile_error!(
     "Tribunus Compute requires a supported backend: Apple Silicon (macOS arm64), Candle CPU (Linux x86), or a stub/storage backend feature."

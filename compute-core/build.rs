@@ -7,7 +7,9 @@ fn forward(name: &str) {
 
 fn main() {
     // ── Metal kernel compilation ────────────────────────────────────────
-    // Compile palettized shaders into a loadable .metallib.
+    // Only compile Metal shaders when the metal-dispatch feature is active.
+    #[cfg(feature = "metal-dispatch")]
+    {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let template_dir = std::path::Path::new(&manifest_dir)
         .join("src")
@@ -61,6 +63,7 @@ fn main() {
         "cargo:rustc-env=TRIBUNUS_METALLIB={}",
         metallib_path.display()
     );
+    }
 
     // Forward git SHA and branch for artifact provenance.
     if std::env::var("VERGEN_GIT_SHA").is_err() {

@@ -360,6 +360,38 @@ impl CimageDeployment {
             None => (None, None, None, None, None, None),
         };
 
+        // For format v6+, embedding/centroid/norm segments are required
+        if header.version >= 6 {
+            let required_tags = [
+                (model_artifact_tag::EMBED_NIBBLES, "EMBED_NIBBLES"),
+                (model_artifact_tag::EMBED_SCALES, "EMBED_SCALES"),
+                (model_artifact_tag::CENTROID_NIBBLES, "CENTROID_NIBBLES"),
+                (model_artifact_tag::CENTROID_SCALES, "CENTROID_SCALES"),
+                (model_artifact_tag::CLUSTER_MAP, "CLUSTER_MAP"),
+                (model_artifact_tag::AUX_NORMS, "AUX_NORMS"),
+            ];
+            match model_artifacts_seg {
+                Some(seg) => {
+                    let off = seg.offset as usize;
+                    let len = seg.length as usize;
+                    let data = &bytes[off..off + len];
+                    for (tag, name) in &required_tags {
+                        let found = ModelArtifactEntry::iter_entries(data).any(|(t, _)| t == *tag);
+                        if !found {
+                            return Err(format!(
+                                "v{} .cimage missing required model artifact tag {} (0x{:02X})",
+                                header.version, name, tag
+                            ));
+                        }
+                    }
+                }
+                None => return Err(format!(
+                    "v{} .cimage missing ModelArtifacts segment (required for v6+)",
+                    header.version
+                )),
+            }
+        }
+
         Ok(Self {
             header: crate::compute_image::manifest::CImageHeader::default(),
             layout: unsafe { std::mem::zeroed() },
