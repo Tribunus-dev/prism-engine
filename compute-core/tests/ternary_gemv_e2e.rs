@@ -201,13 +201,13 @@ fn f32_to_f16(v: f32) -> u16 {
     let sign = (bits >> 16) & 0x8000;
     let exp = ((bits >> 23) & 0xff) as i32 - 127 + 15;
     let mantissa = (bits >> 13) & 0x3ff;
-    if exp <= 0 {
+    (if exp <= 0 {
         sign
     } else if exp >= 31 {
         sign | 0x7c00 | mantissa
     } else {
         sign | ((exp as u32) << 10) | mantissa
-    } as u16
+    }) as u16
 }
 
 fn f16_to_f32(bits: u16) -> f32 {

@@ -398,8 +398,9 @@ mod tests {
                 SegmentEntry { kind: 0, offset: 0, length: 0 },
                 SegmentEntry { kind: 0, offset: 0, length: 0 },
                 SegmentEntry { kind: 0, offset: 0, length: 0 },
+                SegmentEntry { kind: 0, offset: 0, length: 0 },
             ],
-            _pad: [0u8; 12],
+            _pad: [0u8; 8],
         };
 
         // Write header

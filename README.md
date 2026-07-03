@@ -1,17 +1,17 @@
 # Prism Engine
 
-Palettized LUT inference runtime with Metal GPU acceleration.
+Palettized LUT inference runtime with Metal GPU acceleration (Apple Silicon) and CPU fallback. Cross-platform Linux build with `--features backend-cpu` (tracking).
 
-One format (`.cimage`), three backends: Metal GPU, macOS ANE, CPU. OpenAI-compatible API.
+One format (`.cimage`), supporting Metal GPU on Apple Silicon. CPU backend in development. OpenAI-compatible API.
 
 ## Quick Start
 
 ```bash
 # Pull a model from HuggingFace (downloads + compiles to .cimage)
-cargo run --release --bin prism --features full -- pull Qwen/Qwen2.5-0.5B-Instruct
+cargo run --release --bin prism --features full-apple -- pull Qwen/Qwen2.5-0.5B-Instruct
 
 # Run the server
-cargo run --release --bin prism --features full -- run qwen2.5-0.5b-instruct
+cargo run --release --bin prism --features full-apple -- run qwen2.5-0.5b-instruct
 
 # Try it
 curl http://localhost:8080/v1/chat/completions \
@@ -50,7 +50,6 @@ Cargo feature flags (compose as needed):
 > Off macOS the Metal kernels cannot be compiled, so the build emits a
 > placeholder kernel library to keep the crate linkable. Set `PRISM_MOCK_BUILD=1`
 > to force this on macOS for a fast, non-GPU dev build — never ship a mock build.
-
 ## Model Format
 
 Models are stored in `~/.prism/models/<name>/`:
