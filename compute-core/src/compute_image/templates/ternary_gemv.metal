@@ -1,43 +1,26 @@
-// ── TERNARY GEMV ───────────────────────────────────────────────────────────
-// Branch-free ternary-weight GEMV kernel for 2-bit packed ternary weights.
+// ── TERNARY GEMV (legacy 2-bit format) ──────────────────────────────────────
+// Branch-free ternary-weight GEMV for 2-bit packed ternary weights.
 //
-// Performance characteristics (expected on Apple Silicon GPU):
-//   - ~2× memory bandwidth reduction vs FP16 weights (2 bits vs 16 bits)
-//   - Zero multiply instructions — all operations are conditional selects and
-//     additions, maximizing ALU throughput on Apple GPUs
-//   - One thread per output row → maximum parallelism for batch=1 matvec
-//   - Half accumulator → matches input/output precision, sufficient for ternary
+// ⚠ FORMAT NOTE: this kernel consumes the LEGACY 2-bit packing (4 weights/byte,
+// = 2.0 bits/weight) and applies NO block scale (unit scale). For the compiler's
+// real weight format use `ternary_tile640_gemv.metal`, which consumes the
+// space-optimal tile640 base-3 packing (20 trits/u32 = 1.6 bits/weight) AND
+// applies the per-256 block scales. Prefer that kernel for production; this one
+// is kept for the scale-free 2-bit path and legacy fixtures.
 //
-// Encoding:
-//   2 bits per weight, 4 weights packed per UINT8 byte.
-//   Compiler encoding (ternary_compile.rs): 0b00 = 0, 0b01 = +1, 0b10 = -1
-//   This kernel decodes to match the compiler (00→0, 01→+iv, 10→-iv).
-//   The ternary set {+1, 0, -1} means no multiplication is needed — just
-//   conditional add, pass, or subtract of the input element.
-//   All condition checks use select() — zero branching divergence.
+// PRECISION: this version accumulates in fp32 (was fp16). Ternary needs no
+// multiply — each 2-bit code selects add / skip / subtract of the input element
+// — but the running sum must be fp32 to avoid precision loss over long rows.
+//
+// Encoding (matches the compiler): 00 = 0, 01 = +1, 10 = -1, 11 = 0.
 //
 // Buffer layout:
 //   [0] packed_weights [N * K/4] uint8_t  — packed ternary weights, row-major
-//   [1] input          [K] half             — input vector (1D, one row)
-//   [2] output         [N] half             — result vector
-//   [3] in_dim         uint                 — input dimension (K)
-//   [4] out_dim        uint                 — output dimension (N)
-//
-// K must be a multiple of 4 (4 weights per byte).
-//
-// Thread count: N threads (one per output row).
-//
-// ── select() strategy ─────────────────────────────────────────────────────
-// For each 2-bit nibble n:
-//   n == 0 (00): zero              →   0.0h
-//   n == 1 (01): keep input as-is  →   iv
-//   n == 2 (10): negate input      →  -iv
-//   n == 3 (11, reserved): zero    →   0.0h
-//
-// Two nested select() calls per weight produce the correct value:
-//   inner: select(0.0h, iv, n == 1)    —  iv when n==1, else 0.0h
-//   outer: select(inner, -iv, n == 2)   — -iv when n==2, else inner result
-// Total: 8 select() calls per byte (2 per weight × 4 weights).
+//   [1] input          [K] half           — input vector (1D, one row)
+//   [2] output         [N] half           — result vector
+//   [3] in_dim         uint               — input dimension (K)
+//   [4] out_dim        uint               — output dimension (N)
+// K must be a multiple of 4 (4 weights per byte). Thread count: N (one/row).
 
 #include <metal_stdlib>
 using namespace metal;
@@ -55,28 +38,23 @@ kernel void ternary_gemv(
     uint packed_cols = in_dim / 4;  // 4 weights per byte
     uint offset      = row * packed_cols;
 
-    half sum = 0.0h;
+    float sum = 0.0f; // fp32 accumulation
 
     for (uint i = 0; i < packed_cols; ++i) {
-        uint8_t byte   = packed_weights[offset + i];
-        half4   iv     = *((device const half4*)(input + i * 4));
+        uint8_t byte = packed_weights[offset + i];
+        float4  iv   = float4(*((device const half4*)(input + i * 4)));
 
-        uint nibble0 = uint(byte)       & 0x03u;
-        uint nibble1 = (uint(byte) >> 2) & 0x03u;
-        uint nibble2 = (uint(byte) >> 4) & 0x03u;
-        uint nibble3 = (uint(byte) >> 6) & 0x03u;
+        uint n0 =  uint(byte)       & 0x03u;
+        uint n1 = (uint(byte) >> 2) & 0x03u;
+        uint n2 = (uint(byte) >> 4) & 0x03u;
+        uint n3 = (uint(byte) >> 6) & 0x03u;
 
-        // select(a, b, cond) → a if cond is false, b if cond is true
-        half4 tmp;
-        // Fixed: matches compiler encoding 00=0, 01=+1, 10=-1
-        // Inner: when nibble==1 → +iv; outer: when nibble==2 → -iv
-        tmp.x = select(select(0.0h, iv.x, nibble0 == 1u), -iv.x, nibble0 == 2u);
-        tmp.y = select(select(0.0h, iv.y, nibble1 == 1u), -iv.y, nibble1 == 2u);
-        tmp.z = select(select(0.0h, iv.z, nibble2 == 1u), -iv.z, nibble2 == 2u);
-        tmp.w = select(select(0.0h, iv.w, nibble3 == 1u), -iv.w, nibble3 == 2u);
-
-        sum += tmp.x + tmp.y + tmp.z + tmp.w;
+        // 00,11 -> 0 ; 01 -> +iv ; 10 -> -iv   (branch-free select in fp32)
+        sum += select(select(0.0f, iv.x, n0 == 1u), -iv.x, n0 == 2u);
+        sum += select(select(0.0f, iv.y, n1 == 1u), -iv.y, n1 == 2u);
+        sum += select(select(0.0f, iv.z, n2 == 1u), -iv.z, n2 == 2u);
+        sum += select(select(0.0f, iv.w, n3 == 1u), -iv.w, n3 == 2u);
     }
 
-    output[row] = sum;
+    output[row] = half(sum);
 }
