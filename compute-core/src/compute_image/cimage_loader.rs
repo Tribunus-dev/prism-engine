@@ -15,7 +15,7 @@
 //! [`TernaryCImageCompiler`]: crate::compute_image::compile::ternary::TernaryCImageCompiler
 
 use crate::compute_image::compile::ternary::{
-    verify_cimage, SegmentEntry, SegmentKind, PRISM_MAGIC,
+    verify_cimage, SegmentEntry, SegmentKind, ModelArtifactEntry, model_artifact_tag, PRISM_MAGIC,
 };
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
@@ -333,6 +333,33 @@ impl CimageDeployment {
 
         let num_weights = (sg2.length / 2) * 256;
 
+        // ── Read auxiliary buffers from ModelArtifacts segment ────────
+        let model_artifacts_seg = header.segments.iter().find(|s| s.kind == SegmentKind::ModelArtifacts as u32 && s.length > 0);
+        let (embed_buffer, embed_scales_buffer, centroid_buffer, centroid_scales_buffer,
+             cluster_map_buffer, norms_buffer) = match model_artifacts_seg {
+            Some(seg) => {
+                let off = seg.offset as usize;
+                let len = seg.length as usize;
+                let data = &bytes[off..off + len];
+                let mut embed = None; let mut escale = None;
+                let mut cent = None; let mut cscale = None;
+                let mut cmap = None; let mut norms = None;
+                for (tag, payload) in ModelArtifactEntry::iter_entries(data) {
+                    match tag {
+                        t if t == model_artifact_tag::EMBED_NIBBLES => embed = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
+                        t if t == model_artifact_tag::EMBED_SCALES => escale = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
+                        t if t == model_artifact_tag::CENTROID_NIBBLES => cent = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
+                        t if t == model_artifact_tag::CENTROID_SCALES => cscale = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
+                        t if t == model_artifact_tag::CLUSTER_MAP => cmap = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
+                        t if t == model_artifact_tag::AUX_NORMS => norms = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
+                        _ => {}
+                    }
+                }
+                (embed, escale, cent, cscale, cmap, norms)
+            }
+            None => (None, None, None, None, None, None),
+        };
+
         Ok(Self {
             header: crate::compute_image::manifest::CImageHeader::default(),
             layout: unsafe { std::mem::zeroed() },
@@ -340,12 +367,12 @@ impl CimageDeployment {
             scales_buffer: mk_buf(sg2),
             weights_int4_buffer: None,
             fused_int4_buffer: None,
-            embed_buffer: None,
-            embed_scales_buffer: None,
-            centroid_scales_buffer: None,
-            centroid_buffer: None,
-            cluster_map_buffer: None,
-            norms_buffer: None,
+            embed_buffer,
+            embed_scales_buffer,
+            centroid_scales_buffer,
+            centroid_buffer,
+            cluster_map_buffer,
+            norms_buffer,
             scalars_buffer: None,
             mil_buffer: None,
             metallib_buffer: Some(mk_buf(sg0)),

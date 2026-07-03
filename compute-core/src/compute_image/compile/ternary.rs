@@ -91,6 +91,18 @@ pub mod model_artifact_tag {
     pub const TOKEN_MAP: u32 = 0x04;     // Multimodal special token map (JSON)
     pub const CHAT_TEMPLATE: u32 = 0x05; // Chat prompt template string
     pub const GENERATION_CONFIG: u32 = 0x06; // Sampling params (JSON)
+    /// Ternary-packed embedding table (nibbles reordered by cluster)
+    pub const EMBED_NIBBLES: u32 = 0x10;
+    /// FP16 block scales for the embedding table
+    pub const EMBED_SCALES: u32 = 0x11;
+    /// Ternary-packed centroid table (256 centroids × hidden_dim)
+    pub const CENTROID_NIBBLES: u32 = 0x12;
+    /// FP16 block scales for centroids
+    pub const CENTROID_SCALES: u32 = 0x13;
+    /// u32 cluster assignments (vocab_size entries)
+    pub const CLUSTER_MAP: u32 = 0x14;
+    /// FP16 per-layer RMSNorm weights (all layers × [input, post_attn] × hidden_dim)
+    pub const AUX_NORMS: u32 = 0x15;
 }
 
 /// One entry in the ModelArtifacts segment. Flat binary: tag + length + data.

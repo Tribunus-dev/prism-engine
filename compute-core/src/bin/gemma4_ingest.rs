@@ -139,6 +139,131 @@ fn process_weights(
         weights_out.extend_from_slice(&nibbles);
     }
 }
+// ── K-Means Clustering (for embedding quantization) ──────────────────
+
+thread_local! {
+    static SEED: std::cell::Cell<u64> = std::cell::Cell::new(42);
+}
+
+fn rand_range(n: usize) -> usize {
+    if n == 0 { return 0; }
+    SEED.with(|seed| {
+        let s = seed.get();
+        let next = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        seed.set(next);
+        (next >> 33) as usize % n
+    })
+}
+
+/// K-Means++ centroid initialization.
+fn kmeans_plusplus(data: &[f32], k: usize, n_rows: usize, dim: usize) -> Vec<f32> {
+    use std::collections::HashSet;
+    let mut centroids: Vec<f32> = Vec::with_capacity(k * dim);
+    let mut chosen: HashSet<usize> = HashSet::new();
+    let first_idx = rand_range(n_rows);
+    chosen.insert(first_idx);
+    centroids.extend_from_slice(&data[first_idx * dim..(first_idx + 1) * dim]);
+
+    let mut min_dist_sq: Vec<f32> = vec![f32::MAX; n_rows];
+    for i in 0..n_rows {
+        let row = &data[i * dim..(i + 1) * dim];
+        let dist = row.iter()
+            .zip(centroids.chunks_exact(dim).last().unwrap())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f32>();
+        min_dist_sq[i] = dist;
+    }
+
+    for c in 1..k {
+        let total_dist: f64 = min_dist_sq.iter().map(|&d| d as f64).sum();
+        if total_dist <= 0.0 {
+            let idx = loop { let idx = rand_range(n_rows); if !chosen.contains(&idx) { break idx; } };
+            chosen.insert(idx);
+            centroids.extend_from_slice(&data[idx * dim..(idx + 1) * dim]);
+            continue;
+        }
+        let threshold = rand_range(usize::MAX) as f64 / usize::MAX as f64 * total_dist;
+        let mut cumulative = 0.0_f64;
+        let mut next_idx = 0;
+        for i in 0..n_rows {
+            cumulative += min_dist_sq[i] as f64;
+            if cumulative >= threshold && !chosen.contains(&i) { next_idx = i; break; }
+        }
+        chosen.insert(next_idx);
+        centroids.extend_from_slice(&data[next_idx * dim..(next_idx + 1) * dim]);
+        let new_centroid = &centroids[c * dim..(c + 1) * dim];
+        for i in 0..n_rows {
+            if chosen.contains(&i) { min_dist_sq[i] = 0.0; continue; }
+            let row = &data[i * dim..(i + 1) * dim];
+            let dist = row.iter().zip(new_centroid).map(|(a, b)| (a - b) * (a - b)).sum::<f32>();
+            if dist < min_dist_sq[i] { min_dist_sq[i] = dist; }
+        }
+    }
+    centroids
+}
+
+/// One k-means iteration: assign + update.
+fn kmeans_iterate(data: &[f32], centroids: &mut [f32], n_rows: usize, dim: usize, k: usize) -> (Vec<u32>, f64) {
+    let mut assignments: Vec<u32> = vec![0u32; n_rows];
+    for i in 0..n_rows {
+        let row = &data[i * dim..(i + 1) * dim];
+        let mut best_c = 0u32;
+        let mut best_dot = f32::NEG_INFINITY;
+        for c in 0..k {
+            let centroid = &centroids[c * dim..(c + 1) * dim];
+            let dot = row.iter().zip(centroid).map(|(a, b)| a * b).sum::<f32>();
+            if dot > best_dot { best_dot = dot; best_c = c as u32; }
+        }
+        assignments[i] = best_c;
+    }
+
+    let old_centroids: Vec<f32> = centroids.to_vec();
+    for c in 0..k { let slice = &mut centroids[c * dim..(c + 1) * dim]; slice.fill(0.0_f32); }
+    let mut counts: Vec<u64> = vec![0u64; k];
+    for i in 0..n_rows {
+        let c = assignments[i] as usize;
+        counts[c] += 1;
+        let row = &data[i * dim..(i + 1) * dim];
+        let cent_slice = &mut centroids[c * dim..(c + 1) * dim];
+        for j in 0..dim { cent_slice[j] += row[j]; }
+    }
+    for c in 0..k {
+        if counts[c] > 0 {
+            let inv = 1.0 / counts[c] as f32;
+            let slice = &mut centroids[c * dim..(c + 1) * dim];
+            for j in 0..dim { slice[j] *= inv; }
+        }
+    }
+
+    let mut delta = 0.0_f64;
+    for c in 0..k {
+        let old = &old_centroids[c * dim..(c + 1) * dim];
+        let new_ = &centroids[c * dim..(c + 1) * dim];
+        delta += old.iter().zip(new_).map(|(a, b)| ((a - b) as f64) * ((a - b) as f64)).sum::<f64>().sqrt();
+    }
+    (assignments, delta)
+}
+
+/// Reorder data rows by cluster assignment.
+fn reorder_by_cluster(data: &[f32], assignments: &[u32], n_rows: usize, dim: usize, k: usize) -> Vec<f32> {
+    let mut cluster_sizes: Vec<usize> = vec![0usize; k];
+    for &a in assignments { cluster_sizes[a as usize] += 1; }
+    let mut write_pos: Vec<usize> = Vec::with_capacity(k);
+    let mut offset = 0usize;
+    for c in 0..k { write_pos.push(offset); offset += cluster_sizes[c] * dim; }
+    let mut reordered: Vec<f32> = vec![0.0_f32; offset];
+    for i in 0..n_rows {
+        let c = assignments[i] as usize;
+        let dst = write_pos[c];
+        let src = i * dim;
+        reordered[dst..dst + dim].copy_from_slice(&data[src..src + dim]);
+        write_pos[c] += dim;
+    }
+    reordered
+}
+
 
 /// Read tensor bytes (f32 or bf16) into a Vec<f32>.
 fn tensor_to_f32(data: &[u8], dtype: safetensors::Dtype) -> Vec<f32> {
@@ -850,6 +975,11 @@ fn main() {
     // Separate buffers for non-transformer-weight segments
     let mut vocab_embedding_raw_f32: Vec<f32> = Vec::new();
     let mut aux_norm_fp16: Vec<u8> = Vec::new();
+    let mut vocab_nibbles: Vec<u8> = Vec::new();
+    let mut vocab_scales: Vec<u8> = Vec::new();
+    let mut centroid_nibbles: Vec<u8> = Vec::new();
+    let mut centroid_scales: Vec<u8> = Vec::new();
+    let mut cluster_map_bytes: Vec<u8> = Vec::new();
     let mut multimodal_scales: Vec<u8> = Vec::new();
     let mut multimodal_nibbles: Vec<u8> = Vec::new();
     let mut multimodal_aux_fp16: Vec<u8> = Vec::new();
@@ -869,6 +999,44 @@ fn main() {
         }
     }
 
+
+    // ── CLUSTER & QUANTIZE EMBEDDING TABLE ───────────────────────────
+    {
+        let dim = HIDDEN_DIM;
+        let n_rows = vocab_embedding_raw_f32.len() / dim;
+        if n_rows > 0 {
+            let k = 256;
+            if n_rows < k * 2 {
+                eprintln!("  Too few embedding rows ({n_rows}) for {k} clusters; skipping centroid scheme.");
+                process_weights(&vocab_embedding_raw_f32, &mut vocab_scales, &mut vocab_nibbles);
+                centroid_nibbles = vec![0u8; (256 * dim + 255) / 256 * 64];
+                centroid_scales = vec![0u8; ((256 * dim + 255) / 256) * 2];
+                cluster_map_bytes = vec![0u8; n_rows * 4];
+            } else {
+                eprint!("  Clustering {n_rows} embedding rows into {k} groups... ");
+                let start = std::time::Instant::now();
+                let mut centroids = kmeans_plusplus(&vocab_embedding_raw_f32, k, n_rows, dim);
+                for _iter in 0..20 {
+                    let (_assignments, delta) = kmeans_iterate(
+                        &vocab_embedding_raw_f32, &mut centroids, n_rows, dim, k
+                    );
+                    if delta < 1e-6 { break; }
+                }
+                let (assignments, _delta) = kmeans_iterate(
+                    &vocab_embedding_raw_f32, &mut centroids, n_rows, dim, k
+                );
+                let reordered = reorder_by_cluster(&vocab_embedding_raw_f32, &assignments, n_rows, dim, k);
+                eprintln!("{:.1}s", start.elapsed().as_secs_f64());
+                process_weights(&reordered, &mut vocab_scales, &mut vocab_nibbles);
+                process_weights(&centroids, &mut centroid_scales, &mut centroid_nibbles);
+                for &c in &assignments {
+                    cluster_map_bytes.extend_from_slice(&c.to_le_bytes());
+                }
+            }
+        } else {
+            eprintln!("  Embedding table empty, skipping quantization");
+        }
+    }
     // ── FINAL_NORM (aux section: raw FP16 bytes) ─────────────────
     {
         let (name, _rows, _cols) = FINAL_NORM;
@@ -940,6 +1108,16 @@ fn main() {
         if layer % 8 == 7 {
             let mb = (all_scales.len() + all_weights.len()) as f64 / (1024.0 * 1024.0);
             println!(" — {mb:.1} MB");
+        }
+
+        // ── Collect per-layer norm weights ─────────────────────────
+        for norm_name in &["input_layernorm.weight", "post_attention_layernorm.weight"] {
+            let nkey = format!("model.language_model.model.layers.{layer}.{norm_name}");
+            if let Some((norm_data, _)) = load_tensor(&nkey, &shard_paths) {
+                for &v in &norm_data {
+                    aux_norm_fp16.extend_from_slice(&f32_to_fp16_bits(v).to_le_bytes());
+                }
+            }
         }
     }
     println!();
@@ -1201,7 +1379,20 @@ fn main() {
     });
     let token_map_bytes = serde_json::to_vec(&token_map).unwrap_or_default();
     ModelArtifactEntry::encode(model_artifact_tag::TOKEN_MAP, &token_map_bytes, &mut model_artifacts);
-    println!("  Model artifacts: {} bytes", model_artifacts.len());
+
+    // ── Embedding auxiliary data ──────────────────────────────────────
+    if !vocab_nibbles.is_empty() {
+        ModelArtifactEntry::encode(model_artifact_tag::EMBED_NIBBLES, &vocab_nibbles, &mut model_artifacts);
+        ModelArtifactEntry::encode(model_artifact_tag::EMBED_SCALES, &vocab_scales, &mut model_artifacts);
+        ModelArtifactEntry::encode(model_artifact_tag::CENTROID_NIBBLES, &centroid_nibbles, &mut model_artifacts);
+        ModelArtifactEntry::encode(model_artifact_tag::CENTROID_SCALES, &centroid_scales, &mut model_artifacts);
+        ModelArtifactEntry::encode(model_artifact_tag::CLUSTER_MAP, &cluster_map_bytes, &mut model_artifacts);
+    }
+    if !aux_norm_fp16.is_empty() {
+        ModelArtifactEntry::encode(model_artifact_tag::AUX_NORMS, &aux_norm_fp16, &mut model_artifacts);
+    }
+    println!("  Model artifacts: {} bytes ({} entries)", model_artifacts.len(),
+        (model_artifacts.len() as f64 / 8.0).ceil() as u32);
 
     // Write ExecutionGraph segment 6
     let exec_graph_offset = page_align(&mut writer).unwrap();
@@ -1227,7 +1418,7 @@ fn main() {
     // Write header at position 0
     let header = CimageHeader {
         magic: *b"PRISM\0\0\0",
-        version: 5,
+        version: 6,  // v6 adds auxiliary data (embedding, centroids, cluster map, norms) in ModelArtifacts
         segment_count: 8 + draft_segment_count,
         payload_hash,
         num_layers: NUM_LAYERS as u32,
