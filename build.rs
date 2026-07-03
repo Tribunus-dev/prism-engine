@@ -23,13 +23,29 @@ fn main() {
         );
     }
 
+    // Metal kernels can only be compiled on macOS via `xcrun`. Off macOS — or
+    // when PRISM_MOCK_BUILD is set for a fast, non-GPU dev/CI build — we emit a
+    // placeholder metallib so the crate still links; the GPU path is never used
+    // on those targets. On macOS WITHOUT the mock flag, a missing or failing
+    // toolchain is a HARD ERROR: we must never silently ship an empty kernel
+    // library that would then fail (or worse, misbehave) at runtime.
+    let mock_requested = std::env::var("PRISM_MOCK_BUILD").is_ok();
+    let is_macos = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos");
+    let use_mock = mock_requested || !is_macos;
+    if mock_requested && is_macos {
+        println!(
+            "cargo:warning=PRISM_MOCK_BUILD is set — embedding a MOCK Metal kernel \
+             library. This build cannot run GPU inference; do not ship it."
+        );
+    }
+
     let mut air_files = Vec::new();
     for src in metal_sources {
         let src_path = template_dir.join(src);
         let air_file = std::path::Path::new(&out_dir)
             .join(src)
             .with_extension("air");
-        if std::env::var("PRISM_MOCK_BUILD").is_ok() {
+        if use_mock {
             std::fs::write(&air_file, "").unwrap();
         } else {
             let status = std::process::Command::new("xcrun")
@@ -37,18 +53,22 @@ fn main() {
                 .arg(&src_path)
                 .arg("-o")
                 .arg(&air_file)
-                .status();
-            match status {
-                Ok(s) => assert!(s.success(), "xcrun metal failed for {src}"),
-                Err(_) => std::fs::write(&air_file, "").unwrap(),
-            }
+                .status()
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "xcrun not found while compiling Metal kernel {src} on macOS: {e}. \
+                         Install the Xcode command-line tools, or set PRISM_MOCK_BUILD=1 \
+                         for a non-GPU dev build."
+                    )
+                });
+            assert!(status.success(), "xcrun metal failed for {src}");
         }
         air_files.push(air_file);
     }
 
     // Link all .air → .metallib
     let metallib_path = std::path::Path::new(&out_dir).join("palettized_kernels.metallib");
-    if std::env::var("PRISM_MOCK_BUILD").is_ok() {
+    if use_mock {
         std::fs::write(&metallib_path, b"mock_metallib").unwrap();
     } else {
         let mut link_cmd = std::process::Command::new("xcrun");
@@ -57,11 +77,13 @@ fn main() {
         for air in &air_files {
             link_cmd.arg(air);
         }
-        let status = link_cmd.status();
-        match status {
-            Ok(s) => assert!(s.success(), "xcrun metallib failed"),
-            Err(_) => std::fs::write(&metallib_path, b"mock_metallib").unwrap(),
-        }
+        let status = link_cmd.status().unwrap_or_else(|e| {
+            panic!(
+                "xcrun not found while linking Metal kernels on macOS: {e}. \
+                 Install the Xcode command-line tools, or set PRISM_MOCK_BUILD=1."
+            )
+        });
+        assert!(status.success(), "xcrun metallib failed");
     }
 
     // Generate embedded_metallib.rs with the kernel bytes baked into the binary.
