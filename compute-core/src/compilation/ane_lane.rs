@@ -18,7 +18,7 @@
 use std::time::Instant;
 
 use super::phase_ir::{
-    ANEArtifactKey, BridgeKind, CompileExecutionReceipt, CompilationId, CompilePlacement,
+    ANEArtifactKey, BridgeKind, CompilationId, CompileExecutionReceipt, CompilePlacement,
     CoreAiComputeUnits, DeviceSignature, EffectiveRoute, PhaseId, ValidationResult,
 };
 use super::staging::StagingRing;
@@ -93,14 +93,14 @@ impl AneCalibrationLane {
     /// * The total weight footprint exceeds [`ANE_SAFETY_WATERMARK`].
     /// * Any Core ML model load or prediction fails.
     /// * The derived model path does not point to a valid `.mlmodelc`.
-    pub fn submit_batch(&self, blocks: &[BlockFeatures]) -> Result<CompileExecutionReceipt, String> {
+    pub fn submit_batch(
+        &self,
+        blocks: &[BlockFeatures],
+    ) -> Result<CompileExecutionReceipt, String> {
         let batch_start = Instant::now();
 
         // ── 1. Safety watermark check ───────────────────────────────────
-        let total_bytes: u64 = blocks
-            .iter()
-            .map(|b| b.weights.len() as u64 * 4)
-            .sum();
+        let total_bytes: u64 = blocks.iter().map(|b| b.weights.len() as u64 * 4).sum();
         if total_bytes > ANE_SAFETY_WATERMARK {
             return Err(format!(
                 "ANE calibration batch ({total_bytes} bytes) exceeds safety watermark ({ANE_SAFETY_WATERMARK})"
@@ -206,9 +206,7 @@ impl AneCalibrationLane {
             copied_bytes: total_copied_bytes,
             numerical_validation: ValidationResult::Passed,
             fallback_reason: None,
-            coreai_compute_units: Some(
-                CoreAiComputeUnits::CpuAndNeuralEngine,
-            ),
+            coreai_compute_units: Some(CoreAiComputeUnits::CpuAndNeuralEngine),
         };
 
         Ok(receipt)
@@ -273,8 +271,8 @@ impl AneCalibrationLane {
     /// The path is constructed as:
     /// `{TRIBUNUS_ANE_CACHE_DIR or ./ane_cache}/{key_name}.mlmodelc`
     fn derive_model_path(&self) -> Result<String, String> {
-        let base = std::env::var("TRIBUNUS_ANE_CACHE_DIR")
-            .unwrap_or_else(|_| "./ane_cache".to_string());
+        let base =
+            std::env::var("TRIBUNUS_ANE_CACHE_DIR").unwrap_or_else(|_| "./ane_cache".to_string());
         let key_name = self.key_filename();
         Ok(format!("{}/{}.mlmodelc", base, key_name))
     }

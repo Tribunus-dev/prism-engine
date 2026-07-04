@@ -224,7 +224,6 @@ fn bench_matmul_sweep() {
             output_name: on.clone(),
             inputs: vec![("x".into(), vec![1, m])],
             outputs: vec![(on.clone(), vec![1, n])],
-
         };
         match bench_both(&tag, prog, meta, "x", &on, m as u32, n as u32, k as u32) {
             Ok((c50, c95, cm, a50, a95, am)) => {
@@ -281,7 +280,6 @@ fn bench_mlp_sweep() {
             output_name: on.clone(),
             inputs: vec![("x".into(), vec![1, h])],
             outputs: vec![(on.clone(), vec![1, h])],
-
         };
         match bench_both(&tag, prog, meta, "x", &on, h as u32, h as u32, i as u32) {
             Ok((c50, c95, cm, a50, a95, am)) => {
@@ -332,7 +330,6 @@ fn bench_rmsnorm_sweep() {
             output_name: on.clone(),
             inputs: vec![("x".into(), vec![1, h])],
             outputs: vec![(on.clone(), vec![1, h])],
-
         };
         match bench_both(&tag, prog, meta, "x", &on, h as u32, h as u32, h as u32) {
             Ok((c50, c95, cm, a50, a95, am)) => {

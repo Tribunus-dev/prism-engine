@@ -20,21 +20,20 @@
 //! `slots` HashMap would indicate a leak or unbounded allocation.  This is
 //! the primary hardware-soak gate for the tri-lane IOSurface arena.
 
+use tribunus_compute_core::backend::metal_consumer::{MetalConsumer, MetalSlotBinding};
 use tribunus_compute_core::backend::placement::ExecutionLane;
+use tribunus_compute_core::compilation::epoch_scheduler::EpochScheduler;
+use tribunus_compute_core::compilation::tri_lane::{
+    AppleFallbackPlan, AppleHardwareSignature, AppleTriLaneExecutionPlan, CpuProgramBinding,
+    EpochRouteOrigin, LaneCostEstimate, MetalProgramBinding, NumericalPolicy, ShapeClass,
+    TriLaneCostModel, TriLaneEvidenceRequirements,
+};
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
     AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, AppleTriLaneArtifactManifest,
     CoreMlArtifactManifest, IOSurfaceSlotManifest,
 };
 use tribunus_compute_core::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
-use tribunus_compute_core::backend::metal_consumer::{MetalConsumer, MetalSlotBinding};
-use tribunus_compute_core::compilation::epoch_scheduler::EpochScheduler;
-use tribunus_compute_core::compilation::tri_lane::{
-    AppleTriLaneExecutionPlan, AppleHardwareSignature, ShapeClass, NumericalPolicy,
-    MetalProgramBinding, CpuProgramBinding, AppleFallbackPlan,
-    TriLaneCostModel, TriLaneEvidenceRequirements, LaneCostEstimate,
-    EpochRouteOrigin,
-};
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -153,11 +152,7 @@ fn simulate_epoch(arena: &mut AppleSharedArena, epoch: u64) {
     let slot_ids: Vec<u32> = arena.slots.keys().copied().collect();
 
     for &id in &slot_ids {
-        let producer = arena
-            .slot(id)
-            .unwrap()
-            .manifest
-            .producer;
+        let producer = arena.slot(id).unwrap().manifest.producer;
         let slot = arena.slot_mut(id).unwrap();
         if slot.is_available_for(epoch, producer) {
             let _ = slot.reserve(epoch, producer);
@@ -183,11 +178,7 @@ fn simulate_epoch(arena: &mut AppleSharedArena, epoch: u64) {
     }
 
     for &id in &slot_ids {
-        let consumer = arena
-            .slot(id)
-            .unwrap()
-            .manifest
-            .consumer;
+        let consumer = arena.slot(id).unwrap().manifest.consumer;
         if let Some(slot) = arena.slot_mut(id) {
             if matches!(slot.state, SlotState::Ready { .. }) {
                 let _ = slot.mark_reading(epoch, consumer);
@@ -211,8 +202,8 @@ fn simulate_epoch(arena: &mut AppleSharedArena, epoch: u64) {
 #[test]
 fn test_install_cimage_and_run_1000_epochs() {
     let manifest = make_manifest();
-    let mut arena = AppleSharedArena::install(&manifest.arena)
-        .expect("install arena from manifest");
+    let mut arena =
+        AppleSharedArena::install(&manifest.arena).expect("install arena from manifest");
 
     // Verify structural invariants from manifest.
     assert_eq!(arena.slots.len(), 3, "expected exactly 3 slots");
@@ -255,7 +246,10 @@ fn test_iosurface_mutation_detected() {
 
     // 2. Write known data to input slot 0 (using per-slot backing)
     let input_slot = arena.slot(0).unwrap();
-    let input_backing = input_slot.backing_arena.as_ref().expect("input slot 0 must have backing");
+    let input_backing = input_slot
+        .backing_arena
+        .as_ref()
+        .expect("input slot 0 must have backing");
     let len = input_slot.manifest.byte_length as usize;
     let input_ptr = unsafe { input_backing.base_ptr() } as *mut u8;
     let slice = unsafe { std::slice::from_raw_parts_mut(input_ptr as *mut u32, len / 4) };
@@ -265,7 +259,10 @@ fn test_iosurface_mutation_detected() {
 
     // 3. Write known data to output slot 1 (simulating Core ML output, using per-slot backing)
     let output_slot = arena.slot(1).unwrap();
-    let output_backing = output_slot.backing_arena.as_ref().expect("output slot 1 must have backing");
+    let output_backing = output_slot
+        .backing_arena
+        .as_ref()
+        .expect("output slot 1 must have backing");
     let out_len = output_slot.manifest.byte_length as usize;
     let out_ptr = unsafe { output_backing.base_ptr() } as *mut u8;
     let out_slice = unsafe { std::slice::from_raw_parts_mut(out_ptr as *mut u32, out_len / 4) };
@@ -285,8 +282,10 @@ fn test_iosurface_mutation_detected() {
     let checksum_after: u64 = out_slice.iter().map(|&v| v as u64).sum();
 
     // 7. Verify checksums differ — proves digest reflects actual byte contents
-    assert_ne!(checksum_before, checksum_after,
-        "checksum must change when slot contents change");
+    assert_ne!(
+        checksum_before, checksum_after,
+        "checksum must change when slot contents change"
+    );
 
     // 5. Verify Metal consumer can read the same bytes
     let mut consumer = MetalConsumer::new("validation");
@@ -300,12 +299,20 @@ fn test_iosurface_mutation_detected() {
     consumer.add_input(input_binding);
     // Validate — creates and caches R16Uint texture from IOSurface
     let result = consumer.validate(&arena, 0).unwrap();
-    assert!(result.matched, "CPU and Metal checksums must match on same bytes");
+    assert!(
+        result.matched,
+        "CPU and Metal checksums must match on same bytes"
+    );
     // Both digests limit to 512 u16 elements (1024 bytes) — verify manually
     let max_u16s = (out_len / 2).min(512);
-    let bounded_checksum: u64 = (0..max_u16s).map(|i| unsafe { (out_ptr as *const u16).add(i).read() } as u64).sum();
-    assert_eq!(result.metal_digest, bounded_checksum,
-        "Metal digest ({}) must match bounded u16 checksum ({})", result.metal_digest, bounded_checksum);
+    let bounded_checksum: u64 = (0..max_u16s)
+        .map(|i| unsafe { (out_ptr as *const u16).add(i).read() } as u64)
+        .sum();
+    assert_eq!(
+        result.metal_digest, bounded_checksum,
+        "Metal digest ({}) must match bounded u16 checksum ({})",
+        result.metal_digest, bounded_checksum
+    );
 
     // ── Persistence mutation test ──────────────────────────────────────────
     // After caching the texture (above), mutate the IOSurface bytes in-place,
@@ -323,10 +330,15 @@ fn test_iosurface_mutation_detected() {
 
     // Re-validate with the SAME consumer — texture cache hit, same MTLTexture
     let result2 = consumer.validate(&arena, 0).unwrap();
-    assert!(result2.matched, "second validation must still produce matching CPU/Metal digest");
-    assert_ne!(result2.metal_digest, baseline_digest,
+    assert!(
+        result2.matched,
+        "second validation must still produce matching CPU/Metal digest"
+    );
+    assert_ne!(
+        result2.metal_digest, baseline_digest,
         "persistent Metal texture must detect IOSurface content changes: before={}, after={}",
-        baseline_digest, result2.metal_digest);
+        baseline_digest, result2.metal_digest
+    );
 }
 
 #[test]
@@ -338,30 +350,50 @@ fn test_two_slot_isolation() {
     // Write distinct patterns to slot 0 and slot 1
     let _offset0 = arena.slot(0).unwrap().manifest.byte_offset as usize;
     let len0 = arena.slot(0).unwrap().manifest.byte_length as usize;
-    let ptr0 = unsafe { arena.slot(0).unwrap().backing_arena.as_ref().unwrap().base_ptr() } as *mut u32;
+    let ptr0 = unsafe {
+        arena
+            .slot(0)
+            .unwrap()
+            .backing_arena
+            .as_ref()
+            .unwrap()
+            .base_ptr()
+    } as *mut u32;
     let slice0 = unsafe { std::slice::from_raw_parts_mut(ptr0, len0 / 4) };
     for (i, v) in slice0.iter_mut().enumerate() {
-        *v = (i * 7 % 256) as u32;  // pattern A
+        *v = (i * 7 % 256) as u32; // pattern A
     }
 
-    let ptr1 = unsafe { arena.slot(1).unwrap().backing_arena.as_ref().unwrap().base_ptr() } as *mut u32;
+    let ptr1 = unsafe {
+        arena
+            .slot(1)
+            .unwrap()
+            .backing_arena
+            .as_ref()
+            .unwrap()
+            .base_ptr()
+    } as *mut u32;
     let len1 = arena.slot(1).unwrap().manifest.byte_length as usize;
     let slice1 = unsafe { std::slice::from_raw_parts_mut(ptr1, len1 / 4) };
     for (i, v) in slice1.iter_mut().enumerate() {
-        *v = (i * 11 % 256) as u32;  // pattern B (distinct from A)
+        *v = (i * 11 % 256) as u32; // pattern B (distinct from A)
     }
 
     // Validate both slots — creates and caches textures
     let mut consumer0 = MetalConsumer::new("slot0");
     consumer0.add_input(MetalSlotBinding {
-        slot_id: 0, tensor_name: "input".into(),
-        byte_offset: 0, byte_length: len0 as u64,
+        slot_id: 0,
+        tensor_name: "input".into(),
+        byte_offset: 0,
+        byte_length: len0 as u64,
         layout_digest: arena.layout_digest.clone(),
     });
     let mut consumer1 = MetalConsumer::new("slot1");
     consumer1.add_input(MetalSlotBinding {
-        slot_id: 1, tensor_name: "output".into(),
-        byte_offset: 0, byte_length: len1 as u64,
+        slot_id: 1,
+        tensor_name: "output".into(),
+        byte_offset: 0,
+        byte_length: len1 as u64,
         layout_digest: arena.layout_digest.clone(),
     });
 
@@ -369,12 +401,14 @@ fn test_two_slot_isolation() {
     let baseline1 = consumer1.validate(&arena, 0).unwrap();
     assert!(baseline0.matched);
     assert!(baseline1.matched);
-    assert_ne!(baseline0.metal_digest, baseline1.metal_digest,
-        "two slots with distinct data must produce different digests");
+    assert_ne!(
+        baseline0.metal_digest, baseline1.metal_digest,
+        "two slots with distinct data must produce different digests"
+    );
 
     // Mutate slot 0 only
     for (i, v) in slice0.iter_mut().enumerate() {
-        *v = (i * 13 % 256) as u32;  // pattern C (different from A)
+        *v = (i * 13 % 256) as u32; // pattern C (different from A)
     }
 
     // Re-validate both — slot 0 digest must change, slot 1 must NOT
@@ -382,10 +416,14 @@ fn test_two_slot_isolation() {
     let after1 = consumer1.validate(&arena, 0).unwrap();
     assert!(after0.matched);
     assert!(after1.matched);
-    assert_ne!(after0.metal_digest, baseline0.metal_digest,
-        "slot 0 digest must change after mutating slot 0");
-    assert_eq!(after1.metal_digest, baseline1.metal_digest,
-        "slot 1 digest must remain unchanged when only slot 0 mutated");
+    assert_ne!(
+        after0.metal_digest, baseline0.metal_digest,
+        "slot 0 digest must change after mutating slot 0"
+    );
+    assert_eq!(
+        after1.metal_digest, baseline1.metal_digest,
+        "slot 1 digest must remain unchanged when only slot 0 mutated"
+    );
 }
 
 // ── FP16 Production V1 Tests ─────────────────────────────────────────
@@ -400,13 +438,17 @@ fn test_two_slot_isolation() {
 mod fp16_production_v1 {
     use super::*;
     use coreml_proto::proto::mil_spec;
-    use tribunus_compute_core::mil_builder::MilBuilder;
-    use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
-    use tribunus_compute_core::compilation::apple_installation::{install_apple_tri_lane, warmup_with_arena, AppleInstallationResult};
-    use tribunus_compute_core::compilation::tri_lane::CoreMlWarmupContract;
     use tribunus_compute_core::backend::coreml_iosurface::CoreMlComputePolicy;
+    use tribunus_compute_core::compilation::apple_installation::{
+        install_apple_tri_lane, warmup_with_arena, AppleInstallationResult,
+    };
+    use tribunus_compute_core::compilation::tri_lane::CoreMlWarmupContract;
+    use tribunus_compute_core::compute_image::fallback_plan::{
+        CoreMlFailureInjector, TestFailureInjector,
+    };
+    use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
+    use tribunus_compute_core::mil_builder::MilBuilder;
     use tribunus_compute_core::mlpackage::{write_mlpackage, ModelMeta};
-    use tribunus_compute_core::compute_image::fallback_plan::{CoreMlFailureInjector, TestFailureInjector};
 
     /// Returns the path to the compiled .mlmodelc directory.
     fn build_fp16_test_model(model_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
@@ -421,7 +463,9 @@ mod fp16_production_v1 {
         let weight_name = b.last_name().unwrap_or("weight_0").to_string();
         b = b.matmul("input", &weight_name);
         let output_name = b.last_name().unwrap_or("matmul_0").to_string();
-        let prog = b.output(&output_name).build()
+        let prog = b
+            .output(&output_name)
+            .build()
             .map_err(|e| format!("MIL build: {:?}", e))?;
 
         let meta = ModelMeta {
@@ -448,24 +492,23 @@ mod fp16_production_v1 {
             "fp16_test",
             "cpuAndNeuralEngine",
             "iOS15",
-        ).map_err(|e| format!("compile_mlpackage: {}", e))?;
+        )
+        .map_err(|e| format!("compile_mlpackage: {}", e))?;
 
         Ok(std::path::Path::new(&receipt.compiled_modelc_path).to_path_buf())
     }
 
     fn make_fp16_manifest() -> AppleTriLaneArtifactManifest {
         let mut m = make_manifest();
-        m.coreml_artifacts = vec![
-            CoreMlArtifactManifest {
-                artifact_id: "fp16_test".into(),
-                mlmodelc_name: "fp16_test.mlmodelc".into(),
-                package_digest: "test".into(),
-                compiled_model_digest: "test".into(),
-                compute_policy: "cpuAndNeuralEngine".into(),
-                input_slots: vec!["0".into()],
-                output_slots: vec!["1".into()],
-            },
-        ];
+        m.coreml_artifacts = vec![CoreMlArtifactManifest {
+            artifact_id: "fp16_test".into(),
+            mlmodelc_name: "fp16_test.mlmodelc".into(),
+            package_digest: "test".into(),
+            compiled_model_digest: "test".into(),
+            compute_policy: "cpuAndNeuralEngine".into(),
+            input_slots: vec!["0".into()],
+            output_slots: vec!["1".into()],
+        }];
         m
     }
 
@@ -477,14 +520,17 @@ mod fp16_production_v1 {
         // Build a real FP16 Core ML artifact if it doesn't exist
         let modelc_path = model_dir.join("fp16_test.mlmodelc");
         if !modelc_path.exists() {
-            build_fp16_test_model(model_dir)
-                .expect("FP16 test model compilation should succeed");
+            build_fp16_test_model(model_dir).expect("FP16 test model compilation should succeed");
         }
 
         let mut result = install_apple_tri_lane(
-            &manifest, model_dir, CoreMlComputePolicy::CpuAndNeuralEngine,
-        ).expect("FP16 production install should succeed");
-        result.precreate_metal_textures()
+            &manifest,
+            model_dir,
+            CoreMlComputePolicy::CpuAndNeuralEngine,
+        )
+        .expect("FP16 production install should succeed");
+        result
+            .precreate_metal_textures()
             .expect("precreate Metal textures should succeed");
         result
     }
@@ -538,10 +584,27 @@ mod fp16_production_v1 {
                 cpu_only_valid: false,
             },
             predicted_cost: TriLaneCostModel::new(
-                LaneCostEstimate { compute_ns: 0, memory_ns: 0, boundary_ns: 0, sync_ns: 0 },
-                LaneCostEstimate { compute_ns: 0, memory_ns: 0, boundary_ns: 0, sync_ns: 0 },
-                LaneCostEstimate { compute_ns: 0, memory_ns: 0, boundary_ns: 0, sync_ns: 0 },
-                0, 0, 0,
+                LaneCostEstimate {
+                    compute_ns: 0,
+                    memory_ns: 0,
+                    boundary_ns: 0,
+                    sync_ns: 0,
+                },
+                LaneCostEstimate {
+                    compute_ns: 0,
+                    memory_ns: 0,
+                    boundary_ns: 0,
+                    sync_ns: 0,
+                },
+                LaneCostEstimate {
+                    compute_ns: 0,
+                    memory_ns: 0,
+                    boundary_ns: 0,
+                    sync_ns: 0,
+                },
+                0,
+                0,
+                0,
             ),
             evidence_requirements: TriLaneEvidenceRequirements {
                 validate_numerics: false,
@@ -568,11 +631,11 @@ mod fp16_production_v1 {
             let pf = backing.info.pixel_format as u32;
             assert!(
                 pf == 0x4C303068 || pf == 0x4C303066, // 'L00h' or 'L00f'
-                "float16 slot must use a 16-bit half-float pixel format, got 0x{:08X}", pf
+                "float16 slot must use a 16-bit half-float pixel format, got 0x{:08X}",
+                pf
             );
         } else {
             panic!("slot 0 has no IOSurface backing");
-
         }
     }
 
@@ -582,12 +645,15 @@ mod fp16_production_v1 {
         // Uses the real EpochScheduler::execute_epoch() with CoreML/Metal
         // bindings instead of simulate_epoch().
         let mut install = create_fp16_install();
-        let mut metal_consumer = install.metal_consumer.take().expect("install must have metal_consumer");
+        let mut metal_consumer = install
+            .metal_consumer
+            .take()
+            .expect("install must have metal_consumer");
         let plan = create_minimal_execution_plan();
         let mut scheduler = EpochScheduler::new(plan);
 
         // Warm up the Core ML artifact against installed slots
-for (_id, exec) in install.coreml_executables.iter_mut() {
+        for (_id, exec) in install.coreml_executables.iter_mut() {
             let warmup_contract = CoreMlWarmupContract {
                 min_warmup_predictions: 3,
                 max_warmup_latency_ms: 5000,
@@ -601,23 +667,36 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
         }
 
         // Take the Core ML executable from the install
-        let mut coreml_exec = install.coreml_executables
+        let mut coreml_exec = install
+            .coreml_executables
             .remove("fp16_test")
             .expect("install must have fp16_test executable");
-
 
         for epoch in 0..1000u64 {
             let receipt = scheduler
                 .execute_epoch(&mut install.arena, &mut coreml_exec, &mut metal_consumer)
                 .unwrap();
-            assert_eq!(receipt.route_origin, EpochRouteOrigin::CoreMlAne,
-                "epoch {} must use Core ML route", epoch);
-            assert!(receipt.coreml_prediction_completed,
-                "epoch {} must complete Core ML prediction", epoch);
-            assert!(receipt.metal_command_buffer_completed,
-                "epoch {} must complete Metal command buffer", epoch);
-            assert!(!receipt.fallback_used,
-                "epoch {} must not report fallback", epoch);
+            assert_eq!(
+                receipt.route_origin,
+                EpochRouteOrigin::CoreMlAne,
+                "epoch {} must use Core ML route",
+                epoch
+            );
+            assert!(
+                receipt.coreml_prediction_completed,
+                "epoch {} must complete Core ML prediction",
+                epoch
+            );
+            assert!(
+                receipt.metal_command_buffer_completed,
+                "epoch {} must complete Metal command buffer",
+                epoch
+            );
+            assert!(
+                !receipt.fallback_used,
+                "epoch {} must not report fallback",
+                epoch
+            );
             if epoch % 100 == 0 {
                 assert_eq!(
                     install.arena.slots.len(),
@@ -625,12 +704,14 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
                     "slot count must remain stable at 1000 epochs (epoch {})",
                     epoch
                 );
-
             }
         }
 
-        assert_eq!(install.arena.slots.len(), 3, "slot count stable after 1000 FP16 epochs");
-
+        assert_eq!(
+            install.arena.slots.len(),
+            3,
+            "slot count stable after 1000 FP16 epochs"
+        );
     }
 
     #[test]
@@ -639,20 +720,28 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
         // swap to make execute_epoch() skip the prediction step for epoch 5.
         // The TestFailureInjector gates which epoch gets the injected failure.
         let mut install = create_fp16_install();
-        let mut metal_consumer = install.metal_consumer.take().expect("install must have metal_consumer");
+        let mut metal_consumer = install
+            .metal_consumer
+            .take()
+            .expect("install must have metal_consumer");
         let plan = create_minimal_execution_plan();
         let mut scheduler = EpochScheduler::new(plan);
-        let injector = TestFailureInjector { fail_epoch: Some(5) };
+        let injector = TestFailureInjector {
+            fail_epoch: Some(5),
+        };
 
-        let mut coreml_exec = install.coreml_executables
+        let mut coreml_exec = install
+            .coreml_executables
             .remove("fp16_test")
             .expect("install must have fp16_test executable");
 
         // Run epochs 0-4: should succeed (CoreMlAne route)
         for epoch in 0..5u64 {
             // verify injector doesn't fire
-            assert!(!injector.should_fail(epoch),
-                "injector should not fire before epoch 5");
+            assert!(
+                !injector.should_fail(epoch),
+                "injector should not fire before epoch 5"
+            );
 
             scheduler
                 .execute_epoch(&mut install.arena, &mut coreml_exec, &mut metal_consumer)
@@ -661,19 +750,25 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
 
         // Epoch 5: inject failure — swap model_path so load_model() fails
         // and execute_epoch() skips the prediction step.
-        assert!(injector.should_fail(5),
-            "injector must fire at epoch 5");
+        assert!(injector.should_fail(5), "injector must fire at epoch 5");
         coreml_exec.model_path = "/tmp/nonexistent_fp16_test.mlmodelc".into();
         coreml_exec.loaded = false;
         let epoch5 = scheduler
             .execute_epoch(&mut install.arena, &mut coreml_exec, &mut metal_consumer)
             .expect("epoch 5 returns Ok");
-        assert_eq!(epoch5.route_origin, EpochRouteOrigin::CoreMlAne,
-            "failed epoch must show CoreMlAne route (lane where prediction was attempted)");
-        assert!(!epoch5.coreml_prediction_completed,
-            "failed epoch must not complete Core ML prediction");
-        assert!(epoch5.fallback_used,
-            "failed epoch must report fallback activated");
+        assert_eq!(
+            epoch5.route_origin,
+            EpochRouteOrigin::CoreMlAne,
+            "failed epoch must show CoreMlAne route (lane where prediction was attempted)"
+        );
+        assert!(
+            !epoch5.coreml_prediction_completed,
+            "failed epoch must not complete Core ML prediction"
+        );
+        assert!(
+            epoch5.fallback_used,
+            "failed epoch must report fallback activated"
+        );
         // Failed primary output must not reach Ready
         let out_slot = install.arena.slot(1).unwrap();
         match &out_slot.state {
@@ -684,12 +779,22 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
         // After failure, verify fallback preserves ABI
         for id in 0..3 {
             let slot = install.arena.slot(id).unwrap();
-            assert_eq!(slot.manifest.dtype, "float16",
-                "fallback must preserve fp16 dtype on slot {}", id);
-            assert_eq!(slot.manifest.physical_shape.len(), 2,
-                "fallback must preserve 2D shape on slot {}", id);
-            assert!(slot.manifest.strides_bytes[0] > 0,
-                "fallback must preserve positive stride on slot {}", id);
+            assert_eq!(
+                slot.manifest.dtype, "float16",
+                "fallback must preserve fp16 dtype on slot {}",
+                id
+            );
+            assert_eq!(
+                slot.manifest.physical_shape.len(),
+                2,
+                "fallback must preserve 2D shape on slot {}",
+                id
+            );
+            assert!(
+                slot.manifest.strides_bytes[0] > 0,
+                "fallback must preserve positive stride on slot {}",
+                id
+            );
         }
 
         // Run epochs 6+: restore model path, continue with fallback route
@@ -697,28 +802,40 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
             let receipt = scheduler
                 .execute_epoch(&mut install.arena, &mut coreml_exec, &mut metal_consumer)
                 .expect(&format!("epoch {} should succeed", epoch));
-            assert_eq!(receipt.route_origin, EpochRouteOrigin::CoreMlAne,
-                "fallback epoch {} must show CoreMlAne route", epoch);
-            assert!(!receipt.coreml_prediction_completed,
-                "fallback epoch {} must not complete Core ML prediction", epoch);
-            assert!(receipt.fallback_used,
-                "fallback epoch {} must report fallback active", epoch);
+            assert_eq!(
+                receipt.route_origin,
+                EpochRouteOrigin::CoreMlAne,
+                "fallback epoch {} must show CoreMlAne route",
+                epoch
+            );
+            assert!(
+                !receipt.coreml_prediction_completed,
+                "fallback epoch {} must not complete Core ML prediction",
+                epoch
+            );
+            assert!(
+                receipt.fallback_used,
+                "fallback epoch {} must report fallback active",
+                epoch
+            );
         }
     }
 
     #[test]
     fn test_prism_session_step_with_failure_injector() {
         use tribunus_compute_core::compilation::failure_injector::EpochFailureInjector;
-        use tribunus_compute_core::scheduling::prism_session::{
-            PrismSession, PrismSessionRequest,
-        };
+        use tribunus_compute_core::scheduling::prism_session::{PrismSession, PrismSessionRequest};
 
         let mut install = create_fp16_install();
-        let mut metal_consumer = install.metal_consumer.take().expect("install must have metal_consumer");
+        let mut metal_consumer = install
+            .metal_consumer
+            .take()
+            .expect("install must have metal_consumer");
         let plan = create_minimal_execution_plan();
         let mut scheduler = EpochScheduler::new(plan);
 
-        let mut coreml_exec = install.coreml_executables
+        let mut coreml_exec = install
+            .coreml_executables
             .remove("fp16_test")
             .expect("install must have fp16_test executable");
 
@@ -747,30 +864,40 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
 
             // Epochs divisible by 5 have injected failure
             if epoch > 0 && epoch % 5 == 0 {
-                assert!(token.is_none(),
-                    "epoch {} (injected failure) should return no token", epoch);
+                assert!(
+                    token.is_none(),
+                    "epoch {} (injected failure) should return no token",
+                    epoch
+                );
             }
         }
 
-        assert_eq!(session.evidence_log.len(), 105,
-            "step must record 105 evidence entries");
-        assert!(session.scheduler.terminated,
-            "scheduler must terminate after 105 epochs");
+        assert_eq!(
+            session.evidence_log.len(),
+            105,
+            "step must record 105 evidence entries"
+        );
+        assert!(
+            session.scheduler.terminated,
+            "scheduler must terminate after 105 epochs"
+        );
     }
 
     #[test]
     fn test_prism_session_step_noop_injector_never_fails() {
         use tribunus_compute_core::compilation::failure_injector::NoopFailureInjector;
-        use tribunus_compute_core::scheduling::prism_session::{
-            PrismSession, PrismSessionRequest,
-        };
+        use tribunus_compute_core::scheduling::prism_session::{PrismSession, PrismSessionRequest};
 
         let mut install = create_fp16_install();
-        let mut metal_consumer = install.metal_consumer.take().expect("install must have metal_consumer");
+        let mut metal_consumer = install
+            .metal_consumer
+            .take()
+            .expect("install must have metal_consumer");
         let plan = create_minimal_execution_plan();
         let mut scheduler = EpochScheduler::new(plan);
 
-        let mut coreml_exec = install.coreml_executables
+        let mut coreml_exec = install
+            .coreml_executables
             .remove("fp16_test")
             .expect("install must have fp16_test executable");
 
@@ -797,7 +924,10 @@ for (_id, exec) in install.coreml_executables.iter_mut() {
             assert!(result.is_ok(), "epoch {} should return Ok", epoch);
         }
 
-        assert_eq!(session.evidence_log.len(), 10,
-            "step must record 10 evidence entries");
+        assert_eq!(
+            session.evidence_log.len(),
+            10,
+            "step must record 10 evidence entries"
+        );
     }
 }

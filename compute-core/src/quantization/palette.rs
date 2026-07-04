@@ -26,10 +26,9 @@
 
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 use crate::compilation::phase_ir::{
-    ArithmeticIntensity, BridgeKind, CompileDeterminism, CompileExecutionReceipt,
-    CompilationId, CompilePhaseDescriptor, CompilePlacement, DeviceSignature,
-    EffectiveRoute, MaterializationContract, MutationClass, PhaseId,
-    ShapeClass, TensorContract, ValidationResult,
+    ArithmeticIntensity, BridgeKind, CompilationId, CompileDeterminism, CompileExecutionReceipt,
+    CompilePhaseDescriptor, CompilePlacement, DeviceSignature, EffectiveRoute,
+    MaterializationContract, MutationClass, PhaseId, ShapeClass, TensorContract, ValidationResult,
 };
 
 /// A palettized weight matrix row (one output channel).
@@ -202,7 +201,6 @@ pub fn fit_palette(channel: &[f32], k: usize, max_iter: usize, seeds: Option<&[f
     });
     centroids
 }
-
 
 fn weighted_threshold(total: f32, seed: usize, _n: usize) -> f32 {
     // Simple hash-based deterministic threshold in [0, total).
@@ -587,8 +585,8 @@ fn build_palettized_matrix(
             let key = format!("seed_{}", i);
             if let Some(&val) = features.get(&key) {
                 seeds.push(val);
-}
-}
+            }
+        }
         seeds
     });
 
@@ -608,17 +606,17 @@ fn build_palettized_matrix(
             let mut cb_arr = [0.0f32; 16];
             for (i, &v) in codebook.iter().enumerate().take(16) {
                 cb_arr[i] = v;
-}
+            }
 
             let done = progress.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             if done % 256 == 0 {
                 eprintln!("[palette] row {}/{} fitted", done, out_dim);
-}
+            }
 
             PalettizedRow {
                 codebook: cb_arr,
                 indices,
-}
+            }
         })
         .collect();
 
@@ -627,7 +625,7 @@ fn build_palettized_matrix(
         ane_features,
         in_dim,
         out_dim,
-}
+    }
 }
 
 /// Palettize a complete weight matrix (f32, row-major) into per-channel

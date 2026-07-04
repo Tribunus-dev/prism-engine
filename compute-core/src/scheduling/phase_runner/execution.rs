@@ -97,14 +97,13 @@ impl PhaseRunner for MetalFusedKernelRunner {
 
         // Read .metallib bytes from the image directory.
         let metallib_path = std::path::PathBuf::from(&kernel.artifact.metallib_relpath);
-        let metallib_bytes =
-            std::fs::read(&metallib_path).map_err(|e| {
-                format!(
-                    "failed to read metallib at {}: {}",
-                    metallib_path.display(),
-                    e
-                )
-            })?;
+        let metallib_bytes = std::fs::read(&metallib_path).map_err(|e| {
+            format!(
+                "failed to read metallib at {}: {}",
+                metallib_path.display(),
+                e
+            )
+        })?;
 
         // Build a minimal SealedMetalFusionArtifact for the admission gate.
         let launch_contract = MetalLaunchContract {
@@ -132,8 +131,11 @@ impl PhaseRunner for MetalFusedKernelRunner {
         );
 
         // Admission gate.
-        use crate::benchmark::admission::{check_fused_metal_benchmark_admission, AdmissionVerdict};
-        let verdict = check_fused_metal_benchmark_admission(&minimal_artifact, &metallib_bytes, "m1");
+        use crate::benchmark::admission::{
+            check_fused_metal_benchmark_admission, AdmissionVerdict,
+        };
+        let verdict =
+            check_fused_metal_benchmark_admission(&minimal_artifact, &metallib_bytes, "m1");
         if let AdmissionVerdict::Rejected(reason) = &verdict {
             return Err(format!("admission rejected: {}", reason));
         }
@@ -811,9 +813,7 @@ impl PhaseRunner for LegacyMlxPrologueRunner {
         )
         .map_err(|e| format!("Prologue: {:?}", e))?;
 
-        hidden
-            .eval()
-            .map_err(|e| format!("Prologue eval: {}", e))?;
+        hidden.eval().map_err(|e| format!("Prologue eval: {}", e))?;
 
         // Store as current activation.
         ctx.hidden_state = Some(hidden);
@@ -870,9 +870,7 @@ impl PhaseRunner for LegacyMlxEpilogueRunner {
         )
         .map_err(|e| format!("Epilogue matmul: {}", e))?;
 
-        logits
-            .eval()
-            .map_err(|e| format!("Epilogue eval: {}", e))?;
+        logits.eval().map_err(|e| format!("Epilogue eval: {}", e))?;
 
         // Store logits back for sampling.
         ctx.hidden_state = Some(logits);

@@ -106,11 +106,11 @@ pub fn compile_vision_patch_embed_ane(
         "image_patches",
         "patch_dense_weight",
         "patch_features",
-        1,     // m: batch dimension (dynamic at runtime via symbolic)
-        3840,  // k: input dimension
-        6912,  // n: output dimension
+        1,    // m: batch dimension (dynamic at runtime via symbolic)
+        3840, // k: input dimension
+        6912, // n: output dimension
         weights,
-        true,  // stateless
+        true, // stateless
     )
     .map_err(|e| format!("vision patch embed MIL: {}", e))?;
 
@@ -137,11 +137,11 @@ pub fn compile_vision_projection_ane(
         "patch_features",
         "embedding_projection_weight",
         "projected_features",
-        1,     // m
-        3840,  // k
-        3840,  // n
+        1,    // m
+        3840, // k
+        3840, // n
         weights,
-        true,  // stateless
+        true, // stateless
     )
     .map_err(|e| format!("vision projection MIL: {}", e))?;
 
@@ -168,11 +168,11 @@ pub fn compile_audio_embed_ane(
         "audio_frames",
         "audio_embed_weight",
         "encoded_frames",
-        1,     // m
-        128,   // k
-        2560,  // n
+        1,    // m
+        128,  // k
+        2560, // n
         weights,
-        true,  // stateless
+        true, // stateless
     )
     .map_err(|e| format!("audio embed MIL: {}", e))?;
 
@@ -199,11 +199,11 @@ pub fn compile_audio_projection_ane(
         "encoded_frames",
         "audio_proj_weight",
         "projected_frames",
-        1,     // m
-        2560,  // k
-        3840,  // n
+        1,    // m
+        2560, // k
+        3840, // n
         weights,
-        true,  // stateless
+        true, // stateless
     )
     .map_err(|e| format!("audio projection MIL: {}", e))?;
 
@@ -237,11 +237,11 @@ pub fn compile_draft_pre_proj_ane(
         "draft_hidden",
         "pre_proj_weight",
         "main_space_hidden",
-        1,     // m
-        1024,  // k
-        3840,  // n
+        1,    // m
+        1024, // k
+        3840, // n
         weights,
-        true,  // stateless
+        true, // stateless
     )
     .map_err(|e| format!("draft pre-proj MIL: {}", e))?;
 
@@ -271,11 +271,11 @@ pub fn compile_draft_post_proj_ane(
         "main_hidden",
         "post_proj_weight",
         "draft_space_hidden",
-        1,     // m
-        3840,  // k
-        1024,  // n
+        1,    // m
+        3840, // k
+        1024, // n
         weights,
-        true,  // stateless
+        true, // stateless
     )
     .map_err(|e| format!("draft post-proj MIL: {}", e))?;
 

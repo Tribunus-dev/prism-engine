@@ -69,7 +69,11 @@ impl CoreAiIOSurfaceExecutable {
 
     /// Add an input binding, returns error if slot_id already bound.
     pub fn add_input_binding(&mut self, binding: CoreAiIOSurfaceBinding) -> Result<(), String> {
-        if self.input_bindings.iter().any(|b| b.slot_id == binding.slot_id) {
+        if self
+            .input_bindings
+            .iter()
+            .any(|b| b.slot_id == binding.slot_id)
+        {
             return Err(format!("slot {} already bound as input", binding.slot_id));
         }
         self.input_bindings.push(binding);
@@ -78,7 +82,11 @@ impl CoreAiIOSurfaceExecutable {
 
     /// Add an output binding.
     pub fn add_output_binding(&mut self, binding: CoreAiIOSurfaceBinding) -> Result<(), String> {
-        if self.output_bindings.iter().any(|b| b.slot_id == binding.slot_id) {
+        if self
+            .output_bindings
+            .iter()
+            .any(|b| b.slot_id == binding.slot_id)
+        {
             return Err(format!("slot {} already bound as output", binding.slot_id));
         }
         self.output_bindings.push(binding);
@@ -187,7 +195,10 @@ pub fn create_iosurface_from_mmap(
 ) -> io::Result<*mut c_void> {
     let byte_count = (width as u64) * (height as u64) * 4; // worst-case bytes per pixel
     if byte_count > i32::MAX as u64 {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "IOSurface too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "IOSurface too large",
+        ));
     }
     let mut info = crate::arena_info::ArenaInfo {
         width: 0,
@@ -226,8 +237,11 @@ mod tests {
 
     #[test]
     fn test_bind_add_input_output() {
-        let mut exec =
-            CoreAiIOSurfaceExecutable::new("artifact_1", "/tmp/model.mlmodelc", CoreAiComputePolicy::All);
+        let mut exec = CoreAiIOSurfaceExecutable::new(
+            "artifact_1",
+            "/tmp/model.mlmodelc",
+            CoreAiComputePolicy::All,
+        );
 
         let input = CoreAiIOSurfaceBinding {
             tensor_id: "input_0".into(),
@@ -302,8 +316,11 @@ mod tests {
 
     #[test]
     fn test_validate_contract_mismatch_rejected() {
-        let mut exec =
-            CoreAiIOSurfaceExecutable::new("contract_test", "/tmp/model.mlmodelc", CoreAiComputePolicy::All);
+        let mut exec = CoreAiIOSurfaceExecutable::new(
+            "contract_test",
+            "/tmp/model.mlmodelc",
+            CoreAiComputePolicy::All,
+        );
 
         exec.add_input_binding(CoreAiIOSurfaceBinding {
             tensor_id: "input_a".into(),
@@ -338,8 +355,11 @@ mod tests {
             .contains("input tensor name mismatch: input_a vs input_b"));
 
         // Rebuild exec for output mismatch test
-        let mut exec2 =
-            CoreAiIOSurfaceExecutable::new("contract_test_2", "/tmp/model.mlmodelc", CoreAiComputePolicy::All);
+        let mut exec2 = CoreAiIOSurfaceExecutable::new(
+            "contract_test_2",
+            "/tmp/model.mlmodelc",
+            CoreAiComputePolicy::All,
+        );
         exec2
             .add_input_binding(CoreAiIOSurfaceBinding {
                 tensor_id: "input_a".into(),
@@ -376,7 +396,11 @@ mod tests {
 
     #[test]
     fn test_validate_count_mismatch() {
-        let exec = CoreAiIOSurfaceExecutable::new("count_test", "/tmp/model.mlmodelc", CoreAiComputePolicy::CpuOnly);
+        let exec = CoreAiIOSurfaceExecutable::new(
+            "count_test",
+            "/tmp/model.mlmodelc",
+            CoreAiComputePolicy::CpuOnly,
+        );
         // Zero input bindings, but pass one contract entry
         let contract = CoreAiIOSurfaceBinding {
             tensor_id: "x".into(),
@@ -404,7 +428,8 @@ mod tests {
 
     #[test]
     fn test_executable_new_defaults() {
-        let exec = CoreAiIOSurfaceExecutable::new("test", "/path.mlmodelc", CoreAiComputePolicy::GpuOnly);
+        let exec =
+            CoreAiIOSurfaceExecutable::new("test", "/path.mlmodelc", CoreAiComputePolicy::GpuOnly);
         assert_eq!(exec.artifact_id, "test");
         assert_eq!(exec.model_path, "/path.mlmodelc");
         assert_eq!(exec.compute_policy, CoreAiComputePolicy::GpuOnly);
@@ -416,11 +441,11 @@ mod tests {
     #[test]
     fn test_coreai_iosurface_warmup_with_arena() {
         use crate::backend::coreai_lane::{CoreAiLane, CoreAiSubgraph, CoreAiSubgraphStatus};
-        use crate::compute_image::apple_shared_arena::{
-            AppleSharedArena, LiveIOSurfaceSlot, IOSurfaceSlotManifest, SlotReuseClass,
-        };
         use crate::backend::placement::ExecutionLane;
-        use crate::compilation::tri_lane::{CoreAiWarmupContract, AneLaneLifecycle};
+        use crate::compilation::tri_lane::{AneLaneLifecycle, CoreAiWarmupContract};
+        use crate::compute_image::apple_shared_arena::{
+            AppleSharedArena, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
+        };
 
         // Create arena with input/output slots
         let mut arena = AppleSharedArena::new("test-arena".into(), 1);
@@ -488,7 +513,8 @@ mod tests {
             io_surface_id: 1,
             byte_offset: 0,
             contract_digest: String::new(),
-        }).unwrap();
+        })
+        .unwrap();
 
         exec.add_output_binding(CoreAiIOSurfaceBinding {
             tensor_id: "output".into(),
@@ -496,7 +522,8 @@ mod tests {
             io_surface_id: 2,
             byte_offset: 4096,
             contract_digest: String::new(),
-        }).unwrap();
+        })
+        .unwrap();
 
         // Create lane with a compiled subgraph
         let mut lane = CoreAiLane::new();
@@ -518,10 +545,17 @@ mod tests {
         let result = lane.warmup_with_arena("test_subgraph", &contract, &mut arena, &mut exec);
 
         // Model file doesn't exist — expect graceful failure
-        assert!(result.is_err(), "warmup should fail gracefully with missing model: {:?}", result);
+        assert!(
+            result.is_err(),
+            "warmup should fail gracefully with missing model: {:?}",
+            result
+        );
         let err = result.unwrap_err();
-        assert!(err.contains("tribunus_coreai_load_model") || err.contains("load"),
-            "error should mention model loading: {}", err);
+        assert!(
+            err.contains("tribunus_coreai_load_model") || err.contains("load"),
+            "error should mention model loading: {}",
+            err
+        );
 
         // Executable state: model not loaded, but bindings still configured
         assert!(!exec.loaded, "executable should not be marked as loaded");
@@ -530,7 +564,10 @@ mod tests {
         assert_eq!(exec.output_bindings.len(), 1, "output bindings preserved");
 
         // Lifecycle should remain Unavailable since warmup failed
-        assert_eq!(lane.lifecycle, AneLaneLifecycle::Unavailable,
-            "lifecycle should be Unavailable after failed warmup");
+        assert_eq!(
+            lane.lifecycle,
+            AneLaneLifecycle::Unavailable,
+            "lifecycle should be Unavailable after failed warmup"
+        );
     }
 }

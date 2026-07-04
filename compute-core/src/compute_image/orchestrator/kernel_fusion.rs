@@ -14,9 +14,7 @@
 //!   pressure limits on Apple Silicon).
 //! - SWA (Sliding Window Attention) and Full attention never fuse together.
 
-use crate::compute_image::compile::execution_graph::{
-    ExecutionGraphDescriptor, NodeKind,
-};
+use crate::compute_image::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
 
 /// A fused kernel group: N consecutive layers that can be merged into
 /// a single Metal kernel dispatch.
@@ -114,9 +112,7 @@ pub fn analyze_graph(graph: &ExecutionGraphDescriptor) -> Vec<FusedLayerGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compute_image::compile::execution_graph::{
-        AttentionKind, LayerExecutionNode,
-    };
+    use crate::compute_image::compile::execution_graph::{AttentionKind, LayerExecutionNode};
 
     fn make_decoder(attention_kind: u8, head_dim: u16, compaction_epoch: u8) -> LayerExecutionNode {
         LayerExecutionNode {
@@ -193,9 +189,7 @@ mod tests {
     #[test]
     fn fuses_max_four_layers() {
         let layers = (0..8)
-            .map(|_| {
-                make_decoder(AttentionKind::FullAttention as u8, 256, 0xFF)
-            })
+            .map(|_| make_decoder(AttentionKind::FullAttention as u8, 256, 0xFF))
             .collect();
         let graph = build_graph(layers);
         let groups = analyze_graph(&graph);
@@ -210,7 +204,7 @@ mod tests {
     fn compaction_epoch_breaks_fusion() {
         let layers = vec![
             make_decoder(AttentionKind::FullAttention as u8, 256, 0xFF),
-            make_decoder(AttentionKind::FullAttention as u8, 256, 0),  // epoch index 0
+            make_decoder(AttentionKind::FullAttention as u8, 256, 0), // epoch index 0
             make_decoder(AttentionKind::FullAttention as u8, 256, 0xFF),
         ];
         let graph = build_graph(layers);
@@ -304,10 +298,7 @@ mod tests {
         assert_eq!(groups[3].start_layer, 6);
         assert_eq!(groups[3].count, 2);
 
-        assert_eq!(
-            groups[2].attention_kind,
-            AttentionKind::SlidingWindow as u8
-        );
+        assert_eq!(groups[2].attention_kind, AttentionKind::SlidingWindow as u8);
         for g in &[&groups[0], &groups[1], &groups[3]] {
             assert_eq!(g.attention_kind, AttentionKind::FullAttention as u8);
         }

@@ -11,18 +11,18 @@
 //! - `limits`: Compilation planning types
 //! - `operation_route`: Per-operation backend routing
 
-pub mod operation_route;
 pub mod hardware;
-pub mod parser;
-pub mod network;
 pub mod limits;
+pub mod network;
+pub mod operation_route;
+pub mod parser;
 
 // Re-exports for backward compatibility — everything accessible
 // at `crate::config::*` as before.
 pub use hardware::*;
-pub use parser::*;
-pub use network::*;
 pub use limits::*;
+pub use network::*;
+pub use parser::*;
 
 // Re-exported from config_namespace module.
 pub use crate::config_namespace::*;

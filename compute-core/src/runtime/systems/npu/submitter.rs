@@ -19,14 +19,14 @@
 use lazy_static::lazy_static;
 
 use crate::backend::npu::ffi::{NpuBuffer, TargetNpu};
+use crate::runtime::components::{WorkerLifecycle, WorkerRequestPhase};
 use crate::runtime::scheduling::access::{ComponentSet, ResourceSet};
 use crate::runtime::scheduling::command::CommandWriter;
 use crate::runtime::scheduling::component_id::{ComponentId, SchedulableComponent};
 use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
 };
-use crate::runtime::components::{WorkerLifecycle, WorkerRequestPhase};
 use crate::runtime::world::World;
 
 // ---------------------------------------------------------------------------
@@ -175,11 +175,7 @@ impl ErasedSystem for NpuSubmitterSystem {
     /// 2. For each candidate, fires [`submit_execution`] via FFI.
     /// 3. Updates the execution state with the returned submission ID.
     /// 4. Transitions the worker lifecycle to [`Streaming`].
-    fn run(
-        &mut self,
-        world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // Collect entity IDs first to avoid borrow conflicts with get_mut below.
         let candidate_entities: Vec<_> = world
             .iter_entities_with::<NpuExecutionState>()
@@ -204,20 +200,40 @@ impl ErasedSystem for NpuSubmitterSystem {
             // Extract FFI parameters from the mutable borrow, then release
             // it before re-borrowing for the state update below.
             let submission_id = {
-        let (target, session, in_buf, out_buf, in_bytes, out_bytes) = {
-            let ns = match world.get_mut::<NpuExecutionState>(entity) {
-                    Some(s) => s,
-                None => continue,
-            };
-            let t = ns.target;
-            let s = ns.session;
-            let ib = if !ns.inputs.is_empty() { ns.inputs[0].ptr } else { std::ptr::null_mut() };
-            let ob = if !ns.outputs.is_empty() { ns.outputs[0].ptr } else { std::ptr::null_mut() };
-            let isz = if !ns.inputs.is_empty() { ns.inputs[0].size } else { 0 };
-            let osz = if !ns.outputs.is_empty() { ns.outputs[0].size } else { 0 };
-            (t, s, ib, ob, isz, osz)
+                let (target, session, in_buf, out_buf, in_bytes, out_bytes) = {
+                    let ns = match world.get_mut::<NpuExecutionState>(entity) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    let t = ns.target;
+                    let s = ns.session;
+                    let ib = if !ns.inputs.is_empty() {
+                        ns.inputs[0].ptr
+                    } else {
+                        std::ptr::null_mut()
+                    };
+                    let ob = if !ns.outputs.is_empty() {
+                        ns.outputs[0].ptr
+                    } else {
+                        std::ptr::null_mut()
+                    };
+                    let isz = if !ns.inputs.is_empty() {
+                        ns.inputs[0].size
+                    } else {
+                        0
+                    };
+                    let osz = if !ns.outputs.is_empty() {
+                        ns.outputs[0].size
+                    } else {
+                        0
+                    };
+                    (t, s, ib, ob, isz, osz)
                 };
-        unsafe { crate::backend::npu::ffi::npu_submit_execution(target, session, in_buf, out_buf, in_bytes, out_bytes) }
+                unsafe {
+                    crate::backend::npu::ffi::npu_submit_execution(
+                        target, session, in_buf, out_buf, in_bytes, out_bytes,
+                    )
+                }
             };
 
             // -- 2. Mark the execution state as submitted -------------------

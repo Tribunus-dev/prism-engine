@@ -10,7 +10,6 @@
 //! between the host-side buffer allocation (`pipeline::Megakernel::launch`)
 //! and the GPU kernel.
 
-
 // ── Ternary KV block constants ────────────────────────────────────
 #[allow(dead_code)]
 pub const KV_BLOCK: u32 = 256;

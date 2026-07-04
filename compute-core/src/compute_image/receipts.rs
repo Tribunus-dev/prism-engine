@@ -280,8 +280,14 @@ mod tests {
         let json = serde_json::to_string(&receipt).unwrap();
         let back: PrismInstallationReceipt = serde_json::from_str(&json).unwrap();
         assert_eq!(receipt.image_digest, back.image_digest);
-        assert_eq!(receipt.artifact_load_results.len(), back.artifact_load_results.len());
-    assert!(matches!(back.installation_status, InstallationStatus::Succeeded));
+        assert_eq!(
+            receipt.artifact_load_results.len(),
+            back.artifact_load_results.len()
+        );
+        assert!(matches!(
+            back.installation_status,
+            InstallationStatus::Succeeded
+        ));
     }
 
     /// Verify that a full PrismEpochReceipt roundtrips through JSON.

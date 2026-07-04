@@ -850,8 +850,8 @@ impl AneDmaPrefetcher {
     pub fn new() -> Result<Self, String> {
         // 4MB buffer — enough for a single layer's weights (~400MB for a 2-layer window
         // but we only buffer the DMA transfer, not the full weight storage).
-        let io_arena = Arena::new_bytes(1024 * 1024)
-            .map_err(|e| format!("DMA prefetcher arena: {}", e))?;
+        let io_arena =
+            Arena::new_bytes(1024 * 1024).map_err(|e| format!("DMA prefetcher arena: {}", e))?;
         Ok(Self { io_arena })
     }
 

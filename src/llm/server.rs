@@ -5,8 +5,8 @@
 // inference receipts.
 
 use super::manifest::{
-    ExecutionLane, InferencePhase, IslandAllocationId, MaterializationEvent,
-    QualificationStatus, SessionId,
+    ExecutionLane, InferencePhase, IslandAllocationId, MaterializationEvent, QualificationStatus,
+    SessionId,
 };
 use crate::image::types::ArtifactDigest;
 use serde::{Deserialize, Serialize};

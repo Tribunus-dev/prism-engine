@@ -28,15 +28,14 @@ use tribunus_compute_core::compilation::apple_installation::{
 use tribunus_compute_core::compilation::epoch_scheduler::EpochScheduler;
 use tribunus_compute_core::compilation::tri_lane::{
     AppleFallbackPlan, AppleHardwareSignature, AppleTriLaneExecutionPlan,
-    AppleTriLaneExecutionReceipt, CpuProgramBinding, EpochRouteOrigin,
-    LaneCostEstimate, MetalProgramBinding, NumericalPolicy, ShapeClass,
-    TriLaneCostModel, TriLaneEvidenceRequirements, OverlapMetrics,
-    CoreMlWarmupContract,
+    AppleTriLaneExecutionReceipt, CoreMlWarmupContract, CpuProgramBinding, EpochRouteOrigin,
+    LaneCostEstimate, MetalProgramBinding, NumericalPolicy, OverlapMetrics, ShapeClass,
+    TriLaneCostModel, TriLaneEvidenceRequirements,
 };
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
-    AppleSharedArenaManifest, AppleTriLaneAdmissionManifest,
-    AppleTriLaneArtifactManifest, CoreMlArtifactManifest, IOSurfaceSlotManifest,
+    AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, AppleTriLaneArtifactManifest,
+    CoreMlArtifactManifest, IOSurfaceSlotManifest,
 };
 use tribunus_compute_core::compute_image::apple_shared_arena::AppleSharedArena;
 use tribunus_compute_core::coreml_pipeline::{compile_mlpackage, CoreMlIslandReceipt};
@@ -84,17 +83,27 @@ fn build_fp16_throughput_model(model_dir: &Path) -> Result<PathBuf, String> {
         .map(|i| {
             let r = i / 64;
             let c = i % 64;
-            if r == c { 1.0 } else { 0.0 }
+            if r == c {
+                1.0
+            } else {
+                0.0
+            }
         })
         .collect();
 
     let mut b = MilBuilder::new("main");
-    b = b.input("input", coreml_proto::proto::mil_spec::DataType::Float16, &[BATCH, HIDDEN]);
+    b = b.input(
+        "input",
+        coreml_proto::proto::mil_spec::DataType::Float16,
+        &[BATCH, HIDDEN],
+    );
     b = b.const_f16("weight", &weight, &[HIDDEN, HIDDEN]);
     let weight_name = b.last_name().unwrap_or("weight_0").to_string();
     b = b.matmul("input", &weight_name);
     let output_name = b.last_name().unwrap_or("matmul_0").to_string();
-    let prog = b.output(&output_name).build()
+    let prog = b
+        .output(&output_name)
+        .build()
         .map_err(|e| format!("MIL build: {:?}", e))?;
 
     let meta = ModelMeta {
@@ -108,8 +117,8 @@ fn build_fp16_throughput_model(model_dir: &Path) -> Result<PathBuf, String> {
         outputs: vec![(output_name.clone(), vec![BATCH, HIDDEN])],
     };
 
-    let mlpackage_dir = write_mlpackage(prog, model_dir, &meta)
-        .map_err(|e| format!("mlpackage write: {}", e))?;
+    let mlpackage_dir =
+        write_mlpackage(prog, model_dir, &meta).map_err(|e| format!("mlpackage write: {}", e))?;
 
     let output_dir = model_dir.join("compiled");
     std::fs::create_dir_all(&output_dir)
@@ -121,7 +130,8 @@ fn build_fp16_throughput_model(model_dir: &Path) -> Result<PathBuf, String> {
         "fp16_throughput",
         "cpuAndNeuralEngine",
         "iOS15",
-    ).map_err(|e| format!("compile_mlpackage: {}", e))?;
+    )
+    .map_err(|e| format!("compile_mlpackage: {}", e))?;
 
     Ok(Path::new(&receipt.compiled_modelc_path).to_path_buf())
 }
@@ -178,7 +188,8 @@ fn make_throughput_slots(base_offset: u64) -> Vec<IOSurfaceSlotManifest> {
 }
 
 fn make_arena_manifest(slots: Vec<IOSurfaceSlotManifest>) -> AppleSharedArenaManifest {
-    let total_bytes = slots.last()
+    let total_bytes = slots
+        .last()
         .map(|s| s.byte_offset + s.byte_length)
         .unwrap_or(3 * BYTE_COUNT as u64);
     AppleSharedArenaManifest {
@@ -293,10 +304,27 @@ fn make_execution_plan() -> AppleTriLaneExecutionPlan {
             cpu_only_valid: false,
         },
         predicted_cost: TriLaneCostModel::new(
-            LaneCostEstimate { compute_ns: 0, memory_ns: 0, boundary_ns: 0, sync_ns: 0 },
-            LaneCostEstimate { compute_ns: 0, memory_ns: 0, boundary_ns: 0, sync_ns: 0 },
-            LaneCostEstimate { compute_ns: 0, memory_ns: 0, boundary_ns: 0, sync_ns: 0 },
-            0, 0, 0,
+            LaneCostEstimate {
+                compute_ns: 0,
+                memory_ns: 0,
+                boundary_ns: 0,
+                sync_ns: 0,
+            },
+            LaneCostEstimate {
+                compute_ns: 0,
+                memory_ns: 0,
+                boundary_ns: 0,
+                sync_ns: 0,
+            },
+            LaneCostEstimate {
+                compute_ns: 0,
+                memory_ns: 0,
+                boundary_ns: 0,
+                sync_ns: 0,
+            },
+            0,
+            0,
+            0,
         ),
         evidence_requirements: TriLaneEvidenceRequirements {
             validate_numerics: false,
@@ -340,8 +368,7 @@ fn warmup_exec(exec: &mut CoreMlIOSurfaceExecutable, arena: &mut AppleSharedAren
         max_warmup_latency_ms: 5000,
         tolerance: 0.01,
     };
-    let record = warmup_with_arena(exec, arena, &contract)
-        .expect("Core ML warmup should succeed");
+    let record = warmup_with_arena(exec, arena, &contract).expect("Core ML warmup should succeed");
     assert!(record.warmup_success, "warmup predictions must complete");
     assert!(record.output_present, "warmup must produce output");
     assert!(record.load_success, "warmup must load model");
@@ -397,7 +424,10 @@ impl SequenceMetrics {
     }
 
     fn aggregate_epoch_wall_ns(&self) -> u64 {
-        self.receipts.iter().map(|r| r.overlap_ns.epoch_wall_ns).sum()
+        self.receipts
+            .iter()
+            .map(|r| r.overlap_ns.epoch_wall_ns)
+            .sum()
     }
 
     fn total_overlap_ns(&self) -> u64 {
@@ -405,7 +435,10 @@ impl SequenceMetrics {
     }
 
     fn overlap_epochs(&self) -> usize {
-        self.receipts.iter().filter(|r| r.overlap_ns.overlap_ns > 0).count()
+        self.receipts
+            .iter()
+            .filter(|r| r.overlap_ns.overlap_ns > 0)
+            .count()
     }
 
     fn overlap_fraction(&self) -> f64 {
@@ -487,15 +520,21 @@ fn test_multi_sequence_ane_metal_overlap() {
     let mut install_a = create_throughput_install(slots.clone());
     let mut install_b = create_throughput_install(slots);
 
-    let mut metal_a = install_a.metal_consumer.take()
+    let mut metal_a = install_a
+        .metal_consumer
+        .take()
         .expect("install A must have metal_consumer");
-    let mut metal_b = install_b.metal_consumer.take()
+    let mut metal_b = install_b
+        .metal_consumer
+        .take()
         .expect("install B must have metal_consumer");
 
-    let mut exec_a = install_a.coreml_executables
+    let mut exec_a = install_a
+        .coreml_executables
         .remove("fp16_throughput")
         .expect("install A must have fp16_throughput executable");
-    let mut exec_b = install_b.coreml_executables
+    let mut exec_b = install_b
+        .coreml_executables
         .remove("fp16_throughput")
         .expect("install B must have fp16_throughput executable");
 
@@ -520,10 +559,16 @@ fn test_multi_sequence_ane_metal_overlap() {
     // Measured interleaved run
     let (metrics_a, metrics_b) = run_interleaved_sequences(
         (
-            &mut install_a.arena, &mut exec_a, &mut metal_a, &mut sched_a,
+            &mut install_a.arena,
+            &mut exec_a,
+            &mut metal_a,
+            &mut sched_a,
         ),
         (
-            &mut install_b.arena, &mut exec_b, &mut metal_b, &mut sched_b,
+            &mut install_b.arena,
+            &mut exec_b,
+            &mut metal_b,
+            &mut sched_b,
         ),
         MEASURED_EPOCHS,
     );
@@ -531,22 +576,29 @@ fn test_multi_sequence_ane_metal_overlap() {
     // ── Assertions ──────────────────────────────────────────────────
 
     assert_eq!(
-        metrics_a.receipts.len() as u64, MEASURED_EPOCHS,
-        "seq A must produce exactly {} receipts", MEASURED_EPOCHS
+        metrics_a.receipts.len() as u64,
+        MEASURED_EPOCHS,
+        "seq A must produce exactly {} receipts",
+        MEASURED_EPOCHS
     );
     assert_eq!(
-        metrics_b.receipts.len() as u64, MEASURED_EPOCHS,
-        "seq B must produce exactly {} receipts", MEASURED_EPOCHS
+        metrics_b.receipts.len() as u64,
+        MEASURED_EPOCHS,
+        "seq B must produce exactly {} receipts",
+        MEASURED_EPOCHS
     );
 
     for (i, receipt) in metrics_a.receipts.iter().enumerate() {
         assert_eq!(
-            receipt.route_origin, EpochRouteOrigin::CoreMlAne,
-            "seq A epoch {} must use Core ML ANE route", i
+            receipt.route_origin,
+            EpochRouteOrigin::CoreMlAne,
+            "seq A epoch {} must use Core ML ANE route",
+            i
         );
         assert!(
             receipt.coreml_prediction_completed,
-            "seq A epoch {} must complete Core ML prediction", i
+            "seq A epoch {} must complete Core ML prediction",
+            i
         );
     }
 
@@ -584,7 +636,8 @@ fn test_multi_sequence_ane_metal_overlap() {
         if receipt.coreml_prediction_completed {
             assert!(
                 !ane_events.is_empty(),
-                "seq A epoch {}: Core ML ANE lane event required when prediction completed", i
+                "seq A epoch {}: Core ML ANE lane event required when prediction completed",
+                i
             );
         }
     }
@@ -600,9 +653,12 @@ fn test_aggregate_throughput_exceeds_baseline() {
     // ── Baseline: single sequence throughput ─────────────────────────
 
     let mut baseline_install = create_throughput_install(slots.clone());
-    let mut baseline_metal = baseline_install.metal_consumer.take()
+    let mut baseline_metal = baseline_install
+        .metal_consumer
+        .take()
         .expect("baseline install must have metal_consumer");
-    let mut baseline_exec = baseline_install.coreml_executables
+    let mut baseline_exec = baseline_install
+        .coreml_executables
         .remove("fp16_throughput")
         .expect("baseline must have fp16_throughput executable");
 
@@ -613,7 +669,11 @@ fn test_aggregate_throughput_exceeds_baseline() {
 
     for _ in 0..WARMUP_EPOCHS {
         baseline_sched
-            .execute_epoch(&mut baseline_install.arena, &mut baseline_exec, &mut baseline_metal)
+            .execute_epoch(
+                &mut baseline_install.arena,
+                &mut baseline_exec,
+                &mut baseline_metal,
+            )
             .expect("baseline warmup should succeed");
     }
 
@@ -650,15 +710,21 @@ fn test_aggregate_throughput_exceeds_baseline() {
     let mut install_a = create_throughput_install(slots.clone());
     let mut install_b = create_throughput_install(slots);
 
-    let mut metal_a = install_a.metal_consumer.take()
+    let mut metal_a = install_a
+        .metal_consumer
+        .take()
         .expect("install A must have metal_consumer");
-    let mut metal_b = install_b.metal_consumer.take()
+    let mut metal_b = install_b
+        .metal_consumer
+        .take()
         .expect("install B must have metal_consumer");
 
-    let mut exec_a = install_a.coreml_executables
+    let mut exec_a = install_a
+        .coreml_executables
         .remove("fp16_throughput")
         .expect("install A must have fp16_throughput executable");
-    let mut exec_b = install_b.coreml_executables
+    let mut exec_b = install_b
+        .coreml_executables
         .remove("fp16_throughput")
         .expect("install B must have fp16_throughput executable");
 
@@ -681,17 +747,21 @@ fn test_aggregate_throughput_exceeds_baseline() {
 
     let (metrics_a, metrics_b) = run_interleaved_sequences(
         (
-            &mut install_a.arena, &mut exec_a, &mut metal_a, &mut sched_a,
+            &mut install_a.arena,
+            &mut exec_a,
+            &mut metal_a,
+            &mut sched_a,
         ),
         (
-            &mut install_b.arena, &mut exec_b, &mut metal_b, &mut sched_b,
+            &mut install_b.arena,
+            &mut exec_b,
+            &mut metal_b,
+            &mut sched_b,
         ),
         THROUGHPUT_EPOCHS,
     );
 
-    let tri_lane_total_ns = metrics_a
-        .total_wall_ns()
-        .max(metrics_b.total_wall_ns());
+    let tri_lane_total_ns = metrics_a.total_wall_ns().max(metrics_b.total_wall_ns());
     let tri_lane_total_epochs = metrics_a.epoch_count + metrics_b.epoch_count;
 
     let tri_lane_thpt = if tri_lane_total_ns > 0 {
@@ -731,18 +801,23 @@ fn test_aggregate_throughput_exceeds_baseline() {
     );
 
     assert_eq!(
-        metrics_a.receipts.len() as u64, THROUGHPUT_EPOCHS,
-        "seq A must complete {} epochs", THROUGHPUT_EPOCHS
+        metrics_a.receipts.len() as u64,
+        THROUGHPUT_EPOCHS,
+        "seq A must complete {} epochs",
+        THROUGHPUT_EPOCHS
     );
     assert_eq!(
-        metrics_b.receipts.len() as u64, THROUGHPUT_EPOCHS,
-        "seq B must complete {} epochs", THROUGHPUT_EPOCHS
+        metrics_b.receipts.len() as u64,
+        THROUGHPUT_EPOCHS,
+        "seq B must complete {} epochs",
+        THROUGHPUT_EPOCHS
     );
 
     for (i, receipt) in metrics_a.receipts.iter().enumerate() {
         assert!(
             receipt.overlap_ns.epoch_wall_ns > 0,
-            "seq A epoch {} must have nonzero epoch wall time", i
+            "seq A epoch {} must have nonzero epoch wall time",
+            i
         );
     }
 
@@ -763,15 +838,21 @@ fn test_overlap_latency_headroom() {
     let mut install_a = create_throughput_install(slots.clone());
     let mut install_b = create_throughput_install(slots);
 
-    let mut metal_a = install_a.metal_consumer.take()
+    let mut metal_a = install_a
+        .metal_consumer
+        .take()
         .expect("install A must have metal_consumer");
-    let mut metal_b = install_b.metal_consumer.take()
+    let mut metal_b = install_b
+        .metal_consumer
+        .take()
         .expect("install B must have metal_consumer");
 
-    let mut exec_a = install_a.coreml_executables
+    let mut exec_a = install_a
+        .coreml_executables
         .remove("fp16_throughput")
         .expect("install A must have fp16_throughput executable");
-    let mut exec_b = install_b.coreml_executables
+    let mut exec_b = install_b
+        .coreml_executables
         .remove("fp16_throughput")
         .expect("install B must have fp16_throughput executable");
 
@@ -859,14 +940,26 @@ fn test_overlap_latency_headroom() {
     let seq_a_timings: Vec<&EpochTiming> = timings.iter().filter(|t| t.seq == 0).collect();
     let seq_b_timings: Vec<&EpochTiming> = timings.iter().filter(|t| t.seq == 1).collect();
 
-    let a_avg_wall = seq_a_timings.iter().map(|t| t.epoch_wall_ns as f64).sum::<f64>()
+    let a_avg_wall = seq_a_timings
+        .iter()
+        .map(|t| t.epoch_wall_ns as f64)
+        .sum::<f64>()
         / seq_a_timings.len() as f64;
-    let b_avg_wall = seq_b_timings.iter().map(|t| t.epoch_wall_ns as f64).sum::<f64>()
+    let b_avg_wall = seq_b_timings
+        .iter()
+        .map(|t| t.epoch_wall_ns as f64)
+        .sum::<f64>()
         / seq_b_timings.len() as f64;
 
-    let a_avg_overlap = seq_a_timings.iter().map(|t| t.epoch_overlap_ns as f64).sum::<f64>()
+    let a_avg_overlap = seq_a_timings
+        .iter()
+        .map(|t| t.epoch_overlap_ns as f64)
+        .sum::<f64>()
         / seq_a_timings.len() as f64;
-    let b_avg_overlap = seq_b_timings.iter().map(|t| t.epoch_overlap_ns as f64).sum::<f64>()
+    let b_avg_overlap = seq_b_timings
+        .iter()
+        .map(|t| t.epoch_overlap_ns as f64)
+        .sum::<f64>()
         / seq_b_timings.len() as f64;
 
     // Epoch-level speedup: serial sum / cycle wall
@@ -901,27 +994,51 @@ fn test_overlap_latency_headroom() {
         0.0
     };
 
-    let a_avg_orch = seq_a_timings.iter().map(|t| t.orchestration_ns as f64).sum::<f64>()
+    let a_avg_orch = seq_a_timings
+        .iter()
+        .map(|t| t.orchestration_ns as f64)
+        .sum::<f64>()
         / seq_a_timings.len() as f64;
-    let b_avg_orch = seq_b_timings.iter().map(|t| t.orchestration_ns as f64).sum::<f64>()
+    let b_avg_orch = seq_b_timings
+        .iter()
+        .map(|t| t.orchestration_ns as f64)
+        .sum::<f64>()
         / seq_b_timings.len() as f64;
 
     // ── Report ───────────────────────────────────────────────────────
 
     eprintln!("--- Overlap Latency Headroom Report ---");
-    eprintln!("Seq A: avg wall {:.1} µs, avg overlap {:.1} µs",
-        a_avg_wall / 1000.0, a_avg_overlap / 1000.0);
-    eprintln!("Seq B: avg wall {:.1} µs, avg overlap {:.1} µs",
-        b_avg_wall / 1000.0, b_avg_overlap / 1000.0);
-    eprintln!("Serial sum: {:.1} µs across {} timings",
-        total_serial_wall as f64 / 1000.0, timings.len());
-    eprintln!("Cycle wall: {:.1} µs across {} cycles",
-        total_cycle_wall as f64 / 1000.0, MEASURED_EPOCHS);
+    eprintln!(
+        "Seq A: avg wall {:.1} µs, avg overlap {:.1} µs",
+        a_avg_wall / 1000.0,
+        a_avg_overlap / 1000.0
+    );
+    eprintln!(
+        "Seq B: avg wall {:.1} µs, avg overlap {:.1} µs",
+        b_avg_wall / 1000.0,
+        b_avg_overlap / 1000.0
+    );
+    eprintln!(
+        "Serial sum: {:.1} µs across {} timings",
+        total_serial_wall as f64 / 1000.0,
+        timings.len()
+    );
+    eprintln!(
+        "Cycle wall: {:.1} µs across {} cycles",
+        total_cycle_wall as f64 / 1000.0,
+        MEASURED_EPOCHS
+    );
     eprintln!("Epoch-level speedup: {:.4}x", speedup);
-    eprintln!("Avg boundary latency: {:.1} µs ({} samples)",
-        avg_boundary_ns / 1000.0, boundary_latencies.len());
-    eprintln!("Avg CPU orchestration: seq A {:.1} µs, seq B {:.1} µs",
-        a_avg_orch / 1000.0, b_avg_orch / 1000.0);
+    eprintln!(
+        "Avg boundary latency: {:.1} µs ({} samples)",
+        avg_boundary_ns / 1000.0,
+        boundary_latencies.len()
+    );
+    eprintln!(
+        "Avg CPU orchestration: seq A {:.1} µs, seq B {:.1} µs",
+        a_avg_orch / 1000.0,
+        b_avg_orch / 1000.0
+    );
 
     // ── Assertions ──────────────────────────────────────────────────
 
@@ -929,13 +1046,15 @@ fn test_overlap_latency_headroom() {
         assert!(
             t.epoch_wall_ns > 0,
             "seq {} epoch {} must have nonzero wall time",
-            t.seq, t.epoch,
+            t.seq,
+            t.epoch,
         );
     }
 
     assert!(
         speedup > 0.0,
-        "epoch-level speedup must be positive, got {:.4}", speedup
+        "epoch-level speedup must be positive, got {:.4}",
+        speedup
     );
 
     let overlap_epochs = timings.iter().filter(|t| t.epoch_overlap_ns > 0).count();
@@ -948,10 +1067,12 @@ fn test_overlap_latency_headroom() {
 
     assert!(
         seq_a_timings.len() as u64 == MEASURED_EPOCHS,
-        "seq A must produce {} timing records", MEASURED_EPOCHS
+        "seq A must produce {} timing records",
+        MEASURED_EPOCHS
     );
     assert!(
         seq_b_timings.len() as u64 == MEASURED_EPOCHS,
-        "seq B must produce {} timing records", MEASURED_EPOCHS
+        "seq B must produce {} timing records",
+        MEASURED_EPOCHS
     );
 }

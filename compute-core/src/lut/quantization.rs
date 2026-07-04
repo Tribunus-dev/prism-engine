@@ -102,7 +102,12 @@ mod tests {
         for (o, d) in original.iter().zip(dequantized.iter()) {
             let of = half::f16::from_bits(*o).to_f32();
             let df = half::f16::from_bits(*d).to_f32();
-            assert!((of - df).abs() < 0.02, "quant error: orig={} deq={}", of, df);
+            assert!(
+                (of - df).abs() < 0.02,
+                "quant error: orig={} deq={}",
+                of,
+                df
+            );
         }
     }
 

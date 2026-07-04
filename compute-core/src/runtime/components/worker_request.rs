@@ -6,8 +6,8 @@
 
 use std::time::Instant;
 
-use crate::runtime::scheduling::component_id::SchedulableComponent;
 use crate::runtime::components::WORKER_REQUEST_COMPONENT;
+use crate::runtime::scheduling::component_id::SchedulableComponent;
 
 /// A submitted inference request awaiting or undergoing worker execution.
 ///
@@ -52,7 +52,11 @@ pub struct CancellationState {
 
 impl WorkerRequest {
     /// Create a new worker request.
-    pub fn new(request_id: impl Into<String>, payload: Vec<u8>, request_class: RequestClass) -> Self {
+    pub fn new(
+        request_id: impl Into<String>,
+        payload: Vec<u8>,
+        request_class: RequestClass,
+    ) -> Self {
         Self {
             request_id: request_id.into(),
             payload,
@@ -72,9 +76,7 @@ impl WorkerRequest {
 
     /// Returns true when cancellation has been requested.
     pub fn is_cancelled(&self) -> bool {
-        self.cancellation
-            .as_ref()
-            .map_or(false, |c| c.requested)
+        self.cancellation.as_ref().map_or(false, |c| c.requested)
     }
 }
 

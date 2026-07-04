@@ -120,7 +120,10 @@ impl Arena {
                 &mut cv_buffer,
             );
             if status != 0 || cv_buffer.is_null() {
-                return Err(format!("CVPixelBufferCreateWithIOSurface failed: {}", status));
+                return Err(format!(
+                    "CVPixelBufferCreateWithIOSurface failed: {}",
+                    status
+                ));
             }
 
             let info = ArenaInfo {
@@ -151,7 +154,7 @@ impl Arena {
     pub fn new(logical_dim0: u32, logical_dim1: u32, dtype: DataType) -> Result<Self, String> {
         match dtype {
             DataType::Float16 | DataType::Float32 => {}
-            }
+        }
 
         let mut info: ArenaInfo = unsafe { std::mem::zeroed() };
         let rc = unsafe {
@@ -353,8 +356,8 @@ mod tests {
     use super::*;
     use crate::coreai_bridge::CoreAiModel;
     use crate::coreai_state::CoreAiStateHandle;
-    use mlx_rs::Dtype;
     use crate::external_array;
+    use mlx_rs::Dtype;
     use std::sync::Arc;
 
     // ---- FP16 conversion helpers ----

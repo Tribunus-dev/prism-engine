@@ -257,7 +257,8 @@ mod tests {
     #[test]
     fn append_and_verify_chain() {
         let dir = tempfile::tempdir().unwrap();
-        let mut frontier = CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Teacher);
+        let mut frontier =
+            CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Teacher);
 
         let stage1 = frontier
             .append_stage(b"shard_one", test_metadata(128, 64))
@@ -279,7 +280,8 @@ mod tests {
     #[test]
     fn verify_chain_fails_on_tampered_shard() {
         let dir = tempfile::tempdir().unwrap();
-        let mut frontier = CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Student);
+        let mut frontier =
+            CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Student);
 
         frontier
             .append_stage(b"shard_one", test_metadata(128, 64))
@@ -298,7 +300,8 @@ mod tests {
     #[test]
     fn save_and_load_scheduler_state() {
         let dir = tempfile::tempdir().unwrap();
-        let mut frontier = CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Teacher);
+        let mut frontier =
+            CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Teacher);
 
         frontier
             .append_stage(b"data_a", test_metadata(64, 32))
@@ -327,7 +330,8 @@ mod tests {
     #[test]
     fn load_scheduler_state_missing_shard_fails() {
         let dir = tempfile::tempdir().unwrap();
-        let mut frontier = CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Student);
+        let mut frontier =
+            CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Student);
         frontier
             .append_stage(b"data", test_metadata(64, 32))
             .unwrap();
@@ -347,14 +351,11 @@ mod tests {
     #[test]
     fn stages_iterator() {
         let dir = tempfile::tempdir().unwrap();
-        let mut frontier = CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Teacher);
+        let mut frontier =
+            CalibrationFrontier::new(dir.path().to_path_buf(), FrontierNamespace::Teacher);
 
-        frontier
-            .append_stage(b"a", test_metadata(64, 32))
-            .unwrap();
-        frontier
-            .append_stage(b"b", test_metadata(128, 64))
-            .unwrap();
+        frontier.append_stage(b"a", test_metadata(64, 32)).unwrap();
+        frontier.append_stage(b"b", test_metadata(128, 64)).unwrap();
 
         let collected: Vec<_> = frontier.stages().collect();
         assert_eq!(collected.len(), 2);

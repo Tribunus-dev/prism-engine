@@ -158,7 +158,13 @@ mod tests {
         let scales: Vec<f32> = (0..n_blocks)
             .map(|_| 0.05 + (next() % 100) as f32 / 1000.0)
             .collect();
-        TernaryWeights { out_dim, in_dim, block_size, digits, scales }
+        TernaryWeights {
+            out_dim,
+            in_dim,
+            block_size,
+            digits,
+            scales,
+        }
     }
 
     #[test]

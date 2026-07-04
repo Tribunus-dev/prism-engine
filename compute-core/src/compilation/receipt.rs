@@ -31,14 +31,18 @@ pub struct BridgeReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PageGeometry {
-    pub lane: usize,          // 20
-    pub page: usize,          // 640
+    pub lane: usize,           // 20
+    pub page: usize,           // 640
     pub trits_per_word: usize, // 20
 }
 
 impl Default for PageGeometry {
     fn default() -> Self {
-        PageGeometry { lane: 20, page: 640, trits_per_word: 20 }
+        PageGeometry {
+            lane: 20,
+            page: 640,
+            trits_per_word: 20,
+        }
     }
 }
 

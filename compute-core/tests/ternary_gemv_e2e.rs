@@ -49,10 +49,34 @@ fn cpu_gemv(packed: &[u8], input: &[f32; K]) -> [f32; N] {
         let n2 = (byte >> 4) & 0x03;
         let n3 = (byte >> 6) & 0x03;
         let w: [f32; K] = [
-            if n0 == 1 { 1.0 } else if n0 == 2 { -1.0 } else { 0.0 },
-            if n1 == 1 { 1.0 } else if n1 == 2 { -1.0 } else { 0.0 },
-            if n2 == 1 { 1.0 } else if n2 == 2 { -1.0 } else { 0.0 },
-            if n3 == 1 { 1.0 } else if n3 == 2 { -1.0 } else { 0.0 },
+            if n0 == 1 {
+                1.0
+            } else if n0 == 2 {
+                -1.0
+            } else {
+                0.0
+            },
+            if n1 == 1 {
+                1.0
+            } else if n1 == 2 {
+                -1.0
+            } else {
+                0.0
+            },
+            if n2 == 1 {
+                1.0
+            } else if n2 == 2 {
+                -1.0
+            } else {
+                0.0
+            },
+            if n3 == 1 {
+                1.0
+            } else if n3 == 2 {
+                -1.0
+            } else {
+                0.0
+            },
         ];
         out[row] = w[0] * input[0] + w[1] * input[1] + w[2] * input[2] + w[3] * input[3];
     }
@@ -163,8 +187,16 @@ fn ternary_2bit_nibble_gemv_e2e() {
     encoder.set_buffer(3, Some(&in_dim_buf), 0);
     encoder.set_buffer(4, Some(&out_dim_buf), 0);
 
-    let grid_size = MTLSize { width: N as u64, height: 1, depth: 1 };
-    let threadgroup_size = MTLSize { width: 1, height: 1, depth: 1 };
+    let grid_size = MTLSize {
+        width: N as u64,
+        height: 1,
+        depth: 1,
+    };
+    let threadgroup_size = MTLSize {
+        width: 1,
+        height: 1,
+        depth: 1,
+    };
     encoder.dispatch_threads(grid_size, threadgroup_size);
     encoder.end_encoding();
     cmd_buf.commit();

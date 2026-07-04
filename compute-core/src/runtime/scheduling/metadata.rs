@@ -10,10 +10,10 @@
 
 use crate::runtime::scheduling::access::{ComponentSet, ResourceSet};
 use crate::runtime::scheduling::command::CommandWriter;
-use serde::{Deserialize, Serialize};
 use crate::runtime::scheduling::component_id::{ComponentMask, ResourceMask};
 use crate::runtime::scheduling::error::ScheduleError;
 use crate::runtime::world::World;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Stage
@@ -244,8 +244,7 @@ pub trait SystemSpec: Send {
             stage: Self::STAGE,
             reads: Self::Reads::mask().map_err(ScheduleError::InvalidComponent)?,
             writes: Self::Writes::mask().map_err(ScheduleError::InvalidComponent)?,
-            reads_resources: Self::ReadResources::mask()
-                .map_err(ScheduleError::InvalidResource)?,
+            reads_resources: Self::ReadResources::mask().map_err(ScheduleError::InvalidResource)?,
             writes_resources: Self::WriteResources::mask()
                 .map_err(ScheduleError::InvalidResource)?,
             after: Self::AFTER,
@@ -275,9 +274,5 @@ pub trait ErasedSystem: Send {
     /// `world` provides mutable World access for the initial Slice 1.
     /// `resources` provides capability-scoped resource access.
     /// `commands` is the structural mutation channel.
-    fn run(
-        &mut self,
-        world: &mut World,
-        commands: &mut CommandWriter,
-    ) -> SystemResult;
+    fn run(&mut self, world: &mut World, commands: &mut CommandWriter) -> SystemResult;
 }

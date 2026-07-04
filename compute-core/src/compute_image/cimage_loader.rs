@@ -15,14 +15,14 @@
 //! [`TernaryCImageCompiler`]: crate::compute_image::compile::ternary::TernaryCImageCompiler
 
 use crate::compute_image::compile::ternary::{
-    verify_cimage, SegmentEntry, SegmentKind, ModelArtifactEntry, model_artifact_tag, PRISM_MAGIC,
+    model_artifact_tag, verify_cimage, ModelArtifactEntry, SegmentEntry, SegmentKind, PRISM_MAGIC,
 };
+use crate::compute_image::megakernel::kernels::HIDDEN_DIM;
+use crate::compute_image::multimodal::descriptor::MultimodalCapabilities;
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
-use crate::compute_image::megakernel::kernels::HIDDEN_DIM;
 use std::fs::File;
 use std::io;
-use crate::compute_image::multimodal::descriptor::MultimodalCapabilities;
 use std::path::Path;
 
 // O_ROWS and DOWN_ROWS are defined as private const in kernels.rs;
@@ -52,7 +52,9 @@ pub struct V1CImageLayoutMeta {
     _pad3: [u8; 4],
 }
 
-fn align64(n: u64) -> u64 { (n + 63) & !63 }
+fn align64(n: u64) -> u64 {
+    (n + 63) & !63
+}
 
 /// Load a `.cimage` file via mmap and parse its V3 page-aligned header.
 ///
@@ -70,13 +72,18 @@ pub fn load_cimage_mmap(path: &Path) -> io::Result<(Mmap, PrismCimageHeader)> {
     let file = File::open(path)?;
     let mmap = unsafe { Mmap::map(&file)? };
     if mmap.len() < std::mem::size_of::<PrismCimageHeader>() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, ".cimage file too small"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            ".cimage file too small",
+        ));
     }
-    let header: PrismCimageHeader = unsafe {
-        std::ptr::read_unaligned(mmap.as_ptr() as *const PrismCimageHeader)
-    };
+    let header: PrismCimageHeader =
+        unsafe { std::ptr::read_unaligned(mmap.as_ptr() as *const PrismCimageHeader) };
     if &header.magic != &PRISM_MAGIC {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad .cimage magic"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "bad .cimage magic",
+        ));
     }
     Ok((mmap, header))
 }
@@ -212,8 +219,9 @@ impl CimageDeployment {
         }
 
         // ── Parse layout metadata (bytes 128..192) ────────────────────────
-        let layout: V1CImageLayoutMeta =
-            unsafe { std::ptr::read_unaligned(bytes.as_ptr().add(128) as *const V1CImageLayoutMeta) };
+        let layout: V1CImageLayoutMeta = unsafe {
+            std::ptr::read_unaligned(bytes.as_ptr().add(128) as *const V1CImageLayoutMeta)
+        };
 
         // ── Verify SHA-256 hash of payload (everything after the header) ──
         let payload = &bytes[128..];
@@ -312,7 +320,9 @@ impl CimageDeployment {
 
         // ══ Segment-directory based loader (avoids CimageLayoutMeta) ══
         let find_seg = |kind: u32| -> Result<&SegmentEntry, String> {
-            header.segments.iter()
+            header
+                .segments
+                .iter()
                 .find(|s| s.kind == kind && s.length > 0)
                 .ok_or_else(|| format!("segment kind {} not found", kind))
         };
@@ -334,24 +344,72 @@ impl CimageDeployment {
         let num_weights = (sg2.length / 2) * 256;
 
         // ── Read auxiliary buffers from ModelArtifacts segment ────────
-        let model_artifacts_seg = header.segments.iter().find(|s| s.kind == SegmentKind::ModelArtifacts as u32 && s.length > 0);
-        let (embed_buffer, embed_scales_buffer, centroid_buffer, centroid_scales_buffer,
-             cluster_map_buffer, norms_buffer) = match model_artifacts_seg {
+        let model_artifacts_seg = header
+            .segments
+            .iter()
+            .find(|s| s.kind == SegmentKind::ModelArtifacts as u32 && s.length > 0);
+        let (
+            embed_buffer,
+            embed_scales_buffer,
+            centroid_buffer,
+            centroid_scales_buffer,
+            cluster_map_buffer,
+            norms_buffer,
+        ) = match model_artifacts_seg {
             Some(seg) => {
                 let off = seg.offset as usize;
                 let len = seg.length as usize;
                 let data = &bytes[off..off + len];
-                let mut embed = None; let mut escale = None;
-                let mut cent = None; let mut cscale = None;
-                let mut cmap = None; let mut norms = None;
+                let mut embed = None;
+                let mut escale = None;
+                let mut cent = None;
+                let mut cscale = None;
+                let mut cmap = None;
+                let mut norms = None;
                 for (tag, payload) in ModelArtifactEntry::iter_entries(data) {
                     match tag {
-                        t if t == model_artifact_tag::EMBED_NIBBLES => embed = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
-                        t if t == model_artifact_tag::EMBED_SCALES => escale = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
-                        t if t == model_artifact_tag::CENTROID_NIBBLES => cent = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
-                        t if t == model_artifact_tag::CENTROID_SCALES => cscale = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
-                        t if t == model_artifact_tag::CLUSTER_MAP => cmap = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
-                        t if t == model_artifact_tag::AUX_NORMS => norms = Some(device.new_buffer_with_data(payload.as_ptr() as *const _, payload.len() as u64, metal::MTLResourceOptions::StorageModeShared)),
+                        t if t == model_artifact_tag::EMBED_NIBBLES => {
+                            embed = Some(device.new_buffer_with_data(
+                                payload.as_ptr() as *const _,
+                                payload.len() as u64,
+                                metal::MTLResourceOptions::StorageModeShared,
+                            ))
+                        }
+                        t if t == model_artifact_tag::EMBED_SCALES => {
+                            escale = Some(device.new_buffer_with_data(
+                                payload.as_ptr() as *const _,
+                                payload.len() as u64,
+                                metal::MTLResourceOptions::StorageModeShared,
+                            ))
+                        }
+                        t if t == model_artifact_tag::CENTROID_NIBBLES => {
+                            cent = Some(device.new_buffer_with_data(
+                                payload.as_ptr() as *const _,
+                                payload.len() as u64,
+                                metal::MTLResourceOptions::StorageModeShared,
+                            ))
+                        }
+                        t if t == model_artifact_tag::CENTROID_SCALES => {
+                            cscale = Some(device.new_buffer_with_data(
+                                payload.as_ptr() as *const _,
+                                payload.len() as u64,
+                                metal::MTLResourceOptions::StorageModeShared,
+                            ))
+                        }
+                        t if t == model_artifact_tag::CLUSTER_MAP => {
+                            cmap = Some(device.new_buffer_with_data(
+                                payload.as_ptr() as *const _,
+                                payload.len() as u64,
+                                metal::MTLResourceOptions::StorageModeShared,
+                            ))
+                        }
+                        t if t == model_artifact_tag::AUX_NORMS => {
+                            norms = Some(device.new_buffer_with_data(
+                                payload.as_ptr() as *const _,
+                                payload.len() as u64,
+                                metal::MTLResourceOptions::StorageModeShared,
+                            ))
+                        }
                         _ => {}
                     }
                 }
@@ -385,10 +443,12 @@ impl CimageDeployment {
                         }
                     }
                 }
-                None => return Err(format!(
-                    "v{} .cimage missing ModelArtifacts segment (required for v6+)",
-                    header.version
-                )),
+                None => {
+                    return Err(format!(
+                        "v{} .cimage missing ModelArtifacts segment (required for v6+)",
+                        header.version
+                    ))
+                }
             }
         }
 
@@ -419,8 +479,6 @@ impl CimageDeployment {
         MultimodalCapabilities::default()
     }
 
-
-
     /// If running on M5+ (Apple10 GPU family), expand ternary weights to INT4
     /// block-quantized format in a GPU-readable shared buffer.
     /// Called once after load, before any decode.
@@ -447,9 +505,8 @@ impl CimageDeployment {
 
         // Repack .cimage ternary (20 trits/u32) → TernaryBlock32 (5 trits/byte) format
         let blocks = crate::compute_image::compile::int4_pack::repack_ternary_tensor(src);
-        let block_bytes = unsafe {
-            std::slice::from_raw_parts(blocks.as_ptr() as *const u8, blocks.len() * 9)
-        };
+        let block_bytes =
+            unsafe { std::slice::from_raw_parts(blocks.as_ptr() as *const u8, blocks.len() * 9) };
 
         let ternary_buf = device.new_buffer_with_data(
             block_bytes.as_ptr() as *const std::ffi::c_void,
@@ -460,22 +517,22 @@ impl CimageDeployment {
         self.weights_int4_buffer = Some(ternary_buf);
 
         // Build fused interleaved ternary buffer from the per-matrix block data
-        const Q_WEIGHTS: usize   = 3840 * 4096;
-        const KV_WEIGHTS: usize  = 3840 * 2048;
-        const O_WEIGHTS: usize   = 4096 * 3840;
+        const Q_WEIGHTS: usize = 3840 * 4096;
+        const KV_WEIGHTS: usize = 3840 * 2048;
+        const O_WEIGHTS: usize = 4096 * 3840;
         const FFN_WEIGHTS: usize = 3840 * 15360;
         const DOWN_WEIGHTS: usize = 15360 * 3840;
 
-        const Q_BLOCKS: usize    = Q_WEIGHTS / 32;
-        const KV_BLOCKS: usize   = KV_WEIGHTS / 32;
-        const O_BLOCKS: usize    = O_WEIGHTS / 32;
-        const FFN_BLOCKS: usize  = FFN_WEIGHTS / 32;
+        const Q_BLOCKS: usize = Q_WEIGHTS / 32;
+        const KV_BLOCKS: usize = KV_WEIGHTS / 32;
+        const O_BLOCKS: usize = O_WEIGHTS / 32;
+        const FFN_BLOCKS: usize = FFN_WEIGHTS / 32;
         const DOWN_BLOCKS: usize = DOWN_WEIGHTS / 32;
 
-        const Q_BYTES: usize    = Q_BLOCKS * 9;
-        const KV_BYTES: usize   = KV_BLOCKS * 9;
-        const O_BYTES: usize    = O_BLOCKS * 9;
-        const FFN_BYTES: usize  = FFN_BLOCKS * 9;
+        const Q_BYTES: usize = Q_BLOCKS * 9;
+        const KV_BYTES: usize = KV_BLOCKS * 9;
+        const O_BYTES: usize = O_BLOCKS * 9;
+        const FFN_BYTES: usize = FFN_BLOCKS * 9;
         const DOWN_BYTES: usize = DOWN_BLOCKS * 9;
 
         const LAYER_BLOCK_BYTES: usize =
@@ -485,25 +542,33 @@ impl CimageDeployment {
 
         for layer in 0..self.num_layers as usize {
             let lbase = layer * LAYER_BLOCK_BYTES;
-            let q    = &block_bytes[lbase..lbase + Q_BYTES];
-            let k    = &block_bytes[lbase + Q_BYTES..lbase + Q_BYTES + KV_BYTES];
-            let v    = &block_bytes[lbase + Q_BYTES + KV_BYTES..lbase + Q_BYTES + 2 * KV_BYTES];
-            let o    = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES..lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES];
-            let gate = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES..
-                                    lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + FFN_BYTES];
-            let up   = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + FFN_BYTES..
-                                    lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + 2 * FFN_BYTES];
-            let down = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + 2 * FFN_BYTES..
-                                    lbase + LAYER_BLOCK_BYTES];
+            let q = &block_bytes[lbase..lbase + Q_BYTES];
+            let k = &block_bytes[lbase + Q_BYTES..lbase + Q_BYTES + KV_BYTES];
+            let v = &block_bytes[lbase + Q_BYTES + KV_BYTES..lbase + Q_BYTES + 2 * KV_BYTES];
+            let o = &block_bytes
+                [lbase + Q_BYTES + 2 * KV_BYTES..lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES];
+            let gate = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES
+                ..lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + FFN_BYTES];
+            let up = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + FFN_BYTES
+                ..lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + 2 * FFN_BYTES];
+            let down = &block_bytes[lbase + Q_BYTES + 2 * KV_BYTES + O_BYTES + 2 * FFN_BYTES
+                ..lbase + LAYER_BLOCK_BYTES];
 
-            let layer_fused = crate::compute_image::compile::int4_pack::interleave_fused_ternary_layer(
-                q, k, v, o, gate, up, down,
-                HIDDEN_DIM as usize,
-                HIDDEN_DIM as usize,
-                O_ROWS as usize,
-                HIDDEN_DIM as usize,
-                DOWN_ROWS as usize,
-            );
+            let layer_fused =
+                crate::compute_image::compile::int4_pack::interleave_fused_ternary_layer(
+                    q,
+                    k,
+                    v,
+                    o,
+                    gate,
+                    up,
+                    down,
+                    HIDDEN_DIM as usize,
+                    HIDDEN_DIM as usize,
+                    O_ROWS as usize,
+                    HIDDEN_DIM as usize,
+                    DOWN_ROWS as usize,
+                );
             fused.extend_from_slice(&layer_fused);
         }
 
@@ -519,7 +584,15 @@ impl CimageDeployment {
     /// Returns the parsed [`CImageHeader`] and [`CImageLayoutMeta`] on success
     /// for v1 binaries.  For the v2 Prism Engine format, use
     /// [`verify_prism_cimage`] directly instead.
-    pub fn verify(path: impl AsRef<Path>) -> Result<(crate::compute_image::manifest::CImageHeader, V1CImageLayoutMeta), String> {
+    pub fn verify(
+        path: impl AsRef<Path>,
+    ) -> Result<
+        (
+            crate::compute_image::manifest::CImageHeader,
+            V1CImageLayoutMeta,
+        ),
+        String,
+    > {
         let bytes =
             std::fs::read(path.as_ref()).map_err(|e| format!("failed to read .cimage: {}", e))?;
 
@@ -549,8 +622,9 @@ impl CimageDeployment {
             ));
         }
 
-        let v1_layout: V1CImageLayoutMeta =
-            unsafe { std::ptr::read_unaligned(bytes.as_ptr().add(128) as *const V1CImageLayoutMeta) };
+        let v1_layout: V1CImageLayoutMeta = unsafe {
+            std::ptr::read_unaligned(bytes.as_ptr().add(128) as *const V1CImageLayoutMeta)
+        };
 
         let payload = &bytes[128..];
         let computed = Sha256::digest(payload);

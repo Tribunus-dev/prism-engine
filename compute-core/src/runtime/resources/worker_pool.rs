@@ -62,11 +62,7 @@ impl WorkerPoolResource {
     /// Request cancellation of an in-flight request on a worker.
     ///
     /// Placeholder implementation — always succeeds.
-    pub fn request_cancellation(
-        &self,
-        _worker_id: &str,
-        _request_id: &str,
-    ) -> Result<(), String> {
+    pub fn request_cancellation(&self, _worker_id: &str, _request_id: &str) -> Result<(), String> {
         Ok(())
     }
 

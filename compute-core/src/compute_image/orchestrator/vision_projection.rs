@@ -8,8 +8,8 @@
 //! This is Phase A (multimodal preparation + projection), separate from
 //! the decoder megakernel (Phase B).
 
-use metal::*;
 use crate::compute_image::megakernel::kernels::HIDDEN_DIM;
+use metal::*;
 
 /// Vision embedder projection pipeline.
 pub struct VisionProjectionPipeline {
@@ -146,10 +146,10 @@ impl VisionProjectionPipeline {
                 weights.max_positions,
             ];
             encoder.set_bytes(
-                    11,
-                    std::mem::size_of_val(&constants) as u64,
-                    &constants as *const u32 as *const std::ffi::c_void,
-                );
+                11,
+                std::mem::size_of_val(&constants) as u64,
+                &constants as *const u32 as *const std::ffi::c_void,
+            );
 
             let threads_per_group = MTLSize::new(256, 1, 1);
             let groups = MTLSize::new(input.num_patches as u64, 1, 1);
@@ -171,10 +171,10 @@ impl VisionProjectionPipeline {
                 input.soft_token_kernel,
             ];
             encoder.set_bytes(
-                    2,
-                    std::mem::size_of_val(&constants) as u64,
-                    &constants as *const u32 as *const std::ffi::c_void,
-                );
+                2,
+                std::mem::size_of_val(&constants) as u64,
+                &constants as *const u32 as *const std::ffi::c_void,
+            );
 
             let threads_per_group = MTLSize::new(256, 1, 1);
             let groups = MTLSize::new(num_soft_tokens as u64, 1, 1);
@@ -192,10 +192,10 @@ impl VisionProjectionPipeline {
             encoder.set_buffer(3, Some(&output_buf), 0);
 
             encoder.set_bytes(
-                    4,
-                    std::mem::size_of::<u32>() as u64,
-                    &num_soft_tokens as *const u32 as *const std::ffi::c_void,
-                );
+                4,
+                std::mem::size_of::<u32>() as u64,
+                &num_soft_tokens as *const u32 as *const std::ffi::c_void,
+            );
 
             let threads_per_group = MTLSize::new(256, 1, 1);
             let groups = MTLSize::new(num_soft_tokens as u64, 1, 1);

@@ -8,8 +8,8 @@
 //!
 //! Routing constants: MLX(GPU)=0, Accelerate(CPU)=1, ANE=3.
 
+use crate::compilation::tri_lane::{LaneCostEstimate, TriLaneCostModel};
 use crate::config::{LayerPlan, ModelExecutionPlan};
-use crate::compilation::tri_lane::{TriLaneCostModel, LaneCostEstimate};
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -103,8 +103,6 @@ pub fn build_tri_lane_cost_model(
     gpu_contention_ns: u64,
     cpu_contention_ns: u64,
 ) -> crate::compilation::tri_lane::TriLaneCostModel {
-    
-
     let total_gpu: u64 = costs.iter().map(|c| c.gpu_estimate_ns).sum();
     let total_ane: u64 = costs.iter().map(|c| c.ane_estimate_ns).sum();
     let total_cpu: u64 = costs.iter().map(|c| c.accel_estimate_ns).sum();
@@ -249,8 +247,7 @@ impl ProfitabilityAnalyzer {
                 op_costs
                     .iter()
                     .find(|c| {
-                        c.op_name == a.op_name
-                            && op_cost_belongs_to_layer(plan, c, a.layer_index)
+                        c.op_name == a.op_name && op_cost_belongs_to_layer(plan, c, a.layer_index)
                     })
                     .map(|c| c.ane_estimate_ns)
                     .unwrap_or(0)
@@ -348,11 +345,7 @@ impl ProfitabilityAnalyzer {
 
                 // Bandwidth-limited: two memory-bound ops in sequence
                 // (e.g. rms_norm → silu) with no compute-bound op between
-                if *op == "rms_norm"
-                    || *op == "silu"
-                    || *op == "add"
-                    || *op == "multiply"
-                {
+                if *op == "rms_norm" || *op == "silu" || *op == "add" || *op == "multiply" {
                     // Note: bandwidth-limited detection depends on prev op
                     // which we can't easily access in this form.  We keep the
                     // struct for API compatibility.
@@ -659,11 +652,9 @@ impl ProfitabilityAnalyzer {
                     "MLX"
                 };
 
-                let on_critical_path =
-                    bubbled_layers.contains(&layer.layer_index);
+                let on_critical_path = bubbled_layers.contains(&layer.layer_index);
                 let layer_has_serial_bubbles = bubbles.iter().any(|b| {
-                    b.layer_index == layer.layer_index
-                        && b.cause == BubbleCause::SerialDependency
+                    b.layer_index == layer.layer_index && b.cause == BubbleCause::SerialDependency
                 });
 
                 // ANE only recommended when strictly fastest AND ≥25% faster
@@ -691,11 +682,7 @@ impl ProfitabilityAnalyzer {
                     )
                 };
 
-                let estimated_gpu_time_saved_ns = if should_assign_ane {
-                    gpu
-                } else {
-                    0
-                };
+                let estimated_gpu_time_saved_ns = if should_assign_ane { gpu } else { 0 };
 
                 assignments.push(AneAssignment {
                     layer_index: layer.layer_index,
@@ -718,13 +705,7 @@ impl ProfitabilityAnalyzer {
         match op_name {
             "rms_norm" => layer.route.rms_norm = backend,
             "silu" => layer.route.silu = backend,
-            "q_proj"
-            | "k_proj"
-            | "v_proj"
-            | "matmul"
-            | "gate_proj"
-            | "up_proj"
-            | "down_proj" => {
+            "q_proj" | "k_proj" | "v_proj" | "matmul" | "gate_proj" | "up_proj" | "down_proj" => {
                 layer.route.matmul = backend;
             }
             "softmax" => layer.route.softmax = backend,
@@ -792,9 +773,7 @@ fn op_cost_belongs_to_layer(plan: &ModelExecutionPlan, cost: &OpCost, layer_inde
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        operation_route::OperationRoute, EpiloguePlan, LayerPlan, ProloguePlan,
-    };
+    use crate::config::{operation_route::OperationRoute, EpiloguePlan, LayerPlan, ProloguePlan};
 
     /// Build a minimal LayerPlan for reuse in custom-layer tests.
     fn base_layer(index: u32) -> LayerPlan {
@@ -1133,7 +1112,10 @@ mod tests {
             .filter(|b| b.cause == BubbleCause::SyncPoint)
             .collect();
 
-        assert!(!sync_bubbles.is_empty(), "expected sync-point bubbles at backend boundary");
+        assert!(
+            !sync_bubbles.is_empty(),
+            "expected sync-point bubbles at backend boundary"
+        );
         assert_eq!(
             sync_bubbles[0].op_name, "backend_switch",
             "sync bubble should be at backend switch"
@@ -1178,11 +1160,7 @@ mod tests {
         // Layer with matmuls on GPU → should assign to ANE if on critical path
         let plan = gemma2_plan();
         let report = ProfitabilityAnalyzer::analyze(&plan);
-        let ane_assignments: Vec<_> = report
-            .assignments
-            .iter()
-            .filter(|a| a.assign)
-            .collect();
+        let ane_assignments: Vec<_> = report.assignments.iter().filter(|a| a.assign).collect();
 
         // Matmuls (q_proj, k_proj, v_proj, gate_proj, up_proj) should be profitable
         assert!(
@@ -1235,11 +1213,7 @@ mod tests {
         plan.layers[0].hidden_size = 64;
 
         let report = ProfitabilityAnalyzer::analyze(&plan);
-        let _assigned: Vec<_> = report
-            .assignments
-            .iter()
-            .filter(|a| a.assign)
-            .collect();
+        let _assigned: Vec<_> = report.assignments.iter().filter(|a| a.assign).collect();
 
         // Either no assignments or only element-wise ops that show no profit
         for a in report.assignments.iter() {
@@ -1275,7 +1249,10 @@ mod tests {
     #[test]
     fn test_apply_updates_route_and_fusion() {
         let mut plan = gemma2_plan();
-        assert!(plan.fused_ane_islands.is_empty(), "should start with no fused islands");
+        assert!(
+            plan.fused_ane_islands.is_empty(),
+            "should start with no fused islands"
+        );
 
         let report = ProfitabilityAnalyzer::apply(&mut plan);
 
@@ -1322,7 +1299,10 @@ mod tests {
 
         assert_eq!(report.machine, "Apple M1");
         assert!(!report.op_costs.is_empty(), "op_costs should not be empty");
-        assert!(!report.assignments.is_empty(), "assignments should not be empty");
+        assert!(
+            !report.assignments.is_empty(),
+            "assignments should not be empty"
+        );
 
         // Verify report structure
         for cost in &report.op_costs {
@@ -1339,7 +1319,10 @@ mod tests {
 
         for bubble in &report.bubbles {
             assert!(!bubble.op_name.is_empty());
-            assert!(bubble.estimated_idle_ns > 0, "bubble idle time should be > 0");
+            assert!(
+                bubble.estimated_idle_ns > 0,
+                "bubble idle time should be > 0"
+            );
         }
 
         for assn in &report.assignments {
@@ -1367,7 +1350,10 @@ mod tests {
         // Layer 0 is sliding_attention, layer 1 is full_attention (set by test_plan)
         let report = ProfitabilityAnalyzer::analyze(&plan);
         // Both should have op costs
-        assert!(report.op_costs.len() >= 8, "should have op costs for both layers");
+        assert!(
+            report.op_costs.len() >= 8,
+            "should have op costs for both layers"
+        );
     }
 
     #[test]
@@ -1387,11 +1373,8 @@ mod tests {
         let plan = test_plan(4, 3072, 16, 8, 128, gemma_default_route());
         let report = ProfitabilityAnalyzer::analyze(&plan);
         // Each layer should have its own assignments
-        let mut layer_indices: Vec<u32> = report
-            .assignments
-            .iter()
-            .map(|a| a.layer_index)
-            .collect();
+        let mut layer_indices: Vec<u32> =
+            report.assignments.iter().map(|a| a.layer_index).collect();
         layer_indices.sort();
         layer_indices.dedup();
         // At least some layers have assignments (GPU layers with matmuls)

@@ -979,9 +979,7 @@ impl IntermediateSize for ModelExecutionPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        operation_route::OperationRoute, EpiloguePlan, LayerPlan, ProloguePlan,
-    };
+    use crate::config::{operation_route::OperationRoute, EpiloguePlan, LayerPlan, ProloguePlan};
 
     fn make_test_plan() -> ModelExecutionPlan {
         let layer = LayerPlan {

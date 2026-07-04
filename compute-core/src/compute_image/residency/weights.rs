@@ -8,9 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::compute_image::content_store::index::{
-    ContentObjectEntry, ResidencyClass,
-};
+use crate::compute_image::content_store::index::{ContentObjectEntry, ResidencyClass};
 use crate::integration::ContentHash;
 
 /// Descriptor for a weight tensor whose residency has been classified.

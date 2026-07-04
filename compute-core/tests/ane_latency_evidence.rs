@@ -33,9 +33,10 @@ use tribunus_compute_core::compilation::apple_installation::{
 };
 use tribunus_compute_core::compilation::epoch_scheduler::EpochScheduler;
 use tribunus_compute_core::compilation::tri_lane::{
-    AppleFallbackPlan, AppleHardwareSignature, AppleTriLaneExecutionPlan, AppleTriLaneExecutionReceipt,
-    CoreMlProgramBinding, CpuProgramBinding, EpochRouteOrigin, LaneCostEstimate, MetalProgramBinding,
-    NumericalPolicy, ShapeClass, TriLaneCostModel, TriLaneEvidenceRequirements,
+    AppleFallbackPlan, AppleHardwareSignature, AppleTriLaneExecutionPlan,
+    AppleTriLaneExecutionReceipt, CoreMlProgramBinding, CpuProgramBinding, EpochRouteOrigin,
+    LaneCostEstimate, MetalProgramBinding, NumericalPolicy, ShapeClass, TriLaneCostModel,
+    TriLaneEvidenceRequirements,
 };
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
@@ -376,8 +377,7 @@ fn test_single_sequence_latency_mode() {
         EPOCH_COUNT
     );
     assert_eq!(
-        install.arena.ring_depth,
-        RING_DEPTH as u8,
+        install.arena.ring_depth, RING_DEPTH as u8,
         "ring depth must remain stable after {} epochs",
         EPOCH_COUNT
     );
@@ -437,7 +437,10 @@ fn test_single_sequence_latency_mode() {
     eprintln!(
         "[WS8B] test_single_sequence_latency_mode: PASS \
          (p50={}ns, p95={}ns, p99={}ns, slots={})",
-        p50_ns, p95_ns, p99_ns, install.arena.slots.len()
+        p50_ns,
+        p95_ns,
+        p99_ns,
+        install.arena.slots.len()
     );
 }
 
@@ -659,8 +662,7 @@ fn test_single_sequence_receipt_correctness() {
             i
         );
         assert_eq!(
-            original.overlap_ns.epoch_wall_ns,
-            rt.overlap_ns.epoch_wall_ns,
+            original.overlap_ns.epoch_wall_ns, rt.overlap_ns.epoch_wall_ns,
             "receipt {}: epoch_wall_ns mismatch after roundtrip",
             i
         );

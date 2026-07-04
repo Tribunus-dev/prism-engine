@@ -10,8 +10,8 @@
 //!
 //! Platform-gated: actual probe only on Linux; non-Linux returns empty Vec.
 
-use crate::device::DeviceInfo;
 use super::DeviceProbe;
+use crate::device::DeviceInfo;
 
 /// Probes Intel NPU devices via `/dev/accel/accel*` device nodes.
 pub struct IntelNpuProbe;
@@ -21,7 +21,7 @@ mod platform {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo, DeviceId};
+    use crate::device::{BackendKind, DeviceId, DeviceInfo, DeviceKind, DeviceMemoryInfo};
 
     /// Maximum number of accelerators to check.
     const MAX_ACCEL_DEVICES: u32 = 64;
@@ -74,7 +74,7 @@ mod platform {
             vendor: "Intel".to_string(),
             driver_version: String::new(),
             memory: DeviceMemoryInfo {
-                total_bytes: 0,      // NPU-local SRAM is driver-managed
+                total_bytes: 0, // NPU-local SRAM is driver-managed
                 free_bytes: 0,
                 bandwidth_gb_per_sec: 0.0, // unknown / driver-managed
                 unified_with_cpu: false,

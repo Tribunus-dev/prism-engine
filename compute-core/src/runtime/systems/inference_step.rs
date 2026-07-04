@@ -10,8 +10,8 @@ use crate::runtime::components::worker_lifecycle::{WorkerLifecycle, WorkerReques
 use crate::runtime::scheduling::access::{ComponentSet, ResourceSet};
 use crate::runtime::scheduling::command::CommandWriter;
 use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
 };
 use crate::runtime::world::{Entity, World};
 
@@ -87,11 +87,7 @@ impl ErasedSystem for InferenceStepSystem {
         &INFERENCE_STEP_META
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, commands: &mut CommandWriter) -> SystemResult {
         // 1. Collect entities currently in the Streaming phase
         let entities: Vec<Entity> = world
             .iter_entities_with::<WorkerLifecycle>()
@@ -119,10 +115,7 @@ impl ErasedSystem for InferenceStepSystem {
             let step = step as u64;
             // Ignore insertion errors; the command buffer will report them
             // during application.
-            let _ = commands.insert(
-                entity,
-                InferenceStepCompleted { step },
-            );
+            let _ = commands.insert(entity, InferenceStepCompleted { step });
         }
 
         SystemResult::ok()

@@ -232,12 +232,12 @@ impl ExecutionGraphDescriptor {
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
         if data.len() < 20 {
             return Err("execution graph too short".into());
-    }
+        }
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&data[0..8]);
         if magic != EXECUTION_GRAPH_MAGIC {
             return Err(format!("bad exec graph magic: {:?}", magic));
-    }
+        }
         let version = u16::from_le_bytes([data[8], data[9]]);
         let num_layers = u16::from_le_bytes([data[10], data[11]]);
         let num_draft_layers = data[12] as u16;
@@ -250,34 +250,51 @@ impl ExecutionGraphDescriptor {
 
         let mut layers = Vec::with_capacity(node_count as usize);
         for _ in 0..node_count {
-            if off + ln_size > data.len() { break; }
-            let node: LayerExecutionNode = unsafe { std::ptr::read_unaligned(data.as_ptr().add(off) as *const _) };
+            if off + ln_size > data.len() {
+                break;
+            }
+            let node: LayerExecutionNode =
+                unsafe { std::ptr::read_unaligned(data.as_ptr().add(off) as *const _) };
             layers.push(node);
             off += ln_size;
-    }
+        }
 
         let mut compaction_epochs = Vec::with_capacity(num_compaction_epochs as usize);
         for _ in 0..num_compaction_epochs {
-            if off + ep_size > data.len() { break; }
-            let epoch: CompactionEpoch = unsafe { std::ptr::read_unaligned(data.as_ptr().add(off) as *const _) };
+            if off + ep_size > data.len() {
+                break;
+            }
+            let epoch: CompactionEpoch =
+                unsafe { std::ptr::read_unaligned(data.as_ptr().add(off) as *const _) };
             compaction_epochs.push(epoch);
             off += ep_size;
-    }
+        }
 
         let has_draft = if off < data.len() { data[off] } else { 0 };
         off += 1;
         // Align to 8
-        while off % 8 != 0 { off += 1; }
+        while off % 8 != 0 {
+            off += 1;
+        }
 
-        let draft_sub_graph = if has_draft != 0 && off + std::mem::size_of::<DraftSubGraph>() <= data.len() {
-            Some(unsafe { std::ptr::read_unaligned(data.as_ptr().add(off) as *const _) })
-        } else {
-            None
-        };
+        let draft_sub_graph =
+            if has_draft != 0 && off + std::mem::size_of::<DraftSubGraph>() <= data.len() {
+                Some(unsafe { std::ptr::read_unaligned(data.as_ptr().add(off) as *const _) })
+            } else {
+                None
+            };
 
         Ok(Self {
-            magic, version, num_layers, num_draft_layers, num_compaction_epochs,
-            node_count, _pad: [0u8; 2], layers, compaction_epochs, draft_sub_graph,
+            magic,
+            version,
+            num_layers,
+            num_draft_layers,
+            num_compaction_epochs,
+            node_count,
+            _pad: [0u8; 2],
+            layers,
+            compaction_epochs,
+            draft_sub_graph,
         })
     }
 
@@ -296,8 +313,8 @@ impl ExecutionGraphDescriptor {
             layer_index: 0,
             head_dim: 256,
             num_heads: 8,
-            hidden_dim: 6912, // patch_dense output: [3840, 6912]
-            weight_offset: 0,  // TODO: compute actual weight offsets from cimage layout
+            hidden_dim: 6912,               // patch_dense output: [3840, 6912]
+            weight_offset: 0, // TODO: compute actual weight offsets from cimage layout
             weight_length: 3840 * 6912 / 4, // ternary nibbles
             scale_offset: 0,  // TODO: compute actual scale offsets from cimage layout
             _reserved: [0u8; 8],
@@ -499,7 +516,10 @@ mod tests {
         // Verify multimodal preprocessing nodes (indices 0..4)
         assert_eq!(graph.layers[0].node_kind, NodeKind::VisionPatchEmbed as u8);
         assert_eq!(graph.layers[0].hidden_dim, 6912);
-        assert_eq!(graph.layers[1].node_kind, NodeKind::VisionFinalProjection as u8);
+        assert_eq!(
+            graph.layers[1].node_kind,
+            NodeKind::VisionFinalProjection as u8
+        );
         assert_eq!(graph.layers[1].hidden_dim, 3840);
         assert_eq!(graph.layers[2].node_kind, NodeKind::AudioFrameEmbed as u8);
         assert_eq!(graph.layers[2].hidden_dim, 2560);
@@ -509,7 +529,10 @@ mod tests {
         assert_eq!(graph.layers[4].hidden_dim, 3840);
         for mm in 0..5 {
             assert_eq!(graph.layers[mm].attention_kind, 2); // Projection
-            assert_eq!(graph.layers[mm].device_capability, DeviceCapability::Gpu as u8);
+            assert_eq!(
+                graph.layers[mm].device_capability,
+                DeviceCapability::Gpu as u8
+            );
             assert_eq!(graph.layers[mm].layer_index, 0);
         }
 
@@ -589,8 +612,11 @@ mod tests {
         assert_eq!(u16::from_le_bytes([bytes[10], bytes[11]]), 48);
         assert_eq!(bytes[12], 4); // num_draft_layers
         assert_eq!(bytes[13], 8); // num_compaction_epochs
-        // Check node_count
-        assert_eq!(u32::from_le_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]), 59);
+                                  // Check node_count
+        assert_eq!(
+            u32::from_le_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]),
+            59
+        );
         assert_eq!(bytes[18], 0); // reserved
         assert_eq!(bytes[19], 0); // reserved
 
@@ -612,9 +638,15 @@ mod tests {
         assert_eq!(bytes[vision_patch_offset + 1], 2); // attention_kind = Projection
         assert_eq!(bytes[vision_patch_offset + 2], DeviceCapability::Gpu as u8);
         assert_eq!(bytes[vision_patch_offset + 3], 0xFF); // compaction_epoch
-        assert_eq!(u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]), 0); // layer_index = 0
         assert_eq!(
-            u16::from_le_bytes([bytes[vision_patch_offset + 8], bytes[vision_patch_offset + 9]]),
+            u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
+            0
+        ); // layer_index = 0
+        assert_eq!(
+            u16::from_le_bytes([
+                bytes[vision_patch_offset + 8],
+                bytes[vision_patch_offset + 9]
+            ]),
             256
         ); // head_dim
         assert_eq!(
@@ -625,7 +657,10 @@ mod tests {
         // Spot-check first decoder layer (node index 5, offset 20 + 5*48 = 260)
         let decoder0_offset = 20 + 5 * 48;
         assert_eq!(bytes[decoder0_offset], NodeKind::DecoderLayer as u8); // node_kind
-        assert_eq!(bytes[decoder0_offset + 1], AttentionKind::FullAttention as u8); // FullAttention
+        assert_eq!(
+            bytes[decoder0_offset + 1],
+            AttentionKind::FullAttention as u8
+        ); // FullAttention
         assert_eq!(
             u32::from_le_bytes([
                 bytes[decoder0_offset + 4],
@@ -652,7 +687,10 @@ mod tests {
         // Spot-check a SWA decoder layer (i=5 -> node index 10, offset 20 + 10*48 = 500)
         let swa_decoder_offset = 20 + 10 * 48;
         assert_eq!(bytes[swa_decoder_offset], NodeKind::DecoderLayer as u8);
-        assert_eq!(bytes[swa_decoder_offset + 1], AttentionKind::SlidingWindow as u8);
+        assert_eq!(
+            bytes[swa_decoder_offset + 1],
+            AttentionKind::SlidingWindow as u8
+        );
         assert_eq!(
             u32::from_le_bytes([
                 bytes[swa_decoder_offset + 4],
@@ -732,7 +770,10 @@ mod tests {
         assert_eq!(bytes[10..12], [0u8, 0]); // num_layers=0
         assert_eq!(bytes[12], 0); // num_draft_layers=0
         assert_eq!(bytes[13], 0); // num_compaction_epochs=0
-        assert_eq!(u32::from_le_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]), 0); // node_count
+        assert_eq!(
+            u32::from_le_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]),
+            0
+        ); // node_count
         assert_eq!(bytes[18], 0); // reserved
         assert_eq!(bytes[19], 0); // reserved
     }

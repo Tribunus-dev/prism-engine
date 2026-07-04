@@ -32,7 +32,7 @@ fn matches_anchors(candidate: &str, tensor_names: &[String]) -> bool {
         format!("{candidate}.embed_tokens.weight"),
         format!("{candidate}.norm.weight"),
         format!("{candidate}.layers.0.input_layernorm.weight"),
-];
+    ];
     for key in &required {
         if !tensor_names.iter().any(|n| n == key) {
             return false;
@@ -41,7 +41,9 @@ fn matches_anchors(candidate: &str, tensor_names: &[String]) -> bool {
     // Either full-attention or linear-attention layer 0 is acceptable.
     let full_attn = format!("{candidate}.layers.0.self_attn.q_proj.weight");
     let linear_attn = format!("{candidate}.layers.0.linear_attn.in_proj_qkv.weight");
-    tensor_names.iter().any(|n| n == &full_attn || n == &linear_attn)
+    tensor_names
+        .iter()
+        .any(|n| n == &full_attn || n == &linear_attn)
 }
 
 /// Discover the text model namespace by probing candidate prefixes.

@@ -199,7 +199,6 @@ fn ane_conv2d_sweep() {
             output_name: conv_out.clone(),
             inputs: vec![("x".into(), vec![1, H, 1, seq_len as i64])],
             outputs: vec![(conv_out.clone(), vec![1, FFN, 1, seq_len as i64])],
-
         };
 
         let conv_path = match compile_with_target(&conv_tag, conv_prog, conv_meta, "macOS26") {
@@ -264,7 +263,6 @@ fn ane_conv2d_sweep() {
             output_name: mm_out.clone(),
             inputs: vec![("x".into(), vec![seq_len as i64, H])],
             outputs: vec![(mm_out.clone(), vec![seq_len as i64, FFN])],
-
         };
 
         let mm_path = match compile(&mm_tag, mm_prog, mm_meta) {
@@ -280,7 +278,8 @@ fn ane_conv2d_sweep() {
         };
 
         let mm_in_arena = Arena::new(seq_len, H as u32, DataType::Float16).expect("mm in arena");
-        let mm_out_arena = Arena::new(seq_len, FFN as u32, DataType::Float16).expect("mm out arena");
+        let mm_out_arena =
+            Arena::new(seq_len, FFN as u32, DataType::Float16).expect("mm out arena");
         fill_arena(&mm_in_arena, (seq_len as usize) * (H as usize));
 
         let mm_time = match bench_one(

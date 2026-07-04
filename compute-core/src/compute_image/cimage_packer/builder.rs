@@ -35,19 +35,20 @@ impl AlignedMmapBuilder {
         assert!(
             end <= self.mmap.len(),
             "AlignedMmapBuilder overflow: cursor={:#X} len={} total={:#X}",
-            start, length, self.mmap.len()
+            start,
+            length,
+            self.mmap.len()
         );
         self.cursor = end;
         &mut self.mmap[start..end]
     }
 
     /// Yield a 16 KB-aligned pointer for `newBufferWithBytesNoCopy`.
-    pub unsafe fn allocate_hardware_pointer(
-        &mut self, length: usize,
-    ) -> *mut std::ffi::c_void {
+    pub unsafe fn allocate_hardware_pointer(&mut self, length: usize) -> *mut std::ffi::c_void {
         assert!(
             self.cursor % APPLE_PAGE_SIZE == 0,
-            "Alignment fault at offset {:#X}", self.cursor
+            "Alignment fault at offset {:#X}",
+            self.cursor
         );
         let ptr = self.mmap.as_mut_ptr().add(self.cursor);
         self.cursor += length;
@@ -56,9 +57,8 @@ impl AlignedMmapBuilder {
 
     /// Write a C-repr struct (used for the header).
     pub fn write_header<T>(&mut self, header: &T) {
-        let bytes = unsafe {
-            std::slice::from_raw_parts(header as *const T as *const u8, size_of::<T>())
-        };
+        let bytes =
+            unsafe { std::slice::from_raw_parts(header as *const T as *const u8, size_of::<T>()) };
         self.allocate_slice(bytes.len()).copy_from_slice(bytes);
     }
 

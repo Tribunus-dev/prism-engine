@@ -7,9 +7,9 @@
 //!
 //! Resources are singletons (TypeId → Box<dyn Any>) shared across systems.
 
+use serde::{Deserialize, Serialize};
 use std::any::TypeId;
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Entity
@@ -78,22 +78,26 @@ impl<T: Component> ComponentVec<T> {
 
     pub fn get(&self, entity: Entity) -> Option<&T> {
         let id = entity.0 as usize;
-        self.sparse
-            .get(id)?
-            .and_then(|dense_idx| {
-                let i = dense_idx as usize;
-                if i < self.dense.len() { Some(&self.dense[i]) } else { None }
-            })
+        self.sparse.get(id)?.and_then(|dense_idx| {
+            let i = dense_idx as usize;
+            if i < self.dense.len() {
+                Some(&self.dense[i])
+            } else {
+                None
+            }
+        })
     }
 
     pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
         let id = entity.0 as usize;
-        self.sparse
-            .get_mut(id)?
-            .and_then(|dense_idx| {
-                let i = dense_idx as usize;
-                if i < self.dense.len() { Some(&mut self.dense[i]) } else { None }
-            })
+        self.sparse.get_mut(id)?.and_then(|dense_idx| {
+            let i = dense_idx as usize;
+            if i < self.dense.len() {
+                Some(&mut self.dense[i])
+            } else {
+                None
+            }
+        })
     }
 
     pub fn remove(&mut self, entity: Entity) -> Option<T> {
@@ -261,9 +265,7 @@ impl World {
 
     fn storage<T: Component>(&self) -> Option<&ComponentVec<T>> {
         let tid = TypeId::of::<ComponentVec<T>>();
-        self.components
-            .get(&tid)?
-            .downcast_ref::<ComponentVec<T>>()
+        self.components.get(&tid)?.downcast_ref::<ComponentVec<T>>()
     }
 
     fn storage_mut<T: Component>(&mut self) -> Option<&mut ComponentVec<T>> {
@@ -303,9 +305,7 @@ impl World {
 
     /// Check whether an entity has a specific component.
     pub fn has<T: Component>(&self, entity: Entity) -> bool {
-        self.storage::<T>()
-            .map(|s| s.has(entity))
-            .unwrap_or(false)
+        self.storage::<T>().map(|s| s.has(entity)).unwrap_or(false)
     }
 
     // -----------------------------------------------------------------------
@@ -321,17 +321,13 @@ impl World {
     /// Get a shared reference to a resource.
     pub fn get_resource<T: Resource>(&self) -> Option<&T> {
         let tid = TypeId::of::<T>();
-        self.resources
-            .get(&tid)?
-            .downcast_ref::<T>()
+        self.resources.get(&tid)?.downcast_ref::<T>()
     }
 
     /// Get an exclusive reference to a resource.
     pub fn get_resource_mut<T: Resource>(&mut self) -> Option<&mut T> {
         let tid = TypeId::of::<T>();
-        self.resources
-            .get_mut(&tid)?
-            .downcast_mut::<T>()
+        self.resources.get_mut(&tid)?.downcast_mut::<T>()
     }
 
     // -----------------------------------------------------------------------
@@ -351,9 +347,7 @@ impl World {
 
     /// Check whether any entity has component type A.
     pub fn any_with<A: Component>(&self) -> bool {
-        self.storage::<A>()
-            .map(|s| s.len() > 0)
-            .unwrap_or(false)
+        self.storage::<A>().map(|s| s.len() > 0).unwrap_or(false)
     }
 
     /// Dump component storage for debugging.
@@ -361,9 +355,7 @@ impl World {
         self.components
             .values()
             .filter_map(|s| {
-                crate::runtime::world::downcast_component_vec_len(
-                    s as &dyn std::any::Any,
-                )
+                crate::runtime::world::downcast_component_vec_len(s as &dyn std::any::Any)
             })
             .next()
             .unwrap_or(0)
@@ -461,20 +453,18 @@ fn downcast_component_vec_len(storage: &dyn std::any::Any) -> Option<usize> {
 }
 
 fn component_vec_len(storage: &dyn std::any::Any) -> usize {
-    if let Some(v) = storage
-        .downcast_ref::<ComponentVec<crate::runtime::agent_slot::AgentSlot>>()
+    if let Some(v) = storage.downcast_ref::<ComponentVec<crate::runtime::agent_slot::AgentSlot>>() {
+        v.len()
+    } else if let Some(v) =
+        storage.downcast_ref::<ComponentVec<crate::runtime::components::KVCacheRef>>()
     {
         v.len()
-    } else if let Some(v) = storage
-        .downcast_ref::<ComponentVec<crate::runtime::components::KVCacheRef>>()
+    } else if let Some(v) =
+        storage.downcast_ref::<ComponentVec<crate::runtime::components::AgentPayload>>()
     {
         v.len()
-    } else if let Some(v) = storage
-        .downcast_ref::<ComponentVec<crate::runtime::components::AgentPayload>>()
-    {
-        v.len()
-    } else if let Some(v) = storage
-        .downcast_ref::<ComponentVec<crate::runtime::components::ToolRegistry>>()
+    } else if let Some(v) =
+        storage.downcast_ref::<ComponentVec<crate::runtime::components::ToolRegistry>>()
     {
         v.len()
     } else {
@@ -491,11 +481,17 @@ fn remove_component_from_any(storage: &mut dyn std::any::Any, entity: Entity) {
     // Try each known component type
     if let Some(s) = storage.downcast_mut::<ComponentVec<crate::runtime::agent_slot::AgentSlot>>() {
         s.remove(entity);
-    } else if let Some(s) = storage.downcast_mut::<ComponentVec<crate::runtime::components::KVCacheRef>>() {
+    } else if let Some(s) =
+        storage.downcast_mut::<ComponentVec<crate::runtime::components::KVCacheRef>>()
+    {
         s.remove(entity);
-    } else if let Some(s) = storage.downcast_mut::<ComponentVec<crate::runtime::components::AgentPayload>>() {
+    } else if let Some(s) =
+        storage.downcast_mut::<ComponentVec<crate::runtime::components::AgentPayload>>()
+    {
         s.remove(entity);
-    } else if let Some(s) = storage.downcast_mut::<ComponentVec<crate::runtime::components::ToolRegistry>>() {
+    } else if let Some(s) =
+        storage.downcast_mut::<ComponentVec<crate::runtime::components::ToolRegistry>>()
+    {
         s.remove(entity);
     }
 }

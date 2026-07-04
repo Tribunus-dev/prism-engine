@@ -69,13 +69,11 @@ impl ProjectorConfig {
 
         let encoder = VisionEncoder::load(arch, &mut |_name| {
             Err("tensor not loaded from Prism facade".to_string())
-        }).ok()?;
+        })
+        .ok()?;
 
         // Use the encoder's projection QuantizedLinearBinding directly.
-        let projected = encoder
-            .projection
-            .forward(_input_f32)
-            .ok()?;
+        let projected = encoder.projection.forward(_input_f32).ok()?;
 
         let _ = projected.eval().ok()?;
 

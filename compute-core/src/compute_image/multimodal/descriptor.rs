@@ -311,7 +311,11 @@ impl fmt::Display for ModalityError {
                 write!(f, "segment not found: {}", name)
             }
             ModalityError::DimensionMismatch { expected, actual } => {
-                write!(f, "dimension mismatch: expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "dimension mismatch: expected {}, got {}",
+                    expected, actual
+                )
             }
             ModalityError::ProjectionFailed(msg) => {
                 write!(f, "projection failed: {}", msg)

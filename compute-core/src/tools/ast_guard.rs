@@ -306,13 +306,21 @@ mod tests {
     #[test]
     fn test_new_function_blocked() {
         let err = validate_agent_script("new Function('return 1')").unwrap_err();
-        assert!(err.contains("Function"), "error should mention Function: {}", err);
+        assert!(
+            err.contains("Function"),
+            "error should mention Function: {}",
+            err
+        );
     }
 
     #[test]
     fn test_string_settimeout_blocked() {
         let err = validate_agent_script("setTimeout('code', 100)").unwrap_err();
-        assert!(err.contains("setTimeout"), "error should mention setTimeout: {}", err);
+        assert!(
+            err.contains("setTimeout"),
+            "error should mention setTimeout: {}",
+            err
+        );
     }
 
     #[test]

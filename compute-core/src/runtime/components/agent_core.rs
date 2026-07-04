@@ -147,7 +147,10 @@ pub struct AgentConfig {
 
 impl AgentConfig {
     pub fn new() -> Self {
-        Self { lane_hint: 0, priority: 0 }
+        Self {
+            lane_hint: 0,
+            priority: 0,
+        }
     }
 }
 

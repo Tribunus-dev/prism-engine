@@ -45,10 +45,7 @@ impl CancellationManager {
     /// Adds the session to the cancelled set and returns an
     /// `InferenceCancelledReceipt` with `state_at_cancellation` set to
     /// `Cancelling`.
-    pub fn cancel(
-        &self,
-        handle: &CancellationHandle,
-    ) -> Result<InferenceCancelledReceipt, String> {
+    pub fn cancel(&self, handle: &CancellationHandle) -> Result<InferenceCancelledReceipt, String> {
         let mut set = self
             .cancelled
             .lock()
@@ -109,7 +106,10 @@ mod tests {
         assert!(mgr.is_cancelled(&sid));
         assert_eq!(receipt.session_id, sid);
         assert_eq!(receipt.request_id, handle.request_id);
-        assert_eq!(receipt.state_at_cancellation, InferenceSessionState::Cancelling);
+        assert_eq!(
+            receipt.state_at_cancellation,
+            InferenceSessionState::Cancelling
+        );
     }
 
     #[test]
@@ -151,7 +151,9 @@ mod tests {
         // second cancel is still a no-op error-wise; it stays in the set
         assert!(mgr.is_cancelled(&sid));
 
-        let receipt2 = mgr.cancel(&handle).expect("second cancel should also succeed");
+        let receipt2 = mgr
+            .cancel(&handle)
+            .expect("second cancel should also succeed");
         assert_eq!(receipt2.session_id, sid);
     }
 

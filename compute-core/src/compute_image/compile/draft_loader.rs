@@ -113,10 +113,7 @@ pub fn load_draft_weights(ckpt_dir: &Path) -> Result<Vec<u8>, String> {
     let mut fused_all = Vec::new();
 
     for layer_idx in 0..DRAFT_LAYERS {
-        let layer_fused = load_and_pack_layer(
-            layer_idx,
-            &shard_paths,
-        )?;
+        let layer_fused = load_and_pack_layer(layer_idx, &shard_paths)?;
         fused_all.extend_from_slice(&layer_fused);
     }
 
@@ -152,8 +149,7 @@ pub fn pack_matrix_to_fused_ternary(f32_weights: &[f32], rows: usize, cols: usiz
             }
             let ternary = int4_pack::quantize_to_ternary_block32(&block_weights);
             let block_offset = r * bytes_per_row + b * 9;
-            out[block_offset..block_offset + 7]
-                .copy_from_slice(&ternary.packed_trits);
+            out[block_offset..block_offset + 7].copy_from_slice(&ternary.packed_trits);
             out[block_offset + 7..block_offset + 9]
                 .copy_from_slice(&ternary.block_scale.to_le_bytes());
         }
@@ -180,24 +176,24 @@ fn load_and_pack_layer(
 
     // Row counts for each matrix (output dimension = rows).
     let row_counts: [usize; 7] = [
-        DRAFT_Q_ROWS,    // Q
-        DRAFT_KV_ROWS,   // K
-        DRAFT_KV_ROWS,   // V
-        DRAFT_O_ROWS,    // O
-        DRAFT_HID_ROWS,  // Gate
-        DRAFT_HID_ROWS,  // Up
-        DRAFT_FFN_ROWS,  // Down
+        DRAFT_Q_ROWS,   // Q
+        DRAFT_KV_ROWS,  // K
+        DRAFT_KV_ROWS,  // V
+        DRAFT_O_ROWS,   // O
+        DRAFT_HID_ROWS, // Gate
+        DRAFT_HID_ROWS, // Up
+        DRAFT_FFN_ROWS, // Down
     ];
 
     // Column counts (input dimension = cols).
     let col_counts: [usize; 7] = [
-        DRAFT_HIDDEN,           // Q
-        DRAFT_HIDDEN,           // K
-        DRAFT_HIDDEN,           // V
-        DRAFT_HIDDEN,           // O
-        DRAFT_HIDDEN,           // Gate
-        DRAFT_HIDDEN,           // Up
-        DRAFT_FFN_INTER,        // Down
+        DRAFT_HIDDEN,    // Q
+        DRAFT_HIDDEN,    // K
+        DRAFT_HIDDEN,    // V
+        DRAFT_HIDDEN,    // O
+        DRAFT_HIDDEN,    // Gate
+        DRAFT_HIDDEN,    // Up
+        DRAFT_FFN_INTER, // Down
     ];
 
     let mut packed_matrices: [Vec<u8>; 7] = Default::default();
@@ -233,7 +229,13 @@ fn load_and_pack_layer(
     let down = &packed_matrices[6];
 
     let fused = int4_pack::interleave_fused_ternary_layer(
-        q, k, v, o, gate, up, down,
+        q,
+        k,
+        v,
+        o,
+        gate,
+        up,
+        down,
         DRAFT_Q_ROWS,
         DRAFT_KV_ROWS,
         DRAFT_O_ROWS,
@@ -251,17 +253,14 @@ fn load_and_pack_layer(
 fn collect_safetensors(dir: &Path) -> Result<Vec<(std::path::PathBuf, Vec<u8>)>, String> {
     let mut shards = Vec::new();
 
-    for entry in std::fs::read_dir(dir).map_err(|e| {
-        format!("reading directory {}: {e}", dir.display())
-    })? {
+    for entry in
+        std::fs::read_dir(dir).map_err(|e| format!("reading directory {}: {e}", dir.display()))?
+    {
         let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
         let path = entry.path();
-        if path
-            .extension()
-            .map_or(false, |ext| ext == "safetensors")
-        {
-            let data = std::fs::read(&path)
-                .map_err(|e| format!("reading {}: {e}", path.display()))?;
+        if path.extension().map_or(false, |ext| ext == "safetensors") {
+            let data =
+                std::fs::read(&path).map_err(|e| format!("reading {}: {e}", path.display()))?;
             shards.push((path, data));
         }
     }
@@ -282,9 +281,7 @@ fn load_tensor_f32(
 ) -> Result<Vec<f32>, String> {
     for (shard_path, data) in shards {
         let tensors = safetensors::SafeTensors::deserialize(data)
-            .map_err(|e| {
-                format!("parsing safetensors {}: {e:?}", shard_path.display())
-            })?;
+            .map_err(|e| format!("parsing safetensors {}: {e:?}", shard_path.display()))?;
 
         if let Ok(view) = tensors.tensor(key) {
             return Ok(tensor_data_to_f32(view.data(), view.dtype()));
@@ -313,9 +310,7 @@ fn tensor_data_to_f32(data: &[u8], dtype: safetensors::Dtype) -> Vec<f32> {
             .collect(),
         other => {
             // Fallback: treat unknown as F32 (will panic if not 4-byte-aligned).
-            eprintln!(
-                "[{LOG_TARGET}] unsupported safetensors dtype {other:?}, treating as F32"
-            );
+            eprintln!("[{LOG_TARGET}] unsupported safetensors dtype {other:?}, treating as F32");
             data.chunks_exact(4)
                 .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect()
@@ -335,9 +330,7 @@ mod tests {
     /// with.
     fn synth_weights(rows: usize, cols: usize) -> Vec<f32> {
         let n = rows * cols;
-        (0..n)
-            .map(|i| (((i as i32) % 5) - 2) as f32)
-            .collect()
+        (0..n).map(|i| (((i as i32) % 5) - 2) as f32).collect()
     }
 
     #[test]
@@ -361,10 +354,7 @@ mod tests {
         // Verify each block has a nonzero scale (indicates correct quantization).
         for r in 0..rows {
             let block_offset = r * bytes_per_row;
-            let scale_bytes: [u8; 2] = [
-                packed[block_offset + 7],
-                packed[block_offset + 8],
-            ];
+            let scale_bytes: [u8; 2] = [packed[block_offset + 7], packed[block_offset + 8]];
             let scale = u16::from_le_bytes(scale_bytes);
             let scale_f32 = half::f16::from_bits(scale).to_f32();
             assert!(
@@ -385,10 +375,7 @@ mod tests {
             packed_trits.copy_from_slice(&packed[block_offset..block_offset + 7]);
 
             // Read back the scale.
-            let scale_bytes: [u8; 2] = [
-                packed[block_offset + 7],
-                packed[block_offset + 8],
-            ];
+            let scale_bytes: [u8; 2] = [packed[block_offset + 7], packed[block_offset + 8]];
             let scale_bits = u16::from_le_bytes(scale_bytes);
             let scale = half::f16::from_bits(scale_bits).to_f32();
 
@@ -470,7 +457,13 @@ mod tests {
         let [q, k, v, o, gate, up, down] = make_layer_weights();
 
         let fused = int4_pack::interleave_fused_ternary_layer(
-            &q, &k, &v, &o, &gate, &up, &down,
+            &q,
+            &k,
+            &v,
+            &o,
+            &gate,
+            &up,
+            &down,
             DRAFT_Q_ROWS,
             DRAFT_KV_ROWS,
             DRAFT_O_ROWS,
@@ -479,8 +472,8 @@ mod tests {
         );
 
         // Compute expected tile count.
-        let q_tiles = (DRAFT_Q_ROWS + 31) / 32;    // 24
-        let kv_tiles = (DRAFT_KV_ROWS + 31) / 32;  // 12
+        let q_tiles = (DRAFT_Q_ROWS + 31) / 32; // 24
+        let kv_tiles = (DRAFT_KV_ROWS + 31) / 32; // 12
         let hid_tiles = (DRAFT_HID_ROWS + 31) / 32; // 64
         let ffn_tiles = (DRAFT_FFN_ROWS + 31) / 32; // 24
         let max_tiles = q_tiles.max(kv_tiles).max(hid_tiles).max(ffn_tiles); // 64
@@ -512,7 +505,7 @@ mod tests {
         // K/V have only 12 tiles (384/32), so tile 13 should be zero for them.
         for t in kv_tiles..max_tiles {
             let base = t * fused_tile;
-            let k_pos = base + sub_tile;   // matrix 1 = K
+            let k_pos = base + sub_tile; // matrix 1 = K
             let v_pos = base + 2 * sub_tile; // matrix 2 = V
             for pos in [k_pos, v_pos] {
                 assert_eq!(
@@ -535,7 +528,9 @@ mod tests {
         // Matrix with cols=33 (one full block + 1 element in second block).
         let rows = 2usize;
         let cols = 33usize;
-        let weights: Vec<f32> = (0..rows * cols).map(|i| ((i as i32) % 7 - 3) as f32).collect();
+        let weights: Vec<f32> = (0..rows * cols)
+            .map(|i| ((i as i32) % 7 - 3) as f32)
+            .collect();
 
         let packed = pack_matrix_to_fused_ternary(&weights, rows, cols);
 
@@ -575,9 +570,21 @@ mod tests {
 
         let result = tensor_data_to_f32(&data, safetensors::Dtype::BF16);
         assert_eq!(result.len(), 3);
-        assert!((result[0] - 1.0).abs() < 0.01, "expected ~1.0, got {}", result[0]);
-        assert!((result[1] - (-2.0)).abs() < 0.02, "expected -2.0, got {}", result[1]);
-        assert!((result[2] - 3.14).abs() < 0.02, "expected ~3.14, got {}", result[2]);
+        assert!(
+            (result[0] - 1.0).abs() < 0.01,
+            "expected ~1.0, got {}",
+            result[0]
+        );
+        assert!(
+            (result[1] - (-2.0)).abs() < 0.02,
+            "expected -2.0, got {}",
+            result[1]
+        );
+        assert!(
+            (result[2] - 3.14).abs() < 0.02,
+            "expected ~3.14, got {}",
+            result[2]
+        );
     }
 
     #[test]

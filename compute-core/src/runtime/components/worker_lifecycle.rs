@@ -1,12 +1,12 @@
 //! WorkerLifecycle — phase-machine tracking a worker request from submission
 //! through dispatch, streaming, completion, and terminal states.
 
-use std::time::Instant;
-use std::fmt;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::time::Instant;
 
-use crate::runtime::scheduling::component_id::SchedulableComponent;
 use crate::runtime::components::WORKER_LIFECYCLE_COMPONENT;
+use crate::runtime::scheduling::component_id::SchedulableComponent;
 
 // ---------------------------------------------------------------------------
 // Phase enumeration
@@ -40,7 +40,10 @@ pub enum WorkerRequestPhase {
 impl WorkerRequestPhase {
     /// Returns `true` for phases that represent a final state.
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned
+        )
     }
 
     /// Returns `true` for phases that are still in progress.
@@ -127,7 +130,10 @@ impl WorkerLifecycle {
     ///
     /// Returns `Ok(())` on success, or a [`LifecycleTransitionError`] with
     /// a descriptive reason when the transition is disallowed.
-    pub fn transition_to(&mut self, target: WorkerRequestPhase) -> Result<(), LifecycleTransitionError> {
+    pub fn transition_to(
+        &mut self,
+        target: WorkerRequestPhase,
+    ) -> Result<(), LifecycleTransitionError> {
         Self::validate_transition(self.phase, target)?;
         self.phase = target;
         self.last_transition_at = Instant::now();
@@ -157,10 +163,7 @@ impl WorkerLifecycle {
             return Err(LifecycleTransitionError {
                 from_phase: from,
                 to_phase: to,
-                reason: format!(
-                    "cannot transition from terminal phase '{}'",
-                    from,
-                ),
+                reason: format!("cannot transition from terminal phase '{}'", from,),
             });
         }
 
@@ -171,7 +174,10 @@ impl WorkerLifecycle {
 
         let allowed = match from {
             WorkerRequestPhase::Queued => {
-                matches!(to, WorkerRequestPhase::Dispatching | WorkerRequestPhase::CancelRequested)
+                matches!(
+                    to,
+                    WorkerRequestPhase::Dispatching | WorkerRequestPhase::CancelRequested
+                )
             }
             WorkerRequestPhase::Dispatching => {
                 matches!(
@@ -206,7 +212,10 @@ impl WorkerLifecycle {
                 )
             }
             WorkerRequestPhase::CancelRequested => {
-                matches!(to, WorkerRequestPhase::Cancelled | WorkerRequestPhase::Failed)
+                matches!(
+                    to,
+                    WorkerRequestPhase::Cancelled | WorkerRequestPhase::Failed
+                )
             }
             // Terminal phases already caught above.
             WorkerRequestPhase::Completed
@@ -260,7 +269,8 @@ mod tests {
         let mut lc = WorkerLifecycle::new();
         // Happy path: Queued -> Dispatching -> AwaitingFirstEvent -> Streaming -> Completing -> Completed.
         lc.transition_to(WorkerRequestPhase::Dispatching).unwrap();
-        lc.transition_to(WorkerRequestPhase::AwaitingFirstEvent).unwrap();
+        lc.transition_to(WorkerRequestPhase::AwaitingFirstEvent)
+            .unwrap();
         lc.transition_to(WorkerRequestPhase::Streaming).unwrap();
         lc.transition_to(WorkerRequestPhase::Completing).unwrap();
         lc.transition_to(WorkerRequestPhase::Completed).unwrap();
@@ -296,7 +306,9 @@ mod tests {
         // CancelRequested should be reachable from active states.
         let mut lc = WorkerLifecycle::new();
         // Queued -> CancelRequested
-        assert!(lc.transition_to(WorkerRequestPhase::CancelRequested).is_ok());
+        assert!(lc
+            .transition_to(WorkerRequestPhase::CancelRequested)
+            .is_ok());
         assert_eq!(lc.phase, WorkerRequestPhase::CancelRequested);
     }
 
@@ -314,7 +326,8 @@ mod tests {
     fn abandon_after_complete_rejected() {
         let mut lc = WorkerLifecycle::new();
         lc.transition_to(WorkerRequestPhase::Dispatching).unwrap();
-        lc.transition_to(WorkerRequestPhase::AwaitingFirstEvent).unwrap();
+        lc.transition_to(WorkerRequestPhase::AwaitingFirstEvent)
+            .unwrap();
         lc.transition_to(WorkerRequestPhase::Streaming).unwrap();
         lc.transition_to(WorkerRequestPhase::Completing).unwrap();
         lc.transition_to(WorkerRequestPhase::Completed).unwrap();

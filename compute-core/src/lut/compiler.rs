@@ -11,9 +11,9 @@ use std::path::Path;
 use serde_json::json;
 
 #[cfg(feature = "prism-backend")]
-use std::fs::File;
-#[cfg(feature = "prism-backend")]
 use std::fs;
+#[cfg(feature = "prism-backend")]
+use std::fs::File;
 #[cfg(feature = "prism-backend")]
 use std::io::Write;
 
@@ -86,9 +86,8 @@ pub fn compile_to_cimage(
 
 /// Build the execution plan as a JSON string for embedding in the CImage.
 fn build_execution_plan_json(config_path: &Path, _weights_dir: &Path) -> Result<String, String> {
-    let (arch, _quant, _manifest) = parse_config(
-        &config_path.to_string_lossy()
-    ).map_err(|e| format!("config parse: {e}"))?;
+    let (arch, _quant, _manifest) =
+        parse_config(&config_path.to_string_lossy()).map_err(|e| format!("config parse: {e}"))?;
 
     // Collect tensor names for namespace discovery
     let mut tensor_names: Vec<String> = Vec::new();
@@ -98,9 +97,12 @@ fn build_execution_plan_json(config_path: &Path, _weights_dir: &Path) -> Result<
             if path.extension().map_or(false, |e| e == "safetensors") {
                 if let Ok(data) = std::fs::read(&path) {
                     if data.len() >= 8 {
-                        let header_len = u64::from_le_bytes(data[0..8].try_into().unwrap_or([0; 8]));
+                        let header_len =
+                            u64::from_le_bytes(data[0..8].try_into().unwrap_or([0; 8]));
                         if header_len > 0 && (8 + header_len as usize) <= data.len() {
-                            if let Ok(header) = serde_json::from_slice::<serde_json::Value>(&data[8..8 + header_len as usize]) {
+                            if let Ok(header) = serde_json::from_slice::<serde_json::Value>(
+                                &data[8..8 + header_len as usize],
+                            ) {
                                 if let Some(obj) = header.as_object() {
                                     tensor_names.extend(obj.keys().cloned());
                                 }
@@ -126,8 +128,7 @@ fn build_execution_plan_json(config_path: &Path, _weights_dir: &Path) -> Result<
     let mut execution_plan = build_execution_plan(&arch, &namespace, &emitted_ids);
     execution_plan.apply_fusion_pass();
 
-    serde_json::to_string(&execution_plan)
-        .map_err(|e| format!("serialize execution plan: {e}"))
+    serde_json::to_string(&execution_plan).map_err(|e| format!("serialize execution plan: {e}"))
 }
 
 /// Compile to memory (no .cimage I/O).
@@ -342,10 +343,7 @@ fn dequantize_mlx_block(
 /// Parses the GGUF header, maps tensor names to HuggingFace-style conventions,
 /// builds an execution graph, dequantizes weights (GGML → f32) and palettizes
 /// each weight matrix via k-means clustering.
-pub fn compile_gguf_to_cimage(
-    gguf_path: &Path,
-    output_path: &Path,
-) -> Result<(), String> {
+pub fn compile_gguf_to_cimage(gguf_path: &Path, output_path: &Path) -> Result<(), String> {
     use crate::compute_image::compile::try_q8_0_ternary_pack_gpu;
     use crate::gguf;
 
@@ -370,8 +368,10 @@ pub fn compile_gguf_to_cimage(
             let q_out = q_tensor.shape[1] as u32;
             let inferred = q_out / arch.num_attention_heads;
             if inferred > 0 && inferred != arch.head_dim {
-                eprintln!("[gguf] inferred head_dim={inferred} from {}(out={q_out}, heads={})",
-                    q_tensor.name, arch.num_attention_heads);
+                eprintln!(
+                    "[gguf] inferred head_dim={inferred} from {}(out={q_out}, heads={})",
+                    q_tensor.name, arch.num_attention_heads
+                );
                 arch.head_dim = inferred;
             }
         }
@@ -383,11 +383,13 @@ pub fn compile_gguf_to_cimage(
             let k_out = k_tensor.shape[1] as u32;
             let inferred_kv = k_out / arch.head_dim;
             if inferred_kv > 0 && inferred_kv != arch.num_key_value_heads {
-                eprintln!("[gguf] inferred kv_heads={inferred_kv} from {}(out={k_out}, head_dim={})",
-                    k_tensor.name, arch.head_dim);
+                eprintln!(
+                    "[gguf] inferred kv_heads={inferred_kv} from {}(out={k_out}, head_dim={})",
+                    k_tensor.name, arch.head_dim
+                );
                 arch.num_key_value_heads = inferred_kv;
-    }
-    }
+            }
+        }
     }
     write_gguf_config_json(&config_path, &arch, &metadata)?;
 
@@ -413,7 +415,11 @@ pub fn compile_gguf_to_cimage(
     }
     all_hf_names.sort();
 
-    eprintln!("[gguf] mapped {}/{} tensors to HF names", hf_to_tensor_idx.len(), tensors.len());
+    eprintln!(
+        "[gguf] mapped {}/{} tensors to HF names",
+        hf_to_tensor_idx.len(),
+        tensors.len()
+    );
 
     // 5. Resolve namespace from HF-style names
     let namespace = resolve_namespace(&all_hf_names).ok_or_else(|| {
@@ -422,7 +428,10 @@ pub fn compile_gguf_to_cimage(
             all_hf_names.len()
         )
     })?;
-    eprintln!("[gguf] namespace: {} (root={})", namespace.discovery, namespace.root);
+    eprintln!(
+        "[gguf] namespace: {} (root={})",
+        namespace.discovery, namespace.root
+    );
 
     // 6. Compile each palettized tensor
     let mut cimage = CImageWriter::new(output_path)?;
@@ -450,17 +459,17 @@ pub fn compile_gguf_to_cimage(
         let use_dim_m = gguf_out;
         let use_dim_n = gguf_in;
         if gguf_in != tb.dim_n || gguf_out != tb.dim_m {
-            eprintln!("  [gguf] shape adjusted: {} graph [{}×{}] → GGUF [{gguf_in}×{gguf_out}]",
-                meta.name, tb.dim_m, tb.dim_n);
+            eprintln!(
+                "  [gguf] shape adjusted: {} graph [{}×{}] → GGUF [{gguf_in}×{gguf_out}]",
+                meta.name, tb.dim_m, tb.dim_n
+            );
         }
 
         // Read and dequantize the GGUF tensor to f32
         // Read raw Q8_0 bytes from the GGUF file (mmap'd at byte_offset)
         let raw_q8 = {
-            let f = File::open(gguf_path)
-                .map_err(|e| format!("Couldn't open GGUF: {e}"))?;
-            let mmap = unsafe { memmap2::Mmap::map(&f) }
-                .map_err(|e| format!("mmap: {e}"))?;
+            let f = File::open(gguf_path).map_err(|e| format!("Couldn't open GGUF: {e}"))?;
+            let mmap = unsafe { memmap2::Mmap::map(&f) }.map_err(|e| format!("mmap: {e}"))?;
             let start = meta.byte_offset as usize;
             let end = start + meta.byte_size as usize;
             mmap[start..end].to_vec()
@@ -482,7 +491,10 @@ pub fn compile_gguf_to_cimage(
                 emitted_ids.insert(tb.key.clone(), id as u32);
                 eprintln!(
                     "  [gguf:gpu] {} ({}×{}) → ternary {} tiles {:.2}s",
-                    meta.name, use_dim_m, use_dim_n, num_tiles,
+                    meta.name,
+                    use_dim_m,
+                    use_dim_n,
+                    num_tiles,
                     t0.elapsed().as_secs_f64()
                 );
             }
@@ -500,7 +512,8 @@ pub fn compile_gguf_to_cimage(
                     }
                     f32_vals = t;
                 }
-                let pal = palettize_matrix(&f32_vals, use_dim_m as usize, use_dim_n as usize, 16, 50);
+                let pal =
+                    palettize_matrix(&f32_vals, use_dim_m as usize, use_dim_n as usize, 16, 50);
                 let bpp = pal.effective_bpp();
                 let cb_bytes = pal.rows.len() * 16 * 2;
                 let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
@@ -518,7 +531,9 @@ pub fn compile_gguf_to_cimage(
                 emitted_ids.insert(tb.key.clone(), id as u32);
                 eprintln!(
                     "  [gguf:cpu] {} ({}×{}) bpp={bpp:.3} {:.2}s",
-                    meta.name, use_dim_m, use_dim_n,
+                    meta.name,
+                    use_dim_m,
+                    use_dim_n,
                     t0.elapsed().as_secs_f64()
                 );
             }

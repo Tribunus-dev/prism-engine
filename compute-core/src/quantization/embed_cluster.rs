@@ -77,11 +77,7 @@ pub fn quantize_block(values: &[f32; 256]) -> (u16, [u8; 64]) {
 }
 
 /// Process a flat weight array in 256-element blocks, append scales + nibbles.
-pub fn process_weights(
-    weights_f32: &[f32],
-    scales_out: &mut Vec<u8>,
-    weights_out: &mut Vec<u8>,
-) {
+pub fn process_weights(weights_f32: &[f32], scales_out: &mut Vec<u8>, weights_out: &mut Vec<u8>) {
     let padded = if weights_f32.len() % 256 == 0 {
         weights_f32.to_vec()
     } else {
@@ -294,7 +290,12 @@ pub fn reorder_by_cluster(
 ///
 /// This is O(n) per query — intended for testing and canonicalization,
 /// not hot-path inference.
-pub fn reordered_position(assignments: &[u32], token_index: usize, _n_rows: usize, _k: usize) -> usize {
+pub fn reordered_position(
+    assignments: &[u32],
+    token_index: usize,
+    _n_rows: usize,
+    _k: usize,
+) -> usize {
     let cluster = assignments[token_index] as usize;
     let mut before = 0usize;
     for c in 0..cluster {
@@ -334,12 +335,20 @@ pub fn f16_to_f32(bits: u16) -> f32 {
     let mant = (bits & 0x03FF) as u32;
     if exp == 0 {
         // denormal or zero
-        if mant == 0 { return if sign == 0 { 0.0 } else { -0.0 }; }
+        if mant == 0 {
+            return if sign == 0 { 0.0 } else { -0.0 };
+        }
         let val = (mant as f32) / 1024.0 * 2.0_f32.powi(-14);
         return if sign == 0 { val } else { -val };
     }
     if exp == 0x1F {
-        if mant == 0 { return if sign == 0 { f32::INFINITY } else { f32::NEG_INFINITY }; }
+        if mant == 0 {
+            return if sign == 0 {
+                f32::INFINITY
+            } else {
+                f32::NEG_INFINITY
+            };
+        }
         return f32::NAN;
     }
     let f32_bits = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
@@ -391,8 +400,7 @@ mod tests {
         let mut prev_distortion = f64::INFINITY;
 
         for iter in 0..20 {
-            let (_assignments, delta) =
-                kmeans_iterate(&data, &mut centroids, n_rows, dim, k);
+            let (_assignments, delta) = kmeans_iterate(&data, &mut centroids, n_rows, dim, k);
             // Distortion = sum of squared distances to assigned centroid.
             let mut distortion = 0.0_f64;
             for i in 0..n_rows {
@@ -450,9 +458,7 @@ mod tests {
         let empty_count = centroids
             .chunks_exact(dim)
             .enumerate()
-            .filter(|(c_idx, _)| {
-                !(0..n_rows).any(|i| _assignments[i] as usize == *c_idx)
-            })
+            .filter(|(c_idx, _)| !(0..n_rows).any(|i| _assignments[i] as usize == *c_idx))
             .count();
         assert!(
             (empty_count as f64) / (k as f64) < 0.05,
@@ -559,7 +565,9 @@ mod tests {
         let mut centroids = kmeans_plusplus(&data, k, n_rows, dim);
         for _ in 0..20 {
             let (_assignments, delta) = kmeans_iterate(&data, &mut centroids, n_rows, dim, k);
-            if delta < 1e-6 { break; }
+            if delta < 1e-6 {
+                break;
+            }
         }
         let (assignments, _) = kmeans_iterate(&data, &mut centroids, n_rows, dim, k);
         let reordered = reorder_by_cluster(&data, &assignments, n_rows, dim, k);

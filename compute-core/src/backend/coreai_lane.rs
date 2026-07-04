@@ -13,15 +13,14 @@
 //! responsible for submitting subgraphs for compilation via the full
 //! MIL → coremlc pipeline and checking `can_execute` before dispatch.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
-use std::collections::HashMap;
 
 use crate::compilation::tri_lane::{
-    AneLaneLifecycle, AneQualificationRecord, AppleFallbackPlan,
-    AppleTriLaneExecutionReceipt, CoreAiWarmupContract, LaneExecutionEvent,
-    OverlapMetrics, NumericalStatus, FallbackStatus, AneExecutionEvidence,
-    EpochRouteOrigin,
+    AneExecutionEvidence, AneLaneLifecycle, AneQualificationRecord, AppleFallbackPlan,
+    AppleTriLaneExecutionReceipt, CoreAiWarmupContract, EpochRouteOrigin, FallbackStatus,
+    LaneExecutionEvent, NumericalStatus, OverlapMetrics,
 };
 use tempfile::TempDir;
 
@@ -467,12 +466,14 @@ impl CoreAiLane {
 
         // Verify output slots exist
         for output in &binding.output_bindings {
-            arena.slot(output.slot_id)
-                .ok_or_else(|| format!("warmup: output slot {} not found in arena", output.slot_id))?;
+            arena.slot(output.slot_id).ok_or_else(|| {
+                format!("warmup: output slot {} not found in arena", output.slot_id)
+            })?;
         }
         for input in &binding.input_bindings {
-            arena.slot(input.slot_id)
-                .ok_or_else(|| format!("warmup: input slot {} not found in arena", input.slot_id))?;
+            arena.slot(input.slot_id).ok_or_else(|| {
+                format!("warmup: input slot {} not found in arena", input.slot_id)
+            })?;
         }
 
         // Load the Core ML model
@@ -486,10 +487,14 @@ impl CoreAiLane {
         for i in 0..warmup_count {
             // Build ArenaInfo from binding contracts
             // Build ArenaInfo from the IOSurface-backed arena
-            let input_slot_id = binding.input_bindings.first()
+            let input_slot_id = binding
+                .input_bindings
+                .first()
                 .map(|b| b.slot_id)
                 .ok_or("no input bindings")?;
-            let output_slot_id = binding.output_bindings.first()
+            let output_slot_id = binding
+                .output_bindings
+                .first()
                 .map(|b| b.slot_id)
                 .ok_or("no output bindings")?;
 
@@ -503,10 +508,14 @@ impl CoreAiLane {
             if let Some(model) = &binding.model {
                 // Real execution: call predict with tensor names from binding contracts
                 // Stub: uses names from the first input/output binding
-                let in_name = binding.input_bindings.first()
+                let in_name = binding
+                    .input_bindings
+                    .first()
                     .map(|b| b.tensor_id.as_str())
                     .unwrap_or("input");
-                let out_name = binding.output_bindings.first()
+                let out_name = binding
+                    .output_bindings
+                    .first()
                     .map(|b| b.tensor_id.as_str())
                     .unwrap_or("output");
                 model.predict(in_name, &input_info, out_name, &output_info)?;
@@ -518,7 +527,8 @@ impl CoreAiLane {
 
             if elapsed > warmup_contract.max_warmup_latency_ms * 1_000_000 {
                 return Err(format!(
-                    "warmup prediction {} exceeded max latency: {}ns vs {}ns", i,
+                    "warmup prediction {} exceeded max latency: {}ns vs {}ns",
+                    i,
                     elapsed,
                     warmup_contract.max_warmup_latency_ms * 1_000_000
                 ));
@@ -577,7 +587,10 @@ impl CoreAiLane {
             .collect();
 
         let fallback_used = matches!(self.lifecycle, AneLaneLifecycle::FallbackActive);
-        let healthy = matches!(self.lifecycle, AneLaneLifecycle::Healthy | AneLaneLifecycle::Warmed);
+        let healthy = matches!(
+            self.lifecycle,
+            AneLaneLifecycle::Healthy | AneLaneLifecycle::Warmed
+        );
 
         AppleTriLaneExecutionReceipt {
             cimage_id: cimage_id.to_string(),

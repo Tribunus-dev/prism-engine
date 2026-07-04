@@ -16,8 +16,8 @@ use super::super::bridge_provider::{
 };
 use super::super::phase_types::TensorDescriptor;
 use super::providers::{
-    detected_coreai_version, CapabilityFingerprint, MaterializationProvider,
-    SharedRouteProvider, StitchedProvider,
+    detected_coreai_version, CapabilityFingerprint, MaterializationProvider, SharedRouteProvider,
+    StitchedProvider,
 };
 
 // ── Router ───────────────────────────────────────────────────────────────────

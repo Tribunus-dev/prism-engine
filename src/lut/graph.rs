@@ -767,11 +767,7 @@ mod tests {
         assert_eq!(graph.num_layers, 24);
 
         let pal_count = graph.palettized_tensors().len();
-        assert_eq!(
-            pal_count,
-            114,
-            "palettized count = {pal_count}"
-        );
+        assert_eq!(pal_count, 114, "palettized count = {pal_count}");
         assert!(pal_count > 0);
     }
 }

@@ -116,8 +116,7 @@ impl Orchestrator {
     /// - Raw MIL text: write as `model.mil` + `Manifest.json`
     /// - A ZIP archive: extract to the mlpackage directory
     fn write_mlpackage(mlpackage_dir: &std::path::Path, mil_bytes: &[u8]) -> Result<(), String> {
-        std::fs::create_dir_all(mlpackage_dir)
-            .map_err(|e| format!("create mlpackage dir: {e}"))?;
+        std::fs::create_dir_all(mlpackage_dir).map_err(|e| format!("create mlpackage dir: {e}"))?;
 
         // If it looks like a ZIP archive (magic "PK"), extract it.
         if mil_bytes.len() >= 2 && &mil_bytes[0..2] == b"PK" {

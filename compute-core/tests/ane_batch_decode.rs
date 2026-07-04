@@ -197,7 +197,6 @@ fn ane_batch_decode_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![batch as i64, H])],
             outputs: vec![(out_name.clone(), vec![batch as i64, FFN])],
-
         };
 
         // ── Compile ───────────────────────────────────────────────

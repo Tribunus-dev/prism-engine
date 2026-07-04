@@ -6,9 +6,7 @@
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
-use crate::runtime::ledger::entry::{
-    TransitionReceipt, DEFAULT_TRANSITION_LEDGER_CAPACITY,
-};
+use crate::runtime::ledger::entry::{TransitionReceipt, DEFAULT_TRANSITION_LEDGER_CAPACITY};
 
 /// Bounded rolling window of semantic transition receipts.
 ///
@@ -61,11 +59,9 @@ impl TransitionLedger {
     /// check — receipts must be committed in sequence order.
     pub fn commit(&mut self, receipt: TransitionReceipt) {
         assert_eq!(
-            receipt.payload.receipt_sequence,
-            self.next_receipt_sequence,
+            receipt.payload.receipt_sequence, self.next_receipt_sequence,
             "receipt sequence mismatch: expected {} got {}",
-            self.next_receipt_sequence,
-            receipt.payload.receipt_sequence,
+            self.next_receipt_sequence, receipt.payload.receipt_sequence,
         );
         if self.history.len() == self.capacity {
             self.history.pop_front();

@@ -30,7 +30,8 @@ fn find_cimage() -> Option<std::path::PathBuf> {
         }
     }
     if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
-        let p = std::path::Path::new(&manifest).join("../../models/gemma4-12b-it/gemma4_12b_v4.cimage");
+        let p =
+            std::path::Path::new(&manifest).join("../../models/gemma4-12b-it/gemma4_12b_v4.cimage");
         if p.exists() {
             return Some(p);
         }
@@ -46,8 +47,7 @@ fn run_tokens(deployment: &CimageDeployment, interleaved: bool, context_len: u32
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
 
-    let mut mk = Megakernel::new(&device, &queue, deployment, false)
-        .expect("Megakernel::new");
+    let mut mk = Megakernel::new(&device, &queue, deployment, false).expect("Megakernel::new");
 
     // Set interleave mode before launch
     mk.kv_prefetch_enabled = interleaved;
@@ -92,29 +92,46 @@ fn print_stats(label: &str, times: &[Duration]) {
     let p95 = s[p95_idx.min(n - 1)];
     let min = s[0];
     let max = s[n - 1];
-    println!("  {label:>25}  {mean:>8.1?}  {p50:>8.1?}  {p95:>8.1?}  {min:>8.1?}  {max:>8.1?}",
-        mean=mean, p50=p50, p95=p95, min=min, max=max);
+    println!(
+        "  {label:>25}  {mean:>8.1?}  {p50:>8.1?}  {p95:>8.1?}  {min:>8.1?}  {max:>8.1?}",
+        mean = mean,
+        p50 = p50,
+        p95 = p95,
+        min = min,
+        max = max
+    );
 }
 
 #[test]
 fn real_weight_qualification() {
     let cimage_path = find_cimage().expect("cimage file not found. Set CIMAGE_PATH or place at models/gemma4-12b-it/gemma4_12b_v4.cimage");
     let file_size = std::fs::metadata(&cimage_path).unwrap().len();
-    println!("Loading cimage: {} ({})", cimage_path.display(), human_size(file_size));
+    println!(
+        "Loading cimage: {} ({})",
+        cimage_path.display(),
+        human_size(file_size)
+    );
 
     let device = Device::system_default().unwrap();
-    let deployment = CimageDeployment::load(&cimage_path, &device)
-        .expect("load cimage failed");
-    println!("Model: {} layers, {}M weights",
-        deployment.num_layers, deployment.num_weights / 1_000_000);
+    let deployment = CimageDeployment::load(&cimage_path, &device).expect("load cimage failed");
+    println!(
+        "Model: {} layers, {}M weights",
+        deployment.num_layers,
+        deployment.num_weights / 1_000_000
+    );
     println!();
 
     println!("── Real-Weight Qualification ──────────────────────────────────────");
-    println!("  {:>25}  {:>8}  {:>8}  {:>8}  {:>8}  {:>8}", "mode", "mean", "p50", "p95", "min", "max");
+    println!(
+        "  {:>25}  {:>8}  {:>8}  {:>8}  {:>8}  {:>8}",
+        "mode", "mean", "p50", "p95", "min", "max"
+    );
     println!("  {}", "-".repeat(77));
 
     for &ctx in CONTEXT_BUCKETS {
-        if ctx > MAX_CONTEXT { continue; }
+        if ctx > MAX_CONTEXT {
+            continue;
+        }
 
         let t0 = Instant::now();
         let baseline = run_tokens(&deployment, false, ctx);
@@ -132,14 +149,23 @@ fn real_weight_qualification() {
         } else {
             format!("-{:?}", b_mean - i_mean)
         };
-        println!("  {:>25}  delta={}  (total {:.1}s)", "", delta, total_elapsed.as_secs_f64());
+        println!(
+            "  {:>25}  delta={}  (total {:.1}s)",
+            "",
+            delta,
+            total_elapsed.as_secs_f64()
+        );
         println!();
     }
 }
 
 fn human_size(bytes: u64) -> String {
     let b = bytes as f64;
-    if b > 1_000_000_000.0 { format!("{:.1} GB", b / 1_000_000_000.0) }
-    else if b > 1_000_000.0 { format!("{:.1} MB", b / 1_000_000.0) }
-    else { format!("{} B", bytes) }
+    if b > 1_000_000_000.0 {
+        format!("{:.1} GB", b / 1_000_000_000.0)
+    } else if b > 1_000_000.0 {
+        format!("{:.1} MB", b / 1_000_000.0)
+    } else {
+        format!("{} B", bytes)
+    }
 }

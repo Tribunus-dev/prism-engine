@@ -3,18 +3,18 @@
 //! Raw model manifest types plus the `parse_config` function that reads
 //! config.json and produces a normalized TextArchitecture + QuantizationMeta.
 
+#[cfg(feature = "prism-backend")]
+use crate::compute_image::TensorEntry;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 /// Import TensorEntry from compute_image when prism-backend is active.
 #[cfg(feature = "prism-backend")]
 use std::path::Path;
-#[cfg(feature = "prism-backend")]
-use crate::compute_image::TensorEntry;
 
 use super::hardware::{
-    AttentionKind, AudioArchitecture, MoEConfig, QuantizationMeta,
-    QuantizationMode, RopeSpec, TextArchitecture, VisionArchitecture,
+    AttentionKind, AudioArchitecture, MoEConfig, QuantizationMeta, QuantizationMode, RopeSpec,
+    TextArchitecture, VisionArchitecture,
 };
 
 // ── Modality Discriminator ─────────────────────────────────────────────
@@ -413,4 +413,3 @@ impl CimageManifest {
         Ok(())
     }
 }
-

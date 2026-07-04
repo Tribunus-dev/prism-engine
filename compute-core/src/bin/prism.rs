@@ -213,8 +213,7 @@ fn main() {
             cuda_cache_dir,
             rocm_cache_dir,
             l0_cache_dir,
-        } => {
-            compile_gguf(
+        } => compile_gguf(
             &gguf_path,
             &output,
             draft.as_deref(),
@@ -229,8 +228,7 @@ fn main() {
             cuda_cache_dir.as_deref(),
             rocm_cache_dir.as_deref(),
             l0_cache_dir.as_deref(),
-            )
-        }
+        ),
         #[cfg(feature = "prism-backend")]
         Commands::AncCompile { model } => ane_compile(&model),
         #[cfg(not(feature = "prism-backend"))]
@@ -321,20 +319,30 @@ fn list_devices(json_output: bool) {
         } else {
             "unknown".to_string()
         };
-        let pcie = device.pcie_link.as_ref().map(|l| {
-            format!(" (PCIe {}.{} x{})", l.generation, 0, l.lanes)
-        }).unwrap_or_default();
+        let pcie = device
+            .pcie_link
+            .as_ref()
+            .map(|l| format!(" (PCIe {}.{} x{})", l.generation, 0, l.lanes))
+            .unwrap_or_default();
 
         println!("  Device {}: {} — {}", device.id.0, device.name, kind);
         println!("           backend:   {}", backend);
         println!("           vendor:    {}", device.vendor);
         println!("           memory:    {}{}", mem_str, pcie);
-        println!("           compute:   {} units @ {} MHz", device.compute_units, device.clock_mhz);
-        println!("           formats:   {}f16 {}bf16 {}int8 {}ternary",
+        println!(
+            "           compute:   {} units @ {} MHz",
+            device.compute_units, device.clock_mhz
+        );
+        println!(
+            "           formats:   {}f16 {}bf16 {}int8 {}ternary",
             if device.supports_f16 { "✓" } else { "✗" },
             if device.supports_bf16 { "✓" } else { "✗" },
             if device.supports_int8 { "✓" } else { "✗" },
-            if device.supports_ternary { "✓" } else { "✗" },
+            if device.supports_ternary {
+                "✓"
+            } else {
+                "✗"
+            },
         );
         if device.ane_cores > 0 {
             println!("           ane cores: {}", device.ane_cores);
@@ -695,7 +703,10 @@ fn compile_gguf(
     if legacy_lut {
         #[cfg(feature = "prism-backend")]
         {
-            match tribunus_compute_core::lut::compiler::compile_gguf_to_cimage(gguf_path, output_path) {
+            match tribunus_compute_core::lut::compiler::compile_gguf_to_cimage(
+                gguf_path,
+                output_path,
+            ) {
                 Ok(()) => {
                     let size = std::fs::metadata(output_path)
                         .map(|m| m.len() / (1024 * 1024))

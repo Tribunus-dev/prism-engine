@@ -63,7 +63,7 @@ impl MetalResourceView {
 /// Metal executable — a Metal kernel bound to specific arena slots.
 ///
 /// Carries input and output resource views that describe how the kernel
- /// accesses memory via IOSurface-backed slots.
+/// accesses memory via IOSurface-backed slots.
 pub struct MetalExecutable {
     /// Artifact identifier for the compiled Metal function
     pub artifact_id: String,

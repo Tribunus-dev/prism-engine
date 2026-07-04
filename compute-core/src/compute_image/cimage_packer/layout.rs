@@ -26,7 +26,11 @@ pub fn predict_tar_size<P: AsRef<Path>>(path: P) -> std::io::Result<u64> {
                 walk(&entry.path(), size)?;
             } else {
                 let len = meta.len();
-                *size += if len % 512 == 0 { len } else { len + (512 - len % 512) };
+                *size += if len % 512 == 0 {
+                    len
+                } else {
+                    len + (512 - len % 512)
+                };
             }
         }
         Ok(())
@@ -82,7 +86,11 @@ impl CImageTopologyTable {
         let make_slice = |slice_count: u32| -> StrideDescriptor {
             let chunk_size = slice_count * bytes_per_element;
             let prefetch_stride = intermediate_size / slice_count;
-            let align_pad = if chunk_size % 64 == 0 { 0 } else { 64 - chunk_size % 64 };
+            let align_pad = if chunk_size % 64 == 0 {
+                0
+            } else {
+                64 - chunk_size % 64
+            };
             StrideDescriptor {
                 chunk_size_bytes: chunk_size,
                 prefetch_stride_elements: prefetch_stride,
@@ -148,7 +156,10 @@ impl CImageLayoutPlan {
     ) -> Self {
         let mut cursor = 0u64;
         let mut next = |size: u64| -> SegmentDescriptor {
-            let desc = SegmentDescriptor { offset: cursor, length: size };
+            let desc = SegmentDescriptor {
+                offset: cursor,
+                length: size,
+            };
             let raw_end = cursor + size;
             cursor = if raw_end % APPLE_PAGE_SIZE == 0 {
                 raw_end
@@ -186,7 +197,9 @@ impl CImageLayoutPlan {
         let layer_directory = next(layer_dir_len);
 
         let multimodal_input_descriptor = {
-            let size = std::mem::size_of::<crate::compute_image::multimodal::MultimodalInputDescriptorV1>() as u64;
+            let size = std::mem::size_of::<
+                crate::compute_image::multimodal::MultimodalInputDescriptorV1,
+            >() as u64;
             Some(next(size))
         };
 
@@ -206,14 +219,19 @@ impl CImageLayoutPlan {
             next(len)
         });
 
-        let multimodal_auxiliary_weights = multimodal_auxiliary_bytes.map(|bytes| {
-            next(bytes)
-        });
+        let multimodal_auxiliary_weights = multimodal_auxiliary_bytes.map(|bytes| next(bytes));
 
         Self {
             total_file_size: cursor,
-            header, metal_lib, main_graph, main_weights, mtp_graph, mtp_weights,
-            topology_table, vocabulary, layer_directory,
+            header,
+            metal_lib,
+            main_graph,
+            main_weights,
+            mtp_graph,
+            mtp_weights,
+            topology_table,
+            vocabulary,
+            layer_directory,
             multimodal_projection_weights,
             multimodal_projection_scales,
             multimodal_input_descriptor,
@@ -222,4 +240,3 @@ impl CImageLayoutPlan {
         }
     }
 }
-

@@ -88,17 +88,17 @@ impl MemoryBudget {
     /// normal desktop use.
     pub fn m1_16gb_default() -> Self {
         let mut ceilings = HashMap::new();
-        ceilings.insert(RegionKind::DenseTeacher, 3_250_000_000);          // 3.25 GB
-        ceilings.insert(RegionKind::TernaryCandidate, 2_750_000_000);     // 2.75 GB
-        ceilings.insert(RegionKind::ActivationFrontier, 2_000_000_000);   // 2.0 GB
-        ceilings.insert(RegionKind::AccelerateWorkspace, 512_000_000);    // 512 MB
-        ceilings.insert(RegionKind::ReceiptBuffer, 256_000_000);          // 256 MB
-        ceilings.insert(RegionKind::CoreMLReserve, 750_000_000);          // 0.75 GB
-        ceilings.insert(RegionKind::Contingency, 500_000_000);            // 0.50 GB
+        ceilings.insert(RegionKind::DenseTeacher, 3_250_000_000); // 3.25 GB
+        ceilings.insert(RegionKind::TernaryCandidate, 2_750_000_000); // 2.75 GB
+        ceilings.insert(RegionKind::ActivationFrontier, 2_000_000_000); // 2.0 GB
+        ceilings.insert(RegionKind::AccelerateWorkspace, 512_000_000); // 512 MB
+        ceilings.insert(RegionKind::ReceiptBuffer, 256_000_000); // 256 MB
+        ceilings.insert(RegionKind::CoreMLReserve, 750_000_000); // 0.75 GB
+        ceilings.insert(RegionKind::Contingency, 500_000_000); // 0.50 GB
 
         MemoryBudget {
-            process_budget_bytes: 10_000_000_000,      // 10.0 GB
-            emergency_ceiling_bytes: 10_750_000_000,    // 10.75 GB
+            process_budget_bytes: 10_000_000_000,    // 10.0 GB
+            emergency_ceiling_bytes: 10_750_000_000, // 10.75 GB
             per_region_ceilings: ceilings,
         }
     }

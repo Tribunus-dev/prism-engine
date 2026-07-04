@@ -293,8 +293,11 @@ mod tests {
         // After gate*up: 1.7616 * 3.0 ≈ 5.2848
         let expected = half::f16::from_f32(2.0).to_f32() / (1.0 + (-2.0f32).exp());
         let got = half::f16::from_bits(gate[0]).to_f32();
-        assert!((got - expected * 3.0).abs() < 0.01,
-            "silu gate*up: got={got}, expected={}", expected * 3.0);
+        assert!(
+            (got - expected * 3.0).abs() < 0.01,
+            "silu gate*up: got={got}, expected={}",
+            expected * 3.0
+        );
     }
 
     #[test]

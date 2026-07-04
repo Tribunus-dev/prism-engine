@@ -16,11 +16,11 @@
 //! 5. **Fallback suspicion** — `fallback_suspected = true` AND
 //!    [`RiskPolicy::ProductionOnly`] → rejected.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::compilation::activation_abi::ActivationAbi;
 use crate::compilation::ane_eligibility::ShapeBucket;
 use crate::compilation::tri_lane::AneRejectionReason;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ── Identity types ────────────────────────────────────────────────────────
 
@@ -196,14 +196,11 @@ impl LaneAdmissionGate {
         _abi: &ActivationAbi,
         _bucket: &ShapeBucket,
     ) -> Result<(), AneRejectionReason> {
-        let record = self
-            .ane_qualification_db
-            .get(key)
-            .ok_or_else(|| {
-                AneRejectionReason::CoreAiCompilationFailure(
-                    "no qualification record in database".into(),
-                )
-            })?;
+        let record = self.ane_qualification_db.get(key).ok_or_else(|| {
+            AneRejectionReason::CoreAiCompilationFailure(
+                "no qualification record in database".into(),
+            )
+        })?;
 
         // Compilation success — enforced at every policy level.
         if !record.compile_success {
@@ -285,8 +282,8 @@ mod tests {
     use super::*;
     use crate::compilation::activation_abi::DecodeActivationV1Params;
     use crate::compilation::activation_abi::PhysicalLayout;
-    use crate::compilation::phase_ir::TensorDtype;
     use crate::compilation::ane_eligibility::ShapeBucketFamily;
+    use crate::compilation::phase_ir::TensorDtype;
     use serde_json;
 
     fn sample_key() -> AneQualificationKey {
@@ -362,7 +359,13 @@ mod tests {
 
         let abi = sample_abi();
         // ShapeBucket is a forward reference to ane_eligibility module
-        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
+        let bucket = ShapeBucket {
+            batch: 1,
+            sequence: 128,
+            hidden: 4096,
+            rank: 1,
+            family: ShapeBucketFamily::Decode,
+        };
 
         assert!(gate.admit(&key, &abi, &bucket).is_ok());
     }
@@ -372,7 +375,13 @@ mod tests {
         let gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
         let key = sample_key();
         let abi = sample_abi();
-        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
+        let bucket = ShapeBucket {
+            batch: 1,
+            sequence: 128,
+            hidden: 4096,
+            rank: 1,
+            family: ShapeBucketFamily::Decode,
+        };
 
         let result = gate.admit(&key, &abi, &bucket);
         assert!(result.is_err());
@@ -393,7 +402,13 @@ mod tests {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
         gate.record(record);
         let abi = sample_abi();
-        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
+        let bucket = ShapeBucket {
+            batch: 1,
+            sequence: 128,
+            hidden: 4096,
+            rank: 1,
+            family: ShapeBucketFamily::Decode,
+        };
 
         let result = gate.admit(&key, &abi, &bucket);
         assert!(result.is_err());
@@ -414,7 +429,13 @@ mod tests {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
         gate.record(record);
         let abi = sample_abi();
-        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
+        let bucket = ShapeBucket {
+            batch: 1,
+            sequence: 128,
+            hidden: 4096,
+            rank: 1,
+            family: ShapeBucketFamily::Decode,
+        };
 
         let result = gate.admit(&key, &abi, &bucket);
         assert!(result.is_err());
@@ -434,7 +455,13 @@ mod tests {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::BenchmarkAllowed);
         gate.record(record);
         let abi = sample_abi();
-        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
+        let bucket = ShapeBucket {
+            batch: 1,
+            sequence: 128,
+            hidden: 4096,
+            rank: 1,
+            family: ShapeBucketFamily::Decode,
+        };
 
         // BenchmarkAllowed tolerates fallback suspicion.
         assert!(gate.admit(&key, &abi, &bucket).is_ok());
@@ -444,13 +471,19 @@ mod tests {
     fn test_experimental_bypasses_warmup() {
         let key = sample_key();
         let mut record = qualified_record(key.clone());
-        record.warmup_success = false;   // would fail ProductionOnly
+        record.warmup_success = false; // would fail ProductionOnly
         record.numerical_parity.passed = false; // would also fail
         record.fallback_suspected = true; // would fail ProductionOnly
         let mut gate = LaneAdmissionGate::new(RiskPolicy::ExperimentalAllowed);
         gate.record(record);
         let abi = sample_abi();
-        let bucket = ShapeBucket { batch: 1, sequence: 128, hidden: 4096, rank: 1, family: ShapeBucketFamily::Decode };
+        let bucket = ShapeBucket {
+            batch: 1,
+            sequence: 128,
+            hidden: 4096,
+            rank: 1,
+            family: ShapeBucketFamily::Decode,
+        };
 
         // ExperimentalAllowed bypasses warmup, parity, and fallback checks.
         assert!(gate.admit(&key, &abi, &bucket).is_ok());
@@ -477,8 +510,7 @@ mod tests {
         assert_eq!(record.numerical_parity, parity_back);
 
         // AneArtifactQualificationRecord round-trip
-        let rec_json =
-            serde_json::to_string(&record).expect("serialize record");
+        let rec_json = serde_json::to_string(&record).expect("serialize record");
         let rec_back: AneArtifactQualificationRecord =
             serde_json::from_str(&rec_json).expect("deserialize record");
         assert_eq!(record, rec_back);
@@ -490,16 +522,13 @@ mod tests {
             RiskPolicy::ExperimentalAllowed,
         ] {
             let pol_json = serde_json::to_string(policy).expect("serialize policy");
-            let pol_back: RiskPolicy =
-                serde_json::from_str(&pol_json).expect("deserialize policy");
+            let pol_back: RiskPolicy = serde_json::from_str(&pol_json).expect("deserialize policy");
             assert_eq!(*policy, pol_back);
         }
 
         // HardwareIdentifier round-trip
-        let hw_json =
-            serde_json::to_string(&record.key.hardware_identifier).expect("serialize hw");
-        let hw_back: HardwareIdentifier =
-            serde_json::from_str(&hw_json).expect("deserialize hw");
+        let hw_json = serde_json::to_string(&record.key.hardware_identifier).expect("serialize hw");
+        let hw_back: HardwareIdentifier = serde_json::from_str(&hw_json).expect("deserialize hw");
         assert_eq!(record.key.hardware_identifier, hw_back);
 
         // OsBuild round-trip
@@ -508,8 +537,7 @@ mod tests {
         assert_eq!(record.key.os_build, os_back);
 
         // CoreAiRuntimeVersion round-trip
-        let rt_json =
-            serde_json::to_string(&record.key.coreai_runtime).expect("serialize runtime");
+        let rt_json = serde_json::to_string(&record.key.coreai_runtime).expect("serialize runtime");
         let rt_back: CoreAiRuntimeVersion =
             serde_json::from_str(&rt_json).expect("deserialize runtime");
         assert_eq!(record.key.coreai_runtime, rt_back);
@@ -542,15 +570,24 @@ mod tests {
             ("compile_success", Box::new(|r| r.compile_success = false)),
             ("load_success", Box::new(|r| r.load_success = false)),
             ("warmup_success", Box::new(|r| r.warmup_success = false)),
-            ("parity_passed", Box::new(|r| r.numerical_parity.passed = false)),
-            ("fallback_suspected", Box::new(|r| r.fallback_suspected = true)),
+            (
+                "parity_passed",
+                Box::new(|r| r.numerical_parity.passed = false),
+            ),
+            (
+                "fallback_suspected",
+                Box::new(|r| r.fallback_suspected = true),
+            ),
         ];
         for (field, mut check) in checks {
             let mut bad = qualified_record(key.clone());
             check(&mut bad);
             let mut gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
             gate.record(bad);
-            assert!(!gate.is_production_ready(&key), "{field} should make record not production-ready");
+            assert!(
+                !gate.is_production_ready(&key),
+                "{field} should make record not production-ready"
+            );
         }
     }
 }

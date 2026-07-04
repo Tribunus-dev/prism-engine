@@ -432,12 +432,7 @@ fn dry_run_produces_correct_status() {
 
     // DryRunCompatibilityRunner always produces FunctionallyQualified
     let receipt = runner
-        .qualify(
-            &artifact,
-            &machine,
-            &profile,
-            ImageProviderKind::PrismLut,
-        )
+        .qualify(&artifact, &machine, &profile, ImageProviderKind::PrismLut)
         .unwrap();
 
     assert_eq!(

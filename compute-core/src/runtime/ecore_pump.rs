@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use super::agent_slot::{MultiplexerState, STATE_IDLE, STATE_PREFETCHING, STATE_READY};
-use crate::runtime::world::Entity;
 use crate::runtime::components::AgentSlot;
+use crate::runtime::world::Entity;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -48,28 +48,45 @@ pub fn spawn_ecore_prefetch_pump(state: Arc<MultiplexerState>) -> JoinHandle<()>
         // ── Phase 1: Weight prefetch ─────────────────────────────────
         for i in 0..32u32 {
             let entity = Entity(i);
-            if !world.is_alive(entity) { continue; }
-            let Some(slot) = world.get::<AgentSlot>(entity) else { continue; };
+            if !world.is_alive(entity) {
+                continue;
+            }
+            let Some(slot) = world.get::<AgentSlot>(entity) else {
+                continue;
+            };
 
-            if slot.load_state() != STATE_IDLE || slot.weight_offset == 0 { continue; }
+            if slot.load_state() != STATE_IDLE || slot.weight_offset == 0 {
+                continue;
+            }
             any_idle = true;
-            if !slot.try_transition(STATE_IDLE, STATE_PREFETCHING) { continue; }
+            if !slot.try_transition(STATE_IDLE, STATE_PREFETCHING) {
+                continue;
+            }
 
             let (mmap, slc_ptr, slc_len, (hd, id)) = match state.cimage_data() {
                 Some(d) => d,
-                None => { slot.store_state(STATE_READY); continue; }
+                None => {
+                    slot.store_state(STATE_READY);
+                    continue;
+                }
             };
             let offset = slot.weight_offset;
-            if offset >= mmap.len() { slot.store_state(STATE_READY); continue; }
+            if offset >= mmap.len() {
+                slot.store_state(STATE_READY);
+                continue;
+            }
 
             let pump = match state.weight_pump.as_deref() {
                 Some(p) => p,
-                None => { slot.store_state(STATE_READY); continue; }
+                None => {
+                    slot.store_state(STATE_READY);
+                    continue;
+                }
             };
 
             let phase = slot.prefetch_phase;
             let out_dim = if phase == 0 { hd } else { id } as usize;
-            let in_dim  = if phase == 0 { hd } else { id } as usize;
+            let in_dim = if phase == 0 { hd } else { id } as usize;
             let rows_per = (out_dim + 31) / 32;
             let tile_stride = ((in_dim + 639) / 640) * 32 * 4;
             let avail = (mmap.len() - offset) / tile_stride;

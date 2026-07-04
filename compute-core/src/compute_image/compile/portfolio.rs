@@ -3,11 +3,11 @@
 //!
 //! PRISM-COREML-PORTFOLIO-COMPILATION-0001
 
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use crate::compilation::activation_abi::{ActivationAbi, ActivationContract, PhysicalLayout};
 use crate::compilation::ane_eligibility::{ShapeBucket, ShapeBucketFamily};
 use crate::compilation::region_planner::CoreAiIsland;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 // ── Public types ──────────────────────────────────────────────────────────
 
@@ -168,8 +168,14 @@ pub fn compile_packet(
         WeightEncoding::Palette6Bit => "p6",
         WeightEncoding::Palette8Bit => "p8",
     };
-    let function_name =
-        build_function_name(&packet_kind, layer_start, layer_end, &request.input_abi, seq_bucket, precision);
+    let function_name = build_function_name(
+        &packet_kind,
+        layer_start,
+        layer_end,
+        &request.input_abi,
+        seq_bucket,
+        precision,
+    );
     let mlpackage_path = output_dir.join(format!("{}.mlpackage", &function_name));
 
     // Build placeholder contracts from the ABIs.
@@ -252,7 +258,10 @@ pub fn build_portfolio(
             match compile_packet(request, output_dir) {
                 Ok(artifact) => artifacts.push(artifact),
                 Err(e) => {
-                    eprintln!("[portfolio_compilation] skipped island {}: {e}", island.island_id);
+                    eprintln!(
+                        "[portfolio_compilation] skipped island {}: {e}",
+                        island.island_id
+                    );
                 }
             }
         }
@@ -315,7 +324,11 @@ pub fn select_shape_bucket(
     sequence: u32,
     is_decode: bool,
 ) -> Option<u32> {
-    let buckets = if is_decode { &profile.decode } else { &profile.prefill };
+    let buckets = if is_decode {
+        &profile.decode
+    } else {
+        &profile.prefill
+    };
     // Exact match first
     if buckets.contains(&sequence) {
         return Some(sequence);
@@ -338,8 +351,8 @@ mod tests {
     use crate::compilation::activation_abi::{
         ActivationAbi, ActivationContract, DecodeActivationV1Params, PhysicalLayout,
     };
-    use crate::compilation::phase_ir::TensorDtype;
     use crate::compilation::ane_eligibility::ShapeBucketFamily;
+    use crate::compilation::phase_ir::TensorDtype;
     use crate::compilation::region_catalogue::RegionAdmission;
     use crate::compilation::region_planner::{CoreAiIsland, ScheduledOp};
 
@@ -423,12 +436,18 @@ mod tests {
         // Different layer range
         let early = build_function_name(&PacketKind::MlpGateUp, 0, 3, &abi, 128, "fp16");
         let late = build_function_name(&PacketKind::MlpGateUp, 4, 7, &abi, 128, "fp16");
-        assert_ne!(early, late, "different layer range must yield different names");
+        assert_ne!(
+            early, late,
+            "different layer range must yield different names"
+        );
 
         // Different packet kind
         let gate_up = build_function_name(&PacketKind::MlpGateUp, 0, 3, &abi, 128, "fp16");
         let down = build_function_name(&PacketKind::MlpDown, 0, 3, &abi, 128, "fp16");
-        assert_ne!(gate_up, down, "different packet kind must yield different names");
+        assert_ne!(
+            gate_up, down,
+            "different packet kind must yield different names"
+        );
     }
 
     // ── test_compile_packet_produces_artifact ──────────────────────────────
@@ -474,7 +493,10 @@ mod tests {
         // The function_name should be deterministic.
         let expected_name = "mlp_gate_up_l0-0_seq128_fp16";
         assert_eq!(artifact.function_name, expected_name);
-        assert!(artifact.mlpackage_path.to_string_lossy().ends_with("mlp_gate_up_l0-0_seq128_fp16.mlpackage"));
+        assert!(artifact
+            .mlpackage_path
+            .to_string_lossy()
+            .ends_with("mlp_gate_up_l0-0_seq128_fp16.mlpackage"));
     }
 
     // ── test_build_portfolio_multiple_buckets ──────────────────────────────
@@ -504,7 +526,11 @@ mod tests {
         let portfolio = build_portfolio(&islands, &buckets, &abi, &tmp);
 
         // 2 islands × 2 buckets = 4 artifacts
-        assert_eq!(portfolio.len(), 4, "should produce one artifact per island×bucket");
+        assert_eq!(
+            portfolio.len(),
+            4,
+            "should produce one artifact per island×bucket"
+        );
 
         // Every artifact should have a valid digest and non-zero size.
         for artifact in &portfolio {
@@ -512,7 +538,10 @@ mod tests {
                 artifact.package_digest.starts_with("placeholder-digest-"),
                 "all artifacts need a digest"
             );
-            assert_eq!(artifact.byte_size, 1_073_741_824, "default max_package_bytes");
+            assert_eq!(
+                artifact.byte_size, 1_073_741_824,
+                "default max_package_bytes"
+            );
             assert!(artifact.compiled_modelc_path.is_none());
         }
 
@@ -582,7 +611,11 @@ mod tests {
         };
 
         let json2 = serde_json::to_string(&artifact).expect("serialize artifact");
-        let deserialized2: CoreAiPacketArtifact = serde_json::from_str(&json2).expect("deserialize artifact");
-        assert_eq!(artifact, deserialized2, "full artifact roundtrip must preserve value");
+        let deserialized2: CoreAiPacketArtifact =
+            serde_json::from_str(&json2).expect("deserialize artifact");
+        assert_eq!(
+            artifact, deserialized2,
+            "full artifact roundtrip must preserve value"
+        );
     }
 }

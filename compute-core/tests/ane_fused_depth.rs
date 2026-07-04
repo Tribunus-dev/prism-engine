@@ -192,7 +192,6 @@ fn ane_fused_depth_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![1, H])],
             outputs: vec![(out_name.clone(), vec![1, H])],
-
         };
 
         // ── Compile ───────────────────────────────────────────────

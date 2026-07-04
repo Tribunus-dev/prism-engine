@@ -130,7 +130,7 @@ pub struct HfConfigBlock {
     pub head_dim: Option<u32>,
     pub attention_k_eq_v: Option<bool>,
     pub tie_word_embeddings: Option<bool>,
-        pub linear_num_key_heads: Option<u32>,
+    pub linear_num_key_heads: Option<u32>,
     pub linear_key_head_dim: Option<u32>,
     pub linear_num_value_heads: Option<u32>,
     pub linear_value_head_dim: Option<u32>,
@@ -170,7 +170,7 @@ pub struct UnifiedConfig {
     pub intermediate_size: u32,
     pub num_layers: u32,
     pub num_heads: u32,
-        pub num_kv_heads: u32,
+    pub num_kv_heads: u32,
     pub linear_num_key_heads: u32,
     pub linear_key_head_dim: u32,
     pub linear_num_value_heads: u32,
@@ -259,12 +259,8 @@ impl UnifiedConfig {
         };
 
         let key_prefix = match family {
-            ArchitectureFamily::Gemma4 => {
-                "language_model.model".to_string()
-            }
-            ArchitectureFamily::Qwen3_5 => {
-                "model.language_model".to_string()
-            }
+            ArchitectureFamily::Gemma4 => "language_model.model".to_string(),
+            ArchitectureFamily::Qwen3_5 => "model.language_model".to_string(),
             _ => "model".to_string(),
         };
 
@@ -342,7 +338,7 @@ impl ModelGraph {
             if is_linear {
                 // Fused QKV dim for linear attention layers.
                 // Qwen3.5 uses a fused projection with Q, K, V of equal size.
-                                let fused_qkv_dim = (config.num_heads * config.head_dim)
+                let fused_qkv_dim = (config.num_heads * config.head_dim)
                     + (config.linear_num_key_heads * config.linear_key_head_dim)
                     + (config.linear_num_value_heads * config.linear_value_head_dim);
 

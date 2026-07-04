@@ -4,9 +4,9 @@
 //! serializable manifests, and O(1) overlap checks.  Capacity is bounded at
 //! 256 IDs each — deliberate and checked at registration time.
 
-use crate::runtime::world::Component;
 use crate::runtime::scheduling::error::MaskError;
 use crate::runtime::scheduling::error::RegistryError;
+use crate::runtime::world::Component;
 
 // ---------------------------------------------------------------------------
 // ID types
@@ -45,10 +45,7 @@ impl ComponentMask {
 
     /// Returns `true` when any bit is set in the same word position in both masks.
     pub fn overlaps(&self, other: &Self) -> bool {
-        self.0
-            .iter()
-            .zip(other.0.iter())
-            .any(|(a, b)| (a & b) != 0)
+        self.0.iter().zip(other.0.iter()).any(|(a, b)| (a & b) != 0)
     }
 
     /// Returns `true` when `id`'s bit is set.
@@ -117,10 +114,7 @@ impl ResourceMask {
     }
 
     pub fn overlaps(&self, other: &Self) -> bool {
-        self.0
-            .iter()
-            .zip(other.0.iter())
-            .any(|(a, b)| (a & b) != 0)
+        self.0.iter().zip(other.0.iter()).any(|(a, b)| (a & b) != 0)
     }
 
     pub fn contains(&self, id: ResourceId) -> bool {
@@ -331,10 +325,7 @@ mod tests {
     #[test]
     fn mask_out_of_range() {
         let mut m = ComponentMask::empty();
-        assert!(matches!(
-            m.insert(300),
-            Err(MaskError::OutOfRange { .. })
-        ));
+        assert!(matches!(m.insert(300), Err(MaskError::OutOfRange { .. })));
     }
 
     #[test]
@@ -352,7 +343,10 @@ mod tests {
         let mut reg = ComponentRegistry::new();
         reg.register::<DummyComponent>().unwrap();
         let result = reg.register::<DummyComponent>();
-        assert!(matches!(result, Err(RegistryError::ComponentIdCollision(0, _, _))));
+        assert!(matches!(
+            result,
+            Err(RegistryError::ComponentIdCollision(0, _, _))
+        ));
     }
 
     #[test]

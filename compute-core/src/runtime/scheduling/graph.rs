@@ -104,11 +104,8 @@ impl GraphBuilder {
     /// Start building a graph with the given systems.
     pub fn new(systems: Vec<SystemMetadata>) -> Self {
         let count = systems.len();
-        let id_to_idx: HashMap<SystemId, usize> = systems
-            .iter()
-            .enumerate()
-            .map(|(i, s)| (s.id, i))
-            .collect();
+        let id_to_idx: HashMap<SystemId, usize> =
+            systems.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
 
         Self {
             systems,
@@ -194,12 +191,10 @@ impl GraphBuilder {
         };
 
         // Check for cycles via Kahn's algorithm.
-        let _ = graph
-            .topological_order()
-            .map_err(|cycle_nodes| {
-                let path = graph.build_cycle_path(&cycle_nodes);
-                ScheduleError::CycleDetected(path)
-            })?;
+        let _ = graph.topological_order().map_err(|cycle_nodes| {
+            let path = graph.build_cycle_path(&cycle_nodes);
+            ScheduleError::CycleDetected(path)
+        })?;
 
         Ok(graph)
     }
@@ -229,7 +224,6 @@ impl GraphBuilder {
         }
         deg
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -241,9 +235,7 @@ impl DependencyGraph {
     pub(crate) fn topological_order(&self) -> Result<Vec<SystemId>, Vec<SystemId>> {
         let n = self.systems.len();
         let mut in_degree = self.in_degree.clone();
-        let mut ready: VecDeque<usize> = (0..n)
-            .filter(|&i| in_degree[i] == 0)
-            .collect();
+        let mut ready: VecDeque<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
 
         // Sort initial ready set by (stage, order, id) for determinism.
         {

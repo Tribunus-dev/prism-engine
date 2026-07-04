@@ -6,9 +6,9 @@
 
 use std::path::Path;
 
+use crate::compute_image::TensorEntry;
 use crate::config::hardware::VisionArchitecture;
 use crate::config::parser::{ArchitectureConfig, CimageManifest, ManifestModality};
-use crate::compute_image::TensorEntry;
 
 /// Compile a vision model checkpoint into a standalone cimage artifact.
 ///

@@ -89,7 +89,10 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
     // 1. Load the model.
     let model =
         CoreAiModel::load_with_compute_units(mlmodelc_path, compute_units).map_err(|e| {
-            format!("evidence_probe: failed to load model '{}': {}", mlmodelc_path, e)
+            format!(
+                "evidence_probe: failed to load model '{}': {}",
+                mlmodelc_path, e
+            )
         })?;
 
     // 2. Allocate IOSurface-backed arenas for input and output.
@@ -169,7 +172,10 @@ pub fn run_probe(mlmodelc_path: &str, batch: u32, dim: u32) -> Result<AliasingEv
             hasher.finalize()
         };
 
-        (coreai_hash.as_bytes().to_owned(), metal_hash.as_bytes().to_owned())
+        (
+            coreai_hash.as_bytes().to_owned(),
+            metal_hash.as_bytes().to_owned(),
+        )
     };
 
     output_arena
@@ -253,7 +259,10 @@ mod probe_tests_macos {
         assert_eq!(evidence.output_name, "output");
         assert_eq!(evidence.input_shape, vec![1, 64]);
         assert_eq!(evidence.output_shape, vec![1, 64]);
-        assert_eq!(evidence.compute_units, CoreAiComputeUnits::CpuAndNeuralEngine);
+        assert_eq!(
+            evidence.compute_units,
+            CoreAiComputeUnits::CpuAndNeuralEngine
+        );
         assert!(evidence.same_backing);
         assert_eq!(evidence.copied_bytes, 0);
         assert!(evidence.checksums_match);

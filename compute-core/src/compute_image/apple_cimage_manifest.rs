@@ -11,7 +11,9 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::backend::placement::ExecutionLane;
-pub use crate::compilation::tri_lane::{ExecutionEpoch, LaneDependency, NumericalPolicy, ShapeClass};
+pub use crate::compilation::tri_lane::{
+    ExecutionEpoch, LaneDependency, NumericalPolicy, ShapeClass,
+};
 
 // ── Content digest ───────────────────────────────────────────────────────
 
@@ -326,10 +328,9 @@ mod tests {
     fn test_manifest_roundtrip() {
         let manifest = minimal_manifest();
 
-        let json = serde_json::to_string_pretty(&manifest)
-            .expect("serialize manifest");
-        let deserialized: AppleTriLaneArtifactManifest = serde_json::from_str(&json)
-            .expect("deserialize manifest");
+        let json = serde_json::to_string_pretty(&manifest).expect("serialize manifest");
+        let deserialized: AppleTriLaneArtifactManifest =
+            serde_json::from_str(&json).expect("deserialize manifest");
 
         // Verify top-level fields survived the round trip.
         assert_eq!(deserialized.manifest_version, 1);
@@ -350,14 +351,14 @@ mod tests {
             deserialized.arena.slots[0].producer,
             ExecutionLane::CoreAiAne
         );
-        assert_eq!(
-            deserialized.arena.slots[0].consumer,
-            ExecutionLane::MlxGpu
-        );
+        assert_eq!(deserialized.arena.slots[0].consumer, ExecutionLane::MlxGpu);
 
         // Verify fallback.
         assert_eq!(deserialized.fallback.replacement_lane, "MlxGpu");
-        assert_eq!(deserialized.fallback.replacement_artifact, "fallback_projection");
+        assert_eq!(
+            deserialized.fallback.replacement_artifact,
+            "fallback_projection"
+        );
 
         // Verify numerical policy.
         assert_eq!(deserialized.numerical_policy.validation_mode, "sampled");

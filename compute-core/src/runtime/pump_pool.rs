@@ -25,8 +25,8 @@ use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crate::compute_image::compile::ternary::SegmentKind;
 use super::npu_pump::NpuWeightPump;
+use crate::compute_image::compile::ternary::SegmentKind;
 
 // ── Shared block scales cache ─────────────────────────────────────
 
@@ -39,7 +39,10 @@ struct BlockScaleCache {
 }
 
 impl BlockScaleCache {
-    fn from_mmap(mmap: &[u8], header: &crate::compute_image::compile::ternary::CimageHeader) -> Self {
+    fn from_mmap(
+        mmap: &[u8],
+        header: &crate::compute_image::compile::ternary::CimageHeader,
+    ) -> Self {
         let entry = header.segment(SegmentKind::BlockScales);
         let raw = match entry {
             Some(seg) if seg.length > 0 => {
@@ -183,22 +186,24 @@ impl PumpPool {
             let mmap = mmap.clone();
             let scales_raw = scale_cache.raw.clone();
 
-            workers.push(thread::Builder::new()
-                .name(format!("pump-{}", device.name))
-                .spawn(move || {
-                    // Pin to any available core (the caller handles QoS).
-                    // Workers use P-core-style spinning: no yielding on hot path.
-                    Self::worker_loop(
-                        &mmap,
-                        &scales_raw,
-                        &rx,
-                        &done,
-                        &stop,
-                        &device,
-                        di as u32,
-                    );
-                })
-                .expect("pump worker thread spawn failed"));
+            workers.push(
+                thread::Builder::new()
+                    .name(format!("pump-{}", device.name))
+                    .spawn(move || {
+                        // Pin to any available core (the caller handles QoS).
+                        // Workers use P-core-style spinning: no yielding on hot path.
+                        Self::worker_loop(
+                            &mmap,
+                            &scales_raw,
+                            &rx,
+                            &done,
+                            &stop,
+                            &device,
+                            di as u32,
+                        );
+                    })
+                    .expect("pump worker thread spawn failed"),
+            );
         }
 
         Self {
@@ -351,7 +356,10 @@ mod tests {
     use crate::runtime::npu_pump::AneWeightPump;
 
     /// Build a minimal cimage header + ternary weights in a temp mmap.
-    fn make_minimal_cimage(rows: usize, cols: usize) -> (tempfile::TempDir, Arc<memmap2::Mmap>, CimageHeader) {
+    fn make_minimal_cimage(
+        rows: usize,
+        cols: usize,
+    ) -> (tempfile::TempDir, Arc<memmap2::Mmap>, CimageHeader) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.cimage");
 
@@ -367,8 +375,9 @@ mod tests {
             .open(&path)
             .unwrap();
 
-        let page_aligned = ((std::mem::size_of::<CimageHeader>() + weights_len) as u64
-            + CIMAGE_PAGE_SIZE - 1) & !(CIMAGE_PAGE_SIZE - 1);
+        let page_aligned =
+            ((std::mem::size_of::<CimageHeader>() + weights_len) as u64 + CIMAGE_PAGE_SIZE - 1)
+                & !(CIMAGE_PAGE_SIZE - 1);
 
         file.set_len(page_aligned).unwrap();
 
@@ -388,17 +397,49 @@ mod tests {
             intermediate_dim: rows as u32,
             vocab_size: 0,
             quantization_schema: 0,
-        draft_num_layers: 0,
+            draft_num_layers: 0,
             segments: [
                 SegmentEntry::new(SegmentKind::MetalLib, 0, 0),
-                SegmentEntry::new(SegmentKind::TernaryWeights, weights_offset, weights_len as u64),
-                SegmentEntry { kind: 0, offset: 0, length: 0 },
-                SegmentEntry { kind: 0, offset: 0, length: 0 },
-                SegmentEntry { kind: 0, offset: 0, length: 0 },
-                SegmentEntry { kind: 0, offset: 0, length: 0 },
-                SegmentEntry { kind: 0, offset: 0, length: 0 },
-                SegmentEntry { kind: 0, offset: 0, length: 0 },
-                SegmentEntry { kind: 0, offset: 0, length: 0 },
+                SegmentEntry::new(
+                    SegmentKind::TernaryWeights,
+                    weights_offset,
+                    weights_len as u64,
+                ),
+                SegmentEntry {
+                    kind: 0,
+                    offset: 0,
+                    length: 0,
+                },
+                SegmentEntry {
+                    kind: 0,
+                    offset: 0,
+                    length: 0,
+                },
+                SegmentEntry {
+                    kind: 0,
+                    offset: 0,
+                    length: 0,
+                },
+                SegmentEntry {
+                    kind: 0,
+                    offset: 0,
+                    length: 0,
+                },
+                SegmentEntry {
+                    kind: 0,
+                    offset: 0,
+                    length: 0,
+                },
+                SegmentEntry {
+                    kind: 0,
+                    offset: 0,
+                    length: 0,
+                },
+                SegmentEntry {
+                    kind: 0,
+                    offset: 0,
+                    length: 0,
+                },
             ],
             _pad: [0u8; 8],
         };

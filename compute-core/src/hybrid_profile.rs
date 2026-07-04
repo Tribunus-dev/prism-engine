@@ -8,12 +8,12 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use crate::arena::DataType;
 use crate::backend::heterogeneous_executor::BackendInstance;
 use crate::backend::routing::*;
 use crate::backend::MlxBackend;
 use crate::backend::TensorBackend;
 use crate::memory::allocator::IosurfaceAllocator;
-use crate::arena::DataType;
 
 /// Complete hybrid deployment profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]

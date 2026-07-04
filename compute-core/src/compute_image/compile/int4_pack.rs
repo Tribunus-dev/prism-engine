@@ -62,7 +62,12 @@ pub fn pack_5_trits(digits: &[u8; 5]) -> u8 {
 /// Finds max magnitude → scale → quantize to [−1,0,1] → pack 5/byte.
 pub fn quantize_to_ternary_block32(weights: &[f32; 32]) -> TernaryBlock32 {
     let mut max_abs = 0.0f32;
-    for &w in weights.iter() { let a = w.abs(); if a > max_abs { max_abs = a; } }
+    for &w in weights.iter() {
+        let a = w.abs();
+        if a > max_abs {
+            max_abs = a;
+        }
+    }
     let scale = if max_abs > 1e-7 { max_abs } else { 1.0f32 };
     let inv = 1.0 / scale;
 
@@ -77,7 +82,11 @@ pub fn quantize_to_ternary_block32(weights: &[f32; 32]) -> TernaryBlock32 {
     for byte_idx in 0..6 {
         let base = byte_idx * 5;
         packed[byte_idx] = pack_5_trits(&[
-            trits[base], trits[base+1], trits[base+2], trits[base+3], trits[base+4]
+            trits[base],
+            trits[base + 1],
+            trits[base + 2],
+            trits[base + 3],
+            trits[base + 4],
         ]);
     }
     // Last byte holds 2 trits
@@ -118,7 +127,11 @@ pub fn repack_ternary_tensor(src: &[u32]) -> Vec<TernaryBlock32> {
         let start = b * 32;
         let mut block = [0.0f32; 32];
         for i in 0..32 {
-            block[i] = if start + i < total_weights { f32_vals[start + i] } else { 0.0 };
+            block[i] = if start + i < total_weights {
+                f32_vals[start + i]
+            } else {
+                0.0
+            };
         }
         out.push(quantize_to_ternary_block32(&block));
     }
@@ -134,19 +147,36 @@ pub fn repack_ternary_tensor(src: &[u32]) -> Vec<TernaryBlock32> {
 /// Each input matrix slice is the serialized TernaryBlock32 blocks for that
 /// matrix, organized as rows_of_blocks × 20 blocks × 9 bytes.
 pub fn interleave_fused_ternary_layer(
-    q: &[u8], k: &[u8], v: &[u8], o: &[u8],
-    gate: &[u8], up: &[u8], down: &[u8],
-    q_rows: usize, kv_rows: usize, o_rows: usize,
-    hid_rows: usize, ffn_rows: usize,
+    q: &[u8],
+    k: &[u8],
+    v: &[u8],
+    o: &[u8],
+    gate: &[u8],
+    up: &[u8],
+    down: &[u8],
+    q_rows: usize,
+    kv_rows: usize,
+    o_rows: usize,
+    hid_rows: usize,
+    ffn_rows: usize,
 ) -> Vec<u8> {
     // Each matrix row = TILE/32=20 blocks × 9 bytes = 180 bytes
     let sub_tile = 180usize;
     let matrices: &[(usize, &[u8])] = &[
-        (q_rows, q), (kv_rows, k), (kv_rows, v), (o_rows, o),
-        (hid_rows, gate), (hid_rows, up), (ffn_rows, down),
+        (q_rows, q),
+        (kv_rows, k),
+        (kv_rows, v),
+        (o_rows, o),
+        (hid_rows, gate),
+        (hid_rows, up),
+        (ffn_rows, down),
     ];
     // Number of tile positions = max rows across all matrices (each row is one tile position)
-    let max_tiles = matrices.iter().map(|(r,_)| (*r + 31) / 32).max().unwrap_or(24);
+    let max_tiles = matrices
+        .iter()
+        .map(|(r, _)| (*r + 31) / 32)
+        .max()
+        .unwrap_or(24);
 
     let fused_tile_bytes = 7 * sub_tile; // 1260 bytes
     let mut fused = vec![0u8; max_tiles * fused_tile_bytes];
@@ -203,7 +233,8 @@ mod tests {
         let block = quantize_to_ternary_block32(&weights);
         // All +1 → digit 2. Packed should be: each byte = 242 (2 * 3^4 + 2 * 3^3 + ...)
         // For 5 trits all = 2: 2 + 2*3 + 2*9 + 2*27 + 2*81 = 2+6+18+54+162 = 242
-        let first_byte = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(block.packed_trits[0])) };
+        let first_byte =
+            unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(block.packed_trits[0])) };
         assert_eq!(first_byte, 242, "first byte should be 242");
         // Scale should be f16 of 1.0
         let scale = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(block.block_scale)) };
@@ -227,10 +258,7 @@ mod tests {
         // Pack digits [0,1,2,0,1,2,...] into one u32: base-3 encoding
         // digit[0]*3^0 + digit[1]*3^1 + digit[2]*3^2 + ...
         // digits = [0,1,2,0,1,2,0,1,2,0,1,2,0,1,2,0,1,2,0,1]
-        let digits: [u32; 20] = [
-            0, 1, 2, 0, 1, 2, 0, 1, 2, 0,
-            1, 2, 0, 1, 2, 0, 1, 2, 0, 1,
-        ];
+        let digits: [u32; 20] = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1];
         let mut val = 0u32;
         let mut mul = 1u32;
         for i in 0..20 {
@@ -249,7 +277,13 @@ mod tests {
                 2 => 1.0,
                 _ => unreachable!(),
             };
-            assert!((v - expected).abs() < 1e-6, "weight {}: expected {} got {}", i, expected, v);
+            assert!(
+                (v - expected).abs() < 1e-6,
+                "weight {}: expected {} got {}",
+                i,
+                expected,
+                v
+            );
         }
     }
 
@@ -271,7 +305,8 @@ mod tests {
 
         // Verify block scale is reasonable
         for block in &blocks {
-            let scale_bits = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(block.block_scale)) };
+            let scale_bits =
+                unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(block.block_scale)) };
             let scale = half::f16::from_bits(scale_bits).to_f32();
             assert!(scale > 0.0, "scale should be positive, got {}", scale);
         }
@@ -281,13 +316,13 @@ mod tests {
     fn test_interleave_fused_ternary_layer() {
         // Build minimal test data: 1 row per matrix (1 row = 20 blocks × 9 = 180 bytes)
         let rows = [
-            (32usize, 180 * 32),  // q: 1 row
-            (32, 180 * 32),       // k: 1 row
-            (32, 180 * 32),       // v: 1 row
-            (32, 180 * 32),       // o: 1 row
-            (32, 180 * 32),       // gate: 1 row
-            (32, 180 * 32),       // up: 1 row
-            (32, 180 * 32),       // down: 1 row
+            (32usize, 180 * 32), // q: 1 row
+            (32, 180 * 32),      // k: 1 row
+            (32, 180 * 32),      // v: 1 row
+            (32, 180 * 32),      // o: 1 row
+            (32, 180 * 32),      // gate: 1 row
+            (32, 180 * 32),      // up: 1 row
+            (32, 180 * 32),      // down: 1 row
         ];
 
         let make_data = |len: usize, fill: u8| -> Vec<u8> { vec![fill; len] };
@@ -300,10 +335,8 @@ mod tests {
         let up = make_data(rows[5].1, 6);
         let down = make_data(rows[6].1, 7);
 
-        let fused = interleave_fused_ternary_layer(
-            &q, &k, &v, &o, &gate, &up, &down,
-            32, 32, 32, 32, 32,
-        );
+        let fused =
+            interleave_fused_ternary_layer(&q, &k, &v, &o, &gate, &up, &down, 32, 32, 32, 32, 32);
 
         // 1 tile position × 7 matrices × 180 bytes = 1260 bytes
         assert_eq!(fused.len(), 1260);
@@ -321,18 +354,16 @@ mod tests {
     #[test]
     fn test_interleave_asymmetric_matrices() {
         // Q has 2 rows, others have 1 row (64 vs 32 elements)
-        let q = vec![0xAAu8; 360];    // 2 rows of 180
-        let k = vec![0xBBu8; 180];    // 1 row
+        let q = vec![0xAAu8; 360]; // 2 rows of 180
+        let k = vec![0xBBu8; 180]; // 1 row
         let v = vec![0xCCu8; 180];
-        let o = vec![0xDDu8; 360];    // 2 rows
+        let o = vec![0xDDu8; 360]; // 2 rows
         let gate = vec![0xEEu8; 180];
         let up = vec![0xFFu8; 180];
         let down = vec![0x00u8; 180];
 
-        let fused = interleave_fused_ternary_layer(
-            &q, &k, &v, &o, &gate, &up, &down,
-            64, 32, 64, 32, 32,
-        );
+        let fused =
+            interleave_fused_ternary_layer(&q, &k, &v, &o, &gate, &up, &down, 64, 32, 64, 32, 32);
 
         // max tiles = max(ceil(64/32), ceil(32/32), ...) = max(2,1,1,2,1,1,1) = 2
         // Each tile = 1260 bytes → 2520 total
@@ -345,7 +376,11 @@ mod tests {
 
         // Tile 1: K,V,Gate,Up,Down should be zeros (only 1 row each)
         for off in [180, 360, 720, 900, 1080] {
-            assert_eq!(fused[1260 + off], 0, "matrix with 1 row should be zero-padded at tile 1");
+            assert_eq!(
+                fused[1260 + off],
+                0,
+                "matrix with 1 row should be zero-padded at tile 1"
+            );
         }
     }
 }

@@ -158,8 +158,7 @@ impl AgentState {
     /// Feed tool execution results back to the model.
     pub fn feed_tool_results(&mut self, results: Vec<(String, serde_json::Value)>) {
         for (name, result) in results {
-            self.messages
-                .push(Message::tool_result(&name, result));
+            self.messages.push(Message::tool_result(&name, result));
         }
         self.round += 1;
         if self.round >= self.max_rounds {
@@ -208,7 +207,10 @@ impl AgentState {
         let filtered_tools = if tool_allowlist.is_empty() {
             tools
         } else {
-            tools.into_iter().filter(|t| tool_allowlist.contains(&t.name)).collect()
+            tools
+                .into_iter()
+                .filter(|t| tool_allowlist.contains(&t.name))
+                .collect()
         };
         let mut handle = SubagentHandle {
             id,
@@ -268,18 +270,13 @@ pub enum StepOutcome {
 /// - Executing tools when `ToolCalls` is returned and calling
 ///   `feed_tool_results()` with the results
 /// - Driving subagents when `SubagentSpawned` is returned
-pub fn step(
-    state: &mut AgentState,
-    model_output: &str,
-) -> Result<StepOutcome, String> {
+pub fn step(state: &mut AgentState, model_output: &str) -> Result<StepOutcome, String> {
     match &state.phase {
         Phase::Idle | Phase::Done { .. } => return Ok(StepOutcome::Idle),
         Phase::AwaitingTools { .. } | Phase::AwaitingSubagents => {
-            return Err(
-                "step() called while awaiting tool results or subagents — \
+            return Err("step() called while awaiting tool results or subagents — \
                  call feed_tool_results() or feed_subagent_result() first"
-                    .into(),
-            );
+                .into());
         }
         Phase::Generating => {}
     }
@@ -371,9 +368,7 @@ pub fn build_agent_prompt(messages: &[Message], tools: &[ToolDefinition]) -> Str
         serde_json::to_string_pretty(tools).unwrap_or_default()
     ));
     prompt.push_str("To call a tool, respond with:\n");
-    prompt.push_str(
-        "```tool_call\n{\"name\": \"tool_name\", \"arguments\": {...}}\n```\n\n",
-    );
+    prompt.push_str("```tool_call\n{\"name\": \"tool_name\", \"arguments\": {...}}\n```\n\n");
     prompt.push_str("To spawn a subagent for a subtask, use the `spawn_subagent` tool.\n\n");
     prompt.push_str("Conversation:\n");
     for msg in messages {
@@ -384,7 +379,10 @@ pub fn build_agent_prompt(messages: &[Message], tools: &[ToolDefinition]) -> Str
             }
             "tool" => {
                 let tool_name = msg.tool_result.as_deref().unwrap_or("unknown");
-                prompt.push_str(&format!("Tool result: {}\n", format_tool_result(tool_name, &msg.content)));
+                prompt.push_str(&format!(
+                    "Tool result: {}\n",
+                    format_tool_result(tool_name, &msg.content)
+                ));
             }
             _ => {}
         }

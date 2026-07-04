@@ -19,7 +19,9 @@ use crate::compilation::ane_admission_gate::{LaneAdmissionGate, RiskPolicy};
 use crate::compilation::phase_ir::PhaseId;
 use crate::compilation::tri_lane::{EpochRouteOrigin, NumericalStatus};
 use crate::compute_image::compile::portfolio::CoreAiArtifactKey;
-use crate::scheduling::ane_artifact_cache::{AneArtifactCache, ArtifactKey, ArtifactResidencyState};
+use crate::scheduling::ane_artifact_cache::{
+    AneArtifactCache, ArtifactKey, ArtifactResidencyState,
+};
 use crate::scheduling::memory_pool::MemoryPoolAllocator;
 
 // ── Type aliases ────────────────────────────────────────────────────────────
@@ -314,7 +316,11 @@ impl TriLaneOrchestrator {
     ///
     /// `select_best_idx` returns `Option<usize>` (not a reference into self),
     /// so we clone before the mutable borrow on `self.lane_queues`.
-    pub fn submit(&mut self, phase_set: &PhaseVariantSet, lane_hint: Option<u32>) -> Result<WorkCompletion, String> {
+    pub fn submit(
+        &mut self,
+        phase_set: &PhaseVariantSet,
+        lane_hint: Option<u32>,
+    ) -> Result<WorkCompletion, String> {
         let best_idx = self
             .select_best_idx(phase_set, lane_hint)
             .ok_or_else(|| "no admissible variant".to_string())?;
@@ -345,7 +351,10 @@ impl TriLaneOrchestrator {
         }
 
         // Reserve page allocation for the activated slot.
-        if let Err(e) = self.memory_pool.resolve_pool_allocation(phase_set.phase_id.0 as usize, 4096) {
+        if let Err(e) = self
+            .memory_pool
+            .resolve_pool_allocation(phase_set.phase_id.0 as usize, 4096)
+        {
             eprintln!("[tri-lane] page allocation failed: {}", e);
         }
 
@@ -369,7 +378,11 @@ impl TriLaneOrchestrator {
     /// highest score.
     ///
     /// Returns `None` when no variant passes the filters.
-    pub fn select_best_idx(&self, phase_set: &PhaseVariantSet, lane_hint: Option<u32>) -> Option<usize> {
+    pub fn select_best_idx(
+        &self,
+        phase_set: &PhaseVariantSet,
+        lane_hint: Option<u32>,
+    ) -> Option<usize> {
         let mut best_idx: Option<usize> = None;
         let mut best_score: f64 = f64::NEG_INFINITY;
 
@@ -381,7 +394,9 @@ impl TriLaneOrchestrator {
                         continue;
                     }
 
-                    if variant.lane == ExecutionLane::CoreAiAne && !self.is_ane_artifact_warmed(&variant) {
+                    if variant.lane == ExecutionLane::CoreAiAne
+                        && !self.is_ane_artifact_warmed(&variant)
+                    {
                         continue;
                     }
 
@@ -469,7 +484,9 @@ impl TriLaneOrchestrator {
     /// Returns Ok(total_bytes) if within budget, Err(OOM description) otherwise.
     pub fn check_memory_budget(&self) -> Result<u64, String> {
         let static_base: u64 = 6_500_000_000; // ~6.5 GB base model + runtime
-        self.memory_pool.verify_memory_budget().map(|used| used + static_base)
+        self.memory_pool
+            .verify_memory_budget()
+            .map(|used| used + static_base)
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
@@ -564,7 +581,8 @@ mod tests {
                 dtype: crate::compilation::phase_ir::TensorDtype::Float16,
                 seq_bucket: 128,
                 hidden_dim: 512,
-                physical_layout: crate::compilation::activation_abi::PhysicalLayout::ContiguousRowMajor,
+                physical_layout:
+                    crate::compilation::activation_abi::PhysicalLayout::ContiguousRowMajor,
                 alignment: 64,
                 stride_constraint: None,
             },
@@ -592,7 +610,11 @@ mod tests {
         }
     }
 
-    fn sample_phase_variant(lane: ExecutionLane, exec_ns: u64, admission: AdmissionStatus) -> PhaseVariant {
+    fn sample_phase_variant(
+        lane: ExecutionLane,
+        exec_ns: u64,
+        admission: AdmissionStatus,
+    ) -> PhaseVariant {
         PhaseVariant {
             lane,
             artifact_key: None,
@@ -620,10 +642,10 @@ mod tests {
             DispatchPolicy {
                 risk_policy: RiskPolicy::ProductionOnly,
             },
-        LaneAdmissionGate::new(RiskPolicy::ProductionOnly),
+            LaneAdmissionGate::new(RiskPolicy::ProductionOnly),
             AneArtifactCache::new(32, 1_000_000_000, AneEvictionPolicy::Lru),
-            16_000_000_000,  // max_vram_bytes: 16 GB
-            1_000_000_000,   // fixed_overhead_bytes: 1 GB
+            16_000_000_000, // max_vram_bytes: 16 GB
+            1_000_000_000,  // fixed_overhead_bytes: 1 GB
         )
     }
 
@@ -663,14 +685,22 @@ mod tests {
         let phase_set = PhaseVariantSet {
             phase_id: PhaseId(1),
             variants: vec![
-                sample_phase_variant(ExecutionLane::MlxGpu, 100, AdmissionStatus::Denied("no".into())),
+                sample_phase_variant(
+                    ExecutionLane::MlxGpu,
+                    100,
+                    AdmissionStatus::Denied("no".into()),
+                ),
                 sample_phase_variant(ExecutionLane::MlxGpu, 200, AdmissionStatus::Admitted),
             ],
         };
         let orch = make_orchestrator(vec![phase_set]);
 
         let idx = orch.select_best_idx(&orch.phase_dag[0], None);
-        assert_eq!(idx, Some(1), "should select the admitted variant (index 1), not the denied one");
+        assert_eq!(
+            idx,
+            Some(1),
+            "should select the admitted variant (index 1), not the denied one"
+        );
     }
 
     #[test]
@@ -698,7 +728,11 @@ mod tests {
 
         // Cache is empty → ANE variant is cold → filtered → selects metal.
         let idx = orch.select_best_idx(&orch.phase_dag[0], None);
-        assert_eq!(idx, Some(1), "should select the metal variant (index 1) because ANE is cold");
+        assert_eq!(
+            idx,
+            Some(1),
+            "should select the metal variant (index 1) because ANE is cold"
+        );
     }
 
     #[test]
@@ -756,7 +790,10 @@ mod tests {
         assert_eq!(deserialized.variant_id, 0);
         assert_eq!(deserialized.lane, ExecutionLane::CoreAiAne);
         assert_eq!(deserialized.artifact_key, Some(sample_artifact_key()));
-        assert_eq!(deserialized.input_slots, vec![SlotLeaseId(1), SlotLeaseId(2)]);
+        assert_eq!(
+            deserialized.input_slots,
+            vec![SlotLeaseId(1), SlotLeaseId(2)]
+        );
         assert_eq!(deserialized.output_slot, SlotLeaseId(3));
         assert_eq!(deserialized.fallback_used, false);
         assert_eq!(deserialized.route_origin, EpochRouteOrigin::CoreAiAne);
@@ -768,8 +805,16 @@ mod tests {
         let phase_set = PhaseVariantSet {
             phase_id: PhaseId(99),
             variants: vec![
-                sample_phase_variant(ExecutionLane::MlxGpu, 100, AdmissionStatus::Denied("bad".into())),
-                sample_phase_variant(ExecutionLane::AccelerateCpu, 200, AdmissionStatus::NotAttempted),
+                sample_phase_variant(
+                    ExecutionLane::MlxGpu,
+                    100,
+                    AdmissionStatus::Denied("bad".into()),
+                ),
+                sample_phase_variant(
+                    ExecutionLane::AccelerateCpu,
+                    200,
+                    AdmissionStatus::NotAttempted,
+                ),
             ],
         };
         let orch = make_orchestrator(vec![phase_set]);
@@ -792,18 +837,34 @@ mod tests {
 
         // Without lane pinning, CPU should be preferred due to lower cost.
         let default_idx = orch.select_best_idx(&orch.phase_dag[0], None);
-        assert_eq!(default_idx, Some(1), "cost model should select AccelerateCpu (index 1)");
+        assert_eq!(
+            default_idx,
+            Some(1),
+            "cost model should select AccelerateCpu (index 1)"
+        );
 
         // With GPU pinning (lane_hint = 1), GPU variant (index 0) must be forced regardless of higher cost.
         let pinned_gpu_idx = orch.select_best_idx(&orch.phase_dag[0], Some(1));
-        assert_eq!(pinned_gpu_idx, Some(0), "lane pinning to GPU should bypass cost scoring and select MlxGpu");
+        assert_eq!(
+            pinned_gpu_idx,
+            Some(0),
+            "lane pinning to GPU should bypass cost scoring and select MlxGpu"
+        );
 
         // With CPU pinning (lane_hint = 3), CPU variant (index 1) must be forced.
         let pinned_cpu_idx = orch.select_best_idx(&orch.phase_dag[0], Some(3));
-        assert_eq!(pinned_cpu_idx, Some(1), "lane pinning to CPU should select AccelerateCpu");
+        assert_eq!(
+            pinned_cpu_idx,
+            Some(1),
+            "lane pinning to CPU should select AccelerateCpu"
+        );
 
         // With invalid/unavailable lane pinning (lane_hint = 2, CoreAiAne not present), should fallback to cost scoring.
         let invalid_pinned_idx = orch.select_best_idx(&orch.phase_dag[0], Some(2));
-        assert_eq!(invalid_pinned_idx, Some(1), "unavailable pinned lane should fall back to cost scoring");
+        assert_eq!(
+            invalid_pinned_idx,
+            Some(1),
+            "unavailable pinned lane should fall back to cost scoring"
+        );
     }
 }

@@ -22,18 +22,18 @@
 //! (kv_scratch_k/kv_scratch_v) hold FP16 for one decompressed layer during decode.
 //! organised as `[layer][position][head][dim]`.
 
-mod runner;
 mod compilation;
+pub mod kernel_fusion;
 mod loading;
 mod multimodal_assembly;
-pub mod vision_projection;
 pub mod multimodal_receipt;
-pub mod kernel_fusion;
+mod runner;
+pub mod vision_projection;
 
 pub use runner::Orchestrator;
 
 pub use crate::compute_image::multimodal::{
-    InputModality, ModalityError, MultimodalCapabilities, MultimodalArtifactSummary,
+    InputModality, ModalityError, MultimodalArtifactSummary, MultimodalCapabilities,
     ProjectionBackend, ProjectionPrecision,
 };
 use multimodal_assembly::PromptPart;
@@ -359,7 +359,10 @@ pub struct MtpKvState {
 
 impl MtpKvState {
     pub fn new() -> Self {
-        Self { committed_generation: 0, speculative_generation: 0 }
+        Self {
+            committed_generation: 0,
+            speculative_generation: 0,
+        }
     }
 
     /// Record a new speculative step. Does not commit.

@@ -327,8 +327,8 @@ fn test_seq_macropipeline_overlap() {
     // ── Allocate arenas ──────────────────────────────────────────────────
     let input_arena =
         Arena::new(CHUNK_SIZE as u32, HIDDEN as u32, DataType::Float16).expect("input arena");
-    let output_arena = Arena::new(CHUNK_SIZE as u32, FFN_DIM as u32, DataType::Float16)
-        .expect("output arena");
+    let output_arena =
+        Arena::new(CHUNK_SIZE as u32, FFN_DIM as u32, DataType::Float16).expect("output arena");
 
     let input_name = "input".to_string();
     let output_name = "matmul_1".to_string();

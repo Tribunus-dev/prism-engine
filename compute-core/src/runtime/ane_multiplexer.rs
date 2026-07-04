@@ -12,9 +12,9 @@
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use super::agent_slot::{MultiplexerState, STATE_READY, STATE_EXECUTING, STATE_IDLE};
-use crate::runtime::world::Entity;
+use super::agent_slot::{MultiplexerState, STATE_EXECUTING, STATE_IDLE, STATE_READY};
 use crate::runtime::components::AgentSlot;
+use crate::runtime::world::Entity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TopologyMode {

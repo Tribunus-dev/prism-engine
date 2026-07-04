@@ -269,7 +269,8 @@ fn test_ane_gpu_ring_buffer() {
     // ── 2. Allocate arenas ─────────────────────────────────────────────────
 
     let in_arena = Arena::new(1, H as u32, DataType::Float16).expect("input arena");
-    let out_arena = Arena::new(1, FFN as u32, DataType::Float16).expect("output arena (ring buffer)");
+    let out_arena =
+        Arena::new(1, FFN as u32, DataType::Float16).expect("output arena (ring buffer)");
     let out_arena2 =
         Arena::new(1, FFN as u32, DataType::Float16).expect("output arena (ring buffer 2)");
 

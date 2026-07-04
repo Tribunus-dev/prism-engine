@@ -23,8 +23,8 @@ use crate::memory::allocator::BlockHandle;
 use crate::quantization::turboquant_kv::{
     AsymmetricQuantMode, KvQuantMode, QjlCorrection, TurboQuantKvCache,
 };
+use crate::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 use std::time::Instant;
-use crate::runtime::scheduling::component_id::{SchedulableResource, ResourceId};
 
 /// Resource ID for KVCacheCoordinator.
 pub const KV_CACHE_COORDINATOR_RESOURCE: ResourceId = 19;
@@ -1009,7 +1009,11 @@ pub enum PageBacking {
     /// Device-local memory buffer (dGPU VRAM, ANE SRAM).
     DeviceBuffer { handle: u64, byte_size: u64 },
     /// Shared/unified memory accessible by CPU and GPU.
-    SharedBuffer { handle: u64, byte_size: u64, domain_tag: u32 },
+    SharedBuffer {
+        handle: u64,
+        byte_size: u64,
+        domain_tag: u32,
+    },
     /// Host system DRAM (resident in process heap).
     SystemHeap { byte_size: u64 },
     /// Disk-backed (no resident data, token_start encodes the path).
@@ -1173,10 +1177,7 @@ impl PageMigrationService {
     /// `policy` — the platform-specific migration policy that handles
     /// compress/decompress and tier promotion/demotion.
     /// `total_cache_budget` — total cache budget for EvolKV optimization.
-    pub fn new(
-        policy: Box<dyn PageMigrationPolicy>,
-        total_cache_budget: usize,
-    ) -> Self {
+    pub fn new(policy: Box<dyn PageMigrationPolicy>, total_cache_budget: usize) -> Self {
         Self {
             pages: Vec::new(),
             policy,

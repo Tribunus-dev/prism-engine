@@ -5,7 +5,10 @@ fn gemma4_12b_schema_matches_known_constants() {
     let schema = Gemma4UnifiedSchema::gemma4_12b_unified();
     assert_eq!(schema.hidden_size, GEMMA4_12B_UNIFIED_HIDDEN_SIZE);
     assert_eq!(schema.num_layers, GEMMA4_12B_UNIFIED_NUM_LAYERS);
-    assert_eq!(schema.num_attention_heads, GEMMA4_12B_UNIFIED_NUM_ATTENTION_HEADS);
+    assert_eq!(
+        schema.num_attention_heads,
+        GEMMA4_12B_UNIFIED_NUM_ATTENTION_HEADS
+    );
     assert_eq!(schema.num_key_value_heads, GEMMA4_12B_UNIFIED_NUM_KV_HEADS);
     assert_eq!(schema.vocabulary_size, GEMMA4_12B_UNIFIED_VOCABULARY_SIZE);
     assert!(schema.supports_text);
@@ -24,23 +27,17 @@ fn gemma4_12b_schema_validates_architecture() {
 #[test]
 fn gemma4_schema_rejects_legacy_vision_tower() {
     let schema = Gemma4UnifiedSchema::gemma4_12b_unified();
-    let names_with_vit = vec![
-        "model.vision_tower.encoder.layers.0.weight".to_string(),
-    ];
+    let names_with_vit = vec!["model.vision_tower.encoder.layers.0.weight".to_string()];
     assert!(schema.reject_legacy_vision_tower(&names_with_vit).is_err());
 
-    let names_clean = vec![
-        "model.layers.0.self_attn.q_proj.weight".to_string(),
-    ];
+    let names_clean = vec!["model.layers.0.self_attn.q_proj.weight".to_string()];
     assert!(schema.reject_legacy_vision_tower(&names_clean).is_ok());
 }
 
 #[test]
 fn gemma4_schema_rejects_siglip_tensors() {
     let schema = Gemma4UnifiedSchema::gemma4_12b_unified();
-    let names = vec![
-        "siglip.vision_model.encoder.layers.0.self_attn.q_proj.weight".to_string(),
-    ];
+    let names = vec!["siglip.vision_model.encoder.layers.0.self_attn.q_proj.weight".to_string()];
     assert!(schema.reject_legacy_vision_tower(&names).is_err());
 }
 

@@ -1,7 +1,7 @@
 //! CPU device probe — discovers CPU cores, cache, and ISA features.
 
-use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo};
 use super::DeviceProbe;
+use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo};
 
 /// Probes CPU capabilities using `std::thread` and target-feature cfg checks.
 pub struct CpuProbe;
@@ -55,7 +55,7 @@ fn probe_cpu() -> DeviceInfo {
     };
 
     DeviceInfo {
-        id: crate::device::DeviceId(0),  // placeholder — registry assigns real ids
+        id: crate::device::DeviceId(0), // placeholder — registry assigns real ids
         kind: DeviceKind::Cpu,
         backend: BackendKind::Cpu,
         name: format!("{} CPU ({} cores)", arch_name, logical_cores),
@@ -63,7 +63,7 @@ fn probe_cpu() -> DeviceInfo {
         driver_version: String::new(),
         memory: DeviceMemoryInfo {
             total_bytes: total_ram_bytes,
-            free_bytes: 0,  // populated by OS-specific probe if needed
+            free_bytes: 0, // populated by OS-specific probe if needed
             bandwidth_gb_per_sec: estimate_memory_bandwidth(),
             unified_with_cpu: true,
         },
@@ -85,14 +85,14 @@ fn detect_isa_features() -> (bool, bool, bool) {
     // Both support INT8.
 
     let f16 = cfg!(any(
-        target_feature = "fp16c",            // ARM NEON FP16
-        target_feature = "avx512fp16",        // x86 AVX-512 FP16
-        all(target_arch = "aarch64", target_os = "macos"),  // Apple Silicon NEON
+        target_feature = "fp16c",                          // ARM NEON FP16
+        target_feature = "avx512fp16",                     // x86 AVX-512 FP16
+        all(target_arch = "aarch64", target_os = "macos"), // Apple Silicon NEON
     ));
 
     let bf16 = cfg!(any(
-        target_feature = "bf16",              // ARM BF16
-        target_feature = "amx-bf16",          // x86 AMX BF16
+        target_feature = "bf16",     // ARM BF16
+        target_feature = "amx-bf16", // x86 AMX BF16
     ));
 
     let int8 = true; // All modern CPUs support INT8
@@ -106,10 +106,7 @@ fn estimate_total_ram() -> u64 {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
-        if let Ok(out) = Command::new("sysctl")
-            .args(["-n", "hw.memsize"])
-            .output()
-        {
+        if let Ok(out) = Command::new("sysctl").args(["-n", "hw.memsize"]).output() {
             if let Ok(s) = String::from_utf8(out.stdout) {
                 if let Ok(bytes) = s.trim().parse::<u64>() {
                     return bytes;

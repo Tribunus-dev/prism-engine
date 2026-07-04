@@ -5,8 +5,8 @@
 //! diagonal estimates, threshold selection, per-page and per-channel scale
 //! solves, sidecar ranking, deterministic reductions, and receipt hashing.
 
-use crate::calibration::accelerate::dot_product;
 use super::super::receipt::ObjectiveWeights;
+use crate::calibration::accelerate::dot_product;
 
 /// The Accelerate reducer — runs on the CPU/Accelerate control plane.
 ///
@@ -48,13 +48,11 @@ impl AccelerateReducer {
     /// * **MSE**: Mean squared error: `(1/N) Σ (t[i] - s[i])²`
     /// * **Cosine similarity**: `Σ t[i]·s[i] / (‖t‖ · ‖s‖)`
     /// * **Residual relative error**: `‖t - s‖₂ / ‖t‖₂`
-    pub fn reduce(
-        &mut self,
-        _microbatch: usize,
-        teacher_out: &[f32],
-        student_out: &[f32],
-    ) {
-        let len = teacher_out.len().min(student_out.len()).min(self.hidden_dim);
+    pub fn reduce(&mut self, _microbatch: usize, teacher_out: &[f32], student_out: &[f32]) {
+        let len = teacher_out
+            .len()
+            .min(student_out.len())
+            .min(self.hidden_dim);
         if len == 0 {
             self.output_mse = Some(f64::INFINITY);
             self.cosine_similarity = Some(0.0);

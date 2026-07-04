@@ -4,10 +4,10 @@
 //! as `/dev/dri/renderD*` devices bound to the `amdxdna` kernel driver.
 //! This probe discovers them and reports basic properties.
 
+use super::DeviceProbe;
+use crate::device::DeviceInfo;
 #[cfg(target_os = "linux")]
 use crate::device::{BackendKind, DeviceKind, DeviceMemoryInfo};
-use crate::device::DeviceInfo;
-use super::DeviceProbe;
 
 /// Probes AMD XDNA NPU devices via sysfs on Linux.
 pub struct AmdNpuProbe;

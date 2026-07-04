@@ -320,8 +320,13 @@ pub fn compile_compaction_model_optimized(
 fn compile_compaction_mil_inner(mil_text: &str) -> Result<CoreAiModel, String> {
     // Wrap MIL text in a .mlpackage and compile via coremlc, then load.
     // This supports the program(1.3) format that coremlcompiler accepts.
-    let tag = format!("ane_compaction_{:x}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    let tag = format!(
+        "ane_compaction_{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
     let tmp = std::env::temp_dir().join(&tag);
     let _ = std::fs::create_dir_all(&tmp);
     let _ = std::fs::create_dir_all(tmp.join("Data"));
@@ -343,12 +348,20 @@ fn compile_compaction_mil_inner(mil_text: &str) -> Result<CoreAiModel, String> {
             }]
         }
     });
-    std::fs::write(tmp.join("Manifest.json"), serde_json::to_string_pretty(&manifest).unwrap())
-        .map_err(|e| format!("write Manifest.json: {}", e))?;
+    std::fs::write(
+        tmp.join("Manifest.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .map_err(|e| format!("write Manifest.json: {}", e))?;
 
     let out_dir = tmp.join("compiled");
     let output = std::process::Command::new("xcrun")
-        .args(["coremlc", "compile", &tmp.to_string_lossy(), &out_dir.to_string_lossy()])
+        .args([
+            "coremlc",
+            "compile",
+            &tmp.to_string_lossy(),
+            &out_dir.to_string_lossy(),
+        ])
         .output()
         .map_err(|e| format!("coremlc: {}", e))?;
     if !output.status.success() {
@@ -690,7 +703,10 @@ fn test_entropy_all_zero() {
 #[test]
 fn test_optimized_mil_contains_axis3_and_b_c_1_s() {
     let mil = generate_compaction_mil_optimized(8, 512, 2048, 20480);
-    assert!(mil.contains("axis = 3L"), "MIL should have axis=3 in program(1.3) format");
+    assert!(
+        mil.contains("axis = 3L"),
+        "MIL should have axis=3 in program(1.3) format"
+    );
     // Verify [B, C, 1, S] layout — inputs start with [1,
     assert!(
         mil.contains("[1, "),

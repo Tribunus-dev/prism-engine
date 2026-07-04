@@ -115,9 +115,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 pub fn sandbox_root(explicit: Option<&Path>) -> PathBuf {
     if let Some(ex) = explicit {
         if !ex.as_os_str().is_empty() {
-            return ex
-                .canonicalize()
-                .unwrap_or_else(|_| ex.to_path_buf());
+            return ex.canonicalize().unwrap_or_else(|_| ex.to_path_buf());
         }
     }
 
@@ -128,8 +126,7 @@ pub fn sandbox_root(explicit: Option<&Path>) -> PathBuf {
         }
     }
 
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("/"))
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
 }
 
 // ── Error helper ───────────────────────────────────────────────────────────
@@ -499,7 +496,10 @@ pub fn tool_write_file(root: &Path, args: &serde_json::Value) -> serde_json::Val
     if let Some(parent) = resolved.parent() {
         if !parent.exists() {
             if let Err(e) = fs::create_dir_all(parent) {
-                return err_json("write_error", &format!("cannot create parent directories: {e}"));
+                return err_json(
+                    "write_error",
+                    &format!("cannot create parent directories: {e}"),
+                );
             }
         }
     }
@@ -545,10 +545,7 @@ pub fn tool_edit_file(root: &Path, args: &serde_json::Value) -> serde_json::Valu
         None => return err_json("missing_param", "missing required parameter 'old_text'"),
     };
 
-    let new_text = args
-        .get("new_text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
 
     if old_text.is_empty() {
         return err_json("invalid_param", "'old_text' must not be empty");
@@ -657,10 +654,7 @@ pub fn tool_edit_file(root: &Path, args: &serde_json::Value) -> serde_json::Valu
 /// Accepts optional `include_hidden` boolean (default false).
 /// Returns `{ ok, path, entries: [{ name, type, size, modified }] }`.
 pub fn tool_list_directory(root: &Path, args: &serde_json::Value) -> serde_json::Value {
-    let path_str = args
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".");
+    let path_str = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
     let include_hidden = args
         .get("include_hidden")
@@ -710,14 +704,11 @@ pub fn tool_list_directory(root: &Path, args: &serde_json::Value) -> serde_json:
             "file"
         };
 
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|t| {
-                t.duration_since(std::time::UNIX_EPOCH)
-                    .ok()
-                    .map(|d| d.as_secs() as i64)
-            });
+        let modified = metadata.modified().ok().and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() as i64)
+        });
 
         result_entries.push(serde_json::json!({
             "name": name,
@@ -746,10 +737,7 @@ pub fn tool_list_directory(root: &Path, args: &serde_json::Value) -> serde_json:
 /// Accepts optional `path` (subdirectory), `extension` filter, and `max_results`.
 /// Returns `{ ok, files: [...] }` with sorted relative paths.
 pub fn tool_glob_files(root: &Path, args: &serde_json::Value) -> serde_json::Value {
-    let path_str = args
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".");
+    let path_str = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
     let extension = args.get("extension").and_then(|v| v.as_str());
 
@@ -806,10 +794,7 @@ pub fn tool_search_files(root: &Path, args: &serde_json::Value) -> serde_json::V
         return err_json("invalid_param", "'pattern' must not be empty");
     }
 
-    let path_str = args
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".");
+    let path_str = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
 
     let extension = args.get("extension").and_then(|v| v.as_str());
 

@@ -44,9 +44,7 @@ pub enum PrismEmbeddingError {
 /// Entry point for the Prism embedding generation facade.  Always available at
 /// compile time; returns `MissingFeature` when the `prism-backend` feature
 /// is not enabled.
-pub fn generate_embedding(
-    params: EmbeddingParams,
-) -> Result<EmbeddingResult, PrismEmbeddingError> {
+pub fn generate_embedding(params: EmbeddingParams) -> Result<EmbeddingResult, PrismEmbeddingError> {
     #[cfg(feature = "prism-backend")]
     {
         generate_via_compute_core(params)
@@ -82,7 +80,11 @@ fn generate_via_compute_core(
 
     let mut vec: Vec<f32> = raw.as_slice::<f32>().to_vec();
 
-    debug_assert_eq!(vec.len(), dimension as usize, "embedding dimension mismatch");
+    debug_assert_eq!(
+        vec.len(),
+        dimension as usize,
+        "embedding dimension mismatch"
+    );
 
     if params.normalize {
         // L2 normalization

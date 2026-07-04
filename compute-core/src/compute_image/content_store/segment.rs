@@ -112,9 +112,8 @@ impl DeterministicSegmentWriter {
         object_id: &str,
         content_hash: ContentHash,
     ) -> SegmentWriteReceipt {
-        let bytes = unsafe {
-            std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
-        };
+        let bytes =
+            unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
         self.append_object(bytes, object_id, content_hash)
     }
 }

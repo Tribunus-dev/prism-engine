@@ -24,8 +24,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use tribunus_compute_core::compute_image::orchestrator::Orchestrator;
 use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
+use tribunus_compute_core::compute_image::orchestrator::Orchestrator;
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
 
 // ── CLI ─────────────────────────────────────────────────────────────────
@@ -185,8 +185,12 @@ async fn chat_completions(
 
     let elapsed = start.elapsed();
     let tok_s = generated_tokens.len() as f64 / elapsed.as_secs_f64();
-    eprintln!("[prism-server] {} tokens in {:.2}s = {:.1} tok/s",
-        generated_tokens.len(), elapsed.as_secs_f64(), tok_s);
+    eprintln!(
+        "[prism-server] {} tokens in {:.2}s = {:.1} tok/s",
+        generated_tokens.len(),
+        elapsed.as_secs_f64(),
+        tok_s
+    );
 
     let output_text = state
         .tokenizer
@@ -223,14 +227,23 @@ async fn chat_completions(
 async fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    println!("[prism-server] Loading V2 cimage from {}...", args.cimage.display());
+    println!(
+        "[prism-server] Loading V2 cimage from {}...",
+        args.cimage.display()
+    );
     let orchestrator = Orchestrator::from_cimage(&args.cimage, 1, false)
         .map_err(|e| format!("cimage load failed: {e}"))?;
 
-    println!("[prism-server] Loading tokenizer from {}...", args.model_dir.display());
+    println!(
+        "[prism-server] Loading tokenizer from {}...",
+        args.model_dir.display()
+    );
     let tokenizer = TribunusTokenizer::from_dir(&args.model_dir)?;
 
-    let state = Arc::new(Mutex::new(AppState { orchestrator, tokenizer }));
+    let state = Arc::new(Mutex::new(AppState {
+        orchestrator,
+        tokenizer,
+    }));
 
     let app = Router::new()
         .route("/v1/models", get(list_models))

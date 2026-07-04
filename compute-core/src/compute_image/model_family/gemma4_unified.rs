@@ -44,7 +44,10 @@ impl TensorClassification {
     }
 
     pub fn is_required(&self) -> bool {
-        !matches!(self, TensorClassification::Unknown | TensorClassification::Ignored)
+        !matches!(
+            self,
+            TensorClassification::Unknown | TensorClassification::Ignored
+        )
     }
 }
 
@@ -75,27 +78,22 @@ pub fn classify_tensor_name(name: &str) -> TensorClassification {
     }
 
     // LM head
-    if lower.contains("lm_head_projection") || lower.contains("lm_head")
-    {
+    if lower.contains("lm_head_projection") || lower.contains("lm_head") {
         return TensorClassification::LmHeadRequired;
     }
     // Multimodal image (before Norms so pos_norm stays image)
 
-    if lower.contains("vision_embedder")
-        || lower.contains("embed_vision")
-    {
+    if lower.contains("vision_embedder") || lower.contains("embed_vision") {
         return TensorClassification::MultimodalImageRequired;
     }
 
     // Multimodal audio
-    if lower.contains("embed_audio")
-    {
+    if lower.contains("embed_audio") {
         return TensorClassification::MultimodalAudioRequired;
     }
 
     // MTP (before Norms so mtp_norm stays MTP)
-    if lower.contains("mtp_projection") || lower.contains("mtp_norm")
-    {
+    if lower.contains("mtp_projection") || lower.contains("mtp_norm") {
         return TensorClassification::MtpRequired;
     }
 

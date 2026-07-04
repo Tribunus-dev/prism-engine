@@ -66,15 +66,17 @@ impl TextArchitecture {
         let mut total = v * h;
 
         // Per layer projections:
-        let per_layer = n * (
-            h * (nq * hd)      // Q
+        let per_layer = n
+            * (
+                h * (nq * hd)      // Q
             + h * (nk * hd)     // K
             + h * (nk * hd)     // V
             + (nq * hd) * h     // O
             + h * im             // Gate
             + h * im             // Up
-            + im * h              // Down
-        );
+            + im * h
+                // Down
+            );
         total += per_layer;
 
         // LM head (if not tied with embeddings)

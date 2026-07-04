@@ -7,7 +7,9 @@
 
 use metal::*;
 use std::time::Instant;
-use tribunus_compute_core::compute_image::compile::int4_pack::{AlignedTernaryBlock32, quantize_to_ternary_block32};
+use tribunus_compute_core::compute_image::compile::int4_pack::{
+    quantize_to_ternary_block32, AlignedTernaryBlock32,
+};
 
 const HIDDEN: usize = 3840;
 const BPR: usize = HIDDEN / 32; // 120
@@ -24,9 +26,14 @@ const TGS: usize = MAX_ROWS / 4; // 3840 TGs for 4-row groups
 
 struct Rng(u64);
 impl Rng {
-    fn new(s: u64) -> Self { Self(s) }
+    fn new(s: u64) -> Self {
+        Self(s)
+    }
     fn f32(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         f32::from_bits(((self.0 >> 40) as u32 >> 9) | 0x3F80_0000) - 1.0
     }
 }
@@ -37,9 +44,13 @@ fn gen_weights(rng: &mut Rng, rows: usize) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(total * 16);
     for _ in 0..total {
         let mut fb = [0.0f32; 32];
-        for i in 0..32 { fb[i] = ((rng.f32() * 3.0 - 1.5) as i8).clamp(-1, 1) as f32; }
+        for i in 0..32 {
+            fb[i] = ((rng.f32() * 3.0 - 1.5) as i8).clamp(-1, 1) as f32;
+        }
         let s = fb.iter().map(|v| v.abs()).fold(0.0f32, f32::max).max(1.0);
-        for v in &mut fb { *v *= s; }
+        for v in &mut fb {
+            *v *= s;
+        }
         let tb = quantize_to_ternary_block32(&fb);
         let ab: AlignedTernaryBlock32 = tb.into();
         bytes.extend_from_slice(&ab.packed_trits);
@@ -51,18 +62,37 @@ fn gen_weights(rng: &mut Rng, rows: usize) -> Vec<u8> {
 
 fn gen_activation(rng: &mut Rng) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(HIDDEN * 2);
-    for _ in 0..HIDDEN { bytes.extend_from_slice(&half::f16::from_f32(rng.f32()).to_bits().to_le_bytes()); }
+    for _ in 0..HIDDEN {
+        bytes.extend_from_slice(&half::f16::from_f32(rng.f32()).to_bits().to_le_bytes());
+    }
     bytes
 }
 
 fn compile_msl(src: &str, entry: &str, dev: &Device) -> ComputePipelineState {
     let tmp = std::env::temp_dir().join("gemv-fused");
     let _ = std::fs::create_dir_all(&tmp);
-    let s = tmp.join("k.metal"); let a = tmp.join("k.air"); let l = tmp.join("k.metallib");
+    let s = tmp.join("k.metal");
+    let a = tmp.join("k.air");
+    let l = tmp.join("k.metallib");
     std::fs::write(&s, src).unwrap();
-    assert!(std::process::Command::new("xcrun").args(["-sdk","macosx","metal","-std=metal4.0","-O3","-c"]).arg(s.to_str().unwrap()).arg("-o").arg(a.to_str().unwrap()).status().unwrap().success());
-    assert!(std::process::Command::new("xcrun").args(["-sdk","macosx","metallib","-o"]).arg(l.to_str().unwrap()).arg(a.to_str().unwrap()).status().unwrap().success());
-    let lib = dev.new_library_with_data(&std::fs::read(&l).unwrap()).unwrap();
+    assert!(std::process::Command::new("xcrun")
+        .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
+        .arg(s.to_str().unwrap())
+        .arg("-o")
+        .arg(a.to_str().unwrap())
+        .status()
+        .unwrap()
+        .success());
+    assert!(std::process::Command::new("xcrun")
+        .args(["-sdk", "macosx", "metallib", "-o"])
+        .arg(l.to_str().unwrap())
+        .arg(a.to_str().unwrap())
+        .status()
+        .unwrap()
+        .success());
+    let lib = dev
+        .new_library_with_data(&std::fs::read(&l).unwrap())
+        .unwrap();
     let f = lib.get_function(entry, None).unwrap();
     dev.new_compute_pipeline_state_with_function(&f).unwrap()
 }
@@ -170,19 +200,20 @@ kernel void fused_projections(
 fn fused_projections_benchmark() {
     let mut rng = Rng::new(42);
     let dev = Device::system_default().expect("Metal device");
-    let shared = MTLResourceOptions::StorageModeShared | MTLResourceOptions::CPUCacheModeWriteCombined;
+    let shared =
+        MTLResourceOptions::StorageModeShared | MTLResourceOptions::CPUCacheModeWriteCombined;
     let queue = dev.new_command_queue();
 
     println!("\n═══ Fused Projections Kernel ═══\n");
 
     // Generate all 6 weight matrices concatenated
     println!("  Generating weights...");
-    let w_q     = gen_weights(&mut rng, Q_ROWS);
-    let w_k     = gen_weights(&mut rng, K_ROWS);
-    let w_v     = gen_weights(&mut rng, V_ROWS);
-    let w_o     = gen_weights(&mut rng, O_ROWS);
-    let w_gate  = gen_weights(&mut rng, GATE_ROWS);
-    let w_up    = gen_weights(&mut rng, UP_ROWS);
+    let w_q = gen_weights(&mut rng, Q_ROWS);
+    let w_k = gen_weights(&mut rng, K_ROWS);
+    let w_v = gen_weights(&mut rng, V_ROWS);
+    let w_o = gen_weights(&mut rng, O_ROWS);
+    let w_gate = gen_weights(&mut rng, GATE_ROWS);
+    let w_up = gen_weights(&mut rng, UP_ROWS);
 
     let mut all_weights = Vec::new();
     all_weights.extend_from_slice(&w_q);
@@ -191,22 +222,40 @@ fn fused_projections_benchmark() {
     all_weights.extend_from_slice(&w_o);
     all_weights.extend_from_slice(&w_gate);
     all_weights.extend_from_slice(&w_up);
-    println!("  Total weight data: {:.1} MB", all_weights.len() / 1_000_000);
+    println!(
+        "  Total weight data: {:.1} MB",
+        all_weights.len() / 1_000_000
+    );
 
     let act_bytes = gen_activation(&mut rng);
 
     let w_buf = dev.new_buffer(all_weights.len() as u64, shared);
-    unsafe { std::ptr::copy_nonoverlapping(all_weights.as_ptr(), w_buf.contents() as *mut u8, all_weights.len()); }
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            all_weights.as_ptr(),
+            w_buf.contents() as *mut u8,
+            all_weights.len(),
+        );
+    }
     let a_buf = dev.new_buffer(act_bytes.len() as u64, shared);
-    unsafe { std::ptr::copy_nonoverlapping(act_bytes.as_ptr(), a_buf.contents() as *mut u8, act_bytes.len()); }
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            act_bytes.as_ptr(),
+            a_buf.contents() as *mut u8,
+            act_bytes.len(),
+        );
+    }
 
-    let mk_buf = |size| { let b = dev.new_buffer(size as u64, MTLResourceOptions::StorageModeShared); b };
-    let o_q    = mk_buf(Q_ROWS * 2);
-    let o_k    = mk_buf(K_ROWS * 2);
-    let o_v    = mk_buf(V_ROWS * 2);
-    let o_o    = mk_buf(O_ROWS * 2);
+    let mk_buf = |size| {
+        let b = dev.new_buffer(size as u64, MTLResourceOptions::StorageModeShared);
+        b
+    };
+    let o_q = mk_buf(Q_ROWS * 2);
+    let o_k = mk_buf(K_ROWS * 2);
+    let o_v = mk_buf(V_ROWS * 2);
+    let o_o = mk_buf(O_ROWS * 2);
     let o_gate = mk_buf(GATE_ROWS * 2);
-    let o_up   = mk_buf(UP_ROWS * 2);
+    let o_up = mk_buf(UP_ROWS * 2);
 
     // Compile
     println!("  Compiling kernel...");
@@ -231,8 +280,16 @@ fn fused_projections_benchmark() {
         enc.set_buffer(6, Some(&o_gate), 0);
         enc.set_buffer(7, Some(&o_up), 0);
         enc.dispatch_thread_groups(
-            MTLSize { width: tg_count, height: 1, depth: 1 },
-            MTLSize { width: tg_size, height: 1, depth: 1 },
+            MTLSize {
+                width: tg_count,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: tg_size,
+                height: 1,
+                depth: 1,
+            },
         );
         enc.end_encoding();
         cb.commit();
@@ -256,8 +313,16 @@ fn fused_projections_benchmark() {
         enc.set_buffer(6, Some(&o_gate), 0);
         enc.set_buffer(7, Some(&o_up), 0);
         enc.dispatch_thread_groups(
-            MTLSize { width: tg_count, height: 1, depth: 1 },
-            MTLSize { width: tg_size, height: 1, depth: 1 },
+            MTLSize {
+                width: tg_count,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: tg_size,
+                height: 1,
+                depth: 1,
+            },
         );
         enc.end_encoding();
         cb.commit();

@@ -67,7 +67,10 @@ impl Qwen25OmniTensorClass {
     }
 
     pub fn is_required(&self) -> bool {
-        !matches!(self, Qwen25OmniTensorClass::Unknown | Qwen25OmniTensorClass::Ignored)
+        !matches!(
+            self,
+            Qwen25OmniTensorClass::Unknown | Qwen25OmniTensorClass::Ignored
+        )
     }
 }
 
@@ -99,35 +102,38 @@ pub fn classify_qwen25_omni_tensor(name: &str) -> Qwen25OmniTensorClass {
     }
 
     // Norms
-    if lower.contains("layernorm") || lower.contains("rms_norm")
-        || lower.contains("norm.weight") || lower.contains("norm.bias")
+    if lower.contains("layernorm")
+        || lower.contains("rms_norm")
+        || lower.contains("norm.weight")
+        || lower.contains("norm.bias")
     {
         return Qwen25OmniTensorClass::NormRequired;
     }
 
     // Vision encoder (ViT)
-    if lower.contains("visual") || lower.contains("vision_tower.vision_model")
-        || lower.contains("vision_model.embeddings") || lower.contains("vision_model.encoder")
+    if lower.contains("visual")
+        || lower.contains("vision_tower.vision_model")
+        || lower.contains("vision_model.embeddings")
+        || lower.contains("vision_model.encoder")
     {
         return Qwen25OmniTensorClass::VisionEncoderRequired;
     }
 
     // Vision projector (ViT → Thinker LM)
-    if lower.contains("vision_projection") || lower.contains("visual_projector")
-    {
+    if lower.contains("vision_projection") || lower.contains("visual_projector") {
         return Qwen25OmniTensorClass::VisionProjectorRequired;
     }
 
     // Audio encoder
-    if lower.contains("audio_tower") || lower.contains("audio_encoder")
+    if lower.contains("audio_tower")
+        || lower.contains("audio_encoder")
         || lower.contains("speech_encoder")
     {
         return Qwen25OmniTensorClass::AudioEncoderRequired;
     }
 
     // Audio projector
-    if lower.contains("audio_projection") || lower.contains("audio_projector")
-    {
+    if lower.contains("audio_projection") || lower.contains("audio_projector") {
         return Qwen25OmniTensorClass::AudioProjectorRequired;
     }
 
@@ -142,9 +148,7 @@ pub fn classify_qwen25_omni_tensor(name: &str) -> Qwen25OmniTensorClass {
     }
 
     // Optimizer states
-    if lower.contains("optimizer") || lower.contains("adam")
-        || lower.contains("exp_avg")
-    {
+    if lower.contains("optimizer") || lower.contains("adam") || lower.contains("exp_avg") {
         return Qwen25OmniTensorClass::Ignored;
     }
 

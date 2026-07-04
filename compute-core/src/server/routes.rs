@@ -54,9 +54,9 @@ use crate::exo::ExoNode;
 #[cfg(feature = "generation-tts")]
 use crate::generation::text_to_speech::pcm_to_wav;
 use crate::generation::video_generation::{TextToImageGenerator, VideoGenerator};
+use crate::kv_cache::KvCache;
 use crate::parsing::Grammar;
 use crate::parsing::GrammarTokenizer;
-use crate::kv_cache::KvCache;
 use crate::profiled_executor::{
     prefill_with_audio, AudioInput, LoadedProfiledModel, ProfiledInferenceSession,
 };
@@ -69,13 +69,13 @@ use crate::session::SamplerConfig;
 use crate::tokenizer::TribunusTokenizer;
 use std::time::Instant;
 //use std::path::Path; (removed - use FilePath alias from above)
+use crate::editing::{
+    self, AuditItem, AuditRequest, EditBatchRequest, EditRequest, KnowledgeEditor,
+};
 use crate::exo::NodeInfo;
 use crate::lora::{AdapterInfo, LoraAdapter};
 use crate::metrics::InferenceTelemetry;
 use crate::model_cache::{ModelCache, ModelType};
-use crate::editing::{
-    self, AuditItem, AuditRequest, EditBatchRequest, EditRequest, KnowledgeEditor,
-};
 use crate::profiled_executor::StreamConfig;
 use crate::server::admin::ActiveRequestInfo;
 use crate::server::rate_limiter::RateLimiter;
@@ -91,8 +91,9 @@ use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
 
-use crate::server::distill_worker::{DistillationEngine, DistillationRequest, DistillationJobStatus};
-
+use crate::server::distill_worker::{
+    DistillationEngine, DistillationJobStatus, DistillationRequest,
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -156,7 +157,6 @@ pub fn create_router(state: AppState) -> Router {
     let v1_routes = v1_routes
         .route("/v1/distill", post(post_distill))
         .route("/v1/distill/{job_id}", get(get_distill_status));
-
 
     let v1_routes = v1_routes
         .route("/v1/video/generations", post(video_generations))
@@ -1172,7 +1172,6 @@ async fn v1_chat_completions(
                 }));
             }
 
-
             return JsonResponse(serde_json::json!({
                 "error": "inference via WorkerSupervisor is no longer available"
             }));
@@ -1341,10 +1340,16 @@ async fn post_distill(
 ) -> Result<JsonResponse<DistillationJobStatus>, (StatusCode, String)> {
     let job_id = payload.job_id.clone();
     let engine = state.distill_engine.lock().await;
-    engine.submit(payload).await.map_err(|e| (StatusCode::CONFLICT, e))?;
+    engine
+        .submit(payload)
+        .await
+        .map_err(|e| (StatusCode::CONFLICT, e))?;
     match engine.status(&job_id).await {
         Some(status) => Ok(JsonResponse(status)),
-        None => Err((StatusCode::INTERNAL_SERVER_ERROR, "job created but not found".into())),
+        None => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "job created but not found".into(),
+        )),
     }
 }
 
@@ -1359,7 +1364,6 @@ async fn get_distill_status(
         None => Err((StatusCode::NOT_FOUND, format!("job {} not found", job_id))),
     }
 }
-
 
 async fn cluster_nodes(
     State(state): State<AppState>,

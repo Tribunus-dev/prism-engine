@@ -17,22 +17,28 @@
 //!   for that microbatch and records the fallback in the bridge receipt.
 
 use crate::arena_info::ArenaInfo;
+use std::ffi::c_void;
 
 use super::super::arena::{ActivationArena, SlotState, StorageRoute};
+use super::super::memory_budget::MemoryBudget;
 use super::super::phase_types::{
     ElementType, PhaseId, PhysicalLayout, ProviderKind, ResidencyClass, TensorDescriptor,
 };
-use super::super::receipt::{
-    BridgeEvidenceSection, BridgeReceipt, PhaseExecutionRecord,
-};
-use super::super::memory_budget::MemoryBudget;
+use super::super::receipt::{BridgeEvidenceSection, BridgeReceipt, PhaseExecutionRecord};
 
-use super::super::level1::scheduler::Level1Config;
-use super::super::level1::teacher::MetalTeacher;
-use super::super::level1::student::TernaryStudent;
 use super::super::level1::reducer::AccelerateReducer;
+use super::super::level1::scheduler::Level1Config;
+use super::super::level1::student::TernaryStudent;
+use super::super::level1::teacher::MetalTeacher;
 
 use super::bridge::CoreMLTeacher;
+use super::compiler::{teacher_region_digest, TEACHER_INPUT_NAME, TEACHER_OUTPUT_NAME};
+
+fn synthetic_teacher_input(hidden_dim: usize) -> Vec<f32> {
+    (0..hidden_dim)
+        .map(|i| ((i as f64).cos() * 0.1) as f32)
+        .collect()
+}
 
 // ── Compile region state ─────────────────────────────────────────────────────
 
@@ -180,46 +186,62 @@ impl Level2Scheduler {
     /// Attempt a Core ML teacher forward for one microbatch.
     ///
     /// Returns `true` if Core ML was used; `false` means fall back to Metal.
-    fn teacher_forward_coreml(
-        &mut self,
-        microbatch: usize,
-        _slot_idx: usize,
-    ) -> bool {
+    fn teacher_forward_coreml(&mut self, microbatch: usize, slot_idx: usize) -> bool {
         if !self.coreai_available {
-            self.bridge_receipts.push(
-                CoreMLTeacher::fallback_to_level1("Core ML not available"),
-            );
+            self.bridge_receipts
+                .push(CoreMLTeacher::fallback_to_level1("Core ML not available"));
             return false;
         }
 
         let hd = self.config.hidden_dim as i32;
-        let mb = self.config.microbatch as i32;
-        let info = ArenaInfo {
+        let input_data = synthetic_teacher_input(self.config.hidden_dim);
+        let mut output_data = vec![0.0f32; self.config.hidden_dim];
+        let input_info = ArenaInfo {
             width: hd,
-            height: mb,
-            logical_dim0: mb,
+            height: 1,
+            logical_dim0: 1,
             logical_dim1: hd,
             pixel_format: 0,
-            byte_size: mb * hd * 2,
-            bytes_per_row: hd * 2,
-            base_address: std::ptr::null_mut(),
+            byte_size: (self.config.hidden_dim * std::mem::size_of::<f32>()) as i32,
+            bytes_per_row: (self.config.hidden_dim * std::mem::size_of::<f32>()) as i32,
+            base_address: input_data.as_ptr() as *mut c_void,
+            cv_buffer: std::ptr::null_mut(),
+            io_surface: std::ptr::null_mut(),
+        };
+        let output_info = ArenaInfo {
+            width: hd,
+            height: 1,
+            logical_dim0: 1,
+            logical_dim1: hd,
+            pixel_format: 0,
+            byte_size: (self.config.hidden_dim * std::mem::size_of::<f32>()) as i32,
+            bytes_per_row: (self.config.hidden_dim * std::mem::size_of::<f32>()) as i32,
+            base_address: output_data.as_mut_ptr() as *mut c_void,
             cv_buffer: std::ptr::null_mut(),
             io_surface: std::ptr::null_mut(),
         };
 
         // Digest derived from microbatch index for cache exercise.
-        let digest = format!("teacher-region-{:04x}", microbatch);
+        let digest = teacher_region_digest(microbatch);
 
         let receipt = self.coreai_teacher.forward(
             &digest,
-            "hidden_states",
-            &info,
-            "hidden_states",
-            &info,
+            TEACHER_INPUT_NAME,
+            &input_info,
+            TEACHER_OUTPUT_NAME,
+            &output_info,
         );
 
-        let used_coreml = receipt.actual_route.starts_with("CoreML");
+        let used_coreml = receipt.actual_route.starts_with("CoreML")
+            && receipt.failure_reason.is_none()
+            && output_data.iter().all(|v| v.is_finite());
         self.bridge_receipts.push(receipt);
+
+        if used_coreml {
+            self.teacher_outputs[slot_idx].copy_from_slice(&output_data);
+            self.teacher_slot_valid[slot_idx] = true;
+        }
+
         used_coreml
     }
 
@@ -267,16 +289,32 @@ impl Level2Scheduler {
             });
 
             self.arena
-                .transition(teacher_slot, SlotState::Evictable, "reuse for next microbatch")
+                .transition(
+                    teacher_slot,
+                    SlotState::Evictable,
+                    "reuse for next microbatch",
+                )
                 .ok();
             self.arena
-                .transition(teacher_slot, SlotState::Reserved, "reset for next microbatch")
+                .transition(
+                    teacher_slot,
+                    SlotState::Reserved,
+                    "reset for next microbatch",
+                )
                 .ok();
             self.arena
-                .transition(student_slot, SlotState::Evictable, "reuse for next microbatch")
+                .transition(
+                    student_slot,
+                    SlotState::Evictable,
+                    "reuse for next microbatch",
+                )
                 .ok();
             self.arena
-                .transition(student_slot, SlotState::Reserved, "reset for next microbatch")
+                .transition(
+                    student_slot,
+                    SlotState::Reserved,
+                    "reset for next microbatch",
+                )
                 .ok();
         }
 
@@ -293,29 +331,28 @@ impl Level2Scheduler {
 
             // Try Core ML first; fall back to Metal teacher.
             if self.teacher_forward_coreml(mb + 1, slot_idx) {
-                // Core ML succeeded — populate the teacher output buffer.
-                // In production the Core ML output would be copied here;
-                // for the stub we use the Metal teacher's simulated output
-                // as a proxy since Core ML model files are not guaranteed
-                // to be present at test time.
-                self.metal_teacher.forward(mb + 1, slot_id);
+                // Core ML succeeded and populated the teacher output buffer.
             } else {
                 // Fallback to Level 1 Metal teacher.
                 self.metal_teacher.forward(mb + 1, slot_id);
+                let out = self.metal_teacher.output();
+                self.teacher_outputs[slot_idx].copy_from_slice(out);
+                self.teacher_slot_valid[slot_idx] = true;
             }
-
-            // Capture teacher output into the ring buffer.
-            let out = self.metal_teacher.output();
-            self.teacher_outputs[slot_idx].copy_from_slice(out);
-            self.teacher_slot_valid[slot_idx] = true;
 
             self.arena.seal(slot_id, [0u8; 32]).ok();
             self.arena
-                .transition(slot_id, SlotState::ConsumerReadable, "teacher forward complete")
+                .transition(
+                    slot_id,
+                    SlotState::ConsumerReadable,
+                    "teacher forward complete",
+                )
                 .ok();
             self.arena.mark_readable(slot_id).ok();
 
-            let provider = if self.bridge_receipts.last()
+            let provider = if self
+                .bridge_receipts
+                .last()
                 .map(|r| r.actual_route.starts_with("CoreML"))
                 .unwrap_or(false)
             {
@@ -407,6 +444,30 @@ impl Level2Scheduler {
         &self.bridge_receipts
     }
 
+    /// Teacher output buffer for a specific ring slot.
+    pub fn teacher_output_slot(&self, slot_idx: usize) -> Option<&[f32]> {
+        self.teacher_outputs
+            .get(slot_idx)
+            .map(|slot| slot.as_slice())
+    }
+
+    /// Student output buffer for a specific ring slot.
+    pub fn student_output_slot(&self, slot_idx: usize) -> Option<&[f32]> {
+        self.student_outputs
+            .get(slot_idx)
+            .map(|slot| slot.as_slice())
+    }
+
+    /// Whether a teacher ring slot has been populated.
+    pub fn teacher_output_valid(&self, slot_idx: usize) -> Option<bool> {
+        self.teacher_slot_valid.get(slot_idx).copied()
+    }
+
+    /// Whether a student ring slot has been populated.
+    pub fn student_output_valid(&self, slot_idx: usize) -> Option<bool> {
+        self.student_slot_valid.get(slot_idx).copied()
+    }
+
     /// Consume the scheduler and produce a bridge evidence section.
     pub fn into_bridge_evidence(self) -> BridgeEvidenceSection {
         let fallback_count = self
@@ -443,7 +504,6 @@ impl Level2Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::super::memory_budget::MemoryBudget;
 
     #[test]
     fn test_level2_scheduler_construction() {

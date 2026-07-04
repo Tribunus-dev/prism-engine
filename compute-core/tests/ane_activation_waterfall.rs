@@ -210,7 +210,6 @@ fn ane_activation_waterfall() {
             output_name: silu_out.clone(),
             inputs: vec![("x".into(), vec![1, c as i64, 1, 64])],
             outputs: vec![(silu_out.clone(), vec![1, c as i64, 1, 64])],
-
         };
 
         let silu_path = match compile(&silu_tag, silu_prog, silu_meta) {
@@ -272,7 +271,6 @@ fn ane_activation_waterfall() {
             output_name: conv_out.clone(),
             inputs: vec![("x".into(), vec![1, c as i64, 1, 64])],
             outputs: vec![(conv_out.clone(), vec![1, c as i64, 1, 64])],
-
         };
 
         let conv_path = match compile(&conv_tag, conv_prog, conv_meta) {

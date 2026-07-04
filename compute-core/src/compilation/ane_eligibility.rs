@@ -12,9 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::compilation::phase_ir::{
-    CompilePhaseDescriptor, ShapeClass,
-};
+use crate::compilation::phase_ir::{CompilePhaseDescriptor, ShapeClass};
 use crate::compilation::region_catalogue::{LayoutContract, RegionCatalogue, RegionCatalogueEntry};
 use crate::compilation::tri_lane::AneRejectionReason;
 
@@ -159,10 +157,7 @@ fn has_vision_input(phase: &CompilePhaseDescriptor) -> bool {
 /// Determine whether an operator family represents a scatter/gather pattern
 /// that Core ML cannot represent efficiently.
 fn is_scatter_gather_operator(family: &str) -> bool {
-    matches!(
-        family,
-        "attention_score" | "attention_value_aggregation"
-    )
+    matches!(family, "attention_score" | "attention_value_aggregation")
 }
 
 /// Determine whether an operator family represents dynamic index patterns.
@@ -309,13 +304,7 @@ pub fn analyze_ane_eligibility(
             let unknown_family = phase
                 .inputs
                 .first()
-                .map(|t| {
-                    t.name
-                        .split('_')
-                        .next()
-                        .unwrap_or("unknown")
-                        .to_string()
-                })
+                .map(|t| t.name.split('_').next().unwrap_or("unknown").to_string())
                 .unwrap_or_else(|| "unknown".to_string());
 
             return AneEligibility {
@@ -523,8 +512,8 @@ pub fn analyze_ane_eligibility(
 mod tests {
     use super::*;
     use crate::compilation::phase_ir::{
-        ArithmeticIntensity, CompileDeterminism, CompilePlacement, MaterializationContract, TensorContract,
-        MutationClass, PhaseId,
+        ArithmeticIntensity, CompileDeterminism, CompilePlacement, MaterializationContract,
+        MutationClass, PhaseId, TensorContract,
     };
 
     // ── Helpers ───────────────────────────────────────────────────
@@ -559,7 +548,10 @@ mod tests {
             shape_class,
             arithmetic_intensity: ArithmeticIntensity::ComputeBound,
             mutation,
-            determinism: CompileDeterminism::NumericallyBounded { abs_error: 0.01, rel_error: 0.01 },
+            determinism: CompileDeterminism::NumericallyBounded {
+                abs_error: 0.01,
+                rel_error: 0.01,
+            },
             allowed_placements: vec![CompilePlacement::Ane, CompilePlacement::MetalGpu],
             minimum_profitable_elements: 1024,
             fallback: CompilePlacement::MetalGpu,

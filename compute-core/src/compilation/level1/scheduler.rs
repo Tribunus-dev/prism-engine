@@ -12,15 +12,15 @@
 
 use super::super::arena::{ActivationArena, SlotState, StorageRoute};
 use super::super::memory_budget::MemoryBudget;
+use super::super::phase_types::PhaseId;
 use super::super::phase_types::{
     ElementType, PhysicalLayout, ProviderKind, ResidencyClass, TensorDescriptor,
 };
 use super::super::receipt::{ObjectiveWeights, PhaseExecutionRecord};
-use super::super::phase_types::PhaseId;
 
-use super::teacher::MetalTeacher;
-use super::student::TernaryStudent;
 use super::reducer::AccelerateReducer;
+use super::student::TernaryStudent;
+use super::teacher::MetalTeacher;
 
 // ── Scheduler configuration ─────────────────────────────────────────────────
 
@@ -245,16 +245,32 @@ impl Level1Scheduler {
 
             // Release the used teacher and student slots.
             self.arena
-                .transition(teacher_slot, SlotState::Evictable, "reuse for next microbatch")
+                .transition(
+                    teacher_slot,
+                    SlotState::Evictable,
+                    "reuse for next microbatch",
+                )
                 .ok();
             self.arena
-                .transition(teacher_slot, SlotState::Reserved, "reset for next microbatch")
+                .transition(
+                    teacher_slot,
+                    SlotState::Reserved,
+                    "reset for next microbatch",
+                )
                 .ok();
             self.arena
-                .transition(student_slot, SlotState::Evictable, "reuse for next microbatch")
+                .transition(
+                    student_slot,
+                    SlotState::Evictable,
+                    "reuse for next microbatch",
+                )
                 .ok();
             self.arena
-                .transition(student_slot, SlotState::Reserved, "reset for next microbatch")
+                .transition(
+                    student_slot,
+                    SlotState::Reserved,
+                    "reset for next microbatch",
+                )
                 .ok();
         }
 
@@ -278,7 +294,11 @@ impl Level1Scheduler {
 
             self.arena.seal(slot_id, [0u8; 32]).ok();
             self.arena
-                .transition(slot_id, SlotState::ConsumerReadable, "teacher forward complete")
+                .transition(
+                    slot_id,
+                    SlotState::ConsumerReadable,
+                    "teacher forward complete",
+                )
                 .ok();
             self.arena.mark_readable(slot_id).ok();
 
@@ -369,6 +389,30 @@ impl Level1Scheduler {
     /// Reference to the student for post-run analysis.
     pub fn student(&self) -> &TernaryStudent {
         &self.student
+    }
+
+    /// Teacher output buffer for a specific ring slot.
+    pub fn teacher_output_slot(&self, slot_idx: usize) -> Option<&[f32]> {
+        self.teacher_outputs
+            .get(slot_idx)
+            .map(|slot| slot.as_slice())
+    }
+
+    /// Student output buffer for a specific ring slot.
+    pub fn student_output_slot(&self, slot_idx: usize) -> Option<&[f32]> {
+        self.student_outputs
+            .get(slot_idx)
+            .map(|slot| slot.as_slice())
+    }
+
+    /// Whether a teacher ring slot has been populated.
+    pub fn teacher_output_valid(&self, slot_idx: usize) -> Option<bool> {
+        self.teacher_slot_valid.get(slot_idx).copied()
+    }
+
+    /// Whether a student ring slot has been populated.
+    pub fn student_output_valid(&self, slot_idx: usize) -> Option<bool> {
+        self.student_slot_valid.get(slot_idx).copied()
     }
 
     /// Reference to the reducer for reading computed metrics.

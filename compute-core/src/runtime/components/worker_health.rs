@@ -1,12 +1,12 @@
 //! WorkerHeartbeat and WorkerOutcome — liveness tracking and terminal result
 //! for worker-bound requests.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::Instant;
-use serde::{Deserialize, Serialize};
 
-use crate::runtime::scheduling::component_id::SchedulableComponent;
 use crate::runtime::components::{WORKER_HEARTBEAT_COMPONENT, WORKER_OUTCOME_COMPONENT};
+use crate::runtime::scheduling::component_id::SchedulableComponent;
 
 // ---------------------------------------------------------------------------
 // Terminal status

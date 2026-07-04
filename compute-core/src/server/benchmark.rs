@@ -1,7 +1,6 @@
 //! System benchmark for backend routing decisions.
 //! Measures latency and throughput for each available backend.
 
-
 /// Results from benchmarking a single operation
 #[derive(Debug, Clone)]
 pub struct OpBenchmark {

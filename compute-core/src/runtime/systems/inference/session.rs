@@ -26,8 +26,8 @@ use crate::heterogeneous::ComputeRuntime;
 use crate::kv_cache::{KvCache, PageMigrationService};
 use crate::mapped_image::MappedImage;
 use crate::placement_profile::ExecutionPlacementProfile;
-use crate::profiled_model::{LayerWeightStreamer, LoadedProfiledModel};
 use crate::profiled_model::format_bytes;
+use crate::profiled_model::{LayerWeightStreamer, LoadedProfiledModel};
 use crate::quantization::turboquant_kv::AsymmetricQuantMode;
 use crate::quantization::turboquant_kv::KvQuantMode;
 use crate::quantization::turboquant_kv::TurboQuantKvCache;
@@ -160,12 +160,14 @@ impl WorkingSetManager {
 
         // 2. Check KV cache pressure, evict cold pages to disk
         if self.disk_eviction_enabled {
-            self.kv_page_migration.check_and_evict(Duration::from_secs(30))?;
+            self.kv_page_migration
+                .check_and_evict(Duration::from_secs(30))?;
         }
 
         // 3. Prefetch KV pages predicted to be needed next
         if self.disk_eviction_enabled {
-            self.kv_page_migration.prefetch_predicted(Duration::from_secs(5))?;
+            self.kv_page_migration
+                .prefetch_predicted(Duration::from_secs(5))?;
         }
 
         Ok(())

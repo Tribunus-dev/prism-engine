@@ -33,17 +33,20 @@ impl KernelRegistry {
     /// integration failure, not a recoverable runtime condition.
     pub fn new(device: &Device) -> Self {
         let metallib_path = env!("TRIBUNUS_METALLIB");
-        let library_data = std::fs::read(metallib_path)
-            .unwrap_or_else(|e| panic!(
+        let library_data = std::fs::read(metallib_path).unwrap_or_else(|e| {
+            panic!(
                 "KernelRegistry: failed to read metallib at {}: {}",
                 metallib_path, e,
-            ));
+            )
+        });
         let library = device
             .new_library_with_data(&library_data)
-            .unwrap_or_else(|e| panic!(
-                "KernelRegistry: failed to load metallib from {}: {:?}",
-                metallib_path, e,
-            ));
+            .unwrap_or_else(|e| {
+                panic!(
+                    "KernelRegistry: failed to load metallib from {}: {:?}",
+                    metallib_path, e,
+                )
+            });
 
         KernelRegistry {
             device: device.clone(),
@@ -77,18 +80,19 @@ impl KernelRegistry {
         let function = self
             .library
             .get_function(name, Some(constants.clone()))
-            .unwrap_or_else(|e| panic!(
-                "KernelRegistry: entry point '{}' not found: {:?}",
-                name, e,
-            ));
+            .unwrap_or_else(|e| {
+                panic!("KernelRegistry: entry point '{}' not found: {:?}", name, e,)
+            });
 
         let pso = self
             .device
             .new_compute_pipeline_state_with_function(&function)
-            .unwrap_or_else(|e| panic!(
-                "KernelRegistry: pipeline state for '{}' failed: {:?}",
-                name, e,
-            ));
+            .unwrap_or_else(|e| {
+                panic!(
+                    "KernelRegistry: pipeline state for '{}' failed: {:?}",
+                    name, e,
+                )
+            });
 
         self.cache.insert(key, pso.clone());
         pso

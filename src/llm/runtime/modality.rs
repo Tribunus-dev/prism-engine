@@ -12,7 +12,7 @@
 // Every generation method is gated behind its respective feature flag.
 // When the feature is disabled the method returns a structured error.
 
-use crate::image::{ImageGenerationRequest, ImageGenerationResult, ImageGenerationError};
+use crate::image::{ImageGenerationError, ImageGenerationRequest, ImageGenerationResult};
 
 /// Describes modalities the current build supports.
 #[derive(Debug, Clone)]
@@ -110,11 +110,7 @@ pub trait ModalityProvider {
     ) -> Result<crate::video::VideoGenerationReceipt, crate::video::PrismVideoError>;
 
     /// Generate text embeddings.
-    fn generate_embeddings(
-        &self,
-        model_path: &str,
-        text: &str,
-    ) -> Result<Vec<f32>, String>;
+    fn generate_embeddings(&self, model_path: &str, text: &str) -> Result<Vec<f32>, String>;
 
     /// Report which modalities are available at compile time.
     fn capabilities(&self) -> ModalityCapabilities;
@@ -153,11 +149,7 @@ impl ModalityProvider for PrismInferenceServer {
         crate::video::generate_video(model_path, prompt, params)
     }
 
-    fn generate_embeddings(
-        &self,
-        _model_path: &str,
-        _text: &str,
-    ) -> Result<Vec<f32>, String> {
+    fn generate_embeddings(&self, _model_path: &str, _text: &str) -> Result<Vec<f32>, String> {
         #[cfg(feature = "prism-backend")]
         {
             // Delegate to compute-core embedding generation.

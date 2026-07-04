@@ -67,7 +67,8 @@ impl WorkerDiagnosticsResource {
 
     /// Increment the response delivery failures counter.
     pub fn record_response_delivery_failure(&self) {
-        self.response_delivery_failures.fetch_add(1, Ordering::Relaxed);
+        self.response_delivery_failures
+            .fetch_add(1, Ordering::Relaxed);
     }
 }
 

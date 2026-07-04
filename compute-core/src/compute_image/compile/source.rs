@@ -202,10 +202,7 @@ pub fn diff_tensors(source_dir: &Path, prev_manifest: &Manifest) -> crate::Resul
 // Full source loading (with mmap streaming)
 // ═══════════════════════════════════════════════════════════════════════════
 
-pub(crate) fn load_source(
-    source_dir: &Path,
-    skip_validation: bool,
-) -> crate::Result<LoadedSource> {
+pub(crate) fn load_source(source_dir: &Path, skip_validation: bool) -> crate::Result<LoadedSource> {
     use crate::{config, validator};
 
     let config_path = source_dir.join("config.json");
@@ -235,14 +232,13 @@ pub(crate) fn load_source(
         let source_sha256 = sha256_bytes(&mmap);
 
         // Parse metadata only — don't deserialize tensor data
-        let (_, metadata) =
-            safetensors::SafeTensors::read_metadata(&mmap).map_err(|e| {
-                crate::Error::from_reason(format!(
-                    "bad safetensors header {}: {:?}",
-                    shard_path.display(),
-                    e
-                ))
-            })?;
+        let (_, metadata) = safetensors::SafeTensors::read_metadata(&mmap).map_err(|e| {
+            crate::Error::from_reason(format!(
+                "bad safetensors header {}: {:?}",
+                shard_path.display(),
+                e
+            ))
+        })?;
 
         let mut entries: Vec<_> = metadata.tensors().into_iter().collect();
         entries.sort_by(|(left, _), (right, _)| left.cmp(right));
@@ -450,7 +446,6 @@ pub(crate) fn load_source(
         }
     }
 
-
     Ok(LoadedSource {
         arch,
         manifest,
@@ -494,21 +489,25 @@ pub(crate) fn load_gguf_source(
     if let Some(q) = tensors.iter().find(|t| t.name.ends_with("attn_q.weight")) {
         if q.shape.len() >= 2 {
             let inferred = q.shape[1] / arch.num_attention_heads.max(1);
-            if inferred > 0 { arch.head_dim = inferred; }
+            if inferred > 0 {
+                arch.head_dim = inferred;
+            }
         }
     }
     if let Some(k) = tensors.iter().find(|t| t.name.ends_with("attn_k.weight")) {
         if k.shape.len() >= 2 && arch.head_dim > 0 {
             let inferred = k.shape[1] / arch.head_dim;
-            if inferred > 0 { arch.num_key_value_heads = inferred; }
+            if inferred > 0 {
+                arch.num_key_value_heads = inferred;
+            }
         }
     }
 
     let arch_type = gguf::meta_str(&metadata, "general.architecture").unwrap_or("unknown");
 
     // 3. Write a temporary config.json for adapter validation
-    let tmp_dir = tempfile::tempdir()
-        .map_err(|e| crate::Error::from_reason(format!("tempdir: {e}")))?;
+    let tmp_dir =
+        tempfile::tempdir().map_err(|e| crate::Error::from_reason(format!("tempdir: {e}")))?;
     let config_path = tmp_dir.path().join("config.json");
     let architecture_name = match arch.model_type.as_str() {
         "gemma4" => "Gemma4ForCausalLM",
@@ -552,29 +551,36 @@ pub(crate) fn load_gguf_source(
     let mut source_tensors: HashMap<String, SourceTensor> = HashMap::new();
     let mut all_hf_names: Vec<String> = Vec::new();
     for t in &tensors {
-        let hf_name = gguf::gguf_name_to_hf_name(&t.name, arch_type)
-            .unwrap_or_else(|| t.name.clone());
-        if source_tensors.contains_key(&hf_name) { continue; }
-        source_tensors.insert(hf_name.clone(), SourceTensor {
-            name: hf_name.clone(),
-            dtype: t.dtype.clone(),
-            shape: t.shape.clone(),
-            data: Vec::new(),        // lazy — loaded on demand
-            source_filename: gguf_path.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned(),
-            source_sha256: gguf_sha256.clone(),
-            source_offset: t.byte_offset,
-            source_byte_size: t.byte_size,
-        });
+        let hf_name =
+            gguf::gguf_name_to_hf_name(&t.name, arch_type).unwrap_or_else(|| t.name.clone());
+        if source_tensors.contains_key(&hf_name) {
+            continue;
+        }
+        source_tensors.insert(
+            hf_name.clone(),
+            SourceTensor {
+                name: hf_name.clone(),
+                dtype: t.dtype.clone(),
+                shape: t.shape.clone(),
+                data: Vec::new(), // lazy — loaded on demand
+                source_filename: gguf_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+                source_sha256: gguf_sha256.clone(),
+                source_offset: t.byte_offset,
+                source_byte_size: t.byte_size,
+            },
+        );
         all_hf_names.push(hf_name);
     }
     all_hf_names.sort();
 
     // 6. Hashes
     let shard_hashes = vec![ShardHash {
-        filename: gguf_path.file_name()
+        filename: gguf_path
+            .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned(),
@@ -590,8 +596,8 @@ pub(crate) fn load_gguf_source(
                 Ok(Some(h)) => Some(Ok(h)),
                 Ok(None) => None,
                 Err(e) => Some(Err(e)),
-        }
-    })
+            }
+        })
         .collect::<crate::Result<Vec<_>>>()?;
     let auxiliary_hashes = Vec::new();
 
@@ -599,20 +605,22 @@ pub(crate) fn load_gguf_source(
     let namespace = crate::config::resolve_namespace(&all_hf_names)
         .ok_or_else(|| crate::Error::from_reason("GGUF: could not resolve namespace"))?;
     let mut spec = crate::config::compile(&arch, &namespace, None);
-    let name_set: std::collections::HashSet<String> =
-        all_hf_names.into_iter().collect();
+    let name_set: std::collections::HashSet<String> = all_hf_names.into_iter().collect();
     crate::config::filter_spec_to_existing(&mut spec, &name_set);
 
     // 8. Validation
-    let tensor_meta: HashMap<_, _> = source_tensors.iter()
-        .map(|(name, t)| (
-            name.clone(),
-            crate::validator::TensorMeta {
-                name: t.name.clone(),
-                shape: t.shape.clone(),
-                dtype: t.dtype.clone(),
-            },
-        ))
+    let tensor_meta: HashMap<_, _> = source_tensors
+        .iter()
+        .map(|(name, t)| {
+            (
+                name.clone(),
+                crate::validator::TensorMeta {
+                    name: t.name.clone(),
+                    shape: t.shape.clone(),
+                    dtype: t.dtype.clone(),
+                },
+            )
+        })
         .collect();
     let validation = crate::validator::validate_bindings_from_map(&tensor_meta, &spec)?;
 
@@ -621,42 +629,40 @@ pub(crate) fn load_gguf_source(
             eprintln!("GGUF missing tensors (first 10):");
             for (i, t) in validation.missing_tensors.iter().take(10).enumerate() {
                 eprintln!("  {}. {}", i + 1, t);
-    }
+            }
         }
         return Err(crate::Error::from_reason(format!(
             "GGUF source failed validation: {} errors across {} expected tensors",
-            validation.verdict.errors,
-            validation.verdict.total_expected,
+            validation.verdict.errors, validation.verdict.total_expected,
         )));
     }
 
     // 9. Model-adapter check (reads from temp config.json)
     if !skip_validation {
-        let config_val: serde_json::Value =
-            fs::read_to_string(&config_path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_default();
+        let config_val: serde_json::Value = fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
         let tnames: Vec<String> = source_tensors.keys().cloned().collect();
         let registry = crate::model_adapter::AdapterRegistry::new();
         match registry.select(&config_val, &tnames) {
             Ok(adapter) => {
-            let source_model = crate::model_adapter::SourceModel {
+                let source_model = crate::model_adapter::SourceModel {
                     config: config_val,
                     config_path,
                     model_type: arch.model_type.clone(),
                     tensor_names: tnames,
-                    tensors: source_tensors.iter()
+                    tensors: source_tensors
+                        .iter()
                         .map(|(k, v)| (k.clone(), (v.dtype.clone(), v.shape.clone(), Vec::new())))
                         .collect(),
                 };
                 if adapter.normalize(&source_model).is_ok() {
-            eprintln!("[adapter] {} validation passed", adapter.family_name());
-}
+                    eprintln!("[adapter] {} validation passed", adapter.family_name());
+                }
             }
             _ => {}
         }
-
     }
 
     Ok(LoadedSource {

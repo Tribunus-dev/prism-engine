@@ -16,8 +16,8 @@ use crate::compilation::phase_ir::{
     BoundaryTensorContract, CompilePhaseDescriptor, CompilePlacement, ShapeClass, TensorDtype,
 };
 use crate::compilation::tri_lane::{
-    AneAdmission, AneExperimentalReason, AneRejectionReason, CoreAiComputeUnitPolicy,
-    CoreAiProgramBinding, CoreAiShapeContract, CoreAiWarmupContract, AneQualificationRecord,
+    AneAdmission, AneExperimentalReason, AneQualificationRecord, AneRejectionReason,
+    CoreAiComputeUnitPolicy, CoreAiProgramBinding, CoreAiShapeContract, CoreAiWarmupContract,
 };
 
 /// Configuration for the ANE qualification gate.
@@ -91,11 +91,9 @@ impl AneQualificationGate {
         if !ops_exportable {
             return AneQualificationResult {
                 region_id: region_id.to_string(),
-                admission: AneAdmission::Rejected(
-                    AneRejectionReason::UnsupportedOperatorLowering(
-                        "region not allowed on ANE lane".into(),
-                    ),
-                ),
+                admission: AneAdmission::Rejected(AneRejectionReason::UnsupportedOperatorLowering(
+                    "region not allowed on ANE lane".into(),
+                )),
                 gpu_cost_ns,
                 ane_cost_ns,
                 boundary_cost_ns,
@@ -110,11 +108,9 @@ impl AneQualificationGate {
         if !shapes_stable {
             return AneQualificationResult {
                 region_id: region_id.to_string(),
-                admission: AneAdmission::Rejected(
-                    AneRejectionReason::DynamicShapeOutOfRange(
-                        "dynamic shape not permitted for ANE placement".into(),
-                    ),
-                ),
+                admission: AneAdmission::Rejected(AneRejectionReason::DynamicShapeOutOfRange(
+                    "dynamic shape not permitted for ANE placement".into(),
+                )),
                 gpu_cost_ns,
                 ane_cost_ns,
                 boundary_cost_ns,
@@ -163,7 +159,9 @@ impl AneQualificationGate {
         } else {
             AneAdmission::Rejected(AneRejectionReason::PredictedGainBelowThreshold {
                 predicted_us: total_ane_cost / 1000,
-                threshold_us: (gpu_cost_ns as f64 * (1.0 - self.config.min_speedup_threshold)) as u64 / 1000,
+                threshold_us: (gpu_cost_ns as f64 * (1.0 - self.config.min_speedup_threshold))
+                    as u64
+                    / 1000,
             })
         };
 
@@ -240,8 +238,14 @@ impl AneQualificationGate {
         boundary_cost_ns: u64,
     ) -> AneQualificationResult {
         if !self.config.fp16_production_envelope {
-            return self.qualify(region_id, &make_dummy_phase_from_contracts(input_contracts, output_contracts), gpu_cost_ns, ane_cost_ns, boundary_cost_ns);
-}
+            return self.qualify(
+                region_id,
+                &make_dummy_phase_from_contracts(input_contracts, output_contracts),
+                gpu_cost_ns,
+                ane_cost_ns,
+                boundary_cost_ns,
+            );
+        }
 
         // 1. Check contracts exist
         for contract in input_contracts.iter().chain(output_contracts.iter()) {
@@ -249,9 +253,15 @@ impl AneQualificationGate {
                 return AneQualificationResult {
                     region_id: region_id.to_string(),
                     admission: AneAdmission::Rejected(
-                        AneRejectionReason::MissingBoundaryContract { tensor_id: "unknown".into() }),
-                    gpu_cost_ns, ane_cost_ns, boundary_cost_ns,
-                    shapes_stable: false, ops_exportable: false,
+                        AneRejectionReason::MissingBoundaryContract {
+                            tensor_id: "unknown".into(),
+                        },
+                    ),
+                    gpu_cost_ns,
+                    ane_cost_ns,
+                    boundary_cost_ns,
+                    shapes_stable: false,
+                    ops_exportable: false,
                 };
             }
         }
@@ -261,10 +271,14 @@ impl AneQualificationGate {
             if !contract.static_shape {
                 return AneQualificationResult {
                     region_id: region_id.to_string(),
-                    admission: AneAdmission::Rejected(
-                        AneRejectionReason::DynamicShape { tensor_id: contract.tensor_id.clone() }),
-                    gpu_cost_ns, ane_cost_ns, boundary_cost_ns,
-                    shapes_stable: false, ops_exportable: true,
+                    admission: AneAdmission::Rejected(AneRejectionReason::DynamicShape {
+                        tensor_id: contract.tensor_id.clone(),
+                    }),
+                    gpu_cost_ns,
+                    ane_cost_ns,
+                    boundary_cost_ns,
+                    shapes_stable: false,
+                    ops_exportable: true,
                 };
             }
         }
@@ -279,9 +293,13 @@ impl AneQualificationGate {
                             tensor_id: contract.tensor_id.clone(),
                             expected: TensorDtype::Float16,
                             actual: contract.dtype,
-                        }),
-                    gpu_cost_ns, ane_cost_ns, boundary_cost_ns,
-                    shapes_stable: true, ops_exportable: true,
+                        },
+                    ),
+                    gpu_cost_ns,
+                    ane_cost_ns,
+                    boundary_cost_ns,
+                    shapes_stable: true,
+                    ops_exportable: true,
                 };
             }
         }
@@ -291,13 +309,18 @@ impl AneQualificationGate {
             if contract.physical_shape.len() < 2 {
                 return AneQualificationResult {
                     region_id: region_id.to_string(),
-                    admission: AneAdmission::Rejected(
-                        AneRejectionReason::InvalidFp16Layout {
-                            tensor_id: contract.tensor_id.clone(),
-                            reason: format!("physical_shape must have at least 2 dims, got {}", contract.physical_shape.len()),
-                        }),
-                    gpu_cost_ns, ane_cost_ns, boundary_cost_ns,
-                    shapes_stable: true, ops_exportable: true,
+                    admission: AneAdmission::Rejected(AneRejectionReason::InvalidFp16Layout {
+                        tensor_id: contract.tensor_id.clone(),
+                        reason: format!(
+                            "physical_shape must have at least 2 dims, got {}",
+                            contract.physical_shape.len()
+                        ),
+                    }),
+                    gpu_cost_ns,
+                    ane_cost_ns,
+                    boundary_cost_ns,
+                    shapes_stable: true,
+                    ops_exportable: true,
                 };
             }
         }
@@ -308,23 +331,29 @@ impl AneQualificationGate {
         if total_ane_cost >= gpu_cost_ns {
             return AneQualificationResult {
                 region_id: region_id.to_string(),
-                admission: AneAdmission::Rejected(
-                    AneRejectionReason::CostUnprofitable {
-                        ane_cost_ns, gpu_cost_ns, bridge_cost_ns: boundary_cost_ns,
-                    }),
-                gpu_cost_ns, ane_cost_ns, boundary_cost_ns,
-                shapes_stable: true, ops_exportable: true,
+                admission: AneAdmission::Rejected(AneRejectionReason::CostUnprofitable {
+                    ane_cost_ns,
+                    gpu_cost_ns,
+                    bridge_cost_ns: boundary_cost_ns,
+                }),
+                gpu_cost_ns,
+                ane_cost_ns,
+                boundary_cost_ns,
+                shapes_stable: true,
+                ops_exportable: true,
             };
         }
 
         AneQualificationResult {
             region_id: region_id.to_string(),
             admission: AneAdmission::Admitted,
-            gpu_cost_ns, ane_cost_ns, boundary_cost_ns,
-            shapes_stable: true, ops_exportable: true,
+            gpu_cost_ns,
+            ane_cost_ns,
+            boundary_cost_ns,
+            shapes_stable: true,
+            ops_exportable: true,
         }
     }
-
 }
 
 /// Build a dummy CompilePhaseDescriptor from boundary tensor contracts
@@ -340,7 +369,10 @@ fn make_dummy_phase_from_contracts(
         shape_class: ShapeClass::Static(vec![]),
         arithmetic_intensity: crate::compilation::phase_ir::ArithmeticIntensity::ComputeBound,
         mutation: crate::compilation::phase_ir::MutationClass::ProducesNew,
-        determinism: crate::compilation::phase_ir::CompileDeterminism::NumericallyBounded { abs_error: 0.001, rel_error: 0.001 },
+        determinism: crate::compilation::phase_ir::CompileDeterminism::NumericallyBounded {
+            abs_error: 0.001,
+            rel_error: 0.001,
+        },
         allowed_placements: vec![CompilePlacement::Ane, CompilePlacement::MetalGpu],
         minimum_profitable_elements: 0,
         fallback: CompilePlacement::MetalGpu,
@@ -370,7 +402,10 @@ mod tests {
             shape_class: shape,
             arithmetic_intensity: ArithmeticIntensity::ComputeBound,
             mutation: MutationClass::MutatesInPlace,
-            determinism: CompileDeterminism::NumericallyBounded { abs_error: 0.001, rel_error: 0.001 },
+            determinism: CompileDeterminism::NumericallyBounded {
+                abs_error: 0.001,
+                rel_error: 0.001,
+            },
             allowed_placements: placements,
             minimum_profitable_elements: 0,
             fallback: CompilePlacement::MetalGpu,
@@ -441,7 +476,6 @@ mod tests {
             AneAdmission::Rejected(AneRejectionReason::PredictedGainBelowThreshold { .. })
         ));
     }
-
 
     #[test]
     fn test_gate_rejects_non_fp16_in_production() {
@@ -521,7 +555,14 @@ mod tests {
         );
 
         let binding = gate.build_core_ml_binding(
-            "test_region", &phase, 100_000, 300_000, 5_000, true, true, true,
+            "test_region",
+            &phase,
+            100_000,
+            300_000,
+            5_000,
+            true,
+            true,
+            true,
         );
 
         assert_eq!(binding.artifact_id, "test_region");
@@ -574,7 +615,12 @@ mod tests {
             layout_digest: "nhwc".into(),
         }];
         let result = gate.qualify_for_production_v1(
-            "fp16_test", &in_contracts, &out_contracts, 300_000, 100_000, 5_000,
+            "fp16_test",
+            &in_contracts,
+            &out_contracts,
+            300_000,
+            100_000,
+            5_000,
         );
         assert!(matches!(result.admission, AneAdmission::Admitted));
         assert!(result.ops_exportable);
@@ -597,7 +643,12 @@ mod tests {
             layout_digest: "nhwc".into(),
         }];
         let result = gate.qualify_for_production_v1(
-            "fp32_test", &in_contracts, &[], 300_000, 100_000, 5_000,
+            "fp32_test",
+            &in_contracts,
+            &[],
+            300_000,
+            100_000,
+            5_000,
         );
         assert!(matches!(
             result.admission,
@@ -621,7 +672,12 @@ mod tests {
             layout_digest: "nhwc".into(),
         }];
         let result = gate.qualify_for_production_v1(
-            "uint16_test", &in_contracts, &[], 300_000, 100_000, 5_000,
+            "uint16_test",
+            &in_contracts,
+            &[],
+            300_000,
+            100_000,
+            5_000,
         );
         assert!(matches!(
             result.admission,
@@ -645,7 +701,12 @@ mod tests {
             layout_digest: "nhwc".into(),
         }];
         let result = gate.qualify_for_production_v1(
-            "unknown_test", &in_contracts, &[], 300_000, 100_000, 5_000,
+            "unknown_test",
+            &in_contracts,
+            &[],
+            300_000,
+            100_000,
+            5_000,
         );
         assert!(matches!(
             result.admission,
@@ -668,9 +729,8 @@ mod tests {
             static_shape: false,
             layout_digest: "nhwc".into(),
         }];
-        let result = gate.qualify_for_production_v1(
-            "dyn_test", &in_contracts, &[], 300_000, 100_000, 5_000,
-        );
+        let result =
+            gate.qualify_for_production_v1("dyn_test", &in_contracts, &[], 300_000, 100_000, 5_000);
         assert!(matches!(
             result.admission,
             AneAdmission::Rejected(AneRejectionReason::DynamicShape { .. })
@@ -693,7 +753,12 @@ mod tests {
             layout_digest: "flat".into(),
         }];
         let result = gate.qualify_for_production_v1(
-            "layout_test", &in_contracts, &[], 300_000, 100_000, 5_000,
+            "layout_test",
+            &in_contracts,
+            &[],
+            300_000,
+            100_000,
+            5_000,
         );
         assert!(matches!(
             result.admission,
@@ -718,7 +783,12 @@ mod tests {
         }];
         // ANE slower than GPU: 200k vs 100k
         let result = gate.qualify_for_production_v1(
-            "cost_test", &in_contracts, &[], 100_000, 200_000, 20_000,
+            "cost_test",
+            &in_contracts,
+            &[],
+            100_000,
+            200_000,
+            20_000,
         );
         assert!(matches!(
             result.admission,

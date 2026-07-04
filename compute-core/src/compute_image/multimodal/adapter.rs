@@ -29,9 +29,19 @@ pub trait ModalityAdapter: Send + Sync {
 
 /// Raw input to a modality adapter.
 pub enum ModalityInput {
-    Text { token_ids: Vec<u32> },
-    Image { pixels: Vec<u8>, width: u32, height: u32, channels: u8 },
-    Audio { samples: Vec<f32>, sample_rate: u32 },
+    Text {
+        token_ids: Vec<u32>,
+    },
+    Image {
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+        channels: u8,
+    },
+    Audio {
+        samples: Vec<f32>,
+        sample_rate: u32,
+    },
 }
 
 // ── TokenEmbeddingAdapter ──────────────────────────────────────────
@@ -43,17 +53,17 @@ pub struct TokenEmbeddingAdapter {
 }
 
 impl ModalityAdapter for TokenEmbeddingAdapter {
-    fn modality(&self) -> InputModality { InputModality::Text }
+    fn modality(&self) -> InputModality {
+        InputModality::Text
+    }
 
     fn prepare(&self, input: &ModalityInput) -> Result<PreparedModality, ModalityError> {
         match input {
-            ModalityInput::Text { token_ids } => {
-                Ok(PreparedModality {
-                    modality: InputModality::Text,
-                    data: Vec::new(),
-                    shape: vec![token_ids.len(), self.hidden_size as usize],
-                })
-            }
+            ModalityInput::Text { token_ids } => Ok(PreparedModality {
+                modality: InputModality::Text,
+                data: Vec::new(),
+                shape: vec![token_ids.len(), self.hidden_size as usize],
+            }),
             _ => Err(ModalityError::UnsupportedModality(InputModality::Text)),
         }
     }
@@ -67,7 +77,9 @@ impl ModalityAdapter for TokenEmbeddingAdapter {
         })
     }
 
-    fn contract_digest(&self) -> [u8; 32] { [0u8; 32] }
+    fn contract_digest(&self) -> [u8; 32] {
+        [0u8; 32]
+    }
 }
 
 // ── LegacyVisionEncoderProjectorAdapter ────────────────────────────
@@ -81,17 +93,27 @@ pub struct LegacyVisionEncoderProjectorAdapter {
 }
 
 impl ModalityAdapter for LegacyVisionEncoderProjectorAdapter {
-    fn modality(&self) -> InputModality { InputModality::Image }
+    fn modality(&self) -> InputModality {
+        InputModality::Image
+    }
 
     fn prepare(&self, input: &ModalityInput) -> Result<PreparedModality, ModalityError> {
         match input {
-            ModalityInput::Image { pixels: _, width, height, channels: _ } => {
+            ModalityInput::Image {
+                pixels: _,
+                width,
+                height,
+                channels: _,
+            } => {
                 let num_patches_w = *width / self.patch_size;
                 let num_patches_h = *height / self.patch_size;
                 Ok(PreparedModality {
                     modality: InputModality::Image,
                     data: Vec::new(),
-                    shape: vec![(num_patches_w * num_patches_h) as usize, self.hidden_size as usize],
+                    shape: vec![
+                        (num_patches_w * num_patches_h) as usize,
+                        self.hidden_size as usize,
+                    ],
                 })
             }
             _ => Err(ModalityError::UnsupportedModality(InputModality::Image)),
@@ -107,7 +129,9 @@ impl ModalityAdapter for LegacyVisionEncoderProjectorAdapter {
         })
     }
 
-    fn contract_digest(&self) -> [u8; 32] { [0u8; 32] }
+    fn contract_digest(&self) -> [u8; 32] {
+        [0u8; 32]
+    }
 }
 
 // ── Gemma4DirectImageProjectionAdapter ─────────────────────────────
@@ -151,20 +175,29 @@ impl Gemma4DirectImageProjectionAdapter {
 }
 
 impl ModalityAdapter for Gemma4DirectImageProjectionAdapter {
-    fn modality(&self) -> InputModality { InputModality::Image }
+    fn modality(&self) -> InputModality {
+        InputModality::Image
+    }
 
     fn prepare(&self, input: &ModalityInput) -> Result<PreparedModality, ModalityError> {
         match input {
-            ModalityInput::Image { pixels: _, width, height, channels: _ } => {
+            ModalityInput::Image {
+                pixels: _,
+                width,
+                height,
+                channels: _,
+            } => {
                 // Validate divisibility
                 if width % self.width_divisibility != 0 {
                     return Err(ModalityError::AssemblyFailed(format!(
-                        "image width {} not divisible by {}", width, self.width_divisibility
+                        "image width {} not divisible by {}",
+                        width, self.width_divisibility
                     )));
                 }
                 if height % self.height_divisibility != 0 {
                     return Err(ModalityError::AssemblyFailed(format!(
-                        "image height {} not divisible by {}", height, self.height_divisibility
+                        "image height {} not divisible by {}",
+                        height, self.height_divisibility
                     )));
                 }
 
@@ -174,7 +207,8 @@ impl ModalityAdapter for Gemma4DirectImageProjectionAdapter {
 
                 if num_patches > self.max_patch_count {
                     return Err(ModalityError::AssemblyFailed(format!(
-                        "patch count {} exceeds budget {}", num_patches, self.max_patch_count
+                        "patch count {} exceeds budget {}",
+                        num_patches, self.max_patch_count
                     )));
                 }
 
@@ -193,7 +227,10 @@ impl ModalityAdapter for Gemma4DirectImageProjectionAdapter {
 
     fn project(&self, prepared: &PreparedModality) -> Result<EmbeddedModality, ModalityError> {
         let _num_patches = prepared.shape[0] as u32;
-        let soft_tokens = self.default_soft_tokens.min(self.max_soft_tokens).max(self.min_soft_tokens);
+        let soft_tokens = self
+            .default_soft_tokens
+            .min(self.max_soft_tokens)
+            .max(self.min_soft_tokens);
 
         // Stub: actual projection requires Metal compute or CPU fallback.
         // Returns zero-filled decoder-width embeddings for now.
@@ -207,7 +244,9 @@ impl ModalityAdapter for Gemma4DirectImageProjectionAdapter {
         })
     }
 
-    fn contract_digest(&self) -> [u8; 32] { [0u8; 32] }
+    fn contract_digest(&self) -> [u8; 32] {
+        [0u8; 32]
+    }
 }
 
 // ── Gemma4DirectAudioProjectionAdapter ─────────────────────────────
@@ -232,11 +271,16 @@ impl Gemma4DirectAudioProjectionAdapter {
 }
 
 impl ModalityAdapter for Gemma4DirectAudioProjectionAdapter {
-    fn modality(&self) -> InputModality { InputModality::Audio }
+    fn modality(&self) -> InputModality {
+        InputModality::Audio
+    }
 
     fn prepare(&self, input: &ModalityInput) -> Result<PreparedModality, ModalityError> {
         match input {
-            ModalityInput::Audio { samples, sample_rate: _ } => {
+            ModalityInput::Audio {
+                samples,
+                sample_rate: _,
+            } => {
                 let frame_samples = (self.sample_rate * self.frame_size_ms / 1000) as usize;
                 let num_frames = samples.len().div_ceil(frame_samples.max(1));
                 Ok(PreparedModality {
@@ -260,5 +304,7 @@ impl ModalityAdapter for Gemma4DirectAudioProjectionAdapter {
         })
     }
 
-    fn contract_digest(&self) -> [u8; 32] { [0u8; 32] }
+    fn contract_digest(&self) -> [u8; 32] {
+        [0u8; 32]
+    }
 }

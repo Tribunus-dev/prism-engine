@@ -344,11 +344,8 @@ pub(crate) fn compile_unchecked_speculative(
     }
 
     // === STEP 4: Build execution plan with captured metadata ===
-    let mut execution_plan = crate::config::build_execution_plan(
-        &target_arch,
-        &target_namespace,
-        &emitted_ids,
-    );
+    let mut execution_plan =
+        crate::config::build_execution_plan(&target_arch, &target_namespace, &emitted_ids);
     execution_plan.build_ane_fusion_plan();
 
     // Attach speculative config metadata

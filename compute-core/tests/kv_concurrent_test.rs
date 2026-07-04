@@ -13,30 +13,53 @@ use std::time::Instant;
 fn compile(device: &Device, src: &str, entry: &str) -> ComputePipelineState {
     let t = std::env::temp_dir().join("kv-concurrent");
     std::fs::create_dir_all(&t).unwrap();
-    let sp = t.join("test.metal"); let ap = t.join("test.air"); let lp = t.join("test.metallib");
+    let sp = t.join("test.metal");
+    let ap = t.join("test.air");
+    let lp = t.join("test.metallib");
     std::fs::write(&sp, src).unwrap();
     for pass in 0..2 {
         let mut c = std::process::Command::new("xcrun");
         c.args(["-sdk", "macosx"]);
-        c.args(if pass == 0 { vec!["metal","-std=metal4.0","-O3","-c",sp.to_str().unwrap(),"-o",ap.to_str().unwrap()] }
-                else { vec!["metallib","-o",lp.to_str().unwrap(),ap.to_str().unwrap()] });
+        c.args(if pass == 0 {
+            vec![
+                "metal",
+                "-std=metal4.0",
+                "-O3",
+                "-c",
+                sp.to_str().unwrap(),
+                "-o",
+                ap.to_str().unwrap(),
+            ]
+        } else {
+            vec!["metallib", "-o", lp.to_str().unwrap(), ap.to_str().unwrap()]
+        });
         assert!(c.status().unwrap().success());
     }
-    let lib = device.new_library_with_data(&std::fs::read(&lp).unwrap()).unwrap();
-    device.new_compute_pipeline_state_with_function(&lib.get_function(entry, None).unwrap()).unwrap()
+    let lib = device
+        .new_library_with_data(&std::fs::read(&lp).unwrap())
+        .unwrap();
+    device
+        .new_compute_pipeline_state_with_function(&lib.get_function(entry, None).unwrap())
+        .unwrap()
 }
 
 fn get_shader_src() -> String {
-    let s = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/compute_image/megakernel/kernels.rs")).unwrap();
-    let a = s.find("pub const SHADER_SRC: &str = r##\"").unwrap() + "pub const SHADER_SRC: &str = r##\"".len();
-    s[a..s[a..].find("\"##;").unwrap()+a].to_string()
+    let s = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/compute_image/megakernel/kernels.rs"),
+    )
+    .unwrap();
+    let a = s.find("pub const SHADER_SRC: &str = r##\"").unwrap()
+        + "pub const SHADER_SRC: &str = r##\"".len();
+    s[a..s[a..].find("\"##;").unwrap() + a].to_string()
 }
 
 fn compile_minimal(device: &Device, src: &str, entry: &str) -> ComputePipelineState {
     let opts = CompileOptions::new();
     let lib = device.new_library_with_source(src, &opts).unwrap();
-    device.new_compute_pipeline_state_with_function(&lib.get_function(entry, None).unwrap()).unwrap()
+    device
+        .new_compute_pipeline_state_with_function(&lib.get_function(entry, None).unwrap())
+        .unwrap()
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -56,9 +79,31 @@ fn a_stage_different_pso() {
     let cb = queue.new_command_buffer();
     let enc = cb.compute_command_encoder_with_dispatch_type(MTLDispatchType::Concurrent);
     enc.set_compute_pipeline_state(&pso_a);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:32,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 32,
+            height: 1,
+            depth: 1,
+        },
+    );
     enc.set_compute_pipeline_state(&pso_b);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:32,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 32,
+            height: 1,
+            depth: 1,
+        },
+    );
     enc.end_encoding();
     cb.commit();
     cb.wait_until_completed();
@@ -76,7 +121,10 @@ fn b_stage_shared_readonly() {
     let queue = device.new_command_queue();
 
     let shared = device.new_buffer_with_data(
-        &42u32 as *const u32 as *const std::ffi::c_void, 4, MTLResourceOptions::StorageModeShared);
+        &42u32 as *const u32 as *const std::ffi::c_void,
+        4,
+        MTLResourceOptions::StorageModeShared,
+    );
 
     let src = "#include <metal_stdlib>\nusing namespace metal;\nkernel void r(\
         device const uint* buf [[buffer(0)]], uint tid [[thread_index_in_threadgroup]]) { \
@@ -87,10 +135,32 @@ fn b_stage_shared_readonly() {
     let enc = cb.compute_command_encoder_with_dispatch_type(MTLDispatchType::Concurrent);
     enc.set_compute_pipeline_state(&pso);
     enc.set_buffer(0, Some(&shared), 0);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:32,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 32,
+            height: 1,
+            depth: 1,
+        },
+    );
     enc.set_compute_pipeline_state(&pso);
     enc.set_buffer(0, Some(&shared), 0);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:32,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 32,
+            height: 1,
+            depth: 1,
+        },
+    );
     enc.end_encoding();
     cb.commit();
     cb.wait_until_completed();
@@ -114,32 +184,64 @@ fn c_stage_epoch_close() {
 
     // Shared epoch_control: epoch_close_requested = 1
     let ec = device.new_buffer(128, MTLResourceOptions::StorageModeShared);
-    unsafe { *(ec.contents() as *mut u32) = 1; }
+    unsafe {
+        *(ec.contents() as *mut u32) = 1;
+    }
 
     let d_bufs: Vec<_> = (0..31)
-        .map(|_| device.new_buffer(64*1024, MTLResourceOptions::StorageModeShared)).collect();
+        .map(|_| device.new_buffer(64 * 1024, MTLResourceOptions::StorageModeShared))
+        .collect();
     let p_bufs: Vec<_> = (0..12)
-        .map(|_| device.new_buffer(64*1024, MTLResourceOptions::StorageModeShared)).collect();
+        .map(|_| device.new_buffer(64 * 1024, MTLResourceOptions::StorageModeShared))
+        .collect();
 
     let cb = queue.new_command_buffer();
     let enc = cb.compute_command_encoder_with_dispatch_type(MTLDispatchType::Concurrent);
 
     enc.set_compute_pipeline_state(&pso_d);
-    for (i,b) in d_bufs.iter().enumerate() { enc.set_buffer(i as u64, Some(b), 0); }
+    for (i, b) in d_bufs.iter().enumerate() {
+        enc.set_buffer(i as u64, Some(b), 0);
+    }
     enc.set_buffer(13, Some(&ec), 0);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:256,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 256,
+            height: 1,
+            depth: 1,
+        },
+    );
 
     enc.set_compute_pipeline_state(&pso_p);
-    for (i,b) in p_bufs.iter().enumerate() { enc.set_buffer(i as u64, Some(b), 0); }
+    for (i, b) in p_bufs.iter().enumerate() {
+        enc.set_buffer(i as u64, Some(b), 0);
+    }
     enc.set_buffer(11, Some(&ec), 0); // epoch_control at CORRECT slot
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:256,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 256,
+            height: 1,
+            depth: 1,
+        },
+    );
 
     enc.end_encoding();
     let start = Instant::now();
     cb.commit();
     cb.wait_until_completed();
-    println!("  ✓ Stage C: decode+prefetch epoch close — {:.1}ms",
-        start.elapsed().as_secs_f64() * 1e3);
+    println!(
+        "  ✓ Stage C: decode+prefetch epoch close — {:.1}ms",
+        start.elapsed().as_secs_f64() * 1e3
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -156,41 +258,75 @@ fn d_stage_ring_entry_epoch_close() {
     let pso_p = compile(&device, &full, "persistent_kv_prefetch_worker");
 
     let ec = device.new_buffer(128, MTLResourceOptions::StorageModeShared);
-    unsafe { *(ec.contents() as *mut u32) = 1; } // epoch_close_requested = 1
-    let mt = device.new_buffer_with_data(&1u32 as *const u32 as *const std::ffi::c_void, 4, MTLResourceOptions::StorageModeShared);
+    unsafe {
+        *(ec.contents() as *mut u32) = 1;
+    } // epoch_close_requested = 1
+    let mt = device.new_buffer_with_data(
+        &1u32 as *const u32 as *const std::ffi::c_void,
+        4,
+        MTLResourceOptions::StorageModeShared,
+    );
 
     let d_bufs: Vec<_> = (0..31)
-        .map(|_| device.new_buffer(64*1024, MTLResourceOptions::StorageModeShared)).collect();
+        .map(|_| device.new_buffer(64 * 1024, MTLResourceOptions::StorageModeShared))
+        .collect();
 
     // Ring entry at position 0: state=SUBMITTED(1)
     unsafe {
         let r = d_bufs[22].contents() as *mut u32;
         r.write_volatile(0);
-        r.add(1).write_volatile(1);  // request_id
-        r.add(2).write_volatile(0);  // session_id = token 0
-        r.add(3).write_volatile(0);  // sequence_id = pos 0
-        r.write_volatile(1);         // state = SUBMITTED
+        r.add(1).write_volatile(1); // request_id
+        r.add(2).write_volatile(0); // session_id = token 0
+        r.add(3).write_volatile(0); // sequence_id = pos 0
+        r.write_volatile(1); // state = SUBMITTED
         *(d_bufs[23].contents() as *mut u32) = 0; // ring_tail
         std::ptr::write_bytes(d_bufs[18].contents(), 0, 64); // receipt
     }
 
     let p_bufs: Vec<_> = (0..12)
-        .map(|_| device.new_buffer(64*1024, MTLResourceOptions::StorageModeShared)).collect();
+        .map(|_| device.new_buffer(64 * 1024, MTLResourceOptions::StorageModeShared))
+        .collect();
 
     let cb = queue.new_command_buffer();
     let enc = cb.compute_command_encoder_with_dispatch_type(MTLDispatchType::Concurrent);
 
     enc.set_compute_pipeline_state(&pso_d);
-    for (i,b) in d_bufs.iter().enumerate() { enc.set_buffer(i as u64, Some(b), 0); }
+    for (i, b) in d_bufs.iter().enumerate() {
+        enc.set_buffer(i as u64, Some(b), 0);
+    }
     enc.set_buffer(13, Some(&ec), 0);
     enc.set_buffer(27, Some(&mt), 0);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:256,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 256,
+            height: 1,
+            depth: 1,
+        },
+    );
 
     enc.set_compute_pipeline_state(&pso_p);
-    for (i,b) in p_bufs.iter().enumerate() { enc.set_buffer(i as u64, Some(b), 0); }
+    for (i, b) in p_bufs.iter().enumerate() {
+        enc.set_buffer(i as u64, Some(b), 0);
+    }
     enc.set_buffer(10, Some(&mt), 0);
     enc.set_buffer(11, Some(&ec), 0);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:256,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 256,
+            height: 1,
+            depth: 1,
+        },
+    );
 
     enc.end_encoding();
     let start = Instant::now();
@@ -204,12 +340,16 @@ fn d_stage_ring_entry_epoch_close() {
         let state = entry_state & 3;
         let consumed = state >= 2;
         let receipt = *(d_bufs[18].contents() as *const u32);
-        println!("  Ring entry state={}, consumed={}, requests_claimed={}",
-            state, consumed, receipt);
+        println!(
+            "  Ring entry state={}, consumed={}, requests_claimed={}",
+            state, consumed, receipt
+        );
     }
     assert_eq!(cb.status(), MTLCommandBufferStatus::Completed);
-    println!("  ✓ Stage D: ring entry + epoch close — {:.1}ms",
-        elapsed.as_secs_f64() * 1e3);
+    println!(
+        "  ✓ Stage D: ring entry + epoch close — {:.1}ms",
+        elapsed.as_secs_f64() * 1e3
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -229,43 +369,75 @@ fn e_stage_full_protocol() {
     // epoch_close=0, epoch_enqueue_limit=1 — let both kernels run
     let ec = device.new_buffer(128, MTLResourceOptions::StorageModeShared);
     unsafe {
-        *(ec.contents() as *mut u32) = 0;       // epoch_close_requested = 0
+        *(ec.contents() as *mut u32) = 0; // epoch_close_requested = 0
         *(ec.contents() as *mut u32).add(1) = 1; // epoch_enqueue_limit = 1
     }
-    let mt = device.new_buffer_with_data(&1u32 as *const u32 as *const std::ffi::c_void, 4, MTLResourceOptions::StorageModeShared);
+    let mt = device.new_buffer_with_data(
+        &1u32 as *const u32 as *const std::ffi::c_void,
+        4,
+        MTLResourceOptions::StorageModeShared,
+    );
 
     let d_bufs: Vec<_> = (0..31)
-        .map(|_| device.new_buffer(64*1024, MTLResourceOptions::StorageModeShared)).collect();
+        .map(|_| device.new_buffer(64 * 1024, MTLResourceOptions::StorageModeShared))
+        .collect();
 
     // Ring entry at position 0
     unsafe {
         let r = d_bufs[22].contents() as *mut u32;
         r.write_volatile(0);
-        r.add(1).write_volatile(1);  // request_id
-        r.add(2).write_volatile(0);  // token 0
-        r.add(3).write_volatile(0);  // pos 0
-        r.write_volatile(1);         // SUBMITTED
+        r.add(1).write_volatile(1); // request_id
+        r.add(2).write_volatile(0); // token 0
+        r.add(3).write_volatile(0); // pos 0
+        r.write_volatile(1); // SUBMITTED
         *(d_bufs[23].contents() as *mut u32) = 0; // ring_tail
         std::ptr::write_bytes(d_bufs[18].contents(), 0, 64); // receipt
     }
 
     let p_bufs: Vec<_> = (0..12)
-        .map(|_| device.new_buffer(64*1024, MTLResourceOptions::StorageModeShared)).collect();
+        .map(|_| device.new_buffer(64 * 1024, MTLResourceOptions::StorageModeShared))
+        .collect();
 
     let cb = queue.new_command_buffer();
     let enc = cb.compute_command_encoder_with_dispatch_type(MTLDispatchType::Concurrent);
 
     enc.set_compute_pipeline_state(&pso_d);
-    for (i,b) in d_bufs.iter().enumerate() { enc.set_buffer(i as u64, Some(b), 0); }
+    for (i, b) in d_bufs.iter().enumerate() {
+        enc.set_buffer(i as u64, Some(b), 0);
+    }
     enc.set_buffer(13, Some(&ec), 0);
     enc.set_buffer(27, Some(&mt), 0);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:256,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 256,
+            height: 1,
+            depth: 1,
+        },
+    );
 
     enc.set_compute_pipeline_state(&pso_p);
-    for (i,b) in p_bufs.iter().enumerate() { enc.set_buffer(i as u64, Some(b), 0); }
+    for (i, b) in p_bufs.iter().enumerate() {
+        enc.set_buffer(i as u64, Some(b), 0);
+    }
     enc.set_buffer(10, Some(&mt), 0);
     enc.set_buffer(11, Some(&ec), 0);
-    enc.dispatch_threads(MTLSize{width:1,height:1,depth:1}, MTLSize{width:256,height:1,depth:1});
+    enc.dispatch_threads(
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 256,
+            height: 1,
+            depth: 1,
+        },
+    );
 
     enc.end_encoding();
     let start = Instant::now();
@@ -279,11 +451,15 @@ fn e_stage_full_protocol() {
         let state = entry_state & 3;
         let consumed = state == 3; // COMPLETED
         let receipt = *(d_bufs[18].contents() as *const u32);
-        println!("  Ring entry state={}, consumed={}, requests_claimed={}",
-            state, consumed, receipt);
+        println!(
+            "  Ring entry state={}, consumed={}, requests_claimed={}",
+            state, consumed, receipt
+        );
     }
 
     assert_eq!(cb.status(), MTLCommandBufferStatus::Completed);
-    println!("  ✓ Stage E: full protocol — {:.1}ms",
-        elapsed.as_secs_f64() * 1e3);
+    println!(
+        "  ✓ Stage E: full protocol — {:.1}ms",
+        elapsed.as_secs_f64() * 1e3
+    );
 }

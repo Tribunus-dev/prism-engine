@@ -4,8 +4,8 @@
 //! Tier 1 of the tri-modal routing strategy — completely bypasses WebKit
 //! for raw HTML ingestion.
 
-use lol_html::{element, RewriteStrSettings};
 use lol_html::html_content::ContentType;
+use lol_html::{element, RewriteStrSettings};
 
 /// Fetch a URL and return sanitized HTML with scripts removed or neutered.
 ///
@@ -92,7 +92,7 @@ fn is_trusted_script_domain(src: &str) -> bool {
         || src_lower.starts_with("./")
         || src_lower.starts_with("../")
         || src_lower.starts_with("//")
-        || !src_lower.contains("://")  // protocol-relative or no protocol = likely same-origin
+        || !src_lower.contains("://") // protocol-relative or no protocol = likely same-origin
 }
 
 /// Fully inline-script X-Ray: parse every <script> tag body, run AST guard,
@@ -103,12 +103,10 @@ pub fn xray_inline_scripts(raw_html: &str) -> Result<String, String> {
     let _ = lol_html::rewrite_str(
         raw_html,
         RewriteStrSettings {
-            element_content_handlers: vec![
-                element!("script[src]", |el| {
-                    el.remove();
-                    Ok(())
-                }),
-            ],
+            element_content_handlers: vec![element!("script[src]", |el| {
+                el.remove();
+                Ok(())
+            })],
             ..RewriteStrSettings::default()
         },
     );

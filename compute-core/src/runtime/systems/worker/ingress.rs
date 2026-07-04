@@ -4,16 +4,15 @@
 //! This system runs during `Stage::Intake` and is responsible for the
 //! Queued → Dispatching → AwaitingFirstEvent (or → Failed) transition.
 
-use crate::runtime::scheduling::command::CommandWriter;
-use crate::runtime::scheduling::metadata::*;
-use crate::runtime::components::{
-    WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome,
-    WorkerRequest, WorkerRequestPhase,
-    WORKER_INGRESS_SYSTEM,
-};
 use crate::runtime::components::worker_health::{TerminalStatus, WorkerErrorCategory};
 use crate::runtime::components::worker_request::RequestClass;
+use crate::runtime::components::{
+    WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
+    WorkerRequestPhase, WORKER_INGRESS_SYSTEM,
+};
 use crate::runtime::resources::*;
+use crate::runtime::scheduling::command::CommandWriter;
+use crate::runtime::scheduling::metadata::*;
 use crate::runtime::world::{Entity, World};
 
 // ---------------------------------------------------------------------------
@@ -63,7 +62,12 @@ impl Default for WorkerIngressSystem {
 
 impl SystemSpec for WorkerIngressSystem {
     type Reads = (WorkerRequest, WorkerLifecycle);
-    type Writes = (WorkerAssignment, WorkerLifecycle, WorkerHeartbeat, WorkerOutcome);
+    type Writes = (
+        WorkerAssignment,
+        WorkerLifecycle,
+        WorkerHeartbeat,
+        WorkerOutcome,
+    );
     type ReadResources = (WorkerIngressQueue, WorkerResponseRegistry);
     type WriteResources = (WorkerPoolResource, WorkerDiagnosticsResource);
 
@@ -84,27 +88,20 @@ impl ErasedSystem for WorkerIngressSystem {
         // NOTE: metadata() must return a 'static reference because
         // ErasedSystem is stored as Box<dyn ErasedSystem>.  We use a
         // LazyLock to compute it once at first access.
-        static META: std::sync::LazyLock<SystemMetadata> =
-            std::sync::LazyLock::new(|| {
-                <WorkerIngressSystem as SystemSpec>::metadata()
-                    .expect("WorkerIngressSystem metadata construction")
-            });
+        static META: std::sync::LazyLock<SystemMetadata> = std::sync::LazyLock::new(|| {
+            <WorkerIngressSystem as SystemSpec>::metadata()
+                .expect("WorkerIngressSystem metadata construction")
+        });
         &META
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, commands: &mut CommandWriter) -> SystemResult {
         // ---- 1. Drain ingress queue (scoped borrow) ----
         let entries = {
             let queue = match world.get_resource_mut::<WorkerIngressQueue>() {
                 Some(q) => q,
                 None => {
-                    return SystemResult::err(
-                        "WorkerIngressQueue resource not registered",
-                    );
+                    return SystemResult::err("WorkerIngressQueue resource not registered");
                 }
             };
             queue.drain(BATCH_SIZE)
@@ -137,11 +134,14 @@ impl ErasedSystem for WorkerIngressSystem {
             // ---- 2b. Insert request and lifecycle ----
             // Use the World API for immediate availability; subsequent
             // mutations to lifecycle happen in-place.
-            world.insert(entity, WorkerRequest::new(
-                entry.request_id.clone(),
-                entry.payload.clone(),
-                DEFAULT_REQUEST_CLASS,
-            ));
+            world.insert(
+                entity,
+                WorkerRequest::new(
+                    entry.request_id.clone(),
+                    entry.payload.clone(),
+                    DEFAULT_REQUEST_CLASS,
+                ),
+            );
             // Only insert lifecycle if the entity doesn't have one yet.
             // Entities passed from the caller (e.g. engine.rs) already have
             // a lifecycle initialized to Queued — overwriting it would
@@ -173,7 +173,8 @@ impl ErasedSystem for WorkerIngressSystem {
             }
 
             // ---- 3. Select a healthy worker ----
-            let worker_id = match world.get_resource::<WorkerPoolResource>()
+            let worker_id = match world
+                .get_resource::<WorkerPoolResource>()
                 .and_then(|pool| pool.select_healthy_worker())
             {
                 Some(id) => id,
@@ -192,7 +193,10 @@ impl ErasedSystem for WorkerIngressSystem {
             // WorkerAssignment and WorkerHeartbeat are inserted via the
             // provenance-stamped command buffer.
             if commands
-                .insert(entity, WorkerAssignment::new(&worker_id, INITIAL_GENERATION))
+                .insert(
+                    entity,
+                    WorkerAssignment::new(&worker_id, INITIAL_GENERATION),
+                )
                 .is_err()
             {
                 continue;
@@ -277,7 +281,8 @@ impl WorkerIngressSystem {
     /// Increment the stale/drop counter on the diagnostics resource.
     fn record_diagnostics(world: &mut World) {
         if let Some(diag) = world.get_resource::<WorkerDiagnosticsResource>() {
-            diag.stale_event_drops.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            diag.stale_event_drops
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

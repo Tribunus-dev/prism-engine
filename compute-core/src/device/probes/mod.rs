@@ -4,19 +4,19 @@
 //! The [`DeviceRegistry::discover()`] method runs all probes and collects
 //! their results.
 
-pub mod cpu;
 pub mod amd_npu;
+pub mod cpu;
 
 #[cfg(any(feature = "metal-dispatch", feature = "prism-backend"))]
 pub mod metal;
 
-pub mod intel_npu;
 pub mod ane;
-pub mod rocm;
 pub mod cuda;
+pub mod intel_npu;
 /// Level Zero GPU probe — available on Linux with Intel Graphics driver.
 #[cfg(target_os = "linux")]
 pub mod level_zero;
+pub mod rocm;
 
 use crate::device::DeviceInfo;
 

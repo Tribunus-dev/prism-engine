@@ -82,30 +82,14 @@ impl SlotState {
     /// Human-readable description of this state.
     pub fn description(&self) -> &'static str {
         match self {
-            SlotState::Unallocated => {
-                "Slot is free and not bound to any tensor"
-            }
-            SlotState::Reserved => {
-                "Slot has been claimed for a specific tensor allocation"
-            }
-            SlotState::ProducerWriting => {
-                "Producer phase is actively writing tensor data"
-            }
-            SlotState::ProducerSealed => {
-                "Producer has completed writing; data is immutable"
-            }
-            SlotState::ConsumerReadable => {
-                "At least one consumer may read the tensor data"
-            }
-            SlotState::Reducing => {
-                "Partial reduction or aggregation is in progress"
-            }
-            SlotState::Evictable => {
-                "Slot content is eligible for eviction under memory pressure"
-            }
-            SlotState::Released => {
-                "Slot has been freed and returned to the pool"
-            }
+            SlotState::Unallocated => "Slot is free and not bound to any tensor",
+            SlotState::Reserved => "Slot has been claimed for a specific tensor allocation",
+            SlotState::ProducerWriting => "Producer phase is actively writing tensor data",
+            SlotState::ProducerSealed => "Producer has completed writing; data is immutable",
+            SlotState::ConsumerReadable => "At least one consumer may read the tensor data",
+            SlotState::Reducing => "Partial reduction or aggregation is in progress",
+            SlotState::Evictable => "Slot content is eligible for eviction under memory pressure",
+            SlotState::Released => "Slot has been freed and returned to the pool",
         }
     }
 }
@@ -187,10 +171,7 @@ pub struct ActivationSlot {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ArenaError {
     #[error("invalid slot state transition: {from:?} \u{2192} {to:?}")]
-    InvalidTransition {
-        from: SlotState,
-        to: SlotState,
-    },
+    InvalidTransition { from: SlotState, to: SlotState },
     #[error("slot {0} is not in Reserved state")]
     SlotNotReserved(u64),
     #[error("slot {0} is already sealed")]
@@ -386,8 +367,9 @@ impl ActivationArena {
             .iter()
             .position(|s| s.id == slot_id)
             .ok_or(ArenaError::SlotNotReserved(slot_id))?;
-        self.current_allocated_bytes =
-            self.current_allocated_bytes.saturating_sub(self.slots[idx].bytes);
+        self.current_allocated_bytes = self
+            .current_allocated_bytes
+            .saturating_sub(self.slots[idx].bytes);
         self.transition(slot_id, SlotState::Released, "slot released")?;
         Ok(())
     }
@@ -423,11 +405,7 @@ impl ActivationArena {
     }
 
     /// Set the producer phase for a slot.
-    pub fn set_producer(
-        &mut self,
-        slot_id: u64,
-        phase_id: PhaseId,
-    ) -> Result<(), ArenaError> {
+    pub fn set_producer(&mut self, slot_id: u64, phase_id: PhaseId) -> Result<(), ArenaError> {
         let slot = self
             .slots
             .iter_mut()
@@ -438,11 +416,7 @@ impl ActivationArena {
     }
 
     /// Add a consumer phase to a slot.
-    pub fn add_consumer(
-        &mut self,
-        slot_id: u64,
-        phase_id: PhaseId,
-    ) -> Result<(), ArenaError> {
+    pub fn add_consumer(&mut self, slot_id: u64, phase_id: PhaseId) -> Result<(), ArenaError> {
         let slot = self
             .slots
             .iter_mut()
@@ -575,12 +549,8 @@ mod tests {
             .unwrap();
         arena.seal(id, [0u8; 32]).unwrap();
         arena.mark_readable(id).unwrap();
-        arena
-            .transition(id, SlotState::Reducing, "reduce")
-            .unwrap();
-        arena
-            .transition(id, SlotState::Evictable, "evict")
-            .unwrap();
+        arena.transition(id, SlotState::Reducing, "reduce").unwrap();
+        arena.transition(id, SlotState::Evictable, "evict").unwrap();
         arena.release(id).unwrap();
 
         let slot = arena.slot(id).unwrap();

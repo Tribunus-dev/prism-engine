@@ -14,9 +14,9 @@ use prism_engine::llm::server;
 /// A minimal LlmCapabilityManifest that can be used in tests.
 fn test_manifest() -> manifest::LlmCapabilityManifest {
     use manifest::{
-        ComponentAvailability, ContextProfile, KvCacheContract, KvDtype,
-        LlmCapabilityManifest, LlmModelFamily, LlmProviderArtifact,
-        LlmQualificationRecord, QualificationStatus, ResidencyRequirements, RopeMode,
+        ComponentAvailability, ContextProfile, KvCacheContract, KvDtype, LlmCapabilityManifest,
+        LlmModelFamily, LlmProviderArtifact, LlmQualificationRecord, QualificationStatus,
+        ResidencyRequirements, RopeMode,
     };
 
     LlmCapabilityManifest {
@@ -74,7 +74,10 @@ fn test_manifest() -> manifest::LlmCapabilityManifest {
 
 /// A minimal valid CreateSessionRequest.
 fn create_request() -> server::CreateSessionRequest {
-    use server::{AuxiliaryLanePolicy, CImageId, ContextProfileId, CreateSessionRequest, InferenceExecutionPolicy};
+    use server::{
+        AuxiliaryLanePolicy, CImageId, ContextProfileId, CreateSessionRequest,
+        InferenceExecutionPolicy,
+    };
     CreateSessionRequest {
         cimage_id: CImageId("test-cimage".into()),
         context_profile: ContextProfileId("default".into()),
@@ -128,27 +131,42 @@ fn session_state_transitions() {
         .expect("create_session should succeed");
 
     // Starts at Ready after creation.
-    assert_eq!(mgr.get_state(&session_id), Some(InferenceSessionState::Ready));
+    assert_eq!(
+        mgr.get_state(&session_id),
+        Some(InferenceSessionState::Ready)
+    );
 
     // Ready -> Decoding
     mgr.transition(&session_id, InferenceSessionState::Decoding)
         .expect("Ready -> Decoding should succeed");
-    assert_eq!(mgr.get_state(&session_id), Some(InferenceSessionState::Decoding));
+    assert_eq!(
+        mgr.get_state(&session_id),
+        Some(InferenceSessionState::Decoding)
+    );
 
     // Decoding -> Completed
     mgr.transition(&session_id, InferenceSessionState::Completed)
         .expect("Decoding -> Completed should succeed");
-    assert_eq!(mgr.get_state(&session_id), Some(InferenceSessionState::Completed));
+    assert_eq!(
+        mgr.get_state(&session_id),
+        Some(InferenceSessionState::Completed)
+    );
 
     // Completed -> Closed
     mgr.transition(&session_id, InferenceSessionState::Closed)
         .expect("Completed -> Closed should succeed");
-    assert_eq!(mgr.get_state(&session_id), Some(InferenceSessionState::Closed));
+    assert_eq!(
+        mgr.get_state(&session_id),
+        Some(InferenceSessionState::Closed)
+    );
 
     // Transition on non-existent session should fail.
     let bogus_id = manifest::SessionId(uuid::Uuid::new_v4());
     let result = mgr.transition(&bogus_id, InferenceSessionState::Ready);
-    assert!(result.is_err(), "transition on non-existent session should fail");
+    assert!(
+        result.is_err(),
+        "transition on non-existent session should fail"
+    );
 }
 
 // ── Test 3: Weight Residency Cache Hit ──────────────────────────────────
@@ -176,7 +194,10 @@ fn weight_residency_cache_hit() {
     // Verify cache hit.
     let receipt = mgr.get_residency_receipt(&key);
     assert!(receipt.cache_hit, "receipt should report cache_hit=true");
-    assert_eq!(receipt.active_weight_leases, 2, "two sessions should hold leases");
+    assert_eq!(
+        receipt.active_weight_leases, 2,
+        "two sessions should hold leases"
+    );
     assert!(receipt.metal_visible, "weights should be metal visible");
 }
 
@@ -201,7 +222,9 @@ fn kv_epoch_create_seal_dispatch() {
         residency: "default".into(),
         state: KvPageState::Allocated,
     };
-    let _page_id = kv.add_page(&epoch_id, page).expect("add_page should succeed");
+    let _page_id = kv
+        .add_page(&epoch_id, page)
+        .expect("add_page should succeed");
 
     // Seal the epoch.
     let epoch_receipt = kv.seal_epoch(&epoch_id).expect("seal_epoch should succeed");
@@ -213,7 +236,10 @@ fn kv_epoch_create_seal_dispatch() {
         .create_dispatch_view(&epoch_id, 0)
         .expect("create_dispatch_view should succeed");
 
-    assert_eq!(view.epoch_id, epoch_id, "dispatch view should reference the correct epoch");
+    assert_eq!(
+        view.epoch_id, epoch_id,
+        "dispatch view should reference the correct epoch"
+    );
 }
 
 // ── Test 5: KV Sparse Retention Preserves Positions ────────────────────
@@ -279,8 +305,14 @@ fn cancellation_returns_receipt() {
 
     // Cancel and verify receipt.
     let receipt = mgr.cancel(&handle).expect("cancel should succeed");
-    assert_eq!(receipt.session_id, session_id, "receipt should have correct session_id");
-    assert_eq!(receipt.state_at_cancellation, InferenceSessionState::Cancelling);
+    assert_eq!(
+        receipt.session_id, session_id,
+        "receipt should have correct session_id"
+    );
+    assert_eq!(
+        receipt.state_at_cancellation,
+        InferenceSessionState::Cancelling
+    );
 
     // Verify the session is now marked cancelled.
     assert!(mgr.is_cancelled(&session_id), "session should be cancelled");
@@ -336,10 +368,10 @@ fn memory_pressure_levels() {
 #[test]
 fn receipt_store_full_lifecycle() {
     use server::{
-        CImageId, ContextProfileId, CoreMlVisibilityState, DispatchId,
-        InferenceAdmissionReceipt, InferenceExecutionPolicy, InferenceOutputReceipt,
-        InferenceTerminalState, LaneExecutionReceipt, MetalExecutionReceipt, RequestId,
-        WeightEvictionStatus, WeightResidencyReceipt,
+        CImageId, ContextProfileId, CoreMlVisibilityState, DispatchId, InferenceAdmissionReceipt,
+        InferenceExecutionPolicy, InferenceOutputReceipt, InferenceTerminalState,
+        LaneExecutionReceipt, MetalExecutionReceipt, RequestId, WeightEvictionStatus,
+        WeightResidencyReceipt,
     };
 
     let tmp = ScopedTempDir::new();
@@ -409,7 +441,10 @@ fn receipt_store_full_lifecycle() {
         .finalize(&session_id, InferenceTerminalState::Succeeded)
         .expect("finalize should succeed");
     assert_eq!(finalized.terminal_state, InferenceTerminalState::Succeeded);
-    assert!(!finalized.completed_at.is_empty(), "completed_at should be set");
+    assert!(
+        !finalized.completed_at.is_empty(),
+        "completed_at should be set"
+    );
 
     // Step 7: Retrieve.
     let retrieved = store

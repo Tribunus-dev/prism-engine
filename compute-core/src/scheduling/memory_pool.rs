@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use half::f16;
+use serde::{Deserialize, Serialize};
 
 // ── Token classification ────────────────────────────────────────────
 
@@ -17,14 +17,14 @@ impl TokenClass {
     /// Bytes per token for this class's KV cache storage.
     pub fn bytes_per_token(&self) -> u64 {
         match self {
-            TokenClass::Reasoning => 98304,   // 4-bit: 48×8×512×0.5
-            TokenClass::Execution => 49152,   // 1.58-bit: 48×8×512×0.25
-            TokenClass::Transition => 49152,  // 2-bit: 48×8×512×0.25
+            TokenClass::Reasoning => 98304,  // 4-bit: 48×8×512×0.5
+            TokenClass::Execution => 49152,  // 1.58-bit: 48×8×512×0.25
+            TokenClass::Transition => 49152, // 2-bit: 48×8×512×0.25
         }
     }
     /// Predictive delta buffer bytes per token (constant 4-bit across all classes).
     pub fn delta_bytes_per_token() -> u64 {
-        98304  // 48×8×512×0.5
+        98304 // 48×8×512×0.5
     }
 }
 
@@ -112,16 +112,24 @@ impl MemoryPoolAllocator {
         for (idx, busy) in self.global_page_pool.iter_mut().enumerate() {
             if !*busy {
                 *busy = true;
-                mapped_pages.push(VirtualPage { surface_id: idx, active_tokens: 0 });
+                mapped_pages.push(VirtualPage {
+                    surface_id: idx,
+                    active_tokens: 0,
+                });
                 allocated += 1;
-                if allocated >= required_pages { break; }
+                if allocated >= required_pages {
+                    break;
+                }
             }
         }
 
         // 2. Token-stealing: harvest from low-entropy execution contexts.
         if allocated < required_pages {
             // Sort active slots by page count (steal from those with most).
-            let steal_candidates: Vec<usize> = self.active_slots.iter().enumerate()
+            let steal_candidates: Vec<usize> = self
+                .active_slots
+                .iter()
+                .enumerate()
                 .filter(|(_, s)| s.slot_id != slot_id && s.virtual_pages.len() > 1)
                 .map(|(i, _)| i)
                 .collect();
@@ -132,7 +140,9 @@ impl MemoryPoolAllocator {
                         active_tokens: 0,
                     });
                     allocated += 1;
-                    if allocated >= required_pages { break; }
+                    if allocated >= required_pages {
+                        break;
+                    }
                 }
             }
         }
@@ -178,6 +188,6 @@ impl MemoryPoolAllocator {
             TokenClass::Execution
         } else {
             TokenClass::Transition
-    }
+        }
     }
 }

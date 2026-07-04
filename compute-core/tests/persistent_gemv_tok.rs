@@ -14,7 +14,7 @@ use metal::*;
 use std::time::Instant;
 use tribunus_compute_core::compute_image::compile::int4_pack::quantize_to_ternary_block32;
 use tribunus_compute_core::compute_image::megakernel::{
-    PERSISTENT_GEMV_ROWS_PER_TG, PERSISTENT_GEMV_THREADS_PER_TG, PERSISTENT_GEMV_SRC,
+    PERSISTENT_GEMV_ROWS_PER_TG, PERSISTENT_GEMV_SRC, PERSISTENT_GEMV_THREADS_PER_TG,
 };
 
 const HIDDEN: usize = 3840;
@@ -24,9 +24,14 @@ const LAYERS: usize = 48;
 
 struct Rng(u64);
 impl Rng {
-    fn new(s: u64) -> Self { Self(s) }
+    fn new(s: u64) -> Self {
+        Self(s)
+    }
     fn f32(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         f32::from_bits(((self.0 >> 40) as u32 >> 9) | 0x3F80_0000) - 1.0
     }
 }
@@ -43,8 +48,14 @@ fn gen_weights(rng: &mut Rng, rows: usize, hidden_dim: usize) -> Vec<u8> {
             f32_block[i] = t.clamp(-1, 1) as f32;
         }
         // Scale so weights are non-trivial
-        let max_abs = f32_block.iter().map(|v| v.abs()).fold(0.0f32, f32::max).max(1.0);
-        for v in &mut f32_block { *v *= max_abs; }
+        let max_abs = f32_block
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0f32, f32::max)
+            .max(1.0);
+        for v in &mut f32_block {
+            *v *= max_abs;
+        }
         let block = quantize_to_ternary_block32(&f32_block);
         bytes.extend_from_slice(&block.packed_trits);
         bytes.extend_from_slice(&block.block_scale.to_le_bytes());
@@ -72,12 +83,19 @@ fn compile_kernel(src: &str, entry: &str) -> (ComputePipelineState, CommandQueue
     std::fs::write(&s, src).unwrap();
     assert!(std::process::Command::new("xcrun")
         .args(["-sdk", "macosx", "metal", "-std=metal3.2", "-O3", "-c"])
-        .arg(s.to_str().unwrap()).arg("-o").arg(a.to_str().unwrap())
-        .status().unwrap().success());
+        .arg(s.to_str().unwrap())
+        .arg("-o")
+        .arg(a.to_str().unwrap())
+        .status()
+        .unwrap()
+        .success());
     assert!(std::process::Command::new("xcrun")
         .args(["-sdk", "macosx", "metallib", "-o"])
-        .arg(l.to_str().unwrap()).arg(a.to_str().unwrap())
-        .status().unwrap().success());
+        .arg(l.to_str().unwrap())
+        .arg(a.to_str().unwrap())
+        .status()
+        .unwrap()
+        .success());
     let bytes = std::fs::read(&l).unwrap();
     let lib = dev.new_library_with_data(&bytes).unwrap();
     let f = lib.get_function(entry, None).unwrap();
@@ -166,27 +184,71 @@ fn decode_tok_benchmark() {
         repeats: usize, // how many dispatches (24 for Down tiles)
     }
     const PROJS: &[Proj] = &[
-        Proj { name: "Q",   rows: 4096,  hidden: HIDDEN,     repeats: 1 },
-        Proj { name: "K",   rows: 2048,  hidden: HIDDEN,     repeats: 1 },
-        Proj { name: "V",   rows: 2048,  hidden: HIDDEN,     repeats: 1 },
-        Proj { name: "O",   rows: 4096,  hidden: HIDDEN,     repeats: 1 },
-        Proj { name: "Gate", rows: 15360, hidden: HIDDEN,    repeats: 1 },
-        Proj { name: "Up",  rows: 15360, hidden: HIDDEN,     repeats: 1 },
-        Proj { name: "Down", rows: HIDDEN, hidden: TILE,     repeats: 24 },
+        Proj {
+            name: "Q",
+            rows: 4096,
+            hidden: HIDDEN,
+            repeats: 1,
+        },
+        Proj {
+            name: "K",
+            rows: 2048,
+            hidden: HIDDEN,
+            repeats: 1,
+        },
+        Proj {
+            name: "V",
+            rows: 2048,
+            hidden: HIDDEN,
+            repeats: 1,
+        },
+        Proj {
+            name: "O",
+            rows: 4096,
+            hidden: HIDDEN,
+            repeats: 1,
+        },
+        Proj {
+            name: "Gate",
+            rows: 15360,
+            hidden: HIDDEN,
+            repeats: 1,
+        },
+        Proj {
+            name: "Up",
+            rows: 15360,
+            hidden: HIDDEN,
+            repeats: 1,
+        },
+        Proj {
+            name: "Down",
+            rows: HIDDEN,
+            hidden: TILE,
+            repeats: 24,
+        },
     ];
 
-    println!("
+    println!(
+        "
 ═══ Decode tok/s Benchmark ═══
-");
+"
+    );
     println!("  Model:     Gemma 4 12B ({} layers)", LAYERS);
     println!("  Dispatches per layer: 7 projections");
-    println!("  Kernel:    Persistent row-batched (4 rows/TG, {} threads/TG)",
-        PERSISTENT_GEMV_THREADS_PER_TG);
-    println!("  SRAM:      {} bytes/TG", PERSISTENT_GEMV_THREADS_PER_TG * 2);
+    println!(
+        "  Kernel:    Persistent row-batched (4 rows/TG, {} threads/TG)",
+        PERSISTENT_GEMV_THREADS_PER_TG
+    );
+    println!(
+        "  SRAM:      {} bytes/TG",
+        PERSISTENT_GEMV_THREADS_PER_TG * 2
+    );
 
     // Compile both kernel variants
-    println!("
-  Compiling 3840-dim kernel...");
+    println!(
+        "
+  Compiling 3840-dim kernel..."
+    );
     let (pso_3840, queue, dev) = compile_kernel(PERSISTENT_GEMV_SRC, "matvec_persistent_batched");
     println!("  Compiling 640-dim kernel (Down)...");
     let (pso_640, _, _) = compile_kernel(PERSISTENT_GEMV_SRC_640, "matvec_persistent_batched_640");
@@ -205,16 +267,39 @@ fn decode_tok_benchmark() {
         let weight_bytes = gen_weights(&mut rng, p.rows, p.hidden);
         let act_bytes = gen_activation(&mut rng, p.hidden);
 
-        let weight_buf = dev.new_buffer(weight_bytes.len() as u64, MTLResourceOptions::StorageModeShared);
-        unsafe { std::ptr::copy_nonoverlapping(weight_bytes.as_ptr(), weight_buf.contents() as *mut u8, weight_bytes.len()); }
+        let weight_buf = dev.new_buffer(
+            weight_bytes.len() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                weight_bytes.as_ptr(),
+                weight_buf.contents() as *mut u8,
+                weight_bytes.len(),
+            );
+        }
 
-        let act_buf = dev.new_buffer(act_bytes.len() as u64, MTLResourceOptions::StorageModeShared);
-        unsafe { std::ptr::copy_nonoverlapping(act_bytes.as_ptr(), act_buf.contents() as *mut u8, act_bytes.len()); }
+        let act_buf = dev.new_buffer(
+            act_bytes.len() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                act_bytes.as_ptr(),
+                act_buf.contents() as *mut u8,
+                act_bytes.len(),
+            );
+        }
 
         let out_buf = dev.new_buffer((p.rows * 2) as u64, MTLResourceOptions::StorageModeShared);
 
         let tgs = (p.rows / PERSISTENT_GEMV_ROWS_PER_TG) as u64;
-        prepped.push(Prepped { weight_buf, act_buf, out_buf, tgs });
+        prepped.push(Prepped {
+            weight_buf,
+            act_buf,
+            out_buf,
+            tgs,
+        });
     }
 
     // ── Warmup: 3 iterations of all projections ──────────────────
@@ -223,11 +308,20 @@ fn decode_tok_benchmark() {
         let cb = queue.new_command_buffer();
         let enc = cb.new_compute_command_encoder();
         for (i, &p) in PROJS.iter().enumerate() {
-            let pso = if p.hidden == TILE { &pso_640 } else { &pso_3840 };
+            let pso = if p.hidden == TILE {
+                &pso_640
+            } else {
+                &pso_3840
+            };
             for _ in 0..p.repeats {
-                dispatch_persistent_gemv_generic(&enc, pso,
-                    &prepped[i].weight_buf, &prepped[i].act_buf, &prepped[i].out_buf,
-                    prepped[i].tgs);
+                dispatch_persistent_gemv_generic(
+                    &enc,
+                    pso,
+                    &prepped[i].weight_buf,
+                    &prepped[i].act_buf,
+                    &prepped[i].out_buf,
+                    prepped[i].tgs,
+                );
             }
         }
         enc.end_encoding();
@@ -244,11 +338,20 @@ fn decode_tok_benchmark() {
         let cb = queue.new_command_buffer();
         let enc = cb.new_compute_command_encoder();
         for (i, &p) in PROJS.iter().enumerate() {
-            let pso = if p.hidden == TILE { &pso_640 } else { &pso_3840 };
+            let pso = if p.hidden == TILE {
+                &pso_640
+            } else {
+                &pso_3840
+            };
             for _ in 0..p.repeats {
-                dispatch_persistent_gemv_generic(&enc, pso,
-                    &prepped[i].weight_buf, &prepped[i].act_buf, &prepped[i].out_buf,
-                    prepped[i].tgs);
+                dispatch_persistent_gemv_generic(
+                    &enc,
+                    pso,
+                    &prepped[i].weight_buf,
+                    &prepped[i].act_buf,
+                    &prepped[i].out_buf,
+                    prepped[i].tgs,
+                );
             }
         }
         enc.end_encoding();
@@ -266,21 +369,31 @@ fn decode_tok_benchmark() {
     let tok_per_s = 1.0 / per_token_s;
 
     // ── Report ─────────────────────────────────────────────────
-    println!("
-  Per-projection dispatch details:");
+    println!(
+        "
+  Per-projection dispatch details:"
+    );
     for (i, &p) in PROJS.iter().enumerate() {
-        println!("    {:>6}: {:>5} rows × {:>5} dim, {} TGs, {} rep(s)",
-            p.name, p.rows, p.hidden, prepped[i].tgs, p.repeats);
+        println!(
+            "    {:>6}: {:>5} rows × {:>5} dim, {} TGs, {} rep(s)",
+            p.name, p.rows, p.hidden, prepped[i].tgs, p.repeats
+        );
     }
 
-    println!("
-═══ Per-Layer Latency ({} projections) ═══", PROJS.len());
+    println!(
+        "
+═══ Per-Layer Latency ({} projections) ═══",
+        PROJS.len()
+    );
     println!("  Median:  {:.3} ms", median_layer_s * 1e3);
     println!("  Min:     {:.3} ms", min_layer_s * 1e3);
     println!("  Max:     {:.3} ms", max_layer_s * 1e3);
 
-    println!("
-═══ Decode Throughput ({} layers) ═══", LAYERS);
+    println!(
+        "
+═══ Decode Throughput ({} layers) ═══",
+        LAYERS
+    );
     println!("  Per-token GPU time: {:.1} ms", per_token_s * 1e3);
     println!("  Tokens/sec:         {:.1}", tok_per_s);
     println!();
@@ -290,15 +403,24 @@ fn decode_tok_benchmark() {
     println!("  Per-projection timing (individual dispatches):");
     for (i, &p) in PROJS.iter().enumerate() {
         let mut times = Vec::new();
-        let pso = if p.hidden == TILE { &pso_640 } else { &pso_3840 };
+        let pso = if p.hidden == TILE {
+            &pso_640
+        } else {
+            &pso_3840
+        };
         for _ in 0..10 {
             let t0 = Instant::now();
             let cb = queue.new_command_buffer();
             let enc = cb.new_compute_command_encoder();
             for _ in 0..p.repeats {
-                dispatch_persistent_gemv_generic(&enc, pso,
-                    &prepped[i].weight_buf, &prepped[i].act_buf, &prepped[i].out_buf,
-                    prepped[i].tgs);
+                dispatch_persistent_gemv_generic(
+                    &enc,
+                    pso,
+                    &prepped[i].weight_buf,
+                    &prepped[i].act_buf,
+                    &prepped[i].out_buf,
+                    prepped[i].tgs,
+                );
             }
             enc.end_encoding();
             cb.commit();
@@ -307,18 +429,31 @@ fn decode_tok_benchmark() {
         }
         times.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let med = times[5];
-        println!("    {:>6}: {:.1} µs/layer ({} disp × {} rep)",
-            p.name, med, prepped[i].tgs, p.repeats);
+        println!(
+            "    {:>6}: {:.1} µs/layer ({} disp × {} rep)",
+            p.name, med, prepped[i].tgs, p.repeats
+        );
     }
 
-    println!("
-  Occupancy estimate (3840-dim):");
+    println!(
+        "
+  Occupancy estimate (3840-dim):"
+    );
     let concurrent_3840 = 64u64;
     let _tgs_3840 = prepped[0].tgs;
     println!("    Concurrent TGs:   {}", concurrent_3840);
-    println!("    TGs (Q 4096):     {}", (4096 / PERSISTENT_GEMV_ROWS_PER_TG));
-    println!("    TGs (Gate 15360): {}", (15360 / PERSISTENT_GEMV_ROWS_PER_TG));
-    println!("    Waves (Gate):     ~{}", (15360 / PERSISTENT_GEMV_ROWS_PER_TG) as f64 / concurrent_3840 as f64);
+    println!(
+        "    TGs (Q 4096):     {}",
+        (4096 / PERSISTENT_GEMV_ROWS_PER_TG)
+    );
+    println!(
+        "    TGs (Gate 15360): {}",
+        (15360 / PERSISTENT_GEMV_ROWS_PER_TG)
+    );
+    println!(
+        "    Waves (Gate):     ~{}",
+        (15360 / PERSISTENT_GEMV_ROWS_PER_TG) as f64 / concurrent_3840 as f64
+    );
     println!();
 }
 
@@ -336,7 +471,15 @@ fn dispatch_persistent_gemv_generic(
     encoder.set_buffer(1, Some(activation_vector), 0);
     encoder.set_buffer(2, Some(output_vector), 0);
     encoder.dispatch_thread_groups(
-        MTLSize { width: threadgroups, height: 1, depth: 1 },
-        MTLSize { width: PERSISTENT_GEMV_THREADS_PER_TG as u64, height: 1, depth: 1 },
+        MTLSize {
+            width: threadgroups,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: PERSISTENT_GEMV_THREADS_PER_TG as u64,
+            height: 1,
+            depth: 1,
+        },
     );
 }

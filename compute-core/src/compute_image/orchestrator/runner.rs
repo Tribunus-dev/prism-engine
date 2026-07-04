@@ -4,20 +4,20 @@
 //! (embedding → 48 layers → logits), tree-attention, and optional ANE
 //! prefill model for prompt processing.
 
+use super::kernel_fusion;
+use super::{
+    generate_speculative_candidates, sample_argmax, GLOBAL_HEAD_DIM, LAYERS, MAX_CONTEXT,
+    MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS,
+};
+use crate::arena::Arena;
 use crate::arena::DataType;
-use crate::compute_image::compaction;
 use crate::compute_image::cimage_loader::CimageDeployment;
+use crate::compute_image::compaction;
+use crate::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
 use crate::compute_image::megakernel::{KernelBuffers, Megakernel};
 use crate::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
 use crate::compute_image::tree_attention::TreeAttention;
 use crate::compute_image::vm_manager::VmManager;
-use crate::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
-use super::kernel_fusion;
-use super::{
-    generate_speculative_candidates, sample_argmax,
-    GLOBAL_HEAD_DIM, LAYERS, MAX_CONTEXT, MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS,
-};
-use crate::arena::Arena;
 use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use half::f16;
 use metal::*;
@@ -181,13 +181,18 @@ impl Orchestrator {
             .and_then(|bytes| Self::load_prefill_model(bytes));
 
         // Pre-allocate compaction arenas
-        let (compaction_indices_arena, compaction_k_arena, compaction_v_arena, compacted_k_arena, compacted_v_arena) =
-            Self::allocate_compaction_arenas(
-                &compaction_model,
-                NUM_KV_HEADS,
-                GLOBAL_HEAD_DIM,
-                MAX_CONTEXT,
-            );
+        let (
+            compaction_indices_arena,
+            compaction_k_arena,
+            compaction_v_arena,
+            compacted_k_arena,
+            compacted_v_arena,
+        ) = Self::allocate_compaction_arenas(
+            &compaction_model,
+            NUM_KV_HEADS,
+            GLOBAL_HEAD_DIM,
+            MAX_CONTEXT,
+        );
 
         Ok(Self {
             megakernel,
@@ -262,14 +267,14 @@ impl Orchestrator {
             1,
             DataType::Float16,
         )
-            .map_err(|e| format!("k output arena from scratch: {e}"))?;
+        .map_err(|e| format!("k output arena from scratch: {e}"))?;
         let v_output_arena = Arena::from_metal_buffer(
             &self.kernel_buffers.kv_scratch_v,
             total_kv_elems as i32,
             1,
             DataType::Float16,
         )
-            .map_err(|e| format!("v output arena from scratch: {e}"))?;
+        .map_err(|e| format!("v output arena from scratch: {e}"))?;
 
         // ── 3. Run ANE prediction ────────────────────────────────────
         // Use the pixelbuffer path for IOSurface-backed tensors.
@@ -379,8 +384,7 @@ impl Orchestrator {
 
                 // Compute byte offset within the slot's scratch region
                 // from the VM manager's allocation base.
-                let per_position_bytes =
-                    (NUM_KV_HEADS as usize) * (GLOBAL_HEAD_DIM as usize) * 2;
+                let per_position_bytes = (NUM_KV_HEADS as usize) * (GLOBAL_HEAD_DIM as usize) * 2;
                 let chunk_offset_bytes =
                     slot_alloc.byte_offset as usize + start * per_position_bytes;
 
@@ -493,7 +497,9 @@ impl Orchestrator {
         let next_pos = seq_pos + 1;
         if next_pos > L1_CAPACITY {
             // Read entropy map
-            let entropy = self.megakernel.read_entropy_map(&self.kernel_buffers, slot_id as u32);
+            let entropy = self
+                .megakernel
+                .read_entropy_map(&self.kernel_buffers, slot_id as u32);
 
             // Find lowest-entropy token outside pinned regions
             // Pinned: sinks [0..4), recent window [next_pos - SLIDING_WINDOW, next_pos)
@@ -597,8 +603,9 @@ impl Orchestrator {
             }
 
             if self.megakernel.poll_work(&self.kernel_buffers, slot) {
-                let cand_logits =
-                    self.megakernel.read_slot_logits(&self.kernel_buffers, slot, 0);
+                let cand_logits = self
+                    .megakernel
+                    .read_slot_logits(&self.kernel_buffers, slot, 0);
                 let cand_result = sample_argmax(&cand_logits);
                 self.megakernel.reset_work_slot(&self.kernel_buffers, slot);
 
@@ -670,7 +677,7 @@ impl Orchestrator {
 
                 let cb = queue.new_command_buffer();
                 let encoder = cb.new_compute_command_encoder();
-                                let pipeline = self.get_pso(kernel_fn)?;
+                let pipeline = self.get_pso(kernel_fn)?;
                 encoder.set_compute_pipeline_state(&pipeline);
                 encoder.set_buffer(0, Some(&current), 0);
                 encoder.set_buffer(1, Some(&next), 0);
@@ -701,7 +708,7 @@ impl Orchestrator {
 
                 let cb = queue.new_command_buffer();
                 let encoder = cb.new_compute_command_encoder();
-                                let pipeline = self.get_pso(kernel_fn)?;
+                let pipeline = self.get_pso(kernel_fn)?;
                 encoder.set_compute_pipeline_state(&pipeline);
                 encoder.set_buffer(0, Some(&current), 0);
                 encoder.set_buffer(1, Some(&next), 0);
@@ -710,13 +717,29 @@ impl Orchestrator {
                 encoder.set_buffer(4, Some(weights_buf), 0);
                 encoder.set_buffer(5, Some(scales_buf), 0);
                 // layer A weight offset (for intra-kernel layer A weight base)
-                encoder.set_bytes(6, 4, &(layer_a.weight_offset as u32) as *const u32 as *const _);
+                encoder.set_bytes(
+                    6,
+                    4,
+                    &(layer_a.weight_offset as u32) as *const u32 as *const _,
+                );
                 // layer B weight offset
-                encoder.set_bytes(7, 4, &(layer_b.weight_offset as u32) as *const u32 as *const _);
+                encoder.set_bytes(
+                    7,
+                    4,
+                    &(layer_b.weight_offset as u32) as *const u32 as *const _,
+                );
                 // layer A scale offset
-                encoder.set_bytes(8, 4, &(layer_a.scale_offset as u32) as *const u32 as *const _);
+                encoder.set_bytes(
+                    8,
+                    4,
+                    &(layer_a.scale_offset as u32) as *const u32 as *const _,
+                );
                 // layer B scale offset
-                encoder.set_bytes(9, 4, &(layer_b.scale_offset as u32) as *const u32 as *const _);
+                encoder.set_bytes(
+                    9,
+                    4,
+                    &(layer_b.scale_offset as u32) as *const u32 as *const _,
+                );
                 // layer indices
                 encoder.set_bytes(10, 4, &layer_a.layer_index as *const u32 as *const _);
                 encoder.set_bytes(11, 4, &layer_b.layer_index as *const u32 as *const _);
@@ -738,7 +761,11 @@ impl Orchestrator {
         Ok(current)
     }
 
-    pub fn decode_speculative(&mut self, token_id: u32, num_draft: u32) -> Result<Vec<u32>, String> {
+    pub fn decode_speculative(
+        &mut self,
+        token_id: u32,
+        num_draft: u32,
+    ) -> Result<Vec<u32>, String> {
         let slot = 0usize;
         let seq_pos = self.slot_seq_pos[slot];
 
@@ -749,12 +776,8 @@ impl Orchestrator {
         }
 
         // ── Phase 1: Run draft model forward pass ──
-        self.megakernel.submit_draft(
-            &self.kernel_buffers,
-            token_id,
-            seq_pos,
-            num_candidates,
-        );
+        self.megakernel
+            .submit_draft(&self.kernel_buffers, token_id, seq_pos, num_candidates);
         while !self.megakernel.poll_work(&self.kernel_buffers, 0) {
             std::hint::spin_loop();
         }
@@ -814,11 +837,11 @@ impl Orchestrator {
         for &(draft_token, draft_logprob) in &draft_candidates {
             let p_main = probs_f32[draft_token as usize];
             let p_draft = draft_logprob.exp(); // log-prob → probability
-            // Standard speculative decoding rejection criterion:
-            // Accept if p_main / p_draft > uniform(0,1).
-            // Conservative approximation: accept when p_main > p_draft
-            // (since uniform < 1, this is a stricter bound that guarantees
-            // the correct target distribution when satisfied).
+                                               // Standard speculative decoding rejection criterion:
+                                               // Accept if p_main / p_draft > uniform(0,1).
+                                               // Conservative approximation: accept when p_main > p_draft
+                                               // (since uniform < 1, this is a stricter bound that guarantees
+                                               // the correct target distribution when satisfied).
             if p_main > p_draft {
                 accepted.push(draft_token);
             } else {
@@ -979,18 +1002,10 @@ impl Orchestrator {
 
                 unsafe {
                     let k_src = k_out_arena.base_ptr() as *const u8;
-                    std::ptr::copy_nonoverlapping(
-                        k_src,
-                        pass_scratch_k,
-                        compacted_per_layer_bytes,
-                    );
+                    std::ptr::copy_nonoverlapping(k_src, pass_scratch_k, compacted_per_layer_bytes);
 
                     let v_src = v_out_arena.base_ptr() as *const u8;
-                    std::ptr::copy_nonoverlapping(
-                        v_src,
-                        pass_scratch_v,
-                        compacted_per_layer_bytes,
-                    );
+                    std::ptr::copy_nonoverlapping(v_src, pass_scratch_v, compacted_per_layer_bytes);
                 }
             }
 
@@ -1139,18 +1154,10 @@ impl Orchestrator {
 
                 unsafe {
                     let k_src = k_out_arena.base_ptr() as *const u8;
-                    std::ptr::copy_nonoverlapping(
-                        k_src,
-                        pass_scratch_k,
-                        compacted_per_layer_bytes,
-                    );
+                    std::ptr::copy_nonoverlapping(k_src, pass_scratch_k, compacted_per_layer_bytes);
 
                     let v_src = v_out_arena.base_ptr() as *const u8;
-                    std::ptr::copy_nonoverlapping(
-                        v_src,
-                        pass_scratch_v,
-                        compacted_per_layer_bytes,
-                    );
+                    std::ptr::copy_nonoverlapping(v_src, pass_scratch_v, compacted_per_layer_bytes);
                 }
             }
 

@@ -5,11 +5,8 @@
 
 use std::time::Instant;
 
+use crate::runtime::components::{WORKER_HARDWARE_STREAM_COMPONENT, WORKER_STREAM_COMPONENT};
 use crate::runtime::scheduling::component_id::SchedulableComponent;
-use crate::runtime::components::{
-    WORKER_HARDWARE_STREAM_COMPONENT,
-    WORKER_STREAM_COMPONENT,
-};
 
 /// Rolling window of recently produced token IDs for duplicate detection.
 ///
@@ -110,7 +107,6 @@ impl SchedulableComponent for WorkerStream {
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-
 /// Zero-cost abstraction over a hardware-mapped memory pointer.
 ///
 /// Points to an IOSurface-backed MTLBuffer that the GPU atomically
@@ -132,8 +128,7 @@ impl HardwareAtomicPtr {
     /// that the GPU will atomically increment.
     pub unsafe fn new(raw_ptr: *mut u32) -> Self {
         Self {
-            ptr: NonNull::new(raw_ptr as *mut AtomicU32)
-                .expect("null pointer from Metal FFI"),
+            ptr: NonNull::new(raw_ptr as *mut AtomicU32).expect("null pointer from Metal FFI"),
         }
     }
 

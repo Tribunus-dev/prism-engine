@@ -12,17 +12,16 @@
 
 use lazy_static::lazy_static;
 
+use crate::runtime::components::{
+    HardwareStreamHandle, WorkerLifecycle, WorkerStream, WORKER_WATCHDOG_SYSTEM,
+};
+use crate::runtime::resources::WorkerDiagnosticsResource;
 use crate::runtime::scheduling::access::{ComponentSet, ResourceSet};
 use crate::runtime::scheduling::command::CommandWriter;
 use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
 };
-use crate::runtime::components::{
-    HardwareStreamHandle, WorkerLifecycle, WorkerStream,
-    WORKER_WATCHDOG_SYSTEM,
-};
-use crate::runtime::resources::WorkerDiagnosticsResource;
 use crate::runtime::world::World;
 
 // ---------------------------------------------------------------------------
@@ -82,11 +81,7 @@ impl ErasedSystem for StreamObservationSystem {
         &STREAM_OBSERVER_META
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, commands: &mut CommandWriter) -> SystemResult {
         // For each entity in Streaming with a hardware handle:
         // 1. Poll the atomic token counter
         // 2. If delta > 0, emit WorkerStreamAdvanced via CommandWriter::insert

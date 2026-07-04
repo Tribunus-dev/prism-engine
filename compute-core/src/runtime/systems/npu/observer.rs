@@ -98,13 +98,8 @@ impl ErasedSystem for NpuObserverSystem {
             };
 
             // Non-blocking poll of the NPU completion flag.
-            let is_complete = unsafe {
-                crate::backend::npu::ffi::npu_poll_completion(
-                    target,
-                    session,
-                    sid,
-                )
-            };
+            let is_complete =
+                unsafe { crate::backend::npu::ffi::npu_poll_completion(target, session, sid) };
 
             if is_complete == 0 {
                 continue;

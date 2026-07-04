@@ -2,15 +2,15 @@
 
 use super::archive::archive_mlmodelc_to_mmap;
 use super::builder::AlignedMmapBuilder;
-use super::layout::{CImageLayoutPlan, CImageTopologyTable, predict_tar_size};
+use super::layout::{predict_tar_size, CImageLayoutPlan, CImageTopologyTable};
+use crate::compute_image::compile::source::LoadedSource;
 use crate::compute_image::compile::ternary::LayerDirectoryEntry;
 use crate::compute_image::compile::ternary::{CimageHeader, SegmentEntry, SegmentKind};
-use std::io::{Write, Seek};
-use std::fs::File;
-use memmap2::MmapMut;
-use std::path::Path;
-use crate::compute_image::compile::source::LoadedSource;
 use crate::config::CompileQuantMode;
+use memmap2::MmapMut;
+use std::fs::File;
+use std::io::{Seek, Write};
+use std::path::Path;
 
 /// Compile and pack the unified Gemma4_Unified.cimage.
 ///
@@ -47,7 +47,10 @@ pub(crate) fn stream_weights_to_mmap_gpu(
 
     // Pre-collect weight binding names so we can freely borrow loaded mutably
     // inside the per-tensor loop.
-    let global_weight_names: Vec<String> = loaded.spec.global_tensors.iter()
+    let global_weight_names: Vec<String> = loaded
+        .spec
+        .global_tensors
+        .iter()
         .filter(|b| b.name.ends_with(".weight"))
         .map(|b| b.name.clone())
         .collect();
@@ -58,26 +61,24 @@ pub(crate) fn stream_weights_to_mmap_gpu(
         // free the source Vec before GPU dispatch.  Peak heap = ~1 tensor.
         let (out_dim, in_dim) = {
             let mut entry = loaded.source_tensors.get_mut(binding_name).unwrap();
-        for mmap in &loaded.mmap_bytes {
-                crate::compute_image::compile::source::ensure_tensor_loaded(
-                    &mut entry,
-                    mmap,
-                );
+            for mmap in &loaded.mmap_bytes {
+                crate::compute_image::compile::source::ensure_tensor_loaded(&mut entry, mmap);
                 if !entry.data.is_empty() {
-                break;
-            }
+                    break;
+                }
             }
             if entry.data.len() < 2 || (entry.dtype != "F16" && entry.dtype != "BF16") {
-            continue;
+                continue;
             }
             if entry.shape.len() != 2 {
-            continue;
+                continue;
             }
             (entry.shape[0], entry.shape[1])
         };
         // Take the Vec out of the SourceTensor, replacing it with empty.
         // The source memory is freed here, before GPU dispatch.
-        let data = loaded.source_tensors
+        let data = loaded
+            .source_tensors
             .get_mut(binding_name)
             .map(|t| std::mem::take(&mut t.data))
             .unwrap_or_default();
@@ -103,7 +104,10 @@ pub(crate) fn stream_weights_to_mmap_gpu(
     }
 
     // Pre-collect per-layer weight binding names.
-    let layer_weight_names: Vec<String> = loaded.spec.layers.iter()
+    let layer_weight_names: Vec<String> = loaded
+        .spec
+        .layers
+        .iter()
         .flat_map(|layer| layer.tensors.iter())
         .filter(|b| b.name.ends_with(".weight"))
         .map(|b| b.name.clone())
@@ -130,11 +134,14 @@ pub(crate) fn stream_weights_to_mmap_gpu(
             }
             (entry.shape[0], entry.shape[1])
         };
-        let data = loaded.source_tensors
+        let data = loaded
+            .source_tensors
             .get_mut(binding_name)
             .map(|t| std::mem::take(&mut t.data))
             .unwrap_or_default();
-        if data.is_empty() { continue; }
+        if data.is_empty() {
+            continue;
+        }
         let num_tiles = (in_dim as u64 + 639) / 640;
         let tensor_file_offset = segment_file_offset + tensor_cursor;
 
@@ -147,7 +154,7 @@ pub(crate) fn stream_weights_to_mmap_gpu(
             Some((mmap_base, tensor_file_offset)),
         )?;
 
-            let tensor_bytes = (out_dim as u64) * num_tiles * 32 * 4;
+        let tensor_bytes = (out_dim as u64) * num_tiles * 32 * 4;
         tensor_cursor += tensor_bytes;
     }
     eprintln!(
@@ -181,13 +188,15 @@ pub(crate) fn compile_and_pack_god_binary(
 
     // ── Locate embed_tokens.weight for the vocabulary segment ──────────────
     // Try common HF key prefixes (Gemma4 / Llama / Qwen families).
-    let embed_key = ["language_model.model.embed_tokens.weight",
-                     "model.embed_tokens.weight",
-                     "embed_tokens.weight"]
-        .iter()
-        .find(|&&k| loaded.source_tensors.contains_key(k))
-        .copied()
-        .unwrap_or("");
+    let embed_key = [
+        "language_model.model.embed_tokens.weight",
+        "model.embed_tokens.weight",
+        "embed_tokens.weight",
+    ]
+    .iter()
+    .find(|&&k| loaded.source_tensors.contains_key(k))
+    .copied()
+    .unwrap_or("");
 
     // Element count (number of f16/bf16 elements = byte_size / 2).
     let vocab_weight_elements: u64 = if embed_key.is_empty() {
@@ -203,16 +212,25 @@ pub(crate) fn compile_and_pack_god_binary(
     };
 
     let plan = CImageLayoutPlan::calculate(
-        header_size, metal_lib_len, main_graph_len,
-        main_weight_total_elements, mtp_graph_len, mtp_weight_total_elements,
+        header_size,
+        metal_lib_len,
+        main_graph_len,
+        main_weight_total_elements,
+        mtp_graph_len,
+        mtp_weight_total_elements,
         vocab_weight_elements,
         num_layers,
-        None, None, None,
+        None,
+        None,
+        None,
     );
 
     let topology_table = CImageTopologyTable::compute(
-        hidden_size, intermediate_size,
-        num_layers, num_heads, head_dim,
+        hidden_size,
+        intermediate_size,
+        num_layers,
+        num_heads,
+        head_dim,
     );
 
     eprintln!(
@@ -224,17 +242,24 @@ pub(crate) fn compile_and_pack_god_binary(
     );
 
     let file = std::fs::OpenOptions::new()
-        .read(true).write(true).create(true).truncate(true)
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
         .open(output_path)?;
     file.set_len(plan.total_file_size)?;
     let mut mmap = unsafe { MmapMut::map_mut(&file)? };
-    unsafe { std::ptr::write_bytes(mmap.as_mut_ptr(), 0u8, mmap.len()); }
+    unsafe {
+        std::ptr::write_bytes(mmap.as_mut_ptr(), 0u8, mmap.len());
+    }
     let mut builder = AlignedMmapBuilder::new(mmap);
 
     // Segment: Metal megakernel
     let metallib_data = std::fs::read(metallib_path)?;
     builder.align_cursor();
-    builder.allocate_slice(metallib_data.len()).copy_from_slice(&metallib_data);
+    builder
+        .allocate_slice(metallib_data.len())
+        .copy_from_slice(&metallib_data);
 
     // Segment: Main .mlmodelc
     builder.align_cursor();
@@ -244,9 +269,8 @@ pub(crate) fn compile_and_pack_god_binary(
 
     // Segment: Main weights (GPU writes directly into mmap here)
     builder.align_cursor();
-    let _main_weights_ptr = unsafe {
-        builder.allocate_hardware_pointer(plan.main_weights.length as usize)
-    };
+    let _main_weights_ptr =
+        unsafe { builder.allocate_hardware_pointer(plan.main_weights.length as usize) };
 
     // GPU-accelerated ternary tile640 quantization streams weights into the mmap.
     #[cfg(feature = "metal-dispatch")]
@@ -265,9 +289,8 @@ pub(crate) fn compile_and_pack_god_binary(
 
     // Segment: MTP weights (GPU writes directly into mmap here)
     builder.align_cursor();
-    let _mtp_weights_ptr = unsafe {
-        builder.allocate_hardware_pointer(plan.mtp_weights.length as usize)
-    };
+    let _mtp_weights_ptr =
+        unsafe { builder.allocate_hardware_pointer(plan.mtp_weights.length as usize) };
 
     // Segment: Topology table
     builder.align_cursor();
@@ -277,7 +300,9 @@ pub(crate) fn compile_and_pack_god_binary(
             std::mem::size_of::<CImageTopologyTable>(),
         )
     };
-    builder.allocate_slice(topology_bytes.len()).copy_from_slice(topology_bytes);
+    builder
+        .allocate_slice(topology_bytes.len())
+        .copy_from_slice(topology_bytes);
 
     // Segment: Vocabulary (embed_tokens.weight in TernaryTile640)
     builder.align_cursor();
@@ -287,7 +312,9 @@ pub(crate) fn compile_and_pack_god_binary(
             let st = loaded.source_tensors.get_mut(embed_key).unwrap();
             for mmap in &loaded.mmap_bytes {
                 crate::compute_image::compile::source::ensure_tensor_loaded(st, mmap);
-                if !st.data.is_empty() { break; }
+                if !st.data.is_empty() {
+                    break;
+                }
             }
             st.data.clone()
         };
@@ -300,7 +327,10 @@ pub(crate) fn compile_and_pack_god_binary(
                 (elems / hidden_size, hidden_size)
             }
         };
-        eprintln!("[cimage] Vocabulary: {} ({}×{}) → tile640", embed_key, vocab_out_dim, vocab_in_dim);
+        eprintln!(
+            "[cimage] Vocabulary: {} ({}×{}) → tile640",
+            embed_key, vocab_out_dim, vocab_in_dim
+        );
 
         // Reserve the vocabulary slice in the mmap.
         // Capture mmap_base and vocab_file_offset before mutable borrow of builder.
@@ -379,8 +409,16 @@ pub(crate) fn compile_and_pack_god_binary(
                             let idx = lane * 20 + w;
                             let q = if idx < tile.len() {
                                 let x = tile[idx] * inv;
-                                if x > 0.5 { 1 } else if x < -0.5 { 2 } else { 0 }
-                            } else { 0 };
+                                if x > 0.5 {
+                                    1
+                                } else if x < -0.5 {
+                                    2
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
                             v = v * 3 + q;
                         }
                         packed_u32[row * tile_count * u32_per_tile + t * u32_per_tile + lane] = v;
@@ -391,7 +429,8 @@ pub(crate) fn compile_and_pack_god_binary(
             let scales_bytes: Vec<u8> = scales_f32.iter().flat_map(|&s| s.to_le_bytes()).collect();
             let copy_len = packed_bytes.len().min(packed_len);
             vocab_slice[..copy_len].copy_from_slice(&packed_bytes[..copy_len]);
-            let scale_dst = &mut vocab_slice[packed_len..packed_len + scales_len.min(scales_bytes.len())];
+            let scale_dst =
+                &mut vocab_slice[packed_len..packed_len + scales_len.min(scales_bytes.len())];
             scale_dst.copy_from_slice(&scales_bytes[..scale_dst.len()]);
         }
     } else if plan.vocabulary.length > 0 {
@@ -419,10 +458,7 @@ pub(crate) fn compile_and_pack_god_binary(
                 flags: 0,
             };
             entries.extend_from_slice(unsafe {
-                std::slice::from_raw_parts(
-                    &e as *const LayerDirectoryEntry as *const u8,
-                    48,
-                )
+                std::slice::from_raw_parts(&e as *const LayerDirectoryEntry as *const u8, 48)
             });
         }
         layer_dir_slice[..entries.len()].copy_from_slice(&entries);
@@ -434,19 +470,51 @@ pub(crate) fn compile_and_pack_god_binary(
     }
 
     // Header at offset 0
-    let mut segments = [SegmentEntry { kind: 0, offset: 0, length: 0 }; 9];
-    segments[0] = SegmentEntry::new(SegmentKind::MetalLib, plan.metal_lib.offset, plan.metal_lib.length);
-    segments[1] = SegmentEntry::new(SegmentKind::TopologyTable, plan.topology_table.offset, plan.topology_table.length);
+    let mut segments = [SegmentEntry {
+        kind: 0,
+        offset: 0,
+        length: 0,
+    }; 9];
+    segments[0] = SegmentEntry::new(
+        SegmentKind::MetalLib,
+        plan.metal_lib.offset,
+        plan.metal_lib.length,
+    );
+    segments[1] = SegmentEntry::new(
+        SegmentKind::TopologyTable,
+        plan.topology_table.offset,
+        plan.topology_table.length,
+    );
     // Segment 2: Vocabulary (TernaryTile640-packed embed_tokens.weight)
     if plan.vocabulary.length > 0 {
-        segments[2] = SegmentEntry::new(SegmentKind::Vocabulary, plan.vocabulary.offset, plan.vocabulary.length);
+        segments[2] = SegmentEntry::new(
+            SegmentKind::Vocabulary,
+            plan.vocabulary.offset,
+            plan.vocabulary.length,
+        );
     }
-    segments[5] = SegmentEntry::new(SegmentKind::AneArchive, plan.main_graph.offset, plan.main_graph.length);
-    segments[6] = SegmentEntry::new(SegmentKind::TernaryWeights, plan.main_weights.offset, plan.main_weights.length);
+    segments[5] = SegmentEntry::new(
+        SegmentKind::AneArchive,
+        plan.main_graph.offset,
+        plan.main_graph.length,
+    );
+    segments[6] = SegmentEntry::new(
+        SegmentKind::TernaryWeights,
+        plan.main_weights.offset,
+        plan.main_weights.length,
+    );
     if plan.mtp_graph.length > 0 {
         // If MTP present, insert as a second AneArchive or LayoutMeta
-        segments[3] = SegmentEntry::new(SegmentKind::AneArchive, plan.mtp_graph.offset, plan.mtp_graph.length);
-        segments[4] = SegmentEntry::new(SegmentKind::TernaryWeights, plan.mtp_weights.offset, plan.mtp_weights.length);
+        segments[3] = SegmentEntry::new(
+            SegmentKind::AneArchive,
+            plan.mtp_graph.offset,
+            plan.mtp_graph.length,
+        );
+        segments[4] = SegmentEntry::new(
+            SegmentKind::TernaryWeights,
+            plan.mtp_weights.offset,
+            plan.mtp_weights.length,
+        );
     }
     // Segment 7: LayerDirectory (per-layer weight/scale offset table)
     if num_layers > 0 {
@@ -465,10 +533,14 @@ pub(crate) fn compile_and_pack_god_binary(
         version: 4,
         segment_count: seg_count,
         payload_hash: [0u8; 32],
-        num_layers, num_heads: 0, head_dim: 0,
-        hidden_dim: 0, intermediate_dim: 0, vocab_size: 0,
+        num_layers,
+        num_heads: 0,
+        head_dim: 0,
+        hidden_dim: 0,
+        intermediate_dim: 0,
+        vocab_size: 0,
         quantization_schema: 0,
-            draft_num_layers: 0,
+        draft_num_layers: 0,
         segments,
         _pad: [0u8; 8],
     };
@@ -479,7 +551,10 @@ pub(crate) fn compile_and_pack_god_binary(
 
     let mmap = builder.into_mmap();
     mmap.flush()?;
-    eprintln!("✅ .cimage: {} bytes, {} segments", plan.total_file_size, header.segment_count);
+    eprintln!(
+        "✅ .cimage: {} bytes, {} segments",
+        plan.total_file_size, header.segment_count
+    );
     Ok(())
 }
 
@@ -511,7 +586,10 @@ pub fn pack_unified_cimage(
     // Reserve header space
     writer.write_all(&vec![0u8; header_size as usize])?;
 
-    fn write_segment(writer: &mut std::io::BufWriter<File>, data: &[u8]) -> std::io::Result<(u64, u64)> {
+    fn write_segment(
+        writer: &mut std::io::BufWriter<File>,
+        data: &[u8],
+    ) -> std::io::Result<(u64, u64)> {
         let offset = align_to_page(writer)?;
         writer.write_all(data)?;
         Ok((offset, data.len() as u64))
@@ -523,10 +601,22 @@ pub fn pack_unified_cimage(
     let (main_graph_offset, main_graph_len) = write_segment(&mut writer, main_graph_bytes)?;
     let (mtp_graph_offset, mtp_graph_len) = write_segment(&mut writer, mtp_graph_bytes)?;
 
-    let mut segments = [SegmentEntry { kind: 0, offset: 0, length: 0 }; 9];
+    let mut segments = [SegmentEntry {
+        kind: 0,
+        offset: 0,
+        length: 0,
+    }; 9];
     segments[0] = SegmentEntry::new(SegmentKind::MetalLib, metal_lib_offset, metal_lib_len);
-    segments[1] = SegmentEntry::new(SegmentKind::TernaryWeights, main_weights_offset, main_weights_len);
-    segments[2] = SegmentEntry::new(SegmentKind::TernaryWeights, mtp_weights_offset, mtp_weights_len);
+    segments[1] = SegmentEntry::new(
+        SegmentKind::TernaryWeights,
+        main_weights_offset,
+        main_weights_len,
+    );
+    segments[2] = SegmentEntry::new(
+        SegmentKind::TernaryWeights,
+        mtp_weights_offset,
+        mtp_weights_len,
+    );
     segments[3] = SegmentEntry::new(SegmentKind::AneArchive, main_graph_offset, main_graph_len);
     segments[4] = SegmentEntry::new(SegmentKind::AneArchive, mtp_graph_offset, mtp_graph_len);
 
@@ -535,9 +625,14 @@ pub fn pack_unified_cimage(
         version: 4,
         segment_count: if mtp_graph_bytes.is_empty() { 3 } else { 5 },
         payload_hash: [0u8; 32],
-        num_layers: 0, num_heads: 0, head_dim: 0, hidden_dim: 0,
-        intermediate_dim: 0, vocab_size: 0, quantization_schema: 0,
-            draft_num_layers: 0,
+        num_layers: 0,
+        num_heads: 0,
+        head_dim: 0,
+        hidden_dim: 0,
+        intermediate_dim: 0,
+        vocab_size: 0,
+        quantization_schema: 0,
+        draft_num_layers: 0,
         segments,
         _pad: [0u8; 8],
     };
@@ -545,7 +640,8 @@ pub fn pack_unified_cimage(
     writer.seek(std::io::SeekFrom::Start(0))?;
     let header_bytes = unsafe {
         std::slice::from_raw_parts(
-            (&header as *const CimageHeader) as *const u8, header_size as usize,
+            (&header as *const CimageHeader) as *const u8,
+            header_size as usize,
         )
     };
     writer.write_all(header_bytes)?;
@@ -559,29 +655,26 @@ pub fn pack_unified_cimage(
 /// from `input_dir` and produces a V4 unified .cimage at `output_path`.
 /// Uses `ftruncate` + `mmap` + `AlignedMmapBuilder` for zero-copy GPU
 /// compatibility (16 KB page alignment).
-pub fn pack_cimage_from_dir(
-    input_dir: &Path,
-    output_path: &Path,
-) -> std::io::Result<()> {
+pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Result<()> {
     // 1. Discover all segments in the directory
     let kernel_patterns: &[(&str, SegmentKind)] = &[
         ("model.metallib", SegmentKind::MetalLib),
-        ("model.cubin",    SegmentKind::CudaLib),
-        ("model.fatbin",   SegmentKind::CudaLib),
-        ("model.co",       SegmentKind::RocmLib),
-        ("model.hsaco",    SegmentKind::RocmLib),
-        ("model_l0.spv",   SegmentKind::LevelZeroLib),
+        ("model.cubin", SegmentKind::CudaLib),
+        ("model.fatbin", SegmentKind::CudaLib),
+        ("model.co", SegmentKind::RocmLib),
+        ("model.hsaco", SegmentKind::RocmLib),
+        ("model_l0.spv", SegmentKind::LevelZeroLib),
         ("model_vulkan.spv", SegmentKind::VulkanLib),
         ("model_wgsl.spv", SegmentKind::WebGpuLib),
     ];
     let npu_patterns: &[(&str, SegmentKind)] = &[
-        ("npu_intel.bin",    SegmentKind::IntelNpuBlob),
+        ("npu_intel.bin", SegmentKind::IntelNpuBlob),
         ("npu_amdxdna.bin", SegmentKind::AmdNpuBlob),
         ("npu_qualcomm.bin", SegmentKind::QualcommNpuBlob),
-        ("npu_google.bin",   SegmentKind::GoogleTpuBlob),
-        ("npu_ane.tar",      SegmentKind::AneArchive),
-        ("npu_huawei.bin",   SegmentKind::HuaweiAscendBlob),
-        ("npu_hailo.hef",    SegmentKind::HailoBlob),
+        ("npu_google.bin", SegmentKind::GoogleTpuBlob),
+        ("npu_ane.tar", SegmentKind::AneArchive),
+        ("npu_huawei.bin", SegmentKind::HuaweiAscendBlob),
+        ("npu_hailo.hef", SegmentKind::HailoBlob),
     ];
 
     let mut weight_segments: Vec<Vec<u8>> = Vec::new();
@@ -598,12 +691,17 @@ pub fn pack_cimage_from_dir(
         for (pat, kind) in kernel_patterns {
             if name_str == *pat {
                 extra_segments.push((*kind, std::fs::read(entry.path())?));
-                matched = true; break;
+                matched = true;
+                break;
             }
         }
-        if matched { continue; }
+        if matched {
+            continue;
+        }
         for (pat, kind) in npu_patterns {
-            if name_str == *pat || (kind == &SegmentKind::AneArchive && name_str.ends_with(".ane.tar")) {
+            if name_str == *pat
+                || (kind == &SegmentKind::AneArchive && name_str.ends_with(".ane.tar"))
+            {
                 extra_segments.push((*kind, std::fs::read(entry.path())?));
                 break;
             }
@@ -611,36 +709,52 @@ pub fn pack_cimage_from_dir(
     }
 
     // 2. Compute layout
-    struct Slot { kind: SegmentKind, offset: u64, length: u64 }
+    struct Slot {
+        kind: SegmentKind,
+        offset: u64,
+        length: u64,
+    }
     let mut slots: Vec<Slot> = Vec::new();
     let header_size = std::mem::size_of::<CimageHeader>() as u64;
     let weights_total: u64 = weight_segments.iter().map(|d| d.len() as u64).sum();
 
     let mut cursor = header_size as u64;
     let mut push_slot = |kind: SegmentKind, len: u64| {
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let r = cursor % APPLE_PAGE_SIZE;
-        if r != 0 { cursor += APPLE_PAGE_SIZE - r; }
-        slots.push(Slot { kind, offset: cursor, length: len });
+        if r != 0 {
+            cursor += APPLE_PAGE_SIZE - r;
+        }
+        slots.push(Slot {
+            kind,
+            offset: cursor,
+            length: len,
+        });
         cursor += len;
     };
     for (kind, data) in &extra_segments {
         match kind {
-            SegmentKind::MetalLib | SegmentKind::CudaLib
-            | SegmentKind::RocmLib | SegmentKind::LevelZeroLib
-            | SegmentKind::VulkanLib | SegmentKind::WebGpuLib
-                => push_slot(*kind, data.len() as u64),
+            SegmentKind::MetalLib
+            | SegmentKind::CudaLib
+            | SegmentKind::RocmLib
+            | SegmentKind::LevelZeroLib
+            | SegmentKind::VulkanLib
+            | SegmentKind::WebGpuLib => push_slot(*kind, data.len() as u64),
             _ => {}
         }
     }
     push_slot(SegmentKind::TernaryWeights, weights_total);
     for (kind, data) in &extra_segments {
         match kind {
-            SegmentKind::AneArchive | SegmentKind::IntelNpuBlob
-            | SegmentKind::AmdNpuBlob | SegmentKind::QualcommNpuBlob
-            | SegmentKind::GoogleTpuBlob | SegmentKind::HuaweiAscendBlob
-            | SegmentKind::HailoBlob
-                => push_slot(*kind, data.len() as u64),
+            SegmentKind::AneArchive
+            | SegmentKind::IntelNpuBlob
+            | SegmentKind::AmdNpuBlob
+            | SegmentKind::QualcommNpuBlob
+            | SegmentKind::GoogleTpuBlob
+            | SegmentKind::HuaweiAscendBlob
+            | SegmentKind::HailoBlob => push_slot(*kind, data.len() as u64),
             _ => {}
         }
     }
@@ -648,10 +762,17 @@ pub fn pack_cimage_from_dir(
 
     // 3. Allocate and fill via ftruncate + mmap
     use std::fs::OpenOptions;
-    let file = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(output_path)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(output_path)?;
     file.set_len(total_file_size)?;
     let mut mmap = unsafe { MmapMut::map_mut(&file)? };
-    unsafe { std::ptr::write_bytes(mmap.as_mut_ptr(), 0u8, mmap.len()); }
+    unsafe {
+        std::ptr::write_bytes(mmap.as_mut_ptr(), 0u8, mmap.len());
+    }
     let mut builder = AlignedMmapBuilder::new(mmap);
 
     // Skip header (written last)
@@ -660,9 +781,12 @@ pub fn pack_cimage_from_dir(
     // Write kernel segments
     for (kind, bytes) in &extra_segments {
         match kind {
-            SegmentKind::MetalLib | SegmentKind::CudaLib
-            | SegmentKind::RocmLib | SegmentKind::LevelZeroLib
-            | SegmentKind::VulkanLib | SegmentKind::WebGpuLib => {
+            SegmentKind::MetalLib
+            | SegmentKind::CudaLib
+            | SegmentKind::RocmLib
+            | SegmentKind::LevelZeroLib
+            | SegmentKind::VulkanLib
+            | SegmentKind::WebGpuLib => {
                 if !bytes.is_empty() {
                     builder.align_cursor();
                     builder.allocate_slice(bytes.len()).copy_from_slice(bytes);
@@ -686,9 +810,12 @@ pub fn pack_cimage_from_dir(
     // NPU model segments
     for (kind, bytes) in &extra_segments {
         match kind {
-            SegmentKind::AneArchive | SegmentKind::IntelNpuBlob
-            | SegmentKind::AmdNpuBlob | SegmentKind::QualcommNpuBlob
-            | SegmentKind::GoogleTpuBlob | SegmentKind::HuaweiAscendBlob
+            SegmentKind::AneArchive
+            | SegmentKind::IntelNpuBlob
+            | SegmentKind::AmdNpuBlob
+            | SegmentKind::QualcommNpuBlob
+            | SegmentKind::GoogleTpuBlob
+            | SegmentKind::HuaweiAscendBlob
             | SegmentKind::HailoBlob => {
                 if !bytes.is_empty() {
                     builder.align_cursor();
@@ -701,7 +828,11 @@ pub fn pack_cimage_from_dir(
 
     // 4. Build header
     let total_segments = slots.len().min(8);
-    let mut segments_dir = [SegmentEntry { kind: 0, offset: 0, length: 0 }; 9];
+    let mut segments_dir = [SegmentEntry {
+        kind: 0,
+        offset: 0,
+        length: 0,
+    }; 9];
     for (i, slot) in slots.iter().enumerate().take(8) {
         segments_dir[i] = SegmentEntry::new(slot.kind, slot.offset, slot.length);
     }
@@ -711,10 +842,14 @@ pub fn pack_cimage_from_dir(
         version: 4,
         segment_count: total_segments as u32,
         payload_hash: [0u8; 32],
-        num_layers: 0, num_heads: 0, head_dim: 0,
-        hidden_dim: 0, intermediate_dim: 0, vocab_size: 0,
+        num_layers: 0,
+        num_heads: 0,
+        head_dim: 0,
+        hidden_dim: 0,
+        intermediate_dim: 0,
+        vocab_size: 0,
         quantization_schema: 0,
-            draft_num_layers: 0,
+        draft_num_layers: 0,
         segments: segments_dir,
         _pad: [0u8; 8],
     };
@@ -726,6 +861,11 @@ pub fn pack_cimage_from_dir(
 
     let mmap = builder.into_mmap();
     mmap.flush()?;
-    eprintln!("[cimage] packed {} bytes, {} segments → {}", total_file_size, total_segments, output_path.display());
+    eprintln!(
+        "[cimage] packed {} bytes, {} segments → {}",
+        total_file_size,
+        total_segments,
+        output_path.display()
+    );
     Ok(())
 }

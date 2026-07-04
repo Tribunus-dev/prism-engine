@@ -6,8 +6,8 @@
 
 use std::path::Path;
 
-use crate::config::parser::{CimageManifest, ManifestModality};
 use crate::compute_image::manifest::TensorEntry;
+use crate::config::parser::{CimageManifest, ManifestModality};
 
 /// Compile an audio model checkpoint into a standalone cimage artifact.
 ///

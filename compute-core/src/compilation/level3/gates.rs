@@ -37,10 +37,7 @@ pub struct CorrectnessResult {
 /// - The shared route produces a receipt with `materialized_bytes == 0`
 /// - The materialization route produces a receipt with `materialized_bytes > 0`
 /// - Both receipts report success (no failure reason)
-pub fn check_correctness(
-    router: &Level3Router,
-    source: &TensorDescriptor,
-) -> CorrectnessResult {
+pub fn check_correctness(router: &Level3Router, source: &TensorDescriptor) -> CorrectnessResult {
     // Each provider prepares its own plan so plan parameters (especially
     // estimated_bytes) reflect the provider's allocation strategy.
     let mat_plan = router.materialization_provider().prepare(0, source);
@@ -49,8 +46,8 @@ pub fn check_correctness(
     let mat_receipt = router.materialization_provider().execute(&mat_plan);
     let shared_receipt = router.shared_route_provider().execute(&shr_plan);
 
-    let digest_match = mat_receipt.failure_reason.is_none()
-        && shared_receipt.failure_reason.is_none();
+    let digest_match =
+        mat_receipt.failure_reason.is_none() && shared_receipt.failure_reason.is_none();
 
     let passed = digest_match
         && mat_receipt.materialized_bytes > 0
@@ -82,17 +79,12 @@ pub struct LifetimeResult {
 /// Transfers use a small arena with limited slots to force reuse pressure.
 /// After each transfer, the content digest must match expectations;
 /// cycling through the arena must not produce stale or corrupted data.
-pub fn check_lifetime_safety(
-    router: &Level3Router,
-    source: &TensorDescriptor,
-) -> LifetimeResult {
+pub fn check_lifetime_safety(router: &Level3Router, source: &TensorDescriptor) -> LifetimeResult {
     const ITERATIONS: usize = 1000;
 
     // Create a small arena to force slot reuse under repeated transfers.
     let _arena = ActivationArena::new();
-    let plan = router
-        .materialization_provider()
-        .prepare(0, source);
+    let plan = router.materialization_provider().prepare(0, source);
 
     let mut mismatches = 0;
     let last_digest: Option<[u8; 32]> = source.content_digest;
@@ -178,8 +170,7 @@ pub fn check_materialization_evidence(
     let mat_receipt = router.materialization_provider().execute(&mat_plan);
     let shared_receipt = router.shared_route_provider().execute(&shr_plan);
 
-    let passed = mat_receipt.materialized_bytes > 0
-        && shared_receipt.materialized_bytes == 0;
+    let passed = mat_receipt.materialized_bytes > 0 && shared_receipt.materialized_bytes == 0;
 
     MaterializationEvidenceResult {
         passed,
@@ -210,9 +201,7 @@ pub fn check_system_benefit(
     router: &Level3Router,
     source: &TensorDescriptor,
 ) -> SystemBenefitResult {
-    let plan = router
-        .materialization_provider()
-        .prepare(0, source);
+    let plan = router.materialization_provider().prepare(0, source);
 
     // Warmup: one call each to settle caches.
     router.materialization_provider().execute(&plan);
@@ -237,8 +226,7 @@ pub fn check_system_benefit(
 
     // Improvement is materialization_latency - shared_route_latency.
     // Positive means shared route is faster.
-    let improvement_ns =
-        materialization_latency_ns as i64 - shared_route_latency_ns as i64;
+    let improvement_ns = materialization_latency_ns as i64 - shared_route_latency_ns as i64;
 
     let passed = shared_route_latency_ns < materialization_latency_ns;
 
@@ -256,23 +244,22 @@ pub fn check_system_benefit(
 ///
 /// Returns the certification section with `level3_pass` set to `true` only
 /// when all four gates pass, and a test corpus digest for audit traceability.
-pub fn run_all_gates(
-    router: &Level3Router,
-    source: &TensorDescriptor,
-) -> CertificationSection {
+pub fn run_all_gates(router: &Level3Router, source: &TensorDescriptor) -> CertificationSection {
     let correctness = check_correctness(router, source);
     let lifetime = check_lifetime_safety(router, source);
     let evidence = check_materialization_evidence(router, source);
     let benefit = check_system_benefit(router, source);
 
-    let all_pass = correctness.passed
-        && lifetime.passed
-        && evidence.passed
-        && benefit.passed;
+    let all_pass = correctness.passed && lifetime.passed && evidence.passed && benefit.passed;
 
     // Build a test corpus digest from the four gate results.
     let mut corpus = Vec::new();
-    corpus.extend_from_slice(&correctness.materialization_receipt.source_slot.to_le_bytes());
+    corpus.extend_from_slice(
+        &correctness
+            .materialization_receipt
+            .source_slot
+            .to_le_bytes(),
+    );
     corpus.extend_from_slice(&(lifetime.iterations as u64).to_le_bytes());
     corpus.extend_from_slice(&evidence.materialization_bytes.to_le_bytes());
     corpus.extend_from_slice(&(benefit.materialization_latency_ns).to_le_bytes());
@@ -282,8 +269,8 @@ pub fn run_all_gates(
     let test_corpus_digest: [u8; 32] = Sha256::digest(&corpus).into();
 
     CertificationSection {
-        level1_pass: true,  // inherited from Level 1
-        level2_pass: true,  // inherited from Level 2
+        level1_pass: true, // inherited from Level 1
+        level2_pass: true, // inherited from Level 2
         level3_pass: all_pass,
         test_corpus_digest,
     }

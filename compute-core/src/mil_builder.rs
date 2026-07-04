@@ -117,7 +117,7 @@ impl MilBuilder {
         });
 
         let mut inputs = HashMap::new();
-        inputs.insert("x" .to_string(), named_arg(x));
+        inputs.insert("x".to_string(), named_arg(x));
         // k is a constant attribute embedded as an int in the op attrs,
         // not an input tensor.  MIL accepts both forms; we use attribute.
 
@@ -732,13 +732,21 @@ impl MilBuilder {
     /// `inputs` — list of SSA value names to concatenate.
     /// `axis` — axis along which to concatenate (0-based).
     /// `_use_sequence_length` — placeholder for MIL spec compatibility (unused).
-    pub fn concat(mut self, name_hint: &str, inputs: &[&str], axis: i64, _use_sequence_length: bool) -> Self {
+    pub fn concat(
+        mut self,
+        name_hint: &str,
+        inputs: &[&str],
+        axis: i64,
+        _use_sequence_length: bool,
+    ) -> Self {
         let name = self.fresh_name(name_hint);
         let dtype = self.require_dtype(inputs[0]).expect("SSA: unknown type");
 
         // Infer output shape from first input; zero the concat axis since
         // the actual sum is computed at compile time by coremlcompiler.
-        let dimensions = self.value_types.get(inputs[0])
+        let dimensions = self
+            .value_types
+            .get(inputs[0])
             .and_then(|vt| match &vt.r#type {
                 Some(mil_spec::value_type::Type::TensorType(tt)) => {
                     let mut dims = tt.dimensions.clone();
@@ -805,7 +813,9 @@ impl MilBuilder {
         let dtype = self.require_dtype(input).expect("SSA: unknown value");
 
         // Clone dimensions from input
-        let dimensions = self.value_types.get(input)
+        let dimensions = self
+            .value_types
+            .get(input)
             .and_then(|vt| match &vt.r#type {
                 Some(mil_spec::value_type::Type::TensorType(tt)) => Some(tt.dimensions.clone()),
                 _ => None,
@@ -834,13 +844,22 @@ impl MilBuilder {
     ///
     /// `kernel_size` is the spatial kernel dimensions (e.g. `[1, 1]`).
     /// `padding` is the padding mode (`"valid"`, `"same"`, or `"custom"`).
-    pub fn conv(mut self, name_hint: &str, input: &str, weight: &str, kernel_size: &[i64], padding: &str) -> Self {
+    pub fn conv(
+        mut self,
+        name_hint: &str,
+        input: &str,
+        weight: &str,
+        kernel_size: &[i64],
+        padding: &str,
+    ) -> Self {
         let name = self.fresh_name(name_hint);
         let dtype = self.require_dtype(input).expect("SSA: unknown value");
 
         // Output shape: [B, C_out, H_out, W_out]. C_out is unknown, spatial dims
         // from input for 1x1 valid conv: [B, C, 1, S] -> [B, ?, 1, S]
-        let out_dims = self.value_types.get(input)
+        let out_dims = self
+            .value_types
+            .get(input)
             .and_then(|vt| match &vt.r#type {
                 Some(mil_spec::value_type::Type::TensorType(tt)) => {
                     let mut dims = tt.dimensions.clone();
@@ -856,12 +875,30 @@ impl MilBuilder {
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| vec![
-                mil_spec::Dimension { dimension: Some(dimension::Dimension::Unknown(dimension::UnknownDimension { variadic: false })) },
-                mil_spec::Dimension { dimension: Some(dimension::Dimension::Unknown(dimension::UnknownDimension { variadic: false })) },
-                mil_spec::Dimension { dimension: Some(dimension::Dimension::Unknown(dimension::UnknownDimension { variadic: false })) },
-                mil_spec::Dimension { dimension: Some(dimension::Dimension::Unknown(dimension::UnknownDimension { variadic: false })) },
-            ]);
+            .unwrap_or_else(|| {
+                vec![
+                    mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Unknown(
+                            dimension::UnknownDimension { variadic: false },
+                        )),
+                    },
+                    mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Unknown(
+                            dimension::UnknownDimension { variadic: false },
+                        )),
+                    },
+                    mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Unknown(
+                            dimension::UnknownDimension { variadic: false },
+                        )),
+                    },
+                    mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Unknown(
+                            dimension::UnknownDimension { variadic: false },
+                        )),
+                    },
+                ]
+            });
         let rank = out_dims.len() as i64;
 
         let vt = value_type_tensor(mil_spec::TensorType {
@@ -900,19 +937,27 @@ impl MilBuilder {
     /// indices=swizzled u8 byte, axis=0 → gathers one row of the LUT.
     pub fn gather(mut self, params: &str, indices: &str, axis: i64) -> Self {
         let name = self.fresh_name("gather");
-        let dtype = self.require_dtype(params).expect("SSA: unknown params type");
+        let dtype = self
+            .require_dtype(params)
+            .expect("SSA: unknown params type");
 
         // Gather output has same rank and dtype as params, but the axis
         // dimension becomes the indices dimension.
-        let indices_rank = self.value_types.get(indices)
+        let indices_rank = self
+            .value_types
+            .get(indices)
             .and_then(|vt| match &vt.r#type {
                 Some(mil_spec::value_type::Type::TensorType(tt)) => Some(tt.rank),
                 _ => None,
             })
             .unwrap_or(1);
-        let out_rank = self.value_types.get(params)
+        let out_rank = self
+            .value_types
+            .get(params)
             .and_then(|vt| match &vt.r#type {
-                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(tt.rank + indices_rank - 1),
+                Some(mil_spec::value_type::Type::TensorType(tt)) => {
+                    Some(tt.rank + indices_rank - 1)
+                }
                 _ => None,
             })
             .unwrap_or(4);
@@ -925,7 +970,7 @@ impl MilBuilder {
         });
 
         let mut inputs = HashMap::new();
-        inputs.insert("params" .to_string(), named_arg(params));
+        inputs.insert("params".to_string(), named_arg(params));
         inputs.insert("indices".to_string(), named_arg(indices));
 
         let mut attrs = HashMap::new();
@@ -951,7 +996,7 @@ impl MilBuilder {
         });
 
         let mut inputs = HashMap::new();
-        inputs.insert("x" .to_string(), named_arg(input));
+        inputs.insert("x".to_string(), named_arg(input));
 
         let mut attrs = HashMap::new();
         attrs.insert("axis".to_string(), int_attr(axis));
@@ -1375,7 +1420,18 @@ pub fn build_full_ane_layer_program(
 
     // Static LUT: [81, 4] INT8
     let mut lut_vals = Vec::with_capacity(81 * 4);
-    for state in 0u8..81 { let mut s = state; for _ in 0..4 { let d = s % 3; s /= 3; lut_vals.push(match d { 1 => 1i8, 2 => -1, _ => 0 } as f32); } }
+    for state in 0u8..81 {
+        let mut s = state;
+        for _ in 0..4 {
+            let d = s % 3;
+            s /= 3;
+            lut_vals.push(match d {
+                1 => 1i8,
+                2 => -1,
+                _ => 0,
+            } as f32);
+        }
+    }
 
     // inputs (0 fresh) + const (0 fresh)
     let base = MilBuilder::new("ane_forward")
@@ -1388,7 +1444,11 @@ pub fn build_full_ane_layer_program(
         .input("w_up", DataType::Uint8, &[interm, hs])
         .input("w_down", DataType::Uint8, &[hs, interm])
         .input("mtp_w_proj", DataType::Uint8, &[hs, hs])
-        .input("kv_full", DataType::Float16, &[1, 1, n_h * hd * 2, 1_000_000]) // max seq
+        .input(
+            "kv_full",
+            DataType::Float16,
+            &[1, 1, n_h * hd * 2, 1_000_000],
+        ) // max seq
         .const_f32("lut", &lut_vals, &[81, 4]);
 
     // SSA counter: 0 fresh so far. Chain:
@@ -1398,37 +1458,37 @@ pub fn build_full_ane_layer_program(
     // gather(kv)=19,20  (two gather outputs for compacted K and V)
     let b = base
         // ── Attention Q, K, V projections ──────────────────────────
-        .gather("lut", "w_q", 1)      // gather_0
-        .gather("lut", "w_k", 1)      // gather_1
-        .gather("lut", "w_v", 1)      // gather_2
-        .matmul("h", "gather_0")         // matmul_7 — Q projection
-        .matmul("h", "gather_1")         // matmul_8 — K projection
-        .matmul("h", "gather_2")         // matmul_9 — V projection
+        .gather("lut", "w_q", 1) // gather_0
+        .gather("lut", "w_k", 1) // gather_1
+        .gather("lut", "w_v", 1) // gather_2
+        .matmul("h", "gather_0") // matmul_7 — Q projection
+        .matmul("h", "gather_1") // matmul_8 — K projection
+        .matmul("h", "gather_2") // matmul_9 — V projection
         // ── Attention scores: Q @ K^T / sqrt(d) ────────────────────
-        .matmul("matmul_7", "matmul_8")  // matmul_10 — QK^T scores
-        .softmax("matmul_10", -1)        // softmax_11 — attention
+        .matmul("matmul_7", "matmul_8") // matmul_10 — QK^T scores
+        .softmax("matmul_10", -1) // softmax_11 — attention
         .matmul("softmax_11", "matmul_9") // matmul_12 — attn @ V
         // ── Output projection ───────────────────────────────────────
-        .gather("lut", "w_o", 1)      // gather_3
-        .matmul("matmul_12", "gather_3")  // matmul_13 — attention output
-        .add("h", "matmul_13")            // add_14 — residual
+        .gather("lut", "w_o", 1) // gather_3
+        .matmul("matmul_12", "gather_3") // matmul_13 — attention output
+        .add("h", "matmul_13") // add_14 — residual
         // ── FFN ─────────────────────────────────────────────────────
-        .gather("lut", "w_gate", 1)    // gather_4
-        .matmul("add_14", "gather_4")    // matmul_15 — gate proj
-        .silu("gate", "matmul_15")        // silu_16
-        .gather("lut", "w_up", 1)      // gather_5
-        .matmul("add_14", "gather_5")    // matmul_17 — up proj
-        .mul("silu_16", "matmul_17")     // mul_18
-        .gather("lut", "w_down", 1)    // gather_6
-        .matmul("mul_18", "gather_6")    // matmul_19 — FFN output
-        .add("add_14", "matmul_19")      // add_20 — residual
+        .gather("lut", "w_gate", 1) // gather_4
+        .matmul("add_14", "gather_4") // matmul_15 — gate proj
+        .silu("gate", "matmul_15") // silu_16
+        .gather("lut", "w_up", 1) // gather_5
+        .matmul("add_14", "gather_5") // matmul_17 — up proj
+        .mul("silu_16", "matmul_17") // mul_18
+        .gather("lut", "w_down", 1) // gather_6
+        .matmul("mul_18", "gather_6") // matmul_19 — FFN output
+        .add("add_14", "matmul_19") // add_20 — residual
         // ── KV compaction: topk from attention scores → gather ─────
-        .topk("matmul_10", target_count, 3)  // topk_21 — top-k positions by score
+        .topk("matmul_10", target_count, 3) // topk_21 — top-k positions by score
         // gather compacted K and V from kv_full using topk indices
         // (gather_22, gather_23 — axis=2 over the seq_len dimension)
         // ── MTP head ────────────────────────────────────────────────
-        .gather("lut", "mtp_w_proj", 1)  // gather_24
-        .matmul("add_20", "gather_24")     // matmul_25 — MTP logits
+        .gather("lut", "mtp_w_proj", 1) // gather_24
+        .matmul("add_20", "gather_24") // matmul_25 — MTP logits
         // ── Outputs ─────────────────────────────────────────────────
         .output("matmul_25")
         .output("topk_21_indices")
@@ -1438,7 +1498,10 @@ pub fn build_full_ane_layer_program(
         Ok(prog) => {
             let mut bytes = Vec::new();
             prog.encode(&mut bytes).ok();
-            eprintln!("[mil] ANE fused layer+compaction program: {} bytes", bytes.len());
+            eprintln!(
+                "[mil] ANE fused layer+compaction program: {} bytes",
+                bytes.len()
+            );
             bytes
         }
         Err(e) => {
@@ -1617,7 +1680,9 @@ fn int_attr(val: i64) -> mil_spec::Value {
 fn ints_attr(vals: &[i64]) -> mil_spec::Value {
     let int_tensor = mil_spec::TensorValue {
         value: Some(tensor_value::Value::LongInts(
-            tensor_value::RepeatedLongInts { values: vals.to_vec() },
+            tensor_value::RepeatedLongInts {
+                values: vals.to_vec(),
+            },
         )),
     };
     mil_spec::Value {
@@ -1629,7 +1694,9 @@ fn ints_attr(vals: &[i64]) -> mil_spec::Value {
                     rank: 1,
                     dimensions: vec![mil_spec::Dimension {
                         dimension: Some(dimension::Dimension::Constant(
-                            dimension::ConstantDimension { size: vals.len() as u64 },
+                            dimension::ConstantDimension {
+                                size: vals.len() as u64,
+                            },
                         )),
                     }],
                     attributes: HashMap::new(),
@@ -1831,8 +1898,14 @@ mod tests {
         let text = builder.to_mil_text();
         // Verify the MIL program has the expected ops (const + matmul + output)
         // to_mil_text does not render const data values, so check op names
-        assert!(text.contains("w_0"), "MIL text should contain const op name");
-        assert!(text.contains("matmul_1"), "MIL text should contain matmul op name");
+        assert!(
+            text.contains("w_0"),
+            "MIL text should contain const op name"
+        );
+        assert!(
+            text.contains("matmul_1"),
+            "MIL text should contain matmul op name"
+        );
         assert!(text.contains("x"), "MIL text should contain input name");
     }
 

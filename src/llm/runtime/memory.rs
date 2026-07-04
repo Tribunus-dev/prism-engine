@@ -40,7 +40,11 @@ impl MemoryPressureMonitor {
     /// and the configured thresholds.
     pub fn current_level(&self) -> MemoryPressureLevel {
         let inner = self.inner.lock();
-        level_for(inner.total_allocated_bytes, inner.elevated_threshold_bytes, inner.critical_threshold_bytes)
+        level_for(
+            inner.total_allocated_bytes,
+            inner.elevated_threshold_bytes,
+            inner.critical_threshold_bytes,
+        )
     }
 
     /// Records an allocation of `bytes` by `owner` and checks for a level
@@ -151,14 +155,16 @@ mod tests {
     #[test]
     fn allocation_triggers_critical() {
         let m = MemoryPressureMonitor::new(100, 200);
-        m.record_allocation(250, AllocationOwner::WeightResidency).unwrap();
+        m.record_allocation(250, AllocationOwner::WeightResidency)
+            .unwrap();
         assert_eq!(m.current_level(), MemoryPressureLevel::Critical);
     }
 
     #[test]
     fn release_lowers_level() {
         let m = MemoryPressureMonitor::new(100, 200);
-        m.record_allocation(250, AllocationOwner::WeightResidency).unwrap();
+        m.record_allocation(250, AllocationOwner::WeightResidency)
+            .unwrap();
         assert_eq!(m.current_level(), MemoryPressureLevel::Critical);
 
         m.record_release(60);
@@ -194,7 +200,8 @@ mod tests {
         let before = m.get_history().len();
 
         // Allocate more but stay within Elevated
-        m.record_allocation(40, AllocationOwner::TokenBuffer).unwrap();
+        m.record_allocation(40, AllocationOwner::TokenBuffer)
+            .unwrap();
         assert_eq!(m.current_level(), MemoryPressureLevel::Elevated);
         assert_eq!(m.get_history().len(), before);
     }
@@ -222,7 +229,8 @@ mod tests {
     #[test]
     fn allocation_overflow_returns_err() {
         let m = MemoryPressureMonitor::new(100, 200);
-        m.record_allocation(u64::MAX, AllocationOwner::KvCache).unwrap();
+        m.record_allocation(u64::MAX, AllocationOwner::KvCache)
+            .unwrap();
         let result = m.record_allocation(1, AllocationOwner::KvCache);
         assert!(result.is_err());
     }
@@ -250,9 +258,9 @@ pub mod compute_memory {
     use std::time::Duration;
 
     use super::{AllocationOwner, MemoryPressureLevel, MemoryPressureReceipt};
+    use parking_lot::Mutex;
     use tribunus_compute_core::memory::monitor::{MemoryMonitor, MemoryStats};
     use tribunus_compute_core::memory::MemoryPressure;
-    use parking_lot::Mutex;
 
     /// Map a compute-core pressure level to the engine's level.
     pub fn to_engine_pressure(cc_pressure: MemoryPressure) -> MemoryPressureLevel {
@@ -311,10 +319,9 @@ pub mod compute_memory {
             // monitor's level-tracking is kept in sync with real system
             // pressure. The engine monitor uses byte-based thresholds;
             // we pass the RSS as the allocated amount.
-            let _ = inner.engine_monitor.record_allocation(
-                stats.rss_bytes,
-                AllocationOwner::KvCache,
-            );
+            let _ = inner
+                .engine_monitor
+                .record_allocation(stats.rss_bytes, AllocationOwner::KvCache);
 
             stats
         }
@@ -325,12 +332,11 @@ pub mod compute_memory {
         }
 
         /// Delegate to the engine-side monitor.
-        pub fn record_allocation(
-            &self,
-            bytes: u64,
-            owner: AllocationOwner,
-        ) -> Result<(), String> {
-            self.inner.lock().engine_monitor.record_allocation(bytes, owner)
+        pub fn record_allocation(&self, bytes: u64, owner: AllocationOwner) -> Result<(), String> {
+            self.inner
+                .lock()
+                .engine_monitor
+                .record_allocation(bytes, owner)
         }
 
         /// Delegate to the engine-side monitor.
@@ -345,7 +351,8 @@ pub mod compute_memory {
 
         /// Update thresholds on the engine-side monitor.
         pub fn update_thresholds(&self, elevated: u64, critical: u64) {
-            self.inner.lock()
+            self.inner
+                .lock()
                 .engine_monitor
                 .update_thresholds(elevated, critical);
         }

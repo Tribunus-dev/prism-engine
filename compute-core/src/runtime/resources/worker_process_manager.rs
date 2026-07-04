@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 
-
 // ---------------------------------------------------------------------------
 // WorkerId
 // ---------------------------------------------------------------------------
@@ -85,7 +84,10 @@ impl std::fmt::Debug for WorkerProcessHandles {
         f.debug_struct("WorkerProcessHandles")
             .field("worker_id", &self.worker_id)
             .field("process", &self.process.id())
-            .field("stdout_reader", &self.stdout_reader.as_ref().map(|_| "active"))
+            .field(
+                "stdout_reader",
+                &self.stdout_reader.as_ref().map(|_| "active"),
+            )
             .finish()
     }
 }
