@@ -142,10 +142,13 @@ impl MetalExecutable {
     pub fn bind_nf4_tile640_triplet(
         &mut self,
         weight_slot: u32,
+        weight_byte_offset: u64,
         scale_slot: u32,
+        scale_byte_offset: u64,
         bias_slot: u32,
-        row_byte_length: u64,
-        metadata_value_count: u64,
+        bias_byte_offset: u64,
+        weight_byte_length: u64,
+        metadata_byte_length: u64,
         layout_digest: &str,
     ) {
         self.add_input_view(MetalResourceView {
@@ -156,11 +159,14 @@ impl MetalExecutable {
                 pixel_format: None,
                 is_srgb: false,
             },
-            byte_offset: 0,
-            length: row_byte_length,
+            byte_offset: weight_byte_offset,
+            length: weight_byte_length,
             layout_digest: layout_digest.into(),
         });
-        for slot_id in [scale_slot, bias_slot] {
+        for (slot_id, byte_offset) in [
+            (scale_slot, scale_byte_offset),
+            (bias_slot, bias_byte_offset),
+        ] {
             self.add_input_view(MetalResourceView {
                 slot_id,
                 resource_kind: MetalResourceKind::IOSurfaceBacked,
@@ -169,8 +175,8 @@ impl MetalExecutable {
                     pixel_format: None,
                     is_srgb: false,
                 },
-                byte_offset: 0,
-                length: metadata_value_count * 4,
+                byte_offset,
+                length: metadata_byte_length,
                 layout_digest: layout_digest.into(),
             });
         }
@@ -287,11 +293,14 @@ mod tests {
     #[test]
     fn test_bind_nf4_tile640_triplet() {
         let mut exec = MetalExecutable::new("art_nf4", "fused_gemv_nf4_tile640_fp32", "pipe");
-        exec.bind_nf4_tile640_triplet(4, 5, 6, 320, 10, "nf4tile640-v1");
+        exec.bind_nf4_tile640_triplet(4, 32, 5, 96, 6, 160, 320, 40, "nf4tile640-v1");
 
         assert_eq!(exec.input_views.len(), 3);
         assert_eq!(exec.input_views[0].slot_id, 4);
         assert_eq!(exec.input_views[0].resource_format.data_type, "uint8");
+        assert_eq!(exec.input_views[0].byte_offset, 32);
+        assert_eq!(exec.input_views[1].byte_offset, 96);
+        assert_eq!(exec.input_views[2].byte_offset, 160);
         assert_eq!(exec.input_views[1].length, 40);
         assert_eq!(exec.input_views[2].length, 40);
     }

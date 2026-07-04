@@ -184,20 +184,27 @@ impl CoreAiIOSurfaceExecutable {
     pub fn bind_nf4_tile640_triplet(
         &mut self,
         packed_weights_slot: u32,
+        packed_weights_byte_offset: u64,
         scales_slot: u32,
+        scales_byte_offset: u64,
         biases_slot: u32,
+        biases_byte_offset: u64,
         contract_digest: &str,
     ) -> Result<(), String> {
-        for (slot_id, tensor_id) in [
-            (packed_weights_slot, "packed_nf4_weights"),
-            (scales_slot, "scales"),
-            (biases_slot, "biases"),
+        for (slot_id, byte_offset, tensor_id) in [
+            (
+                packed_weights_slot,
+                packed_weights_byte_offset,
+                "packed_nf4_weights",
+            ),
+            (scales_slot, scales_byte_offset, "scales"),
+            (biases_slot, biases_byte_offset, "biases"),
         ] {
             self.add_input_binding(CoreAiIOSurfaceBinding {
                 tensor_id: tensor_id.into(),
                 slot_id,
                 io_surface_id: 0,
-                byte_offset: 0,
+                byte_offset,
                 contract_digest: contract_digest.into(),
             })?;
         }
@@ -479,13 +486,16 @@ mod tests {
             CoreAiComputePolicy::CpuAndNeuralEngine,
         );
 
-        exec.bind_nf4_tile640_triplet(7, 8, 9, "nf4tile640-v1")
+        exec.bind_nf4_tile640_triplet(7, 64, 8, 128, 9, 256, "nf4tile640-v1")
             .expect("bind triplet");
 
         assert_eq!(exec.input_bindings.len(), 3);
         assert_eq!(exec.input_bindings[0].tensor_id, "packed_nf4_weights");
         assert_eq!(exec.input_bindings[1].tensor_id, "scales");
         assert_eq!(exec.input_bindings[2].tensor_id, "biases");
+        assert_eq!(exec.input_bindings[0].byte_offset, 64);
+        assert_eq!(exec.input_bindings[1].byte_offset, 128);
+        assert_eq!(exec.input_bindings[2].byte_offset, 256);
     }
 
     #[test]

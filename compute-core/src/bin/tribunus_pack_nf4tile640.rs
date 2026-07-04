@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 
+use tribunus_compute_core::config::parse_config;
 use tribunus_compute_core::coreai_pipeline::build_nf4_tile640_stateless_region;
 use tribunus_compute_core::ffi::prism_compile_and_pack;
 
@@ -23,10 +24,49 @@ struct Args {
     generate_placeholder_modelc: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct PlaceholderRegionSpec {
+    k_padded: i64,
+    out_dim: i64,
+}
+
+fn tile640_pad(width: u32) -> u32 {
+    width.div_ceil(640) * 640
+}
+
+fn infer_placeholder_specs(
+    source_dir: &Path,
+) -> Result<(PlaceholderRegionSpec, PlaceholderRegionSpec), String> {
+    let config_path = source_dir.join("config.json");
+    let config_path_str = config_path
+        .to_str()
+        .ok_or_else(|| format!("invalid config path: {}", config_path.display()))?;
+    let (arch, _, _) = parse_config(config_path_str)
+        .map_err(|e| format!("parse {}: {}", config_path.display(), e))?;
+
+    let main = PlaceholderRegionSpec {
+        k_padded: i64::from(tile640_pad(arch.hidden_size)),
+        out_dim: i64::from(arch.hidden_size),
+    };
+
+    let mtp_hidden = if arch.hidden_size >= 2048 {
+        2048
+    } else {
+        arch.hidden_size
+    };
+    let mtp = PlaceholderRegionSpec {
+        k_padded: i64::from(tile640_pad(mtp_hidden)),
+        out_dim: i64::from(mtp_hidden),
+    };
+
+    Ok((main, mtp))
+}
+
 fn ensure_modelc(
     requested: Option<PathBuf>,
     output_root: &Path,
     region_id: &str,
+    spec: PlaceholderRegionSpec,
 ) -> Result<PathBuf, String> {
     if let Some(path) = requested {
         return Ok(path);
@@ -35,8 +75,13 @@ fn ensure_modelc(
     let modelc_root = output_root.join("generated_modelc");
     fs::create_dir_all(&modelc_root)
         .map_err(|e| format!("create {}: {e}", modelc_root.display()))?;
-    let receipt =
-        build_nf4_tile640_stateless_region("activations", &[1, 640], 64, &modelc_root, region_id)?;
+    let receipt = build_nf4_tile640_stateless_region(
+        "activations",
+        &[1, spec.k_padded],
+        spec.out_dim,
+        &modelc_root,
+        region_id,
+    )?;
     Ok(PathBuf::from(receipt.compiled_modelc_path))
 }
 
@@ -81,13 +126,25 @@ fn main() -> Result<(), String> {
     fs::create_dir_all(&resource_root)
         .map_err(|e| format!("create {}: {e}", resource_root.display()))?;
 
+    let (main_placeholder, mtp_placeholder) = infer_placeholder_specs(&args.source)?;
+
     let main_mlmodelc = if args.generate_placeholder_modelc || args.main_mlmodelc.is_none() {
-        ensure_modelc(args.main_mlmodelc.clone(), &resource_root, "main_12b")?
+        ensure_modelc(
+            args.main_mlmodelc.clone(),
+            &resource_root,
+            "main_12b",
+            main_placeholder,
+        )?
     } else {
         args.main_mlmodelc.clone().unwrap()
     };
     let mtp_mlmodelc = if args.generate_placeholder_modelc || args.mtp_mlmodelc.is_none() {
-        ensure_modelc(args.mtp_mlmodelc.clone(), &resource_root, "mtp_1b")?
+        ensure_modelc(
+            args.mtp_mlmodelc.clone(),
+            &resource_root,
+            "mtp_1b",
+            mtp_placeholder,
+        )?
     } else {
         args.mtp_mlmodelc.clone().unwrap()
     };
@@ -113,4 +170,17 @@ fn main() -> Result<(), String> {
 
     println!("{}", args.output.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tile640_padding_rounds_up_to_macro_tiles() {
+        assert_eq!(tile640_pad(1), 640);
+        assert_eq!(tile640_pad(640), 640);
+        assert_eq!(tile640_pad(641), 1280);
+        assert_eq!(tile640_pad(3840), 3840);
+    }
 }

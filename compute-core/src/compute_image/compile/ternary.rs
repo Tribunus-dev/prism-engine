@@ -13,7 +13,7 @@ pub const QUANT_SCHEMA_TERNARY_TILE640: u32 = 0;
 pub const QUANT_SCHEMA_NF4_TILE640: u32 = 1;
 /// Deprecated alias; use CIMAGE_PAGE_SIZE
 pub const PRISM_PAGE_SIZE: u64 = CIMAGE_PAGE_SIZE;
-pub const CIMAGE_SEGMENT_CAPACITY: usize = 16;
+pub const CIMAGE_SEGMENT_CAPACITY: usize = 32;
 
 /// Encodes the type of content in a cimage segment.
 #[repr(u32)]
