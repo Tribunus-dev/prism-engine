@@ -2,6 +2,7 @@
 ///
 /// Provides resource views that link Metal kernel execution to IOSurface-backed
 /// arena slots, enabling zero-copy data exchange between compute lanes.
+use crate::backend::shared_event::SharedEventBinding;
 
 /// Kind of Metal resource
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +76,8 @@ pub struct MetalExecutable {
     pub input_views: Vec<MetalResourceView>,
     /// Output resource views
     pub output_views: Vec<MetalResourceView>,
+    /// Shared-event waits/signals that guard IOSurface slot handoff.
+    pub shared_event_bindings: Vec<SharedEventBinding>,
 }
 
 impl MetalExecutable {
@@ -86,6 +89,7 @@ impl MetalExecutable {
             pipeline_digest: pipeline_digest.to_string(),
             input_views: Vec::new(),
             output_views: Vec::new(),
+            shared_event_bindings: Vec::new(),
         }
     }
 
@@ -97,6 +101,11 @@ impl MetalExecutable {
     /// Add an output resource view.
     pub fn add_output_view(&mut self, view: MetalResourceView) {
         self.output_views.push(view);
+    }
+
+    /// Attach one shared-event wait or signal to this executable.
+    pub fn add_shared_event_binding(&mut self, binding: SharedEventBinding) {
+        self.shared_event_bindings.push(binding);
     }
 
     /// Verify that all input views match the expected layout digests.
@@ -127,6 +136,44 @@ impl MetalExecutable {
             view.verify_layout(expected)?;
         }
         Ok(())
+    }
+
+    /// Bind the canonical NF4Tile640 triplet ABI for a shared-lane kernel.
+    pub fn bind_nf4_tile640_triplet(
+        &mut self,
+        weight_slot: u32,
+        scale_slot: u32,
+        bias_slot: u32,
+        row_byte_length: u64,
+        metadata_value_count: u64,
+        layout_digest: &str,
+    ) {
+        self.add_input_view(MetalResourceView {
+            slot_id: weight_slot,
+            resource_kind: MetalResourceKind::IOSurfaceBacked,
+            resource_format: MetalResourceFormat {
+                data_type: "uint8".into(),
+                pixel_format: None,
+                is_srgb: false,
+            },
+            byte_offset: 0,
+            length: row_byte_length,
+            layout_digest: layout_digest.into(),
+        });
+        for slot_id in [scale_slot, bias_slot] {
+            self.add_input_view(MetalResourceView {
+                slot_id,
+                resource_kind: MetalResourceKind::IOSurfaceBacked,
+                resource_format: MetalResourceFormat {
+                    data_type: "float32".into(),
+                    pixel_format: None,
+                    is_srgb: false,
+                },
+                byte_offset: 0,
+                length: metadata_value_count * 4,
+                layout_digest: layout_digest.into(),
+            });
+        }
     }
 }
 
@@ -235,5 +282,17 @@ mod tests {
         // Mismatched digest in outputs
         let err = exec.verify_outputs(&[(3, "bad_out")]).unwrap_err();
         assert!(err.contains("layout digest mismatch for slot 3"));
+    }
+
+    #[test]
+    fn test_bind_nf4_tile640_triplet() {
+        let mut exec = MetalExecutable::new("art_nf4", "fused_gemv_nf4_tile640_fp32", "pipe");
+        exec.bind_nf4_tile640_triplet(4, 5, 6, 320, 10, "nf4tile640-v1");
+
+        assert_eq!(exec.input_views.len(), 3);
+        assert_eq!(exec.input_views[0].slot_id, 4);
+        assert_eq!(exec.input_views[0].resource_format.data_type, "uint8");
+        assert_eq!(exec.input_views[1].length, 40);
+        assert_eq!(exec.input_views[2].length, 40);
     }
 }

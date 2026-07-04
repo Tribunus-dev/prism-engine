@@ -5,6 +5,7 @@
 //! along with known weight sizes to lay out all 7 segments at 16 KB
 //! boundaries.
 
+use crate::config::CompileQuantMode;
 use std::path::Path;
 
 const APPLE_PAGE_SIZE: u64 = super::APPLE_PAGE_SIZE as u64;
@@ -116,14 +117,20 @@ pub struct CImageLayoutPlan {
     pub metal_lib: SegmentDescriptor,
     pub main_graph: SegmentDescriptor,
     pub main_weights: SegmentDescriptor,
+    pub main_scales: SegmentDescriptor,
+    pub main_biases: SegmentDescriptor,
     pub mtp_graph: SegmentDescriptor,
     pub mtp_weights: SegmentDescriptor,
+    pub mtp_scales: SegmentDescriptor,
+    pub mtp_biases: SegmentDescriptor,
     pub topology_table: SegmentDescriptor,
     /// TernaryTile640-packed `embed_tokens.weight` (shared vocab for both models).
     pub vocabulary: SegmentDescriptor,
     /// Per-layer weight/scale offset table (array of LayerDirectoryEntry).
     /// Present when `num_layers > 0`; enables ANE/GPU interleaved scheduling.
     pub layer_directory: SegmentDescriptor,
+    /// Execution graph descriptor for graph-driven runtime dispatch.
+    pub execution_graph: SegmentDescriptor,
     /// Multimodal projection weights segment. `None` for text-only cimages.
     pub multimodal_projection_weights: Option<SegmentDescriptor>,
     /// Multimodal projection scales segment. `None` for text-only cimages.
@@ -143,16 +150,21 @@ impl CImageLayoutPlan {
         header_size: u64,
         metal_lib_len: u64,
         main_graph_len: u64,
-        main_weights_total_elements: u64,
+        main_weights_len: u64,
+        main_scales_len: u64,
+        main_biases_len: u64,
         mtp_graph_len: u64,
-        mtp_weights_total_elements: u64,
-        // Number of elements in the embed_tokens.weight tensor (vocab_size × hidden_dim).
-        vocab_weight_total_elements: u64,
+        mtp_weights_len: u64,
+        mtp_scales_len: u64,
+        mtp_biases_len: u64,
+        vocab_len: u64,
         // Number of transformer layers (for LayerDirectory sizing).
         num_layers: u32,
+        execution_graph_len: u64,
         multimodal_projection_weights_elements: Option<u64>,
         multimodal_position_embeddings_elements: Option<u64>,
         multimodal_auxiliary_bytes: Option<u64>,
+        qmode: CompileQuantMode,
     ) -> Self {
         let mut cursor = 0u64;
         let mut next = |size: u64| -> SegmentDescriptor {
@@ -169,24 +181,16 @@ impl CImageLayoutPlan {
             desc
         };
 
-        // TernaryTile640: 640 weights → 32 u32 lanes × 4 bytes = 128 bytes per tile
-        let main_weights_len = (main_weights_total_elements / 640) * 128;
-        let mtp_weights_len = (mtp_weights_total_elements / 640) * 128;
-        // Vocabulary segment: same TernaryTile640 packing for embed_tokens.weight.
-        // Also append one F32 scale per tile (4 bytes × num_tiles, one per row-tile group).
-        let vocab_num_tiles = (vocab_weight_total_elements + 639) / 640;
-        // packed u32 payload: num_tiles tiles, each 32 u32s × 4 bytes
-        let vocab_packed_len = vocab_num_tiles * 32 * 4;
-        // scales payload: one f32 per (row, tile) pair already amortised into vocab_num_tiles
-        let vocab_scales_len = vocab_num_tiles * 4;
-        let vocab_len = vocab_packed_len + vocab_scales_len;
-
         let header = next(header_size);
         let metal_lib = next(metal_lib_len);
         let main_graph = next(main_graph_len);
         let main_weights = next(main_weights_len);
+        let main_scales = next(main_scales_len);
+        let main_biases = next(main_biases_len);
         let mtp_graph = next(mtp_graph_len);
         let mtp_weights = next(mtp_weights_len);
+        let mtp_scales = next(mtp_scales_len);
+        let mtp_biases = next(mtp_biases_len);
         let topology_table_size = std::mem::size_of::<CImageTopologyTable>() as u64;
         let topology_table = next(topology_table_size);
         let vocabulary = next(vocab_len);
@@ -195,6 +199,7 @@ impl CImageLayoutPlan {
         // LayerDirectoryEntry is 6 × u64 = 48 bytes.
         let layer_dir_len = (num_layers as u64) * 48;
         let layer_directory = next(layer_dir_len);
+        let execution_graph = next(execution_graph_len);
 
         let multimodal_input_descriptor = {
             let size = std::mem::size_of::<
@@ -204,13 +209,18 @@ impl CImageLayoutPlan {
         };
 
         let multimodal_projection_weights = multimodal_projection_weights_elements.map(|elems| {
-            let len = (elems / 640) * 128; // TernaryTile640 packing
+            let len = match qmode {
+                CompileQuantMode::Nf4Tile640 { .. } => ((elems + 639) / 640) * 320,
+                _ => (elems / 640) * 128,
+            };
             next(len)
         });
 
         let multimodal_projection_scales = multimodal_projection_weights_elements.map(|elems| {
-            let num_tiles = (elems + 639) / 640;
-            let len = num_tiles * 4; // one F32 scale per tile
+            let len = match qmode {
+                CompileQuantMode::Nf4Tile640 { .. } => ((elems + 639) / 640) * 5 * 4,
+                _ => ((elems + 639) / 640) * 4,
+            };
             next(len)
         });
 
@@ -227,16 +237,61 @@ impl CImageLayoutPlan {
             metal_lib,
             main_graph,
             main_weights,
+            main_scales,
+            main_biases,
             mtp_graph,
             mtp_weights,
+            mtp_scales,
+            mtp_biases,
             topology_table,
             vocabulary,
             layer_directory,
+            execution_graph,
             multimodal_projection_weights,
             multimodal_projection_scales,
             multimodal_input_descriptor,
             multimodal_position_embeddings,
             multimodal_auxiliary_weights,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nf4_tile640_layout_reserves_triplet_segments() {
+        let plan = CImageLayoutPlan::calculate(
+            256,
+            1024,
+            4096,
+            3200,
+            640,
+            128,
+            512,
+            2048,
+            1600,
+            320,
+            320,
+            2,
+            256,
+            None,
+            None,
+            None,
+            CompileQuantMode::Nf4Tile640 { group_size: 128 },
+        );
+
+        assert_eq!(plan.main_weights.length, 3200);
+        assert_eq!(plan.main_scales.length, 640);
+        assert_eq!(plan.main_biases.length, 128);
+        assert_eq!(plan.mtp_weights.length, 2048);
+        assert_eq!(plan.mtp_scales.length, 1600);
+        assert_eq!(plan.mtp_biases.length, 320);
+        assert_eq!(plan.vocabulary.length, 320);
+        assert!(plan.main_scales.offset > plan.main_weights.offset);
+        assert!(plan.main_biases.offset > plan.main_scales.offset);
+        assert_eq!(plan.execution_graph.length, 256);
+        assert!(plan.execution_graph.offset > plan.layer_directory.offset);
     }
 }

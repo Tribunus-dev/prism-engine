@@ -16,6 +16,7 @@ pub(crate) struct SourceTensor {
     pub dtype: String,
     pub shape: Vec<u32>,
     pub data: Vec<u8>,
+    pub mmap_index: Option<usize>,
     pub source_filename: String,
     pub source_sha256: String,
     pub source_offset: u64,
@@ -56,10 +57,48 @@ fn sha256_bytes(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn looks_like_sha256_hex(name: &str) -> bool {
+    name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn content_addressed_sha256(path: &Path) -> Option<String> {
+    let canonical = std::fs::canonicalize(path).ok()?;
+    let file_name = canonical.file_name()?.to_str()?;
+    if !looks_like_sha256_hex(file_name) {
+        return None;
+    }
+    let parent = canonical.parent()?.file_name()?.to_str()?;
+    if parent != "blobs" {
+        return None;
+    }
+    Some(file_name.to_ascii_lowercase())
+}
+
+fn sha256_file_stream(path: &Path) -> crate::Result<String> {
+    use std::io::Read;
+
+    if let Some(sha256) = content_addressed_sha256(path) {
+        return Ok(sha256);
+    }
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| crate::Error::from_reason(format!("open {}: {}", path.display(), e)))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 1024 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| crate::Error::from_reason(format!("read {}: {}", path.display(), e)))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 fn hash_file(path: &Path) -> crate::Result<String> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| crate::Error::from_reason(format!("read {}: {}", path.display(), e)))?;
-    Ok(sha256_bytes(&bytes))
+    sha256_file_stream(path)
 }
 
 fn optional_hash(path: &Path) -> crate::Result<Option<ShardHash>> {
@@ -108,6 +147,39 @@ pub(crate) fn ensure_tensor_loaded(tensor: &mut SourceTensor, mmap: &[u8]) {
     } else {
         Vec::new()
     };
+}
+
+pub(crate) fn source_tensor_byte_len(tensor: &SourceTensor) -> usize {
+    if tensor.source_byte_size > 0 {
+        return tensor.source_byte_size as usize;
+    }
+    let elem_bytes: usize = match tensor.dtype.as_str() {
+        "BF16" | "BFloat16" | "F16" | "Float16" => 2,
+        "F32" | "Float32" | "I32" | "Int32" | "U32" | "Uint32" => 4,
+        "I8" | "Int8" | "U8" | "Uint8" => 1,
+        other => panic!("unknown dtype {} for tensor {}", other, tensor.name),
+    };
+    let n: usize = tensor.shape.iter().map(|d| *d as usize).product();
+    n * elem_bytes
+}
+
+pub(crate) fn source_tensor_view<'a>(tensor: &'a SourceTensor, mmaps: &'a [Mmap]) -> &'a [u8] {
+    if !tensor.data.is_empty() {
+        return &tensor.data;
+    }
+    let Some(mmap_index) = tensor.mmap_index else {
+        return &[];
+    };
+    let Some(mmap) = mmaps.get(mmap_index) else {
+        return &[];
+    };
+    let offset = tensor.source_offset as usize;
+    let end = (offset + source_tensor_byte_len(tensor)).min(mmap.len());
+    if offset >= mmap.len() {
+        &[]
+    } else {
+        &mmap[offset..end]
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -219,6 +291,7 @@ pub(crate) fn load_source(source_dir: &Path, skip_validation: bool) -> crate::Re
     let mut mmaps: Vec<Mmap> = Vec::new();
 
     for shard_path in shard_paths {
+        let mmap_index = mmaps.len();
         // Stream via mmap instead of reading entire file into memory
         let file = std::fs::File::open(&shard_path).map_err(|e| {
             crate::Error::from_reason(format!("open {}: {}", shard_path.display(), e))
@@ -229,7 +302,7 @@ pub(crate) fn load_source(source_dir: &Path, skip_validation: bool) -> crate::Re
             crate::Error::from_reason(format!("mmap {}: {}", shard_path.display(), e))
         })?;
 
-        let source_sha256 = sha256_bytes(&mmap);
+        let source_sha256 = sha256_file_stream(&shard_path)?;
 
         // Parse metadata only — don't deserialize tensor data
         let (_, metadata) = safetensors::SafeTensors::read_metadata(&mmap).map_err(|e| {
@@ -259,6 +332,7 @@ pub(crate) fn load_source(source_dir: &Path, skip_validation: bool) -> crate::Re
                     shape: info.shape.iter().map(|&d| d as u32).collect(),
                     // Data is loaded lazily from mmap — start empty
                     data: Vec::new(),
+                    mmap_index: Some(mmap_index),
                     source_filename: shard_path
                         .file_name()
                         .unwrap()
@@ -545,7 +619,7 @@ pub(crate) fn load_gguf_source(
         .map_err(|e| crate::Error::from_reason(format!("open GGUF: {e}")))?;
     let mmap = unsafe { Mmap::map(&file) }
         .map_err(|e| crate::Error::from_reason(format!("mmap GGUF: {e}")))?;
-    let gguf_sha256 = sha256_bytes(&mmap);
+    let gguf_sha256 = sha256_file_stream(gguf_path)?;
 
     // 5. Map GgufTensorMeta → SourceTensor via HF name mapping
     let mut source_tensors: HashMap<String, SourceTensor> = HashMap::new();
@@ -563,6 +637,7 @@ pub(crate) fn load_gguf_source(
                 dtype: t.dtype.clone(),
                 shape: t.shape.clone(),
                 data: Vec::new(), // lazy — loaded on demand
+                mmap_index: Some(0),
                 source_filename: gguf_path
                     .file_name()
                     .unwrap_or_default()

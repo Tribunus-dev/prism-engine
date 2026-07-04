@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use crate::compute_image::manifest::Nf4Tile640Layout;
 use std::fmt;
 
 // ──────────────────────────────────────────────
@@ -100,6 +101,49 @@ pub struct ProjectionTensorRecord {
 impl Default for ProjectionTensorRecord {
     fn default() -> Self {
         unsafe { std::mem::zeroed() }
+    }
+}
+
+impl ProjectionTensorRecord {
+    pub const LAYOUT_DENSE_ROW_MAJOR: u8 = 0;
+    pub const LAYOUT_NF4_TILE640: u8 = 1;
+
+    pub const QUANTIZATION_NONE: u8 = 0;
+    pub const QUANTIZATION_NF4_TILE640: u8 = 1;
+
+    pub fn is_nf4_tile640(&self) -> bool {
+        self.layout == Self::LAYOUT_NF4_TILE640
+            && self.quantization_kind == Self::QUANTIZATION_NF4_TILE640
+    }
+
+    pub fn nf4_layout(&self) -> Option<Nf4Tile640Layout> {
+        self.is_nf4_tile640()
+            .then(Nf4Tile640Layout::canonical)
+    }
+
+    pub fn validate_nf4_tile640(&self) -> Result<Nf4Tile640Layout, String> {
+        let layout = self
+            .nf4_layout()
+            .ok_or_else(|| "projection record is not tagged as NF4Tile640".to_string())?;
+        let expected_weight_length =
+            layout.packed_row_bytes(self.input_width) as u64 * self.output_width as u64;
+        if self.weight_length != expected_weight_length {
+            return Err(format!(
+                "NF4Tile640 weight_length mismatch for projection: expected {}, got {}",
+                expected_weight_length, self.weight_length
+            ));
+        }
+
+        let expected_scale_length =
+            layout.metadata_row_values(self.input_width) as u64 * self.output_width as u64 * 4;
+        if self.scale_length != expected_scale_length {
+            return Err(format!(
+                "NF4Tile640 scale_length mismatch for projection: expected {}, got {}",
+                expected_scale_length, self.scale_length
+            ));
+        }
+
+        Ok(layout)
     }
 }
 
@@ -212,6 +256,7 @@ pub enum ProjectionBackend {
 pub enum ProjectionPrecision {
     Fp16,
     Ternary,
+    Nf4Tile640,
     Hybrid,
     Unknown,
 }
@@ -249,6 +294,7 @@ impl Default for MultimodalCapabilities {
 // ──────────────────────────────────────────────
 
 /// A lightweight report summarising multimodal capabilities after loading.
+#[derive(Debug, Clone)]
 pub struct MultimodalArtifactSummary {
     pub modalities: u32,
     pub image_soft_token_default: u32,

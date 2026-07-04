@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::compute_image::manifest::Nf4Tile640Layout;
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 use crate::toolchain_attest::ToolchainAttestation;
@@ -205,6 +206,110 @@ pub fn build_matmul_region(
     )
 }
 
+/// Build and compile a stateless NF4Tile640 region whose inputs mirror the
+/// shared arena ABI: FP32 activations, packed uint8 weights, and FP32
+/// scale/bias sidecars.
+///
+/// The program dequantizes via a byte LUT, expands per-group FP32 metadata,
+/// transposes to `[K, N]`, and emits a standard matmul output.
+pub fn build_nf4_tile640_stateless_region(
+    input_name: &str,
+    input_shape: &[i64], // [1, K_padded]
+    out_dim: i64,        // N
+    output_dir: &Path,
+    region_id: &str,
+) -> Result<CoreAiIslandReceipt, String> {
+    let k_padded = input_shape
+        .get(1)
+        .copied()
+        .ok_or_else(|| "input_shape must be rank-2 [1, K]".to_string())?;
+    if k_padded <= 0 || out_dim <= 0 {
+        return Err("NF4Tile640 stateless region requires positive K and N".into());
+    }
+    let layout = Nf4Tile640Layout::canonical();
+    if k_padded as u32 % layout.tile_elements != 0 {
+        return Err(format!(
+            "NF4Tile640 stateless region requires K padded to {}-element tiles, got {}",
+            layout.tile_elements, k_padded
+        ));
+    }
+    let packed_in = i64::from(layout.packed_row_bytes(k_padded as u32));
+    let groups = i64::from(layout.metadata_row_values(k_padded as u32));
+    if packed_in * 2 != k_padded || groups * i64::from(layout.quant_group_size) != k_padded {
+        return Err(format!(
+            "NF4Tile640 stateless region requires K padded to both 2 and 128 boundaries, got {}",
+            k_padded
+        ));
+    }
+
+    let mut byte_lut = Vec::with_capacity(256 * 2);
+    let codebook: [f32; 16] = [
+        -1.0, -0.8480, -0.5698, -0.3940, -0.2419, -0.1057, 0.0, 0.1057, 0.2419, 0.3940, 0.5698,
+        0.8480, 1.0, 1.2588, 1.5862, 2.0,
+    ];
+    for byte in 0..256u32 {
+        byte_lut.push(codebook[(byte & 0x0F) as usize]);
+        byte_lut.push(codebook[((byte >> 4) & 0x0F) as usize]);
+    }
+
+    let mut group_indices = Vec::with_capacity(k_padded as usize);
+    for group in 0..groups {
+        for _ in 0..128 {
+            group_indices.push(group as i32);
+        }
+    }
+
+    let builder = MilBuilder::new("main")
+        .set_opset("CoreML9")
+        .input(input_name, mil_spec::DataType::Float32, input_shape)
+        .input(
+            "packed_nf4_weights",
+            // Core ML's public MultiArray interface cannot publish Uint8, so the
+            // stateless lane binds the shared raw byte arena as Int8 while keeping
+            // the underlying bits identical for both ANE and Metal consumers.
+            mil_spec::DataType::Int8,
+            &[out_dim, packed_in],
+        )
+        .input("scales", mil_spec::DataType::Float32, &[out_dim, groups])
+        .input("biases", mil_spec::DataType::Float32, &[out_dim, groups])
+        .const_f32("nf4_byte_lut", &byte_lut, &[256, 2])
+        .const_i32("group_indices", &group_indices, &[k_padded])
+        .gather("nf4_byte_lut_0", "packed_nf4_weights", 0)
+        .reshape("decoded_nf4", "gather_2", &[out_dim, k_padded])
+        .gather("scales", "group_indices_1", 1)
+        .gather("biases", "group_indices_1", 1)
+        .mul("decoded_nf4_3", "gather_4")
+        .add("mul_6", "gather_5")
+        .transpose("weights_kn", "add_7", &[1, 0])
+        .matmul(input_name, "weights_kn_8")
+        .output("matmul_9")
+        .build()
+        .map_err(|e| format!("MIL builder error: {e}"))?;
+
+    let meta = ModelMeta {
+        model_name: region_id.to_string(),
+        function_name: "main".into(),
+        inputs: vec![
+            (input_name.to_string(), input_shape.to_vec()),
+            ("packed_nf4_weights".into(), vec![out_dim, packed_in]),
+            ("scales".into(), vec![out_dim, groups]),
+            ("biases".into(), vec![out_dim, groups]),
+        ],
+        outputs: vec![("matmul_9".into(), vec![input_shape[0], out_dim])],
+        output_name: "matmul_9".into(),
+        ..Default::default()
+    };
+
+    build_and_compile_with_opset(
+        builder,
+        &meta,
+        output_dir,
+        region_id,
+        "cpuAndNeuralEngine",
+        "CoreML9",
+    )
+}
+
 /// Build, write, and compile a MIL program from a pre-built [`mil_spec::Program`].
 pub fn build_and_compile(
     program: mil_spec::Program,
@@ -216,6 +321,19 @@ pub fn build_and_compile(
     let tmp = tempfile::tempdir().map_err(|e| format!("tempdir: {}", e))?;
     let pkg_path = mlpackage::write_mlpackage(program, tmp.path(), &meta)?;
     compile_mlpackage(&pkg_path, output_dir, region_id, compute_units, "CoreML9")
+}
+
+pub fn build_and_compile_with_opset(
+    program: mil_spec::Program,
+    meta: &ModelMeta,
+    output_dir: &Path,
+    region_id: &str,
+    compute_units: &str,
+    opset: &str,
+) -> Result<CoreAiIslandReceipt, String> {
+    let tmp = tempfile::tempdir().map_err(|e| format!("tempdir: {}", e))?;
+    let pkg_path = mlpackage::write_mlpackage(program, tmp.path(), &meta)?;
+    compile_mlpackage(&pkg_path, output_dir, region_id, compute_units, opset)
 }
 
 /// Return the expected `.modelc` directory name (relative path) for a given

@@ -5,6 +5,7 @@
 //! Each binding maps a model tensor to an IOSurface arena slot, validated
 //! against a cimage manifest contract.
 
+use crate::backend::shared_event::SharedEventBinding;
 use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use std::ffi::c_void;
 use std::io;
@@ -48,6 +49,8 @@ pub struct CoreAiIOSurfaceExecutable {
     pub input_bindings: Vec<CoreAiIOSurfaceBinding>,
     pub output_bindings: Vec<CoreAiIOSurfaceBinding>,
     pub model_path: String,
+    /// Shared-event waits/signals that guard IOSurface slot handoff.
+    pub shared_event_bindings: Vec<SharedEventBinding>,
     /// Whether the underlying Core ML model is loaded.
     pub loaded: bool,
     /// Loaded Core ML model handle, or None before load_model() is called.
@@ -62,6 +65,7 @@ impl CoreAiIOSurfaceExecutable {
             input_bindings: Vec::new(),
             output_bindings: Vec::new(),
             model_path: model_path.to_string(),
+            shared_event_bindings: Vec::new(),
             loaded: false,
             model: None,
         }
@@ -91,6 +95,11 @@ impl CoreAiIOSurfaceExecutable {
         }
         self.output_bindings.push(binding);
         Ok(())
+    }
+
+    /// Attach one shared-event wait or signal to this executable.
+    pub fn add_shared_event_binding(&mut self, binding: SharedEventBinding) {
+        self.shared_event_bindings.push(binding);
     }
 
     /// Bind from an AppleSharedArena manifest — validates shape/dtype/layout match.
@@ -167,6 +176,30 @@ impl CoreAiIOSurfaceExecutable {
                     a.tensor_id, b.tensor_id
                 ));
             }
+        }
+        Ok(())
+    }
+
+    /// Bind the canonical NF4Tile640 shared-weight triplet.
+    pub fn bind_nf4_tile640_triplet(
+        &mut self,
+        packed_weights_slot: u32,
+        scales_slot: u32,
+        biases_slot: u32,
+        contract_digest: &str,
+    ) -> Result<(), String> {
+        for (slot_id, tensor_id) in [
+            (packed_weights_slot, "packed_nf4_weights"),
+            (scales_slot, "scales"),
+            (biases_slot, "biases"),
+        ] {
+            self.add_input_binding(CoreAiIOSurfaceBinding {
+                tensor_id: tensor_id.into(),
+                slot_id,
+                io_surface_id: 0,
+                byte_offset: 0,
+                contract_digest: contract_digest.into(),
+            })?;
         }
         Ok(())
     }
@@ -436,6 +469,23 @@ mod tests {
         assert!(exec.input_bindings.is_empty());
         assert!(exec.output_bindings.is_empty());
         assert!(!exec.loaded);
+    }
+
+    #[test]
+    fn test_bind_nf4_tile640_triplet() {
+        let mut exec = CoreAiIOSurfaceExecutable::new(
+            "nf4_tile640",
+            "/path.mlmodelc",
+            CoreAiComputePolicy::CpuAndNeuralEngine,
+        );
+
+        exec.bind_nf4_tile640_triplet(7, 8, 9, "nf4tile640-v1")
+            .expect("bind triplet");
+
+        assert_eq!(exec.input_bindings.len(), 3);
+        assert_eq!(exec.input_bindings[0].tensor_id, "packed_nf4_weights");
+        assert_eq!(exec.input_bindings[1].tensor_id, "scales");
+        assert_eq!(exec.input_bindings[2].tensor_id, "biases");
     }
 
     #[test]

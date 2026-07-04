@@ -148,6 +148,133 @@ impl TernaryProjectionDispatcher {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Nf4Tile640ProjectionDispatcher
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Dispatches the shared-layout NF4 Tile640 FP32 GEMV kernel.
+///
+/// Buffer layout matches `compute_image/templates/nf4_tile640_gemv.metal`:
+///   [[buffer(0)]]  packed_weights   — raw Tile640 packed u8 rows
+///   [[buffer(1)]]  scales           — fp32 per-group scales
+///   [[buffer(2)]]  biases           — fp32 per-group biases
+///   [[buffer(3)]]  input            — fp32 activation vector
+///   [[buffer(4)]]  output           — fp32 result vector
+///   [[buffer(5)]]  num_macro_tiles  — constant uint
+#[cfg(feature = "metal-dispatch")]
+pub struct Nf4Tile640ProjectionDispatcher {
+    registry: RegistryRef,
+    kernel_name: &'static str,
+}
+
+#[cfg(feature = "metal-dispatch")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Nf4Tile640Offsets {
+    pub weights_offset: u64,
+    pub scales_offset: u64,
+    pub biases_offset: u64,
+}
+
+#[cfg(feature = "metal-dispatch")]
+impl Nf4Tile640ProjectionDispatcher {
+    pub fn new(registry: RegistryRef) -> Self {
+        Self {
+            registry,
+            kernel_name: "fused_gemv_nf4_tile640_fp32",
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch(
+        &self,
+        command_buffer: &CommandBufferRef,
+        packed_weights_buffer: &Buffer,
+        scales_buffer: &Buffer,
+        biases_buffer: &Buffer,
+        input_buffer: &Buffer,
+        output_buffer: &Buffer,
+        params: &ProjectionParams,
+        receipt: &mut KernelReceipt,
+    ) {
+        self.dispatch_with_offsets(
+            command_buffer,
+            packed_weights_buffer,
+            scales_buffer,
+            biases_buffer,
+            input_buffer,
+            output_buffer,
+            params,
+            Nf4Tile640Offsets::default(),
+            receipt,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_with_offsets(
+        &self,
+        command_buffer: &CommandBufferRef,
+        packed_weights_buffer: &Buffer,
+        scales_buffer: &Buffer,
+        biases_buffer: &Buffer,
+        input_buffer: &Buffer,
+        output_buffer: &Buffer,
+        params: &ProjectionParams,
+        offsets: Nf4Tile640Offsets,
+        receipt: &mut KernelReceipt,
+    ) {
+        let (pso, device) = {
+            let mut reg = self.registry.lock();
+            let fcv = FunctionConstantValues::new();
+            let pso = reg.get_or_create(self.kernel_name, &fcv, 0);
+            (pso, reg.device().clone())
+        };
+
+        let encoder = command_buffer.new_compute_command_encoder();
+        encoder.set_compute_pipeline_state(&pso);
+        encoder.set_buffer(0, Some(packed_weights_buffer), offsets.weights_offset);
+        encoder.set_buffer(1, Some(scales_buffer), offsets.scales_offset);
+        encoder.set_buffer(2, Some(biases_buffer), offsets.biases_offset);
+        encoder.set_buffer(3, Some(input_buffer), 0);
+        encoder.set_buffer(4, Some(output_buffer), 0);
+
+        let num_macro_tiles = params.page_count.max(1);
+        let num_macro_tiles_buf = device.new_buffer_with_data(
+            &num_macro_tiles as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(5, Some(&num_macro_tiles_buf), 0);
+
+        encoder.dispatch_thread_groups(
+            MTLSize {
+                width: params.out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 32,
+                height: 1,
+                depth: 1,
+            },
+        );
+        encoder.end_encoding();
+
+        receipt.kernel_id = 12; // NF4_TILE640_PROJECTION
+        receipt.phase_id = 0;
+        receipt.page_count = num_macro_tiles;
+        receipt.sidecar_hits = 0;
+        receipt.sidecar_entries_read = 0;
+        receipt.threadgroups = params.out_dim;
+        receipt.threads_per_threadgroup = 32;
+        receipt.output_elements = params.out_dim;
+        receipt.flags = 0;
+        receipt.logical_weight_bytes = (params.out_dim as u64) * (num_macro_tiles as u64) * 320;
+        receipt.logical_sidecar_bytes =
+            (params.out_dim as u64) * (num_macro_tiles as u64) * 5 * 2 * 4;
+        receipt.logical_activation_bytes = (params.in_dim as u64) * 4 + (params.out_dim as u64) * 4;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // DenseProjectionDispatcher
 // ═══════════════════════════════════════════════════════════════════════════
 

@@ -193,6 +193,20 @@ fn test_registry_selects_gemma() {
 }
 
 #[test]
+fn test_registry_selects_gemma4_unified() {
+    let registry = AdapterRegistry::new();
+    let config = serde_json::json!({
+        "model_type": "gemma4_unified",
+        "text_config": {
+            "model_type": "gemma4_unified_text"
+        }
+    });
+    let tensor_names = vec!["model.layers.0.self_attn.q_proj.weight".to_string()];
+    let adapter = registry.select(&config, &tensor_names).unwrap();
+    assert_eq!(adapter.family_name(), "gemma");
+}
+
+#[test]
 fn test_registry_selects_phi() {
     let registry = AdapterRegistry::new();
     let config = serde_json::json!({"model_type": "phi3"});
@@ -326,6 +340,121 @@ fn test_gemma_normalize_success() {
     assert!(
         result.is_ok(),
         "gemma normalize succeeded: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_gemma4_unified_normalize_success() {
+    let mut tensors = HashMap::new();
+    fill_standard_tensors(&mut tensors, 64, 256, 2, 32000, 2, 16);
+    add_qk_norms(&mut tensors, 64, 2);
+    let renamed = tensors
+        .into_iter()
+        .map(|(name, value)| {
+            let unified = if name == "lm_head.weight" {
+                "lm_head.weight".to_string()
+            } else if let Some(rest) = name.strip_prefix("model.") {
+                format!("model.language_model.{rest}")
+            } else {
+                name
+            };
+            (unified, value)
+        })
+        .collect::<HashMap<_, _>>();
+    let names = standard_names(&renamed);
+    let source = make_source(
+        "gemma4_unified_text",
+        &serde_json::json!({}),
+        names,
+        renamed,
+    );
+    let adapter = gemma::GemmaAdapter;
+    let result = adapter.normalize(&source);
+    assert!(
+        result.is_ok(),
+        "gemma4 unified normalize succeeded: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_registry_selects_gemma4_unified_assistant() {
+    let mut tensors = HashMap::new();
+    fill_standard_tensors(&mut tensors, 64, 256, 2, 32000, 2, 16);
+    add_qk_norms(&mut tensors, 64, 2);
+    let renamed = tensors
+        .into_iter()
+        .map(|(name, value)| {
+            let unified = if name == "lm_head.weight" {
+                "lm_head.weight".to_string()
+            } else if let Some(rest) = name.strip_prefix("model.") {
+                format!("model.language_model.{rest}")
+            } else {
+                name
+            };
+            (unified, value)
+        })
+        .collect::<HashMap<_, _>>();
+    let tensor_names = standard_names(&renamed);
+    let registry = AdapterRegistry::new();
+    let config = serde_json::json!({
+        "model_type": "gemma4_unified_assistant",
+        "text_config": {
+            "model_type": "gemma4_unified_text"
+        }
+    });
+    let adapter = registry
+        .select(&config, &tensor_names)
+        .expect("assistant variant should select gemma adapter");
+    assert_eq!(adapter.family_name(), "gemma");
+}
+
+#[test]
+fn test_gemma4_unified_assistant_normalize_success() {
+    let mut tensors = HashMap::new();
+    fill_standard_tensors(&mut tensors, 64, 256, 4, 32000, 2, 16);
+    add_qk_norms(&mut tensors, 64, 4);
+    let assistant = tensors
+        .into_iter()
+        .filter_map(|(name, value)| {
+            let unified = if name == "lm_head.weight" {
+                None
+            } else if let Some(rest) = name.strip_prefix("model.") {
+                let mapped = format!("model.{rest}");
+                if mapped.contains(".self_attn.k_proj.")
+                    || mapped.contains(".self_attn.v_proj.")
+                    || mapped.contains(".self_attn.k_norm.")
+                {
+                    None
+                } else {
+                    Some((mapped, value))
+                }
+            } else {
+                Some((name, value))
+            };
+            unified
+        })
+        .collect::<HashMap<_, _>>();
+    let names = standard_names(&assistant);
+    let source = make_source(
+        "gemma4_unified_text",
+        &serde_json::json!({
+            "model_type": "gemma4_unified_assistant",
+            "text_config": {
+                "model_type": "gemma4_unified_text",
+                "attention_k_eq_v": true,
+                "num_hidden_layers": 4
+            }
+        }),
+        names,
+        assistant,
+    );
+    let adapter = gemma::GemmaAdapter;
+    let result = adapter.normalize(&source);
+    assert!(
+        result.is_ok(),
+        "gemma4 unified assistant normalize succeeded: {:?}",
         result.err()
     );
 }

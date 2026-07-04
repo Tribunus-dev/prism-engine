@@ -32,6 +32,73 @@ static Q8_METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> 
         Some((device.clone(), device.new_command_queue(), pipeline))
     });
 
+static NF4_METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> =
+    LazyLock::new(|| {
+        let device = Device::system_default()?;
+        let src = include_str!("../templates/tile640_pack.metal");
+        let lib = device
+            .new_library_with_source(src, &CompileOptions::new())
+            .ok()?;
+        let kernel = lib.get_function("nf4_tile640_pack", None).ok()?;
+        let pipeline = device
+            .new_compute_pipeline_state_with_function(&kernel)
+            .ok()?;
+        Some((device.clone(), device.new_command_queue(), pipeline))
+    });
+
+#[derive(Clone, Copy)]
+pub(crate) struct Nf4Tile640MmapOutput {
+    pub mmap_base: *mut u8,
+    pub weights_offset: u64,
+    pub scales_offset: u64,
+    pub biases_offset: u64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct Nf4Tile640PackLayout {
+    pub num_tiles: usize,
+    pub groups_per_tile: usize,
+    pub total_packed_bytes: usize,
+    pub total_meta_values: usize,
+    pub scales_len: usize,
+    pub biases_len: usize,
+    pub packed_in: usize,
+}
+
+struct Nf4Tile640PackArtifacts {
+    packed_weight: Vec<u8>,
+    scales_bytes: Vec<u8>,
+    biases_bytes: Vec<u8>,
+    total_packed_bytes: usize,
+    scales_len: usize,
+    biases_len: usize,
+    packed_in: usize,
+    packed_shape: crate::config::PackedLinearShapes,
+}
+
+pub(crate) fn nf4_tile640_pack_layout(out_dim: u32, in_dim: u32) -> Nf4Tile640PackLayout {
+    let out_dim_u = out_dim as usize;
+    let in_dim_u = in_dim as usize;
+    let num_tiles = in_dim_u.div_ceil(640);
+    let packed_bytes_per_tile = 320usize;
+    let groups_per_tile = 5usize;
+    let total_packed_bytes = out_dim_u * num_tiles * packed_bytes_per_tile;
+    let total_meta_values = out_dim_u * num_tiles * groups_per_tile;
+    let scales_len = total_meta_values * std::mem::size_of::<f32>();
+    let biases_len = total_meta_values * std::mem::size_of::<f32>();
+    let packed_in = num_tiles * packed_bytes_per_tile;
+
+    Nf4Tile640PackLayout {
+        num_tiles,
+        groups_per_tile,
+        total_packed_bytes,
+        total_meta_values,
+        scales_len,
+        biases_len,
+        packed_in,
+    }
+}
+
 /// GPU-accelerated TernaryTile640 pack with optional direct-to-mmap output.
 ///
 /// When `mmap_output` is `Some((ptr, offset))`, the GPU writes packed u32
@@ -78,9 +145,7 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
             );
             buf
         }
-        None => {
-            device.new_buffer(total_u32_bytes, MTLResourceOptions::StorageModeShared)
-        }
+        None => device.new_buffer(total_u32_bytes, MTLResourceOptions::StorageModeShared),
     };
 
     let egest_scales = device.new_buffer(
@@ -94,8 +159,16 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
         let src = row * in_dim_u * 2;
         let dst = row * padded_in * 2;
         unsafe {
-            std::ptr::copy_nonoverlapping(raw_bytes.as_ptr().add(src), ingest_ptr.add(dst), in_dim_u * 2);
-            std::ptr::write_bytes(ingest_ptr.add(dst + in_dim_u * 2), 0u8, (padded_in - in_dim_u) * 2);
+            std::ptr::copy_nonoverlapping(
+                raw_bytes.as_ptr().add(src),
+                ingest_ptr.add(dst),
+                in_dim_u * 2,
+            );
+            std::ptr::write_bytes(
+                ingest_ptr.add(dst + in_dim_u * 2),
+                0u8,
+                (padded_in - in_dim_u) * 2,
+            );
         }
     }
 
@@ -146,6 +219,7 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
         .iter()
         .flat_map(|&s| s.to_le_bytes().to_vec())
         .collect();
+    let scales_len = scales_bytes.len() as u64;
 
     let stem = weight_name.strip_suffix(".weight").unwrap_or(weight_name);
     let scales_name = format!("{}.scales", stem);
@@ -167,6 +241,7 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
         match mmap_output {
             Some(_) => {
                 st.data = Vec::new(); // data is already in the mmap
+                st.source_byte_size = total_u32_bytes;
             }
             None => {
                 let packed_slice = unsafe {
@@ -175,7 +250,11 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
                         total_u32_count as usize,
                     )
                 };
-                st.data = packed_slice.iter().flat_map(|&w| w.to_le_bytes().to_vec()).collect();
+                st.data = packed_slice
+                    .iter()
+                    .flat_map(|&w| w.to_le_bytes().to_vec())
+                    .collect();
+                st.source_byte_size = total_u32_bytes;
             }
         }
         st.dtype = "U32".to_string();
@@ -188,10 +267,11 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
             dtype: "F32".into(),
             shape: vec![out_dim, num_tiles as u32],
             data: scales_bytes,
+            mmap_index: None,
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
-            source_byte_size: 0,
+            source_byte_size: scales_len,
         },
     );
     for binding in &mut loaded.spec.global_tensors {
@@ -214,7 +294,11 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
         in_dim,
         num_tiles,
         total_u32_count,
-        if mmap_output.is_some() { "→ direct mmap" } else { "" },
+        if mmap_output.is_some() {
+            "→ direct mmap"
+        } else {
+            ""
+        },
     );
     Ok(true)
 }
@@ -230,11 +314,11 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
 /// Returns `(packed_u32_bytes, scales_f32_bytes, num_tiles)`.
 /// On failure or missing Metal, returns `None`.
 pub(crate) fn try_q8_0_ternary_pack_gpu(
-q8_bytes: &[u8],
-in_dim: u32,
-out_dim: u32,
+    q8_bytes: &[u8],
+    in_dim: u32,
+    out_dim: u32,
 ) -> Option<(Vec<u8>, Vec<u8>, u32)> {
-match &Q8_METAL.as_ref() {
+    match &Q8_METAL.as_ref() {
         Some((device, queue, pipeline)) => {
             let k = in_dim as usize;
             let n = out_dim as usize;
@@ -250,17 +334,24 @@ match &Q8_METAL.as_ref() {
                 let o = b * 34;
                 let b0 = u16::from_le_bytes([q8_bytes[o], q8_bytes[o + 1]]);
                 let s = half::f16::from_bits(b0).to_f32();
-                if s.is_finite() { fin.push(s.abs()); }
-}
+                if s.is_finite() {
+                    fin.push(s.abs());
+                }
+            }
             fin.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let clamp = fin.get((fin.len() as f64 * 0.99) as usize)
-                .copied().unwrap_or(65504.0);
+            let clamp = fin
+                .get((fin.len() as f64 * 0.99) as usize)
+                .copied()
+                .unwrap_or(65504.0);
             let clamped_bits = half::f16::from_f32(clamp).to_bits().to_le_bytes();
-            let clamped_count = total_blocks - fin.len()
-                + fin.iter().filter(|&&s| s > clamp).count();
+            let clamped_count =
+                total_blocks - fin.len() + fin.iter().filter(|&&s| s > clamp).count();
             if clamped_count > 0 {
-                eprintln!("  [gpu] clamped {} inf/overflow scales to {:.0}", clamped_count, clamp);
-}
+                eprintln!(
+                    "  [gpu] clamped {} inf/overflow scales to {:.0}",
+                    clamped_count, clamp
+                );
+            }
 
             // ── CPU: transpose Q8_0 block indices [K,N] → [N,K] ─────
             // Blocks with inf/NaN scales get clamped to p99 threshold.
@@ -281,13 +372,12 @@ match &Q8_METAL.as_ref() {
                         transposed[dst_off + 2..dst_off + 34]
                             .copy_from_slice(&q8_bytes[src_off + 2..src_off + 34]);
                     } else {
-                    transposed[dst_off..dst_off + 34]
-                        .copy_from_slice(&q8_bytes[src_off..src_off + 34]);
+                        transposed[dst_off..dst_off + 34]
+                            .copy_from_slice(&q8_bytes[src_off..src_off + 34]);
                     }
                 }
             }
 
-            // ── Upload transposed Q8_0 blocks to GPU ────────────────
             // ── Upload transposed Q8_0 blocks to GPU ────────────────
             let ingest = device.new_buffer_with_data(
                 transposed.as_ptr() as *const std::ffi::c_void,
@@ -319,14 +409,18 @@ match &Q8_METAL.as_ref() {
                     MTLResourceOptions::StorageModeShared,
                 );
                 enc.set_buffer(3 + i as u64, Some(&buf), 0);
-}
+            }
             enc.dispatch_threads(
                 MTLSize {
                     width: (n as u64) * (num_tiles as u64),
                     height: 1,
                     depth: 1,
                 },
-                MTLSize { width: 32, height: 1, depth: 1 },
+                MTLSize {
+                    width: 32,
+                    height: 1,
+                    depth: 1,
+                },
             );
             enc.end_encoding();
             cmd_buf.commit();
@@ -334,10 +428,7 @@ match &Q8_METAL.as_ref() {
 
             // ── Read back results ───────────────────────────────────
             let packed_slice = unsafe {
-                std::slice::from_raw_parts(
-                    egest_packed.contents() as *const u32,
-                    total_u32,
-                )
+                std::slice::from_raw_parts(egest_packed.contents() as *const u32, total_u32)
             };
             let packed_u32: Vec<u8> = packed_slice
                 .iter()
@@ -360,7 +451,251 @@ match &Q8_METAL.as_ref() {
                 k, n, num_tiles, total_u32,
             );
             Some((packed_u32, scales_f32, num_tiles as u32))
-}
+        }
         None => None,
+    }
 }
+
+/// GPU-accelerated BF16/F16 → NF4Tile640 pack.
+///
+/// The Metal kernel consumes the raw 16-bit source words, computes one
+/// absmax scale per 128-element group, emits nibble-packed U8 Tile640
+/// payloads, and writes FP32 scale/bias sidecars.
+pub(crate) fn try_nf4_tile640_pack_gpu(
+    loaded: &mut LoadedSource,
+    weight_name: &str,
+    raw_bytes: &[u8],
+    dtype: &str,
+    out_dim: u32,
+    in_dim: u32,
+) -> crate::Result<bool> {
+    try_nf4_tile640_pack_gpu_to_output(loaded, weight_name, raw_bytes, dtype, out_dim, in_dim, None)
+}
+
+#[cfg(test)]
+pub(crate) fn try_nf4_tile640_pack_gpu_bytes(
+    raw_bytes: &[u8],
+    dtype: &str,
+    out_dim: u32,
+    in_dim: u32,
+) -> Option<(
+    Vec<u8>,
+    Vec<u8>,
+    Vec<u8>,
+    usize,
+    crate::config::PackedLinearShapes,
+)> {
+    let artifacts = dispatch_nf4_tile640_pack(raw_bytes, dtype, out_dim, in_dim, None)?;
+    Some((
+        artifacts.packed_weight,
+        artifacts.scales_bytes,
+        artifacts.biases_bytes,
+        artifacts.packed_in,
+        artifacts.packed_shape,
+    ))
+}
+
+pub(crate) fn try_nf4_tile640_pack_gpu_to_output(
+    loaded: &mut LoadedSource,
+    weight_name: &str,
+    raw_bytes: &[u8],
+    dtype: &str,
+    out_dim: u32,
+    in_dim: u32,
+    mmap_output: Option<Nf4Tile640MmapOutput>,
+) -> crate::Result<bool> {
+    let Some(artifacts) = dispatch_nf4_tile640_pack(raw_bytes, dtype, out_dim, in_dim, mmap_output)
+    else {
+        return Ok(false);
+    };
+
+    install_quantized_triplet(
+        loaded,
+        weight_name,
+        artifacts.packed_weight,
+        "U8",
+        vec![out_dim, artifacts.packed_in as u32],
+        artifacts.total_packed_bytes,
+        artifacts.scales_bytes,
+        artifacts.scales_len,
+        artifacts.biases_bytes,
+        artifacts.biases_len,
+        vec![out_dim, artifacts.packed_shape.groups / out_dim],
+        artifacts.packed_shape,
+    );
+
+    eprintln!(
+        "[quantize:gpu] nf4 tile640 packed {}: {}×{} -> {} tiles, {} bytes {}",
+        weight_name,
+        out_dim,
+        in_dim,
+        in_dim.div_ceil(640),
+        artifacts.total_packed_bytes,
+        if mmap_output.is_some() {
+            "→ direct mmap"
+        } else {
+            ""
+        },
+    );
+
+    Ok(true)
+}
+
+fn dispatch_nf4_tile640_pack(
+    raw_bytes: &[u8],
+    dtype: &str,
+    out_dim: u32,
+    in_dim: u32,
+    mmap_output: Option<Nf4Tile640MmapOutput>,
+) -> Option<Nf4Tile640PackArtifacts> {
+    let (device, queue, pipeline) = NF4_METAL.as_ref()?;
+    if dtype != "F16" && dtype != "BF16" {
+        return None;
+    }
+
+    let out_dim_u = out_dim as usize;
+    let layout = nf4_tile640_pack_layout(out_dim, in_dim);
+
+    let ingest = device.new_buffer_with_data(
+        raw_bytes.as_ptr() as *const std::ffi::c_void,
+        raw_bytes.len() as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+    let (egest_packed, egest_scales, egest_biases) = match mmap_output {
+        Some(targets) => {
+            let packed_ptr = unsafe { targets.mmap_base.add(targets.weights_offset as usize) };
+            let scales_ptr = unsafe { targets.mmap_base.add(targets.scales_offset as usize) };
+            let biases_ptr = unsafe { targets.mmap_base.add(targets.biases_offset as usize) };
+            (
+                device.new_buffer_with_bytes_no_copy(
+                    packed_ptr as *mut std::ffi::c_void,
+                    layout.total_packed_bytes as u64,
+                    MTLResourceOptions::StorageModeShared,
+                    None,
+                ),
+                device.new_buffer_with_bytes_no_copy(
+                    scales_ptr as *mut std::ffi::c_void,
+                    layout.scales_len as u64,
+                    MTLResourceOptions::StorageModeShared,
+                    None,
+                ),
+                device.new_buffer_with_bytes_no_copy(
+                    biases_ptr as *mut std::ffi::c_void,
+                    layout.biases_len as u64,
+                    MTLResourceOptions::StorageModeShared,
+                    None,
+                ),
+            )
+        }
+        None => (
+            device.new_buffer(
+                layout.total_packed_bytes as u64,
+                MTLResourceOptions::StorageModeShared,
+            ),
+            device.new_buffer(
+                layout.scales_len as u64,
+                MTLResourceOptions::StorageModeShared,
+            ),
+            device.new_buffer(
+                layout.biases_len as u64,
+                MTLResourceOptions::StorageModeShared,
+            ),
+        ),
+    };
+
+    let cmd_buf = queue.new_command_buffer();
+    let enc = cmd_buf.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(pipeline);
+    enc.set_buffer(0, Some(&ingest), 0);
+    enc.set_buffer(1, Some(&egest_packed), 0);
+    enc.set_buffer(2, Some(&egest_scales), 0);
+    enc.set_buffer(3, Some(&egest_biases), 0);
+    for (i, &val) in [
+        in_dim,
+        out_dim,
+        layout.num_tiles as u32,
+        if dtype == "BF16" { 1u32 } else { 0u32 },
+    ]
+    .iter()
+    .enumerate()
+    {
+        let buf = device.new_buffer_with_data(
+            &val as *const u32 as *const std::ffi::c_void,
+            4,
+            MTLResourceOptions::StorageModeShared,
+        );
+        enc.set_buffer(4 + i as u64, Some(&buf), 0);
+    }
+    enc.dispatch_thread_groups(
+        MTLSize {
+            width: (out_dim_u as u64) * (layout.num_tiles as u64),
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 32,
+            height: 1,
+            depth: 1,
+        },
+    );
+    enc.end_encoding();
+    cmd_buf.commit();
+    cmd_buf.wait_until_completed();
+
+    let packed_weight = match mmap_output {
+        Some(_) => Vec::new(),
+        None => unsafe {
+            std::slice::from_raw_parts(
+                egest_packed.contents() as *const u8,
+                layout.total_packed_bytes,
+            )
+        }
+        .to_vec(),
+    };
+    let scales_slice = unsafe {
+        std::slice::from_raw_parts(
+            egest_scales.contents() as *const f32,
+            layout.total_meta_values,
+        )
+    };
+    let scales_bytes = match mmap_output {
+        Some(_) => Vec::new(),
+        None => scales_slice
+            .iter()
+            .flat_map(|&s| s.to_le_bytes().to_vec())
+            .collect(),
+    };
+    let biases_slice = unsafe {
+        std::slice::from_raw_parts(
+            egest_biases.contents() as *const f32,
+            layout.total_meta_values,
+        )
+    };
+    let biases_bytes = match mmap_output {
+        Some(_) => Vec::new(),
+        None => biases_slice
+            .iter()
+            .flat_map(|&b| b.to_le_bytes().to_vec())
+            .collect(),
+    };
+
+    let packed_shape = crate::config::PackedLinearShapes {
+        weight: vec![out_dim, layout.packed_in as u32],
+        scales: vec![out_dim, (layout.num_tiles * layout.groups_per_tile) as u32],
+        biases: vec![out_dim, (layout.num_tiles * layout.groups_per_tile) as u32],
+        bits: 4,
+        group_size: 128,
+        groups: (out_dim_u * layout.num_tiles * layout.groups_per_tile) as u32,
+    };
+
+    Some(Nf4Tile640PackArtifacts {
+        packed_weight,
+        scales_bytes,
+        biases_bytes,
+        total_packed_bytes: layout.total_packed_bytes,
+        scales_len: layout.scales_len,
+        biases_len: layout.biases_len,
+        packed_in: layout.packed_in,
+        packed_shape,
+    })
 }

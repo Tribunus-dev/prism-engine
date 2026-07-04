@@ -72,6 +72,7 @@ pub mod placement;
 /// Tensor residency tracking — auditable contract for where a tensor lives.
 pub mod residency;
 pub mod routing;
+pub mod shared_event;
 pub mod tensor_registry;
 /// Unified execution arena — single mmap-backed memory region for all lanes.
 #[cfg(any(

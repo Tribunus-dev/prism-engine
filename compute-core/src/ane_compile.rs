@@ -90,6 +90,7 @@ pub fn compile_ane_artifacts(model_dir: &Path) -> Result<Vec<String>, String> {
                     dtype: format!("{:?}", info.dtype),
                     shape: info.shape.iter().map(|&d| d as u32).collect(),
                     data: view.data().to_vec(),
+                    mmap_index: None,
                     source_filename: shard_path
                         .file_name()
                         .unwrap()

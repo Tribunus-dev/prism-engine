@@ -407,6 +407,35 @@ impl MilBuilder {
         self
     }
 
+    /// Register a constant tensor with Int32 data type.
+    pub fn const_i32(mut self, name_hint: &str, values: &[i32], shape: &[i64]) -> Self {
+        let name = self.fresh_name(name_hint);
+        let tensor_type = tensor_type(mil_spec::DataType::Int32, shape);
+        let vt = value_type_tensor(tensor_type);
+
+        let tv = mil_spec::TensorValue {
+            value: Some(tensor_value::Value::Ints(tensor_value::RepeatedInts {
+                values: values.to_vec(),
+            })),
+        };
+        let v = mil_spec::Value {
+            doc_string: String::new(),
+            r#type: Some(vt.clone()),
+            value: Some(value::Value::ImmediateValue(value::ImmediateValue {
+                value: Some(value::immediate_value::Value::Tensor(tv)),
+            })),
+        };
+
+        let mut attrs = HashMap::new();
+        attrs.insert("name".to_string(), string_attr(&name));
+        attrs.insert("val".to_string(), v);
+
+        let op = make_operation("const", &name, HashMap::new(), &[(&name, &vt)], attrs);
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
     /// Bind palettized weight indices + codebook via `constexpr_lut_to_dense`.
     ///
     /// Core ML 9+ intercepts this operation and routes the palettized
@@ -941,42 +970,116 @@ impl MilBuilder {
             .require_dtype(params)
             .expect("SSA: unknown params type");
 
-        // Gather output has same rank and dtype as params, but the axis
-        // dimension becomes the indices dimension.
-        let indices_rank = self
-            .value_types
-            .get(indices)
-            .and_then(|vt| match &vt.r#type {
-                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(tt.rank),
-                _ => None,
-            })
-            .unwrap_or(1);
-        let out_rank = self
+        // Gather output has the params prefix dims, then the indices dims,
+        // then the params suffix dims after the gathered axis.
+        let params_dims: Vec<i64> = self
             .value_types
             .get(params)
             .and_then(|vt| match &vt.r#type {
-                Some(mil_spec::value_type::Type::TensorType(tt)) => {
-                    Some(tt.rank + indices_rank - 1)
-                }
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(
+                    tt.dimensions
+                        .iter()
+                        .filter_map(|d| match d.dimension.as_ref()? {
+                            dimension::Dimension::Constant(c) => Some(c.size as i64),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
                 _ => None,
             })
-            .unwrap_or(4);
+            .unwrap_or_default();
+        let indices_dims: Vec<i64> = self
+            .value_types
+            .get(indices)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(
+                    tt.dimensions
+                        .iter()
+                        .filter_map(|d| match d.dimension.as_ref()? {
+                            dimension::Dimension::Constant(c) => Some(c.size as i64),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
 
-        let vt = value_type_tensor(mil_spec::TensorType {
-            data_type: dtype as i32,
-            rank: out_rank,
-            dimensions: vec![],
-            attributes: HashMap::new(),
-        });
+        let axis_index = if axis < 0 {
+            (params_dims.len() as i64 + axis).max(0) as usize
+        } else {
+            axis as usize
+        };
+        let mut out_dims = Vec::new();
+        if axis_index <= params_dims.len() {
+            out_dims.extend_from_slice(&params_dims[..axis_index.min(params_dims.len())]);
+            out_dims.extend_from_slice(&indices_dims);
+            if axis_index < params_dims.len() {
+                out_dims.extend_from_slice(&params_dims[axis_index + 1..]);
+            }
+        }
+        let vt = value_type_tensor(tensor_type(dtype, &out_dims));
 
         let mut inputs = HashMap::new();
-        inputs.insert("params".to_string(), named_arg(params));
+        inputs.insert("x".to_string(), named_arg(params));
         inputs.insert("indices".to_string(), named_arg(indices));
+        inputs.insert("axis".to_string(), int32_arg(axis as i32));
+        inputs.insert("validate_indices".to_string(), bool_arg(false));
 
-        let mut attrs = HashMap::new();
-        attrs.insert("axis".to_string(), int_attr(axis));
+        let op = make_operation("gather", &name, inputs, &[(&name, &vt)], HashMap::new());
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
 
-        let op = make_operation("gather", &name, inputs, &[(&name, &vt)], attrs);
+    /// Reshape a tensor to a new static shape.
+    pub fn reshape(mut self, name_hint: &str, input: &str, shape: &[i64]) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(input).expect("SSA: unknown type");
+        let vt = value_type_tensor(tensor_type(dtype, shape));
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x".to_string(), named_arg(input));
+        inputs.insert("shape".to_string(), ints32_arg(shape));
+
+        let op = make_operation("reshape", &name, inputs, &[(&name, &vt)], HashMap::new());
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Permute tensor dimensions using a static axis order.
+    pub fn transpose(mut self, name_hint: &str, input: &str, perm: &[i64]) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(input).expect("SSA: unknown type");
+        let input_dims = self
+            .value_types
+            .get(input)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(
+                    tt.dimensions
+                        .iter()
+                        .filter_map(|d| match d.dimension.as_ref()? {
+                            dimension::Dimension::Constant(c) => Some(c.size as i64),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut output_shape = Vec::with_capacity(perm.len());
+        for &axis in perm {
+            let axis_usize = axis as usize;
+            output_shape.push(*input_dims.get(axis_usize).unwrap_or(&1));
+        }
+        let vt = value_type_tensor(tensor_type(dtype, &output_shape));
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x".to_string(), named_arg(input));
+        inputs.insert("perm".to_string(), ints32_arg(perm));
+
+        let op = make_operation("transpose", &name, inputs, &[(&name, &vt)], HashMap::new());
         self.value_types.insert(name.clone(), vt);
         self.ops.push(op);
         self
@@ -1629,6 +1732,22 @@ fn bool_arg(val: bool) -> mil_spec::Argument {
     }
 }
 
+fn int32_arg(val: i32) -> mil_spec::Argument {
+    mil_spec::Argument {
+        arguments: vec![argument::Binding {
+            binding: Some(argument::binding::Binding::Value(int32_attr(val))),
+        }],
+    }
+}
+
+fn ints32_arg(vals: &[i64]) -> mil_spec::Argument {
+    mil_spec::Argument {
+        arguments: vec![argument::Binding {
+            binding: Some(argument::binding::Binding::Value(ints32_attr(vals))),
+        }],
+    }
+}
+
 fn bool_attr(val: bool) -> mil_spec::Value {
     let bool_tensor = mil_spec::TensorValue {
         value: Some(tensor_value::Value::Bools(tensor_value::RepeatedBools {
@@ -1677,6 +1796,30 @@ fn int_attr(val: i64) -> mil_spec::Value {
     }
 }
 
+fn int32_attr(val: i32) -> mil_spec::Value {
+    let int_tensor = mil_spec::TensorValue {
+        value: Some(tensor_value::Value::Ints(tensor_value::RepeatedInts {
+            values: vec![val],
+        })),
+    };
+    mil_spec::Value {
+        doc_string: String::new(),
+        r#type: Some(mil_spec::ValueType {
+            r#type: Some(mil_spec::value_type::Type::TensorType(
+                mil_spec::TensorType {
+                    data_type: mil_spec::DataType::Int32 as i32,
+                    rank: 0,
+                    dimensions: vec![],
+                    attributes: HashMap::new(),
+                },
+            )),
+        }),
+        value: Some(value::Value::ImmediateValue(value::ImmediateValue {
+            value: Some(value::immediate_value::Value::Tensor(int_tensor)),
+        })),
+    }
+}
+
 fn ints_attr(vals: &[i64]) -> mil_spec::Value {
     let int_tensor = mil_spec::TensorValue {
         value: Some(tensor_value::Value::LongInts(
@@ -1691,6 +1834,36 @@ fn ints_attr(vals: &[i64]) -> mil_spec::Value {
             r#type: Some(mil_spec::value_type::Type::TensorType(
                 mil_spec::TensorType {
                     data_type: mil_spec::DataType::Int64 as i32,
+                    rank: 1,
+                    dimensions: vec![mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Constant(
+                            dimension::ConstantDimension {
+                                size: vals.len() as u64,
+                            },
+                        )),
+                    }],
+                    attributes: HashMap::new(),
+                },
+            )),
+        }),
+        value: Some(value::Value::ImmediateValue(value::ImmediateValue {
+            value: Some(value::immediate_value::Value::Tensor(int_tensor)),
+        })),
+    }
+}
+
+fn ints32_attr(vals: &[i64]) -> mil_spec::Value {
+    let int_tensor = mil_spec::TensorValue {
+        value: Some(tensor_value::Value::Ints(tensor_value::RepeatedInts {
+            values: vals.iter().map(|&v| v as i32).collect(),
+        })),
+    };
+    mil_spec::Value {
+        doc_string: String::new(),
+        r#type: Some(mil_spec::ValueType {
+            r#type: Some(mil_spec::value_type::Type::TensorType(
+                mil_spec::TensorType {
+                    data_type: mil_spec::DataType::Int32 as i32,
                     rank: 1,
                     dimensions: vec![mil_spec::Dimension {
                         dimension: Some(dimension::Dimension::Constant(

@@ -118,6 +118,10 @@ required-features = ["prism-backend"]
 [[bin]]
 name = "q8-scale-dump"
 path = "src/bin/q8_scale_dump.rs"
+
+[[bin]]
+name = "tribunus-pack-nf4tile640"
+path = "src/bin/tribunus_pack_nf4tile640.rs"
 required-features = ["prism-backend"]
 
 [[bin]]
@@ -133,4 +137,9 @@ required-features = ["prism-backend"]
 [[bin]]
 name = "qwen25-omni-ingest"
 path = "src/bin/qwen25_omni_ingest.rs"
+required-features = ["prism-backend"]
+
+[[bin]]
+name = "tribunus-compute-image"
+path = "src/bin/tribunus-compute-image.rs"
 required-features = ["prism-backend"]

@@ -3,14 +3,421 @@
 use super::archive::archive_mlmodelc_to_mmap;
 use super::builder::AlignedMmapBuilder;
 use super::layout::{predict_tar_size, CImageLayoutPlan, CImageTopologyTable};
+use crate::compute_image::compile::execution_graph::{
+    AttentionKind as GraphAttentionKind, CompactionEpoch, DeviceCapability, DraftSubGraph,
+    ExecutionGraphDescriptor, LayerExecutionNode, NodeKind,
+};
+use crate::compute_image::compile::source::source_tensor_byte_len;
 use crate::compute_image::compile::source::LoadedSource;
-use crate::compute_image::compile::ternary::LayerDirectoryEntry;
-use crate::compute_image::compile::ternary::{CimageHeader, SegmentEntry, SegmentKind};
+use crate::compute_image::compile::ternary::model_artifact_tag;
+use crate::compute_image::compile::ternary::{
+    CimageHeader, LayerDirectoryEntry, ModelArtifactEntry, SegmentEntry, SegmentKind,
+    CIMAGE_SEGMENT_CAPACITY,
+};
+use crate::compute_image::compile::ternary::{
+    QUANT_SCHEMA_NF4_TILE640, QUANT_SCHEMA_TERNARY_TILE640,
+};
+use crate::compute_image::manifest::Manifest;
+use crate::compute_image::multimodal::descriptor::{
+    MultimodalInputDescriptorV1, ProjectionRole, ProjectionTensorRecord,
+    MULTIMODAL_DESCRIPTOR_MAGIC,
+};
 use crate::config::CompileQuantMode;
 use memmap2::MmapMut;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, Write};
 use std::path::Path;
+
+fn is_draft_tensor_name(name: &str) -> bool {
+    name.contains("draft") || name.contains("mtp")
+}
+
+fn ordered_weight_binding_names(loaded: &LoadedSource, include_draft: bool) -> Vec<String> {
+    let mut names = Vec::new();
+    for binding in &loaded.spec.global_tensors {
+        if binding.name.ends_with(".weight") && is_draft_tensor_name(&binding.name) == include_draft
+        {
+            names.push(binding.name.clone());
+        }
+    }
+    for layer in &loaded.spec.layers {
+        for binding in &layer.tensors {
+            if binding.name.ends_with(".weight")
+                && is_draft_tensor_name(&binding.name) == include_draft
+            {
+                names.push(binding.name.clone());
+            }
+        }
+    }
+    names
+}
+
+fn quantized_triplet_lengths(loaded: &LoadedSource, include_draft: bool) -> (u64, u64, u64) {
+    let mut weight_len = 0u64;
+    let mut scale_len = 0u64;
+    let mut bias_len = 0u64;
+    for name in ordered_weight_binding_names(loaded, include_draft) {
+        let stem = name.strip_suffix(".weight").unwrap_or(&name);
+        if let Some(t) = loaded.source_tensors.get(&name) {
+            weight_len += source_tensor_byte_len(t) as u64;
+        }
+        if let Some(t) = loaded.source_tensors.get(&format!("{}.scales", stem)) {
+            scale_len += source_tensor_byte_len(t) as u64;
+        }
+        if let Some(t) = loaded.source_tensors.get(&format!("{}.biases", stem)) {
+            bias_len += source_tensor_byte_len(t) as u64;
+        }
+    }
+    (weight_len, scale_len, bias_len)
+}
+
+fn copy_quantized_triplets_into_slices(
+    loaded: &LoadedSource,
+    include_draft: bool,
+    weights_dst: &mut [u8],
+    scales_dst: &mut [u8],
+    biases_dst: &mut [u8],
+) {
+    let mut weights_off = 0usize;
+    let mut scales_off = 0usize;
+    let mut biases_off = 0usize;
+    for name in ordered_weight_binding_names(loaded, include_draft) {
+        let stem = name.strip_suffix(".weight").unwrap_or(&name);
+        if let Some(t) = loaded.source_tensors.get(&name) {
+            let end = weights_off + t.data.len();
+            weights_dst[weights_off..end].copy_from_slice(&t.data);
+            weights_off = end;
+        }
+        if let Some(t) = loaded.source_tensors.get(&format!("{}.scales", stem)) {
+            let end = scales_off + t.data.len();
+            scales_dst[scales_off..end].copy_from_slice(&t.data);
+            scales_off = end;
+        }
+        if let Some(t) = loaded.source_tensors.get(&format!("{}.biases", stem)) {
+            let end = biases_off + t.data.len();
+            biases_dst[biases_off..end].copy_from_slice(&t.data);
+            biases_off = end;
+        }
+    }
+}
+
+fn collect_quantized_triplet_bytes(
+    loaded: &LoadedSource,
+    include_draft: bool,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let (weight_len, scale_len, bias_len) = quantized_triplet_lengths(loaded, include_draft);
+    let mut weights = vec![0u8; weight_len as usize];
+    let mut scales = vec![0u8; scale_len as usize];
+    let mut biases = vec![0u8; bias_len as usize];
+    copy_quantized_triplets_into_slices(
+        loaded,
+        include_draft,
+        &mut weights,
+        &mut scales,
+        &mut biases,
+    );
+    (weights, scales, biases)
+}
+
+fn layer_directory_entries_for_loaded(
+    loaded: &LoadedSource,
+    include_draft: bool,
+) -> Vec<LayerDirectoryEntry> {
+    let mut entries = Vec::new();
+    let mut weights_offset = 0u64;
+    let mut scales_offset = 0u64;
+
+    for layer in &loaded.spec.layers {
+        let layer_is_draft = layer
+            .tensors
+            .iter()
+            .any(|binding| is_draft_tensor_name(&binding.name));
+        if layer_is_draft != include_draft {
+            continue;
+        }
+
+        let mut weights_length = 0u64;
+        let mut scales_length = 0u64;
+        for binding in &layer.tensors {
+            if !binding.name.ends_with(".weight") {
+                continue;
+            }
+            if is_draft_tensor_name(&binding.name) != include_draft {
+                continue;
+            }
+            let stem = binding
+                .name
+                .strip_suffix(".weight")
+                .unwrap_or(&binding.name);
+            weights_length += loaded
+                .source_tensors
+                .get(&binding.name)
+                .map(|tensor| source_tensor_byte_len(tensor) as u64)
+                .unwrap_or(0);
+            scales_length += loaded
+                .source_tensors
+                .get(&format!("{}.scales", stem))
+                .map(|tensor| source_tensor_byte_len(tensor) as u64)
+                .unwrap_or(0);
+        }
+
+        entries.push(LayerDirectoryEntry {
+            weights_offset,
+            weights_length,
+            scales_offset,
+            scales_length,
+            layer_kind: 0,
+            flags: 0,
+        });
+
+        weights_offset += weights_length;
+        scales_offset += scales_length;
+    }
+
+    entries
+}
+
+fn vocabulary_triplet_lengths(loaded: &LoadedSource, embed_key: &str) -> u64 {
+    if embed_key.is_empty() {
+        return 0;
+    }
+    let stem = embed_key.strip_suffix(".weight").unwrap_or(embed_key);
+    let weight = loaded
+        .source_tensors
+        .get(embed_key)
+        .map(|t| source_tensor_byte_len(t) as u64)
+        .unwrap_or(0);
+    let scales = loaded
+        .source_tensors
+        .get(&format!("{}.scales", stem))
+        .map(|t| source_tensor_byte_len(t) as u64)
+        .unwrap_or(0);
+    let biases = loaded
+        .source_tensors
+        .get(&format!("{}.biases", stem))
+        .map(|t| source_tensor_byte_len(t) as u64)
+        .unwrap_or(0);
+    weight + scales + biases
+}
+
+fn draft_projection_triplet_lengths(loaded: &LoadedSource) -> (u64, u64, u64, u64, u64, u64) {
+    fn tensor_len(loaded: &LoadedSource, name: &str) -> u64 {
+        loaded
+            .source_tensors
+            .get(name)
+            .map(|tensor| source_tensor_byte_len(tensor) as u64)
+            .unwrap_or(0)
+    }
+
+    let pre_names = ["pre_projection.weight", "model.mtp_projection.weight"];
+    let post_names = ["post_projection.weight", "model.mtp_post_projection.weight"];
+
+    let pre = pre_names
+        .iter()
+        .find(|name| loaded.source_tensors.contains_key(**name))
+        .copied();
+    let post = post_names
+        .iter()
+        .find(|name| loaded.source_tensors.contains_key(**name))
+        .copied();
+
+    let pre_weight = pre.map(|name| tensor_len(loaded, name)).unwrap_or(0);
+    let pre_scales = pre
+        .map(|name| {
+            tensor_len(
+                loaded,
+                &format!("{}.scales", name.strip_suffix(".weight").unwrap_or(name)),
+            )
+        })
+        .unwrap_or(0);
+    let pre_biases = pre
+        .map(|name| {
+            tensor_len(
+                loaded,
+                &format!("{}.biases", name.strip_suffix(".weight").unwrap_or(name)),
+            )
+        })
+        .unwrap_or(0);
+
+    let post_weight = post.map(|name| tensor_len(loaded, name)).unwrap_or(0);
+    let post_scales = post
+        .map(|name| {
+            tensor_len(
+                loaded,
+                &format!("{}.scales", name.strip_suffix(".weight").unwrap_or(name)),
+            )
+        })
+        .unwrap_or(0);
+    let post_biases = post
+        .map(|name| {
+            tensor_len(
+                loaded,
+                &format!("{}.biases", name.strip_suffix(".weight").unwrap_or(name)),
+            )
+        })
+        .unwrap_or(0);
+
+    (
+        pre_weight,
+        pre_scales,
+        pre_biases,
+        post_weight,
+        post_scales,
+        post_biases,
+    )
+}
+
+fn synthesize_execution_graph_for_loaded(loaded: &LoadedSource) -> Option<Vec<u8>> {
+    let text = &loaded.arch;
+    let mut layers = Vec::new();
+
+    let main_entries = layer_directory_entries_for_loaded(loaded, false);
+    let draft_entries = layer_directory_entries_for_loaded(loaded, true);
+    let (pre_weight, pre_scales, _pre_biases, post_weight, post_scales, _post_biases) =
+        draft_projection_triplet_lengths(loaded);
+
+    for (plan, entry) in loaded
+        .spec
+        .layers
+        .iter()
+        .filter(|layer| {
+            !layer
+                .tensors
+                .iter()
+                .any(|binding| is_draft_tensor_name(&binding.name))
+        })
+        .zip(main_entries.iter())
+    {
+        let is_sliding = matches!(
+            plan.attention_kind,
+            crate::config::AttentionKind::SlidingAttention
+        );
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::DecoderLayer as u8,
+            attention_kind: if is_sliding {
+                GraphAttentionKind::SlidingWindow as u8
+            } else {
+                GraphAttentionKind::FullAttention as u8
+            },
+            device_capability: DeviceCapability::Both as u8,
+            compaction_epoch: 0xFF,
+            layer_index: plan.index,
+            head_dim: plan.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: plan.n_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: entry.weights_offset,
+            weight_length: entry.weights_length,
+            scale_offset: entry.scales_offset,
+            _reserved: [0u8; 8],
+        });
+    }
+
+    let mut draft_sub_graph = None;
+    if !draft_entries.is_empty() {
+        let draft_hidden = text.hidden_size;
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::DraftPreProjection as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: 0,
+            weight_length: pre_weight,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::DraftPostProjection as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: draft_hidden,
+            weight_offset: pre_weight,
+            weight_length: post_weight,
+            scale_offset: pre_scales,
+            _reserved: [0u8; 8],
+        });
+        for (layer_index, entry) in draft_entries.iter().enumerate() {
+            layers.push(LayerExecutionNode {
+                node_kind: NodeKind::DraftLayer as u8,
+                attention_kind: GraphAttentionKind::FullAttention as u8,
+                device_capability: DeviceCapability::Both as u8,
+                compaction_epoch: 0xFF,
+                layer_index: layer_index as u32,
+                head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+                num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+                hidden_dim: draft_hidden,
+                weight_offset: entry.weights_offset,
+                weight_length: entry.weights_length,
+                scale_offset: entry.scales_offset,
+                _reserved: [0u8; 8],
+            });
+        }
+
+        let draft_weight_offset = draft_entries.first().map(|e| e.weights_offset).unwrap_or(0);
+        let draft_scale_offset = draft_entries.first().map(|e| e.scales_offset).unwrap_or(0);
+        let draft_weight_length: u64 = draft_entries.iter().map(|e| e.weights_length).sum();
+        let draft_scale_length: u64 = draft_entries.iter().map(|e| e.scales_length).sum();
+        draft_sub_graph = Some(DraftSubGraph {
+            num_layers: draft_entries.len().min(u32::MAX as usize) as u32,
+            hidden_dim: draft_hidden,
+            weight_offset: draft_weight_offset,
+            weight_length: draft_weight_length,
+            scale_offset: draft_scale_offset,
+            scale_length: draft_scale_length,
+            pre_proj_offset: 0,
+            post_proj_offset: pre_weight,
+        });
+        let _ = post_scales;
+    }
+
+    if layers.is_empty() {
+        return None;
+    }
+
+    Some(
+        ExecutionGraphDescriptor {
+            magic: crate::compute_image::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
+            version: 1,
+            num_layers: main_entries.len().min(u16::MAX as usize) as u16,
+            num_draft_layers: draft_entries.len().min(u16::MAX as usize) as u16,
+            num_compaction_epochs: 0,
+            node_count: layers.len().min(u32::MAX as usize) as u32,
+            _pad: [0u8; 2],
+            layers,
+            compaction_epochs: Vec::new(),
+            draft_sub_graph,
+        }
+        .to_bytes(),
+    )
+}
+
+fn copy_vocabulary_triplet(loaded: &LoadedSource, embed_key: &str, dst: &mut [u8]) {
+    if embed_key.is_empty() {
+        return;
+    }
+    let stem = embed_key.strip_suffix(".weight").unwrap_or(embed_key);
+    let mut off = 0usize;
+    for key in [
+        embed_key.to_string(),
+        format!("{}.scales", stem),
+        format!("{}.biases", stem),
+    ] {
+        if let Some(t) = loaded.source_tensors.get(&key) {
+            let end = off + t.data.len();
+            dst[off..end].copy_from_slice(&t.data);
+            off = end;
+        }
+    }
+}
 
 /// Compile and pack the unified Gemma4_Unified.cimage.
 ///
@@ -32,96 +439,67 @@ pub(crate) fn stream_weights_to_mmap_gpu(
     builder: &mut AlignedMmapBuilder,
     qmode: CompileQuantMode,
 ) -> crate::Result<()> {
+    let mmap_base = builder.mmap_base();
+    match qmode {
+        CompileQuantMode::TernaryTile640 { .. } => {
+            let total = stream_ternary_segment_to_mmap_gpu(
+                loaded,
+                &ordered_weight_binding_names(loaded, false),
+                mmap_base,
+                plan.main_weights.offset,
+            )?;
+            eprintln!(
+                "[cimage] GPU ternary tile640: {} weights streamed into mmap at offset {:#X}, {} bytes total",
+                if total > 0 { "all" } else { "no" },
+                plan.main_weights.offset,
+                total,
+            );
+            Ok(())
+        }
+        CompileQuantMode::Nf4Tile640 { .. } => {
+            let main_total = stream_nf4_segment_to_mmap_gpu(
+                loaded,
+                &ordered_weight_binding_names(loaded, false),
+                mmap_base,
+                plan.main_weights.offset,
+                plan.main_scales.offset,
+                plan.main_biases.offset,
+            )?;
+            let mtp_total = stream_nf4_segment_to_mmap_gpu(
+                loaded,
+                &ordered_weight_binding_names(loaded, true),
+                mmap_base,
+                plan.mtp_weights.offset,
+                plan.mtp_scales.offset,
+                plan.mtp_biases.offset,
+            )?;
+            eprintln!(
+                "[cimage] GPU nf4 tile640: main={}B mtp={}B streamed into resident triplet arenas",
+                main_total, mtp_total,
+            );
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+#[cfg(feature = "metal-dispatch")]
+fn stream_ternary_segment_to_mmap_gpu(
+    loaded: &mut LoadedSource,
+    weight_names: &[String],
+    mmap_base: *mut u8,
+    segment_file_offset: u64,
+) -> crate::Result<u64> {
     use crate::compute_image::compile::try_ternary_tile640_pack_gpu;
 
-    if !matches!(qmode, CompileQuantMode::TernaryTile640 { .. }) {
-        return Ok(());
-    }
-
-    let mmap_base = builder.mmap_base();
-    let segment_file_offset = plan.main_weights.offset;
-
-    // Iterate weight bindings in spec order, computing cumulative
-    // offsets within the weights segment for each tensor.
-    let mut tensor_cursor: u64 = 0;
-
-    // Pre-collect weight binding names so we can freely borrow loaded mutably
-    // inside the per-tensor loop.
-    let global_weight_names: Vec<String> = loaded
-        .spec
-        .global_tensors
-        .iter()
-        .filter(|b| b.name.ends_with(".weight"))
-        .map(|b| b.name.clone())
-        .collect();
-
-    // --- Global weight tensors ---
-    for binding_name in &global_weight_names {
-        // Streaming: load one tensor from mmap, extract shape + data, then
-        // free the source Vec before GPU dispatch.  Peak heap = ~1 tensor.
+    let mut tensor_cursor = 0u64;
+    for binding_name in weight_names {
         let (out_dim, in_dim) = {
-            let mut entry = loaded.source_tensors.get_mut(binding_name).unwrap();
-            for mmap in &loaded.mmap_bytes {
-                crate::compute_image::compile::source::ensure_tensor_loaded(&mut entry, mmap);
-                if !entry.data.is_empty() {
-                    break;
-                }
-            }
-            if entry.data.len() < 2 || (entry.dtype != "F16" && entry.dtype != "BF16") {
+            let Some(entry) = loaded.source_tensors.get_mut(binding_name) else {
                 continue;
-            }
-            if entry.shape.len() != 2 {
-                continue;
-            }
-            (entry.shape[0], entry.shape[1])
-        };
-        // Take the Vec out of the SourceTensor, replacing it with empty.
-        // The source memory is freed here, before GPU dispatch.
-        let data = loaded
-            .source_tensors
-            .get_mut(binding_name)
-            .map(|t| std::mem::take(&mut t.data))
-            .unwrap_or_default();
-        if data.is_empty() {
-            continue;
-        }
-
-        let num_tiles = (in_dim as u64 + 639) / 640;
-        let tensor_file_offset = segment_file_offset + tensor_cursor;
-
-        try_ternary_tile640_pack_gpu(
-            loaded,
-            binding_name,
-            &data,
-            out_dim,
-            in_dim,
-            Some((mmap_base, tensor_file_offset)),
-        )?;
-
-        // Advance cursor by this tensor's packed size.
-        let tensor_bytes = (out_dim as u64) * num_tiles * 32 * 4; // 32 u32 lanes per tile
-        tensor_cursor += tensor_bytes;
-    }
-
-    // Pre-collect per-layer weight binding names.
-    let layer_weight_names: Vec<String> = loaded
-        .spec
-        .layers
-        .iter()
-        .flat_map(|layer| layer.tensors.iter())
-        .filter(|b| b.name.ends_with(".weight"))
-        .map(|b| b.name.clone())
-        .collect();
-
-    // --- Per-layer weight tensors ---
-    for binding_name in &layer_weight_names {
-        let (out_dim, in_dim) = {
-            let mut entry = match loaded.source_tensors.get_mut(binding_name) {
-                Some(e) => e,
-                None => continue,
             };
             for mmap in &loaded.mmap_bytes {
-                crate::compute_image::compile::source::ensure_tensor_loaded(&mut entry, mmap);
+                crate::compute_image::compile::source::ensure_tensor_loaded(entry, mmap);
                 if !entry.data.is_empty() {
                     break;
                 }
@@ -134,6 +512,7 @@ pub(crate) fn stream_weights_to_mmap_gpu(
             }
             (entry.shape[0], entry.shape[1])
         };
+
         let data = loaded
             .source_tensors
             .get_mut(binding_name)
@@ -142,9 +521,9 @@ pub(crate) fn stream_weights_to_mmap_gpu(
         if data.is_empty() {
             continue;
         }
+
         let num_tiles = (in_dim as u64 + 639) / 640;
         let tensor_file_offset = segment_file_offset + tensor_cursor;
-
         try_ternary_tile640_pack_gpu(
             loaded,
             binding_name,
@@ -153,17 +532,81 @@ pub(crate) fn stream_weights_to_mmap_gpu(
             in_dim,
             Some((mmap_base, tensor_file_offset)),
         )?;
-
-        let tensor_bytes = (out_dim as u64) * num_tiles * 32 * 4;
-        tensor_cursor += tensor_bytes;
+        tensor_cursor += (out_dim as u64) * num_tiles * 32 * 4;
     }
-    eprintln!(
-        "[cimage] GPU ternary tile640: {} weights streamed into mmap at offset {:#X}, {} bytes total",
-        if tensor_cursor > 0 { "all" } else { "no" },
-        segment_file_offset,
-        tensor_cursor,
-    );
-    Ok(())
+    Ok(tensor_cursor)
+}
+
+#[cfg(feature = "metal-dispatch")]
+fn stream_nf4_segment_to_mmap_gpu(
+    loaded: &mut LoadedSource,
+    weight_names: &[String],
+    mmap_base: *mut u8,
+    weights_segment_offset: u64,
+    scales_segment_offset: u64,
+    biases_segment_offset: u64,
+) -> crate::Result<u64> {
+    use crate::compute_image::compile::{
+        nf4_tile640_pack_layout, try_nf4_tile640_pack_gpu_to_output, Nf4Tile640MmapOutput,
+    };
+
+    let mut weights_cursor = 0u64;
+    let mut scales_cursor = 0u64;
+    let mut biases_cursor = 0u64;
+
+    for binding_name in weight_names {
+        let (out_dim, in_dim, dtype) = {
+            let Some(entry) = loaded.source_tensors.get_mut(binding_name) else {
+                continue;
+            };
+            for mmap in &loaded.mmap_bytes {
+                crate::compute_image::compile::source::ensure_tensor_loaded(entry, mmap);
+                if !entry.data.is_empty() {
+                    break;
+                }
+            }
+            if entry.data.len() < 2 || (entry.dtype != "F16" && entry.dtype != "BF16") {
+                continue;
+            }
+            if entry.shape.len() != 2 {
+                continue;
+            }
+            (entry.shape[0], entry.shape[1], entry.dtype.clone())
+        };
+
+        let data = loaded
+            .source_tensors
+            .get_mut(binding_name)
+            .map(|t| std::mem::take(&mut t.data))
+            .unwrap_or_default();
+        if data.is_empty() {
+            continue;
+        }
+
+        let layout = nf4_tile640_pack_layout(out_dim, in_dim);
+        let output = Nf4Tile640MmapOutput {
+            mmap_base,
+            weights_offset: weights_segment_offset + weights_cursor,
+            scales_offset: scales_segment_offset + scales_cursor,
+            biases_offset: biases_segment_offset + biases_cursor,
+        };
+
+        try_nf4_tile640_pack_gpu_to_output(
+            loaded,
+            binding_name,
+            &data,
+            &dtype,
+            out_dim,
+            in_dim,
+            Some(output),
+        )?;
+
+        weights_cursor += layout.total_packed_bytes as u64;
+        scales_cursor += layout.scales_len as u64;
+        biases_cursor += layout.biases_len as u64;
+    }
+
+    Ok(weights_cursor + scales_cursor + biases_cursor)
 }
 
 pub(crate) fn compile_and_pack_god_binary(
@@ -181,6 +624,13 @@ pub(crate) fn compile_and_pack_god_binary(
     num_heads: u32,
     head_dim: u32,
 ) -> std::io::Result<()> {
+    if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+        crate::compute_image::compile::apply_quantize_to_loaded(loaded, qmode)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+    }
+
+    let execution_graph_bytes = synthesize_execution_graph_for_loaded(loaded).unwrap_or_default();
+
     let main_graph_len = predict_tar_size(main_mlmodelc_path)?;
     let mtp_graph_len = predict_tar_size(mtp_mlmodelc_path)?;
     let metal_lib_len = std::fs::metadata(metallib_path)?.len();
@@ -198,31 +648,60 @@ pub(crate) fn compile_and_pack_god_binary(
     .copied()
     .unwrap_or("");
 
-    // Element count (number of f16/bf16 elements = byte_size / 2).
-    let vocab_weight_elements: u64 = if embed_key.is_empty() {
-        eprintln!("[cimage] ⚠️  embed_tokens.weight not found — Vocabulary segment will be empty");
-        0
+    let (
+        main_weights_len,
+        main_scales_len,
+        main_biases_len,
+        mtp_weights_len,
+        mtp_scales_len,
+        mtp_biases_len,
+        vocab_len,
+    ) = if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+        let (mw, ms, mb) = quantized_triplet_lengths(loaded, false);
+        let (dw, ds, db) = quantized_triplet_lengths(loaded, true);
+        let vocab_len = vocabulary_triplet_lengths(loaded, embed_key);
+        (mw, ms, mb, dw, ds, db, vocab_len)
     } else {
-        let st = &loaded.source_tensors[embed_key];
-        if st.shape.len() == 2 {
-            st.shape[0] as u64 * st.shape[1] as u64
+        // TernaryTile640: 640 weights → 32 u32 lanes × 4 bytes = 128 bytes per tile.
+        let mw = (main_weight_total_elements / 640) * 128;
+        let dw = (mtp_weight_total_elements / 640) * 128;
+        let vocab_weight_elements: u64 = if embed_key.is_empty() {
+            eprintln!(
+                "[cimage] ⚠️  embed_tokens.weight not found — Vocabulary segment will be empty"
+            );
+            0
         } else {
-            (st.source_byte_size / 2).max(st.data.len() as u64 / 2)
-        }
+            let st = &loaded.source_tensors[embed_key];
+            if st.shape.len() == 2 {
+                st.shape[0] as u64 * st.shape[1] as u64
+            } else {
+                (st.source_byte_size / 2).max(st.data.len() as u64 / 2)
+            }
+        };
+        let vocab_num_tiles = (vocab_weight_elements + 639) / 640;
+        let vocab_packed_len = vocab_num_tiles * 32 * 4;
+        let vocab_scales_len = vocab_num_tiles * 4;
+        (mw, 0, 0, dw, 0, 0, vocab_packed_len + vocab_scales_len)
     };
 
     let plan = CImageLayoutPlan::calculate(
         header_size,
         metal_lib_len,
         main_graph_len,
-        main_weight_total_elements,
+        main_weights_len,
+        main_scales_len,
+        main_biases_len,
         mtp_graph_len,
-        mtp_weight_total_elements,
-        vocab_weight_elements,
+        mtp_weights_len,
+        mtp_scales_len,
+        mtp_biases_len,
+        vocab_len,
         num_layers,
+        execution_graph_bytes.len() as u64,
         None,
         None,
         None,
+        qmode,
     );
 
     let topology_table = CImageTopologyTable::compute(
@@ -267,19 +746,21 @@ pub(crate) fn compile_and_pack_god_binary(
     let written = archive_mlmodelc_to_mmap(main_mlmodelc_path, main_slice)?;
     eprintln!("[cimage] main .mlmodelc: {} bytes archived", written);
 
-    // Segment: Main weights (GPU writes directly into mmap here)
+    // Segment: Main weights
     builder.align_cursor();
-    let _main_weights_ptr =
-        unsafe { builder.allocate_hardware_pointer(plan.main_weights.length as usize) };
-
-    // GPU-accelerated ternary tile640 quantization streams weights into the mmap.
-    #[cfg(feature = "metal-dispatch")]
-    {
-        stream_weights_to_mmap_gpu(loaded, &plan, &mut builder, qmode)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+        let _main_weights_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.main_weights.length as usize) };
+        builder.align_cursor();
+        let _main_scales_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.main_scales.length as usize) };
+        builder.align_cursor();
+        let _main_biases_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.main_biases.length as usize) };
+    } else {
+        let _main_weights_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.main_weights.length as usize) };
     }
-    #[cfg(not(feature = "metal-dispatch"))]
-    let _ = (loaded, qmode); // suppress unused warning when feature disabled
 
     // Segment: MTP .mlmodelc
     builder.align_cursor();
@@ -287,10 +768,29 @@ pub(crate) fn compile_and_pack_god_binary(
     let written = archive_mlmodelc_to_mmap(mtp_mlmodelc_path, mtp_slice)?;
     eprintln!("[cimage] MTP .mlmodelc: {} bytes archived", written);
 
-    // Segment: MTP weights (GPU writes directly into mmap here)
+    // Segment: MTP weights
     builder.align_cursor();
-    let _mtp_weights_ptr =
-        unsafe { builder.allocate_hardware_pointer(plan.mtp_weights.length as usize) };
+    if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+        let _mtp_weights_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.mtp_weights.length as usize) };
+        builder.align_cursor();
+        let _mtp_scales_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.mtp_scales.length as usize) };
+        builder.align_cursor();
+        let _mtp_biases_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.mtp_biases.length as usize) };
+    } else {
+        let _mtp_weights_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.mtp_weights.length as usize) };
+    }
+
+    #[cfg(feature = "metal-dispatch")]
+    {
+        stream_weights_to_mmap_gpu(loaded, &plan, &mut builder, qmode)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+    }
+    #[cfg(not(feature = "metal-dispatch"))]
+    let _ = (loaded, qmode);
 
     // Segment: Topology table
     builder.align_cursor();
@@ -304,9 +804,70 @@ pub(crate) fn compile_and_pack_god_binary(
         .allocate_slice(topology_bytes.len())
         .copy_from_slice(topology_bytes);
 
-    // Segment: Vocabulary (embed_tokens.weight in TernaryTile640)
+    // Segment: Vocabulary / embedding triplet
     builder.align_cursor();
-    if plan.vocabulary.length > 0 && !embed_key.is_empty() {
+    if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+        let mmap_capture = builder.mmap_base();
+        let _vocab_ptr =
+            unsafe { builder.allocate_hardware_pointer(plan.vocabulary.length as usize) };
+        if !embed_key.is_empty() {
+            let (vocab_out_dim, vocab_in_dim, vocab_dtype) = {
+                let st = loaded.source_tensors.get(embed_key).ok_or_else(|| {
+                    std::io::Error::other(format!("missing vocabulary tensor {}", embed_key))
+                })?;
+                if st.shape.len() == 2 {
+                    (st.shape[0], st.shape[1], st.dtype.clone())
+                } else {
+                    let elems = source_tensor_byte_len(st) as u32 / 2;
+                    (elems / hidden_size, hidden_size, st.dtype.clone())
+                }
+            };
+            let stem = embed_key.strip_suffix(".weight").unwrap_or(embed_key);
+            let weight_len = loaded
+                .source_tensors
+                .get(embed_key)
+                .map(source_tensor_byte_len)
+                .unwrap_or(0) as u64;
+            let scales_len = loaded
+                .source_tensors
+                .get(&format!("{}.scales", stem))
+                .map(source_tensor_byte_len)
+                .unwrap_or(0) as u64;
+            let raw_bytes = {
+                let st = loaded.source_tensors.get_mut(embed_key).ok_or_else(|| {
+                    std::io::Error::other(format!("missing vocabulary tensor {}", embed_key))
+                })?;
+                for mmap in &loaded.mmap_bytes {
+                    crate::compute_image::compile::source::ensure_tensor_loaded(st, mmap);
+                    if !st.data.is_empty() {
+                        break;
+                    }
+                }
+                std::mem::take(&mut st.data)
+            };
+            if !raw_bytes.is_empty() {
+                crate::compute_image::compile::try_nf4_tile640_pack_gpu_to_output(
+                    loaded,
+                    embed_key,
+                    &raw_bytes,
+                    &vocab_dtype,
+                    vocab_out_dim,
+                    vocab_in_dim,
+                    Some(crate::compute_image::compile::Nf4Tile640MmapOutput {
+                        mmap_base: mmap_capture,
+                        weights_offset: plan.vocabulary.offset,
+                        scales_offset: plan.vocabulary.offset + weight_len,
+                        biases_offset: plan.vocabulary.offset + weight_len + scales_len,
+                    }),
+                )
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+                eprintln!(
+                    "[cimage] Vocabulary {} → GPU nf4 tile640 done ({}×{})",
+                    embed_key, vocab_out_dim, vocab_in_dim
+                );
+            }
+        }
+    } else if plan.vocabulary.length > 0 && !embed_key.is_empty() {
         // Collect the raw BF16/FP16 bytes; lazy-load from mmap if needed.
         let raw_bytes: Vec<u8> = {
             let st = loaded.source_tensors.get_mut(embed_key).unwrap();
@@ -441,31 +1002,37 @@ pub(crate) fn compile_and_pack_god_binary(
     // Segment: LayerDirectory (per-layer weight/scale byte offsets)
     builder.align_cursor();
     if num_layers > 0 && plan.layer_directory.length > 0 {
-        let layer_weight_bytes = plan.main_weights.length / num_layers as u64;
-        let layer_elements = main_weight_total_elements / num_layers as u64;
-        let layer_scale_bytes = ((layer_elements + 255) / 256) * 2;
-
         let layer_dir_slice = builder.allocate_slice(plan.layer_directory.length as usize);
-        let num_entries = num_layers as usize;
-        let mut entries: Vec<u8> = Vec::with_capacity(num_entries * 48);
-        for l in 0..num_layers as u64 {
-            let e = LayerDirectoryEntry {
-                weights_offset: l * layer_weight_bytes,
-                weights_length: layer_weight_bytes,
-                scales_offset: l * layer_scale_bytes,
-                scales_length: layer_scale_bytes,
-                layer_kind: 0,
-                flags: 0,
-            };
+        let entries_typed = layer_directory_entries_for_loaded(loaded, false);
+        let mut entries: Vec<u8> = Vec::with_capacity(entries_typed.len() * 48);
+        for e in entries_typed.iter().copied() {
             entries.extend_from_slice(unsafe {
                 std::slice::from_raw_parts(&e as *const LayerDirectoryEntry as *const u8, 48)
             });
         }
         layer_dir_slice[..entries.len()].copy_from_slice(&entries);
+        let per_layer_kb = entries_typed
+            .first()
+            .map(|entry| entry.weights_length as f64 / 1024.0)
+            .unwrap_or(0.0);
         eprintln!(
             "[cimage] LayerDirectory: {} entries x 48B, {:.1} KB per layer",
-            num_layers,
-            layer_weight_bytes as f64 / 1024.0,
+            entries_typed.len(),
+            per_layer_kb,
+        );
+    }
+
+    builder.align_cursor();
+    if !execution_graph_bytes.is_empty() {
+        builder
+            .allocate_slice(plan.execution_graph.length as usize)
+            .copy_from_slice(&execution_graph_bytes);
+        eprintln!(
+            "[cimage] ExecutionGraph: {} bytes, {} nodes",
+            execution_graph_bytes.len(),
+            ExecutionGraphDescriptor::from_bytes(&execution_graph_bytes)
+                .map(|graph| graph.node_count)
+                .unwrap_or(0),
         );
     }
 
@@ -474,7 +1041,7 @@ pub(crate) fn compile_and_pack_god_binary(
         kind: 0,
         offset: 0,
         length: 0,
-    }; 9];
+    }; CIMAGE_SEGMENT_CAPACITY];
     segments[0] = SegmentEntry::new(
         SegmentKind::MetalLib,
         plan.metal_lib.offset,
@@ -499,10 +1066,28 @@ pub(crate) fn compile_and_pack_god_binary(
         plan.main_graph.length,
     );
     segments[6] = SegmentEntry::new(
-        SegmentKind::TernaryWeights,
+        if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+            SegmentKind::Nf4Tile640Weights
+        } else {
+            SegmentKind::TernaryWeights
+        },
         plan.main_weights.offset,
         plan.main_weights.length,
     );
+    if plan.main_scales.length > 0 {
+        segments[8] = SegmentEntry::new(
+            SegmentKind::BlockScales,
+            plan.main_scales.offset,
+            plan.main_scales.length,
+        );
+    }
+    if plan.main_biases.length > 0 {
+        segments[9] = SegmentEntry::new(
+            SegmentKind::BlockBiases,
+            plan.main_biases.offset,
+            plan.main_biases.length,
+        );
+    }
     if plan.mtp_graph.length > 0 {
         // If MTP present, insert as a second AneArchive or LayoutMeta
         segments[3] = SegmentEntry::new(
@@ -511,10 +1096,28 @@ pub(crate) fn compile_and_pack_god_binary(
             plan.mtp_graph.length,
         );
         segments[4] = SegmentEntry::new(
-            SegmentKind::TernaryWeights,
+            if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+                SegmentKind::Nf4Tile640Weights
+            } else {
+                SegmentKind::TernaryWeights
+            },
             plan.mtp_weights.offset,
             plan.mtp_weights.length,
         );
+        if plan.mtp_scales.length > 0 {
+            segments[10] = SegmentEntry::new(
+                SegmentKind::BlockScales,
+                plan.mtp_scales.offset,
+                plan.mtp_scales.length,
+            );
+        }
+        if plan.mtp_biases.length > 0 {
+            segments[11] = SegmentEntry::new(
+                SegmentKind::BlockBiases,
+                plan.mtp_biases.offset,
+                plan.mtp_biases.length,
+            );
+        }
     }
     // Segment 7: LayerDirectory (per-layer weight/scale offset table)
     if num_layers > 0 {
@@ -524,10 +1127,24 @@ pub(crate) fn compile_and_pack_god_binary(
             plan.layer_directory.length,
         );
     }
+    if plan.execution_graph.length > 0 {
+        segments[12] = SegmentEntry::new(
+            SegmentKind::ExecutionGraph,
+            plan.execution_graph.offset,
+            plan.execution_graph.length,
+        );
+    }
     let vocab_seg = if plan.vocabulary.length > 0 { 1 } else { 0 };
-    let mtp_segs = if plan.mtp_graph.length > 0 { 2 } else { 0 };
+    let main_meta_segs =
+        u32::from(plan.main_scales.length > 0) + u32::from(plan.main_biases.length > 0);
+    let mtp_segs = if plan.mtp_graph.length > 0 {
+        2 + u32::from(plan.mtp_scales.length > 0) + u32::from(plan.mtp_biases.length > 0)
+    } else {
+        0
+    };
     let layer_dir_seg = if num_layers > 0 { 1 } else { 0 };
-    let seg_count = 5u32 + mtp_segs + vocab_seg + layer_dir_seg;
+    let exec_graph_seg = u32::from(plan.execution_graph.length > 0);
+    let seg_count = 5u32 + mtp_segs + vocab_seg + layer_dir_seg + main_meta_segs + exec_graph_seg;
     let header = CimageHeader {
         magic: *b"PRISM\0\0\0",
         version: 4,
@@ -539,7 +1156,11 @@ pub(crate) fn compile_and_pack_god_binary(
         hidden_dim: 0,
         intermediate_dim: 0,
         vocab_size: 0,
-        quantization_schema: 0,
+        quantization_schema: if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+            QUANT_SCHEMA_NF4_TILE640
+        } else {
+            QUANT_SCHEMA_TERNARY_TILE640
+        },
         draft_num_layers: 0,
         segments,
         _pad: [0u8; 8],
@@ -605,7 +1226,7 @@ pub fn pack_unified_cimage(
         kind: 0,
         offset: 0,
         length: 0,
-    }; 9];
+    }; CIMAGE_SEGMENT_CAPACITY];
     segments[0] = SegmentEntry::new(SegmentKind::MetalLib, metal_lib_offset, metal_lib_len);
     segments[1] = SegmentEntry::new(
         SegmentKind::TernaryWeights,
@@ -656,6 +1277,17 @@ pub fn pack_unified_cimage(
 /// Uses `ftruncate` + `mmap` + `AlignedMmapBuilder` for zero-copy GPU
 /// compatibility (16 KB page alignment).
 pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Result<()> {
+    const MAX_CIMAGE_SEGMENTS: usize = CIMAGE_SEGMENT_CAPACITY;
+
+    #[derive(Clone)]
+    struct Slot {
+        kind: SegmentKind,
+        offset: u64,
+        length: u64,
+    }
+
+    let manifest = load_manifest_if_present(input_dir);
+
     // 1. Discover all segments in the directory
     let kernel_patterns: &[(&str, SegmentKind)] = &[
         ("model.metallib", SegmentKind::MetalLib),
@@ -707,18 +1339,20 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
             }
         }
     }
+    let mut multimodal = synthesize_multimodal_segments(input_dir, manifest.as_ref())?;
+    if let Some(bytes) = load_or_synthesize_execution_graph(input_dir, manifest.as_ref())? {
+        extra_segments.push((SegmentKind::ExecutionGraph, bytes));
+    }
+    if let Some(bytes) = load_or_synthesize_model_artifacts(input_dir, manifest.as_ref())? {
+        extra_segments.push((SegmentKind::ModelArtifacts, bytes));
+    }
 
     // 2. Compute layout
-    struct Slot {
-        kind: SegmentKind,
-        offset: u64,
-        length: u64,
-    }
     let mut slots: Vec<Slot> = Vec::new();
     let header_size = std::mem::size_of::<CimageHeader>() as u64;
     let weights_total: u64 = weight_segments.iter().map(|d| d.len() as u64).sum();
 
-    let mut cursor = header_size as u64;
+    let mut cursor = header_size;
     let mut push_slot = |kind: SegmentKind, len: u64| {
         if len == 0 {
             return;
@@ -746,6 +1380,36 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         }
     }
     push_slot(SegmentKind::TernaryWeights, weights_total);
+    if let Some(multimodal) = &multimodal {
+        push_slot(
+            SegmentKind::MultimodalProjectionWeights,
+            multimodal.projection_weights.len() as u64,
+        );
+        push_slot(
+            SegmentKind::MultimodalProjectionScales,
+            multimodal.projection_scales.len() as u64,
+        );
+        push_slot(
+            SegmentKind::MultimodalInputDescriptor,
+            multimodal.descriptor.len() as u64,
+        );
+        push_slot(
+            SegmentKind::MultimodalPositionEmbeddings,
+            multimodal.position_embeddings.len() as u64,
+        );
+        push_slot(
+            SegmentKind::MultimodalAuxiliaryWeights,
+            multimodal.auxiliary_weights.len() as u64,
+        );
+    }
+    for (kind, data) in &extra_segments {
+        match kind {
+            SegmentKind::ExecutionGraph | SegmentKind::ModelArtifacts => {
+                push_slot(*kind, data.len() as u64)
+            }
+            _ => {}
+        }
+    }
     for (kind, data) in &extra_segments {
         match kind {
             SegmentKind::AneArchive
@@ -756,6 +1420,28 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
             | SegmentKind::HuaweiAscendBlob
             | SegmentKind::HailoBlob => push_slot(*kind, data.len() as u64),
             _ => {}
+        }
+    }
+    if let Some(multimodal) = &mut multimodal {
+        if multimodal.descriptor.len() >= std::mem::size_of::<MultimodalInputDescriptorV1>() {
+            let find_slot_index = |kind: SegmentKind| {
+                slots
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, slot)| (slot.kind == kind).then_some(index as u16))
+                    .unwrap_or(u16::MAX)
+            };
+            let desc = unsafe {
+                &mut *(multimodal.descriptor.as_mut_ptr() as *mut MultimodalInputDescriptorV1)
+            };
+            desc.projection_weight_segment_index =
+                find_slot_index(SegmentKind::MultimodalProjectionWeights);
+            desc.projection_scale_segment_index =
+                find_slot_index(SegmentKind::MultimodalProjectionScales);
+            desc.position_embedding_segment_index =
+                find_slot_index(SegmentKind::MultimodalPositionEmbeddings);
+            desc.auxiliary_weight_segment_index =
+                find_slot_index(SegmentKind::MultimodalAuxiliaryWeights);
         }
     }
     let total_file_size = cursor;
@@ -774,11 +1460,8 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         std::ptr::write_bytes(mmap.as_mut_ptr(), 0u8, mmap.len());
     }
     let mut builder = AlignedMmapBuilder::new(mmap);
-
-    // Skip header (written last)
     builder.cursor = header_size as usize;
 
-    // Write kernel segments
     for (kind, bytes) in &extra_segments {
         match kind {
             SegmentKind::MetalLib
@@ -796,7 +1479,6 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         }
     }
 
-    // Weight segments (concatenated into one TernaryWeights segment)
     if weights_total > 0 {
         builder.align_cursor();
         let mut seg_slice = builder.allocate_slice(weights_total as usize);
@@ -807,7 +1489,33 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         }
     }
 
-    // NPU model segments
+    if let Some(multimodal) = &multimodal {
+        for bytes in [
+            &multimodal.projection_weights,
+            &multimodal.projection_scales,
+            &multimodal.descriptor,
+            &multimodal.position_embeddings,
+            &multimodal.auxiliary_weights,
+        ] {
+            if !bytes.is_empty() {
+                builder.align_cursor();
+                builder.allocate_slice(bytes.len()).copy_from_slice(bytes);
+            }
+        }
+    }
+
+    for (kind, bytes) in &extra_segments {
+        match kind {
+            SegmentKind::ExecutionGraph | SegmentKind::ModelArtifacts => {
+                if !bytes.is_empty() {
+                    builder.align_cursor();
+                    builder.allocate_slice(bytes.len()).copy_from_slice(bytes);
+                }
+            }
+            _ => {}
+        }
+    }
+
     for (kind, bytes) in &extra_segments {
         match kind {
             SegmentKind::AneArchive
@@ -827,29 +1535,98 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
     }
 
     // 4. Build header
-    let total_segments = slots.len().min(8);
+    let total_segments = slots.len().min(MAX_CIMAGE_SEGMENTS);
     let mut segments_dir = [SegmentEntry {
         kind: 0,
         offset: 0,
         length: 0,
-    }; 9];
-    for (i, slot) in slots.iter().enumerate().take(8) {
+    }; MAX_CIMAGE_SEGMENTS];
+    for (i, slot) in slots.iter().enumerate().take(MAX_CIMAGE_SEGMENTS) {
         segments_dir[i] = SegmentEntry::new(slot.kind, slot.offset, slot.length);
     }
+    if slots.len() > MAX_CIMAGE_SEGMENTS {
+        eprintln!(
+            "[cimage] warning: {} segments discovered, truncating to {} entries due to header limit",
+            slots.len(),
+            MAX_CIMAGE_SEGMENTS
+        );
+    }
+
+    let mut payload_hasher = Sha256::new();
+    for slot in &slots {
+        match slot.kind {
+            SegmentKind::TernaryWeights => {
+                for segment in &weight_segments {
+                    payload_hasher.update(segment);
+                }
+            }
+            SegmentKind::MultimodalProjectionWeights => {
+                if let Some(multimodal) = &multimodal {
+                    payload_hasher.update(&multimodal.projection_weights);
+                }
+            }
+            SegmentKind::MultimodalProjectionScales => {
+                if let Some(multimodal) = &multimodal {
+                    payload_hasher.update(&multimodal.projection_scales);
+                }
+            }
+            SegmentKind::MultimodalInputDescriptor => {
+                if let Some(multimodal) = &multimodal {
+                    payload_hasher.update(&multimodal.descriptor);
+                }
+            }
+            SegmentKind::MultimodalPositionEmbeddings => {
+                if let Some(multimodal) = &multimodal {
+                    payload_hasher.update(&multimodal.position_embeddings);
+                }
+            }
+            SegmentKind::MultimodalAuxiliaryWeights => {
+                if let Some(multimodal) = &multimodal {
+                    payload_hasher.update(&multimodal.auxiliary_weights);
+                }
+            }
+            _ => {
+                if let Some((_, bytes)) = extra_segments.iter().find(|(kind, _)| *kind == slot.kind)
+                {
+                    payload_hasher.update(bytes);
+                }
+            }
+        }
+    }
+    let payload_hash: [u8; 32] = payload_hasher.finalize().into();
+    let (
+        num_layers,
+        num_heads,
+        head_dim,
+        hidden_dim,
+        intermediate_dim,
+        vocab_size,
+        draft_num_layers,
+    ) = header_fields_from_manifest(manifest.as_ref());
+    let header_version = if slots.iter().any(|slot| {
+        matches!(
+            slot.kind,
+            SegmentKind::ExecutionGraph | SegmentKind::ModelArtifacts
+        )
+    }) {
+        6
+    } else {
+        4
+    };
 
     let header = CimageHeader {
         magic: *b"PRISM\0\0\0",
-        version: 4,
+        version: header_version,
         segment_count: total_segments as u32,
-        payload_hash: [0u8; 32],
-        num_layers: 0,
-        num_heads: 0,
-        head_dim: 0,
-        hidden_dim: 0,
-        intermediate_dim: 0,
-        vocab_size: 0,
+        payload_hash,
+        num_layers,
+        num_heads,
+        head_dim,
+        hidden_dim,
+        intermediate_dim,
+        vocab_size,
         quantization_schema: 0,
-        draft_num_layers: 0,
+        draft_num_layers,
         segments: segments_dir,
         _pad: [0u8; 8],
     };
@@ -868,4 +1645,813 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         output_path.display()
     );
     Ok(())
+}
+
+fn load_manifest_if_present(input_dir: &Path) -> Option<Manifest> {
+    let bytes = std::fs::read(input_dir.join("manifest.json")).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn load_or_synthesize_execution_graph(
+    input_dir: &Path,
+    manifest: Option<&Manifest>,
+) -> std::io::Result<Option<Vec<u8>>> {
+    let path = input_dir.join("execution_graph.bin");
+    if path.exists() {
+        return std::fs::read(path).map(Some);
+    }
+    Ok(manifest.and_then(synthesize_execution_graph))
+}
+
+fn load_or_synthesize_model_artifacts(
+    input_dir: &Path,
+    manifest: Option<&Manifest>,
+) -> std::io::Result<Option<Vec<u8>>> {
+    let path = input_dir.join("model_artifacts.bin");
+    if path.exists() {
+        return std::fs::read(path).map(Some);
+    }
+    Ok(synthesize_model_artifacts(input_dir, manifest))
+}
+
+fn synthesize_execution_graph(manifest: &Manifest) -> Option<Vec<u8>> {
+    let text = &manifest.architecture;
+    let mut layers = Vec::new();
+
+    if let Some(vision) = &manifest.vision_config {
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::VisionPatchEmbed as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: vision.patch_size.min(u16::MAX as u32) as u16,
+            num_heads: vision.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: vision.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::VisionFinalProjection as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+    }
+
+    if let Some(audio) = &manifest.audio_config {
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::AudioFrameEmbed as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: audio.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: audio.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::AudioProjection as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+    }
+
+    if manifest.vision_config.is_some() || manifest.audio_config.is_some() {
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::EmbeddingAssembly as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+    }
+
+    let mut compaction_epochs = Vec::new();
+    for layer in &manifest.execution_plan.layers {
+        let is_sliding = layer
+            .attention_kind
+            .eq_ignore_ascii_case("slidingattention")
+            || layer
+                .attention_kind
+                .eq_ignore_ascii_case("sliding_attention");
+        let compaction_epoch = if is_sliding {
+            let epoch_index = compaction_epochs.len() as u8;
+            compaction_epochs.push(CompactionEpoch {
+                epoch_index,
+                trigger_layer: layer.layer_index.min(u8::MAX as u32) as u8,
+                tier_count: 1,
+                _pad: 0,
+                compression_ratio: [0; 4],
+                tier_boundaries: [0; 3],
+                access_threshold: 0,
+            });
+            epoch_index
+        } else {
+            0xFF
+        };
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::DecoderLayer as u8,
+            attention_kind: if is_sliding {
+                GraphAttentionKind::SlidingWindow as u8
+            } else {
+                GraphAttentionKind::FullAttention as u8
+            },
+            device_capability: DeviceCapability::Both as u8,
+            compaction_epoch,
+            layer_index: layer.layer_index,
+            head_dim: layer.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: layer.n_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: layer.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+    }
+
+    let draft_sub_graph = manifest
+        .execution_plan
+        .speculative_config
+        .as_ref()
+        .map(|draft| DraftSubGraph {
+            num_layers: draft.draft_architecture.num_hidden_layers,
+            hidden_dim: draft.draft_architecture.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            scale_length: 0,
+            pre_proj_offset: 0,
+            post_proj_offset: 0,
+        });
+
+    if let Some(draft) = &manifest.execution_plan.speculative_config {
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::DraftPreProjection as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: draft.draft_architecture.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: draft
+                .draft_architecture
+                .num_attention_heads
+                .min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::DraftPostProjection as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: draft.draft_architecture.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+        for layer_index in 0..draft.draft_architecture.num_hidden_layers {
+            layers.push(LayerExecutionNode {
+                node_kind: NodeKind::DraftLayer as u8,
+                attention_kind: GraphAttentionKind::FullAttention as u8,
+                device_capability: DeviceCapability::Both as u8,
+                compaction_epoch: 0xFF,
+                layer_index,
+                head_dim: draft.draft_architecture.head_dim.min(u16::MAX as u32) as u16,
+                num_heads: draft
+                    .draft_architecture
+                    .num_attention_heads
+                    .min(u16::MAX as u32) as u16,
+                hidden_dim: draft.draft_architecture.hidden_size,
+                weight_offset: 0,
+                weight_length: 0,
+                scale_offset: 0,
+                _reserved: [0u8; 8],
+            });
+        }
+    }
+
+    if layers.is_empty() {
+        return None;
+    }
+
+    Some(
+        ExecutionGraphDescriptor {
+            magic: crate::compute_image::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
+            version: 1,
+            num_layers: manifest.architecture.num_hidden_layers.min(u16::MAX as u32) as u16,
+            num_draft_layers: manifest
+                .execution_plan
+                .speculative_config
+                .as_ref()
+                .map(|draft| draft.draft_architecture.num_hidden_layers)
+                .unwrap_or(0)
+                .min(u16::MAX as u32) as u16,
+            num_compaction_epochs: compaction_epochs.len().min(u16::MAX as usize) as u16,
+            node_count: layers.len().min(u32::MAX as usize) as u32,
+            _pad: [0u8; 2],
+            layers,
+            compaction_epochs,
+            draft_sub_graph,
+        }
+        .to_bytes(),
+    )
+}
+
+fn synthesize_model_artifacts(input_dir: &Path, manifest: Option<&Manifest>) -> Option<Vec<u8>> {
+    let mut artifacts = Vec::new();
+
+    for name in ["tokenizer.model", "tokenizer.json"] {
+        let path = input_dir.join(name);
+        if path.exists() {
+            let data = std::fs::read(path).ok()?;
+            ModelArtifactEntry::encode(model_artifact_tag::TOKENIZER, &data, &mut artifacts);
+            break;
+        }
+    }
+
+    let tokenizer_config = read_json_if_present(&input_dir.join("tokenizer_config.json"));
+    let generation_config = read_json_if_present(&input_dir.join("generation_config.json"));
+
+    if let Some(chat_template) = tokenizer_config
+        .as_ref()
+        .and_then(|json| json.get("chat_template"))
+        .and_then(|value| value.as_str())
+    {
+        ModelArtifactEntry::encode(
+            model_artifact_tag::CHAT_TEMPLATE,
+            chat_template.as_bytes(),
+            &mut artifacts,
+        );
+    }
+
+    if let Some(config) = generation_config.as_ref() {
+        let bytes = serde_json::to_vec(config).ok()?;
+        ModelArtifactEntry::encode(
+            model_artifact_tag::GENERATION_CONFIG,
+            &bytes,
+            &mut artifacts,
+        );
+    }
+
+    let mut token_map = serde_json::Map::new();
+    if let Some(config) = tokenizer_config.as_ref() {
+        for key in ["bos_token_id", "eos_token_id", "pad_token_id"] {
+            if let Some(value) = config.get(key) {
+                token_map.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    if let Some(manifest) = manifest {
+        if let Some(vision) = &manifest.vision_config {
+            token_map.insert(
+                "image_start_token".into(),
+                serde_json::Value::String("<start_of_image>".into()),
+            );
+            token_map.insert(
+                "image_end_token".into(),
+                serde_json::Value::String("<end_of_image>".into()),
+            );
+            token_map.insert(
+                "image_token_count".into(),
+                serde_json::Value::from(vision.hidden_size as u64),
+            );
+            token_map.insert(
+                "vision_patch_size".into(),
+                serde_json::Value::from(vision.patch_size as u64),
+            );
+        }
+        if let Some(audio) = &manifest.audio_config {
+            token_map.insert(
+                "audio_start_token".into(),
+                serde_json::Value::String("<start_of_audio>".into()),
+            );
+            token_map.insert(
+                "audio_end_token".into(),
+                serde_json::Value::String("<end_of_audio>".into()),
+            );
+            token_map.insert(
+                "audio_sample_rate".into(),
+                serde_json::Value::from(audio.sample_rate as u64),
+            );
+            let frame_ms = if audio.sample_rate > 0 {
+                ((audio.hop_length as f64 / audio.sample_rate as f64) * 1000.0).round() as u64
+            } else {
+                0
+            };
+            token_map.insert("audio_frame_ms".into(), serde_json::Value::from(frame_ms));
+        }
+    }
+    if !token_map.is_empty() {
+        let bytes = serde_json::to_vec(&token_map).ok()?;
+        ModelArtifactEntry::encode(model_artifact_tag::TOKEN_MAP, &bytes, &mut artifacts);
+    }
+
+    if artifacts.is_empty() {
+        None
+    } else {
+        Some(artifacts)
+    }
+}
+
+struct SynthesizedMultimodalSegments {
+    projection_weights: Vec<u8>,
+    projection_scales: Vec<u8>,
+    descriptor: Vec<u8>,
+    position_embeddings: Vec<u8>,
+    auxiliary_weights: Vec<u8>,
+}
+
+fn synthesize_multimodal_segments(
+    input_dir: &Path,
+    manifest: Option<&Manifest>,
+) -> std::io::Result<Option<SynthesizedMultimodalSegments>> {
+    let Some(manifest) = manifest else {
+        return Ok(None);
+    };
+    if manifest.vision_config.is_none() && manifest.audio_config.is_none() {
+        return Ok(None);
+    }
+
+    let segment_files: HashMap<&str, std::path::PathBuf> = manifest
+        .segments
+        .iter()
+        .map(|segment| (segment.id.as_str(), input_dir.join(&segment.filename)))
+        .collect();
+
+    let mut projection_weights = Vec::new();
+    let projection_scales = Vec::new();
+    let mut position_embeddings = Vec::new();
+    let mut auxiliary_weights = Vec::new();
+    let mut image_records = Vec::new();
+    let mut audio_records = Vec::new();
+
+    for tensor in &manifest.tensor_table {
+        let Some(class) = classify_multimodal_tensor(&tensor.name) else {
+            continue;
+        };
+        let Some(path) = segment_files.get(tensor.segment.as_str()) else {
+            continue;
+        };
+        let bytes = read_tensor_payload(path, tensor.offset, tensor.byte_length)?;
+        let entry_kind = classify_multimodal_entry(&tensor.name, &tensor.logical_shape);
+        let start_offset = match entry_kind {
+            MultimodalEntryKind::ProjectionWeight => {
+                let start = projection_weights.len() as u64;
+                projection_weights.extend_from_slice(&bytes);
+                start
+            }
+            MultimodalEntryKind::PositionEmbedding => {
+                position_embeddings.extend_from_slice(&bytes);
+                continue;
+            }
+            MultimodalEntryKind::Auxiliary => {
+                auxiliary_weights.extend_from_slice(&bytes);
+                continue;
+            }
+        };
+        let record = ProjectionTensorRecord {
+            logical_name_hash: stable_name_hash(&tensor.name),
+            role: projection_role_for_name(&tensor.name) as u16,
+            dtype: dtype_code(&tensor.storage_dtype),
+            weight_offset: start_offset,
+            weight_length: bytes.len() as u64,
+            scale_offset: 0,
+            scale_length: 0,
+            input_width: tensor.logical_shape.get(1).copied().unwrap_or(0),
+            output_width: tensor.logical_shape.first().copied().unwrap_or(0),
+            rank: tensor.logical_shape.len() as u8,
+            layout: 0,
+            quantization_kind: 0,
+            flags: 0,
+            dims: dims4(&tensor.logical_shape),
+        };
+        match class {
+            MultimodalClass::Image => image_records.push(record),
+            MultimodalClass::Audio => audio_records.push(record),
+        }
+    }
+
+    if projection_weights.is_empty()
+        && position_embeddings.is_empty()
+        && auxiliary_weights.is_empty()
+    {
+        return Ok(None);
+    }
+
+    let desc_size = std::mem::size_of::<MultimodalInputDescriptorV1>() as u64;
+    let image_offset = desc_size;
+    let audio_offset =
+        image_offset + (image_records.len() * std::mem::size_of::<ProjectionTensorRecord>()) as u64;
+    let mut desc = MultimodalInputDescriptorV1::default();
+    desc.magic = MULTIMODAL_DESCRIPTOR_MAGIC;
+    desc.version = 1;
+    desc.modality_mask = 0b0001
+        | if !image_records.is_empty() { 0b0010 } else { 0 }
+        | if !audio_records.is_empty() { 0b0100 } else { 0 };
+    desc.decoder_hidden_size = manifest.architecture.hidden_size;
+    desc.vocabulary_size = manifest.architecture.vocab_size;
+    if let Some(vision) = &manifest.vision_config {
+        desc.image_patch_size = vision.patch_size.min(u16::MAX as u32) as u16;
+        desc.image_channels = vision.num_channels.min(u16::MAX as u32) as u16;
+        desc.image_position_embedding_width = vision.hidden_size;
+    }
+    desc.image_projection_table_offset = image_offset;
+    desc.image_projection_count = image_records.len().min(u32::MAX as usize) as u32;
+    desc.audio_projection_table_offset = audio_offset;
+    desc.audio_projection_count = audio_records.len().min(u32::MAX as usize) as u32;
+    desc.processor_contract_digest = Sha256::digest(&projection_weights).into();
+    let mut layout_hasher = Sha256::new();
+    for record in image_records.iter().chain(audio_records.iter()) {
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                record as *const ProjectionTensorRecord as *const u8,
+                std::mem::size_of::<ProjectionTensorRecord>(),
+            )
+        };
+        layout_hasher.update(bytes);
+    }
+    desc.tensor_layout_digest = layout_hasher.finalize().into();
+
+    let mut descriptor = Vec::with_capacity(
+        std::mem::size_of::<MultimodalInputDescriptorV1>()
+            + (image_records.len() + audio_records.len())
+                * std::mem::size_of::<ProjectionTensorRecord>(),
+    );
+    descriptor.extend_from_slice(unsafe {
+        std::slice::from_raw_parts(
+            &desc as *const MultimodalInputDescriptorV1 as *const u8,
+            std::mem::size_of::<MultimodalInputDescriptorV1>(),
+        )
+    });
+    for record in image_records.iter().chain(audio_records.iter()) {
+        descriptor.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(
+                record as *const ProjectionTensorRecord as *const u8,
+                std::mem::size_of::<ProjectionTensorRecord>(),
+            )
+        });
+    }
+
+    Ok(Some(SynthesizedMultimodalSegments {
+        projection_weights,
+        projection_scales,
+        descriptor,
+        position_embeddings,
+        auxiliary_weights,
+    }))
+}
+
+#[derive(Clone, Copy)]
+enum MultimodalClass {
+    Image,
+    Audio,
+}
+
+#[derive(Clone, Copy)]
+enum MultimodalEntryKind {
+    ProjectionWeight,
+    PositionEmbedding,
+    Auxiliary,
+}
+
+fn classify_multimodal_tensor(name: &str) -> Option<MultimodalClass> {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("vision_encoder")
+        || lower.contains("vision_embedder")
+        || lower.contains("embed_vision")
+    {
+        return Some(MultimodalClass::Image);
+    }
+    if lower.contains("audio_encoder") || lower.contains("embed_audio") {
+        return Some(MultimodalClass::Audio);
+    }
+    None
+}
+
+fn classify_multimodal_entry(name: &str, logical_shape: &[u32]) -> MultimodalEntryKind {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("pos_embedding") || lower.contains("position_embed") {
+        return MultimodalEntryKind::PositionEmbedding;
+    }
+    if logical_shape.len() >= 2
+        && (lower.contains("projection")
+            || lower.contains("patch_dense")
+            || lower.contains("patch_embed"))
+    {
+        return MultimodalEntryKind::ProjectionWeight;
+    }
+    MultimodalEntryKind::Auxiliary
+}
+
+fn projection_role_for_name(name: &str) -> ProjectionRole {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("patch_dense") || lower.contains("patch_embed") {
+        ProjectionRole::ImagePatchEmbedding
+    } else if lower.contains("embed_vision") || lower.contains("vision") {
+        ProjectionRole::ImageProjection
+    } else if lower.contains("embed_audio") || lower.contains("audio") {
+        ProjectionRole::AudioProjection
+    } else {
+        ProjectionRole::ImageProjection
+    }
+}
+
+fn dims4(shape: &[u32]) -> [u32; 4] {
+    let mut dims = [0u32; 4];
+    for (idx, dim) in shape.iter().take(4).enumerate() {
+        dims[idx] = *dim;
+    }
+    dims
+}
+
+fn dtype_code(dtype: &str) -> u16 {
+    match dtype {
+        "F16" | "Float16" => 1,
+        "BF16" | "BFloat16" => 2,
+        "F32" | "Float32" => 3,
+        "U8" | "Uint8" => 4,
+        "U32" | "Uint32" => 5,
+        _ => 0,
+    }
+}
+
+fn stable_name_hash(name: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    name.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn read_tensor_payload(path: &Path, offset: u64, byte_length: u64) -> std::io::Result<Vec<u8>> {
+    let bytes = std::fs::read(path)?;
+    let start = offset as usize;
+    let end = start.saturating_add(byte_length as usize);
+    if end > bytes.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "tensor slice {}..{} exceeds segment {} length {}",
+                start,
+                end,
+                path.display(),
+                bytes.len()
+            ),
+        ));
+    }
+    Ok(bytes[start..end].to_vec())
+}
+
+fn read_json_if_present(path: &Path) -> Option<serde_json::Value> {
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn header_fields_from_manifest(manifest: Option<&Manifest>) -> (u32, u32, u32, u32, u32, u32, u32) {
+    if let Some(manifest) = manifest {
+        (
+            manifest.architecture.num_hidden_layers,
+            manifest.architecture.num_attention_heads,
+            manifest.architecture.head_dim,
+            manifest.architecture.hidden_size,
+            manifest.architecture.intermediate_size,
+            manifest.architecture.vocab_size,
+            manifest
+                .execution_plan
+                .speculative_config
+                .as_ref()
+                .map(|draft| draft.draft_architecture.num_hidden_layers)
+                .unwrap_or(0),
+        )
+    } else {
+        (0, 0, 0, 0, 0, 0, 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compute_image::manifest::{
+        CompileReadiness, ResidencyPlan, ShardHash, SourceIdentity,
+    };
+    use crate::config::{
+        AudioArchitecture, GenerationRegime, LayerPlan, ModelExecutionPlan, RopeSpec,
+        TextArchitecture, VisionArchitecture,
+    };
+
+    fn test_manifest() -> Manifest {
+        Manifest {
+            image_version: "0.1.0".into(),
+            compiler_version: "test".into(),
+            runtime_abi: "test".into(),
+            hardware_target: None,
+            readiness: Some(CompileReadiness::Ready),
+            compile_date: String::new(),
+            compile_host: String::new(),
+            source: SourceIdentity {
+                config_hash: String::new(),
+                shard_hashes: Vec::<ShardHash>::new(),
+                tokenizer_hashes: Vec::<ShardHash>::new(),
+                auxiliary_hashes: Vec::<ShardHash>::new(),
+                model_type: "gemma4".into(),
+                quantization_bits: 2,
+                quantization_group_size: 64,
+                quantization_mode: "ternary".into(),
+            },
+            architecture: TextArchitecture {
+                hidden_size: 3840,
+                intermediate_size: 15360,
+                num_attention_heads: 16,
+                num_key_value_heads: 8,
+                head_dim: 256,
+                global_head_dim: None,
+                num_global_key_value_heads: None,
+                num_hidden_layers: 48,
+                vocab_size: 262144,
+                sliding_window: 1024,
+                max_position_embeddings: 131072,
+                rms_norm_eps: 1e-6,
+                final_logit_softcapping: None,
+                hidden_size_per_layer_input: 0,
+                layer_types: Vec::new(),
+                rope_local: RopeSpec {
+                    theta: 10000.0,
+                    rope_type: "default".into(),
+                    partial_rotary_factor: None,
+                },
+                rope_global: None,
+                attention_k_eq_v: false,
+                tie_word_embeddings: true,
+                model_type: "gemma4".into(),
+                moe_config: None,
+                diffusion_config: None,
+            },
+            vision_config: Some(VisionArchitecture {
+                hidden_size: 1152,
+                num_attention_heads: 16,
+                num_hidden_layers: 27,
+                intermediate_size: 4304,
+                image_size: 896,
+                patch_size: 14,
+                num_channels: 3,
+                projection_dim: 256,
+                model_family: "gemma4_unified".into(),
+                has_ane_program: false,
+            }),
+            audio_config: Some(AudioArchitecture {
+                hidden_size: 1024,
+                num_attention_heads: 8,
+                num_hidden_layers: 12,
+                intermediate_size: 4096,
+                sample_rate: 16000,
+                num_mel_bins: 80,
+                hop_length: 160,
+                max_audio_length_s: 30,
+                projection_dim: 256,
+            }),
+            segments: Vec::new(),
+            tensor_table: Vec::new(),
+            alias_table: Vec::new(),
+            residency_plan: ResidencyPlan {
+                persistent_segments: Vec::new(),
+                layer_segments: Vec::new(),
+                layer_window_size: 2,
+                total_bytes: 0,
+            },
+            image_hash: String::new(),
+            required_storage_abi: "copied-v0".into(),
+            required_capabilities: Vec::new(),
+            prepacked_layout: "none".into(),
+            metallib_hash: None,
+            metallib_size: None,
+            metal_kernel_artifacts: Vec::new(),
+            execution_plan: ModelExecutionPlan {
+                prologue: Default::default(),
+                layers: vec![LayerPlan {
+                    layer_index: 0,
+                    attention_kind: "full_attention".into(),
+                    segment_id: "layer_0".into(),
+                    hidden_size: 3840,
+                    n_heads: 16,
+                    n_kv_heads: 8,
+                    head_dim: 256,
+                    global_head_dim: None,
+                    n_global_kv_heads: None,
+                    sliding_window: 0,
+                    rope_theta: 10000.0,
+                    partial_rotary_factor: None,
+                    attention_k_eq_v: false,
+                    q_norm_enabled: false,
+                    k_norm_enabled: false,
+                    q_proj_tensor_id: 0,
+                    k_proj_tensor_id: 0,
+                    v_proj_tensor_id: 0,
+                    o_proj_tensor_id: 0,
+                    q_norm_tensor_id: None,
+                    k_norm_tensor_id: None,
+                    gate_proj_tensor_id: 0,
+                    up_proj_tensor_id: 0,
+                    down_proj_tensor_id: 0,
+                    input_layernorm_tensor_id: 0,
+                    post_attention_layernorm_tensor_id: 0,
+                    pre_ffw_layernorm_tensor_id: None,
+                    post_ffw_layernorm_tensor_id: None,
+                    layer_scalar_ids: Vec::new(),
+                    quantization_ids: Vec::new(),
+                    route: Default::default(),
+                    fused_operations: Vec::new(),
+                }],
+                epilogue: Default::default(),
+                fused_ane_islands: Vec::new(),
+                hidden_size: 3840,
+                vocab_size: 262144,
+                sliding_window: 0,
+                final_logit_softcapping: None,
+                tie_word_embeddings: true,
+                rms_norm_eps: 1e-6,
+                speculative_config: None,
+                generation_regime: GenerationRegime::Autoregressive,
+                diffusion_config: None,
+                diffusion_execution_plan: None,
+                kv_cache_mode: Default::default(),
+            },
+            phase_dag: None,
+            compatibility_receipt: None,
+        }
+    }
+
+    #[test]
+    fn synthesized_execution_graph_reflects_multimodal_manifest() {
+        let bytes = synthesize_execution_graph(&test_manifest()).expect("execution graph");
+        let graph = ExecutionGraphDescriptor::from_bytes(&bytes).expect("decode graph");
+        assert!(graph
+            .layers
+            .iter()
+            .any(|node| node.node_kind == NodeKind::VisionPatchEmbed as u8));
+        assert!(graph
+            .layers
+            .iter()
+            .any(|node| node.node_kind == NodeKind::AudioProjection as u8));
+        assert_eq!(graph.num_layers, 48);
+    }
+
+    #[test]
+    fn synthesized_model_artifacts_include_multimodal_token_map() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let artifacts =
+            synthesize_model_artifacts(dir.path(), Some(&test_manifest())).expect("artifacts");
+        let entries: Vec<(u32, &[u8])> = ModelArtifactEntry::iter_entries(&artifacts).collect();
+        let token_map = entries
+            .iter()
+            .find(|(tag, _)| *tag == model_artifact_tag::TOKEN_MAP)
+            .map(|(_, bytes)| {
+                serde_json::from_slice::<serde_json::Value>(bytes).expect("token map")
+            })
+            .expect("token map entry");
+        assert!(token_map.get("image_start_token").is_some());
+        assert!(token_map.get("audio_start_token").is_some());
+        assert_eq!(
+            token_map
+                .get("audio_sample_rate")
+                .and_then(|value| value.as_u64()),
+            Some(16000)
+        );
+    }
 }

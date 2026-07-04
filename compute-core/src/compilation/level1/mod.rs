@@ -10,6 +10,7 @@
 //! or Hessian-diagonal estimates, threshold selection, per-page and per-channel
 //! scale solves, sidecar ranking, deterministic reductions, and receipt hashing.
 
+pub mod checkpoint;
 pub mod gates;
 pub mod reducer;
 pub mod scheduler;

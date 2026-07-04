@@ -2,11 +2,13 @@
 //! segment pipeline, handles quantized weight triplets, and builds the
 //! source identity / manifest hash for deterministic compilation.
 
-use crate::compute_image::compile::source::SourceTensor;
+use crate::compute_image::compile::source::{source_tensor_view, SourceTensor};
 use crate::compute_image::manifest::{
-    Manifest, QuantizationDesc, SegmentKind, ShardHash, SourceIdentity,
+    Manifest, Nf4Tile640Layout, QuantizationDesc, SegmentKind, ShardHash, SharedWeightLayout,
+    SourceIdentity,
 };
 use crate::config::PackedLinearShapes;
+use memmap2::Mmap;
 use mlx_rs::Array;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -19,6 +21,7 @@ use std::collections::HashMap;
 fn emit_tensor(
     builder: &mut crate::compute_image::manifest::ImageBuilder,
     source_tensors: &HashMap<String, SourceTensor>,
+    mmap_bytes: &[Mmap],
     name: &str,
     role: String,
     layer: Option<u32>,
@@ -29,12 +32,13 @@ fn emit_tensor(
     let tensor = source_tensors
         .get(name)
         .ok_or_else(|| crate::Error::from_reason(format!("missing tensor: {}", name)))?;
+    let bytes = source_tensor_view(tensor, mmap_bytes);
 
     Ok(builder.add_tensor(
         name.to_string(),
         role,
         layer,
-        &tensor.data,
+        bytes,
         tensor.source_filename.clone(),
         tensor.source_sha256.clone(),
         tensor.source_offset,
@@ -49,6 +53,7 @@ fn emit_tensor(
 fn emit_quantized_binding(
     builder: &mut crate::compute_image::manifest::ImageBuilder,
     source_tensors: &HashMap<String, SourceTensor>,
+    mmap_bytes: &[Mmap],
     weight_name: &str,
     role: String,
     layer: Option<u32>,
@@ -63,6 +68,7 @@ fn emit_quantized_binding(
     let scales_id = emit_tensor(
         builder,
         source_tensors,
+        mmap_bytes,
         &scales_name,
         format!("{}::scales", role),
         layer,
@@ -73,6 +79,7 @@ fn emit_quantized_binding(
     let biases_id = emit_tensor(
         builder,
         source_tensors,
+        mmap_bytes,
         &biases_name,
         format!("{}::biases", role),
         layer,
@@ -84,6 +91,7 @@ fn emit_quantized_binding(
     emit_tensor(
         builder,
         source_tensors,
+        mmap_bytes,
         weight_name,
         role,
         layer,
@@ -95,8 +103,21 @@ fn emit_quantized_binding(
             groups: packed.groups,
             scale_tensor_id: scales_id,
             bias_tensor_id: biases_id,
+            storage_layout: infer_shared_weight_layout(source_tensors, weight_name, packed),
         }),
     )
+}
+
+fn infer_shared_weight_layout(
+    source_tensors: &HashMap<String, SourceTensor>,
+    weight_name: &str,
+    packed: &PackedLinearShapes,
+) -> Option<SharedWeightLayout> {
+    let tensor = source_tensors.get(weight_name)?;
+    if tensor.dtype == "U8" && packed.bits == 4 && packed.group_size == 128 {
+        return Some(SharedWeightLayout::Nf4Tile640(Nf4Tile640Layout::canonical()));
+    }
+    None
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -132,11 +153,18 @@ pub(crate) fn build_source_identity(
 pub(crate) fn compile_vision_encoder_tensors(
     builder: &mut crate::compute_image::manifest::ImageBuilder,
     source_tensors: &HashMap<String, SourceTensor>,
+    mmap_bytes: &[Mmap],
     emitted_ids: &mut HashMap<String, u32>,
 ) -> crate::Result<()> {
     let mut vision_names: Vec<&String> = source_tensors
         .keys()
-        .filter(|k| k.starts_with("vision_encoder."))
+        .filter(|k| {
+            k.starts_with("vision_encoder.")
+                || k.starts_with("vision_embedder.")
+                || k.starts_with("embed_vision.")
+                || k.starts_with("model.vision_embedder.")
+                || k.starts_with("model.embed_vision.")
+        })
         .collect();
     vision_names.sort();
 
@@ -144,7 +172,13 @@ pub(crate) fn compile_vision_encoder_tensors(
         return Ok(());
     }
 
-    if emitted_ids.keys().any(|k| k.starts_with("vision_encoder.")) {
+    if emitted_ids.keys().any(|k| {
+        k.starts_with("vision_encoder.")
+            || k.starts_with("vision_embedder.")
+            || k.starts_with("embed_vision.")
+            || k.starts_with("model.vision_embedder.")
+            || k.starts_with("model.embed_vision.")
+    }) {
         return Ok(());
     }
 
@@ -160,6 +194,7 @@ pub(crate) fn compile_vision_encoder_tensors(
         let id = emit_tensor(
             builder,
             source_tensors,
+            mmap_bytes,
             name,
             "VisionEncoder".into(),
             None,
@@ -177,6 +212,7 @@ pub(crate) fn compile_vision_encoder_tensors(
 pub(crate) fn compile_audio_encoder_tensors(
     builder: &mut crate::compute_image::manifest::ImageBuilder,
     source_tensors: &HashMap<String, SourceTensor>,
+    mmap_bytes: &[Mmap],
     emitted_ids: &mut HashMap<String, u32>,
     audio_config: Option<crate::config::AudioArchitecture>,
 ) -> crate::Result<()> {
@@ -209,6 +245,7 @@ pub(crate) fn compile_audio_encoder_tensors(
         let id = emit_tensor(
             builder,
             source_tensors,
+            mmap_bytes,
             name,
             "AudioEncoder".into(),
             None,
@@ -226,6 +263,7 @@ pub(crate) fn compile_audio_encoder_tensors(
 pub(crate) fn emit_binding_set(
     builder: &mut crate::compute_image::manifest::ImageBuilder,
     source_tensors: &HashMap<String, SourceTensor>,
+    mmap_bytes: &[Mmap],
     binding: &crate::config::TensorBinding,
     layer: Option<u32>,
 ) -> crate::Result<u32> {
@@ -234,6 +272,7 @@ pub(crate) fn emit_binding_set(
         Some(packed) => emit_quantized_binding(
             builder,
             source_tensors,
+            mmap_bytes,
             &binding.name,
             role,
             layer,
@@ -244,6 +283,7 @@ pub(crate) fn emit_binding_set(
         None => emit_tensor(
             builder,
             source_tensors,
+            mmap_bytes,
             &binding.name,
             role,
             layer,

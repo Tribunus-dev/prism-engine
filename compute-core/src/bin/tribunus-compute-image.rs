@@ -11,7 +11,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rayon::prelude::*;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -35,8 +34,8 @@ fn main() {
         eprintln!("       [--draft-model <dir>] [--diagnostic] [--quantize <mode>]");
         eprintln!("       [--diff <manifest.json>]");
         eprintln!("       [--target <target>]");
-        eprintln!("    quantize modes: nf4, nf4-128, 8bit");
-        eprintln!("    quantize modes: nf4, nf4-128, 8bit, none (default: hardware auto-detect)");
+        eprintln!("    quantize modes: nf4, nf4-128, nf4tile640, 8bit");
+        eprintln!("    quantize modes: nf4, nf4-128, nf4tile640, 8bit, none (default: hardware auto-detect)");
         eprintln!("    targets: m1, m1pro, m2, m2ultra, m3ultra (default: auto-detect)");
         eprintln!(
             "  tribunus-compute-image verify --image <dir> [--expected-hash <hash>] [--full]"
@@ -102,10 +101,13 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
         .map(|q| match q {
             "nf4" => Ok(CompileQuantMode::Nf4 { group_size: 64 }),
             "nf4-128" => Ok(CompileQuantMode::Nf4 { group_size: 128 }),
+            "nf4tile640" | "nf4-tile640" | "nftile640" => {
+                Ok(CompileQuantMode::Nf4Tile640 { group_size: 128 })
+            }
             "8bit" => Ok(CompileQuantMode::Af8 { group_size: 64 }),
             "none" => Ok(CompileQuantMode::Nf4 { group_size: 64 }),
             other => Err(format!(
-                "unknown quantize mode: '{other}'. Expected nf4, nf4-128, 8bit, or none"
+                "unknown quantize mode: '{other}'. Expected nf4, nf4-128, nf4tile640, 8bit, or none"
             )),
         })
         .transpose()?;
@@ -258,18 +260,21 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
         "[build] computing artifact root hash (parallel, {} segments)...",
         compiled.manifest.segments.len()
     );
-    let seg_data: Vec<Vec<u8>> = compiled
-        .manifest
-        .segments
-        .par_iter()
-        .map(|seg| {
-            let sp = staging_path.join(&seg.filename);
-            std::fs::read(&sp).unwrap_or_else(|e| panic!("read {}: {}", seg.filename, e))
-        })
-        .collect();
     let mut root_hasher = Sha256::new();
-    for bytes in &seg_data {
-        root_hasher.update(bytes);
+    let mut buf = vec![0u8; 1024 * 1024];
+    for seg in &compiled.manifest.segments {
+        let sp = staging_path.join(&seg.filename);
+        let mut file =
+            File::open(&sp).map_err(|e| format!("open segment {}: {}", seg.filename, e))?;
+        loop {
+            let n = file
+                .read(&mut buf)
+                .map_err(|e| format!("read segment {}: {}", seg.filename, e))?;
+            if n == 0 {
+                break;
+            }
+            root_hasher.update(&buf[..n]);
+        }
     }
     let artifact_root_hash = format!("{:x}", root_hasher.finalize());
     tribunus_compute_core::log_info!(
@@ -431,37 +436,38 @@ fn cmd_verify(args: &[String]) -> Result<(), String> {
         }
     }
 
-    // If --full: verify every segment SHA-256 against manifest (parallel),
-    // then verify artifact root hash against seal.json.
+    // If --full: verify every segment SHA-256 against manifest, then verify
+    // artifact root hash against seal.json using a streaming read.
     if full {
         tribunus_compute_core::log_info!(
-            "[verify] full: hashing {} segments in parallel...",
+            "[verify] full: hashing {} segments...",
             reader.manifest.segments.len()
         );
-        let results: Vec<(String, bool, Vec<u8>)> = reader
-            .manifest
-            .segments
-            .par_iter()
-            .map(|seg| {
-                let sp = image_path.join(&seg.filename);
-                let bytes =
-                    std::fs::read(&sp).unwrap_or_else(|e| panic!("read {}: {}", seg.filename, e));
-                let computed = format!("{:x}", Sha256::digest(&bytes));
-                let ok = computed == seg.sha256;
-                (seg.filename.clone(), ok, bytes)
-            })
-            .collect();
-
         let mut mismatches: Vec<String> = Vec::new();
         let mut verified = 0usize;
         let mut root_hasher = Sha256::new();
-        for (filename, ok, bytes) in &results {
-            if *ok {
+        let mut buf = vec![0u8; 1024 * 1024];
+        for seg in &reader.manifest.segments {
+            let sp = image_path.join(&seg.filename);
+            let mut file =
+                File::open(&sp).map_err(|e| format!("open segment {}: {}", seg.filename, e))?;
+            let mut seg_hasher = Sha256::new();
+            loop {
+                let n = file
+                    .read(&mut buf)
+                    .map_err(|e| format!("read segment {}: {}", seg.filename, e))?;
+                if n == 0 {
+                    break;
+                }
+                seg_hasher.update(&buf[..n]);
+                root_hasher.update(&buf[..n]);
+            }
+            let computed = format!("{:x}", seg_hasher.finalize());
+            if computed == seg.sha256 {
                 verified += 1;
             } else {
-                mismatches.push(format!("{}: hash mismatch", filename));
+                mismatches.push(format!("{}: hash mismatch", seg.filename));
             }
-            root_hasher.update(bytes);
         }
         if !mismatches.is_empty() {
             return Err(format!(

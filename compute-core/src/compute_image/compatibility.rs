@@ -212,6 +212,12 @@ impl CompatibilityMatrix {
                     ));
                 }
             }
+            CompileQuantMode::Nf4Tile640 { .. } => {
+                // NF4Tile640 uses a fixed 640-element tile storage contract
+                // with internal 128-element quantization groups. Compatibility
+                // is governed by the runtime ABI rather than divisibility of
+                // the logical projection dimensions.
+            }
             CompileQuantMode::Af8 { group_size: _ } => {
                 // 8-bit affine quantization changes byte layout but preserves
                 // logical element count. Always compatible.
