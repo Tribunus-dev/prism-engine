@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tribunus_compute_core::compute_image::compile::ternary::{
-    CimageHeader, SegmentEntry, SegmentKind,
+    CimageHeader, SegmentEntry, SegmentKind, CIMAGE_SEGMENT_CAPACITY,
 };
 
 // ── Qwen2.5-Omni 7B architecture constants ────────────────────────
@@ -337,7 +337,7 @@ fn main() {
         kind: SegmentKind::MetalLib as u32,
         offset: 0,
         length: 0,
-    }; 9];
+    }; CIMAGE_SEGMENT_CAPACITY];
     segments[0] = SegmentEntry {
         kind: SegmentKind::TernaryWeights as u32,
         offset: weights_off,

@@ -13,15 +13,24 @@ use crate::arena::Arena;
 use crate::arena::DataType;
 use crate::compute_image::cimage_loader::CimageDeployment;
 use crate::compute_image::compaction;
-use crate::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
+use crate::compute_image::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
+use crate::compute_image::compile::kernel_dispatch::{
+    Nf4Tile640Offsets, Nf4Tile640ProjectionDispatcher,
+};
+use crate::compute_image::compile::kernel_registry::KernelRegistry;
+use crate::compute_image::compile::kernel_types::{KernelReceipt, ProjectionParams};
 use crate::compute_image::megakernel::{KernelBuffers, Megakernel};
 use crate::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
+use crate::compute_image::multimodal::binding::SealedMultimodalBindings;
+use crate::compute_image::multimodal::descriptor::ProjectionTensorRecord;
 use crate::compute_image::tree_attention::TreeAttention;
 use crate::compute_image::vm_manager::VmManager;
 use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use half::f16;
 use metal::*;
+use parking_lot::Mutex;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 // ── Architecture constants (also used by sibling modules) ────────
 // (shared constants live in mod.rs; runner re-exports via `use super::*`)
@@ -77,6 +86,129 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
+    /// Execute one multimodal NF4Tile640 projection record directly against the
+    /// sealed shared-weight arena.
+    pub fn run_nf4_multimodal_projection(
+        &self,
+        record: &ProjectionTensorRecord,
+        input: &[f32],
+    ) -> Result<Vec<f32>, String> {
+        let _layout = record.validate_nf4_tile640()?;
+        let weights = self
+            .deployment
+            .multimodal_projection_weights_buffer
+            .as_ref()
+            .ok_or_else(|| "multimodal NF4 projection weights unavailable".to_string())?;
+        let scales = self
+            .deployment
+            .multimodal_projection_scales_buffer
+            .as_ref()
+            .ok_or_else(|| "multimodal NF4 projection scales unavailable".to_string())?;
+
+        let expected_in = record.input_width as usize;
+        let expected_out = record.output_width as usize;
+        if expected_in == 0 || expected_out == 0 {
+            return Err("projection record has zero input/output width".into());
+        }
+        if input.len() != expected_in {
+            return Err(format!(
+                "projection input width mismatch: got {}, expected {}",
+                input.len(),
+                expected_in
+            ));
+        }
+
+        let input_buf = self.device.new_buffer_with_data(
+            input.as_ptr() as *const std::ffi::c_void,
+            std::mem::size_of_val(input) as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let output_buf = self.device.new_buffer(
+            (expected_out * std::mem::size_of::<f32>()) as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+
+        let zero_biases = vec![0u8; record.scale_length as usize];
+        let biases_buf = self.device.new_buffer_with_data(
+            zero_biases.as_ptr() as *const std::ffi::c_void,
+            zero_biases.len() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+
+        let registry = Arc::new(Mutex::new(KernelRegistry::new(&self.device)));
+        let dispatcher = Nf4Tile640ProjectionDispatcher::new(registry);
+        let params = ProjectionParams {
+            in_dim: record.input_width,
+            out_dim: record.output_width,
+            page_count: record.input_width.div_ceil(640),
+            page_width: 640,
+            mode_flags: 0,
+            probe_seed: 0,
+            reserved: [0; 5],
+        };
+        let mut receipt = KernelReceipt {
+            kernel_id: 0,
+            phase_id: 0,
+            page_count: 0,
+            sidecar_hits: 0,
+            sidecar_entries_read: 0,
+            threadgroups: 0,
+            threads_per_threadgroup: 0,
+            output_elements: 0,
+            flags: 0,
+            logical_weight_bytes: 0,
+            logical_sidecar_bytes: 0,
+            logical_activation_bytes: 0,
+        };
+
+        let cb = self.queue.new_command_buffer();
+        dispatcher.dispatch_with_offsets(
+            &cb,
+            weights,
+            scales,
+            &biases_buf,
+            &input_buf,
+            &output_buf,
+            &params,
+            Nf4Tile640Offsets {
+                weights_offset: record.weight_offset,
+                scales_offset: record.scale_offset,
+                biases_offset: 0,
+            },
+            &mut receipt,
+        );
+        cb.commit();
+        cb.wait_until_completed();
+
+        let out = unsafe {
+            std::slice::from_raw_parts(output_buf.contents() as *const f32, expected_out)
+        };
+        Ok(out.to_vec())
+    }
+
+    /// Resolve one multimodal execution-graph node against the sealed binding
+    /// table and execute it through the explicit NF4Tile640 Metal projection
+    /// path.
+    pub fn run_nf4_multimodal_node(
+        &self,
+        node_kind: NodeKind,
+        input: &[f32],
+    ) -> Result<Vec<f32>, String> {
+        let bindings = SealedMultimodalBindings::from_deployment(&self.deployment)?;
+        if bindings.projection_precision
+            != crate::compute_image::multimodal::ProjectionPrecision::Nf4Tile640
+        {
+            return Err(format!(
+                "multimodal projection graph is not sealed as NF4Tile640: {:?}",
+                bindings.projection_precision
+            ));
+        }
+        let binding = bindings
+            .binding_for_node_kind(node_kind)
+            .ok_or_else(|| format!("no multimodal projection binding for {:?}", node_kind))?;
+        self.run_nf4_multimodal_projection(&binding.record, input)
+    }
+
     /// Look up or create a compute pipeline state for a kernel function name.
     /// Loads the metallib from the deployment on first call; Metal caches PSOs internally.
     fn get_pso(&self, kernel_name: &str) -> Result<metal::ComputePipelineState, String> {
@@ -651,6 +783,14 @@ impl Orchestrator {
         kv_cache: &metal::Buffer,
         seq_position: u32,
     ) -> Result<metal::Buffer, String> {
+        if self.deployment.is_nf4_tile640() {
+            let _ = self.deployment.require_nf4_biases()?;
+            return Err(
+                "decode_fused: NF4Tile640 deployment detected, but this fused decode path still targets the legacy ternary half-precision kernels. Route through the explicit NF4Tile640 execution graph before decode."
+                    .into(),
+            );
+        }
+
         let fusion_groups = kernel_fusion::analyze_graph(graph);
         let hidden_dim = graph.layers[0].hidden_dim;
         let mut current = input_hidden.clone();

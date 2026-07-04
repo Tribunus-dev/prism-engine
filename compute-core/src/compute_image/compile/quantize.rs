@@ -1,6 +1,6 @@
 //! Compile-time quantization transforms — NF4, 8-bit affine, INT4, ternary.
 
-use super::source::{ensure_tensor_loaded, LoadedSource, SourceTensor};
+use super::source::{source_tensor_view, LoadedSource, SourceTensor};
 use crate::config::CompileQuantMode;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -19,11 +19,11 @@ pub(crate) const NF4_CODEBOOK: [f32; 16] = [
 pub(crate) fn quantize_nf4_value(value: f32) -> u8 {
     let mut best_idx: u8 = 0;
     let mut best_dist: f32 = (value - NF4_CODEBOOK[0]).abs();
-    for (i, &level) in NF4_CODEBOOK.iter().enumerate().skip(1) {
+    for (i, &level) in NF4_CODEBOOK[1..].iter().enumerate() {
         let dist = (value - level).abs();
         if dist < best_dist {
             best_dist = dist;
-            best_idx = i as u8;
+            best_idx = (i + 1) as u8;
         }
     }
     best_idx
@@ -125,6 +125,38 @@ pub fn quantize_int4_group(values: &[f32]) -> (Vec<u32>, f32, f32) {
     (packed, scale, bias)
 }
 
+fn quantize_int4_group_with_stats(
+    values: &[f32],
+    min_val: f32,
+    max_val: f32,
+) -> (Vec<u32>, f32, f32) {
+    if values.is_empty() {
+        return (vec![0u32; 1], 0.0, 0.0);
+    }
+    let range = max_val - min_val;
+    if range == 0.0 {
+        return (vec![0u32; 1], 1.0, min_val);
+    }
+    let max_abs = max_val.abs().max(min_val.abs());
+    let scale_mag = max_abs / 8.0;
+    let (scale, bias) = if max_val.abs() < min_val.abs() {
+        (-scale_mag, max_val)
+    } else {
+        (scale_mag, min_val)
+    };
+    let n = values.len();
+    let packed_len = (n + 7) / 8;
+    let mut packed = vec![0u32; packed_len];
+
+    for (i, &val) in values.iter().enumerate() {
+        let u = ((val - bias) / scale).round().clamp(0.0, 15.0) as u8;
+        let word_idx = i / 8;
+        let bit_shift = ((i % 8) * 4) as u32;
+        packed[word_idx] |= (u as u32) << bit_shift;
+    }
+    (packed, scale, bias)
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Top-level quantization dispatch
 // ═══════════════════════════════════════════════════════════════════════════
@@ -178,23 +210,14 @@ pub(crate) fn apply_quantize_to_loaded(
         }
     }
 
-    // Lazy-load each weight tensor from mmap before quantizing
-    for wb in &weight_bindings {
-        if let Some(tensor) = loaded.source_tensors.get_mut(&wb.name) {
-            for mmap in &loaded.mmap_bytes {
-                ensure_tensor_loaded(tensor, mmap);
-                if !tensor.data.is_empty() {
-                    break;
-                }
-            }
-        }
-    }
-
     eprintln!(
         "[quantize] applying {} quantization to {} weight tensors",
         match qmode {
             CompileQuantMode::Nf4 { group_size } => {
                 format!("NF4 (group_size={})", group_size)
+            }
+            CompileQuantMode::Nf4Tile640 { group_size } => {
+                format!("NF4 Tile640 (group_size={})", group_size)
             }
             CompileQuantMode::Af8 { group_size } => {
                 format!("8-bit affine (group_size={})", group_size)
@@ -210,12 +233,14 @@ pub(crate) fn apply_quantize_to_loaded(
     );
 
     for wb in &weight_bindings {
-        let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
-            crate::Error::from_reason(format!("quantize: missing source tensor '{}'", wb.name))
-        })?;
+        let (dtype, shape) = {
+            let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
+                crate::Error::from_reason(format!("quantize: missing source tensor '{}'", wb.name))
+            })?;
+            (source_tensor.dtype.clone(), source_tensor.shape.clone())
+        };
 
         // Only quantize FP16/BF16 dtypes.
-        let dtype = source_tensor.dtype.clone();
         if dtype != "F16" && dtype != "BF16" {
             eprintln!(
                 "[quantize] skipping {} (dtype={}, only FP16/BF16 supported)",
@@ -224,7 +249,6 @@ pub(crate) fn apply_quantize_to_loaded(
             continue;
         }
 
-        let shape = &source_tensor.shape;
         // Skip 1D tensors (RMS norm weights, etc.) — only quantize 2D weight matrices.
         if shape.len() != 2 {
             eprintln!(
@@ -236,16 +260,21 @@ pub(crate) fn apply_quantize_to_loaded(
         let out_dim = shape[0]; // rows
         let in_dim = shape[1]; // cols
 
-        // Clone raw data to release the immutable borrow on loaded
-        // before calling try_ternary_tile640_pack_gpu which needs &mut loaded.
-        let raw = source_tensor.data.clone();
-
         // GPU-accelerated TernaryTile640: try Metal before falling back to CPU.
         // The GPU kernel reads BF16 directly from a shared-memory buffer,
         // skipping the CPU F32 conversion entirely.
         #[cfg(feature = "metal-dispatch")]
         if matches!(qmode, CompileQuantMode::TernaryTile640 { .. }) {
-            if try_ternary_tile640_pack_gpu(loaded, &wb.name, &raw, out_dim, in_dim, None)? {
+            let raw_view = {
+                let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
+                    crate::Error::from_reason(format!(
+                        "quantize: missing source tensor '{}'",
+                        wb.name
+                    ))
+                })?;
+                source_tensor_view(source_tensor, &loaded.mmap_bytes).to_vec()
+            };
+            if try_ternary_tile640_pack_gpu(loaded, &wb.name, &raw_view, out_dim, in_dim, None)? {
                 eprintln!("[quantize] {} ternary tile640 → GPU", wb.name);
                 continue;
             }
@@ -255,25 +284,30 @@ pub(crate) fn apply_quantize_to_loaded(
             );
         }
 
-        // Convert FP16/BF16 raw bytes to F32.
-        let n_elements = raw.len() / 2;
-        let mut f32_vals = Vec::with_capacity(n_elements);
-        if dtype == "BF16" {
-            // BF16: same exponent/mantissa layout as F32 top-16 bits.
-            for chunk in raw.chunks_exact(2) {
-                let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
-                f32_vals.push(f32::from_bits((bits as u32) << 16));
+        #[cfg(feature = "metal-dispatch")]
+        if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
+            let raw_view = {
+                let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
+                    crate::Error::from_reason(format!(
+                        "quantize: missing source tensor '{}'",
+                        wb.name
+                    ))
+                })?;
+                source_tensor_view(source_tensor, &loaded.mmap_bytes).to_vec()
+            };
+            if try_nf4_tile640_pack_gpu(loaded, &wb.name, &raw_view, &dtype, out_dim, in_dim)? {
+                eprintln!("[quantize] {} nf4 tile640 → GPU", wb.name);
+                continue;
             }
-        } else {
-            // FP16: standard IEEE 754 half-precision.
-            for chunk in raw.chunks_exact(2) {
-                let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
-                f32_vals.push(half_to_f32(bits));
-            }
+            eprintln!(
+                "[quantize] {} nf4 tile640 → CPU fallback (Metal unavailable)",
+                wb.name
+            );
         }
 
         let group_size = match qmode {
             CompileQuantMode::Nf4 { group_size } => group_size,
+            CompileQuantMode::Nf4Tile640 { group_size } => group_size,
             CompileQuantMode::Af8 { group_size } => group_size,
             CompileQuantMode::Ternary { group_size } => group_size,
             CompileQuantMode::TernaryTile640 { group_size } => group_size,
@@ -284,18 +318,82 @@ pub(crate) fn apply_quantize_to_loaded(
         // Apply block quantization per group.
         match qmode {
             CompileQuantMode::Nf4 { .. } => {
-                apply_nf4_quantize(
+                let (packed_bytes, scales_bytes, biases_bytes, packed_in, packed_shape) = {
+                    let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
+                        crate::Error::from_reason(format!(
+                            "quantize: missing source tensor '{}'",
+                            wb.name
+                        ))
+                    })?;
+                    let raw_view = source_tensor_view(source_tensor, &loaded.mmap_bytes);
+                    quantize_nf4_matrix_from_raw(
+                        raw_view,
+                        &dtype,
+                        out_dim,
+                        in_dim,
+                        group_size,
+                        groups_per_row,
+                        total_groups,
+                    )?
+                };
+                let packed_len = packed_bytes.len();
+                let scales_len = scales_bytes.len();
+                let biases_len = biases_bytes.len();
+                install_quantized_triplet(
                     loaded,
                     &wb.name,
-                    &f32_vals,
-                    out_dim,
-                    in_dim,
-                    group_size,
-                    groups_per_row,
-                    total_groups,
-                )?;
+                    packed_bytes,
+                    "U32",
+                    vec![out_dim, packed_in as u32],
+                    packed_len,
+                    scales_bytes,
+                    scales_len,
+                    biases_bytes,
+                    biases_len,
+                    vec![out_dim, groups_per_row],
+                    packed_shape,
+                );
+            }
+            CompileQuantMode::Nf4Tile640 { .. } => {
+                let (packed_bytes, scales_bytes, biases_bytes, packed_in, packed_shape) = {
+                    let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
+                        crate::Error::from_reason(format!(
+                            "quantize: missing source tensor '{}'",
+                            wb.name
+                        ))
+                    })?;
+                    let raw_view = source_tensor_view(source_tensor, &loaded.mmap_bytes);
+                    quantize_nf4_tile640_matrix_from_raw(raw_view, &dtype, out_dim, in_dim)?
+                };
+                let packed_len = packed_bytes.len();
+                let scales_len = scales_bytes.len();
+                let biases_len = biases_bytes.len();
+                install_quantized_triplet(
+                    loaded,
+                    &wb.name,
+                    packed_bytes,
+                    "U8",
+                    vec![out_dim, packed_in as u32],
+                    packed_len,
+                    scales_bytes,
+                    scales_len,
+                    biases_bytes,
+                    biases_len,
+                    vec![out_dim, packed_shape.groups / out_dim],
+                    packed_shape,
+                );
             }
             CompileQuantMode::Af8 { .. } => {
+                let raw_view = {
+                    let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
+                        crate::Error::from_reason(format!(
+                            "quantize: missing source tensor '{}'",
+                            wb.name
+                        ))
+                    })?;
+                    source_tensor_view(source_tensor, &loaded.mmap_bytes).to_vec()
+                };
+                let f32_vals = decode_f16_or_bf16_matrix(&raw_view, &dtype);
                 apply_af8_quantize(
                     loaded,
                     &wb.name,
@@ -308,6 +406,16 @@ pub(crate) fn apply_quantize_to_loaded(
                 )?;
             }
             CompileQuantMode::Ternary { .. } => {
+                let raw_view = {
+                    let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
+                        crate::Error::from_reason(format!(
+                            "quantize: missing source tensor '{}'",
+                            wb.name
+                        ))
+                    })?;
+                    source_tensor_view(source_tensor, &loaded.mmap_bytes).to_vec()
+                };
+                let f32_vals = decode_f16_or_bf16_matrix(&raw_view, &dtype);
                 apply_ternary_quantize(
                     loaded,
                     &wb.name,
@@ -320,6 +428,16 @@ pub(crate) fn apply_quantize_to_loaded(
                 )?;
             }
             CompileQuantMode::TernaryTile640 { .. } => {
+                let raw_view = {
+                    let source_tensor = loaded.source_tensors.get(&wb.name).ok_or_else(|| {
+                        crate::Error::from_reason(format!(
+                            "quantize: missing source tensor '{}'",
+                            wb.name
+                        ))
+                    })?;
+                    source_tensor_view(source_tensor, &loaded.mmap_bytes).to_vec()
+                };
+                let f32_vals = decode_f16_or_bf16_matrix(&raw_view, &dtype);
                 apply_ternary_tile640_quantize(
                     loaded,
                     &wb.name,
@@ -335,6 +453,101 @@ pub(crate) fn apply_quantize_to_loaded(
     }
 
     Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Raw decode helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn decode_scalar_from_raw(raw: &[u8], bf16: bool, elem_index: usize) -> f32 {
+    let byte_index = elem_index * 2;
+    let bits = u16::from_le_bytes([raw[byte_index], raw[byte_index + 1]]);
+    if bf16 {
+        f32::from_bits((bits as u32) << 16)
+    } else {
+        half_to_f32(bits)
+    }
+}
+
+fn decode_f16_or_bf16_matrix(raw: &[u8], dtype: &str) -> Vec<f32> {
+    let n_elements = raw.len() / 2;
+    let mut f32_vals = Vec::with_capacity(n_elements);
+    let bf16 = dtype == "BF16";
+    for elem_index in 0..n_elements {
+        f32_vals.push(decode_scalar_from_raw(raw, bf16, elem_index));
+    }
+    f32_vals
+}
+
+fn install_quantized_triplet(
+    loaded: &mut LoadedSource,
+    weight_name: &str,
+    packed_weight_bytes: Vec<u8>,
+    packed_dtype: &str,
+    packed_weight_shape: Vec<u32>,
+    packed_weight_len: usize,
+    scales_bytes: Vec<u8>,
+    scales_len: usize,
+    biases_bytes: Vec<u8>,
+    biases_len: usize,
+    aux_shape: Vec<u32>,
+    packed_shape: crate::config::PackedLinearShapes,
+) {
+    if let Some(st) = loaded.source_tensors.get_mut(weight_name) {
+        st.data = packed_weight_bytes;
+        st.dtype = packed_dtype.to_string();
+        st.shape = packed_weight_shape;
+        st.mmap_index = None;
+        st.source_offset = 0;
+        st.source_byte_size = packed_weight_len as u64;
+    }
+
+    let stem = weight_name.strip_suffix(".weight").unwrap_or(weight_name);
+    let scales_name = format!("{}.scales", stem);
+    let biases_name = format!("{}.biases", stem);
+
+    loaded.source_tensors.insert(
+        scales_name.clone(),
+        SourceTensor {
+            name: scales_name,
+            dtype: "F32".to_string(),
+            shape: aux_shape.clone(),
+            data: scales_bytes,
+            mmap_index: None,
+            source_filename: String::new(),
+            source_sha256: String::new(),
+            source_offset: 0,
+            source_byte_size: scales_len as u64,
+        },
+    );
+
+    loaded.source_tensors.insert(
+        biases_name.clone(),
+        SourceTensor {
+            name: biases_name,
+            dtype: "F32".to_string(),
+            shape: aux_shape,
+            data: biases_bytes,
+            mmap_index: None,
+            source_filename: String::new(),
+            source_sha256: String::new(),
+            source_offset: 0,
+            source_byte_size: biases_len as u64,
+        },
+    );
+
+    for binding in &mut loaded.spec.global_tensors {
+        if binding.name == weight_name && binding.packed_shape.is_none() {
+            binding.packed_shape = Some(packed_shape.clone());
+        }
+    }
+    for layer in &mut loaded.spec.layers {
+        for binding in &mut layer.tensors {
+            if binding.name == weight_name && binding.packed_shape.is_none() {
+                binding.packed_shape = Some(packed_shape.clone());
+            }
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -435,6 +648,7 @@ pub(crate) fn apply_af8_quantize(
             dtype: "F32".to_string(),
             shape: vec![out_dim, groups_per_row],
             data: scales_bytes,
+            mmap_index: None,
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
@@ -449,6 +663,7 @@ pub(crate) fn apply_af8_quantize(
             dtype: "F32".to_string(),
             shape: vec![out_dim, groups_per_row],
             data: biases_bytes,
+            mmap_index: None,
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
@@ -482,20 +697,26 @@ pub(crate) fn apply_af8_quantize(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Apply NF4 quantization to a weight tensor and update the loaded source.
-pub(crate) fn apply_nf4_quantize(
-    loaded: &mut LoadedSource,
-    weight_name: &str,
-    f32_vals: &[f32],
+fn quantize_nf4_matrix_from_raw(
+    raw: &[u8],
+    dtype: &str,
     out_dim: u32,
     in_dim: u32,
     group_size: u32,
     groups_per_row: u32,
     total_groups: u32,
-) -> crate::Result<()> {
+) -> crate::Result<(
+    Vec<u8>,
+    Vec<u8>,
+    Vec<u8>,
+    usize,
+    crate::config::PackedLinearShapes,
+)> {
     let in_dim_u = in_dim as usize;
     let gs = group_size as usize;
     let gpr = groups_per_row as usize;
     let total_g = total_groups as usize;
+    let bf16 = dtype == "BF16";
 
     // Packed NF4 weights: each U32 stores 8 * 4-bit values.
     let pack_factor = 8; // 32 / 4
@@ -503,17 +724,28 @@ pub(crate) fn apply_nf4_quantize(
     let packed_weight_len = (out_dim as usize) * packed_in;
     let mut packed_weight = vec![0u32; packed_weight_len];
     let mut scales = Vec::with_capacity(total_g);
-    let _biases = vec![0.0f32; total_g]; // NF4 is symmetric — biases are 0
+    let mut group_vals = Vec::with_capacity(gs);
 
     for row in 0..out_dim as usize {
-        let row_offset = row * in_dim_u;
+        let row_elem_offset = row * in_dim_u;
         for g in 0..gpr {
-            let group_start = row_offset + g * gs;
-            let group_end = (group_start + gs).min(row_offset + in_dim_u);
-            let group_vals = &f32_vals[group_start..group_end];
+            let group_start = row_elem_offset + g * gs;
+            let group_end = (group_start + gs).min(row_elem_offset + in_dim_u);
+            group_vals.clear();
+            let mut absmax = 0.0f32;
+            let mut min_val = f32::INFINITY;
+            let mut max_val = f32::NEG_INFINITY;
+            for elem_index in group_start..group_end {
+                let value = decode_scalar_from_raw(raw, bf16, elem_index);
+                absmax = absmax.max(value.abs());
+                min_val = min_val.min(value);
+                max_val = max_val.max(value);
+                group_vals.push(value);
+            }
 
-            let (_packed_group, _scale, _bias) = quantize_nf4_group(group_vals);
-            let (packed_group, scale, _bias) = quantize_int4_group(group_vals);
+            let scale = if absmax > 1e-12 { absmax } else { 1.0 };
+            let (packed_group, _int4_scale, _bias) =
+                quantize_int4_group_with_stats(&group_vals, min_val, max_val);
             scales.push(scale);
 
             // Place packed U32 words into the correct position in packed_weight.
@@ -551,12 +783,6 @@ pub(crate) fn apply_nf4_quantize(
         .collect();
     let biases_bytes: Vec<u8> = vec![0u8; total_g * 4]; // F32 zeros
 
-    // Derive scale/bias tensor names.
-    let stem = weight_name.strip_suffix(".weight").unwrap_or(weight_name);
-    let scales_name = format!("{}.scales", stem);
-    let biases_name = format!("{}.biases", stem);
-
-    // Build the packed shape descriptor.
     let packed_shape = crate::config::PackedLinearShapes {
         weight: vec![out_dim, packed_in as u32],
         scales: vec![out_dim, groups_per_row],
@@ -566,63 +792,100 @@ pub(crate) fn apply_nf4_quantize(
         groups: groups_per_row * out_dim,
     };
 
-    // Replace the weight source tensor with packed data.
-    if let Some(st) = loaded.source_tensors.get_mut(weight_name) {
-        st.data = packed_bytes;
-        st.dtype = "U32".to_string();
-        st.shape = vec![out_dim, packed_in as u32];
-    }
+    Ok((
+        packed_bytes,
+        scales_bytes,
+        biases_bytes,
+        packed_in,
+        packed_shape,
+    ))
+}
 
-    // Add scale source tensor.
-    loaded.source_tensors.insert(
-        scales_name.clone(),
-        SourceTensor {
-            name: scales_name.clone(),
-            dtype: "F32".to_string(),
-            shape: vec![out_dim, groups_per_row],
-            data: scales_bytes,
-            source_filename: String::new(),
-            source_sha256: String::new(),
-            source_offset: 0,
-            source_byte_size: 0,
-        },
-    );
+fn quantize_nf4_tile640_matrix_from_raw(
+    raw: &[u8],
+    dtype: &str,
+    out_dim: u32,
+    in_dim: u32,
+) -> crate::Result<(
+    Vec<u8>,
+    Vec<u8>,
+    Vec<u8>,
+    usize,
+    crate::config::PackedLinearShapes,
+)> {
+    let in_dim_u = in_dim as usize;
+    let out_dim_u = out_dim as usize;
+    let tile_elements = 640usize;
+    let group_size = 128usize;
+    let groups_per_tile = 5usize;
+    let tile_count = in_dim_u.div_ceil(tile_elements);
+    let packed_bytes_per_group = group_size / 2;
+    let packed_bytes_per_tile = tile_elements / 2;
+    let bf16 = dtype == "BF16";
 
-    // Add bias source tensor.
-    loaded.source_tensors.insert(
-        biases_name.clone(),
-        SourceTensor {
-            name: biases_name.clone(),
-            dtype: "F32".to_string(),
-            shape: vec![out_dim, groups_per_row],
-            data: biases_bytes,
-            source_filename: String::new(),
-            source_sha256: String::new(),
-            source_offset: 0,
-            source_byte_size: 0,
-        },
-    );
+    let mut packed_weight = vec![0u8; out_dim_u * tile_count * packed_bytes_per_tile];
+    let mut scales = Vec::with_capacity(out_dim_u * tile_count * groups_per_tile);
+    let mut biases = Vec::with_capacity(out_dim_u * tile_count * groups_per_tile);
+    let mut group_vals = vec![0.0f32; group_size];
 
-    // Update the TensorBinding in the spec to enable packed emission.
-    for binding in &mut loaded.spec.global_tensors {
-        if binding.name == weight_name && binding.packed_shape.is_none() {
-            binding.packed_shape = Some(packed_shape.clone());
-        }
-    }
-    for layer in &mut loaded.spec.layers {
-        for binding in &mut layer.tensors {
-            if binding.name == weight_name && binding.packed_shape.is_none() {
-                binding.packed_shape = Some(packed_shape.clone());
+    for row in 0..out_dim_u {
+        let row_elem_offset = row * in_dim_u;
+        for tile in 0..tile_count {
+            let tile_col0 = tile * tile_elements;
+            let tile_byte_offset =
+                row * tile_count * packed_bytes_per_tile + tile * packed_bytes_per_tile;
+
+            for group in 0..groups_per_tile {
+                let group_col0 = tile_col0 + group * group_size;
+                for (i, slot) in group_vals.iter_mut().enumerate() {
+                    let col = group_col0 + i;
+                    *slot = if col < in_dim_u {
+                        decode_scalar_from_raw(raw, bf16, row_elem_offset + col)
+                    } else {
+                        0.0
+                    };
+                }
+
+                let (packed_group, scale, bias) = quantize_nf4_group(&group_vals);
+                scales.push(scale);
+                biases.push(bias);
+
+                let group_byte_offset = tile_byte_offset + group * packed_bytes_per_group;
+                for (word_i, word) in packed_group.iter().enumerate() {
+                    let bytes = word.to_le_bytes();
+                    let dst = group_byte_offset + word_i * 4;
+                    packed_weight[dst..dst + 4].copy_from_slice(&bytes);
+                }
             }
         }
     }
 
-    eprintln!(
-        "[quantize] NF4 quantized {}: [{},{}] -> packed [{},{}] + scales [{},{}]",
-        weight_name, out_dim, in_dim, out_dim, packed_in, out_dim, groups_per_row
-    );
+    let scales_bytes: Vec<u8> = scales
+        .iter()
+        .flat_map(|&s| s.to_le_bytes().to_vec())
+        .collect();
+    let biases_bytes: Vec<u8> = biases
+        .iter()
+        .flat_map(|&b| b.to_le_bytes().to_vec())
+        .collect();
 
-    Ok(())
+    let packed_in = tile_count * packed_bytes_per_tile;
+    let packed_shape = crate::config::PackedLinearShapes {
+        weight: vec![out_dim, packed_in as u32],
+        scales: vec![out_dim, (tile_count * groups_per_tile) as u32],
+        biases: vec![out_dim, (tile_count * groups_per_tile) as u32],
+        bits: 4,
+        group_size: group_size as u32,
+        groups: (out_dim_u * tile_count * groups_per_tile) as u32,
+    };
+
+    Ok((
+        packed_weight,
+        scales_bytes,
+        biases_bytes,
+        packed_in,
+        packed_shape,
+    ))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -723,6 +986,7 @@ pub(crate) fn apply_ternary_quantize(
             dtype: "F32".to_string(),
             shape: vec![out_dim, groups_per_row],
             data: scales_bytes,
+            mmap_index: None,
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
@@ -737,6 +1001,7 @@ pub(crate) fn apply_ternary_quantize(
             dtype: "F32".to_string(),
             shape: vec![out_dim, groups_per_row],
             data: biases_bytes,
+            mmap_index: None,
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
@@ -899,6 +1164,7 @@ pub(crate) fn apply_ternary_tile640_quantize(
             dtype: "F32".to_string(),
             shape: vec![out_dim, tile_count as u32],
             data: scales_bytes,
+            mmap_index: None,
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
@@ -913,6 +1179,7 @@ pub(crate) fn apply_ternary_tile640_quantize(
             dtype: "F32".to_string(),
             shape: vec![out_dim, tile_count as u32],
             data: biases_bytes,
+            mmap_index: None,
             source_filename: String::new(),
             source_sha256: String::new(),
             source_offset: 0,
@@ -982,3 +1249,139 @@ pub(crate) fn half_to_f32(bits: u16) -> f32 {
 // so the `use` items and `pub(crate)` visibility work naturally.
 #[cfg(feature = "metal-dispatch")]
 include!("gpu_pack.rs");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn encode_bf16(values: &[f32]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(values.len() * 2);
+        for &value in values {
+            bytes.extend_from_slice(&half::bf16::from_f32(value).to_bits().to_le_bytes());
+        }
+        bytes
+    }
+
+    fn sample_tile640_matrix(out_dim: usize, in_dim: usize) -> Vec<f32> {
+        let mut values = Vec::with_capacity(out_dim * in_dim);
+        for row in 0..out_dim {
+            for col in 0..in_dim {
+                let phase = ((row * 37 + col * 17) % 29) as f32;
+                let wave = ((col % 11) as f32 - 5.0) / 5.0;
+                let signed = if (row + col) % 2 == 0 { 1.0 } else { -1.0 };
+                values.push((phase / 29.0) * wave * signed);
+            }
+        }
+        values
+    }
+
+    #[test]
+    fn nf4_tile640_cpu_quantizer_emits_expected_shapes() {
+        let out_dim = 3u32;
+        let in_dim = 641u32;
+        let raw = encode_bf16(&sample_tile640_matrix(out_dim as usize, in_dim as usize));
+        let (packed, scales, biases, packed_in, packed_shape) =
+            quantize_nf4_tile640_matrix_from_raw(&raw, "BF16", out_dim, in_dim).unwrap();
+
+        assert_eq!(packed_in, 640);
+        assert_eq!(packed.len(), out_dim as usize * 2 * 320);
+        assert_eq!(
+            scales.len(),
+            out_dim as usize * 2 * 5 * std::mem::size_of::<f32>()
+        );
+        assert_eq!(
+            biases.len(),
+            out_dim as usize * 2 * 5 * std::mem::size_of::<f32>()
+        );
+        assert_eq!(packed_shape.weight, vec![out_dim, 640]);
+        assert_eq!(packed_shape.scales, vec![out_dim, 10]);
+        assert_eq!(packed_shape.biases, vec![out_dim, 10]);
+        assert_eq!(packed_shape.bits, 4);
+        assert_eq!(packed_shape.group_size, 128);
+        assert_eq!(packed_shape.groups, 30);
+    }
+
+    #[cfg(feature = "metal-dispatch")]
+    #[test]
+    fn nf4_tile640_gpu_matches_cpu_quantizer() {
+        let out_dim = 2u32;
+        let in_dim = 641u32;
+        let raw = encode_bf16(&sample_tile640_matrix(out_dim as usize, in_dim as usize));
+
+        let (cpu_packed, cpu_scales, cpu_biases, cpu_packed_in, cpu_shape) =
+            quantize_nf4_tile640_matrix_from_raw(&raw, "BF16", out_dim, in_dim).unwrap();
+
+        let Some((gpu_packed, gpu_scales, gpu_biases, gpu_packed_in, gpu_shape)) =
+            try_nf4_tile640_pack_gpu_bytes(&raw, "BF16", out_dim, in_dim)
+        else {
+            return;
+        };
+
+        assert_eq!(gpu_packed_in, cpu_packed_in);
+        assert_eq!(gpu_shape.weight, cpu_shape.weight);
+        assert_eq!(gpu_shape.scales, cpu_shape.scales);
+        assert_eq!(gpu_shape.biases, cpu_shape.biases);
+        assert_eq!(gpu_shape.bits, cpu_shape.bits);
+        assert_eq!(gpu_shape.group_size, cpu_shape.group_size);
+        assert_eq!(gpu_shape.groups, cpu_shape.groups);
+        assert_eq!(gpu_packed, cpu_packed);
+        assert_eq!(gpu_scales, cpu_scales);
+        assert_eq!(gpu_biases, cpu_biases);
+    }
+
+    #[cfg(feature = "metal-dispatch")]
+    #[test]
+    fn nf4_tile640_gpu_direct_mmap_matches_cpu_quantizer() {
+        let out_dim = 2u32;
+        let in_dim = 641u32;
+        let raw = encode_bf16(&sample_tile640_matrix(out_dim as usize, in_dim as usize));
+
+        let (cpu_packed, cpu_scales, cpu_biases, _, _) =
+            quantize_nf4_tile640_matrix_from_raw(&raw, "BF16", out_dim, in_dim).unwrap();
+        let layout = nf4_tile640_pack_layout(out_dim, in_dim);
+
+        let weights_offset = 64usize;
+        let scales_offset = weights_offset + layout.total_packed_bytes + 64;
+        let biases_offset = scales_offset + layout.scales_len + 64;
+        let backing_len = biases_offset + layout.biases_len + 64;
+        let mut backing = vec![0xCDu8; backing_len];
+
+        let result = dispatch_nf4_tile640_pack(
+            &raw,
+            "BF16",
+            out_dim,
+            in_dim,
+            Some(Nf4Tile640MmapOutput {
+                mmap_base: backing.as_mut_ptr(),
+                weights_offset: weights_offset as u64,
+                scales_offset: scales_offset as u64,
+                biases_offset: biases_offset as u64,
+            }),
+        );
+
+        let Some(artifacts) = result else {
+            return;
+        };
+
+        assert!(artifacts.packed_weight.is_empty());
+        assert!(artifacts.scales_bytes.is_empty());
+        assert!(artifacts.biases_bytes.is_empty());
+        assert_eq!(artifacts.total_packed_bytes, layout.total_packed_bytes);
+        assert_eq!(artifacts.scales_len, layout.scales_len);
+        assert_eq!(artifacts.biases_len, layout.biases_len);
+        assert_eq!(artifacts.packed_in, layout.packed_in);
+
+        assert_eq!(
+            &backing[weights_offset..weights_offset + layout.total_packed_bytes],
+            cpu_packed.as_slice()
+        );
+        assert_eq!(
+            &backing[scales_offset..scales_offset + layout.scales_len],
+            cpu_scales.as_slice()
+        );
+        assert_eq!(
+            &backing[biases_offset..biases_offset + layout.biases_len],
+            cpu_biases.as_slice()
+        );
+    }
+}

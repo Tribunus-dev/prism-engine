@@ -490,6 +490,71 @@ pub struct QuantizationDesc {
     pub groups: u32,
     pub scale_tensor_id: u32,
     pub bias_tensor_id: u32,
+    /// Explicit physical storage contract for shared-lane execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_layout: Option<SharedWeightLayout>,
+}
+
+/// Physical shared-lane storage layout for quantized weight triplets.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedWeightLayout {
+    Nf4Tile640(Nf4Tile640Layout),
+}
+
+/// Canonical NF4 Tile640 packed-weight + FP32 metadata ABI.
+///
+/// The weight tensor stores raw packed u8 bytes in 640-element macro-tiles.
+/// Companion scale and bias tensors store FP32 metadata in the exact same
+/// tile/group order. Both the Metal path and stateless ANE path consume this
+/// descriptor so they agree on the same resident bytes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Nf4Tile640Layout {
+    pub tile_elements: u32,
+    pub quant_group_size: u32,
+    pub groups_per_tile: u32,
+    pub packed_weight_bytes_per_tile: u32,
+    pub scale_values_per_tile: u32,
+    pub bias_values_per_tile: u32,
+    pub packed_weight_dtype: String,
+    pub metadata_dtype: String,
+    pub weight_lane_read_bytes: u32,
+}
+
+impl Nf4Tile640Layout {
+    pub const TILE_ELEMENTS: u32 = 640;
+    pub const QUANT_GROUP_SIZE: u32 = 128;
+    pub const GROUPS_PER_TILE: u32 = 5;
+    pub const PACKED_WEIGHT_BYTES_PER_TILE: u32 = 320;
+    pub const SCALE_VALUES_PER_TILE: u32 = 5;
+    pub const BIAS_VALUES_PER_TILE: u32 = 5;
+    pub const WEIGHT_LANE_READ_BYTES: u32 = 2;
+
+    pub fn canonical() -> Self {
+        Self {
+            tile_elements: Self::TILE_ELEMENTS,
+            quant_group_size: Self::QUANT_GROUP_SIZE,
+            groups_per_tile: Self::GROUPS_PER_TILE,
+            packed_weight_bytes_per_tile: Self::PACKED_WEIGHT_BYTES_PER_TILE,
+            scale_values_per_tile: Self::SCALE_VALUES_PER_TILE,
+            bias_values_per_tile: Self::BIAS_VALUES_PER_TILE,
+            packed_weight_dtype: "U8".into(),
+            metadata_dtype: "F32".into(),
+            weight_lane_read_bytes: Self::WEIGHT_LANE_READ_BYTES,
+        }
+    }
+
+    pub fn tiles_for_cols(&self, cols: u32) -> u32 {
+        cols.div_ceil(self.tile_elements)
+    }
+
+    pub fn packed_row_bytes(&self, cols: u32) -> u32 {
+        self.tiles_for_cols(cols) * self.packed_weight_bytes_per_tile
+    }
+
+    pub fn metadata_row_values(&self, cols: u32) -> u32 {
+        self.tiles_for_cols(cols) * self.groups_per_tile
+    }
 }
 
 /// An alias mapping — resolves a logical tensor name to physical storage.
@@ -506,6 +571,8 @@ pub struct AliasEntry {
 pub enum ArtifactKind {
     /// MLX NF4 — packed uint32 words (8 NF4 values per u32).
     MlxNf4U32,
+    /// Shared-lane NF4 Tile640 — packed uint8 bytes with FP32 sidecar metadata.
+    Nf4Tile640Shared,
     /// MLX 8-bit affine — packed uint32 words (4 u8 values per u32).
     MlxAf8U32,
     /// CPU fp16 — dequantized float16.

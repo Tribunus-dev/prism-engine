@@ -113,10 +113,9 @@ impl MultiplexerState {
         self.slc_buf_ptr = Some(buf.as_mut_ptr());
         self.slc_buf = Some(buf);
 
-        use crate::compute_image::compile::ternary::SegmentKind;
         let weights = header
-            .segment(SegmentKind::TernaryWeights)
-            .expect("cimage must have TernaryWeights segment");
+            .primary_weight_segment()
+            .expect("cimage must have a primary weight segment");
         let main_bytes = weights.length as usize;
         let slot_size = (main_bytes / 32).max(1);
         let mut world = self.world.write();

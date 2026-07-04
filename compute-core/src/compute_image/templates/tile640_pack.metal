@@ -8,8 +8,7 @@
 //   Each SIMD lane processes 20 ternary weights, packs into 1 u32 via
 //   Base-3 encoding (digit 0=0, 1=+1, 2=-1).
 //
-// Thread 0 in each threadgroup computes the tile's absmax scale via
-// simd_reduce_max, then broadcasts to all lanes via threadgroup memory.
+// The 32-lane SIMD group computes one tile absmax via `simd_max`.
 //
 // Input:   BF16 row-major [N, K]
 // Output:  packed_u32  [N × num_tiles × 32]  (u32)
@@ -48,17 +47,13 @@ kernel void tile640_pack(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    // ── Step 2: Thread 0 computes absmax scale ─────────────────────────
-    // Use simd_reduce_max for the per-thread chunk, then write to TG mem.
-    threadgroup float tile_scale;
-    if (lane == 0) {
-        float absmax = 0.0f;
-        for (uint i = 0; i < TILE_SIZE; ++i) {
-            absmax = fmax(absmax, fabs((float)tile_weights[i]));
-        }
-        tile_scale = absmax > 1e-12f ? absmax : 1.0f;
+    // ── Step 2: Compute tile absmax scale ──────────────────────────────
+    float local_absmax = 0.0f;
+    for (uint i = 0; i < PER_LANE; ++i) {
+        local_absmax = fmax(local_absmax, fabs((float)tile_weights[entry_idx + i]));
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float tile_scale = simd_max(local_absmax);
+    if (tile_scale < 1e-12f) tile_scale = 1.0f;
     float inv_scale = 1.0f / tile_scale;
 
     // Write scale output.
@@ -139,7 +134,7 @@ kernel void q8_0_ternary_pack(
     for (uint i = 0; i < PER_LANE; ++i) {
         local_max = fmax(local_max, fabs(tile_vals[start + i]));
     }
-    float tile_scale = simd_reduce_max(local_max);
+    float tile_scale = simd_max(local_max);
     if (tile_scale < 1e-12f) tile_scale = 1.0f;
     float inv_scale = 1.0f / tile_scale;
 
@@ -160,4 +155,110 @@ kernel void q8_0_ternary_pack(
 
     uint out_idx = row * num_tiles * LANES + tile * LANES + lane;
     packed_out[out_idx] = packed;
+}
+
+// ── GPU-Accelerated NF4Tile640 Packer ──────────────────────────────
+//
+// Each threadgroup processes one 640-element tile of one output row.
+// Within each tile, the 32-thread SIMD group walks five 128-element groups.
+// Each lane consumes four source values, computes one 16-bit packed nibble
+// word, and writes it directly into the 64-byte group payload.
+//
+// Input: raw 16-bit row-major [N, K] values, either F16 or BF16.
+// Output: packed_u8   [N × num_tiles × 320]   (u8)
+//         scales_f32  [N × num_tiles × 5]     (f32)
+//         biases_f32  [N × num_tiles × 5]     (f32, currently zero)
+
+constant float NF4_CODEBOOK[16] = {
+    -1.0f, -0.8480f, -0.5698f, -0.3940f,
+    -0.2419f, -0.1057f, 0.0f, 0.1057f,
+    0.2419f, 0.3940f, 0.5698f, 0.8480f,
+    1.0f, 1.2588f, 1.5862f, 2.0f
+};
+
+inline float decode_word_to_float(ushort bits, bool bf16_input) {
+    if (bf16_input) {
+        uint raw = ((uint)bits) << 16;
+        return as_type<float>(raw);
+    }
+    return float(as_type<half>(bits));
+}
+
+inline uchar quantize_nf4_nibble(float normalized) {
+    float best_dist = fabs(normalized - NF4_CODEBOOK[0]);
+    uchar best_idx = 0;
+    for (uchar i = 1; i < 16; ++i) {
+        float dist = fabs(normalized - NF4_CODEBOOK[i]);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_idx = i;
+        }
+    }
+    return best_idx;
+}
+
+kernel void nf4_tile640_pack(
+    device const ushort* input_words  [[buffer(0)]],  // [N, K] raw 16-bit words
+    device uchar*        packed_out   [[buffer(1)]],  // [N × tiles × 320] u8
+    device float*        scales_out   [[buffer(2)]],  // [N × tiles × 5] f32
+    device float*        biases_out   [[buffer(3)]],  // [N × tiles × 5] f32
+    constant uint&       K            [[buffer(4)]],
+    constant uint&       N            [[buffer(5)]],
+    constant uint&       num_tiles    [[buffer(6)]],
+    constant uint&       bf16_input   [[buffer(7)]],
+    uint                 gid          [[threadgroup_position_in_grid]],
+    uint                 lane         [[thread_index_in_simdgroup]])
+{
+    const uint GROUP_SIZE = 128;
+    const uint GROUPS_PER_TILE = 5;
+    const uint VALUES_PER_LANE = 4;
+    const uint BYTES_PER_GROUP = 64;
+    const uint BYTES_PER_TILE = 320;
+
+    uint row = gid / num_tiles;
+    uint tile = gid % num_tiles;
+    if (row >= N || tile >= num_tiles) return;
+
+    bool is_bf16 = bf16_input != 0;
+    uint row_base = row * K;
+    uint tile_base = tile * TILE_SIZE;
+    uint tile_out_base = row * num_tiles * BYTES_PER_TILE + tile * BYTES_PER_TILE;
+    uint meta_base = row * num_tiles * GROUPS_PER_TILE + tile * GROUPS_PER_TILE;
+
+    for (uint group = 0; group < GROUPS_PER_TILE; ++group) {
+        uint group_col0 = tile_base + group * GROUP_SIZE;
+        uint local_col0 = lane * VALUES_PER_LANE;
+
+        float vals[VALUES_PER_LANE];
+        float local_absmax = 0.0f;
+        for (uint i = 0; i < VALUES_PER_LANE; ++i) {
+            uint col = group_col0 + local_col0 + i;
+            float v = 0.0f;
+            if (col < K) {
+                v = decode_word_to_float(input_words[row_base + col], is_bf16);
+            }
+            vals[i] = v;
+            local_absmax = fmax(local_absmax, fabs(v));
+        }
+
+        float scale = simd_max(local_absmax);
+        if (scale < 1e-12f) scale = 1.0f;
+        float inv_scale = 1.0f / scale;
+
+        if (lane == 0) {
+            scales_out[meta_base + group] = scale;
+            biases_out[meta_base + group] = 0.0f;
+        }
+
+        ushort packed = 0;
+        for (uint i = 0; i < VALUES_PER_LANE; ++i) {
+            float clamped = clamp(vals[i] * inv_scale, -1.0f, 1.0f);
+            uchar idx = quantize_nf4_nibble(clamped);
+            packed |= ((ushort)idx) << (i * 4);
+        }
+
+        uint group_out_base = tile_out_base + group * BYTES_PER_GROUP + lane * 2;
+        packed_out[group_out_base + 0] = uchar(packed & 0x00FFu);
+        packed_out[group_out_base + 1] = uchar((packed >> 8) & 0x00FFu);
+    }
 }

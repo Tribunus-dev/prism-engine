@@ -1,8 +1,8 @@
 //! Execution plan generation.
 
 use super::compile::{
-    build_compile_receipt, build_source_identity, emit_binding_set, load_source, LoadedSource,
-    SourceTensor,
+    apply_quantize_to_loaded, build_compile_receipt, build_source_identity, emit_binding_set,
+    load_source, LoadedSource, SourceTensor,
 };
 use super::manifest::{
     mlx_active_memory_bytes, CompiledImage, ImageBuilder, SegmentKind, StageProfile,
@@ -210,7 +210,7 @@ pub(crate) fn compile_unchecked_speculative(
     target_dir: &str,
     draft_dir: &str,
     output_dir: &str,
-    _quantize_mode: Option<CompileQuantMode>,
+    quantize_mode: Option<CompileQuantMode>,
 ) -> crate::Result<CompiledImage> {
     let started_at = std::time::Instant::now();
     let output_dir = Path::new(output_dir);
@@ -218,6 +218,9 @@ pub(crate) fn compile_unchecked_speculative(
     // === STEP 1: Load target, capture metadata, emit, drop ===
     let t_load = Instant::now();
     let mut target_loaded = load_source(Path::new(target_dir), false)?;
+    if let Some(qmode) = quantize_mode {
+        apply_quantize_to_loaded(&mut target_loaded, qmode)?;
+    }
     let source_load_ms = t_load.elapsed().as_millis() as u64;
 
     // Capture lightweight metadata BEFORE dropping target source tensors
@@ -248,7 +251,13 @@ pub(crate) fn compile_unchecked_speculative(
     let shared_seg_id = "persistent".to_string();
     builder.begin_segment(&shared_seg_id, SegmentKind::Persistent);
     for binding in &target_spec.global_tensors {
-        let id = emit_binding_set(&mut builder, &target_loaded.source_tensors, binding, None)?;
+        let id = emit_binding_set(
+            &mut builder,
+            &target_loaded.source_tensors,
+            &target_loaded.mmap_bytes,
+            binding,
+            None,
+        )?;
         emitted_ids.insert(binding.name.clone(), id);
     }
 
@@ -268,6 +277,7 @@ pub(crate) fn compile_unchecked_speculative(
             let id = emit_binding_set(
                 &mut builder,
                 &target_loaded.source_tensors,
+                &target_loaded.mmap_bytes,
                 binding,
                 Some(layer.index),
             )?;
@@ -286,6 +296,9 @@ pub(crate) fn compile_unchecked_speculative(
 
     // === STEP 2: Load draft, emit, drop ===
     let mut draft_loaded = load_source(Path::new(draft_dir), false)?;
+    if let Some(qmode) = quantize_mode {
+        apply_quantize_to_loaded(&mut draft_loaded, qmode)?;
+    }
 
     let draft_arch = draft_loaded.arch.clone();
     let draft_namespace = draft_loaded.namespace.clone();
@@ -304,6 +317,7 @@ pub(crate) fn compile_unchecked_speculative(
             let id = emit_binding_set(
                 &mut builder,
                 &draft_loaded.source_tensors,
+                &draft_loaded.mmap_bytes,
                 binding,
                 Some(layer.index),
             )?;

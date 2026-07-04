@@ -12,6 +12,8 @@ pub mod descriptor;
 pub use descriptor::*;
 pub mod adapter;
 pub use adapter::*;
+pub mod binding;
+pub use binding::*;
 
 #[cfg(test)]
 mod tests;

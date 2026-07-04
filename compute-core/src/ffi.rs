@@ -80,7 +80,7 @@ pub unsafe fn prism_compile_and_pack(
     let n_heads = loaded.arch.num_attention_heads;
     let head_dim = loaded.arch.head_dim;
 
-    let qmode = CompileQuantMode::TernaryTile640 { group_size: 640 };
+    let qmode = CompileQuantMode::Nf4Tile640 { group_size: 128 };
 
     match compile_and_pack_god_binary(
         output_str,

@@ -90,8 +90,9 @@ impl TextArchitecture {
 
 /// Vision encoder configuration from a model's vision_config.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VisionArchitecture {
-    #[serde(alias = "hiddenSize")]
+    #[serde(alias = "hiddenSize", alias = "mm_embed_dim")]
     pub hidden_size: u32,
     #[serde(alias = "num_heads")]
     pub num_attention_heads: u32,
@@ -104,7 +105,7 @@ pub struct VisionArchitecture {
     pub patch_size: u32,
     #[serde(default)]
     pub num_channels: u32,
-    #[serde(default)]
+    #[serde(default, alias = "output_proj_dims", alias = "mm_embed_dim")]
     pub projection_dim: u32,
     /// Cimage model family identifier (e.g. "clip-vit-b32").
     #[serde(default)]
@@ -114,9 +115,28 @@ pub struct VisionArchitecture {
     pub has_ane_program: bool,
 }
 
+impl Default for VisionArchitecture {
+    fn default() -> Self {
+        Self {
+            hidden_size: 0,
+            num_attention_heads: 0,
+            num_hidden_layers: 0,
+            intermediate_size: 0,
+            image_size: 896,
+            patch_size: 16,
+            num_channels: 3,
+            projection_dim: 0,
+            model_family: String::new(),
+            has_ane_program: false,
+        }
+    }
+}
+
 /// Audio encoder configuration from a model's audio_config.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AudioArchitecture {
+    #[serde(alias = "audio_embed_dim")]
     pub hidden_size: u32,
     pub num_attention_heads: u32,
     pub num_hidden_layers: u32,
@@ -125,7 +145,24 @@ pub struct AudioArchitecture {
     pub num_mel_bins: u32,       // e.g. 80
     pub hop_length: u32,         // e.g. 160
     pub max_audio_length_s: u32, // e.g. 30 (seconds)
-    pub projection_dim: u32,     // audio_features -> text hidden dim
+    #[serde(alias = "audio_embed_dim")]
+    pub projection_dim: u32, // audio_features -> text hidden dim
+}
+
+impl Default for AudioArchitecture {
+    fn default() -> Self {
+        Self {
+            hidden_size: 0,
+            num_attention_heads: 0,
+            num_hidden_layers: 0,
+            intermediate_size: 0,
+            sample_rate: 16_000,
+            num_mel_bins: 80,
+            hop_length: 160,
+            max_audio_length_s: 30,
+            projection_dim: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -380,6 +417,8 @@ pub enum NoiseScheduleType {
 pub enum CompileQuantMode {
     /// 4-bit NormalFloat (NF4) block quantization.
     Nf4 { group_size: u32 },
+    /// 4-bit NormalFloat (NF4) with 640-element tile-transposed storage.
+    Nf4Tile640 { group_size: u32 },
     /// 8-bit affine quantization.
     Af8 { group_size: u32 },
     /// Ternary 1.58-bit quantization (2-bit nibble encoding, 4 per byte).
@@ -394,6 +433,9 @@ impl CompileQuantMode {
         match name {
             "nf4" => Some(Self::Nf4 { group_size: 64 }),
             "nf4-128" => Some(Self::Nf4 { group_size: 128 }),
+            "nf4tile640" | "nf4-tile640" | "nftile640" => {
+                Some(Self::Nf4Tile640 { group_size: 128 })
+            }
             "8bit" => Some(Self::Af8 { group_size: 64 }),
             "ternary" | "1.58" => Some(Self::Ternary { group_size: 32 }),
             "ternary_tile640" | "tile640" => Some(Self::TernaryTile640 { group_size: 640 }),
@@ -407,6 +449,7 @@ impl CompileQuantMode {
         match self {
             Self::Nf4 { group_size: 64 } => "nf4",
             Self::Nf4 { group_size: 128 } => "nf4-128",
+            Self::Nf4Tile640 { .. } => "nf4tile640",
             Self::Af8 { .. } => "8bit",
             Self::Ternary { .. } => "ternary",
             Self::TernaryTile640 { .. } => "ternary_tile640",

@@ -202,6 +202,8 @@ fn detect_validate_quant(
 fn extract_architecture_from_config(
     config: &serde_json::Value,
 ) -> Result<crate::config::TextArchitecture, String> {
+    let text = config.get("text_config").unwrap_or(config);
+
     fn num(v: &serde_json::Value, key: &str) -> Result<u32, String> {
         v.get(key)
             .and_then(|v| v.as_u64())
@@ -218,40 +220,104 @@ fn extract_architecture_from_config(
         v.get(key).and_then(|v| v.as_bool())
     }
 
-    let model_type = config
+    let model_type = text
         .get("model_type")
         .and_then(|v| v.as_str())
+        .or_else(|| config.get("model_type").and_then(|v| v.as_str()))
         .unwrap_or("unknown")
         .to_string();
-    let h = num(config, "hidden_size")?;
-    let n_heads = num(config, "num_attention_heads")?;
-    let n_kv_heads = num_opt(config, "num_key_value_heads").unwrap_or(n_heads);
-    let head_dim = num_opt(config, "head_dim").unwrap_or(h / n_heads);
+    let h = num(text, "hidden_size")?;
+    let n_heads = num(text, "num_attention_heads")?;
+    let n_kv_heads = num_opt(text, "num_key_value_heads").unwrap_or(n_heads);
+    let head_dim = num_opt(text, "head_dim").unwrap_or(h / n_heads);
+    let global_head_dim = num_opt(text, "global_head_dim");
+    let num_global_key_value_heads = num_opt(text, "num_global_key_value_heads");
+    let layer_types = text
+        .get("layer_types")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| match item.as_str().unwrap_or("sliding_attention") {
+                    "full_attention" | "full" => crate::config::AttentionKind::FullAttention,
+                    _ => crate::config::AttentionKind::SlidingAttention,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let rope_local_theta = text
+        .get("rope_parameters")
+        .and_then(|r| r.get("sliding_attention"))
+        .and_then(|r| r.get("rope_theta"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or_else(|| f64_val(text, "rope_theta").unwrap_or(10_000.0));
+    let rope_global = text
+        .get("rope_parameters")
+        .and_then(|r| r.get("full_attention"))
+        .map(|r| crate::config::RopeSpec {
+            theta: r
+                .get("rope_theta")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1_000_000.0),
+            rope_type: r
+                .get("rope_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("proportional")
+                .to_string(),
+            partial_rotary_factor: r.get("partial_rotary_factor").and_then(|v| v.as_f64()),
+        });
+
+    let fallback_layer_types = if layer_types.is_empty() {
+        vec![
+            crate::config::AttentionKind::SlidingAttention;
+            num(text, "num_hidden_layers")? as usize
+        ]
+    } else {
+        layer_types
+    };
+
+    let tie_word_embeddings = bool_val(text, "tie_word_embeddings")
+        .or_else(|| bool_val(config, "tie_word_embeddings"))
+        .unwrap_or(true);
+
+    let final_logit_softcapping = text.get("final_logit_softcapping").and_then(|v| v.as_f64());
+
+    let attention_k_eq_v = bool_val(text, "attention_k_eq_v").unwrap_or(false);
+
+    let hidden_size_per_layer_input = num_opt(text, "hidden_size_per_layer_input").unwrap_or(h);
+
+    let sliding_window = num_opt(text, "sliding_window").unwrap_or(0);
+    let max_position_embeddings = num_opt(text, "max_position_embeddings").unwrap_or(4096);
+    let intermediate_size = num_opt(text, "intermediate_size").unwrap_or(h * 4);
+    let vocab_size = num(text, "vocab_size")?;
+    let num_hidden_layers = num(text, "num_hidden_layers")?;
+
+    let rms_norm_eps = f64_val(text, "rms_norm_eps").unwrap_or(1e-6);
 
     Ok(crate::config::TextArchitecture {
         hidden_size: h,
-        intermediate_size: num_opt(config, "intermediate_size").unwrap_or(h * 4),
+        intermediate_size,
         num_attention_heads: n_heads,
         num_key_value_heads: n_kv_heads,
         head_dim,
-        global_head_dim: None,
-        num_global_key_value_heads: None,
-        num_hidden_layers: num(config, "num_hidden_layers")?,
-        vocab_size: num(config, "vocab_size")?,
-        sliding_window: num_opt(config, "sliding_window").unwrap_or(0),
-        max_position_embeddings: num_opt(config, "max_position_embeddings").unwrap_or(4096),
-        rms_norm_eps: f64_val(config, "rms_norm_eps").unwrap_or(1e-6),
-        tie_word_embeddings: bool_val(config, "tie_word_embeddings").unwrap_or(true),
-        attention_k_eq_v: bool_val(config, "attention_k_eq_v").unwrap_or(false),
-        final_logit_softcapping: None,
-        hidden_size_per_layer_input: h,
-        layer_types: Vec::new(),
+        global_head_dim,
+        num_global_key_value_heads,
+        num_hidden_layers,
+        vocab_size,
+        sliding_window,
+        max_position_embeddings,
+        rms_norm_eps,
+        tie_word_embeddings,
+        attention_k_eq_v,
+        final_logit_softcapping,
+        hidden_size_per_layer_input,
+        layer_types: fallback_layer_types,
         rope_local: crate::config::RopeSpec {
-            theta: f64_val(config, "rope_theta").unwrap_or(10_000.0),
+            theta: rope_local_theta,
             rope_type: "default".to_string(),
             partial_rotary_factor: None,
         },
-        rope_global: None,
+        rope_global,
         model_type,
         moe_config: None,
         diffusion_config: None,
@@ -360,7 +426,13 @@ pub fn compile_gguf_speculative(
     // Emit target persistent tensors
     builder.begin_segment("persistent", SegmentKind::Persistent);
     for binding in &target_spec.global_tensors {
-        let id = emit_binding_set(&mut builder, &target_loaded.source_tensors, binding, None)?;
+        let id = emit_binding_set(
+            &mut builder,
+            &target_loaded.source_tensors,
+            &target_loaded.mmap_bytes,
+            binding,
+            None,
+        )?;
         emitted_ids.insert(binding.name.clone(), id);
     }
 
@@ -379,6 +451,7 @@ pub fn compile_gguf_speculative(
             let id = emit_binding_set(
                 &mut builder,
                 &target_loaded.source_tensors,
+                &target_loaded.mmap_bytes,
                 binding,
                 Some(layer.index),
             )?;
@@ -414,6 +487,7 @@ pub fn compile_gguf_speculative(
             let id = emit_binding_set(
                 &mut builder,
                 &draft_loaded.source_tensors,
+                &draft_loaded.mmap_bytes,
                 binding,
                 Some(layer.index),
             )?;
@@ -946,6 +1020,8 @@ fn compile_inference_metallib(output_path: &Path) -> Result<(), String> {
         "\n",
         include_str!("../templates/palettized_gemv_swiglu.metal"),
         "\n",
+        include_str!("../templates/nf4_tile640_gemv.metal"),
+        "\n",
         include_str!("../templates/ternary_tile640_gemv.metal"),
         "\n",
         include_str!("../templates/palettized_gemm.metal"),
@@ -1102,6 +1178,7 @@ fn embed_metallib(
         let quantization_desc = quantize_mode
             .map(|q| match q {
                 CompileQuantMode::Nf4 { .. } => "NF4",
+                CompileQuantMode::Nf4Tile640 { .. } => "NF4Tile640",
                 CompileQuantMode::Af8 { .. } => "8bit",
                 CompileQuantMode::Ternary { .. } => "ternary",
                 CompileQuantMode::TernaryTile640 { .. } => "ternary_tile640",
@@ -1277,7 +1354,13 @@ pub(crate) fn compile_sequential(
     let mut emitted_ids: HashMap<String, u32> = HashMap::new();
 
     for binding in &loaded.spec.global_tensors {
-        let id = emit_binding_set(&mut builder, &loaded.source_tensors, binding, None)?;
+        let id = emit_binding_set(
+            &mut builder,
+            &loaded.source_tensors,
+            &loaded.mmap_bytes,
+            binding,
+            None,
+        )?;
         emitted_ids.insert(binding.name.clone(), id);
     }
 
@@ -1299,6 +1382,7 @@ pub(crate) fn compile_sequential(
             let id = emit_binding_set(
                 &mut builder,
                 &loaded.source_tensors,
+                &loaded.mmap_bytes,
                 binding,
                 Some(layer.index),
             )?;
@@ -1308,8 +1392,12 @@ pub(crate) fn compile_sequential(
 
     // Compile vision encoder tensors if present.
     if loaded.manifest.vision_config.is_some() {
-        let _ =
-            compile_vision_encoder_tensors(&mut builder, &loaded.source_tensors, &mut emitted_ids);
+        let _ = compile_vision_encoder_tensors(
+            &mut builder,
+            &loaded.source_tensors,
+            &loaded.mmap_bytes,
+            &mut emitted_ids,
+        );
     }
 
     // Compile audio encoder tensors if present.
@@ -1317,6 +1405,7 @@ pub(crate) fn compile_sequential(
         let _ = compile_audio_encoder_tensors(
             &mut builder,
             &loaded.source_tensors,
+            &loaded.mmap_bytes,
             &mut emitted_ids,
             loaded.manifest.audio_config.clone(),
         );
@@ -1364,21 +1453,36 @@ pub(crate) fn compile_sequential(
         group_size: u32,
         k: u64,
         n: u64,
+        nf4_tile640: bool,
     }
 
     let mut requests: BTreeMap<String, KernelSpecKey> = BTreeMap::new();
     for layer in &loaded.spec.layers {
         for binding in &layer.tensors {
             if let Some(packed) = &binding.packed_shape {
+                let nf4_tile640 = loaded
+                    .source_tensors
+                    .get(&binding.name)
+                    .map(|t| t.dtype == "U8" && packed.bits == 4 && packed.group_size == 128)
+                    .unwrap_or(false);
                 let key = format!(
-                    "metal:mlx-qmatmul:v1:affine:b{}:g{}:gpu-m1:shape-k{}-n{}",
-                    packed.bits, packed.group_size, binding.logical_shape[1], packed.weight[0],
+                    "metal:{}:v1:affine:b{}:g{}:gpu-m1:shape-k{}-n{}",
+                    if nf4_tile640 {
+                        "nf4-tile640"
+                    } else {
+                        "mlx-qmatmul"
+                    },
+                    packed.bits,
+                    packed.group_size,
+                    binding.logical_shape[1],
+                    packed.weight[0],
                 );
                 requests.entry(key).or_insert(KernelSpecKey {
                     bits: packed.bits as u8,
                     group_size: packed.group_size,
                     k: binding.logical_shape[1] as u64,
                     n: packed.weight[0] as u64,
+                    nf4_tile640,
                 });
             }
         }
@@ -1402,28 +1506,47 @@ pub(crate) fn compile_sequential(
             String::new()
         };
 
-        // NF4 kernel ABI: input=0, weight=1, scale=2, bias=3, output=4
+        // Shared ABI: packed weights + scales + biases + input + output.
         let mut slot_map = std::collections::HashMap::new();
-        slot_map.insert("input".to_string(), 0u32);
-        slot_map.insert("weight".to_string(), 1u32);
-        slot_map.insert("scale".to_string(), 2u32);
-        slot_map.insert("bias".to_string(), 3u32);
+        slot_map.insert("weight".to_string(), 0u32);
+        slot_map.insert("scale".to_string(), 1u32);
+        slot_map.insert("bias".to_string(), 2u32);
+        slot_map.insert("input".to_string(), 3u32);
         slot_map.insert("output".to_string(), 4u32);
 
         let scalar_map: std::collections::HashMap<String, (u32, String)> =
-            std::collections::HashMap::new();
+            std::collections::HashMap::from([(
+                "num_macro_tiles".to_string(),
+                (5u32, "u32".to_string()),
+            )]);
         let artifact = MetalKernelArtifact {
             artifact_id: key.clone(),
             logical_operation: "quantized_matmul".to_string(),
-            kind: crate::compute_image::manifest::ArtifactKind::MlxNf4U32,
+            kind: if spec.nf4_tile640 {
+                crate::compute_image::manifest::ArtifactKind::Nf4Tile640Shared
+            } else {
+                crate::compute_image::manifest::ArtifactKind::MlxNf4U32
+            },
             metallib_relpath: format!("metal/kernels/{}.metallib", key),
             metallib_blake3: String::new(),
             metallib_byte_length,
             dispatch: MetalDispatchRecipe {
-                entry_point: "quantized_matmul_nf4".to_string(),
+                entry_point: if spec.nf4_tile640 {
+                    "fused_gemv_nf4_tile640_fp32".to_string()
+                } else {
+                    "quantized_matmul_nf4".to_string()
+                },
                 kernel_name: key.clone(),
                 threads_per_threadgroup: [32, 1, 1],
-                threadgroups_per_grid: [((spec.n + 31) / 32) as u32, 1, 1],
+                threadgroups_per_grid: [
+                    if spec.nf4_tile640 {
+                        spec.n as u32
+                    } else {
+                        ((spec.n + 31) / 32) as u32
+                    },
+                    1,
+                    1,
+                ],
                 buffer_slot_map: slot_map,
                 scalar_index_map: scalar_map,
                 k: spec.k,
@@ -1628,7 +1751,13 @@ pub fn compile_differential(
         if !compile_names.contains(binding.name.as_str()) {
             continue;
         }
-        let id = emit_binding_set(&mut builder, &loaded.source_tensors, binding, None)?;
+        let id = emit_binding_set(
+            &mut builder,
+            &loaded.source_tensors,
+            &loaded.mmap_bytes,
+            binding,
+            None,
+        )?;
         emitted_ids.insert(binding.name.clone(), id);
     }
 
@@ -1653,6 +1782,7 @@ pub fn compile_differential(
             let id = emit_binding_set(
                 &mut builder,
                 &loaded.source_tensors,
+                &loaded.mmap_bytes,
                 binding,
                 Some(layer.index),
             )?;

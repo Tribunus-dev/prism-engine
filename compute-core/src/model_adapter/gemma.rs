@@ -14,27 +14,46 @@ impl ModelFamilyAdapter for GemmaAdapter {
     }
 
     fn claimed_config_types(&self) -> &'static [&'static str] {
-        &["gemma", "gemma2"]
+        &[
+            "gemma",
+            "gemma2",
+            "gemma4_unified",
+            "gemma4_unified_text",
+            "gemma4_unified_assistant",
+        ]
     }
 
     fn detect(&self, config: &Value, tensor_names: &[String]) -> bool {
-        config
+        let claims_gemma = config
             .get("model_type")
             .and_then(|v| v.as_str())
             .map(|t| t.starts_with("gemma"))
             .unwrap_or(false)
+            || config
+                .get("text_config")
+                .and_then(|v| v.get("model_type"))
+                .and_then(|v| v.as_str())
+                .map(|t| t.starts_with("gemma"))
+                .unwrap_or(false);
+        claims_gemma
             && tensor_names
                 .iter()
                 .any(|n| n.contains(".self_attn.q_proj.weight"))
     }
 
     fn normalize(&self, source: &SourceModel) -> Result<CanonicalModel, NormalizationReport> {
-        let cfg = &source.config;
+        let cfg = source.config.get("text_config").unwrap_or(&source.config);
         let mt = cfg
             .get("model_type")
             .and_then(|v| v.as_str())
+            .or_else(|| source.config.get("model_type").and_then(|v| v.as_str()))
             .unwrap_or("gemma")
             .to_string();
+        let root_model_type = source
+            .config
+            .get("model_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let h = num(cfg, "hidden_size");
         let n_layers = num(cfg, "num_hidden_layers");
         let n_heads = num(cfg, "num_attention_heads");
@@ -46,6 +65,7 @@ impl ModelFamilyAdapter for GemmaAdapter {
         let slide = num_opt(cfg, "sliding_window").unwrap_or(0);
         let eps = f64_val(cfg, "rms_norm_eps").unwrap_or(1e-6);
         let tie = bool_val(cfg, "tie_word_embeddings").unwrap_or(true);
+        let attention_k_eq_v = bool_val(cfg, "attention_k_eq_v").unwrap_or(true);
         let softcap = f64_val(cfg, "final_logit_softcapping");
 
         let arch = TextArchitecture {
@@ -63,7 +83,7 @@ impl ModelFamilyAdapter for GemmaAdapter {
             max_position_embeddings: max_pos,
             rms_norm_eps: eps,
             tie_word_embeddings: tie,
-            attention_k_eq_v: true,
+            attention_k_eq_v,
             final_logit_softcapping: softcap,
             hidden_size_per_layer_input: 0,
             model_type: mt,
@@ -81,8 +101,19 @@ impl ModelFamilyAdapter for GemmaAdapter {
 
         let mut tensors = std::collections::HashMap::new();
         let mut missing = Vec::new();
+        let text_root = if source
+            .tensors
+            .contains_key("model.language_model.embed_tokens.weight")
+        {
+            "model.language_model"
+        } else {
+            "model"
+        };
 
-        if let Some(t) = source.tensors.get("model.embed_tokens.weight") {
+        if let Some(t) = source
+            .tensors
+            .get(&format!("{text_root}.embed_tokens.weight"))
+        {
             tensors.insert(
                 CanonicalRole::Embedding,
                 TensorData {
@@ -95,7 +126,7 @@ impl ModelFamilyAdapter for GemmaAdapter {
             missing.push(CanonicalRole::Embedding);
         }
 
-        if let Some(t) = source.tensors.get("model.norm.weight") {
+        if let Some(t) = source.tensors.get(&format!("{text_root}.norm.weight")) {
             tensors.insert(
                 CanonicalRole::FinalNorm,
                 TensorData {
@@ -109,7 +140,11 @@ impl ModelFamilyAdapter for GemmaAdapter {
         }
 
         // Gemma has optional lm_head (may be tied to embeddings).
-        if let Some(t) = source.tensors.get("model.lm_head.weight") {
+        if let Some(t) = source
+            .tensors
+            .get(&format!("{text_root}.lm_head.weight"))
+            .or_else(|| source.tensors.get("lm_head.weight"))
+        {
             tensors.insert(
                 CanonicalRole::LmHead,
                 TensorData {
@@ -122,7 +157,7 @@ impl ModelFamilyAdapter for GemmaAdapter {
 
         for i in 0..n_layers {
             // input layernorm
-            let name = format!("model.layers.{i}.input_layernorm.weight");
+            let name = format!("{text_root}.layers.{i}.input_layernorm.weight");
             match source.tensors.get(&name) {
                 Some(t) => {
                     tensors.insert(
@@ -148,7 +183,7 @@ impl ModelFamilyAdapter for GemmaAdapter {
                     "o" => CanonicalRole::O(i),
                     _ => unreachable!(),
                 };
-                let name = format!("model.layers.{i}.self_attn.{proj}_proj.weight");
+                let name = format!("{text_root}.layers.{i}.self_attn.{proj}_proj.weight");
                 match source.tensors.get(&name) {
                     Some(t) => {
                         tensors.insert(
@@ -161,13 +196,61 @@ impl ModelFamilyAdapter for GemmaAdapter {
                         );
                     }
                     None => {
-                        missing.push(role);
+                        if matches!(role, CanonicalRole::K(_))
+                            && attention_k_eq_v
+                            && root_model_type == "gemma4_unified_assistant"
+                        {
+                            let q_name = format!("{text_root}.layers.{i}.self_attn.q_proj.weight");
+                            if let Some(t) = source.tensors.get(&q_name) {
+                                tensors.insert(
+                                    role,
+                                    TensorData {
+                                        dtype: t.0.clone(),
+                                        shape: t.1.clone(),
+                                        data: t.2.clone(),
+                                    },
+                                );
+                            } else {
+                                missing.push(role);
+                            }
+                        } else if matches!(role, CanonicalRole::V(_)) && attention_k_eq_v {
+                            let k_name = format!("{text_root}.layers.{i}.self_attn.k_proj.weight");
+                            if let Some(t) = source.tensors.get(&k_name) {
+                                tensors.insert(
+                                    role,
+                                    TensorData {
+                                        dtype: t.0.clone(),
+                                        shape: t.1.clone(),
+                                        data: t.2.clone(),
+                                    },
+                                );
+                            } else if root_model_type == "gemma4_unified_assistant" {
+                                let q_name =
+                                    format!("{text_root}.layers.{i}.self_attn.q_proj.weight");
+                                if let Some(t) = source.tensors.get(&q_name) {
+                                    tensors.insert(
+                                        role,
+                                        TensorData {
+                                            dtype: t.0.clone(),
+                                            shape: t.1.clone(),
+                                            data: t.2.clone(),
+                                        },
+                                    );
+                                } else {
+                                    missing.push(role);
+                                }
+                            } else {
+                                missing.push(role);
+                            }
+                        } else {
+                            missing.push(role);
+                        }
                     }
                 }
             }
 
             // Q/K norms (Gemma2-specific; Gemma 1 doesn't have them)
-            let qn = format!("model.layers.{i}.self_attn.q_norm.weight");
+            let qn = format!("{text_root}.layers.{i}.self_attn.q_norm.weight");
             if let Some(t) = source.tensors.get(&qn) {
                 tensors.insert(
                     CanonicalRole::QNorm(i),
@@ -178,7 +261,7 @@ impl ModelFamilyAdapter for GemmaAdapter {
                     },
                 );
             }
-            let kn = format!("model.layers.{i}.self_attn.k_norm.weight");
+            let kn = format!("{text_root}.layers.{i}.self_attn.k_norm.weight");
             if let Some(t) = source.tensors.get(&kn) {
                 tensors.insert(
                     CanonicalRole::KNorm(i),
@@ -191,7 +274,7 @@ impl ModelFamilyAdapter for GemmaAdapter {
             }
 
             // post attention layernorm
-            let name = format!("model.layers.{i}.post_attention_layernorm.weight");
+            let name = format!("{text_root}.layers.{i}.post_attention_layernorm.weight");
             match source.tensors.get(&name) {
                 Some(t) => {
                     tensors.insert(
@@ -216,7 +299,7 @@ impl ModelFamilyAdapter for GemmaAdapter {
                     "down" => CanonicalRole::Down(i),
                     _ => unreachable!(),
                 };
-                let name = format!("model.layers.{i}.mlp.{proj}_proj.weight");
+                let name = format!("{text_root}.layers.{i}.mlp.{proj}_proj.weight");
                 match source.tensors.get(&name) {
                     Some(t) => {
                         tensors.insert(

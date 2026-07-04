@@ -9,6 +9,7 @@
 //!   5. BlockReceipt with metrics + execution provenance
 //!   6. Repeat for each block
 
+use crate::compilation::level1::checkpoint::validate_teacher_checkpoint_against_ternary;
 use crate::compilation::level1::gates::check_numerical;
 use crate::compilation::level1::scheduler::{Level1Config, Level1Scheduler};
 use crate::compilation::level2::bridge::CoreMLTeacher;
@@ -70,6 +71,7 @@ pub struct DistillationJobStatus {
     pub total_blocks: usize,
     pub blocks_completed: usize,
     pub receipt_count: usize,
+    pub checkpoint_validation_passed: bool,
     pub level2_used: bool,
     pub level2_fallback_verified: bool,
     pub joint_acceptance_rate: Option<f64>,
@@ -96,6 +98,7 @@ struct DistillationJob {
     current_block: usize,
     blocks_completed: usize,
     block_receipts: Vec<BlockReceipt>,
+    checkpoint_validation_passed: bool,
     level2_used: bool,
     level2_fallback_verified: bool,
     joint_acceptance_result: Option<JointAcceptanceResult>,
@@ -137,6 +140,7 @@ impl DistillationEngine {
             current_block: 0,
             blocks_completed: 0,
             block_receipts: Vec::with_capacity(total_blocks),
+            checkpoint_validation_passed: false,
             level2_used: false,
             level2_fallback_verified: false,
             joint_acceptance_result: None,
@@ -147,10 +151,11 @@ impl DistillationEngine {
         let j = self.jobs.clone();
         let b = self.memory_broker.clone();
         let jid = job_id.clone();
+        let teacher_checkpoint = request.teacher_checkpoint.clone();
         let md = request.model_dir.clone();
         let enabled = has_model_dir;
         tokio::spawn(async move {
-            run_distillation_loop(j, b, jid, total_blocks, md, enabled).await;
+            run_distillation_loop(j, b, jid, total_blocks, teacher_checkpoint, md, enabled).await;
         });
         Ok(job_id)
     }
@@ -167,6 +172,7 @@ impl DistillationEngine {
             total_blocks: 48,
             blocks_completed: j.blocks_completed,
             receipt_count: j.block_receipts.len(),
+            checkpoint_validation_passed: j.checkpoint_validation_passed,
             level2_used: j.level2_used,
             level2_fallback_verified: j.level2_fallback_verified,
             joint_acceptance_rate: j
@@ -288,6 +294,7 @@ async fn run_distillation_loop(
     broker: Arc<MemoryAllocationBroker>,
     job_id: String,
     total_blocks: usize,
+    teacher_checkpoint: String,
     model_dir: Option<String>,
     level2_requested: bool,
 ) {
@@ -327,6 +334,61 @@ async fn run_distillation_loop(
     } else {
         None
     };
+
+    let checkpoint_validation = tokio::task::spawn_blocking({
+        let teacher_checkpoint = teacher_checkpoint.clone();
+        move || {
+            validate_teacher_checkpoint_against_ternary(std::path::Path::new(&teacher_checkpoint))
+        }
+    })
+    .await
+    .map_err(|error| format!("checkpoint validation task join error: {}", error));
+
+    match checkpoint_validation {
+        Err(error) => {
+            let mut j = jobs.lock().await;
+            if let Some(job) = j.get_mut(&job_id) {
+                job.state = DistillationState::Failed;
+                job.error = Some(error);
+            }
+            broker.set_mode(ServerOperationalMode::Idle);
+            return;
+        }
+        Ok(result) => match result {
+            Ok(result) if result.passed => {
+                let mut j = jobs.lock().await;
+                if let Some(job) = j.get_mut(&job_id) {
+                    job.checkpoint_validation_passed = true;
+                }
+            }
+            Ok(result) => {
+                let mut j = jobs.lock().await;
+                if let Some(job) = j.get_mut(&job_id) {
+                    job.state = DistillationState::Failed;
+                    job.error = Some(result.failure_reason.unwrap_or_else(|| {
+                    format!(
+                        "checkpoint validation failed after {} sampled layers and {} sampled projections",
+                        result.validated_layers, result.validated_projections
+                    )
+                }));
+                }
+                broker.set_mode(ServerOperationalMode::Idle);
+                return;
+            }
+            Err(error) => {
+                let mut j = jobs.lock().await;
+                if let Some(job) = j.get_mut(&job_id) {
+                    job.state = DistillationState::Failed;
+                    job.error = Some(format!(
+                        "checkpoint-backed teacher validation failed for {}: {}",
+                        teacher_checkpoint, error
+                    ));
+                }
+                broker.set_mode(ServerOperationalMode::Idle);
+                return;
+            }
+        },
+    }
 
     // ── Compiling (block-by-block) ───────────────────────────────────────
     for block_idx in 0..total_blocks {

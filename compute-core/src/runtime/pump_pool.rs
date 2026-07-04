@@ -351,7 +351,7 @@ impl Drop for PumpPool {
 mod tests {
     use super::*;
     use crate::compute_image::compile::ternary::{
-        CimageHeader, SegmentEntry, CIMAGE_PAGE_SIZE, PRISM_MAGIC,
+        CimageHeader, SegmentEntry, CIMAGE_PAGE_SIZE, CIMAGE_SEGMENT_CAPACITY, PRISM_MAGIC,
     };
     use crate::runtime::npu_pump::AneWeightPump;
 
@@ -385,6 +385,18 @@ mod tests {
 
         // Build header with one TernaryWeights segment
         let weights_offset = std::mem::size_of::<CimageHeader>() as u64;
+        let mut segments = [SegmentEntry {
+            kind: 0,
+            offset: 0,
+            length: 0,
+        }; CIMAGE_SEGMENT_CAPACITY];
+        segments[0] = SegmentEntry::new(SegmentKind::MetalLib, 0, 0);
+        segments[1] = SegmentEntry::new(
+            SegmentKind::TernaryWeights,
+            weights_offset,
+            weights_len as u64,
+        );
+
         let header = CimageHeader {
             magic: PRISM_MAGIC,
             version: 4,
@@ -398,49 +410,7 @@ mod tests {
             vocab_size: 0,
             quantization_schema: 0,
             draft_num_layers: 0,
-            segments: [
-                SegmentEntry::new(SegmentKind::MetalLib, 0, 0),
-                SegmentEntry::new(
-                    SegmentKind::TernaryWeights,
-                    weights_offset,
-                    weights_len as u64,
-                ),
-                SegmentEntry {
-                    kind: 0,
-                    offset: 0,
-                    length: 0,
-                },
-                SegmentEntry {
-                    kind: 0,
-                    offset: 0,
-                    length: 0,
-                },
-                SegmentEntry {
-                    kind: 0,
-                    offset: 0,
-                    length: 0,
-                },
-                SegmentEntry {
-                    kind: 0,
-                    offset: 0,
-                    length: 0,
-                },
-                SegmentEntry {
-                    kind: 0,
-                    offset: 0,
-                    length: 0,
-                },
-                SegmentEntry {
-                    kind: 0,
-                    offset: 0,
-                    length: 0,
-                },
-                SegmentEntry {
-                    kind: 0,
-                    offset: 0,
-                    length: 0,
-                },
-            ],
+            segments,
             _pad: [0u8; 8],
         };
 

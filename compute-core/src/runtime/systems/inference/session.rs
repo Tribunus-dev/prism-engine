@@ -1035,30 +1035,50 @@ impl ProfiledInferenceSession {
         images: &[ImageInput],
         model: &LoadedProfiledModel,
     ) -> Result<u32, EngineError> {
-        // If no images or no vision encoder, fall back to standard prefill.
-        if images.is_empty() || model.vision_encoder.is_none() {
+        if images.is_empty() {
             return self.prefill(prompt_token_ids, model);
         }
 
-        let encoder = model.vision_encoder.as_ref().unwrap();
-        let config = &encoder.config;
+        if !model.supports_image_inputs() {
+            return Err(EngineError::new(
+                EngineErrorCode::InvalidRequest,
+                "image input requested but model has no image-capable artifacts".to_string(),
+            ));
+        }
 
-        // 1. Process each image through the vision encoder.
+        let legacy_encoder = model.vision_encoder.as_ref();
+        let config = legacy_encoder.map(|encoder| &encoder.config);
+
         let mut vision_features: Vec<Array> = Vec::with_capacity(images.len());
         for img in images {
-            let preprocessed = crate::vision::preprocess::preprocess_image(&img.source, config)
-                .map_err(|e| {
+            let features = if let Some(encoder) = legacy_encoder {
+                let preprocessed =
+                    crate::vision::preprocess::preprocess_image(&img.source, config.unwrap())
+                        .map_err(|e| {
+                            EngineError::new(
+                                EngineErrorCode::InvalidRequest,
+                                format!("image preprocess '{}': {}", img.source, e),
+                            )
+                        })?;
+                encoder.encode(&preprocessed).map_err(|e| {
                     EngineError::new(
-                        EngineErrorCode::InvalidRequest,
-                        format!("image preprocess '{}': {}", img.source, e),
+                        EngineErrorCode::InferenceFailed,
+                        format!("vision encode '{}': {}", img.source, e),
                     )
-                })?;
-            let features = encoder.encode(&preprocessed).map_err(|e| {
-                EngineError::new(
-                    EngineErrorCode::InferenceFailed,
-                    format!("vision encode '{}': {}", img.source, e),
-                )
-            })?;
+                })?
+            } else if model.has_direct_multimodal_image_projection_path() {
+                crate::vision::project_image_with_loaded_model(model, &img.source).map_err(|e| {
+                    EngineError::new(
+                        EngineErrorCode::InferenceFailed,
+                        format!("direct image projection failed: {}", e),
+                    )
+                })?
+            } else {
+                return Err(EngineError::new(
+                    EngineErrorCode::InvalidRequest,
+                    "image input requested for a multimodal model, but the packed cimage does not expose a complete direct projector bundle".to_string(),
+                ));
+            };
             vision_features.push(features);
         }
 
@@ -1071,7 +1091,10 @@ impl ProfiledInferenceSession {
             for (img_idx, img) in images.iter().enumerate() {
                 if img.placeholder_tokens.contains(&tid) {
                     // Replace the placeholder with num_patches actual vision tokens.
-                    let num_patches = encoder.num_patches;
+                    let num_patches = vision_features
+                        .get(img_idx)
+                        .map(|features| features.shape()[0] as u32)
+                        .unwrap_or(0);
                     // The vision token IDs start at a high offset to avoid
                     // colliding with actual vocabulary tokens.  We use an
                     // offset of 250,000 (beyond typical vocab size).
@@ -1787,57 +1810,46 @@ impl ProfiledInferenceSession {
             return Ok(());
         }
 
-        // Iterate through positions in order, replacing embeddings.
-        // prompt_embeds is [1, seq_len, hidden]; we slice at [:1, pos, :].
-        for (feat_idx, &pos) in placeholder_positions.iter().enumerate() {
-            if feat_idx >= num_feat {
-                break;
-            }
-            // Extract the single feature vector.
-            let feat_slice = mlx_rs::Array::slice(
-                media_features,
-                &[feat_idx as i32, 0],
-                &[1, feat_dim as i32],
-                &[1, 1],
-            )?;
+        prompt_embeds
+            .eval()
+            .map_err(|e| format!("prompt embed eval before media injection: {}", e))?;
+        media_features
+            .eval()
+            .map_err(|e| format!("media feature eval before media injection: {}", e))?;
 
-            // Extract the single position in the embedding sequence.
-            // slice_assign is not available in the mlx-rs fork — rebuild via concatenation.
-            let pos_i32 = pos as i32;
-            let hidden_i32 = feat_dim as i32;
-            let seq_len_i32 = seq_len as i32;
-            let left = if pos > 0 {
-                Some(mlx_rs::Array::slice(
-                    prompt_embeds,
-                    &[0, 0, 0],
-                    &[1, pos_i32, hidden_i32],
-                    &[1, 1, 1],
-                )?)
-            } else {
-                None
-            };
-            let right_len = seq_len_i32 - pos_i32 - 1;
-            let right = if right_len > 0 {
-                Some(mlx_rs::Array::slice(
-                    prompt_embeds,
-                    &[0, pos_i32 + 1, 0],
-                    &[1, right_len, hidden_i32],
-                    &[1, 1, 1],
-                )?)
-            } else {
-                None
-            };
-            let mut parts: Vec<&Array> = Vec::new();
-            if let Some(l) = left.as_ref() {
-                parts.push(l);
+        let prompt_values = prompt_embeds
+            .try_as_slice::<f32>()
+            .map_err(|e| format!("prompt embed slice: {}", e))?
+            .to_vec();
+        let feature_values = media_features
+            .try_as_slice::<f32>()
+            .map_err(|e| format!("media feature slice: {}", e))?
+            .to_vec();
+
+        let mut rebuilt = Vec::with_capacity((seq_len + num_feat) * feat_dim);
+        let mut feat_cursor = 0usize;
+        for pos in 0..seq_len {
+            let is_placeholder = placeholder_positions.contains(&pos);
+            if !is_placeholder {
+                let start = pos * feat_dim;
+                rebuilt.extend_from_slice(&prompt_values[start..start + feat_dim]);
+                continue;
             }
-            parts.push(&feat_slice);
-            if let Some(r) = right.as_ref() {
-                parts.push(r);
+
+            if placeholder_positions.len() == 1 {
+                rebuilt.extend_from_slice(&feature_values);
+                continue;
             }
-            *prompt_embeds = mlx_rs::ops::concatenate_axis(&parts, 1)
-                .map_err(|e| format!("media injection concatenation: {}", e))?;
+
+            if feat_cursor < num_feat {
+                let start = feat_cursor * feat_dim;
+                rebuilt.extend_from_slice(&feature_values[start..start + feat_dim]);
+                feat_cursor += 1;
+            }
         }
+
+        let new_seq_len = rebuilt.len() / feat_dim;
+        *prompt_embeds = Array::from_slice(&rebuilt, &[1, new_seq_len as i32, feat_dim as i32]);
 
         Ok(())
     }
@@ -1949,26 +1961,43 @@ impl ProfiledInferenceSession {
                                         .to_string(),
                                 )
                             })?;
-                    let vision_enc = model.vision_encoder.as_ref().ok_or_else(|| {
-                        EngineError::new(
+                    if !model.supports_image_inputs() {
+                        return Err(EngineError::new(
                             EngineErrorCode::InvalidRequest,
-                            "image input requires vision_encoder in model".to_string(),
-                        )
-                    })?;
-                    let processed =
-                        crate::vision::preprocess::preprocess_image(&img.source, vision_config)
-                            .map_err(|e| {
+                            "image input requested but model has no image-capable artifacts"
+                                .to_string(),
+                        ));
+                    }
+                    let features = if let Some(vision_enc) = model.vision_encoder.as_ref() {
+                        let processed =
+                            crate::vision::preprocess::preprocess_image(&img.source, vision_config)
+                                .map_err(|e| {
+                                    EngineError::new(
+                                        EngineErrorCode::InferenceFailed,
+                                        format!("image preprocessing failed: {}", e),
+                                    )
+                                })?;
+                        vision_enc.encode(&processed).map_err(|e| {
+                            EngineError::new(
+                                EngineErrorCode::InferenceFailed,
+                                format!("image encoding failed: {}", e),
+                            )
+                        })?
+                    } else if model.has_direct_multimodal_image_projection_path() {
+                        crate::vision::project_image_with_loaded_model(model, &img.source).map_err(
+                            |e| {
                                 EngineError::new(
                                     EngineErrorCode::InferenceFailed,
-                                    format!("image preprocessing failed: {}", e),
+                                    format!("direct image projection failed: {}", e),
                                 )
-                            })?;
-                    let features = vision_enc.encode(&processed).map_err(|e| {
-                        EngineError::new(
-                            EngineErrorCode::InferenceFailed,
-                            format!("image encoding failed: {}", e),
-                        )
-                    })?;
+                            },
+                        )?
+                    } else {
+                        return Err(EngineError::new(
+                            EngineErrorCode::InvalidRequest,
+                            "image input requested for a multimodal model, but the packed cimage does not expose a complete direct projector bundle".to_string(),
+                        ));
+                    };
                     all_media_features.push(features);
                     all_placeholder_tokens.extend_from_slice(&img.placeholder_tokens);
                 }
@@ -2736,6 +2765,27 @@ mod tests {
             assert_eq!(_guard.caches.as_ref().unwrap().len(), 4);
         }
         assert_eq!(session_caches.len(), 4);
+    }
+
+    #[test]
+    fn inject_media_tokens_expands_single_placeholder_into_full_feature_block() {
+        let mut session = ProfiledInferenceSession::new("test".to_string(), Vec::new());
+        session.pending_prompt_tokens = Some(vec![11, 99, 12]);
+        let mut prompt_embeds =
+            Array::from_slice(&[1.0f32, 10.0, 2.0, 20.0, 3.0, 30.0], &[1, 3, 2]);
+        let media_features = Array::from_slice(&[100.0f32, 101.0, 200.0, 201.0], &[2, 2]);
+
+        session
+            .inject_media_tokens(&mut prompt_embeds, &media_features, &[99])
+            .expect("inject media");
+        prompt_embeds.eval().expect("eval");
+
+        assert_eq!(prompt_embeds.shape(), &[1, 4, 2]);
+        let values = prompt_embeds.try_as_slice::<f32>().expect("slice").to_vec();
+        assert_eq!(
+            values,
+            vec![1.0, 10.0, 100.0, 101.0, 200.0, 201.0, 3.0, 30.0]
+        );
     }
 }
 

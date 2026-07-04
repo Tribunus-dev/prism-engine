@@ -115,6 +115,17 @@ pub struct CpuArtifactManifest {
     pub description: String,
 }
 
+/// Shared Metal-event contract for one IOSurface handoff.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedEventContractManifest {
+    pub event_id: String,
+    pub slot_id: u32,
+    pub producer_artifact_id: String,
+    pub consumer_artifact_id: String,
+    pub signal_value: u64,
+    pub wait_value: u64,
+}
+
 // ── Numerical policy ─────────────────────────────────────────────────────
 
 /// Numerical policy for Apple tri-lane execution.
@@ -238,6 +249,8 @@ pub struct AppleTriLaneArtifactManifest {
     pub coreai_artifacts: Vec<CoreAiArtifactManifest>,
     pub metal_artifacts: Vec<MetalArtifactManifest>,
     pub cpu_artifacts: Vec<CpuArtifactManifest>,
+    #[serde(default)]
+    pub shared_events: Vec<SharedEventContractManifest>,
     pub epochs: Vec<crate::compilation::tri_lane::ExecutionEpoch>,
     pub dependencies: Vec<crate::compilation::tri_lane::LaneDependency>,
     pub fallback: AppleFallbackManifest,
@@ -297,6 +310,14 @@ mod tests {
             coreai_artifacts: vec![],
             metal_artifacts: vec![],
             cpu_artifacts: vec![],
+            shared_events: vec![SharedEventContractManifest {
+                event_id: "evt.slot0".into(),
+                slot_id: 0,
+                producer_artifact_id: "coreai_attn".into(),
+                consumer_artifact_id: "metal_proj".into(),
+                signal_value: 1,
+                wait_value: 1,
+            }],
             epochs: vec![],
             dependencies: vec![],
             fallback: AppleFallbackManifest {

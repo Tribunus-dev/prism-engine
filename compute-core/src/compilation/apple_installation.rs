@@ -11,13 +11,26 @@ use crate::backend::metal_consumer::MetalConsumer;
 use crate::backend::metal_iosurface::{
     MetalExecutable, MetalResourceFormat, MetalResourceKind, MetalResourceView,
 };
+use crate::backend::shared_event::{SharedEventAccess, SharedEventBinding, SharedEventContract};
 use crate::compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
 use crate::compute_image::apple_cimage_manifest::{
     AppleTriLaneArtifactManifest, IOSurfaceSlotManifest as CimageSlotManifest,
+    SharedEventContractManifest,
 };
 use crate::compute_image::apple_shared_arena::{
     AppleSharedArena, IOSurfaceSlotManifest, SlotReuseClass,
 };
+
+#[cfg(feature = "metal-dispatch")]
+pub struct InstalledSharedEvent {
+    pub contract: SharedEventContract,
+    pub event: metal::SharedEvent,
+}
+
+#[cfg(not(feature = "metal-dispatch"))]
+pub struct InstalledSharedEvent {
+    pub contract: SharedEventContract,
+}
 
 // ── Installation result ──────────────────────────────────────────────────
 
@@ -33,6 +46,8 @@ pub struct AppleInstallationResult {
     pub warmup_results: HashMap<String, Result<AneQualificationRecord, String>>,
     /// Plan digest from the sealed manifest.
     pub plan_digest: String,
+    /// Live Metal shared events guarding IOSurface handoff boundaries.
+    pub shared_events: HashMap<String, InstalledSharedEvent>,
     /// Metal consumer with pre-created IOSurface-backed textures.
     pub metal_consumer: Option<MetalConsumer>,
 }
@@ -82,6 +97,231 @@ fn cimage_slot_to_arena_slot(slot: &CimageSlotManifest) -> IOSurfaceSlotManifest
     }
 }
 
+fn runtime_shared_event_contracts(
+    manifest: &AppleTriLaneArtifactManifest,
+) -> Vec<SharedEventContract> {
+    manifest
+        .shared_events
+        .iter()
+        .map(
+            |contract: &SharedEventContractManifest| SharedEventContract {
+                event_id: contract.event_id.clone(),
+                slot_id: contract.slot_id,
+                producer_artifact_id: contract.producer_artifact_id.clone(),
+                consumer_artifact_id: contract.consumer_artifact_id.clone(),
+                signal_value: contract.signal_value,
+                wait_value: contract.wait_value,
+            },
+        )
+        .collect()
+}
+
+#[cfg(feature = "metal-dispatch")]
+fn install_shared_events(
+    contracts: &[SharedEventContract],
+) -> Result<HashMap<String, InstalledSharedEvent>, String> {
+    let device = metal::Device::system_default()
+        .ok_or_else(|| "no Metal device available for shared-event installation".to_string())?;
+    let mut events = HashMap::new();
+    for contract in contracts {
+        let event = device.new_shared_event();
+        event.set_signaled_value(0);
+        events.insert(
+            contract.event_id.clone(),
+            InstalledSharedEvent {
+                contract: contract.clone(),
+                event,
+            },
+        );
+    }
+    Ok(events)
+}
+
+#[cfg(not(feature = "metal-dispatch"))]
+fn install_shared_events(
+    contracts: &[SharedEventContract],
+) -> Result<HashMap<String, InstalledSharedEvent>, String> {
+    let mut events = HashMap::new();
+    for contract in contracts {
+        events.insert(
+            contract.event_id.clone(),
+            InstalledSharedEvent {
+                contract: contract.clone(),
+            },
+        );
+    }
+    Ok(events)
+}
+
+fn attach_coreai_shared_events(
+    executable: &mut CoreAiIOSurfaceExecutable,
+    contracts: &[SharedEventContract],
+) {
+    for contract in contracts {
+        if contract.producer_artifact_id == executable.artifact_id {
+            executable.add_shared_event_binding(SharedEventBinding {
+                event_id: contract.event_id.clone(),
+                slot_id: contract.slot_id,
+                access: SharedEventAccess::Signal,
+                value: contract.signal_value,
+            });
+        }
+        if contract.consumer_artifact_id == executable.artifact_id {
+            executable.add_shared_event_binding(SharedEventBinding {
+                event_id: contract.event_id.clone(),
+                slot_id: contract.slot_id,
+                access: SharedEventAccess::Wait,
+                value: contract.wait_value,
+            });
+        }
+    }
+}
+
+fn attach_metal_shared_events(executable: &mut MetalExecutable, contracts: &[SharedEventContract]) {
+    for contract in contracts {
+        if contract.producer_artifact_id == executable.artifact_id {
+            executable.add_shared_event_binding(SharedEventBinding {
+                event_id: contract.event_id.clone(),
+                slot_id: contract.slot_id,
+                access: SharedEventAccess::Signal,
+                value: contract.signal_value,
+            });
+        }
+        if contract.consumer_artifact_id == executable.artifact_id {
+            executable.add_shared_event_binding(SharedEventBinding {
+                event_id: contract.event_id.clone(),
+                slot_id: contract.slot_id,
+                access: SharedEventAccess::Wait,
+                value: contract.wait_value,
+            });
+        }
+    }
+}
+
+fn parse_slot_ids(slot_ids: &[String]) -> Result<Vec<u32>, String> {
+    slot_ids
+        .iter()
+        .map(|slot_id| {
+            slot_id
+                .parse()
+                .map_err(|_| format!("invalid slot id: {}", slot_id))
+        })
+        .collect()
+}
+
+fn slot_manifest_by_id<'a>(
+    slots: &'a [CimageSlotManifest],
+    slot_id: u32,
+) -> Result<&'a CimageSlotManifest, String> {
+    slots
+        .iter()
+        .find(|slot| slot.slot_id == slot_id)
+        .ok_or_else(|| format!("slot {} not found", slot_id))
+}
+
+fn normalized_dtype(dtype: &str) -> &str {
+    match dtype {
+        "uint8" | "u8" | "Uint8" | "U8" => "u8",
+        "int8" | "i8" | "Int8" | "I8" => "i8",
+        "float32" | "f32" | "Float32" | "F32" => "f32",
+        other => other,
+    }
+}
+
+fn nf4_triplet_slots<'a>(
+    slots: &'a [CimageSlotManifest],
+    slot_ids: &[u32],
+) -> Option<(
+    &'a CimageSlotManifest,
+    &'a CimageSlotManifest,
+    &'a CimageSlotManifest,
+)> {
+    if slot_ids.len() != 3 {
+        return None;
+    }
+    let weight = slot_manifest_by_id(slots, slot_ids[0]).ok()?;
+    let scale = slot_manifest_by_id(slots, slot_ids[1]).ok()?;
+    let bias = slot_manifest_by_id(slots, slot_ids[2]).ok()?;
+    let weight_dtype = normalized_dtype(&weight.dtype);
+    let scale_dtype = normalized_dtype(&scale.dtype);
+    let bias_dtype = normalized_dtype(&bias.dtype);
+    if matches!(weight_dtype, "u8" | "i8") && scale_dtype == "f32" && bias_dtype == "f32" {
+        Some((weight, scale, bias))
+    } else {
+        None
+    }
+}
+
+fn add_generic_coreai_bindings(
+    executable: &mut CoreAiIOSurfaceExecutable,
+    slots: &[CimageSlotManifest],
+    input_slots: &[u32],
+    output_slots: &[u32],
+    contract_digest: &str,
+) -> Result<(), String> {
+    for slot_id in input_slots {
+        executable.add_input_binding(crate::backend::coreai_iosurface::CoreAiIOSurfaceBinding {
+            tensor_id: slot_manifest_by_id(slots, *slot_id)?.tensor_id.clone(),
+            slot_id: *slot_id,
+            io_surface_id: 0,
+            byte_offset: 0,
+            contract_digest: contract_digest.into(),
+        })?;
+    }
+    for slot_id in output_slots {
+        executable.add_output_binding(
+            crate::backend::coreai_iosurface::CoreAiIOSurfaceBinding {
+                tensor_id: slot_manifest_by_id(slots, *slot_id)?.tensor_id.clone(),
+                slot_id: *slot_id,
+                io_surface_id: 0,
+                byte_offset: 0,
+                contract_digest: contract_digest.into(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn add_generic_metal_views(
+    executable: &mut MetalExecutable,
+    slots: &[CimageSlotManifest],
+    input_slots: &[u32],
+    output_slots: &[u32],
+    layout_digest: &str,
+) -> Result<(), String> {
+    for slot_id in input_slots {
+        let slot = slot_manifest_by_id(slots, *slot_id)?;
+        executable.add_input_view(MetalResourceView {
+            slot_id: *slot_id,
+            resource_kind: MetalResourceKind::IOSurfaceBacked,
+            resource_format: MetalResourceFormat {
+                data_type: slot.dtype.clone(),
+                pixel_format: None,
+                is_srgb: false,
+            },
+            byte_offset: slot.byte_offset,
+            length: slot.byte_length,
+            layout_digest: layout_digest.into(),
+        });
+    }
+    for slot_id in output_slots {
+        let slot = slot_manifest_by_id(slots, *slot_id)?;
+        executable.add_output_view(MetalResourceView {
+            slot_id: *slot_id,
+            resource_kind: MetalResourceKind::IOSurfaceBacked,
+            resource_format: MetalResourceFormat {
+                data_type: slot.dtype.clone(),
+                pixel_format: None,
+                is_srgb: false,
+            },
+            byte_offset: slot.byte_offset,
+            length: slot.byte_length,
+            layout_digest: layout_digest.into(),
+        });
+    }
+    Ok(())
+}
+
 // ── Main installation entry point ────────────────────────────────────────
 
 /// Install a sealed Apple tri-lane artifact.
@@ -99,6 +339,9 @@ pub fn install_apple_tri_lane(
     _model_dir: &std::path::Path,
     compute_policy: CoreAiComputePolicy,
 ) -> Result<AppleInstallationResult, String> {
+    let shared_event_contracts = runtime_shared_event_contracts(manifest);
+    let shared_events = install_shared_events(&shared_event_contracts)?;
+
     // 1. Allocate arena
     // Install the shared arena from the sealed manifest — allocates real
     // IOSurface/CVPixelBuffer backings for every slot, populates per-slot
@@ -136,7 +379,35 @@ pub fn install_apple_tri_lane(
             &model_path.to_string_lossy(),
             compute_policy,
         );
+        let input_slot_ids = parse_slot_ids(&artifact.input_slots)?;
+        let output_slot_ids = parse_slot_ids(&artifact.output_slots)?;
+        if let Some((weights, scales, biases)) =
+            nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids)
+        {
+            executable.bind_nf4_tile640_triplet(
+                weights.slot_id,
+                scales.slot_id,
+                biases.slot_id,
+                &manifest.arena.arena_layout_digest,
+            )?;
+            add_generic_coreai_bindings(
+                &mut executable,
+                &manifest.arena.slots,
+                &[],
+                &output_slot_ids,
+                &manifest.arena.arena_layout_digest,
+            )?;
+        } else {
+            add_generic_coreai_bindings(
+                &mut executable,
+                &manifest.arena.slots,
+                &input_slot_ids,
+                &output_slot_ids,
+                &manifest.arena.arena_layout_digest,
+            )?;
+        }
         executable.bind_from_arena(&manifest.arena.slots)?;
+        attach_coreai_shared_events(&mut executable, &shared_event_contracts);
         coreai_executables.insert(artifact.artifact_id.clone(), executable);
     }
 
@@ -148,52 +419,36 @@ pub fn install_apple_tri_lane(
             &artifact.function_name,
             &artifact.pipeline_digest,
         );
-        for slot_id_str in &artifact.input_slots {
-            let slot_id: u32 = slot_id_str
-                .parse()
-                .map_err(|_| format!("invalid slot id: {}", slot_id_str))?;
-            let slot = manifest
-                .arena
-                .slots
-                .iter()
-                .find(|s| s.slot_id == slot_id)
-                .ok_or_else(|| format!("slot {} not found", slot_id))?;
-            executable.add_input_view(MetalResourceView {
-                slot_id,
-                resource_kind: MetalResourceKind::IOSurfaceBacked,
-                resource_format: MetalResourceFormat {
-                    data_type: slot.dtype.clone(),
-                    pixel_format: None,
-                    is_srgb: false,
-                },
-                byte_offset: slot.byte_offset,
-                length: slot.byte_length,
-                layout_digest: manifest.arena.arena_layout_digest.clone(),
-            });
+        let input_slot_ids = parse_slot_ids(&artifact.input_slots)?;
+        let output_slot_ids = parse_slot_ids(&artifact.output_slots)?;
+        if let Some((weights, scales, biases)) =
+            nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids)
+        {
+            executable.bind_nf4_tile640_triplet(
+                weights.slot_id,
+                scales.slot_id,
+                biases.slot_id,
+                weights.byte_length,
+                scales.byte_length / 4,
+                &manifest.arena.arena_layout_digest,
+            );
+            add_generic_metal_views(
+                &mut executable,
+                &manifest.arena.slots,
+                &[],
+                &output_slot_ids,
+                &manifest.arena.arena_layout_digest,
+            )?;
+        } else {
+            add_generic_metal_views(
+                &mut executable,
+                &manifest.arena.slots,
+                &input_slot_ids,
+                &output_slot_ids,
+                &manifest.arena.arena_layout_digest,
+            )?;
         }
-        for slot_id_str in &artifact.output_slots {
-            let slot_id: u32 = slot_id_str
-                .parse()
-                .map_err(|_| format!("invalid slot id: {}", slot_id_str))?;
-            let slot = manifest
-                .arena
-                .slots
-                .iter()
-                .find(|s| s.slot_id == slot_id)
-                .ok_or_else(|| format!("slot {} not found", slot_id))?;
-            executable.add_output_view(MetalResourceView {
-                slot_id,
-                resource_kind: MetalResourceKind::IOSurfaceBacked,
-                resource_format: MetalResourceFormat {
-                    data_type: slot.dtype.clone(),
-                    pixel_format: None,
-                    is_srgb: false,
-                },
-                byte_offset: slot.byte_offset,
-                length: slot.byte_length,
-                layout_digest: manifest.arena.arena_layout_digest.clone(),
-            });
-        }
+        attach_metal_shared_events(&mut executable, &shared_event_contracts);
         metal_executables.insert(artifact.artifact_id.clone(), executable);
     }
 
@@ -223,6 +478,7 @@ pub fn install_apple_tri_lane(
         metal_executables,
         warmup_results,
         plan_digest: manifest.plan_digest.clone(),
+        shared_events,
         metal_consumer: None,
     })
 }
@@ -378,6 +634,14 @@ mod tests {
                 output_slots: vec!["1".into()],
             }],
             cpu_artifacts: vec![],
+            shared_events: vec![SharedEventContractManifest {
+                event_id: "evt.input0".into(),
+                slot_id: 0,
+                producer_artifact_id: "coreai_attn".into(),
+                consumer_artifact_id: "metal_proj".into(),
+                signal_value: 1,
+                wait_value: 1,
+            }],
             epochs: vec![],
             dependencies: vec![],
             fallback: AppleFallbackManifest {
@@ -397,6 +661,133 @@ mod tests {
             admission: AppleTriLaneAdmissionManifest {
                 region_count: 1,
                 admitted_regions: vec!["attention_projection".into()],
+                rejected_regions: vec![],
+                fallback_available: true,
+            },
+        }
+    }
+
+    fn nf4_triplet_arena() -> AppleSharedArenaManifest {
+        AppleSharedArenaManifest {
+            arena_layout_digest: "nf4tile640-layout".into(),
+            allocation_bytes: 4096,
+            alignment_bytes: 16384,
+            ring_depth: 2,
+            slots: vec![
+                CimageSlotManifest {
+                    slot_id: 7,
+                    tensor_id: "packed_nf4_weights".into(),
+                    byte_offset: 0,
+                    byte_length: 320,
+                    dtype: "uint8".into(),
+                    logical_shape: vec![1, 320],
+                    physical_shape: vec![1, 320],
+                    strides_bytes: vec![320, 1],
+                    layout: "row_major".into(),
+                    producer: ExecutionLane::AccelerateCpu,
+                    consumer: ExecutionLane::CoreAiAne,
+                    reuse_class: "shared_readonly".into(),
+                    required_alignment: 16384,
+                },
+                CimageSlotManifest {
+                    slot_id: 8,
+                    tensor_id: "scales".into(),
+                    byte_offset: 320,
+                    byte_length: 20,
+                    dtype: "float32".into(),
+                    logical_shape: vec![1, 5],
+                    physical_shape: vec![1, 5],
+                    strides_bytes: vec![20, 4],
+                    layout: "row_major".into(),
+                    producer: ExecutionLane::AccelerateCpu,
+                    consumer: ExecutionLane::CoreAiAne,
+                    reuse_class: "shared_readonly".into(),
+                    required_alignment: 16384,
+                },
+                CimageSlotManifest {
+                    slot_id: 9,
+                    tensor_id: "biases".into(),
+                    byte_offset: 340,
+                    byte_length: 20,
+                    dtype: "float32".into(),
+                    logical_shape: vec![1, 5],
+                    physical_shape: vec![1, 5],
+                    strides_bytes: vec![20, 4],
+                    layout: "row_major".into(),
+                    producer: ExecutionLane::AccelerateCpu,
+                    consumer: ExecutionLane::CoreAiAne,
+                    reuse_class: "shared_readonly".into(),
+                    required_alignment: 16384,
+                },
+                CimageSlotManifest {
+                    slot_id: 10,
+                    tensor_id: "hidden_out".into(),
+                    byte_offset: 360,
+                    byte_length: 256,
+                    dtype: "float32".into(),
+                    logical_shape: vec![1, 64],
+                    physical_shape: vec![1, 64],
+                    strides_bytes: vec![256, 4],
+                    layout: "row_major".into(),
+                    producer: ExecutionLane::MlxGpu,
+                    consumer: ExecutionLane::CoreAiAne,
+                    reuse_class: "exclusive".into(),
+                    required_alignment: 16384,
+                },
+            ],
+        }
+    }
+
+    fn nf4_triplet_manifest() -> AppleTriLaneArtifactManifest {
+        AppleTriLaneArtifactManifest {
+            manifest_version: 1,
+            hardware_compatibility: dummy_hardware(),
+            plan_digest: "nf4tile640-plan".into(),
+            arena: nf4_triplet_arena(),
+            coreai_artifacts: vec![CoreAiArtifactManifest {
+                artifact_id: "coreai_nf4".into(),
+                mlmodelc_name: "nf4.modelc".into(),
+                package_digest: "pkg_nf4".into(),
+                compiled_model_digest: "cmp_nf4".into(),
+                compute_policy: "cpuAndNeuralEngine".into(),
+                input_slots: vec!["7".into(), "8".into(), "9".into()],
+                output_slots: vec!["10".into()],
+            }],
+            metal_artifacts: vec![MetalArtifactManifest {
+                artifact_id: "metal_nf4".into(),
+                function_name: "fused_gemv_nf4_tile640_fp32".into(),
+                pipeline_digest: "pipe_nf4".into(),
+                input_slots: vec!["7".into(), "8".into(), "9".into()],
+                output_slots: vec!["10".into()],
+            }],
+            cpu_artifacts: vec![],
+            shared_events: vec![SharedEventContractManifest {
+                event_id: "evt.nf4.hidden_out".into(),
+                slot_id: 10,
+                producer_artifact_id: "coreai_nf4".into(),
+                consumer_artifact_id: "metal_nf4".into(),
+                signal_value: 1,
+                wait_value: 1,
+            }],
+            epochs: vec![],
+            dependencies: vec![],
+            fallback: AppleFallbackManifest {
+                replacement_lane: "MlxGpu".into(),
+                replacement_artifact: "metal_nf4".into(),
+                input_slots: vec![7, 8, 9],
+                output_slots: vec![10],
+                epoch_boundary: 0,
+            },
+            numerical_policy: AppleNumericalPolicy {
+                absolute_tolerance: 0.01,
+                relative_tolerance: 0.01,
+                validation_mode: "sampled".into(),
+                sample_period_epochs: None,
+                failure_action: "warn".into(),
+            },
+            admission: AppleTriLaneAdmissionManifest {
+                region_count: 1,
+                admitted_regions: vec!["nf4_projection".into()],
                 rejected_regions: vec![],
                 fallback_available: true,
             },
@@ -459,6 +850,7 @@ mod tests {
             !exec.loaded,
             "executable should not be loaded before warmup"
         );
+        assert_eq!(exec.shared_event_bindings.len(), 1);
 
         // Warmup results should be present and successful
         let warmup = result
@@ -468,6 +860,113 @@ mod tests {
         let record = warmup.as_ref().expect("warmup should succeed");
         assert!(record.warmup_success);
         assert!(record.compile_success);
+        assert_eq!(result.shared_events.len(), 1);
+    }
+
+    #[test]
+    fn test_install_attaches_shared_event_bindings_to_both_lanes() {
+        let manifest = dummy_manifest();
+        let model_dir = std::path::Path::new("/tmp/models");
+
+        let result = install_apple_tri_lane(
+            &manifest,
+            model_dir,
+            CoreAiComputePolicy::CpuAndNeuralEngine,
+        )
+        .expect("installation should succeed");
+
+        let coreai = result
+            .coreai_executables
+            .get("coreai_attn")
+            .expect("coreai executable");
+        let metal = result
+            .metal_executables
+            .get("metal_proj")
+            .expect("metal executable");
+
+        assert_eq!(coreai.shared_event_bindings.len(), 1);
+        assert_eq!(metal.shared_event_bindings.len(), 1);
+        assert!(matches!(
+            coreai.shared_event_bindings[0].access,
+            SharedEventAccess::Signal
+        ));
+        assert!(matches!(
+            metal.shared_event_bindings[0].access,
+            SharedEventAccess::Wait
+        ));
+        assert_eq!(coreai.shared_event_bindings[0].event_id, "evt.input0");
+        assert_eq!(metal.shared_event_bindings[0].event_id, "evt.input0");
+    }
+
+    #[test]
+    fn test_install_binds_nf4_triplet_for_coreai_and_metal() {
+        let manifest = nf4_triplet_manifest();
+        let coreai_artifact = &manifest.coreai_artifacts[0];
+        let metal_artifact = &manifest.metal_artifacts[0];
+        let input_slot_ids = parse_slot_ids(&coreai_artifact.input_slots).expect("slot ids");
+        let output_slot_ids = parse_slot_ids(&coreai_artifact.output_slots).expect("slot ids");
+        let (weights, scales, biases) =
+            nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids).expect("nf4 triplet");
+
+        let mut coreai = CoreAiIOSurfaceExecutable::new(
+            &coreai_artifact.artifact_id,
+            "/tmp/models/nf4.modelc",
+            CoreAiComputePolicy::CpuAndNeuralEngine,
+        );
+        coreai
+            .bind_nf4_tile640_triplet(
+                weights.slot_id,
+                scales.slot_id,
+                biases.slot_id,
+                &manifest.arena.arena_layout_digest,
+            )
+            .expect("bind coreai triplet");
+        add_generic_coreai_bindings(
+            &mut coreai,
+            &manifest.arena.slots,
+            &[],
+            &output_slot_ids,
+            &manifest.arena.arena_layout_digest,
+        )
+        .expect("bind coreai outputs");
+
+        let mut metal = MetalExecutable::new(
+            &metal_artifact.artifact_id,
+            &metal_artifact.function_name,
+            &metal_artifact.pipeline_digest,
+        );
+        metal.bind_nf4_tile640_triplet(
+            weights.slot_id,
+            scales.slot_id,
+            biases.slot_id,
+            weights.byte_length,
+            scales.byte_length / 4,
+            &manifest.arena.arena_layout_digest,
+        );
+        add_generic_metal_views(
+            &mut metal,
+            &manifest.arena.slots,
+            &[],
+            &parse_slot_ids(&metal_artifact.output_slots).expect("slot ids"),
+            &manifest.arena.arena_layout_digest,
+        )
+        .expect("bind metal outputs");
+
+        assert_eq!(coreai.input_bindings.len(), 3);
+        assert_eq!(coreai.input_bindings[0].tensor_id, "packed_nf4_weights");
+        assert_eq!(coreai.input_bindings[1].tensor_id, "scales");
+        assert_eq!(coreai.input_bindings[2].tensor_id, "biases");
+        assert_eq!(coreai.output_bindings.len(), 1);
+        assert_eq!(coreai.output_bindings[0].tensor_id, "hidden_out");
+
+        assert_eq!(metal.input_views.len(), 3);
+        assert_eq!(metal.input_views[0].resource_format.data_type, "uint8");
+        assert_eq!(metal.input_views[1].resource_format.data_type, "float32");
+        assert_eq!(metal.input_views[2].resource_format.data_type, "float32");
+        assert_eq!(metal.input_views[0].length, 320);
+        assert_eq!(metal.input_views[1].length, 20);
+        assert_eq!(metal.output_views.len(), 1);
+        assert_eq!(metal.output_views[0].slot_id, 10);
     }
 
     // ── test_warmup_validates_slot_presence ─────────────────────────────

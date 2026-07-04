@@ -5,7 +5,8 @@
 
 use super::types::{
     compute_manifest_hash, is_valid_storage_abi, CompileReceipt, Manifest, ManifestVerification,
-    QuantizationDesc, Segment, StorageBackend, TensorEntry, STORAGE_ABI_MAPPED_NO_COPY_V1,
+    QuantizationDesc, Segment, SharedWeightLayout, StorageBackend, TensorEntry,
+    STORAGE_ABI_MAPPED_NO_COPY_V1,
 };
 use crate::mapped_image::MappedSegment;
 pub(crate) use crate::quantized::QuantizedLinearBinding;
@@ -33,6 +34,7 @@ pub struct ResolvedTensorBinding {
     pub logical_shape: Vec<u32>,
     pub strides: Vec<u32>,
     pub quantization: Option<QuantizationDesc>,
+    pub shared_weight_layout: Option<SharedWeightLayout>,
     pub alias_of: Option<u32>,
     pub layout_version: u32,
 }
@@ -63,6 +65,10 @@ pub fn build_tensor_catalog(manifest: &Manifest) -> HashMap<String, ResolvedTens
                 logical_shape: entry.logical_shape.clone(),
                 strides: Vec::new(),
                 quantization: entry.quantization.clone(),
+                shared_weight_layout: entry
+                    .quantization
+                    .as_ref()
+                    .and_then(|q| q.storage_layout.clone()),
                 alias_of: None,
                 layout_version: entry.layout_version,
             },
@@ -87,6 +93,7 @@ pub fn build_tensor_catalog(manifest: &Manifest) -> HashMap<String, ResolvedTens
                 logical_shape: phys_binding.logical_shape.clone(),
                 strides: phys_binding.strides.clone(),
                 quantization: phys_binding.quantization.clone(),
+                shared_weight_layout: phys_binding.shared_weight_layout.clone(),
                 alias_of: Some(alias.physical_tensor_id),
                 layout_version: phys_binding.layout_version,
             };

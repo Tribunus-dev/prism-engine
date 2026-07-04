@@ -25,6 +25,7 @@ use tribunus_compute_core::ane_compile::compile_ane_artifacts;
 use tribunus_compute_core::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
 use tribunus_compute_core::compute_image::compile::ternary::{
     model_artifact_tag, CimageHeader, ModelArtifactEntry, SegmentEntry, SegmentKind,
+    CIMAGE_SEGMENT_CAPACITY,
 };
 use tribunus_compute_core::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
 use tribunus_compute_core::quantization::embed_cluster::*;
@@ -1388,7 +1389,7 @@ fn main() {
         kind: SegmentKind::MetalLib as u32,
         offset: 0,
         length: 0,
-    }; 9];
+    }; CIMAGE_SEGMENT_CAPACITY];
     segments[0] = SegmentEntry {
         kind: SegmentKind::MetalLib as u32,
         offset: metal_offset,

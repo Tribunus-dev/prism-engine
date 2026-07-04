@@ -10,6 +10,10 @@
 //! - [`load_tensor_from_mapped_segment`] — mmap-backed tensor loading
 
 use crate::arena::Arena;
+use crate::compute_image::cimage_loader::CimageDeployment;
+use crate::compute_image::multimodal::{
+    MultimodalArtifactSummary, ProjectionTensorRecord, SealedMultimodalBindings,
+};
 use crate::compute_image::phase_dag::EmittedPhaseGraph;
 use crate::compute_image::{CompiledImageReader, CopyClassification, TensorEntry};
 use crate::config::{ModelExecutionPlan, TextArchitecture, VisionArchitecture};
@@ -22,6 +26,7 @@ use crate::vision::encoder::VisionEncoder;
 use crate::worker_dispatch::LoadedMetalKernel;
 use crate::worker_dispatch::MetalKernelRegistry;
 use crate::worker_memory;
+use half::f16;
 use mlx_rs::Array;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -388,8 +393,27 @@ pub struct LoadedProfiledModel {
     pub scheduled_module: Option<crate::compiler::scheduled::ScheduledModule>,
     /// Vision encoder for multi-modal image input (None for text-only models).
     pub vision_encoder: Option<VisionEncoder>,
+    /// Sealed multimodal metadata loaded from a sibling packed `.cimage`, if present.
+    pub multimodal_summary: Option<MultimodalArtifactSummary>,
+    /// Projection table extracted from the sealed multimodal descriptor.
+    pub multimodal_projection_records: Vec<ProjectionTensorRecord>,
+    /// Structured binding for projector-ready multimodal artifacts sealed into the cimage.
+    pub multimodal_bindings: Option<SealedMultimodalBindings>,
     /// Currently active LoRA adapter (None = no adapter loaded).
     pub active_adapter: Option<crate::lora::LoraAdapter>,
+}
+
+fn tensor_table_has_prefix(reader: &CompiledImageReader, prefixes: &[&str]) -> bool {
+    reader
+        .manifest
+        .tensor_table
+        .iter()
+        .any(|entry| prefixes.iter().any(|prefix| entry.name.starts_with(prefix)))
+}
+
+fn sibling_cimage_path(image_dir: &Path) -> Option<PathBuf> {
+    let stem = image_dir.file_name()?.to_str()?;
+    Some(image_dir.with_file_name(format!("{stem}.cimage")))
 }
 
 // Safety: raw pointers are to MLX ref-counted objects (thread-safe).
@@ -397,6 +421,123 @@ unsafe impl Send for LoadedProfiledModel {}
 unsafe impl Sync for LoadedProfiledModel {}
 
 impl LoadedProfiledModel {
+    pub fn supports_image_inputs(&self) -> bool {
+        self.reader.manifest.vision_config.is_some()
+            || tensor_table_has_prefix(
+                &self.reader,
+                &[
+                    "vision_encoder.",
+                    "vision_embedder.",
+                    "embed_vision.",
+                    "model.vision_embedder.",
+                    "model.embed_vision.",
+                ],
+            )
+    }
+
+    pub fn supports_audio_inputs(&self) -> bool {
+        self.reader.manifest.audio_config.is_some()
+            || tensor_table_has_prefix(
+                &self.reader,
+                &["audio_encoder.", "embed_audio.", "model.embed_audio."],
+            )
+    }
+
+    pub fn has_legacy_vision_encoder_path(&self) -> bool {
+        self.vision_encoder.is_some()
+    }
+
+    pub fn multimodal_summary(&self) -> Option<&MultimodalArtifactSummary> {
+        self.multimodal_summary.as_ref()
+    }
+
+    pub fn multimodal_projection_records(&self) -> &[ProjectionTensorRecord] {
+        &self.multimodal_projection_records
+    }
+
+    pub fn multimodal_bindings(&self) -> Option<&SealedMultimodalBindings> {
+        self.multimodal_bindings.as_ref()
+    }
+
+    pub fn has_direct_multimodal_image_projection_path(&self) -> bool {
+        self.multimodal_bindings
+            .as_ref()
+            .map(|bindings| bindings.ready_for_direct_image_projection())
+            .unwrap_or(false)
+    }
+
+    pub fn find_tensor_name_with_suffixes(&self, suffixes: &[&str]) -> Option<String> {
+        self.reader.manifest.tensor_table.iter().find_map(|entry| {
+            suffixes
+                .iter()
+                .any(|suffix| entry.name.ends_with(suffix))
+                .then(|| entry.name.clone())
+        })
+    }
+
+    pub fn load_tensor_f32_by_name(&self, name: &str) -> crate::Result<(Vec<f32>, Vec<usize>)> {
+        let entry = self
+            .reader
+            .manifest
+            .tensor_table
+            .iter()
+            .find(|entry| entry.name == name)
+            .ok_or_else(|| crate::Error::from_reason(format!("tensor not found: {}", name)))?;
+        let segment = self
+            .mapped_image
+            .segments
+            .get(&entry.segment)
+            .ok_or_else(|| {
+                crate::Error::from_reason(format!("segment not found: {}", entry.segment))
+            })?;
+        let mapping = segment.data_slice();
+        let offset = entry.offset as usize;
+        let len = entry.byte_length as usize;
+        let end = offset.saturating_add(len);
+        if end > mapping.len() {
+            return Err(crate::Error::from_reason(format!(
+                "tensor {} out of range: {}..{} > {}",
+                name,
+                offset,
+                end,
+                mapping.len()
+            )));
+        }
+        let bytes = &mapping[offset..end];
+        let values = match entry.storage_dtype.as_str() {
+            "F32" | "Float32" => bytes
+                .chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect(),
+            "BF16" | "BFloat16" => bytes
+                .chunks_exact(2)
+                .map(|chunk| {
+                    let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    f32::from_bits((bits as u32) << 16)
+                })
+                .collect(),
+            "F16" | "Float16" => bytes
+                .chunks_exact(2)
+                .map(|chunk| {
+                    let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    f16::from_bits(bits).to_f32()
+                })
+                .collect(),
+            other => {
+                return Err(crate::Error::from_reason(format!(
+                    "tensor {} has unsupported runtime dtype {}",
+                    name, other
+                )))
+            }
+        };
+        let shape = entry
+            .logical_shape
+            .iter()
+            .map(|&dim| dim as usize)
+            .collect();
+        Ok((values, shape))
+    }
+
     /// Load and construct a profiled model from a compiled image directory.
     pub fn new(image_dir: &Path) -> crate::Result<Self> {
         let handle_baseline = crate::bridge::handle_count();
@@ -706,12 +847,18 @@ impl LoadedProfiledModel {
         );
 
         // ── Load vision encoder (if present) ─────────────────────────
-        let vision_encoder = if reader
-            .manifest
-            .tensor_table
-            .iter()
-            .any(|e| e.name.contains("vision_encoder"))
-        {
+        let has_legacy_vision_tensors = tensor_table_has_prefix(&reader, &["vision_encoder."]);
+        let has_direct_multimodal_image_tensors = tensor_table_has_prefix(
+            &reader,
+            &[
+                "vision_embedder.",
+                "embed_vision.",
+                "model.vision_embedder.",
+                "model.embed_vision.",
+            ],
+        );
+
+        let vision_encoder = if has_legacy_vision_tensors {
             // Find the model's vision_config from the manifest metadata.
             // Fall back to the image metadata embedded in the architecture.
             let vision_config = VisionArchitecture {
@@ -761,6 +908,11 @@ impl LoadedProfiledModel {
                     None
                 }
             }
+        } else if has_direct_multimodal_image_tensors || reader.manifest.vision_config.is_some() {
+            eprintln!(
+                "[profiled-model] multimodal image artifacts detected, but direct projector runtime binding is not wired yet; continuing without legacy vision encoder"
+            );
+            None
         } else {
             None
         };
@@ -791,6 +943,32 @@ impl LoadedProfiledModel {
             }
         };
 
+        let (multimodal_summary, multimodal_projection_records, multimodal_bindings) =
+            match sibling_cimage_path(image_dir) {
+                Some(cimage_path) if cimage_path.exists() => {
+                    match metal::Device::system_default()
+                        .ok_or_else(|| "no Metal device available".to_string())
+                        .and_then(|device| CimageDeployment::load(&cimage_path, &device))
+                    {
+                        Ok(deployment) => {
+                            let summary = deployment.multimodal_artifact_summary();
+                            let records = deployment.multimodal_projection_records();
+                            let bindings = deployment.multimodal_bindings();
+                            (Some(summary), records, bindings)
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[profiled-model] WARNING: failed to read sealed multimodal metadata from {}: {}",
+                                cimage_path.display(),
+                                e
+                            );
+                            (None, Vec::new(), None)
+                        }
+                    }
+                }
+                _ => (None, Vec::new(), None),
+            };
+
         Ok(Self {
             image_dir: image_dir.to_path_buf(),
             phase_dag: reader.manifest.phase_dag.clone(),
@@ -814,6 +992,9 @@ impl LoadedProfiledModel {
             memory_island,
             scheduled_module,
             vision_encoder,
+            multimodal_summary,
+            multimodal_projection_records,
+            multimodal_bindings,
             active_adapter: None,
             // Metal kernels: start empty; populated by the fused-kernel
             metal_kernels,

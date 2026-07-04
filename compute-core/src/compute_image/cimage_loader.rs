@@ -14,11 +14,17 @@
 //! [`TernaryCImageCompiler`]: crate::compute_image::ternary_compile::TernaryCImageCompiler
 //! [`TernaryCImageCompiler`]: crate::compute_image::compile::ternary::TernaryCImageCompiler
 
+use crate::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
 use crate::compute_image::compile::ternary::{
-    model_artifact_tag, verify_cimage, ModelArtifactEntry, SegmentEntry, SegmentKind, PRISM_MAGIC,
+    model_artifact_tag, verify_cimage, LayerDirectoryEntry, ModelArtifactEntry, SegmentEntry,
+    SegmentKind, PRISM_MAGIC,
 };
 use crate::compute_image::megakernel::kernels::HIDDEN_DIM;
-use crate::compute_image::multimodal::descriptor::MultimodalCapabilities;
+use crate::compute_image::multimodal::descriptor::{
+    MultimodalArtifactSummary, MultimodalCapabilities, MultimodalInputDescriptorV1,
+    ProjectionBackend, ProjectionPrecision, ProjectionTensorRecord,
+};
+use crate::compute_image::multimodal::SealedMultimodalBindings;
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -121,6 +127,8 @@ pub struct CimageDeployment {
     pub weights_buffer: metal::Buffer,
     /// Metal buffer containing the FP16 block scales.
     pub scales_buffer: metal::Buffer,
+    /// Metal buffer containing FP32 block biases for NF4Tile640 images.
+    pub biases_buffer: Option<metal::Buffer>,
     /// INT4 block-quantized weights for M5+ Neural Accelerator direct consumption.
     /// Populated at load time by `maybe_expand_to_int4()`. None on M1-M4 or if expansion disabled.
     pub weights_int4_buffer: Option<metal::Buffer>,
@@ -147,6 +155,14 @@ pub struct CimageDeployment {
     pub norms_buffer: Option<metal::Buffer>,
     /// FP16 per-layer scalars (num_layers × 2 bytes), present in v2 format (from aux section).
     pub scalars_buffer: Option<metal::Buffer>,
+    /// Sealed multimodal projection weights segment, when present.
+    pub multimodal_projection_weights_buffer: Option<metal::Buffer>,
+    /// Sealed multimodal projection scales segment, when present.
+    pub multimodal_projection_scales_buffer: Option<metal::Buffer>,
+    /// Sealed multimodal position embeddings segment, when present.
+    pub multimodal_position_embeddings_buffer: Option<metal::Buffer>,
+    /// Sealed multimodal auxiliary weights segment, when present.
+    pub multimodal_auxiliary_weights_buffer: Option<metal::Buffer>,
     /// ANE MIL program binary (from aux section tail), v2 format.
     pub mil_buffer: Option<metal::Buffer>,
     /// Pre-compiled Metal kernel library (.metallib) embedded in the aux section
@@ -176,6 +192,93 @@ pub struct CimageDeployment {
 }
 
 impl CimageDeployment {
+    /// Return the sealed cimage header when this deployment uses the v2
+    /// Prism format, otherwise `None`.
+    pub fn prism_header(&self) -> Option<PrismCimageHeader> {
+        if self.mmap_data.len() < std::mem::size_of::<PrismCimageHeader>() {
+            return None;
+        }
+        verify_cimage(&self.mmap_data)
+            .ok()
+            .map(|(header, _)| header)
+    }
+
+    /// True when the deployment carries the explicit NF4Tile640 shared-weight
+    /// schema rather than the legacy ternary schema.
+    pub fn is_nf4_tile640(&self) -> bool {
+        self.prism_header()
+            .map(|header| header.is_nf4_tile640())
+            .unwrap_or(false)
+    }
+
+    /// Return the FP32 bias buffer required by the NF4Tile640 runtime path.
+    pub fn require_nf4_biases(&self) -> Result<&metal::Buffer, String> {
+        self.biases_buffer
+            .as_ref()
+            .ok_or_else(|| "NF4Tile640 deployment missing BlockBiases segment".to_string())
+    }
+
+    /// Decode the sealed LayerDirectory segment into typed entries.
+    pub fn layer_directory_entries(&self) -> Result<Vec<LayerDirectoryEntry>, String> {
+        let header = self
+            .prism_header()
+            .ok_or_else(|| "LayerDirectory unavailable for legacy cimage format".to_string())?;
+        let Some(seg) = header
+            .segments
+            .iter()
+            .find(|seg| seg.kind == SegmentKind::LayerDirectory as u32 && seg.length > 0)
+        else {
+            return Ok(Vec::new());
+        };
+
+        let entry_size = std::mem::size_of::<LayerDirectoryEntry>();
+        if seg.length as usize % entry_size != 0 {
+            return Err(format!(
+                "LayerDirectory byte length {} is not a multiple of {}",
+                seg.length, entry_size
+            ));
+        }
+
+        let start = seg.offset as usize;
+        let end = start + seg.length as usize;
+        if end > self.mmap_data.len() {
+            return Err("LayerDirectory extends past end of .cimage mmap".into());
+        }
+
+        let mut entries = Vec::with_capacity(seg.length as usize / entry_size);
+        let bytes = &self.mmap_data[start..end];
+        for chunk in bytes.chunks_exact(entry_size) {
+            let entry =
+                unsafe { std::ptr::read_unaligned(chunk.as_ptr() as *const LayerDirectoryEntry) };
+            entries.push(entry);
+        }
+        Ok(entries)
+    }
+
+    /// Decode the sealed ExecutionGraph segment into a typed descriptor.
+    pub fn execution_graph(&self) -> Result<Option<ExecutionGraphDescriptor>, String> {
+        let header = self
+            .prism_header()
+            .ok_or_else(|| "ExecutionGraph unavailable for legacy cimage format".to_string())?;
+        let Some(seg) = header
+            .segments
+            .iter()
+            .find(|seg| seg.kind == SegmentKind::ExecutionGraph as u32 && seg.length > 0)
+        else {
+            return Ok(None);
+        };
+
+        let start = seg.offset as usize;
+        let end = start + seg.length as usize;
+        if end > self.mmap_data.len() {
+            return Err("ExecutionGraph extends past end of .cimage mmap".into());
+        }
+
+        ExecutionGraphDescriptor::from_bytes(&self.mmap_data[start..end])
+            .map(Some)
+            .map_err(|e| format!("decode ExecutionGraph: {e}"))
+    }
+
     /// Load a `.cimage` file, auto-detecting the format version, verifying
     /// integrity, and creating Metal shared buffers.
     ///
@@ -290,12 +393,17 @@ impl CimageDeployment {
             layout,
             weights_buffer,
             scales_buffer,
+            biases_buffer: None,
             embed_buffer: None,
             centroid_buffer: None,
             centroid_scales_buffer: None,
             cluster_map_buffer: None,
             norms_buffer: None,
             scalars_buffer: None,
+            multimodal_projection_weights_buffer: None,
+            multimodal_projection_scales_buffer: None,
+            multimodal_position_embeddings_buffer: None,
+            multimodal_auxiliary_weights_buffer: None,
             mil_buffer: None,
             metallib_buffer: None,
             compaction_model_bytes: None,
@@ -327,8 +435,19 @@ impl CimageDeployment {
                 .ok_or_else(|| format!("segment kind {} not found", kind))
         };
         let sg0 = find_seg(SegmentKind::MetalLib as u32)?;
-        let sg1 = find_seg(SegmentKind::TernaryWeights as u32)?;
+        let weight_kind = if header.quantization_schema
+            == crate::compute_image::compile::ternary::QUANT_SCHEMA_NF4_TILE640
+        {
+            SegmentKind::Nf4Tile640Weights as u32
+        } else {
+            SegmentKind::TernaryWeights as u32
+        };
+        let sg1 = find_seg(weight_kind)?;
         let sg2 = find_seg(SegmentKind::BlockScales as u32)?;
+        let sg_bias = header
+            .segments
+            .iter()
+            .find(|s| s.kind == SegmentKind::BlockBiases as u32 && s.length > 0);
 
         let mk_buf = |seg: &SegmentEntry| -> metal::Buffer {
             let off = seg.offset as usize;
@@ -341,7 +460,13 @@ impl CimageDeployment {
             )
         };
 
-        let num_weights = (sg2.length / 2) * 256;
+        let num_weights = if header.quantization_schema
+            == crate::compute_image::compile::ternary::QUANT_SCHEMA_NF4_TILE640
+        {
+            (sg1.length / 320) * 640
+        } else {
+            (sg2.length / 2) * 256
+        };
 
         // ── Read auxiliary buffers from ModelArtifacts segment ────────
         let model_artifacts_seg = header
@@ -457,6 +582,7 @@ impl CimageDeployment {
             layout: unsafe { std::mem::zeroed() },
             weights_buffer: mk_buf(sg1),
             scales_buffer: mk_buf(sg2),
+            biases_buffer: sg_bias.map(mk_buf),
             weights_int4_buffer: None,
             fused_int4_buffer: None,
             embed_buffer,
@@ -466,6 +592,18 @@ impl CimageDeployment {
             cluster_map_buffer,
             norms_buffer,
             scalars_buffer: None,
+            multimodal_projection_weights_buffer: header
+                .segment(SegmentKind::MultimodalProjectionWeights)
+                .map(|seg| mk_buf(&seg)),
+            multimodal_projection_scales_buffer: header
+                .segment(SegmentKind::MultimodalProjectionScales)
+                .map(|seg| mk_buf(&seg)),
+            multimodal_position_embeddings_buffer: header
+                .segment(SegmentKind::MultimodalPositionEmbeddings)
+                .map(|seg| mk_buf(&seg)),
+            multimodal_auxiliary_weights_buffer: header
+                .segment(SegmentKind::MultimodalAuxiliaryWeights)
+                .map(|seg| mk_buf(&seg)),
             mil_buffer: None,
             metallib_buffer: Some(mk_buf(sg0)),
             compaction_model_bytes: None,
@@ -476,13 +614,98 @@ impl CimageDeployment {
         })
     }
     pub fn multimodal_capabilities(&self) -> MultimodalCapabilities {
+        if let Some(desc) = self.read_multimodal_descriptor() {
+            return capabilities_from_descriptor(&desc);
+        }
+
+        if let Some(token_map) = self.read_multimodal_token_map() {
+            return capabilities_from_token_map(&token_map);
+        }
+
         MultimodalCapabilities::default()
+    }
+
+    pub fn multimodal_descriptor(&self) -> Option<MultimodalInputDescriptorV1> {
+        self.read_multimodal_descriptor()
+    }
+
+    pub fn multimodal_projection_records(&self) -> Vec<ProjectionTensorRecord> {
+        let Some(desc) = self.read_multimodal_descriptor() else {
+            return Vec::new();
+        };
+        read_projection_records(&self.mmap_data, &desc).unwrap_or_default()
+    }
+
+    pub fn multimodal_artifact_summary(&self) -> MultimodalArtifactSummary {
+        let Some(desc) = self.read_multimodal_descriptor() else {
+            return MultimodalArtifactSummary::text_only();
+        };
+        MultimodalArtifactSummary::from_descriptor(
+            &desc,
+            projection_precision_from_descriptor(&self.mmap_data, &desc),
+        )
+    }
+
+    pub fn multimodal_bindings(&self) -> Option<SealedMultimodalBindings> {
+        SealedMultimodalBindings::from_deployment(self).ok()
+    }
+
+    fn read_multimodal_descriptor(&self) -> Option<MultimodalInputDescriptorV1> {
+        let (header, _) = verify_cimage(&self.mmap_data).ok()?;
+        let entry = header.segment(SegmentKind::MultimodalInputDescriptor)?;
+        let start = entry.offset as usize;
+        let end = start + entry.length as usize;
+        if end > self.mmap_data.len()
+            || (entry.length as usize) < std::mem::size_of::<MultimodalInputDescriptorV1>()
+        {
+            return None;
+        }
+        let desc = unsafe {
+            std::ptr::read_unaligned(
+                self.mmap_data[start..end].as_ptr() as *const MultimodalInputDescriptorV1
+            )
+        };
+        desc.validate().ok()?;
+        Some(desc)
+    }
+
+    fn read_multimodal_token_map(&self) -> Option<serde_json::Value> {
+        let (header, _) = verify_cimage(&self.mmap_data).ok()?;
+        let entry = header.segment(SegmentKind::ModelArtifacts)?;
+        let start = entry.offset as usize;
+        let end = start + entry.length as usize;
+        if end > self.mmap_data.len() {
+            return None;
+        }
+        let blob = &self.mmap_data[start..end];
+        for (tag, payload) in ModelArtifactEntry::iter_entries(blob) {
+            if tag == model_artifact_tag::TOKEN_MAP {
+                if let Ok(json) = serde_json::from_slice::<serde_json::Value>(payload) {
+                    return Some(json);
+                }
+            }
+        }
+        None
     }
 
     /// If running on M5+ (Apple10 GPU family), expand ternary weights to INT4
     /// block-quantized format in a GPU-readable shared buffer.
     /// Called once after load, before any decode.
     pub fn maybe_expand_to_int4(&mut self, device: &metal::Device) -> Result<(), String> {
+        if self.multimodal_descriptor().is_some()
+            && self.mmap_data.len() >= std::mem::size_of::<PrismCimageHeader>()
+        {
+            let (header, _) = verify_cimage(&self.mmap_data)?;
+            if header.is_nf4_tile640() {
+                return Ok(());
+            }
+        } else if self.mmap_data.len() >= std::mem::size_of::<PrismCimageHeader>() {
+            let (header, _) = verify_cimage(&self.mmap_data)?;
+            if header.is_nf4_tile640() {
+                return Ok(());
+            }
+        }
+
         // Check GPU family — activate on M5+ (Apple10).
         // metal-rs 0.29 caps at Apple9; update to Apple10 when the crate adds it.
         if !device.supports_family(metal::MTLGPUFamily::Apple9) {
@@ -642,5 +865,211 @@ impl CimageDeployment {
     /// encoding, 4 weights per byte).
     pub fn tiles_for_dim(&self, dim: usize) -> usize {
         dim.div_ceil(640)
+    }
+}
+
+fn capabilities_from_descriptor(desc: &MultimodalInputDescriptorV1) -> MultimodalCapabilities {
+    let image = (desc.modality_mask & 0b0010) != 0;
+    let audio = (desc.modality_mask & 0b0100) != 0;
+    let projection_backend = if image || audio {
+        ProjectionBackend::Metal
+    } else {
+        ProjectionBackend::None
+    };
+    MultimodalCapabilities {
+        text: true,
+        image,
+        audio,
+        image_projection_backend: if image {
+            projection_backend
+        } else {
+            ProjectionBackend::None
+        },
+        audio_projection_backend: if audio {
+            projection_backend
+        } else {
+            ProjectionBackend::None
+        },
+        max_images_per_prompt: if image { 1 } else { 0 },
+        max_soft_tokens_per_image: desc.image_max_soft_tokens,
+        supports_mixed_embedding_prefill: image || audio,
+    }
+}
+
+fn capabilities_from_token_map(token_map: &serde_json::Value) -> MultimodalCapabilities {
+    let image = token_map.get("image_start_token").is_some()
+        || token_map.get("image_end_token").is_some()
+        || token_map.get("image_token_count").is_some()
+        || token_map.get("vision_patch_size").is_some();
+    let audio = token_map.get("audio_start_token").is_some()
+        || token_map.get("audio_end_token").is_some()
+        || token_map.get("audio_sample_rate").is_some()
+        || token_map.get("audio_frame_ms").is_some();
+
+    MultimodalCapabilities {
+        text: true,
+        image,
+        audio,
+        image_projection_backend: if image {
+            ProjectionBackend::Metal
+        } else {
+            ProjectionBackend::None
+        },
+        audio_projection_backend: if audio {
+            ProjectionBackend::Metal
+        } else {
+            ProjectionBackend::None
+        },
+        max_images_per_prompt: if image { 1 } else { 0 },
+        max_soft_tokens_per_image: token_map
+            .get("image_token_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32,
+        supports_mixed_embedding_prefill: image || audio,
+    }
+}
+
+fn read_projection_records(
+    mmap_data: &[u8],
+    desc: &MultimodalInputDescriptorV1,
+) -> Option<Vec<ProjectionTensorRecord>> {
+    let start = desc.image_projection_table_offset as usize;
+    let total_records = desc.image_projection_count as usize + desc.audio_projection_count as usize;
+    let record_size = std::mem::size_of::<ProjectionTensorRecord>();
+    let byte_len = total_records.checked_mul(record_size)?;
+    let end = start.checked_add(byte_len)?;
+    if end > mmap_data.len() {
+        return None;
+    }
+
+    let mut records = Vec::with_capacity(total_records);
+    let mut cursor = start;
+    for _ in 0..total_records {
+        let record = unsafe {
+            std::ptr::read_unaligned(mmap_data[cursor..].as_ptr() as *const ProjectionTensorRecord)
+        };
+        records.push(record);
+        cursor += record_size;
+    }
+    Some(records)
+}
+
+fn projection_precision_from_descriptor(
+    mmap_data: &[u8],
+    desc: &MultimodalInputDescriptorV1,
+) -> ProjectionPrecision {
+    let Some((header, _)) = verify_cimage(mmap_data).ok() else {
+        return ProjectionPrecision::Unknown;
+    };
+    let has_weight_segment = header
+        .segment(SegmentKind::MultimodalProjectionWeights)
+        .is_some();
+    let has_scale_segment = header
+        .segment(SegmentKind::MultimodalProjectionScales)
+        .is_some();
+    if !has_weight_segment {
+        return ProjectionPrecision::Unknown;
+    }
+
+    let records = read_projection_records(mmap_data, desc).unwrap_or_default();
+    if records.iter().any(|record| record.is_nf4_tile640()) {
+        ProjectionPrecision::Nf4Tile640
+    } else if records.iter().any(|record| record.quantization_kind != 0) {
+        ProjectionPrecision::Ternary
+    } else if has_scale_segment {
+        ProjectionPrecision::Hybrid
+    } else {
+        ProjectionPrecision::Fp16
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compute_image::multimodal::descriptor::MULTIMODAL_DESCRIPTOR_MAGIC;
+
+    #[test]
+    fn descriptor_capabilities_expose_image_and_audio() {
+        let mut desc = MultimodalInputDescriptorV1::default();
+        desc.magic = MULTIMODAL_DESCRIPTOR_MAGIC;
+        desc.version = 1;
+        desc.modality_mask = 0b0110;
+        desc.image_max_soft_tokens = 280;
+
+        let caps = capabilities_from_descriptor(&desc);
+        assert!(caps.text);
+        assert!(caps.image);
+        assert!(caps.audio);
+        assert_eq!(caps.max_soft_tokens_per_image, 280);
+        assert!(caps.supports_mixed_embedding_prefill);
+    }
+
+    #[test]
+    fn token_map_capabilities_detect_multimodal_support() {
+        let token_map = serde_json::json!({
+            "image_start_token": "<start_of_image>",
+            "audio_start_token": "<start_of_audio>",
+            "image_token_count": 256,
+            "audio_sample_rate": 16000
+        });
+
+        let caps = capabilities_from_token_map(&token_map);
+        assert!(caps.image);
+        assert!(caps.audio);
+        assert_eq!(caps.max_soft_tokens_per_image, 256);
+        assert_eq!(caps.image_projection_backend, ProjectionBackend::Metal);
+        assert_eq!(caps.audio_projection_backend, ProjectionBackend::Metal);
+    }
+
+    #[test]
+    fn projection_records_roundtrip_from_descriptor_blob() {
+        let mut desc = MultimodalInputDescriptorV1::default();
+        desc.magic = MULTIMODAL_DESCRIPTOR_MAGIC;
+        desc.version = 1;
+        desc.modality_mask = 0b0110;
+        desc.image_projection_count = 1;
+        desc.audio_projection_count = 1;
+        desc.image_projection_table_offset =
+            std::mem::size_of::<MultimodalInputDescriptorV1>() as u64;
+
+        let image = ProjectionTensorRecord {
+            logical_name_hash: 11,
+            role: 2,
+            input_width: 3840,
+            output_width: 3840,
+            ..ProjectionTensorRecord::default()
+        };
+        let audio = ProjectionTensorRecord {
+            logical_name_hash: 22,
+            role: 6,
+            input_width: 1024,
+            output_width: 3840,
+            ..ProjectionTensorRecord::default()
+        };
+
+        let mut blob = Vec::new();
+        blob.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(
+                &desc as *const MultimodalInputDescriptorV1 as *const u8,
+                std::mem::size_of::<MultimodalInputDescriptorV1>(),
+            )
+        });
+        blob.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(
+                &image as *const ProjectionTensorRecord as *const u8,
+                std::mem::size_of::<ProjectionTensorRecord>(),
+            )
+        });
+        blob.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(
+                &audio as *const ProjectionTensorRecord as *const u8,
+                std::mem::size_of::<ProjectionTensorRecord>(),
+            )
+        });
+
+        let records = read_projection_records(&blob, &desc).expect("records");
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].logical_name_hash, 11);
+        assert_eq!(records[1].logical_name_hash, 22);
     }
 }

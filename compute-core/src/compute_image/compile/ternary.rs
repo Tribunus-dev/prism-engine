@@ -9,8 +9,11 @@ pub const STATE_EXECUTING: u8 = 3;
 
 pub const PRISM_MAGIC: [u8; 8] = *b"PRISM\0\0\0";
 pub const CIMAGE_PAGE_SIZE: u64 = 16384;
+pub const QUANT_SCHEMA_TERNARY_TILE640: u32 = 0;
+pub const QUANT_SCHEMA_NF4_TILE640: u32 = 1;
 /// Deprecated alias; use CIMAGE_PAGE_SIZE
 pub const PRISM_PAGE_SIZE: u64 = CIMAGE_PAGE_SIZE;
+pub const CIMAGE_SEGMENT_CAPACITY: usize = 16;
 
 /// Encodes the type of content in a cimage segment.
 #[repr(u32)]
@@ -75,6 +78,10 @@ pub enum SegmentKind {
     /// Tokenizer, multimodal special token map, audio codebook,
     /// and chat template. Type-tagged entries — see ModelArtifactEntry.
     ModelArtifacts = 25,
+    /// Canonical NF4Tile640 packed weights (raw U8 resident bytes).
+    Nf4Tile640Weights = 26,
+    /// FP32 bias metadata corresponding to packed quantized weights.
+    BlockBiases = 27,
 }
 
 /// One entry in the cimage segment directory.
@@ -258,7 +265,7 @@ pub struct CimageHeader {
     /// Number of layers in the MTP draft decoder (0 = no draft model).
     pub draft_num_layers: u32,
     // Segment directory
-    pub segments: [SegmentEntry; 9],
+    pub segments: [SegmentEntry; CIMAGE_SEGMENT_CAPACITY],
     pub _pad: [u8; 8],
 }
 
@@ -267,6 +274,22 @@ impl CimageHeader {
     pub fn segment(&self, kind: SegmentKind) -> Option<SegmentEntry> {
         let kind_u32 = kind as u32;
         self.segments.iter().find(|s| s.kind == kind_u32).copied()
+    }
+
+    pub fn is_nf4_tile640(&self) -> bool {
+        self.quantization_schema == QUANT_SCHEMA_NF4_TILE640
+    }
+
+    pub fn primary_weight_segment_kind(&self) -> SegmentKind {
+        if self.is_nf4_tile640() {
+            SegmentKind::Nf4Tile640Weights
+        } else {
+            SegmentKind::TernaryWeights
+        }
+    }
+
+    pub fn primary_weight_segment(&self) -> Option<SegmentEntry> {
+        self.segment(self.primary_weight_segment_kind())
     }
 }
 
