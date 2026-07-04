@@ -16,7 +16,12 @@ use crate::compilation::level2::gates::{
     check_joint_acceptance_rate, AcceptanceThresholds, JointAcceptanceResult,
 };
 use crate::compilation::level2::scheduler::Level2Scheduler;
+use crate::compilation::level3::gates::run_all_gates as run_level3_gates;
+use crate::compilation::level3::routing::Level3Router;
 use crate::compilation::memory_budget::MemoryBudget;
+use crate::compilation::phase_types::{
+    ElementType, PhysicalLayout, ProviderKind, ResidencyClass, TensorDescriptor,
+};
 use crate::compilation::receipt::{BlockReceipt, EngineExecutionLog};
 use crate::server::state::{MemoryAllocationBroker, ServerOperationalMode};
 use std::collections::HashMap;
@@ -66,6 +71,7 @@ pub struct DistillationJobStatus {
     pub level2_fallback_verified: bool,
     pub joint_acceptance_rate: Option<f64>,
     pub joint_acceptance_passed: bool,
+    pub level3_pass: bool,
     pub error: Option<String>,
 }
 
@@ -90,6 +96,7 @@ struct DistillationJob {
     level2_used: bool,
     level2_fallback_verified: bool,
     joint_acceptance_result: Option<JointAcceptanceResult>,
+    level3_pass: bool,
     error: Option<String>,
 }
 
@@ -127,6 +134,7 @@ impl DistillationEngine {
             level2_used: false,
             level2_fallback_verified: false,
             joint_acceptance_result: None,
+            level3_pass: false,
             error: None,
         };
         jobs.insert(job_id.clone(), job);
@@ -162,6 +170,7 @@ impl DistillationEngine {
                 .as_ref()
                 .map(|r| r.passed)
                 .unwrap_or(false),
+            level3_pass: j.level3_pass,
             error: j.error.clone(),
         })
     }
@@ -359,6 +368,34 @@ async fn run_distillation_loop(
                 // Gate failed — still mark Verifying so the user can inspect receipts.
                 // The joint acceptance gate requires MTP drafter to pass.
             }
+        }
+    }
+
+    // ── Level 3: Bridge provider validation ─────────────────────────────
+    let l3_cert = {
+        let router = Level3Router::new();
+        let source = TensorDescriptor {
+            logical_shape: vec![1, 1, 1],
+            element_type: ElementType::F32,
+            physical_layout: PhysicalLayout::DenseRowMajor,
+            alignment: 64,
+            producer_phase: None,
+            consumer_phases: vec![],
+            permitted_providers: vec![
+                ProviderKind::CoreML,
+                ProviderKind::Metal,
+            ],
+            residency_class: ResidencyClass::Unified,
+            max_bytes: 0,
+            mutable: false,
+            content_digest: None,
+        };
+        run_level3_gates(&router, &source)
+    };
+    {
+        let mut j = jobs.lock().await;
+        if let Some(job) = j.get_mut(&job_id) {
+            job.level3_pass = l3_cert.level3_pass;
         }
     }
 
