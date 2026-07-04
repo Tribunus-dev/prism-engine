@@ -161,10 +161,12 @@ impl CImageLayoutPlan {
         // Number of transformer layers (for LayerDirectory sizing).
         num_layers: u32,
         execution_graph_len: u64,
-        multimodal_projection_weights_elements: Option<u64>,
-        multimodal_position_embeddings_elements: Option<u64>,
+        multimodal_projection_weights_len: Option<u64>,
+        multimodal_projection_scales_len: Option<u64>,
+        multimodal_input_descriptor_len: Option<u64>,
+        multimodal_position_embeddings_len: Option<u64>,
         multimodal_auxiliary_bytes: Option<u64>,
-        qmode: CompileQuantMode,
+        _qmode: CompileQuantMode,
     ) -> Self {
         let mut cursor = 0u64;
         let mut next = |size: u64| -> SegmentDescriptor {
@@ -201,33 +203,17 @@ impl CImageLayoutPlan {
         let layer_directory = next(layer_dir_len);
         let execution_graph = next(execution_graph_len);
 
-        let multimodal_input_descriptor = {
-            let size = std::mem::size_of::<
-                crate::compute_image::multimodal::MultimodalInputDescriptorV1,
-            >() as u64;
-            Some(next(size))
-        };
+        let multimodal_input_descriptor =
+            multimodal_input_descriptor_len.map(|len| next(len));
 
-        let multimodal_projection_weights = multimodal_projection_weights_elements.map(|elems| {
-            let len = match qmode {
-                CompileQuantMode::Nf4Tile640 { .. } => ((elems + 639) / 640) * 320,
-                _ => (elems / 640) * 128,
-            };
-            next(len)
-        });
+        let multimodal_projection_weights =
+            multimodal_projection_weights_len.map(|len| next(len));
 
-        let multimodal_projection_scales = multimodal_projection_weights_elements.map(|elems| {
-            let len = match qmode {
-                CompileQuantMode::Nf4Tile640 { .. } => ((elems + 639) / 640) * 5 * 4,
-                _ => ((elems + 639) / 640) * 4,
-            };
-            next(len)
-        });
+        let multimodal_projection_scales =
+            multimodal_projection_scales_len.map(|len| next(len));
 
-        let multimodal_position_embeddings = multimodal_position_embeddings_elements.map(|elems| {
-            let len = elems * 2; // FP16
-            next(len)
-        });
+        let multimodal_position_embeddings =
+            multimodal_position_embeddings_len.map(|len| next(len));
 
         let multimodal_auxiliary_weights = multimodal_auxiliary_bytes.map(|bytes| next(bytes));
 
@@ -276,6 +262,8 @@ mod tests {
             320,
             2,
             256,
+            None,
+            None,
             None,
             None,
             None,

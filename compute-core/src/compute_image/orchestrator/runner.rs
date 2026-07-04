@@ -32,6 +32,21 @@ use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+pub struct Nf4GraphPrefixInputs<'a> {
+    pub vision_patch: Option<&'a [f32]>,
+    pub vision_projection: Option<&'a [f32]>,
+    pub audio_frame: Option<&'a [f32]>,
+    pub audio_projection: Option<&'a [f32]>,
+}
+
+pub struct Nf4GraphPrefixOutputs {
+    pub vision_patch: Option<Vec<f32>>,
+    pub vision_projection: Option<Vec<f32>>,
+    pub audio_frame: Option<Vec<f32>>,
+    pub audio_projection: Option<Vec<f32>>,
+    pub next_node_index: usize,
+}
+
 // ── Architecture constants (also used by sibling modules) ────────
 // (shared constants live in mod.rs; runner re-exports via `use super::*`)
 
@@ -86,6 +101,26 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
+    pub fn validate_nf4_execution_graph(
+        &self,
+        graph: &ExecutionGraphDescriptor,
+    ) -> Result<usize, String> {
+        if !self.deployment.is_nf4_tile640() {
+            return Err("validate_nf4_execution_graph requires an NF4Tile640 deployment".into());
+        }
+        let _ = self.deployment.require_nf4_biases()?;
+        let bindings = SealedMultimodalBindings::from_deployment(&self.deployment)?;
+        if bindings.projection_precision
+            != crate::compute_image::multimodal::ProjectionPrecision::Nf4Tile640
+        {
+            return Err(format!(
+                "sealed multimodal projection precision is not NF4Tile640: {:?}",
+                bindings.projection_precision
+            ));
+        }
+        bindings.validate_graph_multimodal_prefix(graph)
+    }
+
     /// Execute one multimodal NF4Tile640 projection record directly against the
     /// sealed shared-weight arena.
     pub fn run_nf4_multimodal_projection(
@@ -191,7 +226,7 @@ impl Orchestrator {
     /// path.
     pub fn run_nf4_multimodal_node(
         &self,
-        node_kind: NodeKind,
+        node: &crate::compute_image::compile::execution_graph::LayerExecutionNode,
         input: &[f32],
     ) -> Result<Vec<f32>, String> {
         let bindings = SealedMultimodalBindings::from_deployment(&self.deployment)?;
@@ -203,10 +238,62 @@ impl Orchestrator {
                 bindings.projection_precision
             ));
         }
-        let binding = bindings
-            .binding_for_node_kind(node_kind)
-            .ok_or_else(|| format!("no multimodal projection binding for {:?}", node_kind))?;
+        let binding = bindings.validate_node_binding(node)?;
         self.run_nf4_multimodal_projection(&binding.record, input)
+    }
+
+    pub fn run_nf4_graph_multimodal_prefix(
+        &self,
+        graph: &ExecutionGraphDescriptor,
+        inputs: Nf4GraphPrefixInputs<'_>,
+    ) -> Result<Nf4GraphPrefixOutputs, String> {
+        let next_node_index = self.validate_nf4_execution_graph(graph)?;
+        let mut outputs = Nf4GraphPrefixOutputs {
+            vision_patch: None,
+            vision_projection: None,
+            audio_frame: None,
+            audio_projection: None,
+            next_node_index,
+        };
+
+        for node in graph.layers.iter().take(next_node_index) {
+            match node.node_kind {
+                x if x == NodeKind::VisionPatchEmbed as u8 => {
+                    let input = inputs.vision_patch.ok_or_else(|| {
+                        "NF4 graph requires vision patch input for VisionPatchEmbed".to_string()
+                    })?;
+                    outputs.vision_patch = Some(self.run_nf4_multimodal_node(node, input)?);
+                }
+                x if x == NodeKind::VisionFinalProjection as u8 => {
+                    let input = inputs.vision_projection.ok_or_else(|| {
+                        "NF4 graph requires vision projection input for VisionFinalProjection"
+                            .to_string()
+                    })?;
+                    outputs.vision_projection = Some(self.run_nf4_multimodal_node(node, input)?);
+                }
+                x if x == NodeKind::AudioFrameEmbed as u8 => {
+                    let input = inputs.audio_frame.ok_or_else(|| {
+                        "NF4 graph requires audio frame input for AudioFrameEmbed".to_string()
+                    })?;
+                    outputs.audio_frame = Some(self.run_nf4_multimodal_node(node, input)?);
+                }
+                x if x == NodeKind::AudioProjection as u8 => {
+                    let input = inputs.audio_projection.ok_or_else(|| {
+                        "NF4 graph requires audio projection input for AudioProjection".to_string()
+                    })?;
+                    outputs.audio_projection = Some(self.run_nf4_multimodal_node(node, input)?);
+                }
+                x if x == NodeKind::EmbeddingAssembly as u8 => {}
+                other => {
+                    return Err(format!(
+                        "run_nf4_graph_multimodal_prefix encountered non-prefix node kind {}",
+                        other
+                    ));
+                }
+            }
+        }
+
+        Ok(outputs)
     }
 
     /// Look up or create a compute pipeline state for a kernel function name.
@@ -784,10 +871,24 @@ impl Orchestrator {
         seq_position: u32,
     ) -> Result<metal::Buffer, String> {
         if self.deployment.is_nf4_tile640() {
-            let _ = self.deployment.require_nf4_biases()?;
+            let next_node_index = self.validate_nf4_execution_graph(graph)?;
+            let first_unsupported = graph.layers.get(next_node_index);
             return Err(
-                "decode_fused: NF4Tile640 deployment detected, but this fused decode path still targets the legacy ternary half-precision kernels. Route through the explicit NF4Tile640 execution graph before decode."
-                    .into(),
+                match first_unsupported {
+                    Some(node) if node.node_kind == NodeKind::DecoderLayer as u8 => format!(
+                        "decode_fused: NF4Tile640 graph validated through multimodal prefix, but decoder layer {} still requires a dedicated NF4 decode kernel",
+                        node.layer_index
+                    ),
+                    Some(node) if node.node_kind == NodeKind::DraftLayer as u8 => format!(
+                        "decode_fused: NF4Tile640 graph validated through multimodal prefix, but draft decoder layer {} still requires a dedicated NF4 decode kernel",
+                        node.layer_index
+                    ),
+                    Some(node) => format!(
+                        "decode_fused: NF4Tile640 graph hit unsupported node kind {} at index {}",
+                        node.node_kind, next_node_index
+                    ),
+                    None => "decode_fused: NF4Tile640 graph contains no decoder nodes; use the explicit graph prefix runner for multimodal execution".into(),
+                }
             );
         }
 

@@ -7,7 +7,7 @@ use crate::compute_image::compile::execution_graph::{
     AttentionKind as GraphAttentionKind, CompactionEpoch, DeviceCapability, DraftSubGraph,
     ExecutionGraphDescriptor, LayerExecutionNode, NodeKind,
 };
-use crate::compute_image::compile::source::source_tensor_byte_len;
+use crate::compute_image::compile::source::{source_tensor_byte_len, source_tensor_view};
 use crate::compute_image::compile::source::LoadedSource;
 use crate::compute_image::compile::ternary::model_artifact_tag;
 use crate::compute_image::compile::ternary::{
@@ -18,6 +18,7 @@ use crate::compute_image::compile::ternary::{
     QUANT_SCHEMA_NF4_TILE640, QUANT_SCHEMA_TERNARY_TILE640,
 };
 use crate::compute_image::manifest::Manifest;
+use crate::compute_image::manifest::SharedWeightLayout;
 use crate::compute_image::multimodal::descriptor::{
     MultimodalInputDescriptorV1, ProjectionRole, ProjectionTensorRecord,
     MULTIMODAL_DESCRIPTOR_MAGIC,
@@ -272,6 +273,85 @@ fn draft_projection_triplet_lengths(loaded: &LoadedSource) -> (u64, u64, u64, u6
 fn synthesize_execution_graph_for_loaded(loaded: &LoadedSource) -> Option<Vec<u8>> {
     let text = &loaded.arch;
     let mut layers = Vec::new();
+
+    if let Some(vision) = &loaded.manifest.vision_config {
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::VisionPatchEmbed as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: vision.patch_size.min(u16::MAX as u32) as u16,
+            num_heads: vision.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: vision.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::VisionFinalProjection as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+    }
+
+    if let Some(audio) = &loaded.manifest.audio_config {
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::AudioFrameEmbed as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: audio.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: audio.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::AudioProjection as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+    }
+
+    if loaded.manifest.vision_config.is_some() || loaded.manifest.audio_config.is_some() {
+        layers.push(LayerExecutionNode {
+            node_kind: NodeKind::EmbeddingAssembly as u8,
+            attention_kind: 2,
+            device_capability: DeviceCapability::Gpu as u8,
+            compaction_epoch: 0xFF,
+            layer_index: 0,
+            head_dim: text.head_dim.min(u16::MAX as u32) as u16,
+            num_heads: text.num_attention_heads.min(u16::MAX as u32) as u16,
+            hidden_dim: text.hidden_size,
+            weight_offset: 0,
+            weight_length: 0,
+            scale_offset: 0,
+            _reserved: [0u8; 8],
+        });
+    }
 
     let main_entries = layer_directory_entries_for_loaded(loaded, false);
     let draft_entries = layer_directory_entries_for_loaded(loaded, true);
@@ -624,12 +704,29 @@ pub(crate) fn compile_and_pack_god_binary(
     num_heads: u32,
     head_dim: u32,
 ) -> std::io::Result<()> {
+    const SEG_MTP_GRAPH: usize = 3;
+    const SEG_MTP_WEIGHTS: usize = 4;
+    const SEG_MAIN_GRAPH: usize = 5;
+    const SEG_MAIN_WEIGHTS: usize = 6;
+    const SEG_LAYER_DIRECTORY: usize = 7;
+    const SEG_MAIN_SCALES: usize = 8;
+    const SEG_MAIN_BIASES: usize = 9;
+    const SEG_MTP_SCALES: usize = 10;
+    const SEG_MTP_BIASES: usize = 11;
+    const SEG_EXECUTION_GRAPH: usize = 12;
+    const SEG_MM_PROJ_WEIGHTS: usize = 13;
+    const SEG_MM_PROJ_SCALES: usize = 14;
+    const SEG_MM_DESCRIPTOR: usize = 15;
+    const SEG_MM_POSITION: usize = 16;
+    const SEG_MM_AUX: usize = 17;
+
     if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
         crate::compute_image::compile::apply_quantize_to_loaded(loaded, qmode)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
     }
 
-    let execution_graph_bytes = synthesize_execution_graph_for_loaded(loaded).unwrap_or_default();
+    let mut multimodal = synthesize_multimodal_segments_for_loaded(loaded)?;
+    let mut execution_graph_bytes = synthesize_execution_graph_for_loaded(loaded).unwrap_or_default();
 
     let main_graph_len = predict_tar_size(main_mlmodelc_path)?;
     let mtp_graph_len = predict_tar_size(mtp_mlmodelc_path)?;
@@ -698,11 +795,63 @@ pub(crate) fn compile_and_pack_god_binary(
         vocab_len,
         num_layers,
         execution_graph_bytes.len() as u64,
-        None,
-        None,
-        None,
+        multimodal
+            .as_ref()
+            .map(|segments| segments.projection_weights.len() as u64),
+        multimodal
+            .as_ref()
+            .map(|segments| segments.projection_scales.len() as u64),
+        multimodal
+            .as_ref()
+            .map(|segments| segments.descriptor.len() as u64),
+        multimodal
+            .as_ref()
+            .map(|segments| segments.position_embeddings.len() as u64),
+        multimodal
+            .as_ref()
+            .map(|segments| segments.auxiliary_weights.len() as u64),
         qmode,
     );
+
+    if let Some(multimodal) = &mut multimodal {
+        if multimodal.descriptor.len() >= std::mem::size_of::<MultimodalInputDescriptorV1>() {
+            let desc = unsafe {
+                &mut *(multimodal.descriptor.as_mut_ptr() as *mut MultimodalInputDescriptorV1)
+            };
+            desc.projection_weight_segment_index = SEG_MM_PROJ_WEIGHTS as u16;
+            desc.projection_scale_segment_index = if plan
+                .multimodal_projection_scales
+                .map(|segment| segment.length > 0)
+                .unwrap_or(false)
+            {
+                SEG_MM_PROJ_SCALES as u16
+            } else {
+                u16::MAX
+            };
+            desc.position_embedding_segment_index = if plan
+                .multimodal_position_embeddings
+                .map(|segment| segment.length > 0)
+                .unwrap_or(false)
+            {
+                SEG_MM_POSITION as u16
+            } else {
+                u16::MAX
+            };
+            desc.auxiliary_weight_segment_index = if plan
+                .multimodal_auxiliary_weights
+                .map(|segment| segment.length > 0)
+                .unwrap_or(false)
+            {
+                SEG_MM_AUX as u16
+            } else {
+                u16::MAX
+            };
+        }
+        let _ = patch_execution_graph_multimodal_nodes(
+            execution_graph_bytes.as_mut_slice(),
+            &multimodal.descriptor,
+        );
+    }
 
     let topology_table = CImageTopologyTable::compute(
         hidden_size,
@@ -1036,6 +1185,26 @@ pub(crate) fn compile_and_pack_god_binary(
         );
     }
 
+    if let Some(multimodal) = &multimodal {
+        for (segment, bytes) in [
+            (plan.multimodal_projection_weights, &multimodal.projection_weights),
+            (plan.multimodal_projection_scales, &multimodal.projection_scales),
+            (plan.multimodal_input_descriptor, &multimodal.descriptor),
+            (
+                plan.multimodal_position_embeddings,
+                &multimodal.position_embeddings,
+            ),
+            (plan.multimodal_auxiliary_weights, &multimodal.auxiliary_weights),
+        ] {
+            if let Some(segment) = segment {
+                if segment.length > 0 {
+                    builder.align_cursor();
+                    builder.allocate_slice(segment.length as usize).copy_from_slice(bytes);
+                }
+            }
+        }
+    }
+
     // Header at offset 0
     let mut segments = [SegmentEntry {
         kind: 0,
@@ -1060,12 +1229,12 @@ pub(crate) fn compile_and_pack_god_binary(
             plan.vocabulary.length,
         );
     }
-    segments[5] = SegmentEntry::new(
+    segments[SEG_MAIN_GRAPH] = SegmentEntry::new(
         SegmentKind::AneArchive,
         plan.main_graph.offset,
         plan.main_graph.length,
     );
-    segments[6] = SegmentEntry::new(
+    segments[SEG_MAIN_WEIGHTS] = SegmentEntry::new(
         if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
             SegmentKind::Nf4Tile640Weights
         } else {
@@ -1075,14 +1244,14 @@ pub(crate) fn compile_and_pack_god_binary(
         plan.main_weights.length,
     );
     if plan.main_scales.length > 0 {
-        segments[8] = SegmentEntry::new(
+        segments[SEG_MAIN_SCALES] = SegmentEntry::new(
             SegmentKind::BlockScales,
             plan.main_scales.offset,
             plan.main_scales.length,
         );
     }
     if plan.main_biases.length > 0 {
-        segments[9] = SegmentEntry::new(
+        segments[SEG_MAIN_BIASES] = SegmentEntry::new(
             SegmentKind::BlockBiases,
             plan.main_biases.offset,
             plan.main_biases.length,
@@ -1090,12 +1259,12 @@ pub(crate) fn compile_and_pack_god_binary(
     }
     if plan.mtp_graph.length > 0 {
         // If MTP present, insert as a second AneArchive or LayoutMeta
-        segments[3] = SegmentEntry::new(
+        segments[SEG_MTP_GRAPH] = SegmentEntry::new(
             SegmentKind::AneArchive,
             plan.mtp_graph.offset,
             plan.mtp_graph.length,
         );
-        segments[4] = SegmentEntry::new(
+        segments[SEG_MTP_WEIGHTS] = SegmentEntry::new(
             if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
                 SegmentKind::Nf4Tile640Weights
             } else {
@@ -1105,14 +1274,14 @@ pub(crate) fn compile_and_pack_god_binary(
             plan.mtp_weights.length,
         );
         if plan.mtp_scales.length > 0 {
-            segments[10] = SegmentEntry::new(
+            segments[SEG_MTP_SCALES] = SegmentEntry::new(
                 SegmentKind::BlockScales,
                 plan.mtp_scales.offset,
                 plan.mtp_scales.length,
             );
         }
         if plan.mtp_biases.length > 0 {
-            segments[11] = SegmentEntry::new(
+            segments[SEG_MTP_BIASES] = SegmentEntry::new(
                 SegmentKind::BlockBiases,
                 plan.mtp_biases.offset,
                 plan.mtp_biases.length,
@@ -1121,33 +1290,81 @@ pub(crate) fn compile_and_pack_god_binary(
     }
     // Segment 7: LayerDirectory (per-layer weight/scale offset table)
     if num_layers > 0 {
-        segments[7] = SegmentEntry::new(
+        segments[SEG_LAYER_DIRECTORY] = SegmentEntry::new(
             SegmentKind::LayerDirectory,
             plan.layer_directory.offset,
             plan.layer_directory.length,
         );
     }
     if plan.execution_graph.length > 0 {
-        segments[12] = SegmentEntry::new(
+        segments[SEG_EXECUTION_GRAPH] = SegmentEntry::new(
             SegmentKind::ExecutionGraph,
             plan.execution_graph.offset,
             plan.execution_graph.length,
         );
     }
-    let vocab_seg = if plan.vocabulary.length > 0 { 1 } else { 0 };
-    let main_meta_segs =
-        u32::from(plan.main_scales.length > 0) + u32::from(plan.main_biases.length > 0);
-    let mtp_segs = if plan.mtp_graph.length > 0 {
-        2 + u32::from(plan.mtp_scales.length > 0) + u32::from(plan.mtp_biases.length > 0)
-    } else {
-        0
-    };
-    let layer_dir_seg = if num_layers > 0 { 1 } else { 0 };
-    let exec_graph_seg = u32::from(plan.execution_graph.length > 0);
-    let seg_count = 5u32 + mtp_segs + vocab_seg + layer_dir_seg + main_meta_segs + exec_graph_seg;
+    if let Some(segment) = plan.multimodal_projection_weights {
+        if segment.length > 0 {
+            segments[SEG_MM_PROJ_WEIGHTS] = SegmentEntry::new(
+                SegmentKind::MultimodalProjectionWeights,
+                segment.offset,
+                segment.length,
+            );
+        }
+    }
+    if let Some(segment) = plan.multimodal_projection_scales {
+        if segment.length > 0 {
+            segments[SEG_MM_PROJ_SCALES] = SegmentEntry::new(
+                SegmentKind::MultimodalProjectionScales,
+                segment.offset,
+                segment.length,
+            );
+        }
+    }
+    if let Some(segment) = plan.multimodal_input_descriptor {
+        if segment.length > 0 {
+            segments[SEG_MM_DESCRIPTOR] = SegmentEntry::new(
+                SegmentKind::MultimodalInputDescriptor,
+                segment.offset,
+                segment.length,
+            );
+        }
+    }
+    if let Some(segment) = plan.multimodal_position_embeddings {
+        if segment.length > 0 {
+            segments[SEG_MM_POSITION] = SegmentEntry::new(
+                SegmentKind::MultimodalPositionEmbeddings,
+                segment.offset,
+                segment.length,
+            );
+        }
+    }
+    if let Some(segment) = plan.multimodal_auxiliary_weights {
+        if segment.length > 0 {
+            segments[SEG_MM_AUX] = SegmentEntry::new(
+                SegmentKind::MultimodalAuxiliaryWeights,
+                segment.offset,
+                segment.length,
+            );
+        }
+    }
+    let seg_count = segments
+        .iter()
+        .rposition(|segment| segment.length > 0)
+        .map(|index| (index + 1) as u32)
+        .unwrap_or(0);
     let header = CimageHeader {
         magic: *b"PRISM\0\0\0",
-        version: 4,
+        version: if plan.execution_graph.length > 0
+            || plan
+                .multimodal_input_descriptor
+                .map(|segment| segment.length > 0)
+                .unwrap_or(false)
+        {
+            6
+        } else {
+            4
+        },
         segment_count: seg_count,
         payload_hash: [0u8; 32],
         num_layers,
@@ -1444,6 +1661,17 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
                 find_slot_index(SegmentKind::MultimodalAuxiliaryWeights);
         }
     }
+    if let Some(multimodal) = &multimodal {
+        if let Some((_, graph_bytes)) = extra_segments
+            .iter_mut()
+            .find(|(kind, _)| *kind == SegmentKind::ExecutionGraph)
+        {
+            let _ = patch_execution_graph_multimodal_nodes(
+                graph_bytes.as_mut_slice(),
+                &multimodal.descriptor,
+            );
+        }
+    }
     let total_file_size = cursor;
 
     // 3. Allocate and fill via ftruncate + mmap
@@ -1672,6 +1900,82 @@ fn load_or_synthesize_model_artifacts(
         return std::fs::read(path).map(Some);
     }
     Ok(synthesize_model_artifacts(input_dir, manifest))
+}
+
+fn read_projection_records_from_descriptor_bytes(
+    descriptor_bytes: &[u8],
+) -> Option<Vec<ProjectionTensorRecord>> {
+    if descriptor_bytes.len() < std::mem::size_of::<MultimodalInputDescriptorV1>() {
+        return None;
+    }
+    let desc = unsafe {
+        std::ptr::read_unaligned(descriptor_bytes.as_ptr() as *const MultimodalInputDescriptorV1)
+    };
+    let total_records = desc.image_projection_count as usize + desc.audio_projection_count as usize;
+    let record_size = std::mem::size_of::<ProjectionTensorRecord>();
+    let records_offset = std::mem::size_of::<MultimodalInputDescriptorV1>();
+    let byte_len = total_records.checked_mul(record_size)?;
+    let end = records_offset.checked_add(byte_len)?;
+    if end > descriptor_bytes.len() {
+        return None;
+    }
+
+    let mut records = Vec::with_capacity(total_records);
+    let mut cursor = records_offset;
+    for _ in 0..total_records {
+        let record = unsafe {
+            std::ptr::read_unaligned(
+                descriptor_bytes[cursor..].as_ptr() as *const ProjectionTensorRecord
+            )
+        };
+        records.push(record);
+        cursor += record_size;
+    }
+    Some(records)
+}
+
+fn patch_execution_graph_multimodal_nodes(graph_bytes: &mut [u8], descriptor_bytes: &[u8]) -> bool {
+    let Some(records) = read_projection_records_from_descriptor_bytes(descriptor_bytes) else {
+        return false;
+    };
+    let Ok(mut graph) = ExecutionGraphDescriptor::from_bytes(graph_bytes) else {
+        return false;
+    };
+
+    let role_for_node = |node_kind: u8| match node_kind {
+        x if x == NodeKind::VisionPatchEmbed as u8 => Some(ProjectionRole::ImagePatchEmbedding),
+        x if x == NodeKind::VisionFinalProjection as u8 => Some(ProjectionRole::ImageProjection),
+        x if x == NodeKind::AudioFrameEmbed as u8 => Some(ProjectionRole::AudioFrameEmbedding),
+        x if x == NodeKind::AudioProjection as u8 => Some(ProjectionRole::AudioProjection),
+        _ => None,
+    };
+
+    let mut changed = false;
+    for node in &mut graph.layers {
+        let Some(role) = role_for_node(node.node_kind) else {
+            continue;
+        };
+        let Some(record) = records.iter().find(|record| record.role == role as u16) else {
+            continue;
+        };
+        node.weight_offset = record.weight_offset;
+        node.weight_length = record.weight_length;
+        node.scale_offset = record.scale_offset;
+        node.hidden_dim = record.output_width;
+        changed = true;
+    }
+
+    if changed {
+        let bytes = graph.to_bytes();
+        if bytes.len() == graph_bytes.len() {
+            graph_bytes.copy_from_slice(&bytes);
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    }
 }
 
 fn synthesize_execution_graph(manifest: &Manifest) -> Option<Vec<u8>> {
@@ -1999,6 +2303,198 @@ struct SynthesizedMultimodalSegments {
     auxiliary_weights: Vec<u8>,
 }
 
+fn logical_shape_for_tensor(loaded: &LoadedSource, name: &str) -> Vec<u32> {
+    loaded
+        .spec
+        .global_tensors
+        .iter()
+        .chain(loaded.spec.layers.iter().flat_map(|layer| layer.tensors.iter()))
+        .find(|binding| binding.name == name)
+        .map(|binding| binding.logical_shape.clone())
+        .unwrap_or_else(|| {
+            loaded
+                .source_tensors
+                .get(name)
+                .map(|tensor| tensor.shape.clone())
+                .unwrap_or_default()
+        })
+}
+
+fn synthesize_multimodal_segments_for_loaded(
+    loaded: &LoadedSource,
+) -> std::io::Result<Option<SynthesizedMultimodalSegments>> {
+    if loaded.manifest.vision_config.is_none() && loaded.manifest.audio_config.is_none() {
+        return Ok(None);
+    }
+
+    let mut projection_weights = Vec::new();
+    let mut projection_scales = Vec::new();
+    let mut position_embeddings = Vec::new();
+    let mut auxiliary_weights = Vec::new();
+    let mut image_records = Vec::new();
+    let mut audio_records = Vec::new();
+
+    let mut tensor_names: Vec<&String> = loaded
+        .source_tensors
+        .keys()
+        .filter(|name| classify_multimodal_tensor(name).is_some())
+        .collect();
+    tensor_names.sort();
+
+    for name in tensor_names {
+        let Some(class) = classify_multimodal_tensor(name) else {
+            continue;
+        };
+        let logical_shape = logical_shape_for_tensor(loaded, name);
+        let entry_kind = classify_multimodal_entry(name, &logical_shape);
+        let Some(tensor) = loaded.source_tensors.get(name) else {
+            continue;
+        };
+        let tensor_bytes = source_tensor_view(tensor, &loaded.mmap_bytes).to_vec();
+        if tensor_bytes.is_empty() {
+            continue;
+        }
+
+        let start_offset = match entry_kind {
+            MultimodalEntryKind::ProjectionWeight => {
+                let start = projection_weights.len() as u64;
+                projection_weights.extend_from_slice(&tensor_bytes);
+                start
+            }
+            MultimodalEntryKind::PositionEmbedding => {
+                position_embeddings.extend_from_slice(&tensor_bytes);
+                continue;
+            }
+            MultimodalEntryKind::Auxiliary => {
+                auxiliary_weights.extend_from_slice(&tensor_bytes);
+                continue;
+            }
+        };
+
+        let stem = name.strip_suffix(".weight").unwrap_or(name);
+        let scale_name = format!("{}.scales", stem);
+        let (scale_offset, scale_length, layout_code, quantization_kind) =
+            if let Some(scale_tensor) = loaded.source_tensors.get(&scale_name) {
+                let scale_bytes = source_tensor_view(scale_tensor, &loaded.mmap_bytes).to_vec();
+                if !scale_bytes.is_empty() {
+                    let scale_offset = projection_scales.len() as u64;
+                    projection_scales.extend_from_slice(&scale_bytes);
+                    (
+                        scale_offset,
+                        scale_bytes.len() as u64,
+                        ProjectionTensorRecord::LAYOUT_NF4_TILE640,
+                        ProjectionTensorRecord::QUANTIZATION_NF4_TILE640,
+                    )
+                } else {
+                    (
+                        0,
+                        0,
+                        ProjectionTensorRecord::LAYOUT_DENSE_ROW_MAJOR,
+                        ProjectionTensorRecord::QUANTIZATION_NONE,
+                    )
+                }
+            } else {
+                (
+                    0,
+                    0,
+                    ProjectionTensorRecord::LAYOUT_DENSE_ROW_MAJOR,
+                    ProjectionTensorRecord::QUANTIZATION_NONE,
+                )
+            };
+
+        let record = ProjectionTensorRecord {
+            logical_name_hash: stable_name_hash(name),
+            role: projection_role_for_name(name) as u16,
+            dtype: dtype_code(&tensor.dtype),
+            weight_offset: start_offset,
+            weight_length: tensor_bytes.len() as u64,
+            scale_offset,
+            scale_length,
+            input_width: logical_shape.get(1).copied().unwrap_or(0),
+            output_width: logical_shape.first().copied().unwrap_or(0),
+            rank: logical_shape.len() as u8,
+            layout: layout_code,
+            quantization_kind,
+            flags: 0,
+            dims: dims4(&logical_shape),
+        };
+        match class {
+            MultimodalClass::Image => image_records.push(record),
+            MultimodalClass::Audio => audio_records.push(record),
+        }
+    }
+
+    if projection_weights.is_empty()
+        && projection_scales.is_empty()
+        && position_embeddings.is_empty()
+        && auxiliary_weights.is_empty()
+    {
+        return Ok(None);
+    }
+
+    let desc_size = std::mem::size_of::<MultimodalInputDescriptorV1>() as u64;
+    let image_offset = desc_size;
+    let audio_offset =
+        image_offset + (image_records.len() * std::mem::size_of::<ProjectionTensorRecord>()) as u64;
+    let mut desc = MultimodalInputDescriptorV1::default();
+    desc.magic = MULTIMODAL_DESCRIPTOR_MAGIC;
+    desc.version = 1;
+    desc.modality_mask = 0b0001
+        | if !image_records.is_empty() { 0b0010 } else { 0 }
+        | if !audio_records.is_empty() { 0b0100 } else { 0 };
+    desc.decoder_hidden_size = loaded.arch.hidden_size;
+    desc.vocabulary_size = loaded.arch.vocab_size;
+    if let Some(vision) = &loaded.manifest.vision_config {
+        desc.image_patch_size = vision.patch_size.min(u16::MAX as u32) as u16;
+        desc.image_channels = vision.num_channels.min(u16::MAX as u32) as u16;
+        desc.image_position_embedding_width = vision.hidden_size;
+    }
+    desc.image_projection_table_offset = image_offset;
+    desc.image_projection_count = image_records.len().min(u32::MAX as usize) as u32;
+    desc.audio_projection_table_offset = audio_offset;
+    desc.audio_projection_count = audio_records.len().min(u32::MAX as usize) as u32;
+    desc.processor_contract_digest = Sha256::digest(&projection_weights).into();
+    let mut layout_hasher = Sha256::new();
+    for record in image_records.iter().chain(audio_records.iter()) {
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                record as *const ProjectionTensorRecord as *const u8,
+                std::mem::size_of::<ProjectionTensorRecord>(),
+            )
+        };
+        layout_hasher.update(bytes);
+    }
+    desc.tensor_layout_digest = layout_hasher.finalize().into();
+
+    let mut descriptor = Vec::with_capacity(
+        std::mem::size_of::<MultimodalInputDescriptorV1>()
+            + (image_records.len() + audio_records.len())
+                * std::mem::size_of::<ProjectionTensorRecord>(),
+    );
+    descriptor.extend_from_slice(unsafe {
+        std::slice::from_raw_parts(
+            &desc as *const MultimodalInputDescriptorV1 as *const u8,
+            std::mem::size_of::<MultimodalInputDescriptorV1>(),
+        )
+    });
+    for record in image_records.iter().chain(audio_records.iter()) {
+        descriptor.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(
+                record as *const ProjectionTensorRecord as *const u8,
+                std::mem::size_of::<ProjectionTensorRecord>(),
+            )
+        });
+    }
+
+    Ok(Some(SynthesizedMultimodalSegments {
+        projection_weights,
+        projection_scales,
+        descriptor,
+        position_embeddings,
+        auxiliary_weights,
+    }))
+}
+
 fn synthesize_multimodal_segments(
     input_dir: &Path,
     manifest: Option<&Manifest>,
@@ -2017,11 +2513,16 @@ fn synthesize_multimodal_segments(
         .collect();
 
     let mut projection_weights = Vec::new();
-    let projection_scales = Vec::new();
+    let mut projection_scales = Vec::new();
     let mut position_embeddings = Vec::new();
     let mut auxiliary_weights = Vec::new();
     let mut image_records = Vec::new();
     let mut audio_records = Vec::new();
+    let tensor_by_id: HashMap<u32, &crate::compute_image::manifest::TensorEntry> = manifest
+        .tensor_table
+        .iter()
+        .map(|tensor| (tensor.id, tensor))
+        .collect();
 
     for tensor in &manifest.tensor_table {
         let Some(class) = classify_multimodal_tensor(&tensor.name) else {
@@ -2047,19 +2548,66 @@ fn synthesize_multimodal_segments(
                 continue;
             }
         };
+        let (scale_offset, scale_length, layout_code, quantization_kind) = if let Some(quant) =
+            &tensor.quantization
+        {
+            match &quant.storage_layout {
+                Some(SharedWeightLayout::Nf4Tile640(_layout)) => {
+                    let Some(scale_tensor) = tensor_by_id.get(&quant.scale_tensor_id).copied()
+                    else {
+                        return Err(std::io::Error::other(format!(
+                            "missing multimodal scale tensor id {} for {}",
+                            quant.scale_tensor_id, tensor.name
+                        )));
+                    };
+                    let Some(scale_path) = segment_files.get(scale_tensor.segment.as_str()) else {
+                        return Err(std::io::Error::other(format!(
+                            "missing segment file for multimodal scale tensor {}",
+                            scale_tensor.name
+                        )));
+                    };
+                    let scale_bytes = read_tensor_payload(
+                        scale_path,
+                        scale_tensor.offset,
+                        scale_tensor.byte_length,
+                    )?;
+                    let scale_offset = projection_scales.len() as u64;
+                    projection_scales.extend_from_slice(&scale_bytes);
+                    (
+                        scale_offset,
+                        scale_bytes.len() as u64,
+                        ProjectionTensorRecord::LAYOUT_NF4_TILE640,
+                        ProjectionTensorRecord::QUANTIZATION_NF4_TILE640,
+                    )
+                }
+                _ => (
+                    0,
+                    0,
+                    ProjectionTensorRecord::LAYOUT_DENSE_ROW_MAJOR,
+                    ProjectionTensorRecord::QUANTIZATION_NONE,
+                ),
+            }
+        } else {
+            (
+                0,
+                0,
+                ProjectionTensorRecord::LAYOUT_DENSE_ROW_MAJOR,
+                ProjectionTensorRecord::QUANTIZATION_NONE,
+            )
+        };
         let record = ProjectionTensorRecord {
             logical_name_hash: stable_name_hash(&tensor.name),
             role: projection_role_for_name(&tensor.name) as u16,
             dtype: dtype_code(&tensor.storage_dtype),
             weight_offset: start_offset,
             weight_length: bytes.len() as u64,
-            scale_offset: 0,
-            scale_length: 0,
+            scale_offset,
+            scale_length,
             input_width: tensor.logical_shape.get(1).copied().unwrap_or(0),
             output_width: tensor.logical_shape.first().copied().unwrap_or(0),
             rank: tensor.logical_shape.len() as u8,
-            layout: 0,
-            quantization_kind: 0,
+            layout: layout_code,
+            quantization_kind,
             flags: 0,
             dims: dims4(&tensor.logical_shape),
         };
@@ -2168,6 +2716,9 @@ fn classify_multimodal_tensor(name: &str) -> Option<MultimodalClass> {
 
 fn classify_multimodal_entry(name: &str, logical_shape: &[u32]) -> MultimodalEntryKind {
     let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".scales") || lower.ends_with(".biases") {
+        return MultimodalEntryKind::Auxiliary;
+    }
     if lower.contains("pos_embedding") || lower.contains("position_embed") {
         return MultimodalEntryKind::PositionEmbedding;
     }
@@ -2269,7 +2820,9 @@ fn header_fields_from_manifest(manifest: Option<&Manifest>) -> (u32, u32, u32, u
 mod tests {
     use super::*;
     use crate::compute_image::manifest::{
-        CompileReadiness, ResidencyPlan, ShardHash, SourceIdentity,
+        CompileReadiness, Nf4Tile640Layout, QuantizationDesc, ResidencyPlan, Segment,
+        SegmentKind as ManifestSegmentKind, ShardHash, SharedWeightLayout, SourceIdentity,
+        TensorEntry,
     };
     use crate::config::{
         AudioArchitecture, GenerationRegime, LayerPlan, ModelExecutionPlan, RopeSpec,
@@ -2453,5 +3006,207 @@ mod tests {
                 .and_then(|value| value.as_u64()),
             Some(16000)
         );
+    }
+
+    #[test]
+    fn synthesized_multimodal_segments_preserve_nf4_tile640_scale_abi() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = Nf4Tile640Layout::canonical();
+        let out_dim = 2u32;
+        let input_width = layout.tile_elements;
+        let weight_len = u64::from(layout.packed_row_bytes(input_width)) * u64::from(out_dim);
+        let scale_len = u64::from(layout.metadata_row_values(input_width)) * u64::from(out_dim) * 4;
+
+        let weight_bytes = vec![0xABu8; weight_len as usize];
+        let scale_bytes = vec![0xCDu8; scale_len as usize];
+        let segment_path = dir.path().join("vision_segment.bin");
+        let mut segment_bytes = weight_bytes.clone();
+        segment_bytes.extend_from_slice(&scale_bytes);
+        std::fs::write(&segment_path, &segment_bytes).expect("write segment");
+
+        let mut manifest = test_manifest();
+        manifest.segments = vec![Segment {
+            id: "vision_encoder".into(),
+            filename: "vision_segment.bin".into(),
+            byte_size: segment_bytes.len() as u64,
+            sha256: String::new(),
+            tensor_ids: vec![1, 2],
+            kind: ManifestSegmentKind::Persistent,
+            alignment_bytes: 4096,
+        }];
+        manifest.tensor_table = vec![
+            TensorEntry {
+                id: 1,
+                name: "vision_encoder.patch_dense.weight".into(),
+                role: "weight".into(),
+                layer: None,
+                segment: "vision_encoder".into(),
+                source_filename: String::new(),
+                source_sha256: String::new(),
+                source_offset: 0,
+                offset: 0,
+                byte_length: weight_len,
+                logical_dtype: "F32".into(),
+                storage_dtype: "U8".into(),
+                logical_shape: vec![out_dim, input_width],
+                physical_shape: vec![out_dim, layout.packed_row_bytes(input_width)],
+                mutability: "immutable".into(),
+                quantization: Some(QuantizationDesc {
+                    bits: 4,
+                    group_size: layout.quant_group_size,
+                    groups: out_dim * layout.metadata_row_values(input_width),
+                    scale_tensor_id: 2,
+                    bias_tensor_id: 0,
+                    storage_layout: Some(SharedWeightLayout::Nf4Tile640(layout.clone())),
+                }),
+                tensor_alignment_bytes: 16,
+                layout_version: 1,
+                artifact_bindings: HashMap::new(),
+            },
+            TensorEntry {
+                id: 2,
+                name: "vision_encoder.patch_dense.scales".into(),
+                role: "weight::scales".into(),
+                layer: None,
+                segment: "vision_encoder".into(),
+                source_filename: String::new(),
+                source_sha256: String::new(),
+                source_offset: 0,
+                offset: weight_len,
+                byte_length: scale_len,
+                logical_dtype: "F32".into(),
+                storage_dtype: "F32".into(),
+                logical_shape: vec![out_dim, layout.metadata_row_values(input_width)],
+                physical_shape: vec![out_dim, layout.metadata_row_values(input_width)],
+                mutability: "immutable".into(),
+                quantization: None,
+                tensor_alignment_bytes: 16,
+                layout_version: 1,
+                artifact_bindings: HashMap::new(),
+            },
+        ];
+
+        let synthesized = synthesize_multimodal_segments(dir.path(), Some(&manifest))
+            .expect("synthesize")
+            .expect("segments");
+        assert_eq!(synthesized.projection_weights, weight_bytes);
+        assert_eq!(synthesized.projection_scales, scale_bytes);
+
+        let desc_size = std::mem::size_of::<MultimodalInputDescriptorV1>();
+        let record_size = std::mem::size_of::<ProjectionTensorRecord>();
+        assert!(synthesized.descriptor.len() >= desc_size + record_size);
+        let record = unsafe {
+            std::ptr::read_unaligned(
+                synthesized.descriptor[desc_size..].as_ptr() as *const ProjectionTensorRecord
+            )
+        };
+        assert!(record.is_nf4_tile640());
+        assert_eq!(record.weight_length, weight_len);
+        assert_eq!(record.scale_offset, 0);
+        assert_eq!(record.scale_length, scale_len);
+        record.validate_nf4_tile640().expect("valid nf4 record");
+    }
+
+    #[test]
+    fn execution_graph_multimodal_nodes_pick_up_descriptor_offsets() {
+        let mut graph = ExecutionGraphDescriptor {
+            magic: crate::compute_image::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
+            version: 1,
+            num_layers: 0,
+            num_draft_layers: 0,
+            num_compaction_epochs: 0,
+            node_count: 2,
+            _pad: [0; 2],
+            layers: vec![
+                LayerExecutionNode {
+                    node_kind: NodeKind::VisionPatchEmbed as u8,
+                    attention_kind: 2,
+                    device_capability: DeviceCapability::Gpu as u8,
+                    compaction_epoch: 0xFF,
+                    layer_index: 0,
+                    head_dim: 14,
+                    num_heads: 8,
+                    hidden_dim: 0,
+                    weight_offset: 0,
+                    weight_length: 0,
+                    scale_offset: 0,
+                    _reserved: [0; 8],
+                },
+                LayerExecutionNode {
+                    node_kind: NodeKind::AudioProjection as u8,
+                    attention_kind: 2,
+                    device_capability: DeviceCapability::Gpu as u8,
+                    compaction_epoch: 0xFF,
+                    layer_index: 0,
+                    head_dim: 256,
+                    num_heads: 8,
+                    hidden_dim: 0,
+                    weight_offset: 0,
+                    weight_length: 0,
+                    scale_offset: 0,
+                    _reserved: [0; 8],
+                },
+            ],
+            compaction_epochs: Vec::new(),
+            draft_sub_graph: None,
+        };
+
+        let mut desc = MultimodalInputDescriptorV1::default();
+        desc.magic = MULTIMODAL_DESCRIPTOR_MAGIC;
+        desc.version = 1;
+        desc.image_projection_count = 1;
+        desc.audio_projection_count = 1;
+        let image = ProjectionTensorRecord {
+            role: ProjectionRole::ImagePatchEmbedding as u16,
+            weight_offset: 128,
+            weight_length: 640,
+            scale_offset: 64,
+            scale_length: 40,
+            output_width: 1152,
+            layout: ProjectionTensorRecord::LAYOUT_NF4_TILE640,
+            quantization_kind: ProjectionTensorRecord::QUANTIZATION_NF4_TILE640,
+            ..ProjectionTensorRecord::default()
+        };
+        let audio = ProjectionTensorRecord {
+            role: ProjectionRole::AudioProjection as u16,
+            weight_offset: 2048,
+            weight_length: 4096,
+            scale_offset: 512,
+            scale_length: 160,
+            output_width: 3840,
+            layout: ProjectionTensorRecord::LAYOUT_NF4_TILE640,
+            quantization_kind: ProjectionTensorRecord::QUANTIZATION_NF4_TILE640,
+            ..ProjectionTensorRecord::default()
+        };
+        let mut descriptor = Vec::new();
+        descriptor.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(
+                &desc as *const MultimodalInputDescriptorV1 as *const u8,
+                std::mem::size_of::<MultimodalInputDescriptorV1>(),
+            )
+        });
+        for record in [image, audio] {
+            descriptor.extend_from_slice(unsafe {
+                std::slice::from_raw_parts(
+                    &record as *const ProjectionTensorRecord as *const u8,
+                    std::mem::size_of::<ProjectionTensorRecord>(),
+                )
+            });
+        }
+
+        let mut graph_bytes = graph.to_bytes();
+        assert!(patch_execution_graph_multimodal_nodes(
+            graph_bytes.as_mut_slice(),
+            &descriptor
+        ));
+        graph = ExecutionGraphDescriptor::from_bytes(&graph_bytes).expect("patched graph");
+        assert_eq!(graph.layers[0].weight_offset, 128);
+        assert_eq!(graph.layers[0].weight_length, 640);
+        assert_eq!(graph.layers[0].scale_offset, 64);
+        assert_eq!(graph.layers[0].hidden_dim, 1152);
+        assert_eq!(graph.layers[1].weight_offset, 2048);
+        assert_eq!(graph.layers[1].weight_length, 4096);
+        assert_eq!(graph.layers[1].scale_offset, 512);
+        assert_eq!(graph.layers[1].hidden_dim, 3840);
     }
 }

@@ -117,8 +117,7 @@ impl ProjectionTensorRecord {
     }
 
     pub fn nf4_layout(&self) -> Option<Nf4Tile640Layout> {
-        self.is_nf4_tile640()
-            .then(Nf4Tile640Layout::canonical)
+        self.is_nf4_tile640().then(Nf4Tile640Layout::canonical)
     }
 
     pub fn validate_nf4_tile640(&self) -> Result<Nf4Tile640Layout, String> {

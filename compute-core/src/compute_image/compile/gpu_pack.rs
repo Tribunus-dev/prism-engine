@@ -552,6 +552,12 @@ fn dispatch_nf4_tile640_pack(
     if dtype != "F16" && dtype != "BF16" {
         return None;
     }
+    let expected_raw_bytes = (out_dim as usize)
+        .checked_mul(in_dim as usize)?
+        .checked_mul(std::mem::size_of::<u16>())?;
+    if raw_bytes.len() != expected_raw_bytes {
+        return None;
+    }
 
     let out_dim_u = out_dim as usize;
     let layout = nf4_tile640_pack_layout(out_dim, in_dim);

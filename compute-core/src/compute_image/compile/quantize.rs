@@ -1262,6 +1262,14 @@ mod tests {
         bytes
     }
 
+    fn encode_f16(values: &[f32]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(values.len() * 2);
+        for &value in values {
+            bytes.extend_from_slice(&half::f16::from_f32(value).to_bits().to_le_bytes());
+        }
+        bytes
+    }
+
     fn sample_tile640_matrix(out_dim: usize, in_dim: usize) -> Vec<f32> {
         let mut values = Vec::with_capacity(out_dim * in_dim);
         for row in 0..out_dim {
@@ -1313,6 +1321,34 @@ mod tests {
 
         let Some((gpu_packed, gpu_scales, gpu_biases, gpu_packed_in, gpu_shape)) =
             try_nf4_tile640_pack_gpu_bytes(&raw, "BF16", out_dim, in_dim)
+        else {
+            return;
+        };
+
+        assert_eq!(gpu_packed_in, cpu_packed_in);
+        assert_eq!(gpu_shape.weight, cpu_shape.weight);
+        assert_eq!(gpu_shape.scales, cpu_shape.scales);
+        assert_eq!(gpu_shape.biases, cpu_shape.biases);
+        assert_eq!(gpu_shape.bits, cpu_shape.bits);
+        assert_eq!(gpu_shape.group_size, cpu_shape.group_size);
+        assert_eq!(gpu_shape.groups, cpu_shape.groups);
+        assert_eq!(gpu_packed, cpu_packed);
+        assert_eq!(gpu_scales, cpu_scales);
+        assert_eq!(gpu_biases, cpu_biases);
+    }
+
+    #[cfg(feature = "metal-dispatch")]
+    #[test]
+    fn nf4_tile640_gpu_matches_cpu_quantizer_for_f16() {
+        let out_dim = 2u32;
+        let in_dim = 641u32;
+        let raw = encode_f16(&sample_tile640_matrix(out_dim as usize, in_dim as usize));
+
+        let (cpu_packed, cpu_scales, cpu_biases, cpu_packed_in, cpu_shape) =
+            quantize_nf4_tile640_matrix_from_raw(&raw, "F16", out_dim, in_dim).unwrap();
+
+        let Some((gpu_packed, gpu_scales, gpu_biases, gpu_packed_in, gpu_shape)) =
+            try_nf4_tile640_pack_gpu_bytes(&raw, "F16", out_dim, in_dim)
         else {
             return;
         };
@@ -1383,5 +1419,16 @@ mod tests {
             &backing[biases_offset..biases_offset + layout.biases_len],
             cpu_biases.as_slice()
         );
+    }
+
+    #[cfg(feature = "metal-dispatch")]
+    #[test]
+    fn nf4_tile640_gpu_rejects_malformed_input_bytes() {
+        let out_dim = 2u32;
+        let in_dim = 640u32;
+        let raw = vec![0u8; (out_dim as usize * in_dim as usize * 2) - 2];
+
+        assert!(try_nf4_tile640_pack_gpu_bytes(&raw, "BF16", out_dim, in_dim).is_none());
+        assert!(try_nf4_tile640_pack_gpu_bytes(&raw, "F16", out_dim, in_dim).is_none());
     }
 }

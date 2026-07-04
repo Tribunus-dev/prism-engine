@@ -20,6 +20,7 @@ use crate::compute_image::apple_cimage_manifest::{
 use crate::compute_image::apple_shared_arena::{
     AppleSharedArena, IOSurfaceSlotManifest, SlotReuseClass,
 };
+use crate::compute_image::manifest::Nf4Tile640Layout;
 
 #[cfg(feature = "metal-dispatch")]
 pub struct InstalledSharedEvent {
@@ -252,6 +253,91 @@ fn nf4_triplet_slots<'a>(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Nf4Tile640ArenaAbi {
+    weight_byte_length: u64,
+    metadata_byte_length: u64,
+}
+
+fn derive_nf4_tile640_arena_abi(
+    weight: &CimageSlotManifest,
+    scale: &CimageSlotManifest,
+    bias: &CimageSlotManifest,
+) -> Result<Nf4Tile640ArenaAbi, String> {
+    let layout = Nf4Tile640Layout::canonical();
+    if weight.logical_shape.len() != 2 || scale.logical_shape.len() != 2 || bias.logical_shape.len() != 2
+    {
+        return Err(format!(
+            "NF4Tile640 triplet requires rank-2 logical shapes, got weight={:?} scale={:?} bias={:?}",
+            weight.logical_shape, scale.logical_shape, bias.logical_shape
+        ));
+    }
+
+    let out_dim = weight.logical_shape[0];
+    if out_dim == 0 || scale.logical_shape[0] != out_dim || bias.logical_shape[0] != out_dim {
+        return Err(format!(
+            "NF4Tile640 triplet row-count mismatch: weight={} scale={} bias={}",
+            out_dim, scale.logical_shape[0], bias.logical_shape[0]
+        ));
+    }
+
+    let packed_row_bytes = weight.logical_shape[1];
+    let metadata_row_values = scale.logical_shape[1];
+    if bias.logical_shape[1] != metadata_row_values {
+        return Err(format!(
+            "NF4Tile640 metadata width mismatch: scale={} bias={}",
+            metadata_row_values, bias.logical_shape[1]
+        ));
+    }
+
+    if packed_row_bytes == 0 || metadata_row_values == 0 {
+        return Err("NF4Tile640 triplet cannot have zero-width rows".into());
+    }
+
+    let packed_per_tile = u64::from(layout.packed_weight_bytes_per_tile);
+    if u64::from(packed_row_bytes) % packed_per_tile != 0 {
+        return Err(format!(
+            "NF4Tile640 weight slot {} row width {} is not a multiple of {}",
+            weight.slot_id, packed_row_bytes, packed_per_tile
+        ));
+    }
+
+    let tile_count = u64::from(packed_row_bytes) / packed_per_tile;
+    let expected_meta_row_values = tile_count * u64::from(layout.scale_values_per_tile);
+    if u64::from(metadata_row_values) != expected_meta_row_values {
+        return Err(format!(
+            "NF4Tile640 metadata row width mismatch: expected {}, got {}",
+            expected_meta_row_values, metadata_row_values
+        ));
+    }
+
+    let expected_weight_byte_length = u64::from(out_dim) * u64::from(packed_row_bytes);
+    if weight.byte_length != expected_weight_byte_length {
+        return Err(format!(
+            "NF4Tile640 weight slot {} length mismatch: expected {}, got {}",
+            weight.slot_id, expected_weight_byte_length, weight.byte_length
+        ));
+    }
+    let expected_metadata_byte_length = u64::from(out_dim) * expected_meta_row_values * 4;
+    if scale.byte_length != expected_metadata_byte_length {
+        return Err(format!(
+            "NF4Tile640 scale slot {} length mismatch: expected {}, got {}",
+            scale.slot_id, expected_metadata_byte_length, scale.byte_length
+        ));
+    }
+    if bias.byte_length != expected_metadata_byte_length {
+        return Err(format!(
+            "NF4Tile640 bias slot {} length mismatch: expected {}, got {}",
+            bias.slot_id, expected_metadata_byte_length, bias.byte_length
+        ));
+    }
+
+    Ok(Nf4Tile640ArenaAbi {
+        weight_byte_length: expected_weight_byte_length,
+        metadata_byte_length: expected_metadata_byte_length,
+    })
+}
+
 fn add_generic_coreai_bindings(
     executable: &mut CoreAiIOSurfaceExecutable,
     slots: &[CimageSlotManifest],
@@ -384,10 +470,14 @@ pub fn install_apple_tri_lane(
         if let Some((weights, scales, biases)) =
             nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids)
         {
+            let _abi = derive_nf4_tile640_arena_abi(weights, scales, biases)?;
             executable.bind_nf4_tile640_triplet(
                 weights.slot_id,
+                weights.byte_offset,
                 scales.slot_id,
+                scales.byte_offset,
                 biases.slot_id,
+                biases.byte_offset,
                 &manifest.arena.arena_layout_digest,
             )?;
             add_generic_coreai_bindings(
@@ -424,12 +514,16 @@ pub fn install_apple_tri_lane(
         if let Some((weights, scales, biases)) =
             nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids)
         {
+            let abi = derive_nf4_tile640_arena_abi(weights, scales, biases)?;
             executable.bind_nf4_tile640_triplet(
                 weights.slot_id,
+                weights.byte_offset,
                 scales.slot_id,
+                scales.byte_offset,
                 biases.slot_id,
-                weights.byte_length,
-                scales.byte_length / 4,
+                biases.byte_offset,
+                abi.weight_byte_length,
+                abi.metadata_byte_length,
                 &manifest.arena.arena_layout_digest,
             );
             add_generic_metal_views(
@@ -907,6 +1001,7 @@ mod tests {
         let output_slot_ids = parse_slot_ids(&coreai_artifact.output_slots).expect("slot ids");
         let (weights, scales, biases) =
             nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids).expect("nf4 triplet");
+        let abi = derive_nf4_tile640_arena_abi(weights, scales, biases).expect("nf4 abi");
 
         let mut coreai = CoreAiIOSurfaceExecutable::new(
             &coreai_artifact.artifact_id,
@@ -916,8 +1011,11 @@ mod tests {
         coreai
             .bind_nf4_tile640_triplet(
                 weights.slot_id,
+                weights.byte_offset,
                 scales.slot_id,
+                scales.byte_offset,
                 biases.slot_id,
+                biases.byte_offset,
                 &manifest.arena.arena_layout_digest,
             )
             .expect("bind coreai triplet");
@@ -937,10 +1035,13 @@ mod tests {
         );
         metal.bind_nf4_tile640_triplet(
             weights.slot_id,
+            weights.byte_offset,
             scales.slot_id,
+            scales.byte_offset,
             biases.slot_id,
-            weights.byte_length,
-            scales.byte_length / 4,
+            biases.byte_offset,
+            abi.weight_byte_length,
+            abi.metadata_byte_length,
             &manifest.arena.arena_layout_digest,
         );
         add_generic_metal_views(
@@ -967,6 +1068,64 @@ mod tests {
         assert_eq!(metal.input_views[1].length, 20);
         assert_eq!(metal.output_views.len(), 1);
         assert_eq!(metal.output_views[0].slot_id, 10);
+    }
+
+    #[test]
+    fn test_derive_nf4_tile640_arena_abi_from_slot_shapes() {
+        let layout = Nf4Tile640Layout::canonical();
+        let out_dim = 3u32;
+        let packed_row_bytes = layout.packed_row_bytes(1280);
+        let metadata_row_values = layout.metadata_row_values(1280);
+
+        let weight = CimageSlotManifest {
+            slot_id: 20,
+            tensor_id: "packed_nf4_weights".into(),
+            byte_offset: 0,
+            byte_length: u64::from(out_dim) * u64::from(packed_row_bytes),
+            dtype: "u8".into(),
+            logical_shape: vec![out_dim, packed_row_bytes],
+            physical_shape: vec![out_dim, packed_row_bytes],
+            strides_bytes: vec![u64::from(packed_row_bytes), 1],
+            layout: "row_major".into(),
+            producer: ExecutionLane::AccelerateCpu,
+            consumer: ExecutionLane::MlxGpu,
+            reuse_class: "shared_readonly".into(),
+            required_alignment: 16384,
+        };
+        let scale = CimageSlotManifest {
+            slot_id: 21,
+            tensor_id: "scales".into(),
+            byte_offset: weight.byte_length,
+            byte_length: u64::from(out_dim) * u64::from(metadata_row_values) * 4,
+            dtype: "f32".into(),
+            logical_shape: vec![out_dim, metadata_row_values],
+            physical_shape: vec![out_dim, metadata_row_values],
+            strides_bytes: vec![u64::from(metadata_row_values) * 4, 4],
+            layout: "row_major".into(),
+            producer: ExecutionLane::AccelerateCpu,
+            consumer: ExecutionLane::CoreAiAne,
+            reuse_class: "shared_readonly".into(),
+            required_alignment: 16384,
+        };
+        let bias = CimageSlotManifest {
+            slot_id: 22,
+            tensor_id: "biases".into(),
+            byte_offset: scale.byte_offset + scale.byte_length,
+            byte_length: scale.byte_length,
+            dtype: "f32".into(),
+            logical_shape: vec![out_dim, metadata_row_values],
+            physical_shape: vec![out_dim, metadata_row_values],
+            strides_bytes: vec![u64::from(metadata_row_values) * 4, 4],
+            layout: "row_major".into(),
+            producer: ExecutionLane::AccelerateCpu,
+            consumer: ExecutionLane::CoreAiAne,
+            reuse_class: "shared_readonly".into(),
+            required_alignment: 16384,
+        };
+
+        let abi = derive_nf4_tile640_arena_abi(&weight, &scale, &bias).expect("nf4 abi");
+        assert_eq!(abi.weight_byte_length, weight.byte_length);
+        assert_eq!(abi.metadata_byte_length, scale.byte_length);
     }
 
     // ── test_warmup_validates_slot_presence ─────────────────────────────
