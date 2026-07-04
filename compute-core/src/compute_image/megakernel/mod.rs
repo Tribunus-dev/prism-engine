@@ -5,10 +5,10 @@
 //! - [`kv`] — ternary KV cache block constants
 //! - [`pipeline`] — persistent dispatch, work queue, buffer management, host API
 
+pub mod gather_kernel;
 pub mod kernels;
 pub mod kv;
 pub mod pipeline;
-pub mod gather_kernel;
 
 pub use kernels::*;
 pub use kv::*;

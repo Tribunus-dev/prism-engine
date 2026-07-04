@@ -230,7 +230,6 @@ impl std::error::Error for BindingError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integration::ContentHash;
     use crate::compute_image::executable::profile::{
         DefaultVariantSelection, ExecutableTargetProfile, HardwareTargetContract,
         RuntimeTargetContract,
@@ -238,8 +237,10 @@ mod tests {
     use crate::compute_image::executable::variant::{ShapeProfile, ShapeSpecializedProgram};
     use crate::compute_image::program::phase_program::{
         CanonicalArtifactIdentity, ExecutionKind, PhaseArtifactKind, PhaseCompletionContract,
-        PhaseDependencyContract, PhaseResourceReservation, ProgramArtifactSelection, SerializedPhase, SerializedPhaseProgram,
+        PhaseDependencyContract, PhaseResourceReservation, ProgramArtifactSelection,
+        SerializedPhase, SerializedPhaseProgram,
     };
+    use crate::integration::ContentHash;
 
     // ── Helpers ────────────────────────────────────────────────────────
 

@@ -208,9 +208,9 @@ fn run_import(model_path_str: &str) {
     };
 
     // ── Step 5: Build region plan ─────────────────────────────────────
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+    #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
     let catalogue = RegionCatalogue::fp16_alpha();
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+    #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
     let plan = region_planner::build_region_plan(&canonical, &catalogue);
 
     // ── Step 6: Print structured summary ──────────────────────────────
@@ -241,7 +241,7 @@ fn run_import(model_path_str: &str) {
         );
     }
     println!();
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+    #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
     {
         println!("=== Region Plan ===");
         println!("  Core ML islands:  {}", plan.coreai_islands.len());

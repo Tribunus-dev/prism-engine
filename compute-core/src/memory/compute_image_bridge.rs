@@ -191,8 +191,6 @@ pub fn load_all_weight_tensors(
 mod tests {
     use super::*;
     use crate::mapped_image::MappedSegment;
-    
-    
 
     /// Create a minimal test segment file on disk and load a tensor from it.
     #[test]

@@ -6,11 +6,11 @@
 
 use std::collections::HashMap;
 
+use super::DType;
 use crate::backend::routing::{
     BackendId, LogicalShape, PhysicalLayout, TensorId, TensorMaterializationId, TensorShape,
     TensorVersion,
 };
-use super::DType;
 
 // ── Materialization identity ──────────────────────────────────────────
 

@@ -16,11 +16,10 @@
 //! If every check passes the phase is `Admitted`; otherwise it is `Denied`
 //! with an explicit fallback to [`CompilePlacement::MetalGpu`].
 
-use super::phase_ir::{
-    CompilePhaseDescriptor, CompilePlacement, CompileDeterminism,
-    DeviceSignature, PhaseId,
-};
 use super::phase_ir::ANEArtifactKey;
+use super::phase_ir::{
+    CompileDeterminism, CompilePhaseDescriptor, CompilePlacement, DeviceSignature, PhaseId,
+};
 use serde::{Deserialize, Serialize};
 
 // ── Performance baseline ──────────────────────────────────────────────────
@@ -202,10 +201,7 @@ mod tests {
             arithmetic_intensity: crate::compilation::phase_ir::ArithmeticIntensity::ComputeBound,
             mutation: crate::compilation::phase_ir::MutationClass::ReadOnly,
             determinism,
-            allowed_placements: vec![
-                CompilePlacement::MetalGpu,
-                CompilePlacement::Ane,
-            ],
+            allowed_placements: vec![CompilePlacement::MetalGpu, CompilePlacement::Ane],
             minimum_profitable_elements: 0,
             fallback: CompilePlacement::MetalGpu,
             estimated_ane_duration_ns: 1_000_000, // 1 ms

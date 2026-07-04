@@ -173,7 +173,6 @@ pub fn prewarm_ane_via_coreml() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_build_mlpackage() {

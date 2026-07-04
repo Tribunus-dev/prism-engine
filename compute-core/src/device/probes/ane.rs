@@ -7,8 +7,8 @@
 //!
 //! On non-macOS platforms, returns an empty device list.
 
-use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo};
 use super::DeviceProbe;
+use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo};
 
 /// Probes the Apple Neural Engine via IOKit ioreg.
 pub struct AneProbe;

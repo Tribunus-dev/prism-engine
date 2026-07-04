@@ -385,7 +385,6 @@ fn test_e_iosurface_min_size() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![1, h])],
             outputs: vec![(out_name.clone(), vec![1, h])],
-
         };
         let mp = match compile_model(&format!("e_h{}", h), p, meta) {
             Ok(x) => x,

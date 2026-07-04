@@ -3,11 +3,11 @@
 //! These systems implement request intake, worker dispatch, event drain,
 //! liveness watchdog, and the legacy bridge shim.
 
-pub mod ingress;
-pub mod stream_observer;
-pub mod event_drain;
-pub mod watchdog;
 pub mod bridge;
+pub mod event_drain;
+pub mod ingress;
 pub mod spawn;
+pub mod stream_observer;
+pub mod watchdog;
 
 pub use stream_observer::StreamObservationSystem;

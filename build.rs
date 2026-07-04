@@ -14,6 +14,7 @@ fn main() {
         "palettized_gemv_swiglu.metal",
         "palettized_gemm.metal",
         "fused_gate_up.metal",
+        "ternary_tile640_gemv.metal",
         "silu_vec.metal",
     ];
     for src in metal_sources {

@@ -9,13 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::compilation::tri_lane::{
-    AneAdmission, AneExecutionEvidence, EpochResourceCounters,
-    EpochRouteOrigin, AppleTriLaneExecutionPlan,
-    AppleTriLaneExecutionReceipt, CoreAiConfigurationEvidence,
-    ExecutionEpoch, ExecutionLane, FallbackStatus, LaneExecutionEvent,
-    NumericalStatus, OverlapMetrics, SlotEvent,
+    AneAdmission, AneExecutionEvidence, AppleTriLaneExecutionPlan, AppleTriLaneExecutionReceipt,
+    CoreAiConfigurationEvidence, EpochResourceCounters, EpochRouteOrigin, ExecutionEpoch,
+    ExecutionLane, FallbackStatus, LaneExecutionEvent, NumericalStatus, OverlapMetrics, SlotEvent,
 };
-
 
 use crate::backend::coreai_iosurface::CoreAiIOSurfaceExecutable;
 use crate::backend::metal_consumer::MetalConsumer;
@@ -24,9 +21,7 @@ use crate::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
-pub use crate::compilation::tri_lane::{
-    CompletionContract, DependencyKind, LaneDependency,
-};
+pub use crate::compilation::tri_lane::{CompletionContract, DependencyKind, LaneDependency};
 
 // ── Activation ring ──────────────────────────────────────────────────────
 
@@ -44,8 +39,7 @@ pub struct ActivationSlot {
     pub epoch_released: u64,
 }
 
-impl ActivationSlot {
-}
+impl ActivationSlot {}
 
 /// Activation ring buffer manager for ANE/GPU/CPU lane boundary transfers.
 ///
@@ -382,9 +376,7 @@ impl EpochScheduler {
             .copied()
             .unwrap_or(wall_ns as u128);
         self.epoch_start_ns.entry(epoch).or_insert(start);
-        self.epoch_end_ns
-            .entry(epoch)
-            .or_insert(wall_ns as u128);
+        self.epoch_end_ns.entry(epoch).or_insert(wall_ns as u128);
     }
 
     /// Execute the current epoch against real backend hardware.
@@ -407,14 +399,14 @@ impl EpochScheduler {
 
         // 0a. FP16-only production envelope check
         // Verify the slot dtype is float16 before dispatching.
-        let slot_dtype = coreai_exec.input_bindings.first()
+        let slot_dtype = coreai_exec
+            .input_bindings
+            .first()
             .and_then(|b| arena.slot(b.slot_id))
             .map(|s| s.manifest.dtype.as_str());
         if let Some(dt) = slot_dtype {
             if dt != "float16" && dt != "fp16" {
-                return Err(
-                    "FP16-only production envelope: slot dtype must be float16".into()
-                );
+                return Err("FP16-only production envelope: slot dtype must be float16".into());
             }
         }
 
@@ -440,53 +432,103 @@ impl EpochScheduler {
 
                         // Extract ArenaInfo from the slot's IOSurface-backed arena.
                         // Falls back to heap memory when backing_arena is None (mock).
-                        let (mut _in_heap, in_info) =
-                            match arena.slot(in_slot_id).and_then(|s| s.backing_arena.as_ref()) {
-                                Some(a) => (None, a.info),
-                                None => {
-                                let s = arena.slot(in_slot_id)
+                        let (mut _in_heap, in_info) = match arena
+                            .slot(in_slot_id)
+                            .and_then(|s| s.backing_arena.as_ref())
+                        {
+                            Some(a) => (None, a.info),
+                            None => {
+                                let s = arena
+                                    .slot(in_slot_id)
                                     .expect("in_slot for prediction must exist");
                                 let byte_len = s.manifest.byte_length.max(1) as usize;
                                 let mut heap: Vec<u8> = vec![0u8; byte_len];
                                 let ptr = heap.as_mut_ptr();
-                                    (Some(heap), crate::arena_info::ArenaInfo {
-                                    width: 1,
-                                    height: 1,
-                                    logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1) as i32,
-                                    logical_dim1: s.manifest.logical_shape.get(1).copied().unwrap_or(1) as i32,
-                                    pixel_format: 0,
-                                    byte_size: byte_len as i32,
-                                    bytes_per_row: s.manifest.strides_bytes.first().copied().unwrap_or(byte_len as u64) as i32,
-                                    base_address: ptr as *mut std::ffi::c_void,
-                                    cv_buffer: std::ptr::null_mut(),
-                                    io_surface: std::ptr::null_mut(),
-                                    })
-                                }
-                            };
-                        let (mut _out_heap, out_info) =
-                            match arena.slot(out_slot_id).and_then(|s| s.backing_arena.as_ref()) {
-                                Some(a) => (None, a.info),
-                                None => {
-                                let s = arena.slot(out_slot_id)
+                                (
+                                    Some(heap),
+                                    crate::arena_info::ArenaInfo {
+                                        width: 1,
+                                        height: 1,
+                                        logical_dim0: s
+                                            .manifest
+                                            .logical_shape
+                                            .first()
+                                            .copied()
+                                            .unwrap_or(1)
+                                            as i32,
+                                        logical_dim1: s
+                                            .manifest
+                                            .logical_shape
+                                            .get(1)
+                                            .copied()
+                                            .unwrap_or(1)
+                                            as i32,
+                                        pixel_format: 0,
+                                        byte_size: byte_len as i32,
+                                        bytes_per_row: s
+                                            .manifest
+                                            .strides_bytes
+                                            .first()
+                                            .copied()
+                                            .unwrap_or(byte_len as u64)
+                                            as i32,
+                                        base_address: ptr as *mut std::ffi::c_void,
+                                        cv_buffer: std::ptr::null_mut(),
+                                        io_surface: std::ptr::null_mut(),
+                                    },
+                                )
+                            }
+                        };
+                        let (mut _out_heap, out_info) = match arena
+                            .slot(out_slot_id)
+                            .and_then(|s| s.backing_arena.as_ref())
+                        {
+                            Some(a) => (None, a.info),
+                            None => {
+                                let s = arena
+                                    .slot(out_slot_id)
                                     .expect("out_slot for prediction must exist");
                                 let byte_len = s.manifest.byte_length.max(1) as usize;
                                 let mut heap: Vec<u8> = vec![0u8; byte_len];
                                 let ptr = heap.as_mut_ptr();
-                                    (Some(heap), crate::arena_info::ArenaInfo {
-                                    width: 1,
-                                    height: 1,
-                                    logical_dim0: s.manifest.logical_shape.first().copied().unwrap_or(1) as i32,
-                                    logical_dim1: s.manifest.logical_shape.get(1).copied().unwrap_or(1) as i32,
-                                    pixel_format: 0,
-                                    byte_size: byte_len as i32,
-                                    bytes_per_row: s.manifest.strides_bytes.first().copied().unwrap_or(byte_len as u64) as i32,
-                                    base_address: ptr as *mut std::ffi::c_void,
-                                    cv_buffer: std::ptr::null_mut(),
-                                    io_surface: std::ptr::null_mut(),
-                                    })
-                                }
-                            };
-                        model.predict(in_name, &in_info, out_name, &out_info).is_ok()
+                                (
+                                    Some(heap),
+                                    crate::arena_info::ArenaInfo {
+                                        width: 1,
+                                        height: 1,
+                                        logical_dim0: s
+                                            .manifest
+                                            .logical_shape
+                                            .first()
+                                            .copied()
+                                            .unwrap_or(1)
+                                            as i32,
+                                        logical_dim1: s
+                                            .manifest
+                                            .logical_shape
+                                            .get(1)
+                                            .copied()
+                                            .unwrap_or(1)
+                                            as i32,
+                                        pixel_format: 0,
+                                        byte_size: byte_len as i32,
+                                        bytes_per_row: s
+                                            .manifest
+                                            .strides_bytes
+                                            .first()
+                                            .copied()
+                                            .unwrap_or(byte_len as u64)
+                                            as i32,
+                                        base_address: ptr as *mut std::ffi::c_void,
+                                        cv_buffer: std::ptr::null_mut(),
+                                        io_surface: std::ptr::null_mut(),
+                                    },
+                                )
+                            }
+                        };
+                        model
+                            .predict(in_name, &in_info, out_name, &out_info)
+                            .is_ok()
                     } else {
                         false
                     }
@@ -539,7 +581,6 @@ impl EpochScheduler {
                 }
             }
         }
-
 
         // Build slot events from the current arena state
         for (id, slot) in &arena.slots {
@@ -618,12 +659,7 @@ impl EpochScheduler {
 /// ```
 ///
 /// When all lanes are idle (`total_compute_ns == 0`), overlap is zero.
-pub fn calculate_overlap(
-    gpu_ns: u64,
-    cpu_ns: u64,
-    ane_ns: u64,
-    wall_ns: u64,
-) -> OverlapMetrics {
+pub fn calculate_overlap(gpu_ns: u64, cpu_ns: u64, ane_ns: u64, wall_ns: u64) -> OverlapMetrics {
     let total_compute_ns = gpu_ns.saturating_add(cpu_ns).saturating_add(ane_ns);
     let total_sync_ns = if total_compute_ns >= wall_ns {
         0
@@ -819,10 +855,7 @@ impl AppleTriLaneExecutor {
     }
 
     /// Run N epochs, return receipts.
-    pub fn run_epochs(
-        &mut self,
-        count: u64,
-    ) -> Result<Vec<AppleTriLaneExecutionReceipt>, String> {
+    pub fn run_epochs(&mut self, count: u64) -> Result<Vec<AppleTriLaneExecutionReceipt>, String> {
         let mut receipts = Vec::new();
         for _ in 0..count {
             receipts.push(self.execute_epoch()?);
@@ -839,10 +872,10 @@ mod tests {
 
     fn sample_plan() -> AppleTriLaneExecutionPlan {
         use crate::compilation::tri_lane::{
-            AppleFallbackPlan, AppleHardwareSignature, CoreAiProgramBinding,
-            CoreAiTensorContract, CoreAiShapeContract, CoreAiWarmupContract,
-            CoreAiComputeUnitPolicy, CpuProgramBinding, MetalProgramBinding, ShapeClass,
-            NumericalPolicy, TriLaneCostModel, LaneCostEstimate, TriLaneEvidenceRequirements,
+            AppleFallbackPlan, AppleHardwareSignature, CoreAiComputeUnitPolicy,
+            CoreAiProgramBinding, CoreAiShapeContract, CoreAiTensorContract, CoreAiWarmupContract,
+            CpuProgramBinding, LaneCostEstimate, MetalProgramBinding, NumericalPolicy, ShapeClass,
+            TriLaneCostModel, TriLaneEvidenceRequirements,
         };
 
         AppleTriLaneExecutionPlan {
@@ -1074,7 +1107,7 @@ mod tests {
         // Since no real model file exists, prediction fails gracefully.
         // The receipt must reflect the failure via its evidence fields.
         use crate::backend::coreai_iosurface::{
-            CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable, CoreAiComputePolicy,
+            CoreAiComputePolicy, CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable,
         };
 
         let plan = sample_plan();
@@ -1349,12 +1382,12 @@ mod tests {
     #[test]
     fn test_execute_epoch_tracks_resource_counters() {
         use crate::backend::coreai_iosurface::{
-            CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable, CoreAiComputePolicy,
+            CoreAiComputePolicy, CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable,
         };
+        use crate::backend::metal_consumer::MetalSlotBinding;
         use crate::compute_image::apple_shared_arena::{
             IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
         };
-        use crate::backend::metal_consumer::MetalSlotBinding;
 
         let plan = sample_plan();
         let mut sched = EpochScheduler::new(plan);
@@ -1463,12 +1496,12 @@ mod tests {
     #[test]
     fn test_receipt_non_optimistic_evidence() {
         use crate::backend::coreai_iosurface::{
-            CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable, CoreAiComputePolicy,
+            CoreAiComputePolicy, CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable,
         };
+        use crate::backend::metal_consumer::MetalSlotBinding;
         use crate::compute_image::apple_shared_arena::{
             IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
         };
-        use crate::backend::metal_consumer::MetalSlotBinding;
 
         let plan = sample_plan();
         let mut sched = EpochScheduler::new(plan);
@@ -1557,13 +1590,19 @@ mod tests {
         // Numerical status must not be Pass when prediction failed
         if !receipt.observed_ane_execution {
             assert!(
-                matches!(receipt.numerical_status, NumericalStatus::Fail(_) | NumericalStatus::NotValidated),
+                matches!(
+                    receipt.numerical_status,
+                    NumericalStatus::Fail(_) | NumericalStatus::NotValidated
+                ),
                 "numerical_status must reflect failure, not Pass: {:?}",
                 receipt.numerical_status
             );
         }
         // Prediction failure on ANE executable with inputs/outputs correctly reports fallback
-        assert!(receipt.fallback_used, "fallback must be reported when prediction fails on ANE executable");
+        assert!(
+            receipt.fallback_used,
+            "fallback must be reported when prediction fails on ANE executable"
+        );
     }
 
     #[test]
@@ -1590,10 +1629,25 @@ mod tests {
         // execution, the counters are zero. The companion test
         // test_execute_epoch_tracks_resource_counters verifies they stay zero
         // through an actual execute_epoch() call.
-        assert_eq!(counters.iosurface_allocations, 0, "iosurface_allocations must be 0 post-warmup");
-        assert_eq!(counters.metal_texture_creations, 0, "metal_texture_creations must be 0 post-warmup");
-        assert_eq!(counters.command_queue_creations, 0, "command_queue_creations must be 0 post-warmup");
-        assert_eq!(counters.command_pipeline_creations, 0, "command_pipeline_creations must be 0 post-warmup");
-        assert_eq!(counters.cpu_readbacks, 0, "cpu_readbacks must be 0 post-warmup");
+        assert_eq!(
+            counters.iosurface_allocations, 0,
+            "iosurface_allocations must be 0 post-warmup"
+        );
+        assert_eq!(
+            counters.metal_texture_creations, 0,
+            "metal_texture_creations must be 0 post-warmup"
+        );
+        assert_eq!(
+            counters.command_queue_creations, 0,
+            "command_queue_creations must be 0 post-warmup"
+        );
+        assert_eq!(
+            counters.command_pipeline_creations, 0,
+            "command_pipeline_creations must be 0 post-warmup"
+        );
+        assert_eq!(
+            counters.cpu_readbacks, 0,
+            "cpu_readbacks must be 0 post-warmup"
+        );
     }
 }

@@ -39,13 +39,6 @@ pub mod coreai_iosurface;
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod coreai_lane;
-/// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
-pub mod metal_iosurface;
-/// Metal consumer — validates Core ML output slots against CPU references.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod metal_consumer;
-/// NPU abstraction — unified FFI for Apple ANE, Intel VPU, AMD XDNA.
-pub mod npu;
 /// CPU attention scheduler — L2-cache-aware work partition + work-stealing
 /// (ported from vLLM's cpu_attn_impl.hpp).
 #[cfg(feature = "candle-cpu")]
@@ -61,6 +54,13 @@ pub mod intel_level_zero;
 /// Intel USM zero-copy buffer abstraction for iGPU (Level Zero / oneAPI).
 #[cfg(feature = "intel")]
 pub mod intel_usm;
+/// Metal consumer — validates Core ML output slots against CPU references.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod metal_consumer;
+/// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
+pub mod metal_iosurface;
+/// NPU abstraction — unified FFI for Apple ANE, Intel VPU, AMD XDNA.
+pub mod npu;
 /// PlacementSet and hazard tracking — op placement legality and cross-lane sync.
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),

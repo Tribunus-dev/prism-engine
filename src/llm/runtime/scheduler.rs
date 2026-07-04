@@ -10,8 +10,7 @@ use std::sync::Mutex;
 
 use super::super::manifest::{ExecutionLane, InferencePhase, SessionId};
 use super::super::server::{
-    CompletionFenceId, DispatchId, LaneDispatch, SlowConsumerAction,
-    StreamBackpressurePolicy,
+    CompletionFenceId, DispatchId, LaneDispatch, SlowConsumerAction, StreamBackpressurePolicy,
 };
 
 /// A dispatched lane execution paired with the session that requested it.
@@ -59,7 +58,10 @@ impl InferenceScheduler {
     fn record(&self, session_id: SessionId, dispatch: LaneDispatch) -> DispatchId {
         let id = dispatch.dispatch_id;
         let mut log = self.dispatches.lock().expect("scheduler lock poisoned");
-        log.push(DispatchRecord { dispatch, session_id });
+        log.push(DispatchRecord {
+            dispatch,
+            session_id,
+        });
         id
     }
 
@@ -92,10 +94,7 @@ impl InferenceScheduler {
     /// Schedules decode work for the given session.
     ///
     /// Creates a `Metal`-lane dispatch with phase `Decode`.
-    pub fn schedule_decode(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<DispatchId, String> {
+    pub fn schedule_decode(&self, session_id: &SessionId) -> Result<DispatchId, String> {
         let id = self.next_dispatch_id();
         let dispatch = LaneDispatch {
             dispatch_id: id,
@@ -258,14 +257,15 @@ mod tests {
             }));
         }
 
-        let mut ids: Vec<_> = handles
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect();
+        let mut ids: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), 10, "all ten concurrent dispatches must be unique");
+        assert_eq!(
+            ids.len(),
+            10,
+            "all ten concurrent dispatches must be unique"
+        );
     }
 }
 
@@ -277,9 +277,7 @@ pub mod compute_scheduler {
     use tribunus_compute_core::scheduling::{Request, RequestState, Scheduler, SchedulerConfig};
 
     use super::super::super::manifest::SessionId;
-    use super::super::super::server::{
-        DispatchId, SlowConsumerAction, StreamBackpressurePolicy,
-    };
+    use super::super::super::server::{DispatchId, SlowConsumerAction, StreamBackpressurePolicy};
 
     /// Wraps `tribunus_compute_core::scheduling::Scheduler` for integration
     /// with the Prism LLM runtime.
@@ -298,7 +296,7 @@ pub mod compute_scheduler {
             Self {
                 inner: Mutex::new(Scheduler::new(SchedulerConfig::default())),
                 counter: AtomicU64::new(0),
-}
+            }
         }
 
         /// Schedules a prefill request for the given session.
@@ -333,10 +331,7 @@ pub mod compute_scheduler {
         ///
         /// Creates a compute-core `Request` in `Decoding` state and adds
         /// it to the scheduler's queue for the next decode batch.
-        pub fn schedule_decode(
-            &self,
-            _session_id: &SessionId,
-        ) -> Result<DispatchId, String> {
+        pub fn schedule_decode(&self, _session_id: &SessionId) -> Result<DispatchId, String> {
             let id = DispatchId(self.counter.fetch_add(1, Ordering::SeqCst));
             let req = Request {
                 id: id.0,

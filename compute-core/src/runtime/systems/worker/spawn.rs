@@ -6,19 +6,15 @@
 //! lack a `WorkerAssignment`, spawns the worker binary via
 //! [`WorkerProcessManager`], and transitions the lifecycle to `Dispatching`.
 
-use crate::runtime::resources::worker_process_manager::{
-    WorkerProcessManager, WorkerId,
-};
+use crate::runtime::components::{WorkerAssignment, WorkerLifecycle, WorkerRequestPhase};
+use crate::runtime::resources::worker_process_manager::{WorkerId, WorkerProcessManager};
 use crate::runtime::resources::WorkerDiagnosticsResource;
 use crate::runtime::scheduling::command::CommandWriter;
 use crate::runtime::scheduling::metadata::{
-    ExecutionClass, ErasedSystem, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
 };
 use crate::runtime::world::{Entity, World};
-use crate::runtime::components::{
-    WorkerAssignment, WorkerLifecycle, WorkerRequestPhase,
-};
 
 // ---------------------------------------------------------------------------
 // Default paths (overridable via environment)
@@ -36,15 +32,13 @@ const DEFAULT_WORKER_MODEL: &str = "/models/default";
 /// Read a worker binary path from the environment, falling back to a
 /// compile-time default.
 fn worker_binary_path() -> String {
-    std::env::var(ENV_WORKER_BINARY)
-        .unwrap_or_else(|_| DEFAULT_WORKER_BINARY.to_string())
+    std::env::var(ENV_WORKER_BINARY).unwrap_or_else(|_| DEFAULT_WORKER_BINARY.to_string())
 }
 
 /// Read a model path from the environment, falling back to a compile-time
 /// default.
 fn worker_model_path() -> String {
-    std::env::var(ENV_WORKER_MODEL)
-        .unwrap_or_else(|_| DEFAULT_WORKER_MODEL.to_string())
+    std::env::var(ENV_WORKER_MODEL).unwrap_or_else(|_| DEFAULT_WORKER_MODEL.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -103,19 +97,14 @@ impl SystemSpec for WorkerSpawnSystem {
 
 impl ErasedSystem for WorkerSpawnSystem {
     fn metadata(&self) -> &SystemMetadata {
-        static META: std::sync::LazyLock<SystemMetadata> =
-            std::sync::LazyLock::new(|| {
-                <WorkerSpawnSystem as SystemSpec>::metadata()
-                    .expect("WorkerSpawnSystem metadata construction")
-            });
+        static META: std::sync::LazyLock<SystemMetadata> = std::sync::LazyLock::new(|| {
+            <WorkerSpawnSystem as SystemSpec>::metadata()
+                .expect("WorkerSpawnSystem metadata construction")
+        });
         &META
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // ---- 1. Collect candidate entities ----
         // We iterate *all* entities that have a WorkerLifecycle component
         // and filter to those that are Queued with no WorkerAssignment.
@@ -149,9 +138,7 @@ impl ErasedSystem for WorkerSpawnSystem {
                 let mgr = match world.get_resource_mut::<WorkerProcessManager>() {
                     Some(mgr) => mgr,
                     None => {
-                        return SystemResult::err(
-                            "WorkerProcessManager resource not registered",
-                        );
+                        return SystemResult::err("WorkerProcessManager resource not registered");
                     }
                 };
                 mgr.spawn_worker(&binary_path, &model_path)
@@ -162,9 +149,7 @@ impl ErasedSystem for WorkerSpawnSystem {
                 Err(_e) => {
                     // Record diagnostic and continue; the entity stays
                     // Queued for retry on the next tick.
-                    if let Some(diag) =
-                        world.get_resource_mut::<WorkerDiagnosticsResource>()
-                    {
+                    if let Some(diag) = world.get_resource_mut::<WorkerDiagnosticsResource>() {
                         diag.record_restart_request();
                     }
                     continue;
@@ -172,10 +157,7 @@ impl ErasedSystem for WorkerSpawnSystem {
             };
 
             // ---- 4. Insert WorkerAssignment ----
-            world.insert(
-                *entity,
-                WorkerAssignment::new(worker_id.to_string(), 1),
-            );
+            world.insert(*entity, WorkerAssignment::new(worker_id.to_string(), 1));
 
             // ---- 5. Transition lifecycle Queued -> Dispatching ----
             if let Some(lc) = world.get_mut::<WorkerLifecycle>(*entity) {

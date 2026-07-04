@@ -162,14 +162,20 @@ impl ToolEngine {
                     .and_then(|n| n.as_str())
                     .unwrap_or(tool_name)
                     .to_string();
-                let arguments = val.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
+                let arguments = val
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
                 Ok(ToolCallOutcome::Valid(ParsedCall {
                     name,
                     arguments,
                     raw: raw.to_string(),
                 }))
             }
-            Err(e) => Ok(ToolCallOutcome::Unrepairable(format!("parse failed: {}", e))),
+            Err(e) => Ok(ToolCallOutcome::Unrepairable(format!(
+                "parse failed: {}",
+                e
+            ))),
         }
     }
 
@@ -194,7 +200,8 @@ impl ToolEngine {
         match parse_and_repair(raw, &def) {
             tribunus_compute_core::tools::ToolCallResult::Valid(fc) => {
                 // Unwrap OpenAI-format wrapper: extract inner "arguments" sub-object.
-                let arguments = fc.arguments
+                let arguments = fc
+                    .arguments
                     .get("arguments")
                     .cloned()
                     .unwrap_or(fc.arguments);
@@ -205,7 +212,8 @@ impl ToolEngine {
                 }))
             }
             tribunus_compute_core::tools::ToolCallResult::Repaired(fc, fixes) => {
-                let arguments = fc.arguments
+                let arguments = fc
+                    .arguments
                     .get("arguments")
                     .cloned()
                     .unwrap_or(fc.arguments);
@@ -308,90 +316,82 @@ impl ToolEngine {
         Self::schema_to_gbnf(name, schema)
     }
 
-/// Build valid GBNF text directly from a JSON Schema Value.
-///
-/// The output is a self-consistent GBNF grammar that constrains generation
-/// to valid JSON matching the schema. This function is the "hand-crafted"
-/// replacement for reconstructing GBNF from the compile-core Grammar AST.
-#[cfg(feature = "prism-backend")]
-fn schema_to_gbnf(name: &str, schema: &serde_json::Value) -> Result<String, ToolError> {
-    let mut out = String::new();
-    out.push_str(&format!("root ::= {}\n", name));
-    Self::emit_schema_rule(name, schema, &mut out, 0)?;
-    if !out.contains("ws ::=") {
-        out.push_str("ws ::= [ \t\n]*\n");
-    }
-    Ok(out)
-}
-
-/// Recursively emit a single named GBNF rule for a JSON Schema sub-schema.
-#[cfg(feature = "prism-backend")]
-fn emit_schema_rule(
-    name: &str,
-    schema: &serde_json::Value,
-    out: &mut String,
-    depth: usize,
-) -> Result<(), ToolError> {
-    if depth > 20 {
-        return Err(ToolError::GrammarError(
-            "JSON schema nesting too deep (>20)".to_string(),
-        ));
+    /// Build valid GBNF text directly from a JSON Schema Value.
+    ///
+    /// The output is a self-consistent GBNF grammar that constrains generation
+    /// to valid JSON matching the schema. This function is the "hand-crafted"
+    /// replacement for reconstructing GBNF from the compile-core Grammar AST.
+    #[cfg(feature = "prism-backend")]
+    fn schema_to_gbnf(name: &str, schema: &serde_json::Value) -> Result<String, ToolError> {
+        let mut out = String::new();
+        out.push_str(&format!("root ::= {}\n", name));
+        Self::emit_schema_rule(name, schema, &mut out, 0)?;
+        if !out.contains("ws ::=") {
+            out.push_str("ws ::= [ \t\n]*\n");
+        }
+        Ok(out)
     }
 
-    let schema_type = schema.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-    match schema_type {
-        "object" => {
-            let properties = match schema.get("properties").and_then(|v| v.as_object()) {
-                Some(p) => p,
-                None => {
-                    out.push_str(&format!("{} ::= \"{{\" ws \"}}\"\n", name));
-                    return Ok(());
-                }
-            };
-
-            let required: Vec<&str> = schema
-                .get("required")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                .unwrap_or_default();
-
-            let mut pair_parts: Vec<String> = Vec::new();
-
-            for (prop_name, prop_schema) in properties {
-                let prop_rule = format!("_{}_v", prop_name);
-                Self::emit_schema_rule(&prop_rule, prop_schema, out, depth + 1)?;
-
-                // Build GBNF literal that matches "prop_name" (including JSON quotes).
-                // The GBNF text "\"name\"" matches the JSON text "name" (with quotes).
-                let pair = format!(
-                    " \"\\\"{}\\\"\" ws \":\" ws {} ",
-                    prop_name, prop_rule
-                );
-
-                if required.contains(&prop_name.as_str()) {
-                    pair_parts.push(pair.trim().to_string());
-                } else {
-                    let opt_name = format!("_{}_opt", prop_name);
-                    out.push_str(&format!(
-                        "{} ::= {} | \"\"\n",
-                        opt_name,
-                        pair.trim()
-                    ));
-                    pair_parts.push(opt_name);
-                }
-            }
-
-            if pair_parts.is_empty() {
-                out.push_str(&format!("{} ::= \"{{\" ws \"}}\"\n", name));
-            } else {
-                let props_seq = pair_parts.join(" \",\" ws ");
-                out.push_str(&format!("{} ::= \"{{\" ws {} \"}}\"\n", name, props_seq));
-            }
+    /// Recursively emit a single named GBNF rule for a JSON Schema sub-schema.
+    #[cfg(feature = "prism-backend")]
+    fn emit_schema_rule(
+        name: &str,
+        schema: &serde_json::Value,
+        out: &mut String,
+        depth: usize,
+    ) -> Result<(), ToolError> {
+        if depth > 20 {
+            return Err(ToolError::GrammarError(
+                "JSON schema nesting too deep (>20)".to_string(),
+            ));
         }
 
-        "array" => {
-            match schema.get("items") {
+        let schema_type = schema.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        match schema_type {
+            "object" => {
+                let properties = match schema.get("properties").and_then(|v| v.as_object()) {
+                    Some(p) => p,
+                    None => {
+                        out.push_str(&format!("{} ::= \"{{\" ws \"}}\"\n", name));
+                        return Ok(());
+                    }
+                };
+
+                let required: Vec<&str> = schema
+                    .get("required")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+
+                let mut pair_parts: Vec<String> = Vec::new();
+
+                for (prop_name, prop_schema) in properties {
+                    let prop_rule = format!("_{}_v", prop_name);
+                    Self::emit_schema_rule(&prop_rule, prop_schema, out, depth + 1)?;
+
+                    // Build GBNF literal that matches "prop_name" (including JSON quotes).
+                    // The GBNF text "\"name\"" matches the JSON text "name" (with quotes).
+                    let pair = format!(" \"\\\"{}\\\"\" ws \":\" ws {} ", prop_name, prop_rule);
+
+                    if required.contains(&prop_name.as_str()) {
+                        pair_parts.push(pair.trim().to_string());
+                    } else {
+                        let opt_name = format!("_{}_opt", prop_name);
+                        out.push_str(&format!("{} ::= {} | \"\"\n", opt_name, pair.trim()));
+                        pair_parts.push(opt_name);
+                    }
+                }
+
+                if pair_parts.is_empty() {
+                    out.push_str(&format!("{} ::= \"{{\" ws \"}}\"\n", name));
+                } else {
+                    let props_seq = pair_parts.join(" \",\" ws ");
+                    out.push_str(&format!("{} ::= \"{{\" ws {} \"}}\"\n", name, props_seq));
+                }
+            }
+
+            "array" => match schema.get("items") {
                 Some(item_schema) => {
                     let item_rule = format!("{}_item", name);
                     Self::emit_schema_rule(&item_rule, item_schema, out, depth + 1)?;
@@ -403,72 +403,74 @@ fn emit_schema_rule(
                 None => {
                     out.push_str(&format!("{} ::= \"[\" ws \"]\"\n", name));
                 }
-            }
-        }
+            },
 
-        "string" => {
-            out.push_str(&format!("{} ::= string\n", name));
-            if !out.contains("string ::=") {
-                // Simple JSON string: "<any chars except double-quote>"
-                out.push_str("string ::= \"\\\"\" ([^\"]*) \"\\\"\"\n");
-            }
-        }
-
-        "integer" => {
-            out.push_str(&format!("{} ::= integer\n", name));
-            if !out.contains("integer ::=") {
-                out.push_str("integer ::= (\"-\" | \"\") [0-9]+\n");
-            }
-        }
-
-        "number" => {
-            out.push_str(&format!("{} ::= number\n", name));
-            if !out.contains("number ::=") {
-                out.push_str("number ::= (\"-\" | \"\") [0-9]+ (\".\" [0-9]+)?\n");
-            }
-        }
-
-        "boolean" => {
-            out.push_str(&format!("{} ::= \"true\" | \"false\"\n", name));
-        }
-
-        "null" => {
-            out.push_str(&format!("{} ::= \"null\"\n", name));
-        }
-
-        _ => {
-            if let Some(enum_values) = schema.get("enum").and_then(|v| v.as_array()) {
-                let alts: Vec<String> = enum_values.iter().map(|v| {
-                    match v {
-                        serde_json::Value::String(s) => {
-                            // GBNF literal matching "s" (JSON string with quotes)
-                            format!("\"\\\"{}\\\"\"", s)
-                        }
-                        _ => {
-                            // Non-string enum value: use JSON repr, wrap in GBNF quotes
-                            let text = serde_json::to_string(v)
-                                .unwrap_or_else(|_| "null".to_string());
-                            format!("\"{}\"", text)
-                        }
-                    }
-                }).collect();
-                out.push_str(&format!("{} ::= {}\n", name, alts.join(" | ")));
-            } else if schema.get("$ref").is_some() {
+            "string" => {
                 out.push_str(&format!("{} ::= string\n", name));
-            } else {
-                // Fallback: accept any JSON value
-                out.push_str(&format!("{} ::= value\n", name));
-                if !out.contains("value ::=") {
-                    out.push_str(
+                if !out.contains("string ::=") {
+                    // Simple JSON string: "<any chars except double-quote>"
+                    out.push_str("string ::= \"\\\"\" ([^\"]*) \"\\\"\"\n");
+                }
+            }
+
+            "integer" => {
+                out.push_str(&format!("{} ::= integer\n", name));
+                if !out.contains("integer ::=") {
+                    out.push_str("integer ::= (\"-\" | \"\") [0-9]+\n");
+                }
+            }
+
+            "number" => {
+                out.push_str(&format!("{} ::= number\n", name));
+                if !out.contains("number ::=") {
+                    out.push_str("number ::= (\"-\" | \"\") [0-9]+ (\".\" [0-9]+)?\n");
+                }
+            }
+
+            "boolean" => {
+                out.push_str(&format!("{} ::= \"true\" | \"false\"\n", name));
+            }
+
+            "null" => {
+                out.push_str(&format!("{} ::= \"null\"\n", name));
+            }
+
+            _ => {
+                if let Some(enum_values) = schema.get("enum").and_then(|v| v.as_array()) {
+                    let alts: Vec<String> = enum_values
+                        .iter()
+                        .map(|v| {
+                            match v {
+                                serde_json::Value::String(s) => {
+                                    // GBNF literal matching "s" (JSON string with quotes)
+                                    format!("\"\\\"{}\\\"\"", s)
+                                }
+                                _ => {
+                                    // Non-string enum value: use JSON repr, wrap in GBNF quotes
+                                    let text = serde_json::to_string(v)
+                                        .unwrap_or_else(|_| "null".to_string());
+                                    format!("\"{}\"", text)
+                                }
+                            }
+                        })
+                        .collect();
+                    out.push_str(&format!("{} ::= {}\n", name, alts.join(" | ")));
+                } else if schema.get("$ref").is_some() {
+                    out.push_str(&format!("{} ::= string\n", name));
+                } else {
+                    // Fallback: accept any JSON value
+                    out.push_str(&format!("{} ::= value\n", name));
+                    if !out.contains("value ::=") {
+                        out.push_str(
                         "value ::= string | integer | \"true\" | \"false\" | \"null\" | \"[\" ws \"]\" | \"{\" ws \"}\"\n",
                     );
+                    }
                 }
             }
         }
-    }
 
-    Ok(())
-}
+        Ok(())
+    }
 
     /// Return the number of registered tools.
     pub fn tool_count(&self) -> usize {
@@ -497,7 +499,10 @@ fn format_node(node: &tribunus_compute_core::grammar::GrammarNode) -> String {
 ///   need wrapping in `( ... )` for correct GBNF precedence.
 #[allow(dead_code)]
 #[cfg(feature = "prism-backend")]
-fn format_node_ctx(node: &tribunus_compute_core::grammar::GrammarNode, parent_is_seq: bool) -> String {
+fn format_node_ctx(
+    node: &tribunus_compute_core::grammar::GrammarNode,
+    parent_is_seq: bool,
+) -> String {
     use tribunus_compute_core::grammar::GrammarNode;
 
     match node {
@@ -578,13 +583,18 @@ mod tests {
         let mut engine = ToolEngine::new();
         assert_eq!(engine.tool_count(), 0);
 
-        engine.register_tool("get_weather", "Get current weather", serde_json::json!({
-            "type": "object",
-            "properties": {
-                "location": { "type": "string" }
-            },
-            "required": ["location"]
-        }), vec!["location".to_string()]);
+        engine.register_tool(
+            "get_weather",
+            "Get current weather",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "location": { "type": "string" }
+                },
+                "required": ["location"]
+            }),
+            vec!["location".to_string()],
+        );
 
         assert_eq!(engine.tool_count(), 1);
         assert!(engine.has_tool("get_weather"));
@@ -627,14 +637,22 @@ mod tests {
     #[test]
     fn test_parse_call_valid_json() {
         let mut engine = ToolEngine::new();
-        engine.register_tool("greet", "Greet someone", serde_json::json!({
-            "type": "object",
-            "properties": {
-                "name": { "type": "string" }
-            }
-        }), vec![]);
+        engine.register_tool(
+            "greet",
+            "Greet someone",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" }
+                }
+            }),
+            vec![],
+        );
 
-        let result = engine.parse_call(r#"{"name": "greet", "arguments": {"name": "Alice"}}"#, "greet");
+        let result = engine.parse_call(
+            r#"{"name": "greet", "arguments": {"name": "Alice"}}"#,
+            "greet",
+        );
         match result {
             Ok(ToolCallOutcome::Valid(call)) => {
                 assert_eq!(call.name, "greet");
@@ -684,10 +702,11 @@ mod tests {
             raw: r#"{"name": "test", "arguments": {"key": "value"}}"#.to_string(),
         };
 
-        let result = engine.execute_tool::<fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>>(
-            &call,
-            None::<&fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>>,
-        );
+        let result = engine
+            .execute_tool::<fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>>(
+                &call,
+                None::<&fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>>,
+            );
         let json = result.expect("execute_tool should succeed");
         assert_eq!(json["tool"], "test");
         assert_eq!(json["status"], "called");
@@ -709,8 +728,7 @@ mod tests {
             }))
         };
 
-        let result =
-            engine.execute_tool(&call, Some(&dispatcher));
+        let result = engine.execute_tool(&call, Some(&dispatcher));
         let json = result.expect("execute_tool with dispatcher should succeed");
         assert_eq!(json["echoed"], "echo");
         assert_eq!(json["message"], "hello");
@@ -726,8 +744,7 @@ mod tests {
         };
 
         let dispatcher = |_: &str, _: &serde_json::Value| Err("something went wrong".to_string());
-        let result =
-            engine.execute_tool(&call, Some(&dispatcher));
+        let result = engine.execute_tool(&call, Some(&dispatcher));
         match result {
             Err(ToolError::ExecutionError(msg)) => assert_eq!(msg, "something went wrong"),
             other => panic!("expected ExecutionError, got {:?}", other),

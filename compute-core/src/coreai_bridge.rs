@@ -182,10 +182,14 @@ impl CoreAiModel {
         let mut c_in_ptrs: Vec<*const i8> = c_input_names.iter().map(|s| s.as_ptr()).collect();
         let mut c_out_ptrs: Vec<*const i8> = c_output_names.iter().map(|s| s.as_ptr()).collect();
 
-        let mut in_arena_ptrs: Vec<*const ArenaInfo> =
-            input_infos.iter().map(|a| &**a as *const ArenaInfo).collect();
-        let mut out_arena_ptrs: Vec<*mut ArenaInfo> =
-            output_infos.iter_mut().map(|a| &mut **a as *mut ArenaInfo).collect();
+        let mut in_arena_ptrs: Vec<*const ArenaInfo> = input_infos
+            .iter()
+            .map(|a| &**a as *const ArenaInfo)
+            .collect();
+        let mut out_arena_ptrs: Vec<*mut ArenaInfo> = output_infos
+            .iter_mut()
+            .map(|a| &mut **a as *mut ArenaInfo)
+            .collect();
 
         let status = unsafe {
             tribunus_coreai_predict_multi(

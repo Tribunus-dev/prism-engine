@@ -1,9 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::runtime::ledger::{
-        DeterministicReceiptPayload, JcsReceiptEncoder, ReceiptHasher,
-        SemanticStampedCommand, SemanticCommandPayload, CanonicalReceiptEncoder,
-        TransitionReceipt,
+        CanonicalReceiptEncoder, DeterministicReceiptPayload, JcsReceiptEncoder, ReceiptHasher,
+        SemanticCommandPayload, SemanticStampedCommand, TransitionReceipt,
     };
     use crate::runtime::scheduling::metadata::{Stage, SystemId};
     use crate::runtime::world::Entity;
@@ -13,7 +12,8 @@ mod tests {
     const EXPECTED_CANONICAL_BYTES: &[u8] = br#"{"command_count":1,"commands":[{"command":{"data":{"entity_kind":"test_entity"},"kind":"entity_spawned"},"entity":0,"entity_generation":null,"sequence":0,"stage":"Intake","system_id":0}],"microcycle":0,"receipt_sequence":0,"scheduler_epoch":0,"schema_version":1,"stage":"Intake"}"#;
 
     /// Blake3-256 digest of the canonical bytes above (hex).
-    const EXPECTED_BLAKE3_HEX: &str = "f72b09b19256ef121e2db3076a460442a0aae1c681035f1f18a708bf7d4336ea";
+    const EXPECTED_BLAKE3_HEX: &str =
+        "f72b09b19256ef121e2db3076a460442a0aae1c681035f1f18a708bf7d4336ea";
 
     fn test_payload() -> DeterministicReceiptPayload {
         DeterministicReceiptPayload {
@@ -144,7 +144,10 @@ mod tests {
         let json = serde_json::to_string(&receipt).unwrap();
         let deserialized: TransitionReceipt = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(receipt, deserialized, "JSON roundtrip must preserve all fields");
+        assert_eq!(
+            receipt, deserialized,
+            "JSON roundtrip must preserve all fields"
+        );
         assert_eq!(
             deserialized.observed_at_ns,
             Some(42),
@@ -164,7 +167,10 @@ mod tests {
         let json = serde_json::to_string(&receipt).unwrap();
         let deserialized: TransitionReceipt = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(receipt, deserialized, "JSON roundtrip with None observed_at_ns");
+        assert_eq!(
+            receipt, deserialized,
+            "JSON roundtrip with None observed_at_ns"
+        );
         assert!(
             deserialized.observed_at_ns.is_none(),
             "None observed_at_ns must roundtrip correctly"

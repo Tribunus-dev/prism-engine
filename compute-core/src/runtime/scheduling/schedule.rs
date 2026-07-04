@@ -14,6 +14,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::runtime::ledger::entry::TRANSITION_RECEIPT_SCHEMA_VERSION;
+use crate::runtime::ledger::error::LedgerProjectionError;
+use crate::runtime::ledger::{
+    ComponentTypeRegistry, DeterministicReceiptPayload, ReceiptHasher, SemanticReceipt,
+    SemanticStampedCommand, TransitionLedgerResource, TransitionReceipt,
+};
 use crate::runtime::scheduling::command::CommandWriter;
 use crate::runtime::scheduling::error::ScheduleError;
 use crate::runtime::scheduling::graph::{EdgeKind, GraphBuilder};
@@ -21,17 +27,10 @@ use crate::runtime::scheduling::manifest::{
     ManifestBuilder, ManifestWarningKind, ScheduleManifest,
 };
 use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, Stage, SystemId, SystemMetadata,
-    SystemResult, SerializationPolicy,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult,
 };
 use crate::runtime::world::World;
-use crate::runtime::ledger::{
-    DeterministicReceiptPayload, ReceiptHasher,
-    ComponentTypeRegistry, SemanticReceipt, SemanticStampedCommand,
-    TransitionLedgerResource, TransitionReceipt,
-};
-use crate::runtime::ledger::entry::TRANSITION_RECEIPT_SCHEMA_VERSION;
-use crate::runtime::ledger::error::LedgerProjectionError;
 
 // ---------------------------------------------------------------------------
 // PriorityKey — deterministic ready-queue ordering
@@ -218,12 +217,9 @@ impl Schedule {
     /// 6. **Resolve legal** — apply `StableOrder` fallback edges.
     /// 7. **Topological sort** — Kahn with deterministic priority.
     /// 8. **Emit manifest** — build hashable `ScheduleManifest`.
-    pub fn compile(
-        systems: Vec<Box<dyn ErasedSystem>>,
-    ) -> Result<Self, ScheduleError> {
+    pub fn compile(systems: Vec<Box<dyn ErasedSystem>>) -> Result<Self, ScheduleError> {
         // ── Step 0: extract metadata ───────────────────────────────────
-        let metadata: Vec<SystemMetadata> =
-            systems.iter().map(|s| s.metadata().clone()).collect();
+        let metadata: Vec<SystemMetadata> = systems.iter().map(|s| s.metadata().clone()).collect();
 
         // ── Step 1: validate uniqueness ─────────────────────────────────
         let mut id_set: HashSet<SystemId> = HashSet::new();
@@ -295,10 +291,7 @@ impl Schedule {
             let b = &metadata[j];
 
             // Check if an explicit edge already resolves this.
-            let has_explicit = a
-                .after
-                .iter()
-                .any(|id| *id == b.id)
+            let has_explicit = a.after.iter().any(|id| *id == b.id)
                 || a.before.iter().any(|id| *id == b.id)
                 || b.after.iter().any(|id| *id == a.id)
                 || b.before.iter().any(|id| *id == a.id);
@@ -325,22 +318,17 @@ impl Schedule {
                     );
                     manifest_builder.record_warning(
                         ManifestWarningKind::CommutativeHazard,
-                        format!(
-                            "commutative hazard between {} and {}",
-                            a.name, b.name
-                        ),
+                        format!("commutative hazard between {} and {}", a.name, b.name),
                     );
                 }
-                (SerializationPolicy::Reject, _)
-                | (_, SerializationPolicy::Reject) => {
+                (SerializationPolicy::Reject, _) | (_, SerializationPolicy::Reject) => {
                     return Err(ScheduleError::IllegalHazard {
                         system_a: a.id,
                         system_b: b.id,
                         reason,
                     });
                 }
-                (SerializationPolicy::ExplicitOnly, _)
-                | (_, SerializationPolicy::ExplicitOnly) => {
+                (SerializationPolicy::ExplicitOnly, _) | (_, SerializationPolicy::ExplicitOnly) => {
                     return Err(ScheduleError::IllegalHazard {
                         system_a: a.id,
                         system_b: b.id,
@@ -400,9 +388,7 @@ impl Schedule {
                 .max_by(|&&i, &&j| {
                     let a = &metadata[i];
                     let b = &metadata[j];
-                    a.order
-                        .cmp(&b.order)
-                        .then_with(|| a.id.cmp(&b.id))
+                    a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id))
                 })
                 .unwrap();
             // First system in stage_b by (order, id).
@@ -411,9 +397,7 @@ impl Schedule {
                 .min_by(|&&i, &&j| {
                     let a = &metadata[i];
                     let b = &metadata[j];
-                    a.order
-                        .cmp(&b.order)
-                        .then_with(|| a.id.cmp(&b.id))
+                    a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id))
                 })
                 .unwrap();
 
@@ -484,9 +468,10 @@ impl Schedule {
         microcycle: u32,
         world: &mut World,
     ) -> Result<(), ScheduleCommitError> {
-        let ledger = self.ledger.as_ref().ok_or_else(|| {
-            ScheduleCommitError::Apply("no ledger installed".into())
-        })?;
+        let ledger = self
+            .ledger
+            .as_ref()
+            .ok_or_else(|| ScheduleCommitError::Apply("no ledger installed".into()))?;
 
         let stage_idx = stage as usize;
         let buffer = &self.command_buffers[stage_idx];
@@ -517,9 +502,10 @@ impl Schedule {
         for cmd in &commands {
             if let Some(entity) = cmd.entity {
                 if !world.is_alive(entity) {
-                    return Err(ScheduleCommitError::Validation(
-                        format!("entity {} not alive for command seq {}", entity.0, cmd.sequence)
-                    ));
+                    return Err(ScheduleCommitError::Validation(format!(
+                        "entity {} not alive for command seq {}",
+                        entity.0, cmd.sequence
+                    )));
                 }
             }
         }
@@ -543,7 +529,8 @@ impl Schedule {
             commands: semantic_commands,
         };
         let hasher = ReceiptHasher::production();
-        let deterministic_digest = hasher.compute(&payload)
+        let deterministic_digest = hasher
+            .compute(&payload)
             .map_err(|e| ScheduleCommitError::Apply(e.to_string()))?;
 
         // 5. Apply commands to World
@@ -576,10 +563,7 @@ impl Schedule {
     /// (system_id, entity_id, sequence).
     ///
     /// Returns execution results for each system.
-    pub fn run(
-        &mut self,
-        world: &mut World,
-    ) -> Vec<(SystemId, SystemResult)> {
+    pub fn run(&mut self, world: &mut World) -> Vec<(SystemId, SystemResult)> {
         let mut results = Vec::with_capacity(self.systems.len());
         let scheduler_epoch: u64 = 1;
         let mut previous_stage: Option<Stage> = None;
@@ -642,14 +626,12 @@ impl Schedule {
 
                 // Cooperative dispatch: sequential but with per-system buffers.
                 // True thread-level parallelism requires Send bounds on ErasedSystem.
-                let mut merged_buffer: Vec<
-                    crate::runtime::scheduling::command::StampedCommand,
-                > = Vec::new();
+                let mut merged_buffer: Vec<crate::runtime::scheduling::command::StampedCommand> =
+                    Vec::new();
 
                 for &sys_idx in &_batch.system_indices {
-                    let mut local_buffer: Vec<
-                        crate::runtime::scheduling::command::StampedCommand,
-                    > = Vec::new();
+                    let mut local_buffer: Vec<crate::runtime::scheduling::command::StampedCommand> =
+                        Vec::new();
                     {
                         let mut writer = CommandWriter::new(
                             &mut local_buffer,
@@ -669,11 +651,8 @@ impl Schedule {
 
             // SERIAL PATH: shared stage command buffer.
             {
-                let mut writer = CommandWriter::new(
-                    &mut self.command_buffers[stage_idx],
-                    meta_stage,
-                    meta_id,
-                );
+                let mut writer =
+                    CommandWriter::new(&mut self.command_buffers[stage_idx], meta_stage, meta_id);
                 let result = self.systems[idx].run(world, &mut writer);
                 results.push((meta_id, result));
             }
@@ -732,10 +711,7 @@ impl Schedule {
                 } => {
                     let _ = world.insert_raw(*entity, *type_id, payload);
                 }
-                crate::runtime::scheduling::command::Command::Remove {
-                    entity,
-                    type_id,
-                } => {
+                crate::runtime::scheduling::command::Command::Remove { entity, type_id } => {
                     let _ = (entity, type_id);
                 }
             }

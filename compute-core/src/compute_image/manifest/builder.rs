@@ -4,8 +4,8 @@
 //! and writing image artifacts to disk.
 
 use super::types::{
-    default_alignment_bytes, default_layout_version, default_tensor_alignment_bytes,
-    compute_manifest_hash, AliasEntry, Manifest, MetalKernelArtifact, QuantizationDesc,
+    compute_manifest_hash, default_alignment_bytes, default_layout_version,
+    default_tensor_alignment_bytes, AliasEntry, Manifest, MetalKernelArtifact, QuantizationDesc,
     ResidencyPlan, Segment, SegmentKind, SourceIdentity, TensorEntry,
 };
 use sha2::{Digest, Sha256};
@@ -189,13 +189,21 @@ impl ImageBuilder {
         physical_shape: Vec<u32>,
         quantization: Option<QuantizationDesc>,
     ) -> u32 {
-        let bytes = unsafe {
-            std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
-        };
+        let bytes =
+            unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
         self.add_tensor(
-            name, role, layer, bytes,
-            source_filename, source_sha256, source_offset,
-            logical_dtype, storage_dtype, logical_shape, physical_shape, quantization,
+            name,
+            role,
+            layer,
+            bytes,
+            source_filename,
+            source_sha256,
+            source_offset,
+            logical_dtype,
+            storage_dtype,
+            logical_shape,
+            physical_shape,
+            quantization,
         )
     }
 

@@ -130,13 +130,14 @@ pub enum AneRejectionReason {
     /// ANE lane cannot overlap critical GPU path.
     CannotOverlapCriticalPath,
     /// Predicted speedup below minimum threshold.
-    PredictedGainBelowThreshold { predicted_us: u64, threshold_us: u64 },
+    PredictedGainBelowThreshold {
+        predicted_us: u64,
+        threshold_us: u64,
+    },
     /// GPU contention risk from this placement.
     GpuContentionRisk,
     /// Phase has dynamic shape (needs static for production).
-    DynamicShape {
-        tensor_id: String,
-    },
+    DynamicShape { tensor_id: String },
     /// Boundary tensor dtype is not FP16.
     UnsupportedBoundaryDtype {
         tensor_id: String,
@@ -144,14 +145,9 @@ pub enum AneRejectionReason {
         actual: super::phase_ir::TensorDtype,
     },
     /// Missing boundary contract for a tensor.
-    MissingBoundaryContract {
-        tensor_id: String,
-    },
+    MissingBoundaryContract { tensor_id: String },
     /// FP16 layout not representable as one-component IOSurface slot.
-    InvalidFp16Layout {
-        tensor_id: String,
-        reason: String,
-    },
+    InvalidFp16Layout { tensor_id: String, reason: String },
     /// Cost profitability evaluation failed.
     CostUnprofitable {
         ane_cost_ns: u64,
@@ -180,9 +176,7 @@ pub enum AneRejectionReason {
     /// Operator has no valid tensor shape for lowering.
     UnsizedOp,
     /// No catalogue entry exists for this operator family.
-    MissingCatalogueEntry {
-        operator_family: String,
-    },
+    MissingCatalogueEntry { operator_family: String },
     /// Data type not supported on the ANE lane.
     UnsupportedDtype,
     /// Input buffer ABI is incompatible with Core ML expectations.
@@ -886,7 +880,8 @@ pub struct AppleFp16ProductionInstallationReceipt {
     /// Whether the FP16 contract was admitted.
     pub fp16_contract_admitted: bool,
     /// Per-slot IO-arena allocation attestations.
-    pub slot_attestations: Vec<crate::compute_image::apple_shared_arena::IOSurfaceAllocationAttestation>,
+    pub slot_attestations:
+        Vec<crate::compute_image::apple_shared_arena::IOSurfaceAllocationAttestation>,
     /// Digest of the compiled Core ML artifact.
     pub coreai_artifact_digest: String,
     /// Whether installation completed.
@@ -954,9 +949,24 @@ mod tests {
                 cpu_only_valid: false,
             },
             predicted_cost: TriLaneCostModel {
-                gpu: LaneCostEstimate { compute_ns: 100_000, memory_ns: 50_000, boundary_ns: 0, sync_ns: 5_000 },
-                ane: LaneCostEstimate { compute_ns: 80_000, memory_ns: 40_000, boundary_ns: 20_000, sync_ns: 10_000 },
-                cpu: LaneCostEstimate { compute_ns: 300_000, memory_ns: 100_000, boundary_ns: 0, sync_ns: 2_000 },
+                gpu: LaneCostEstimate {
+                    compute_ns: 100_000,
+                    memory_ns: 50_000,
+                    boundary_ns: 0,
+                    sync_ns: 5_000,
+                },
+                ane: LaneCostEstimate {
+                    compute_ns: 80_000,
+                    memory_ns: 40_000,
+                    boundary_ns: 20_000,
+                    sync_ns: 10_000,
+                },
+                cpu: LaneCostEstimate {
+                    compute_ns: 300_000,
+                    memory_ns: 100_000,
+                    boundary_ns: 0,
+                    sync_ns: 2_000,
+                },
                 critical_path_ns: 120_000,
                 gpu_contention_penalty_ns: 0,
                 cpu_contention_penalty_ns: 0,
@@ -985,14 +995,19 @@ mod tests {
     #[test]
     fn test_ane_admission_serialization() {
         let admitted = AneAdmission::Admitted;
-        let rejected = AneAdmission::Rejected(AneRejectionReason::DynamicShapeOutOfRange("batch > 1".into()));
+        let rejected = AneAdmission::Rejected(AneRejectionReason::DynamicShapeOutOfRange(
+            "batch > 1".into(),
+        ));
         let experimental = AneAdmission::Experimental(AneExperimentalReason::PartialQualification);
 
         let j1 = serde_json::to_string(&admitted).unwrap();
         let j2 = serde_json::to_string(&rejected).unwrap();
         let j3 = serde_json::to_string(&experimental).unwrap();
 
-        assert!(matches!(serde_json::from_str::<AneAdmission>(&j1).unwrap(), AneAdmission::Admitted));
+        assert!(matches!(
+            serde_json::from_str::<AneAdmission>(&j1).unwrap(),
+            AneAdmission::Admitted
+        ));
         let back: AneAdmission = serde_json::from_str(&j2).unwrap();
         match back {
             AneAdmission::Rejected(ref r) => match r {
@@ -1001,7 +1016,10 @@ mod tests {
             },
             _ => panic!("wrong admission variant"),
         }
-        assert!(matches!(serde_json::from_str::<AneAdmission>(&j3).unwrap(), AneAdmission::Experimental(_)));
+        assert!(matches!(
+            serde_json::from_str::<AneAdmission>(&j3).unwrap(),
+            AneAdmission::Experimental(_)
+        ));
     }
 
     #[test]
@@ -1044,7 +1062,10 @@ mod tests {
         let json = serde_json::to_string_pretty(&binding).unwrap();
         let back: CoreAiProgramBinding = serde_json::from_str(&json).unwrap();
         assert_eq!(back.artifact_id, "test-artifact");
-        assert_eq!(back.compute_unit_policy, CoreAiComputeUnitPolicy::CpuAndNeuralEngineRequired);
+        assert_eq!(
+            back.compute_unit_policy,
+            CoreAiComputeUnitPolicy::CpuAndNeuralEngineRequired
+        );
         assert_eq!(back.input_contract[0].shape, vec![1, 2048]);
     }
 
@@ -1093,7 +1114,10 @@ mod tests {
             lane_events: vec![],
             ane_artifact_id: None,
             ane_admission: AneAdmission::Rejected(
-                AneRejectionReason::PredictedGainBelowThreshold { predicted_us: 90, threshold_us: 100 },
+                AneRejectionReason::PredictedGainBelowThreshold {
+                    predicted_us: 90,
+                    threshold_us: 100,
+                },
             ),
             boundary_events: vec![],
             overlap_ns: OverlapMetrics {
@@ -1119,7 +1143,10 @@ mod tests {
         let json = serde_json::to_string_pretty(&receipt).unwrap();
         let back: AppleTriLaneExecutionReceipt = serde_json::from_str(&json).unwrap();
         match back.ane_admission {
-            AneAdmission::Rejected(AneRejectionReason::PredictedGainBelowThreshold { predicted_us, threshold_us }) => {
+            AneAdmission::Rejected(AneRejectionReason::PredictedGainBelowThreshold {
+                predicted_us,
+                threshold_us,
+            }) => {
                 assert_eq!(predicted_us, 90);
                 assert_eq!(threshold_us, 100);
             }
@@ -1129,6 +1156,9 @@ mod tests {
         assert!(back.slot_events.is_empty());
         assert!(matches!(back.fallback_status, FallbackStatus::NotActivated));
         assert!(back.coreai_configuration.is_none());
-        assert!(matches!(back.ane_execution_evidence, AneExecutionEvidence::NotObserved));
+        assert!(matches!(
+            back.ane_execution_evidence,
+            AneExecutionEvidence::NotObserved
+        ));
     }
 }

@@ -11,5 +11,6 @@
 //! to substitute with Level 1 fallback.
 
 pub mod bridge;
-pub mod scheduler;
+pub mod compiler;
 pub mod gates;
+pub mod scheduler;

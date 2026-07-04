@@ -70,16 +70,15 @@ pub fn spawn_syntax_interceptor(
                         };
 
                         let is_new = !seen.contains_key(&path_str);
-                        let is_modified = seen.get(&path_str).map_or(false, |prev| *prev != modified);
+                        let is_modified =
+                            seen.get(&path_str).map_or(false, |prev| *prev != modified);
 
                         if is_new || is_modified {
                             seen.insert(path_str.clone(), modified);
 
                             // Fire the signal.  A full receiver means the
                             // multiplexer is saturated — that's fine, drop.
-                            let _ = signal_tx.send(RuntimeSignal::FileChanged {
-                                path: path_str,
-                            });
+                            let _ = signal_tx.send(RuntimeSignal::FileChanged { path: path_str });
                         }
                     }
                 }
@@ -169,7 +168,10 @@ pub fn spawn_context_interceptor(
 
                         let _ = signal_tx.send(RuntimeSignal::ContextInterrupt {
                             agent_id,
-                            reason: format!("agent stalled at '{}' — no activity for {:?}", path, stall_timeout),
+                            reason: format!(
+                                "agent stalled at '{}' — no activity for {:?}",
+                                path, stall_timeout
+                            ),
                         });
                     }
                 }

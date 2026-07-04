@@ -1,5 +1,5 @@
-use crate::compute_image::apple_shared_arena::SlotState;
 use crate::compute_image::apple_shared_arena::AppleSharedArena;
+use crate::compute_image::apple_shared_arena::SlotState;
 
 // Metal import — only on macOS with metal-dispatch feature.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
@@ -128,11 +128,7 @@ impl MetalConsumer {
         let metal_digest = cpu_digest; // fallback on non-macOS or without metal
 
         Ok(MetalValidationResult {
-            slot_id: self
-                .input_slots
-                .first()
-                .map(|s| s.slot_id)
-                .unwrap_or(0),
+            slot_id: self.input_slots.first().map(|s| s.slot_id).unwrap_or(0),
             tensor_id: String::new(),
             layout_digest: self
                 .input_slots
@@ -178,8 +174,14 @@ impl MetalConsumer {
     /// In real execution this would read bytes from the IOSurface mapping.
     /// For the initial implementation, returns a deterministic hash of the
     /// slot metadata (slot_id, byte_length, generation) rather than a constant.
-    fn compute_cpu_digest(&self, arena: &crate::compute_image::apple_shared_arena::AppleSharedArena, _epoch: u64) -> Result<u64, String> {
-        let slot_id = self.input_slots.first()
+    fn compute_cpu_digest(
+        &self,
+        arena: &crate::compute_image::apple_shared_arena::AppleSharedArena,
+        _epoch: u64,
+    ) -> Result<u64, String> {
+        let slot_id = self
+            .input_slots
+            .first()
             .map(|s| s.slot_id)
             .ok_or("no input slots")?;
         let slot = arena
@@ -211,8 +213,14 @@ impl MetalConsumer {
     /// repeated validation on the same slot reuses the same texture object — the
     /// IOSurface content is updated in place and the texture sees changes without
     /// recreation.
-    fn compute_metal_digest(&mut self, arena: &crate::compute_image::apple_shared_arena::AppleSharedArena, _epoch: u64) -> Result<u64, String> {
-        let slot_id = self.input_slots.first()
+    fn compute_metal_digest(
+        &mut self,
+        arena: &crate::compute_image::apple_shared_arena::AppleSharedArena,
+        _epoch: u64,
+    ) -> Result<u64, String> {
+        let slot_id = self
+            .input_slots
+            .first()
             .map(|s| s.slot_id)
             .ok_or("no input slots")?;
         let slot = arena
@@ -226,8 +234,7 @@ impl MetalConsumer {
         let byte_len = slot.manifest.byte_length as usize;
 
         // 1. Use cached Metal device from the consumer
-        let device = self.device.clone()
-            .ok_or("no Metal device available")?;
+        let device = self.device.clone().ok_or("no Metal device available")?;
 
         // 2. Get IOSurface handle
         let io_surface = backing.info.io_surface;
@@ -286,11 +293,14 @@ kernel void checksum(texture2d<ushort, access::read> in  [[texture(0)]],
 }
 "#
         };
-        let library = device.new_library_with_source(shader_src, &metal::CompileOptions::new())
+        let library = device
+            .new_library_with_source(shader_src, &metal::CompileOptions::new())
             .map_err(|e| format!("shader compile failed: {:?}", e))?;
-        let func = library.get_function("checksum", None::<metal::FunctionConstantValues>)
+        let func = library
+            .get_function("checksum", None::<metal::FunctionConstantValues>)
             .map_err(|e| format!("get function: {:?}", e))?;
-        let pipeline = device.new_compute_pipeline_state_with_function(&func)
+        let pipeline = device
+            .new_compute_pipeline_state_with_function(&func)
             .map_err(|e| format!("pipeline: {:?}", e))?;
 
         // 5. Allocate 8-byte result buffer (StorageModeShared for CPU readback)
@@ -307,8 +317,17 @@ kernel void checksum(texture2d<ushort, access::read> in  [[texture(0)]],
         encoder.set_buffer(0, Some(&result), 0);
         let thread_count = (byte_len / 2).min(512) as u64;
         encoder.dispatch_threads(
-            metal::MTLSize { width: thread_count, height: 1, depth: 1 },
-            metal::MTLSize { width: thread_count, height: 1, depth: 1 });
+            metal::MTLSize {
+                width: thread_count,
+                height: 1,
+                depth: 1,
+            },
+            metal::MTLSize {
+                width: thread_count,
+                height: 1,
+                depth: 1,
+            },
+        );
         encoder.end_encoding();
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -325,16 +344,26 @@ kernel void checksum(texture2d<ushort, access::read> in  [[texture(0)]],
     #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
     pub fn precreate_metal_textures(&mut self, arena: &AppleSharedArena) -> Result<(), String> {
         for (slot_id, slot) in arena.slots.iter() {
-            let binding = slot.attestation.as_ref()
+            let binding = slot
+                .attestation
+                .as_ref()
                 .ok_or_else(|| format!("slot {} has no attestation", slot_id))?;
-            if !binding.attested { continue; }
+            if !binding.attested {
+                continue;
+            }
             // Production FP16 slots must have real IOSurface backing
-            let io_surface = slot.backing_arena.as_ref()
+            let io_surface = slot
+                .backing_arena
+                .as_ref()
                 .map(|a| a.info.io_surface)
-                .ok_or_else(|| format!("slot {}: FP16 Metal texture requires real IOSurface backing", slot_id))?;
+                .ok_or_else(|| {
+                    format!(
+                        "slot {}: FP16 Metal texture requires real IOSurface backing",
+                        slot_id
+                    )
+                })?;
 
-            let device = metal::Device::system_default()
-                .ok_or("no Metal device")?;
+            let device = metal::Device::system_default().ok_or("no Metal device")?;
             let desc = metal::TextureDescriptor::new();
             desc.set_width(binding.actual_width as u64);
             desc.set_height(binding.actual_height as u64);
@@ -396,7 +425,11 @@ mod tests {
         }
     }
 
-    fn make_arena_with_slot(slot_id: u32, layout_digest: &str, state: SlotState) -> AppleSharedArena {
+    fn make_arena_with_slot(
+        slot_id: u32,
+        layout_digest: &str,
+        state: SlotState,
+    ) -> AppleSharedArena {
         let mut slot = make_test_slot(slot_id);
         slot.layout_digest = layout_digest.to_string();
         slot.state = state;
@@ -418,10 +451,14 @@ mod tests {
             layout_digest: "abc123".into(),
         });
 
-        let arena = make_arena_with_slot(1, "abc123", SlotState::Ready {
-            epoch: 0,
-            producer: ExecutionLane::CoreAiAne,
-        });
+        let arena = make_arena_with_slot(
+            1,
+            "abc123",
+            SlotState::Ready {
+                epoch: 0,
+                producer: ExecutionLane::CoreAiAne,
+            },
+        );
 
         let result = consumer.validate(&arena, 0).unwrap();
         assert!(result.matched);
@@ -447,10 +484,14 @@ mod tests {
             layout_digest: "expected_digest".into(),
         });
 
-        let arena = make_arena_with_slot(1, "different_digest", SlotState::Ready {
-            epoch: 0,
-            producer: ExecutionLane::CoreAiAne,
-        });
+        let arena = make_arena_with_slot(
+            1,
+            "different_digest",
+            SlotState::Ready {
+                epoch: 0,
+                producer: ExecutionLane::CoreAiAne,
+            },
+        );
 
         let err = consumer.validate(&arena, 0).unwrap_err();
         assert!(err.contains("layout digest mismatch for slot 1"));
@@ -463,20 +504,28 @@ mod tests {
         let mut consumer = MetalConsumer::new("test_consumer");
 
         // Slot in Writing state -- not ready
-        let arena_writing = make_arena_with_slot(1, "abc123", SlotState::Writing {
-            epoch: 0,
-            producer: ExecutionLane::CoreAiAne,
-        });
+        let arena_writing = make_arena_with_slot(
+            1,
+            "abc123",
+            SlotState::Writing {
+                epoch: 0,
+                producer: ExecutionLane::CoreAiAne,
+            },
+        );
         let err = consumer
             .verify_coreai_output_accessible(1, &arena_writing)
             .unwrap_err();
         assert!(err.contains("not ready"));
 
         // Slot in Ready state -- accessible
-        let arena_ready = make_arena_with_slot(1, "abc123", SlotState::Ready {
-            epoch: 0,
-            producer: ExecutionLane::CoreAiAne,
-        });
+        let arena_ready = make_arena_with_slot(
+            1,
+            "abc123",
+            SlotState::Ready {
+                epoch: 0,
+                producer: ExecutionLane::CoreAiAne,
+            },
+        );
         let accessible = consumer
             .verify_coreai_output_accessible(1, &arena_ready)
             .unwrap();

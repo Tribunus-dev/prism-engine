@@ -130,7 +130,6 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::thread;
-    
 
     #[test]
     fn test_token_bucket_initial_full() {

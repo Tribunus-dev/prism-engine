@@ -55,7 +55,13 @@ impl AnePageMigrationPolicy {
         cold_threshold: Duration,
         hot_threshold: Duration,
     ) -> Self {
-        Self { compressor, head_dim, n_kv_heads, cold_threshold, hot_threshold }
+        Self {
+            compressor,
+            head_dim,
+            n_kv_heads,
+            cold_threshold,
+            hot_threshold,
+        }
     }
 
     #[inline]
@@ -66,13 +72,23 @@ impl AnePageMigrationPolicy {
     /// Promote from L2System (2-bit) to L1Shared (3.5-bit).
     /// Pipeline: 2-bit → decompress (L3) → FP16 → compress (L2) → 3.5-bit.
     fn promote_to_shared(&self, page: &mut TiersPage) -> Result<(), String> {
-        let packed = page.data.as_ref()
+        let packed = page
+            .data
+            .as_ref()
             .ok_or_else(|| "promote_to_shared: no data".to_string())?;
-        let fp16 = self.compressor.decompress_from_l3(packed, self.head_dim, self.n_kv_heads)?;
-        let compressed = self.compressor.compress_to_l2(&fp16, self.head_dim, self.n_kv_heads, 3)?;
+        let fp16 = self
+            .compressor
+            .decompress_from_l3(packed, self.head_dim, self.n_kv_heads)?;
+        let compressed =
+            self.compressor
+                .compress_to_l2(&fp16, self.head_dim, self.n_kv_heads, 3)?;
         let bs = compressed.len() as u64;
         page.data = Some(compressed);
-        page.backing = PageBacking::SharedBuffer { handle: 0, byte_size: bs, domain_tag: 0 };
+        page.backing = PageBacking::SharedBuffer {
+            handle: 0,
+            byte_size: bs,
+            domain_tag: 0,
+        };
         page.current_tier = KVCacheTier::L1Shared;
         Ok(())
     }
@@ -80,10 +96,15 @@ impl AnePageMigrationPolicy {
     /// Promote from L1Shared (3.5-bit) to L0Device (3.5-bit).
     /// Same format, just change backing.
     fn promote_to_device(&self, page: &mut TiersPage) -> Result<(), String> {
-        let packed = page.data.as_ref()
+        let packed = page
+            .data
+            .as_ref()
             .ok_or_else(|| "promote_to_device: no data".to_string())?;
         let bs = packed.len() as u64;
-        page.backing = PageBacking::DeviceBuffer { handle: 0, byte_size: bs };
+        page.backing = PageBacking::DeviceBuffer {
+            handle: 0,
+            byte_size: bs,
+        };
         page.current_tier = KVCacheTier::L0Device;
         Ok(())
     }
@@ -91,10 +112,16 @@ impl AnePageMigrationPolicy {
     /// Demote from L0Device (3.5-bit) to L1Shared (3.5-bit).
     /// Same format, just change backing.
     fn demote_to_shared(&self, page: &mut TiersPage) -> Result<(), String> {
-        let packed = page.data.as_ref()
+        let packed = page
+            .data
+            .as_ref()
             .ok_or_else(|| "demote_to_shared: no data".to_string())?;
         let bs = packed.len() as u64;
-        page.backing = PageBacking::SharedBuffer { handle: 0, byte_size: bs, domain_tag: 0 };
+        page.backing = PageBacking::SharedBuffer {
+            handle: 0,
+            byte_size: bs,
+            domain_tag: 0,
+        };
         page.current_tier = KVCacheTier::L1Shared;
         Ok(())
     }
@@ -102,10 +129,16 @@ impl AnePageMigrationPolicy {
     /// Demote from L1Shared (3.5-bit) to L2System (2-bit).
     /// Pipeline: 3.5-bit → decompress (L2) → FP16 → compress (L3) → 2-bit.
     fn demote_to_system(&self, page: &mut TiersPage) -> Result<(), String> {
-        let packed = page.data.as_ref()
+        let packed = page
+            .data
+            .as_ref()
             .ok_or_else(|| "demote_to_system: no data".to_string())?;
-        let fp16 = self.compressor.decompress_from_l2(packed, self.head_dim, self.n_kv_heads, 3)?;
-        let cold = self.compressor.compress_to_l3(&fp16, self.head_dim, self.n_kv_heads)?;
+        let fp16 = self
+            .compressor
+            .decompress_from_l2(packed, self.head_dim, self.n_kv_heads, 3)?;
+        let cold = self
+            .compressor
+            .compress_to_l3(&fp16, self.head_dim, self.n_kv_heads)?;
         let bs = cold.len() as u64;
         page.data = Some(cold);
         page.backing = PageBacking::SystemHeap { byte_size: bs };

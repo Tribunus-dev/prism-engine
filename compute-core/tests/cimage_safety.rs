@@ -31,14 +31,17 @@ const HEADER_SIZE: usize = 128;
 fn header_to_bytes(hdr: &CImageHeader) -> Vec<u8> {
     unsafe {
         let ptr = hdr as *const CImageHeader as *const u8;
-        std::slice::from_raw_parts(ptr, size_of::<CImageHeader>())
-            .to_vec()
+        std::slice::from_raw_parts(ptr, size_of::<CImageHeader>()).to_vec()
     }
 }
 
 /// Deserialise raw bytes → `CImageHeader`.
 fn header_from_bytes(bytes: &[u8]) -> CImageHeader {
-    assert_eq!(bytes.len(), size_of::<CImageHeader>(), "header size mismatch");
+    assert_eq!(
+        bytes.len(),
+        size_of::<CImageHeader>(),
+        "header size mismatch"
+    );
     unsafe { std::ptr::read(bytes.as_ptr() as *const CImageHeader) }
 }
 

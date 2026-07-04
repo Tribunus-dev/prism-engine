@@ -140,8 +140,7 @@ fn simulate_epoch(arena: &mut AppleSharedArena, epoch: u64) {
 #[test]
 fn test_soak_no_allocation_in_epoch_loop() {
     let manifest = make_arena_manifest();
-    let mut arena = AppleSharedArena::install(&manifest)
-        .expect("install arena from manifest");
+    let mut arena = AppleSharedArena::install(&manifest).expect("install arena from manifest");
 
     // Record baseline slot count after install.
     let initial_slot_count = arena.slots.len();
@@ -180,8 +179,15 @@ fn test_soak_no_allocation_in_epoch_loop() {
     }
 
     // Final assertion.
-    assert_eq!(arena.slots.len(), 3, "slot count unchanged after 30000 epochs");
-    assert_eq!(arena.ring_depth, 3, "ring depth unchanged after 30000 epochs");
+    assert_eq!(
+        arena.slots.len(),
+        3,
+        "slot count unchanged after 30000 epochs"
+    );
+    assert_eq!(
+        arena.ring_depth, 3,
+        "ring depth unchanged after 30000 epochs"
+    );
 }
 
 #[test]
@@ -189,14 +195,16 @@ fn test_soak_partial_cycle_then_resume() {
     // Simulate an epoch that crashes midway (e.g. power loss), then verify
     // the next epoch can still run correctly.
     let manifest = make_arena_manifest();
-    let mut arena = AppleSharedArena::install(&manifest)
-        .expect("install arena");
+    let mut arena = AppleSharedArena::install(&manifest).expect("install arena");
 
     // Run 5 healthy epochs.
     for epoch in 0..5 {
         simulate_epoch(&mut arena, epoch);
     }
-    assert!(arena.all_slots_retired(4), "all retired before partial epoch");
+    assert!(
+        arena.all_slots_retired(4),
+        "all retired before partial epoch"
+    );
 
     // Partial epoch: reserve slot 0 but never complete the cycle.
     arena
@@ -225,20 +233,17 @@ fn test_soak_partial_cycle_then_resume() {
     // Slot 0 is carried through by simulate_epoch (it advances all Reserved
     // slots regardless of epoch). The epoch completes normally.
     assert!(
-        matches!(
-            arena.slot(0).unwrap().state,
-            SlotState::Retired { .. }
-        ),
+        matches!(arena.slot(0).unwrap().state, SlotState::Retired { .. }),
         "slot 0 should be Retired after simulate_epoch advances it"
     );
 
     // The runtime must explicitly handle stuck slots.  Verify the
     // explicit-recovery path: we can still poison and let the fallback
     // lane take over.
-    arena
-        .slot_mut(0)
-        .unwrap()
-        .poison(7, SlotFailureReason::InternalError("partial cycle abandon".into()));
+    arena.slot_mut(0).unwrap().poison(
+        7,
+        SlotFailureReason::InternalError("partial cycle abandon".into()),
+    );
 
     assert!(
         matches!(
@@ -250,7 +255,8 @@ fn test_soak_partial_cycle_then_resume() {
 
     // Slot count remains stable even with a stuck slot.
     assert_eq!(
-        arena.slots.len(), 3,
+        arena.slots.len(),
+        3,
         "slot count stable after partial-cycle recovery"
     );
 }
@@ -275,7 +281,10 @@ fn test_soak_state_machine_exhaustion() {
     let gen_before = slot.generation;
     slot.mark_ready(1, ExecutionLane::AccelerateCpu);
     assert!(matches!(slot.state, SlotState::Ready { .. }));
-    assert!(slot.generation > gen_before, "generation must bump on mark_ready");
+    assert!(
+        slot.generation > gen_before,
+        "generation must bump on mark_ready"
+    );
 
     // Ready → Reading
     slot.mark_reading(1, ExecutionLane::CoreMlAne).unwrap();
@@ -290,7 +299,12 @@ fn test_soak_state_machine_exhaustion() {
     assert!(matches!(slot.state, SlotState::Reserved { .. }));
 
     // Poisoned state (terminal — not cyclable)
-    slot.poison(2, SlotFailureReason::Timeout { deadline_ns: 1_000_000_000 });
+    slot.poison(
+        2,
+        SlotFailureReason::Timeout {
+            deadline_ns: 1_000_000_000,
+        },
+    );
     assert!(matches!(slot.state, SlotState::Poisoned { .. }));
 
     // Transition from Poisoned must fail.

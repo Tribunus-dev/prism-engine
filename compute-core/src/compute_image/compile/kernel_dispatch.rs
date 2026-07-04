@@ -34,16 +34,14 @@ pub type RegistryRef = Arc<Mutex<KernelRegistry>>;
 
 /// Dispatches the `ternary_tile640_gemv` kernel for tile640 (1.6-bit) ternary GEMV.
 ///
-/// Buffer layout (matching `buffer_slot`):
+/// Buffer layout matches `compute_image/templates/ternary_tile640_gemv.metal`:
 ///   [[buffer(0)]]  packed_weights      — tile640 u32 words
 ///   [[buffer(1)]]  input               — fp16 activation vector
 ///   [[buffer(2)]]  page_scales         — bf16 per-page max
 ///   [[buffer(3)]]  channel_scales      — int8 per-lane scale
-///   [[buffer(4)]]  sidecar             — sparse bf16 outlier entries
-///   [[buffer(5)]]  sidecar_offsets     — per-page sidecar span
-///   [[buffer(6)]]  output              — fp16 result vector
-///   [[buffer(7)]]  params              — ProjectionParams
-///   [[buffer(8)]]  receipt             — KernelReceipt (instrumented only)
+///   [[buffer(4)]]  output              — fp16 result vector
+///   [[buffer(5)]]  in_dim              — constant uint
+///   [[buffer(6)]]  out_dim             — constant uint
 #[cfg(feature = "metal-dispatch")]
 pub struct TernaryProjectionDispatcher {
     registry: RegistryRef,
@@ -79,17 +77,14 @@ impl TernaryProjectionDispatcher {
         receipt: &mut KernelReceipt,
         instrumented: bool,
     ) {
-        let sidecar_enabled = sidecar_buffer.is_some();
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                sidecar_enabled,
-                instrumented,
-            );
-            let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
+            let fcv = FunctionConstantValues::new();
+            let pso = reg.get_or_create(self.kernel_name, &fcv, 0);
             (pso, reg.device().clone())
         };
+        let _ = sidecar_buffer;
+        let _ = sidecar_offsets_buffer;
 
         let encoder = command_buffer.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&pso);
@@ -98,49 +93,47 @@ impl TernaryProjectionDispatcher {
         encoder.set_buffer(buffer_slot::WEIGHTS as u64, Some(weights_buffer), 0);
         encoder.set_buffer(buffer_slot::INPUT as u64, Some(input_buffer), 0);
         encoder.set_buffer(buffer_slot::PAGE_SCALES as u64, Some(page_scales_buffer), 0);
-        encoder.set_buffer(buffer_slot::CHANNEL_SCALES as u64, Some(channel_scales_buffer), 0);
-
-        // Optional sidecar buffers
-        if let Some(sidecar) = sidecar_buffer {
-            encoder.set_buffer(buffer_slot::SIDECAR as u64, Some(sidecar), 0);
-        }
-        if let Some(offsets) = sidecar_offsets_buffer {
-            encoder.set_buffer(buffer_slot::SIDECAR_OFFSETS as u64, Some(offsets), 0);
-        }
-
+        encoder.set_buffer(
+            buffer_slot::CHANNEL_SCALES as u64,
+            Some(channel_scales_buffer),
+            0,
+        );
         encoder.set_buffer(buffer_slot::OUTPUT as u64, Some(output_buffer), 0);
-
-        // Params buffer (packed ProjectionParams)
-        let params_buf = device.new_buffer_with_data(
-            params as *const ProjectionParams as *const std::ffi::c_void,
-            std::mem::size_of::<ProjectionParams>() as u64,
+        let in_dim_buf = device.new_buffer_with_data(
+            &params.in_dim as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        encoder.set_buffer(buffer_slot::PARAMS as u64, Some(&params_buf), 0);
-
-        // Receipt buffer: bound only when instrumented, filled by the kernel
-        let _receipt_buf_handle = instrumented.then(|| {
-            let buf = device.new_buffer(
-                std::mem::size_of::<KernelReceipt>() as u64,
-                MTLResourceOptions::StorageModeShared,
-            );
-            encoder.set_buffer(buffer_slot::RECEIPT as u64, Some(&buf), 0);
-            buf
-        });
+        let out_dim_buf = device.new_buffer_with_data(
+            &params.out_dim as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(5, Some(&in_dim_buf), 0);
+        encoder.set_buffer(6, Some(&out_dim_buf), 0);
+        let _ = instrumented;
 
         // Dispatch: one threadgroup (64 threads) per output row.
         let out_dim = params.out_dim;
         encoder.dispatch_thread_groups(
-            MTLSize { width: out_dim as u64, height: 1, depth: 1 },
-            MTLSize { width: 64, height: 1, depth: 1 },
+            MTLSize {
+                width: out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
         // Populate receipt fields known at dispatch time
-        receipt.kernel_id = 1;     // TERNARY_PROJECTION
+        receipt.kernel_id = 1; // TERNARY_PROJECTION
         receipt.phase_id = 0;
         receipt.page_count = params.page_count;
-        receipt.sidecar_hits = 0;  // populated by kernel when instrumented
+        receipt.sidecar_hits = 0; // populated by kernel when instrumented
         receipt.sidecar_entries_read = 0;
         receipt.threadgroups = out_dim;
         receipt.threads_per_threadgroup = 64;
@@ -149,8 +142,8 @@ impl TernaryProjectionDispatcher {
         receipt.logical_weight_bytes =
             (params.page_width as u64) * (params.page_count as u64) / 8 * 13; // ~1.6 bpw
         receipt.logical_sidecar_bytes = 0;
-        receipt.logical_activation_bytes =
-            (params.in_dim as u64) * (params.out_dim as u64) * 2; // fp16
+        receipt.logical_activation_bytes = (params.in_dim as u64) * (params.out_dim as u64) * 2;
+        // fp16
     }
 }
 
@@ -160,14 +153,13 @@ impl TernaryProjectionDispatcher {
 
 /// Dispatches the `palettized_gemv` kernel for dense codebook-quantized GEMV.
 ///
-/// Buffer slots follow the existing `palettized_gemv` shader ABI:
-///   [[buffer(0)]]  codebook_block  — fp16 codebook values  (WEIGHTS slot)
-///   [[buffer(1)]]  indices_block   — packed uint8 indices   (INPUT slot)
-///   [[buffer(2)]]  input           — fp16 activation        (PAGE_SCALES slot)
-///   [[buffer(3)]]  output          — fp16 result            (OUTPUT slot)
-/// The slot names from `buffer_slot` are repurposed — the shader's entry point
-/// defines the actual ABI.  When the new canonical shader templates arrive they
-/// will match `buffer_slot` exactly.
+/// Buffer layout matches `compute_image/templates/palettized_gemv.metal`:
+///   [[buffer(0)]]  input            — fp16 activation vector
+///   [[buffer(1)]]  codebook_block   — fp16 codebook values
+///   [[buffer(2)]]  indices_block    — packed uint8 indices
+///   [[buffer(3)]]  output           — fp16 result vector
+///   [[buffer(4)]]  in_dim           — constant uint
+///   [[buffer(5)]]  out_dim          — constant uint
 ///
 /// Used by `MetalTeacher` for the dense teacher forward pass in Level 1.
 #[cfg(feature = "metal-dispatch")]
@@ -200,44 +192,46 @@ impl DenseProjectionDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
-            let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
+            let fcv = FunctionConstantValues::new();
+            let pso = reg.get_or_create(self.kernel_name, &fcv, 0);
             (pso, reg.device().clone())
         };
 
         let encoder = command_buffer.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&pso);
 
-        // Bind per existing palettized_gemv ABI
-        encoder.set_buffer(buffer_slot::WEIGHTS as u64, Some(codebook_buffer), 0);
-        encoder.set_buffer(buffer_slot::INPUT as u64, Some(indices_buffer), 0);
-        encoder.set_buffer(buffer_slot::PAGE_SCALES as u64, Some(input_buffer), 0);
-        encoder.set_buffer(buffer_slot::OUTPUT as u64, Some(output_buffer), 0);
+        // Bind per the shipped palettized_gemv ABI.
+        encoder.set_buffer(0, Some(input_buffer), 0);
+        encoder.set_buffer(1, Some(codebook_buffer), 0);
+        encoder.set_buffer(2, Some(indices_buffer), 0);
+        encoder.set_buffer(3, Some(output_buffer), 0);
 
-        let params_buf = device.new_buffer_with_data(
-            params as *const ProjectionParams as *const std::ffi::c_void,
-            std::mem::size_of::<ProjectionParams>() as u64,
+        let in_dim_buf = device.new_buffer_with_data(
+            &params.in_dim as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        encoder.set_buffer(buffer_slot::PARAMS as u64, Some(&params_buf), 0);
-
-        let _receipt_buf_handle = instrumented.then(|| {
-            let buf = device.new_buffer(
-                std::mem::size_of::<KernelReceipt>() as u64,
-                MTLResourceOptions::StorageModeShared,
-            );
-            encoder.set_buffer(buffer_slot::RECEIPT as u64, Some(&buf), 0);
-            buf
-        });
+        let out_dim_buf = device.new_buffer_with_data(
+            &params.out_dim as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(4, Some(&in_dim_buf), 0);
+        encoder.set_buffer(5, Some(&out_dim_buf), 0);
+        let _ = instrumented;
 
         let out_dim = params.out_dim;
         encoder.dispatch_thread_groups(
-            MTLSize { width: out_dim as u64, height: 1, depth: 1 },
-            MTLSize { width: 64, height: 1, depth: 1 },
+            MTLSize {
+                width: out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -250,8 +244,8 @@ impl DenseProjectionDispatcher {
         receipt.flags = if instrumented { 1 } else { 0 };
         receipt.logical_weight_bytes =
             (std::mem::size_of::<f32>() as u64) * (params.in_dim as u64) * (params.out_dim as u64);
-        receipt.logical_activation_bytes =
-            (params.in_dim as u64) * (params.out_dim as u64) * 2; // fp16
+        receipt.logical_activation_bytes = (params.in_dim as u64) * (params.out_dim as u64) * 2;
+        // fp16
     }
 }
 
@@ -299,11 +293,7 @@ impl ErrorPartialDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -314,7 +304,11 @@ impl ErrorPartialDispatcher {
         // For error partial the buffer_slot convention maps WEIGHT/INPUT to teacher/student
         encoder.set_buffer(buffer_slot::INPUT as u64, Some(teacher_buffer), 0);
         encoder.set_buffer(buffer_slot::PAGE_SCALES as u64, Some(student_buffer), 0);
-        encoder.set_buffer(buffer_slot::ERROR_PARTIALS as u64, Some(error_partials_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::ERROR_PARTIALS as u64,
+            Some(error_partials_buffer),
+            0,
+        );
 
         let params_buf = device.new_buffer_with_data(
             params as *const ProjectionParams as *const std::ffi::c_void,
@@ -334,8 +328,16 @@ impl ErrorPartialDispatcher {
 
         let n_elements = (params.out_dim * params.in_dim).max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: 1, height: 1, depth: 1 },
-            MTLSize { width: (n_elements.min(1024)) as u64, height: 1, depth: 1 },
+            MTLSize {
+                width: 1,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: (n_elements.min(1024)) as u64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -396,11 +398,7 @@ impl ProbeDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -410,7 +408,11 @@ impl ProbeDispatcher {
 
         encoder.set_buffer(buffer_slot::WEIGHTS as u64, Some(teacher_attn_buffer), 0);
         encoder.set_buffer(buffer_slot::INPUT as u64, Some(student_attn_buffer), 0);
-        encoder.set_buffer(buffer_slot::PROBE_OUTPUT as u64, Some(probe_output_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::PROBE_OUTPUT as u64,
+            Some(probe_output_buffer),
+            0,
+        );
 
         let params_buf = device.new_buffer_with_data(
             params as *const ProjectionParams as *const std::ffi::c_void,
@@ -429,12 +431,20 @@ impl ProbeDispatcher {
         });
 
         // One threadgroup per head; the probe_seed in params controls sampling.
-        let n_heads = params.in_dim.max(1);   // TODO: repurposed as head count
+        let n_heads = params.in_dim.max(1); // TODO: repurposed as head count
         let probe_tokens = params.out_dim.max(1); // TODO: repurposed as probe tokens
         let n_tgs = (n_heads as u64) * (probe_tokens as u64);
         encoder.dispatch_thread_groups(
-            MTLSize { width: n_tgs, height: 1, depth: 1 },
-            MTLSize { width: 32, height: 1, depth: 1 },
+            MTLSize {
+                width: n_tgs,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 32,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -492,11 +502,7 @@ impl CandidateScoreDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -527,8 +533,16 @@ impl CandidateScoreDispatcher {
         // One threadgroup with thread count = number of candidate pages
         let n_pages = params.page_count.max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: 1, height: 1, depth: 1 },
-            MTLSize { width: n_pages as u64, height: 1, depth: 1 },
+            MTLSize {
+                width: 1,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: n_pages as u64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -585,11 +599,7 @@ impl PackVerifyDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -598,7 +608,11 @@ impl PackVerifyDispatcher {
         encoder.set_compute_pipeline_state(&pso);
 
         encoder.set_buffer(buffer_slot::WEIGHTS as u64, Some(packed_buffer), 0);
-        encoder.set_buffer(buffer_slot::ERROR_PARTIALS as u64, Some(error_partials_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::ERROR_PARTIALS as u64,
+            Some(error_partials_buffer),
+            0,
+        );
 
         let params_buf = device.new_buffer_with_data(
             params as *const ProjectionParams as *const std::ffi::c_void,
@@ -619,8 +633,16 @@ impl PackVerifyDispatcher {
         // One threadgroup per page
         let n_pages = params.page_count.max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: n_pages as u64, height: 1, depth: 1 },
-            MTLSize { width: 32, height: 1, depth: 1 },
+            MTLSize {
+                width: n_pages as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 32,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -683,11 +705,7 @@ impl RmsnormResidualProbeDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -716,13 +734,25 @@ impl RmsnormResidualProbeDispatcher {
             buf
         });
 
-        encoder.set_buffer(buffer_slot::PROBE_OUTPUT as u64, Some(probe_output_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::PROBE_OUTPUT as u64,
+            Some(probe_output_buffer),
+            0,
+        );
 
         // One threadgroup per hidden dimension, 64 threads/TG
         let out_dim = params.out_dim.max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: out_dim as u64, height: 1, depth: 1 },
-            MTLSize { width: 64, height: 1, depth: 1 },
+            MTLSize {
+                width: out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -787,11 +817,7 @@ impl MlpActivationProbeDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -802,7 +828,11 @@ impl MlpActivationProbeDispatcher {
         encoder.set_buffer(buffer_slot::WEIGHTS as u64, Some(hidden_states_buffer), 0);
         encoder.set_buffer(buffer_slot::INPUT as u64, Some(gate_weights_buffer), 0);
         encoder.set_buffer(buffer_slot::PAGE_SCALES as u64, Some(up_weights_buffer), 0);
-        encoder.set_buffer(buffer_slot::CHANNEL_SCALES as u64, Some(down_weights_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::CHANNEL_SCALES as u64,
+            Some(down_weights_buffer),
+            0,
+        );
         encoder.set_buffer(buffer_slot::OUTPUT as u64, Some(result_buffer), 0);
 
         let params_buf = device.new_buffer_with_data(
@@ -821,13 +851,25 @@ impl MlpActivationProbeDispatcher {
             buf
         });
 
-        encoder.set_buffer(buffer_slot::PROBE_OUTPUT as u64, Some(probe_output_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::PROBE_OUTPUT as u64,
+            Some(probe_output_buffer),
+            0,
+        );
 
         // One threadgroup per hidden dimension, 64 threads/TG
         let out_dim = params.out_dim.max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: out_dim as u64, height: 1, depth: 1 },
-            MTLSize { width: 64, height: 1, depth: 1 },
+            MTLSize {
+                width: out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -932,13 +974,25 @@ impl SidecarApplyVerifyDispatcher {
             buf
         });
 
-        encoder.set_buffer(buffer_slot::ERROR_PARTIALS as u64, Some(error_partials_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::ERROR_PARTIALS as u64,
+            Some(error_partials_buffer),
+            0,
+        );
 
         // One threadgroup per page, 32 threads/TG
         let n_pages = params.page_count.max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: n_pages as u64, height: 1, depth: 1 },
-            MTLSize { width: 32, height: 1, depth: 1 },
+            MTLSize {
+                width: n_pages as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 32,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -1002,11 +1056,7 @@ impl FusedRmsnormQkvDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -1016,7 +1066,11 @@ impl FusedRmsnormQkvDispatcher {
 
         encoder.set_buffer(buffer_slot::WEIGHTS as u64, Some(hidden_states_buffer), 0);
         encoder.set_buffer(buffer_slot::INPUT as u64, Some(qkv_weights_buffer), 0);
-        encoder.set_buffer(buffer_slot::PAGE_SCALES as u64, Some(rmsnorm_weights_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::PAGE_SCALES as u64,
+            Some(rmsnorm_weights_buffer),
+            0,
+        );
         encoder.set_buffer(buffer_slot::OUTPUT as u64, Some(output_buffer), 0);
 
         let params_buf = device.new_buffer_with_data(
@@ -1035,14 +1089,30 @@ impl FusedRmsnormQkvDispatcher {
             buf
         });
 
-        encoder.set_buffer(buffer_slot::ACTIVATION_ARENA as u64, Some(activation_arena_buffer), 0);
-        encoder.set_buffer(buffer_slot::ARENA_DESCRIPTORS as u64, Some(arena_descriptors_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::ACTIVATION_ARENA as u64,
+            Some(activation_arena_buffer),
+            0,
+        );
+        encoder.set_buffer(
+            buffer_slot::ARENA_DESCRIPTORS as u64,
+            Some(arena_descriptors_buffer),
+            0,
+        );
 
         // One threadgroup per output element, 64 threads/TG
         let out_dim = params.out_dim.max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: out_dim as u64, height: 1, depth: 1 },
-            MTLSize { width: 64, height: 1, depth: 1 },
+            MTLSize {
+                width: out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -1106,11 +1176,7 @@ impl FusedOProjResidualDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -1139,14 +1205,30 @@ impl FusedOProjResidualDispatcher {
             buf
         });
 
-        encoder.set_buffer(buffer_slot::ACTIVATION_ARENA as u64, Some(activation_arena_buffer), 0);
-        encoder.set_buffer(buffer_slot::ARENA_DESCRIPTORS as u64, Some(arena_descriptors_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::ACTIVATION_ARENA as u64,
+            Some(activation_arena_buffer),
+            0,
+        );
+        encoder.set_buffer(
+            buffer_slot::ARENA_DESCRIPTORS as u64,
+            Some(arena_descriptors_buffer),
+            0,
+        );
 
         // One threadgroup per output element, 64 threads/TG
         let out_dim = params.out_dim.max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: out_dim as u64, height: 1, depth: 1 },
-            MTLSize { width: 64, height: 1, depth: 1 },
+            MTLSize {
+                width: out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -1208,11 +1290,7 @@ impl FusedMultimodalDispatcher {
     ) {
         let (pso, device) = {
             let mut reg = self.registry.lock();
-            let (fcv, digest) = projection_constants(
-                params.page_width,
-                false,
-                instrumented,
-            );
+            let (fcv, digest) = projection_constants(params.page_width, false, instrumented);
             let pso = reg.get_or_create(self.kernel_name, &fcv, digest);
             (pso, reg.device().clone())
         };
@@ -1220,7 +1298,11 @@ impl FusedMultimodalDispatcher {
         let encoder = command_buffer.new_compute_command_encoder();
         encoder.set_compute_pipeline_state(&pso);
 
-        encoder.set_buffer(buffer_slot::WEIGHTS as u64, Some(multimodal_weights_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::WEIGHTS as u64,
+            Some(multimodal_weights_buffer),
+            0,
+        );
         encoder.set_buffer(buffer_slot::INPUT as u64, Some(multimodal_input_buffer), 0);
         encoder.set_buffer(buffer_slot::OUTPUT as u64, Some(output_buffer), 0);
 
@@ -1240,14 +1322,30 @@ impl FusedMultimodalDispatcher {
             buf
         });
 
-        encoder.set_buffer(buffer_slot::ACTIVATION_ARENA as u64, Some(activation_arena_buffer), 0);
-        encoder.set_buffer(buffer_slot::ARENA_DESCRIPTORS as u64, Some(arena_descriptors_buffer), 0);
+        encoder.set_buffer(
+            buffer_slot::ACTIVATION_ARENA as u64,
+            Some(activation_arena_buffer),
+            0,
+        );
+        encoder.set_buffer(
+            buffer_slot::ARENA_DESCRIPTORS as u64,
+            Some(arena_descriptors_buffer),
+            0,
+        );
 
         // One threadgroup per output element, 64 threads/TG
         let out_dim = params.out_dim.max(1);
         encoder.dispatch_thread_groups(
-            MTLSize { width: out_dim as u64, height: 1, depth: 1 },
-            MTLSize { width: 64, height: 1, depth: 1 },
+            MTLSize {
+                width: out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
 
@@ -1328,9 +1426,17 @@ pub fn dispatch_ternary_projection(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = TernaryProjectionDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, weights_buffer, input_buffer, page_scales_buffer,
-        channel_scales_buffer, sidecar_buffer, sidecar_offsets_buffer,
-        output_buffer, params, receipt, instrumented,
+        &cmd_buf,
+        weights_buffer,
+        input_buffer,
+        page_scales_buffer,
+        channel_scales_buffer,
+        sidecar_buffer,
+        sidecar_offsets_buffer,
+        output_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1356,8 +1462,14 @@ pub fn dispatch_dense_projection_f16(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = DenseProjectionDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, codebook_buffer, indices_buffer, input_buffer,
-        output_buffer, params, receipt, instrumented,
+        &cmd_buf,
+        codebook_buffer,
+        indices_buffer,
+        input_buffer,
+        output_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1383,9 +1495,14 @@ pub fn dispatch_rmsnorm_residual_probe(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = RmsnormResidualProbeDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, hidden_states_buffer, rmsnorm_weights_buffer,
-        result_buffer, probe_output_buffer,
-        params, receipt, instrumented,
+        &cmd_buf,
+        hidden_states_buffer,
+        rmsnorm_weights_buffer,
+        result_buffer,
+        probe_output_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1410,8 +1527,13 @@ pub fn dispatch_attention_score_probe(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = ProbeDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, teacher_attn_buffer, student_attn_buffer,
-        probe_output_buffer, params, receipt, instrumented,
+        &cmd_buf,
+        teacher_attn_buffer,
+        student_attn_buffer,
+        probe_output_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1439,9 +1561,16 @@ pub fn dispatch_mlp_activation_probe(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = MlpActivationProbeDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, hidden_states_buffer, gate_weights_buffer,
-        up_weights_buffer, down_weights_buffer, result_buffer,
-        probe_output_buffer, params, receipt, instrumented,
+        &cmd_buf,
+        hidden_states_buffer,
+        gate_weights_buffer,
+        up_weights_buffer,
+        down_weights_buffer,
+        result_buffer,
+        probe_output_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1466,8 +1595,13 @@ pub fn dispatch_activation_error_partial_reduce(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = ErrorPartialDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, teacher_buffer, student_buffer,
-        error_partials_buffer, params, receipt, instrumented,
+        &cmd_buf,
+        teacher_buffer,
+        student_buffer,
+        error_partials_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1492,8 +1626,13 @@ pub fn dispatch_page_candidate_score(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = CandidateScoreDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, weights_buffer, input_buffer,
-        page_scores_buffer, params, receipt, instrumented,
+        &cmd_buf,
+        weights_buffer,
+        input_buffer,
+        page_scores_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1516,8 +1655,12 @@ pub fn dispatch_page_unpack_verify(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = PackVerifyDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, packed_buffer, error_partials_buffer,
-        params, receipt, instrumented,
+        &cmd_buf,
+        packed_buffer,
+        error_partials_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1545,10 +1688,16 @@ pub fn dispatch_sidecar_apply_verify(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = SidecarApplyVerifyDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, packed_weights_buffer, activations_buffer,
-        sidecar_entries_buffer, sidecar_offsets_buffer,
-        result_buffer, error_partials_buffer,
-        params, receipt, instrumented,
+        &cmd_buf,
+        packed_weights_buffer,
+        activations_buffer,
+        sidecar_entries_buffer,
+        sidecar_offsets_buffer,
+        result_buffer,
+        error_partials_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1576,10 +1725,16 @@ pub fn dispatch_fused_rmsnorm_qkv(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = FusedRmsnormQkvDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, hidden_states_buffer, qkv_weights_buffer,
-        rmsnorm_weights_buffer, output_buffer,
-        activation_arena_buffer, arena_descriptors_buffer,
-        params, receipt, instrumented,
+        &cmd_buf,
+        hidden_states_buffer,
+        qkv_weights_buffer,
+        rmsnorm_weights_buffer,
+        output_buffer,
+        activation_arena_buffer,
+        arena_descriptors_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1607,10 +1762,16 @@ pub fn dispatch_fused_o_proj_residual(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = FusedOProjResidualDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, o_proj_weights_buffer, hidden_states_buffer,
-        residual_buffer, output_buffer,
-        activation_arena_buffer, arena_descriptors_buffer,
-        params, receipt, instrumented,
+        &cmd_buf,
+        o_proj_weights_buffer,
+        hidden_states_buffer,
+        residual_buffer,
+        output_buffer,
+        activation_arena_buffer,
+        arena_descriptors_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();
@@ -1637,9 +1798,15 @@ pub fn dispatch_fused_multimodal(
     let registry = Arc::new(Mutex::new(KernelRegistry::new(device)));
     let dispatcher = FusedMultimodalDispatcher::new(registry);
     dispatcher.dispatch(
-        &cmd_buf, multimodal_weights_buffer, multimodal_input_buffer,
-        output_buffer, activation_arena_buffer, arena_descriptors_buffer,
-        params, receipt, instrumented,
+        &cmd_buf,
+        multimodal_weights_buffer,
+        multimodal_input_buffer,
+        output_buffer,
+        activation_arena_buffer,
+        arena_descriptors_buffer,
+        params,
+        receipt,
+        instrumented,
     );
     let start = Instant::now();
     cmd_buf.commit();

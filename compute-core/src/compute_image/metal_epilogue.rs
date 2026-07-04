@@ -64,10 +64,7 @@ pub enum EpilogueSelectionRule {
 /// - `AlwaysMetalNative` when the consumer runs on the Metal GPU
 ///   (`MlxGpu`).
 /// - `CanonicalWhenUncertain` in all other cases.
-pub fn select_epilogue(
-    consumer_lane: ExecutionLane,
-    is_qualified: bool,
-) -> EpilogueSelectionRule {
+pub fn select_epilogue(consumer_lane: ExecutionLane, is_qualified: bool) -> EpilogueSelectionRule {
     match consumer_lane {
         ExecutionLane::CoreAiAne if is_qualified => EpilogueSelectionRule::AneWhenQualified,
         ExecutionLane::MlxGpu => EpilogueSelectionRule::AlwaysMetalNative,

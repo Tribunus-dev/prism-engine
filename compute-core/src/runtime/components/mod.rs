@@ -4,20 +4,22 @@
 //! lifecycle state.  Components are indexed by entity ID (one entity = one
 //! submitted request).
 
-pub mod worker_request;
 pub mod agent_core;
 pub mod worker_assignment;
-pub mod worker_lifecycle;
-pub mod worker_stream;
 pub mod worker_health;
+pub mod worker_lifecycle;
+pub mod worker_request;
+pub mod worker_stream;
 
-pub use worker_request::WorkerRequest;
+pub use agent_core::{
+    AgentConfig, AgentPayload, AgentSlot, AgentStatus, KVCacheRef, ToolDef, ToolRegistry,
+};
 pub use worker_assignment::WorkerAssignment;
-pub use worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase};
-pub use worker_stream::WorkerStream;
-pub use worker_stream::HardwareStreamHandle;
 pub use worker_health::{WorkerHeartbeat, WorkerOutcome};
-pub use agent_core::{AgentSlot, AgentPayload, KVCacheRef, ToolRegistry, ToolDef, AgentStatus, AgentConfig};
+pub use worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase};
+pub use worker_request::WorkerRequest;
+pub use worker_stream::HardwareStreamHandle;
+pub use worker_stream::WorkerStream;
 
 // ── Stable component IDs ──────────────────────────────────────────────
 
@@ -27,7 +29,8 @@ pub const WORKER_LIFECYCLE_COMPONENT: crate::runtime::scheduling::component_id::
 pub const WORKER_STREAM_COMPONENT: crate::runtime::scheduling::component_id::ComponentId = 13;
 pub const WORKER_HEARTBEAT_COMPONENT: crate::runtime::scheduling::component_id::ComponentId = 14;
 pub const WORKER_OUTCOME_COMPONENT: crate::runtime::scheduling::component_id::ComponentId = 15;
-pub const WORKER_HARDWARE_STREAM_COMPONENT: crate::runtime::scheduling::component_id::ComponentId = 16;
+pub const WORKER_HARDWARE_STREAM_COMPONENT: crate::runtime::scheduling::component_id::ComponentId =
+    16;
 
 // ── Stable system IDs ─────────────────────────────────────────────────
 

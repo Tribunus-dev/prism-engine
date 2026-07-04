@@ -32,8 +32,8 @@ pub use selection::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::routing::*;
     use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
+    use crate::backend::routing::*;
     use crate::backend::DType;
 
     fn make_matmul_op(id: u64) -> OperationDescriptor {

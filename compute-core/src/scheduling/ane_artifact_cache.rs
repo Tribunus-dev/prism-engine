@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-
 // ── Key ────────────────────────────────────────────────────────────────────
 
 /// Key identifying a Core ML artifact for ANE execution.
@@ -44,7 +43,9 @@ pub enum ArtifactResidencyState {
 // ── Cache entry ────────────────────────────────────────────────────────────
 
 /// A single entry in the ANE artifact cache.
-fn serde_instant_now() -> Instant { Instant::now() }
+fn serde_instant_now() -> Instant {
+    Instant::now()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AneArtifactCacheEntry {
@@ -89,11 +90,7 @@ pub struct AneArtifactCache {
 
 impl AneArtifactCache {
     /// Create a new empty cache.
-    pub fn new(
-        max_slots: u32,
-        max_weight_bytes: u64,
-        eviction_policy: AneEvictionPolicy,
-    ) -> Self {
+    pub fn new(max_slots: u32, max_weight_bytes: u64, eviction_policy: AneEvictionPolicy) -> Self {
         Self {
             max_slots,
             max_weight_bytes,
@@ -157,12 +154,8 @@ impl AneArtifactCache {
 
         // any → Evictable, except Warmed with a lease.
         if new_state == ArtifactResidencyState::Evictable {
-            if entry.state == ArtifactResidencyState::Warmed
-                && self.active_leases.contains(key)
-            {
-                return Err(
-                    "Cannot mark Warmed entry with active lease as Evictable".to_string(),
-                );
+            if entry.state == ArtifactResidencyState::Warmed && self.active_leases.contains(key) {
+                return Err("Cannot mark Warmed entry with active lease as Evictable".to_string());
             }
             entry.state = new_state;
             entry.last_used = Instant::now();
@@ -302,8 +295,7 @@ impl AneArtifactCache {
         self.entries
             .iter()
             .filter(|(key, entry)| {
-                !(entry.state == ArtifactResidencyState::Warmed
-                    && self.active_leases.contains(key))
+                !(entry.state == ArtifactResidencyState::Warmed && self.active_leases.contains(key))
             })
             .min_by_key(|(_, entry)| entry.last_used)
             .map(|(key, _)| key.clone())
@@ -340,11 +332,7 @@ mod tests {
     }
 
     fn filled_cache(slots: u32) -> AneArtifactCache {
-        let mut cache = AneArtifactCache::new(
-            slots,
-            1_000_000_000,
-            AneEvictionPolicy::Lru,
-        );
+        let mut cache = AneArtifactCache::new(slots, 1_000_000_000, AneEvictionPolicy::Lru);
         for i in 0..slots {
             let mut e = entry(ArtifactResidencyState::Loaded);
             e.key = sample_key(i);
@@ -408,17 +396,13 @@ mod tests {
     fn test_transition_loaded_to_warmed() {
         let mut cache = AneArtifactCache::new(10, 0, AneEvictionPolicy::Lru);
         let key = sample_key(0);
-        cache.entries.insert(
-            key.clone(),
-            entry(ArtifactResidencyState::Loaded),
-        );
+        cache
+            .entries
+            .insert(key.clone(), entry(ArtifactResidencyState::Loaded));
 
         let result = cache.transition(&key, ArtifactResidencyState::Warmed);
         assert!(result.is_ok());
-        assert_eq!(
-            cache.get_state(&key),
-            Some(ArtifactResidencyState::Warmed)
-        );
+        assert_eq!(cache.get_state(&key), Some(ArtifactResidencyState::Warmed));
     }
 
     #[test]
@@ -431,10 +415,7 @@ mod tests {
 
         let result = cache.transition(&key, ArtifactResidencyState::Warmed);
         assert!(result.is_err());
-        assert_eq!(
-            cache.get_state(&key),
-            Some(ArtifactResidencyState::Cold)
-        );
+        assert_eq!(cache.get_state(&key), Some(ArtifactResidencyState::Cold));
     }
 
     // ── failed ────────────────────────────────────────────────────────
@@ -444,9 +425,10 @@ mod tests {
         // A failed entry cannot transition to any other state.
         let mut cache = AneArtifactCache::new(10, 0, AneEvictionPolicy::Lru);
         let key = sample_key(0);
-        cache
-            .entries
-            .insert(key.clone(), entry(ArtifactResidencyState::Failed("OOM".into())));
+        cache.entries.insert(
+            key.clone(),
+            entry(ArtifactResidencyState::Failed("OOM".into())),
+        );
 
         let r = cache.transition(&key, ArtifactResidencyState::Loaded);
         assert!(r.is_err());
@@ -479,8 +461,7 @@ mod tests {
 
         // Try to insert a third entry — should evict. The lease-protected
         // key0 must stay.  Mark key1 as older so it becomes LRU.
-        cache.entries.get_mut(&key1).unwrap().last_used =
-            Instant::now() - Duration::from_secs(60);
+        cache.entries.get_mut(&key1).unwrap().last_used = Instant::now() - Duration::from_secs(60);
         cache.entries.get_mut(&key0).unwrap().last_used = Instant::now();
 
         let key2 = sample_key(2);
@@ -522,10 +503,9 @@ mod tests {
 
         // One entry already Loaded — should not be touched.
         let loaded_key = sample_key(99);
-        cache.entries.insert(
-            loaded_key.clone(),
-            entry(ArtifactResidencyState::Loaded),
-        );
+        cache
+            .entries
+            .insert(loaded_key.clone(), entry(ArtifactResidencyState::Loaded));
 
         cache.warm_portfolio(&keys);
 
@@ -570,7 +550,10 @@ mod tests {
         let restored: AneArtifactCacheEntry =
             serde_json::from_str(&entry_json).expect("deserialize entry");
         assert_eq!(restored.key, entry.key);
-        assert_eq!(restored.memory_footprint_bytes, entry.memory_footprint_bytes);
+        assert_eq!(
+            restored.memory_footprint_bytes,
+            entry.memory_footprint_bytes
+        );
     }
 
     // ── Additional coverage ───────────────────────────────────────────
@@ -653,13 +636,14 @@ mod tests {
             .entries
             .insert(key.clone(), entry(ArtifactResidencyState::Cold));
 
-        cache.transition(&key, ArtifactResidencyState::Compiling).unwrap();
-        cache.transition(&key, ArtifactResidencyState::Loaded).unwrap();
+        cache
+            .transition(&key, ArtifactResidencyState::Compiling)
+            .unwrap();
+        cache
+            .transition(&key, ArtifactResidencyState::Loaded)
+            .unwrap();
         cache.mark_warmed(&key, Duration::from_millis(80)).unwrap();
 
-        assert_eq!(
-            cache.get_state(&key),
-            Some(ArtifactResidencyState::Warmed)
-        );
+        assert_eq!(cache.get_state(&key), Some(ArtifactResidencyState::Warmed));
     }
 }

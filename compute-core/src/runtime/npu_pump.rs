@@ -22,9 +22,7 @@
 //! is never a duplicate weight segment for a second architecture.
 
 use crate::compute_image::compile::ternary::{
-    repack_ternary_to_swizzled_u8,
-    swizzled_buffer_size,
-    SegmentKind,
+    repack_ternary_to_swizzled_u8, swizzled_buffer_size, SegmentKind,
 };
 
 // ── Shared: tile640 decompression ──────────────────────────────────
@@ -44,7 +42,7 @@ fn decompress_tile640_to_f32(
     rows: usize,
     cols: usize,
 ) -> Vec<f32> {
-    let nt = (cols + 639) / 640;          // tiles per row
+    let nt = (cols + 639) / 640; // tiles per row
     let n_vals = rows * cols;
     let n_blocks = (n_vals + 255) / 256;
 
@@ -446,7 +444,6 @@ impl NpuWeightPump for GoogleTpuWeightPump {
     }
 }
 
-
 // ── Huawei Ascend NPU (DaVinci) ───────────────────────────────────
 
 /// Huawei Ascend NPU weight pump: tile640 → FP16 DaVinci Cube layout.
@@ -539,7 +536,6 @@ impl NpuWeightPump for HailoWeightPump {
     }
 }
 
-
 // ── Tests ─────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -615,7 +611,10 @@ mod tests {
         pump.repack(&ternary, &[], rows, cols, &mut via_trait);
         repack_ternary_to_swizzled_u8(&ternary, rows, cols, &mut via_direct, cols);
 
-        assert_eq!(via_trait, via_direct, "AneWeightPump repack must match free function");
+        assert_eq!(
+            via_trait, via_direct,
+            "AneWeightPump repack must match free function"
+        );
     }
 
     /// Verify Intel buffer size is linear INT8.
@@ -644,8 +643,8 @@ mod tests {
             for c in 0..cols {
                 let expected_digit = ((r + c) % 3) as u8;
                 let expected_i8 = ((expected_digit as i32).wrapping_sub(1)) as i8; // 0→-1, 1→0, 2→+1
-                // But with scale=1.0 and f32_to_i8: value × 127, round, clamp.
-                // expected_i8 = expected_f32 * 127
+                                                                                   // But with scale=1.0 and f32_to_i8: value × 127, round, clamp.
+                                                                                   // expected_i8 = expected_f32 * 127
                 let expected_f32 = expected_i8 as f32;
                 let q = (expected_f32 * 127.0).round() as i32;
                 let clamped = q.clamp(-128, 127) as i8;
@@ -686,8 +685,7 @@ mod tests {
             let bf16_bits = u16::from_le_bytes([dst[i * 2], dst[i * 2 + 1]]);
             let expected_bf16 = f32_to_bf16(f32_vals[i]);
             assert_eq!(
-                bf16_bits,
-                expected_bf16,
+                bf16_bits, expected_bf16,
                 "AmdXdnaWeightPump BF16 mismatch at index {i}: f32={}",
                 f32_vals[i]
             );
@@ -769,7 +767,7 @@ mod tests {
 
         // Verify each tile location
         let n_tr = (rows + 127) / 128; // 1
-        let n_tc = (cols + 7) / 8;     // 4
+        let n_tc = (cols + 7) / 8; // 4
         for tr in 0..n_tr {
             for tc in 0..n_tc {
                 let tile_start = (tr * n_tc + tc) * 128 * 8;
@@ -884,8 +882,12 @@ mod tests {
         for i in 0..rows * cols {
             let fp16_bits = u16::from_le_bytes([dst[i * 2], dst[i * 2 + 1]]);
             let expected = half::f16::from_f32(f32_vals[i]);
-            assert_eq!(fp16_bits, expected.to_bits(),
-                "HuaweiAscend FP16 mismatch at {i}: f32={}", f32_vals[i]);
+            assert_eq!(
+                fp16_bits,
+                expected.to_bits(),
+                "HuaweiAscend FP16 mismatch at {i}: f32={}",
+                f32_vals[i]
+            );
         }
     }
 

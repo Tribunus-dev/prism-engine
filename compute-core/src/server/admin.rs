@@ -133,9 +133,7 @@ async fn admin_status(State(state): State<AppState>) -> JsonResponse<serde_json:
     };
 
     // ── Session ────────────────────────────────────────────────────────
-    let sess_info = {
-        json!({"mode": "ecs-only"})
-    };
+    let sess_info = { json!({"mode": "ecs-only"}) };
 
     // ── Telemetry ──────────────────────────────────────────────────────
     let telemetry = &state.telemetry;

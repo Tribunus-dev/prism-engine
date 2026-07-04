@@ -613,8 +613,8 @@ mod tests {
 #[cfg(feature = "prism-backend")]
 mod prism_backend {
     use super::*;
-    use tribunus_compute_core::kv_arena::SequenceId;
     use tribunus_compute_core::kv_arena::block::PhysicalBlockId;
+    use tribunus_compute_core::kv_arena::SequenceId;
 
     /// Maps the KvEpochId to a compute-core SequenceId for physical page allocation.
     #[allow(dead_code)]
@@ -632,9 +632,11 @@ mod prism_backend {
         /// Attempt to allocate KV pages using compute-core's kv_arena.
         /// Returns `Unsupported` until a live inference session provides the
         /// MLX arrays needed for per-layer KV cache initialization.
-        pub fn try_arena_admit(&self, _epoch: &KvEpochId, _token_count: u32)
-            -> Result<tribunus_compute_core::kv_arena::AdmissionReceipt, String>
-        {
+        pub fn try_arena_admit(
+            &self,
+            _epoch: &KvEpochId,
+            _token_count: u32,
+        ) -> Result<tribunus_compute_core::kv_arena::AdmissionReceipt, String> {
             Err("kv_arena integration requires active inference session with MLX arrays".into())
         }
 

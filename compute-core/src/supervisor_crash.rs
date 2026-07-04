@@ -46,4 +46,3 @@ impl CrashRecoveryState {
         self.pending_payloads.lock().drain(..).collect()
     }
 }
-

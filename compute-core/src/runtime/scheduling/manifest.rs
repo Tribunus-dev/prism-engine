@@ -119,12 +119,14 @@ impl ScheduleManifest {
         for edge in &sorted_edges {
             hasher.update(edge.from.0.to_le_bytes());
             hasher.update(edge.to.0.to_le_bytes());
-            hasher.update(match edge.kind {
-                ManifestEdgeKind::StageBarrier => 0u8,
-                ManifestEdgeKind::Explicit => 1u8,
-                ManifestEdgeKind::Serialization => 2u8,
-            }
-            .to_le_bytes());
+            hasher.update(
+                match edge.kind {
+                    ManifestEdgeKind::StageBarrier => 0u8,
+                    ManifestEdgeKind::Explicit => 1u8,
+                    ManifestEdgeKind::Serialization => 2u8,
+                }
+                .to_le_bytes(),
+            );
         }
 
         hasher.finalize().into()
@@ -184,10 +186,7 @@ impl ManifestBuilder {
         self.warnings.push(ManifestWarning { kind, message });
     }
 
-    pub fn build(
-        self,
-        execution_order: Vec<SystemId>,
-    ) -> ScheduleManifest {
+    pub fn build(self, execution_order: Vec<SystemId>) -> ScheduleManifest {
         let mut manifest = ScheduleManifest {
             schema_version: MANIFEST_SCHEMA_VERSION,
             system_count: execution_order.len(),

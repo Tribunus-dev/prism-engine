@@ -6,11 +6,9 @@
 //!
 //! Feature-gated behind `metal-dispatch` or `prism-backend`.
 
-use metal::Device;
-use crate::device::{
-    BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo, PcieLinkInfo,
-};
 use super::DeviceProbe;
+use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo, PcieLinkInfo};
+use metal::Device;
 
 /// Probes all Metal devices via `MTLCopyAllDevices()`.
 pub struct MetalProbe;
@@ -83,7 +81,7 @@ fn probe_metal_device(device: Device) -> DeviceInfo {
     // PCIe link info for discrete GPUs.
     let pcie_link = if matches!(kind, DeviceKind::GpuDiscrete) {
         Some(PcieLinkInfo {
-            generation: 4,  // default — could probe via IORegistry
+            generation: 4, // default — could probe via IORegistry
             lanes: 16,
             max_speed_gb_per_sec: estimate_pcie_bandwidth(&name),
         })
@@ -218,10 +216,7 @@ fn get_driver_version() -> String {
     {
         // Read macOS version as proxy for Metal driver version.
         use std::process::Command;
-        if let Ok(out) = Command::new("sw_vers")
-            .args(["-productVersion"])
-            .output()
-        {
+        if let Ok(out) = Command::new("sw_vers").args(["-productVersion"]).output() {
             if let Ok(s) = String::from_utf8(out.stdout) {
                 return format!("Metal (macOS {})", s.trim());
             }

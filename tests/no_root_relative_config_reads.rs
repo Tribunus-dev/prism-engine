@@ -78,8 +78,11 @@ fn check_file(base: &Path, path: &Path, violations: &mut Vec<String>) {
     for (line_no, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         // Skip comments, fixture paths, and raw-string pattern definitions
-        if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*")
-            || trimmed.starts_with("r#") || trimmed.starts_with("]")
+        if trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with("*")
+            || trimmed.starts_with("r#")
+            || trimmed.starts_with("]")
         {
             continue;
         }
@@ -89,7 +92,11 @@ fn check_file(base: &Path, path: &Path, violations: &mut Vec<String>) {
         }
         for pattern in FORBIDDEN_PATTERNS {
             if trimmed.contains(pattern) {
-                violations.push(format!("{rel}:{ln}: {line}", ln = line_no + 1, line = trimmed));
+                violations.push(format!(
+                    "{rel}:{ln}: {line}",
+                    ln = line_no + 1,
+                    line = trimmed
+                ));
             }
         }
     }

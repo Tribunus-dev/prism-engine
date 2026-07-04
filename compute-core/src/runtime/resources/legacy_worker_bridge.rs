@@ -30,7 +30,9 @@ impl LegacyWorkerBridge {
         _payload: Vec<u8>,
     ) -> Result<u32, String> {
         // Allocate an entity — real wiring will attach components later.
-        let entity = world.spawn().ok_or_else(|| "world at capacity".to_string())?;
+        let entity = world
+            .spawn()
+            .ok_or_else(|| "world at capacity".to_string())?;
         Ok(entity.0)
     }
 }

@@ -9,7 +9,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tribunus_compute_core::compute_image::compile::ternary::{CimageHeader, SegmentEntry, SegmentKind};
+use tribunus_compute_core::compute_image::compile::ternary::{
+    CimageHeader, SegmentEntry, SegmentKind,
+};
 
 // ── Qwen2.5-Omni 7B architecture constants ────────────────────────
 const NUM_LAYERS: usize = 28;
@@ -26,37 +28,77 @@ const VISION_LAYERS: usize = 27;
 
 // Decoder weight matrix list (Thinker LM)
 const DECODER_MATRICES: &[(&str, usize, usize)] = &[
-    ("model.language_model.layers.{}.self_attn.q_proj.weight", HIDDEN_DIM, NUM_HEADS * HEAD_DIM),
-    ("model.language_model.layers.{}.self_attn.k_proj.weight", HIDDEN_DIM, NUM_KV_HEADS * HEAD_DIM),
-    ("model.language_model.layers.{}.self_attn.v_proj.weight", HIDDEN_DIM, NUM_KV_HEADS * HEAD_DIM),
-    ("model.language_model.layers.{}.self_attn.o_proj.weight", NUM_HEADS * HEAD_DIM, HIDDEN_DIM),
-    ("model.language_model.layers.{}.mlp.gate_proj.weight",  HIDDEN_DIM, FFN_INTERMEDIATE),
-    ("model.language_model.layers.{}.mlp.up_proj.weight",    HIDDEN_DIM, FFN_INTERMEDIATE),
-    ("model.language_model.layers.{}.mlp.down_proj.weight",  FFN_INTERMEDIATE, HIDDEN_DIM),
+    (
+        "model.language_model.layers.{}.self_attn.q_proj.weight",
+        HIDDEN_DIM,
+        NUM_HEADS * HEAD_DIM,
+    ),
+    (
+        "model.language_model.layers.{}.self_attn.k_proj.weight",
+        HIDDEN_DIM,
+        NUM_KV_HEADS * HEAD_DIM,
+    ),
+    (
+        "model.language_model.layers.{}.self_attn.v_proj.weight",
+        HIDDEN_DIM,
+        NUM_KV_HEADS * HEAD_DIM,
+    ),
+    (
+        "model.language_model.layers.{}.self_attn.o_proj.weight",
+        NUM_HEADS * HEAD_DIM,
+        HIDDEN_DIM,
+    ),
+    (
+        "model.language_model.layers.{}.mlp.gate_proj.weight",
+        HIDDEN_DIM,
+        FFN_INTERMEDIATE,
+    ),
+    (
+        "model.language_model.layers.{}.mlp.up_proj.weight",
+        HIDDEN_DIM,
+        FFN_INTERMEDIATE,
+    ),
+    (
+        "model.language_model.layers.{}.mlp.down_proj.weight",
+        FFN_INTERMEDIATE,
+        HIDDEN_DIM,
+    ),
 ];
 
 // Vision encoder weight matrices (ViT)
 const VISION_MATRICES: &[(&str, usize, usize)] = &[
-    ("model.visual.vision_model.embeddings.patch_embedding.weight", VISION_HIDDEN, 588),
-    ("model.visual.vision_model.embeddings.position_embedding.weight", 1025, VISION_HIDDEN),
+    (
+        "model.visual.vision_model.embeddings.patch_embedding.weight",
+        VISION_HIDDEN,
+        588,
+    ),
+    (
+        "model.visual.vision_model.embeddings.position_embedding.weight",
+        1025,
+        VISION_HIDDEN,
+    ),
 ];
 
 // Vision projector
 const VISION_PROJECTOR: (&str, usize, usize) = (
-    "model.visual.merger.linear.weight", HIDDEN_DIM, VISION_HIDDEN * 4
+    "model.visual.merger.linear.weight",
+    HIDDEN_DIM,
+    VISION_HIDDEN * 4,
 );
 
 // Text embeddings
 const EMBED_TOKENS: (&str, usize, usize) = (
-    "model.language_model.embed_tokens.weight", VOCAB_SIZE, HIDDEN_DIM
+    "model.language_model.embed_tokens.weight",
+    VOCAB_SIZE,
+    HIDDEN_DIM,
 );
 
-const FINAL_NORM: (&str, usize, usize) = (
-    "model.language_model.norm.weight", HIDDEN_DIM, 1
-);
+const FINAL_NORM: (&str, usize, usize) = ("model.language_model.norm.weight", HIDDEN_DIM, 1);
 
 fn get_opt(args: &[String], flag: &str) -> Option<String> {
-    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1).cloned())
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn main() {
@@ -84,7 +126,10 @@ fn main() {
     // ── Step 1: Read safetensors ─────────────────────────────────
     let st_path = dir.join("model.safetensors");
     if !st_path.exists() {
-        eprintln!("ERROR: model.safetensors not found at {}", st_path.display());
+        eprintln!(
+            "ERROR: model.safetensors not found at {}",
+            st_path.display()
+        );
         eprintln!("Please download the model first: huggingface-cli download Qwen/Qwen2.5-Omni-7B --local-dir {}", model_dir);
         std::process::exit(1);
     }
@@ -99,7 +144,10 @@ fn main() {
     let header_json: serde_json::Value =
         serde_json::from_slice(&st_bytes[8..8 + header_len]).unwrap_or_default();
 
-    println!("  Safetensors: {} tensors", header_json.as_object().map(|o| o.len()).unwrap_or(0));
+    println!(
+        "  Safetensors: {} tensors",
+        header_json.as_object().map(|o| o.len()).unwrap_or(0)
+    );
 
     // ── Step 2: Quantize decoder weights ──────────────────────────
     println!("\n  Step 2: Ternary quantization of Thinker LM weights...");
@@ -117,11 +165,19 @@ fn main() {
 
             if let Some(info) = tensor_info {
                 let dtype = info.get("dtype").and_then(|v| v.as_str()).unwrap_or("F32");
-                let shape = info.get("shape").and_then(|v| v.as_array())
+                let shape = info
+                    .get("shape")
+                    .and_then(|v| v.as_array())
                     .map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>())
                     .unwrap_or_default();
-                let start: u64 = info.get("data_offsets").and_then(|v| v[0].as_u64()).unwrap_or(0);
-                let end: u64 = info.get("data_offsets").and_then(|v| v[1].as_u64()).unwrap_or(0);
+                let start: u64 = info
+                    .get("data_offsets")
+                    .and_then(|v| v[0].as_u64())
+                    .unwrap_or(0);
+                let end: u64 = info
+                    .get("data_offsets")
+                    .and_then(|v| v[1].as_u64())
+                    .unwrap_or(0);
                 let len = (end - start) as usize;
 
                 let rows = *out_dim as usize;
@@ -165,15 +221,30 @@ fn main() {
                                     scales_buf[sc_offset..sc_offset + 2].copy_from_slice(&sc);
                                 }
                                 for j in 0..sb_n {
-                                    let d = match (nib[j / 4] >> ((j % 4) * 2)) & 0x03 { 0b01 => 1u32, 0b10 => 2u32, _ => 0u32 };
-                                    let po = r * nt * 32 * 4 + t * 32 * 4 + (sb_start / 20 + (j / 20)) * 4;
-                                    if po + 4 > weights_buf.len() { continue; }
-                                    let mut pk = u32::from_le_bytes([weights_buf[po], weights_buf[po+1], weights_buf[po+2], weights_buf[po+3]]);
+                                    let d = match (nib[j / 4] >> ((j % 4) * 2)) & 0x03 {
+                                        0b01 => 1u32,
+                                        0b10 => 2u32,
+                                        _ => 0u32,
+                                    };
+                                    let po = r * nt * 32 * 4
+                                        + t * 32 * 4
+                                        + (sb_start / 20 + (j / 20)) * 4;
+                                    if po + 4 > weights_buf.len() {
+                                        continue;
+                                    }
+                                    let mut pk = u32::from_le_bytes([
+                                        weights_buf[po],
+                                        weights_buf[po + 1],
+                                        weights_buf[po + 2],
+                                        weights_buf[po + 3],
+                                    ]);
                                     let sub = j % 20;
                                     let mut mul = 1u32;
-                                    for _ in 0..sub { mul *= 3; }
+                                    for _ in 0..sub {
+                                        mul *= 3;
+                                    }
                                     pk = (pk / (mul * 3)) * (mul * 3) + d * mul + pk % mul;
-                                    weights_buf[po..po+4].copy_from_slice(&pk.to_le_bytes());
+                                    weights_buf[po..po + 4].copy_from_slice(&pk.to_le_bytes());
                                 }
                             }
                         }
@@ -195,8 +266,14 @@ fn main() {
 
     for (name, _, _) in VISION_MATRICES.iter() {
         if let Some(info) = header_json.get(*name) {
-            let start: u64 = info.get("data_offsets").and_then(|v| v[0].as_u64()).unwrap_or(0);
-            let end: u64 = info.get("data_offsets").and_then(|v| v[1].as_u64()).unwrap_or(0);
+            let start: u64 = info
+                .get("data_offsets")
+                .and_then(|v| v[0].as_u64())
+                .unwrap_or(0);
+            let end: u64 = info
+                .get("data_offsets")
+                .and_then(|v| v[1].as_u64())
+                .unwrap_or(0);
             let len = (end - start) as usize;
             let raw = &st_bytes[8 + header_len + start as usize..8 + header_len + end as usize];
             vision_weights.extend_from_slice(raw);
@@ -206,8 +283,14 @@ fn main() {
     // Pack vision projector
     let (proj_name, _, _) = VISION_PROJECTOR;
     if let Some(info) = header_json.get(proj_name) {
-        let start: u64 = info.get("data_offsets").and_then(|v| v[0].as_u64()).unwrap_or(0);
-        let end: u64 = info.get("data_offsets").and_then(|v| v[1].as_u64()).unwrap_or(0);
+        let start: u64 = info
+            .get("data_offsets")
+            .and_then(|v| v[0].as_u64())
+            .unwrap_or(0);
+        let end: u64 = info
+            .get("data_offsets")
+            .and_then(|v| v[1].as_u64())
+            .unwrap_or(0);
         let len = (end - start) as usize;
         let raw = &st_bytes[8 + header_len + start as usize..8 + header_len + end as usize];
         vision_weights.extend_from_slice(raw);
@@ -218,8 +301,8 @@ fn main() {
     // ── Step 4: Write cimage ──────────────────────────────────────
     println!("\n  Step 4: Writing cimage...");
 
-    use std::io::{BufWriter, Write, Seek, SeekFrom};
     use sha2::{Digest, Sha256};
+    use std::io::{BufWriter, Seek, SeekFrom, Write};
 
     let file = std::fs::File::create(&output).unwrap();
     let mut writer = BufWriter::new(file);
@@ -250,9 +333,21 @@ fn main() {
         None
     };
 
-    let mut segments = [SegmentEntry { kind: SegmentKind::MetalLib as u32, offset: 0, length: 0 }; 9];
-    segments[0] = SegmentEntry { kind: SegmentKind::TernaryWeights as u32, offset: weights_off, length: all_weights.len() as u64 };
-    segments[1] = SegmentEntry { kind: SegmentKind::BlockScales as u32, offset: scales_off, length: all_scales.len() as u64 };
+    let mut segments = [SegmentEntry {
+        kind: SegmentKind::MetalLib as u32,
+        offset: 0,
+        length: 0,
+    }; 9];
+    segments[0] = SegmentEntry {
+        kind: SegmentKind::TernaryWeights as u32,
+        offset: weights_off,
+        length: all_weights.len() as u64,
+    };
+    segments[1] = SegmentEntry {
+        kind: SegmentKind::BlockScales as u32,
+        offset: scales_off,
+        length: all_scales.len() as u64,
+    };
 
     let mut hasher = Sha256::new();
     hasher.update(&all_weights);
@@ -276,13 +371,22 @@ fn main() {
         _pad: [0u8; 8],
     };
     writer.seek(SeekFrom::Start(0)).unwrap();
-    let hb = unsafe { std::slice::from_raw_parts(&header as *const CimageHeader as *const u8, header_size as usize) };
+    let hb = unsafe {
+        std::slice::from_raw_parts(
+            &header as *const CimageHeader as *const u8,
+            header_size as usize,
+        )
+    };
     writer.write_all(hb).unwrap();
     writer.flush().unwrap();
     drop(writer);
 
     let cimage_bytes = std::fs::read(&output).unwrap();
-    println!("    Written: {} bytes ({:.1} MB)", cimage_bytes.len(), cimage_bytes.len() as f64 / (1024.0 * 1024.0));
+    println!(
+        "    Written: {} bytes ({:.1} MB)",
+        cimage_bytes.len(),
+        cimage_bytes.len() as f64 / (1024.0 * 1024.0)
+    );
 
     let elapsed = total_start.elapsed();
     println!("\n  Done in {:.1}s", elapsed.as_secs_f64());

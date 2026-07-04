@@ -105,7 +105,10 @@ fn get_device() -> Option<Device> {
 
 /// Helper to read buffer contents as a typed slice.
 unsafe fn buffer_slice<T: Copy>(buf: &Buffer) -> &[T] {
-    std::slice::from_raw_parts(buf.contents() as *const T, buf.length() as usize / std::mem::size_of::<T>())
+    std::slice::from_raw_parts(
+        buf.contents() as *const T,
+        buf.length() as usize / std::mem::size_of::<T>(),
+    )
 }
 
 /// Helper to create a Metal buffer filled with data.
@@ -124,9 +127,14 @@ fn make_zero_buffer<T: Copy>(device: &Device, len: usize) -> Buffer {
 /// Simple LCG RNG for deterministic test data (matches the one in ternary_pipeline).
 struct Lcg(u64);
 impl Lcg {
-    fn new(seed: u64) -> Self { Self(seed) }
+    fn new(seed: u64) -> Self {
+        Self(seed)
+    }
     fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.0
     }
     fn next_f32(&mut self) -> f32 {
@@ -233,7 +241,11 @@ fn cpu_reduce_error_partials(partials: &[ErrorPartialCpu]) -> (f32, f32, f32) {
     let mse = (sum_sq / count as f64) as f32;
     let mae = (sum_abs / count as f64) as f32;
     let denom = sum_t_sq.sqrt() * sum_s_sq.sqrt();
-    let cosine = if denom > 1e-12 { (dot_ts / denom) as f32 } else { 1.0 };
+    let cosine = if denom > 1e-12 {
+        (dot_ts / denom) as f32
+    } else {
+        1.0
+    };
 
     (mse, mae, cosine)
 }
@@ -259,7 +271,9 @@ fn probe_sequence(seed: u32, num_positions: usize, max_pos: u32) -> Vec<u32> {
     let mut state = seed as u64;
     let mut out = Vec::with_capacity(num_positions);
     for _ in 0..num_positions {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let pos = (state >> 33) as u32 % max_pos;
         out.push(pos);
     }
@@ -335,8 +349,16 @@ fn validate_ternary_projection(device: &Device) -> ValidationMatrix {
     enc.set_buffer(6, Some(&out_dim_buf), 0);
 
     // Dispatch: one threadgroup per output row, 64 threads per group.
-    let tg_size = MTLSize { width: 64, height: 1, depth: 1 };
-    let grid_size = MTLSize { width: out_dim as u64, height: 1, depth: 1 };
+    let tg_size = MTLSize {
+        width: 64,
+        height: 1,
+        depth: 1,
+    };
+    let grid_size = MTLSize {
+        width: out_dim as u64,
+        height: 1,
+        depth: 1,
+    };
     enc.dispatch_thread_groups(grid_size, tg_size);
     enc.end_encoding();
     cmd_buf.commit();
@@ -355,7 +377,10 @@ fn validate_ternary_projection(device: &Device) -> ValidationMatrix {
 
     test1.record_error(max_err, "max_abs_error");
     if max_err > 1e-3 {
-        test1.fail(max_err, format!("exceeded 1e-3 threshold: got {:.2e}", max_err));
+        test1.fail(
+            max_err,
+            format!("exceeded 1e-3 threshold: got {:.2e}", max_err),
+        );
     }
     matrix.push(test1);
 
@@ -416,10 +441,16 @@ fn validate_ternary_projection(device: &Device) -> ValidationMatrix {
 
     let gpu_output2: &[u16] = unsafe { buffer_slice(&output_buf2) };
     let identical = gpu_output.len() == gpu_output2.len()
-        && gpu_output.iter().zip(gpu_output2.iter()).all(|(a, b)| a == b);
+        && gpu_output
+            .iter()
+            .zip(gpu_output2.iter())
+            .all(|(a, b)| a == b);
 
     if !identical {
-        test3.fail(0.0, "GPU output differs between identical dispatches".to_string());
+        test3.fail(
+            0.0,
+            "GPU output differs between identical dispatches".to_string(),
+        );
     }
     test3.record_error(if identical { 0.0 } else { 1.0 }, "byte_match");
     matrix.push(test3);
@@ -526,7 +557,10 @@ fn validate_ternary_projection(device: &Device) -> ValidationMatrix {
 
     test5.record_error(sc_max_err, "sidecar_max_err");
     if sc_max_err > 1e-3 {
-        test5.fail(sc_max_err, format!("sidecar mode error: {:.2e}", sc_max_err));
+        test5.fail(
+            sc_max_err,
+            format!("sidecar mode error: {:.2e}", sc_max_err),
+        );
     }
     matrix.push(test5);
 
@@ -536,7 +570,7 @@ fn validate_ternary_projection(device: &Device) -> ValidationMatrix {
     let max_microbatch = 4096usize;
     let model_hidden = 4096usize;
     let mem_out = max_microbatch * model_hidden * 2; // fp16 output = 2 bytes
-    let mem_in = max_microbatch * model_hidden * 2;  // fp16 input
+    let mem_in = max_microbatch * model_hidden * 2; // fp16 input
     let mem_weights = out_dim * (num_tiles * 32 * 4); // packed u32
 
     let total_bytes = mem_out + mem_in + mem_weights;
@@ -611,7 +645,11 @@ fn validate_dense_projection(device: &Device) -> ValidationMatrix {
     let mut codebook = vec![0u16; out_dim * 16];
     for r in 0..out_dim {
         for i in 0..16 {
-            let idx = if i < page_aligned { i % page_aligned } else { 0 };
+            let idx = if i < page_aligned {
+                i % page_aligned
+            } else {
+                0
+            };
             if r * in_dim + idx < weights.len() {
                 codebook[r * 16 + i] = weights[r * in_dim + idx];
             } else {
@@ -654,8 +692,16 @@ fn validate_dense_projection(device: &Device) -> ValidationMatrix {
     enc.set_buffer(4, Some(&in_dim_buf), 0);
     enc.set_buffer(5, Some(&out_dim_buf), 0);
 
-    let tg_size = MTLSize { width: 64, height: 1, depth: 1 };
-    let grid_size = MTLSize { width: out_dim as u64, height: 1, depth: 1 };
+    let tg_size = MTLSize {
+        width: 64,
+        height: 1,
+        depth: 1,
+    };
+    let grid_size = MTLSize {
+        width: out_dim as u64,
+        height: 1,
+        depth: 1,
+    };
     enc.dispatch_thread_groups(grid_size, tg_size);
     enc.end_encoding();
     cmd_buf.commit();
@@ -695,11 +741,17 @@ fn validate_dense_projection(device: &Device) -> ValidationMatrix {
     }
     // Verify output range is reasonable: weights and inputs were [-1,1],
     // so with out_dim=4, max value should be roughly bounded by in_dim.
-    let max_abs_gpu = gpu_raw.iter().map(|&v| f16_bits_to_f32(v).abs()).fold(0.0f32, f32::max);
+    let max_abs_gpu = gpu_raw
+        .iter()
+        .map(|&v| f16_bits_to_f32(v).abs())
+        .fold(0.0f32, f32::max);
     if max_abs_gpu > in_dim as f32 * 2.0 {
         test2.fail(
             max_abs_gpu as f64 / in_dim as f64,
-            format!("output magnitude too large: {:.2} (expect ≤{}×)", max_abs_gpu, in_dim),
+            format!(
+                "output magnitude too large: {:.2} (expect ≤{}×)",
+                max_abs_gpu, in_dim
+            ),
         );
     }
     test2.record_error(max_abs_gpu as f64, "max_abs_output");
@@ -723,11 +775,14 @@ fn validate_dense_projection(device: &Device) -> ValidationMatrix {
     cmd_buf2.wait_until_completed();
 
     let gpu_out2: &[u16] = unsafe { buffer_slice(&output_buf2) };
-    let identical = gpu_out.len() == gpu_out2.len()
-        && gpu_out.iter().zip(gpu_out2.iter()).all(|(a, b)| a == b);
+    let identical =
+        gpu_out.len() == gpu_out2.len() && gpu_out.iter().zip(gpu_out2.iter()).all(|(a, b)| a == b);
 
     if !identical {
-        test3.fail(0.0, "GPU output differs between identical dispatches".to_string());
+        test3.fail(
+            0.0,
+            "GPU output differs between identical dispatches".to_string(),
+        );
     }
     test3.record_error(if identical { 0.0 } else { 1.0 }, "byte_match");
     matrix.push(test3);
@@ -859,7 +914,11 @@ kernel void error_partial_reduce(
     let cpu_mse = cpu_sum_sq / n as f64;
     let cpu_mae = cpu_sum_abs / n as f64;
     let cpu_cos_denom = (cpu_t_sq * cpu_s_sq).sqrt();
-    let cpu_cosine = if cpu_cos_denom > 1e-12 { cpu_dot / cpu_cos_denom } else { 1.0 };
+    let cpu_cosine = if cpu_cos_denom > 1e-12 {
+        cpu_dot / cpu_cos_denom
+    } else {
+        1.0
+    };
 
     // GPU dispatch
     let teacher_buf = make_buffer(device, &teacher);
@@ -877,8 +936,16 @@ kernel void error_partial_reduce(
     enc.set_buffer(3, Some(&count_buf), 0);
     enc.set_buffer(4, Some(&offset_buf), 0);
 
-    let tg_size = MTLSize { width: 1, height: 1, depth: 1 };
-    let grid_size = MTLSize { width: n as u64, height: 1, depth: 1 };
+    let tg_size = MTLSize {
+        width: 1,
+        height: 1,
+        depth: 1,
+    };
+    let grid_size = MTLSize {
+        width: n as u64,
+        height: 1,
+        depth: 1,
+    };
     enc.dispatch_thread_groups(grid_size, tg_size);
     enc.end_encoding();
     cmd_buf.commit();
@@ -903,25 +970,41 @@ kernel void error_partial_reduce(
     let gpu_mse = gpu_sum_sq / n as f64;
     let gpu_mae = gpu_sum_abs / n as f64;
     let gpu_cos_denom = (gpu_t_sq * gpu_s_sq).sqrt();
-    let gpu_cosine = if gpu_cos_denom > 1e-12 { gpu_dot / gpu_cos_denom } else { 1.0 };
+    let gpu_cosine = if gpu_cos_denom > 1e-12 {
+        gpu_dot / gpu_cos_denom
+    } else {
+        1.0
+    };
 
-    let rel_err_mse = if cpu_mse.abs() > 1e-12 { (gpu_mse - cpu_mse).abs() / cpu_mse.abs() } else { (gpu_mse - cpu_mse).abs() };
-    let rel_err_mae = if cpu_mae.abs() > 1e-12 { (gpu_mae - cpu_mae).abs() / cpu_mae.abs() } else { (gpu_mae - cpu_mae).abs() };
+    let rel_err_mse = if cpu_mse.abs() > 1e-12 {
+        (gpu_mse - cpu_mse).abs() / cpu_mse.abs()
+    } else {
+        (gpu_mse - cpu_mse).abs()
+    };
+    let rel_err_mae = if cpu_mae.abs() > 1e-12 {
+        (gpu_mae - cpu_mae).abs() / cpu_mae.abs()
+    } else {
+        (gpu_mae - cpu_mae).abs()
+    };
     let abs_err_cosine = (gpu_cosine - cpu_cosine).abs();
 
     let max_rel_err = rel_err_mse.max(rel_err_mae).max(abs_err_cosine);
 
     test1.record_error(max_rel_err, "max_rel_err");
     if max_rel_err > 1e-4 {
-        test1.fail(max_rel_err, format!(
+        test1.fail(
+            max_rel_err,
+            format!(
             "MSE cpu={:.6e} gpu={:.6e}, MAE cpu={:.6e} gpu={:.6e}, cosine cpu={:.6e} gpu={:.6e}",
             cpu_mse, gpu_mse, cpu_mae, gpu_mae, cpu_cosine, gpu_cosine
-        ));
+        ),
+        );
     }
     matrix.push(test1);
 
     // ── 2. Deterministic reduction ────────────────────────────────────
-    let mut test2 = ValidationResult::new("activation_error_partial_reduce", "deterministic_reduction");
+    let mut test2 =
+        ValidationResult::new("activation_error_partial_reduce", "deterministic_reduction");
 
     let partial_buf2 = make_zero_buffer::<f32>(device, n * 8);
     let cmd_buf2 = queue.new_command_buffer();
@@ -942,7 +1025,10 @@ kernel void error_partial_reduce(
         && partials.iter().zip(partials2.iter()).all(|(a, b)| a == b);
 
     if !identical {
-        test2.fail(0.0, "GPU partials differ between identical dispatches".to_string());
+        test2.fail(
+            0.0,
+            "GPU partials differ between identical dispatches".to_string(),
+        );
     }
     test2.record_error(if identical { 0.0 } else { 1.0 }, "byte_match");
     matrix.push(test2);
@@ -1071,12 +1157,20 @@ kernel void attention_score_probe(
     let student_scores: Vec<f32> = (0..num_heads * seq_len).map(|_| rng.next_f32()).collect();
 
     // CPU reference: compute softmax, entropy, KL per head.
-    let cpu_max_logits: Vec<(f32, f32)> = (0..num_heads).map(|h| {
-        let base = h * seq_len;
-        let t_max = teacher_scores[base..base + seq_len].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let s_max = student_scores[base..base + seq_len].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        (t_max, s_max)
-    }).collect();
+    let cpu_max_logits: Vec<(f32, f32)> = (0..num_heads)
+        .map(|h| {
+            let base = h * seq_len;
+            let t_max = teacher_scores[base..base + seq_len]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let s_max = student_scores[base..base + seq_len]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            (t_max, s_max)
+        })
+        .collect();
 
     let teacher_buf = make_buffer(device, &teacher_scores);
     let student_buf = make_buffer(device, &student_scores);
@@ -1098,8 +1192,16 @@ kernel void attention_score_probe(
     enc.set_buffer(6, Some(&samples_buf), 0);
 
     enc.dispatch_threads(
-        MTLSize { width: num_heads as u64, height: 1, depth: 1 },
-        MTLSize { width: 1, height: 1, depth: 1 },
+        MTLSize {
+            width: num_heads as u64,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
     );
     enc.end_encoding();
     cmd_buf.commit();
@@ -1129,14 +1231,32 @@ kernel void attention_score_probe(
         // Compute CPU reference KL from softmax
         let base_scores = h * seq_len;
         let teacher_probs: Vec<f32> = {
-            let max = teacher_scores[base_scores..base_scores + seq_len].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let sum: f32 = teacher_scores[base_scores..base_scores + seq_len].iter().map(|&s| (s - max).exp()).sum();
-            teacher_scores[base_scores..base_scores + seq_len].iter().map(|&s| ((s - max).exp()) / sum).collect()
+            let max = teacher_scores[base_scores..base_scores + seq_len]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let sum: f32 = teacher_scores[base_scores..base_scores + seq_len]
+                .iter()
+                .map(|&s| (s - max).exp())
+                .sum();
+            teacher_scores[base_scores..base_scores + seq_len]
+                .iter()
+                .map(|&s| ((s - max).exp()) / sum)
+                .collect()
         };
         let student_probs: Vec<f32> = {
-            let max = student_scores[base_scores..base_scores + seq_len].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let sum: f32 = student_scores[base_scores..base_scores + seq_len].iter().map(|&s| (s - max).exp()).sum();
-            student_scores[base_scores..base_scores + seq_len].iter().map(|&s| ((s - max).exp()) / sum).collect()
+            let max = student_scores[base_scores..base_scores + seq_len]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let sum: f32 = student_scores[base_scores..base_scores + seq_len]
+                .iter()
+                .map(|&s| (s - max).exp())
+                .sum();
+            student_scores[base_scores..base_scores + seq_len]
+                .iter()
+                .map(|&s| ((s - max).exp()) / sum)
+                .collect()
         };
         let cpu_kl = cpu_kl_divergence(&teacher_probs, &student_probs);
         let gpu_kl = probe_out[base + 7];
@@ -1146,7 +1266,10 @@ kernel void attention_score_probe(
 
     test1.record_error(max_kl_err, "max_probe_error");
     if !sampling_valid || max_kl_err > 1e-3 {
-        test1.fail(max_kl_err, format!("probe deviation: max error {:.2e}", max_kl_err));
+        test1.fail(
+            max_kl_err,
+            format!("probe deviation: max error {:.2e}", max_kl_err),
+        );
     }
     matrix.push(test1);
 
@@ -1158,14 +1281,32 @@ kernel void attention_score_probe(
     for h in 0..num_heads {
         let base = h * seq_len;
         let teacher_probs: Vec<f32> = {
-            let max = teacher_scores[base..base + seq_len].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let sum: f32 = teacher_scores[base..base + seq_len].iter().map(|&s| (s - max).exp()).sum();
-            teacher_scores[base..base + seq_len].iter().map(|&s| ((s - max).exp()) / sum).collect()
+            let max = teacher_scores[base..base + seq_len]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let sum: f32 = teacher_scores[base..base + seq_len]
+                .iter()
+                .map(|&s| (s - max).exp())
+                .sum();
+            teacher_scores[base..base + seq_len]
+                .iter()
+                .map(|&s| ((s - max).exp()) / sum)
+                .collect()
         };
         let student_probs: Vec<f32> = {
-            let max = student_scores[base..base + seq_len].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let sum: f32 = student_scores[base..base + seq_len].iter().map(|&s| (s - max).exp()).sum();
-            student_scores[base..base + seq_len].iter().map(|&s| ((s - max).exp()) / sum).collect()
+            let max = student_scores[base..base + seq_len]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let sum: f32 = student_scores[base..base + seq_len]
+                .iter()
+                .map(|&s| (s - max).exp())
+                .sum();
+            student_scores[base..base + seq_len]
+                .iter()
+                .map(|&s| ((s - max).exp()) / sum)
+                .collect()
         };
         let cpu_kl = cpu_kl_divergence(&teacher_probs, &student_probs);
         let gpu_kl_val = probe_out[h * 8 + 7];
@@ -1174,7 +1315,10 @@ kernel void attention_score_probe(
     }
     test2.record_error(kl_max_err, "kl_max_error");
     if kl_max_err > 1e-3 {
-        test2.fail(kl_max_err, format!("KL divergence error: {:.2e}", kl_max_err));
+        test2.fail(
+            kl_max_err,
+            format!("KL divergence error: {:.2e}", kl_max_err),
+        );
     }
     matrix.push(test2);
 
@@ -1280,8 +1424,16 @@ kernel void page_candidate_score(
     enc.set_buffer(5, Some(&load_cost_buf), 0);
 
     enc.dispatch_threads(
-        MTLSize { width: num_pages as u64, height: 1, depth: 1 },
-        MTLSize { width: 1, height: 1, depth: 1 },
+        MTLSize {
+            width: num_pages as u64,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
     );
     enc.end_encoding();
     cmd_buf.commit();
@@ -1341,7 +1493,10 @@ kernel void page_candidate_score(
 
     test2.record_error(max_cost_err, "max_cost_rel_err");
     if !consistency_ok {
-        test2.fail(max_cost_err, format!("cost model deviates >20%: max rel err {:.2e}", max_cost_err));
+        test2.fail(
+            max_cost_err,
+            format!("cost model deviates >20%: max rel err {:.2e}", max_cost_err),
+        );
     }
     matrix.push(test2);
 
@@ -1408,7 +1563,9 @@ kernel void page_unpack_verify(
             let in_word = i % 20;
             let d = digits[i] as u32;
             let mut mul = 1u32;
-            for _ in 0..in_word { mul *= 3; }
+            for _ in 0..in_word {
+                mul *= 3;
+            }
             out[word_idx] += d * mul;
         }
         out
@@ -1420,12 +1577,22 @@ kernel void page_unpack_verify(
         for gid in 0..count.min(page_size) {
             let word_idx = gid / 20;
             let in_word = gid % 20;
-            if word_idx >= words_per_page { break; }
+            if word_idx >= words_per_page {
+                break;
+            }
             let word = packed[word_idx];
             let mut rem = word;
-            for _ in 0..in_word { rem /= 3; }
+            for _ in 0..in_word {
+                rem /= 3;
+            }
             let digit = rem % 3;
-            let val = if digit == 1 { scale } else if digit == 2 { -scale } else { 0.0 };
+            let val = if digit == 1 {
+                scale
+            } else if digit == 2 {
+                -scale
+            } else {
+                0.0
+            };
             out[gid] = f32_to_f16_bits(val);
         }
         out
@@ -1458,8 +1625,16 @@ kernel void page_unpack_verify(
     enc.set_buffer(4, Some(&nvalid_buf), 0);
 
     enc.dispatch_threads(
-        MTLSize { width: page_size as u64, height: 1, depth: 1 },
-        MTLSize { width: 1, height: 1, depth: 1 },
+        MTLSize {
+            width: page_size as u64,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
     );
     enc.end_encoding();
     cmd_buf.commit();
@@ -1475,7 +1650,10 @@ kernel void page_unpack_verify(
     }
     test1.record_error(decode_max_err, "decode_max_err");
     if decode_max_err > 1e-6 {
-        test1.fail(decode_max_err, format!("decode mismatch: {:.2e}", decode_max_err));
+        test1.fail(
+            decode_max_err,
+            format!("decode mismatch: {:.2e}", decode_max_err),
+        );
     }
     matrix.push(test1);
 
@@ -1497,8 +1675,16 @@ kernel void page_unpack_verify(
     enc2.set_buffer(3, Some(&nwords_buf), 0);
     enc2.set_buffer(4, Some(&nvalid_buf), 0);
     enc2.dispatch_threads(
-        MTLSize { width: page_size as u64, height: 1, depth: 1 },
-        MTLSize { width: 1, height: 1, depth: 1 },
+        MTLSize {
+            width: page_size as u64,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
     );
     enc2.end_encoding();
     cmd_buf2.commit();
@@ -1532,8 +1718,16 @@ kernel void page_unpack_verify(
     enc3.set_buffer(3, Some(&nwords_buf), 0);
     enc3.set_buffer(4, Some(&nvalid_buf), 0);
     enc3.dispatch_threads(
-        MTLSize { width: page_size as u64, height: 1, depth: 1 },
-        MTLSize { width: 1, height: 1, depth: 1 },
+        MTLSize {
+            width: page_size as u64,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
     );
     enc3.end_encoding();
     cmd_buf3.commit();
@@ -1574,8 +1768,16 @@ kernel void page_unpack_verify(
     enc4.set_buffer(3, Some(&nwords_buf), 0);
     enc4.set_buffer(4, Some(&tail_valid_buf), 0);
     enc4.dispatch_threads(
-        MTLSize { width: tail_len as u64, height: 1, depth: 1 },
-        MTLSize { width: 1, height: 1, depth: 1 },
+        MTLSize {
+            width: tail_len as u64,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
     );
     enc4.end_encoding();
     cmd_buf4.commit();
@@ -1592,7 +1794,10 @@ kernel void page_unpack_verify(
 
     test4.record_error(tail_max_err, "tail_max_err");
     if tail_max_err > 1e-6 {
-        test4.fail(tail_max_err, format!("mixed tail page mismatch: {:.2e}", tail_max_err));
+        test4.fail(
+            tail_max_err,
+            format!("mixed tail page mismatch: {:.2e}", tail_max_err),
+        );
     }
     matrix.push(test4);
 
@@ -1776,7 +1981,7 @@ kernel void sidecar_apply_verify(
     //               span[1]: offset (20+8*2)=36, start 50, count 12
     //               span[2]: offset (36+20+12*2)=80, start 100, count 4
     let span_specs: [(u32, usize, f32); 3] = [
-        (10, 8, 1.0),   // start_index, count, residual_scale
+        (10, 8, 1.0), // start_index, count, residual_scale
         (50, 12, 0.5),
         (100, 4, 2.0),
     ];
@@ -1797,7 +2002,9 @@ kernel void sidecar_apply_verify(
             flags: 0,
         };
         let hdr_bytes = &hdr as *const PageSidecarHeader as *const u8;
-        let hdr_slice = unsafe { std::slice::from_raw_parts(hdr_bytes, std::mem::size_of::<PageSidecarHeader>()) };
+        let hdr_slice = unsafe {
+            std::slice::from_raw_parts(hdr_bytes, std::mem::size_of::<PageSidecarHeader>())
+        };
         sidecar_bytes.extend_from_slice(hdr_slice);
 
         // Write half override values
@@ -1813,7 +2020,9 @@ kernel void sidecar_apply_verify(
     for (k, &(start_idx, count, res_scale)) in span_specs.iter().enumerate() {
         for i in 0..count {
             let pos = start_idx as usize + i;
-            if pos >= out_dim as usize { break; }
+            if pos >= out_dim as usize {
+                break;
+            }
             let delta = res_scale * f16_bits_to_f32(sidecar_values_cpu[k][i]);
             cpu_act[pos] += delta;
         }
@@ -1849,8 +2058,16 @@ kernel void sidecar_apply_verify(
     enc.set_buffer(4, Some(&params_buf), 0);
     enc.set_buffer(5, Some(&receipt_buf), 0);
 
-    let tg_size = MTLSize { width: 64, height: 1, depth: 1 };
-    let grid_size = MTLSize { width: num_spans as u64, height: 1, depth: 1 };
+    let tg_size = MTLSize {
+        width: 64,
+        height: 1,
+        depth: 1,
+    };
+    let grid_size = MTLSize {
+        width: num_spans as u64,
+        height: 1,
+        depth: 1,
+    };
     enc.dispatch_thread_groups(grid_size, tg_size);
     enc.end_encoding();
     cmd_buf.commit();
@@ -1881,9 +2098,13 @@ kernel void sidecar_apply_verify(
         let rec = &gpu_records[k];
         if rec.entries_read != count as u32 {
             verify_ok = false;
-            test2.fail(0.0, format!(
-                "span {}: GPU entries_read={}, expected {}", k, rec.entries_read, count
-            ));
+            test2.fail(
+                0.0,
+                format!(
+                    "span {}: GPU entries_read={}, expected {}",
+                    k, rec.entries_read, count
+                ),
+            );
         }
         // Expected checksum: Σ(residual_scale * ov)
         let _res_scale = span_specs[k].2;
@@ -1894,10 +2115,13 @@ kernel void sidecar_apply_verify(
         let cksum_err = (rec.checksum - expected_checksum).abs();
         if cksum_err > 1e-3 {
             verify_ok = false;
-            test2.fail(cksum_err as f64, format!(
-                "span {}: checksum mismatch: GPU={:.6} expected={:.6}",
-                k, rec.checksum, expected_checksum
-            ));
+            test2.fail(
+                cksum_err as f64,
+                format!(
+                    "span {}: checksum mismatch: GPU={:.6} expected={:.6}",
+                    k, rec.checksum, expected_checksum
+                ),
+            );
         }
     }
     if verify_ok {
@@ -1929,8 +2153,8 @@ kernel void sidecar_apply_verify(
     let gpu_act2: &[u16] = unsafe { buffer_slice(&act_buf2) };
     let gpu_records2: &[SidecarVerifyRecord] = unsafe { buffer_slice(&verify_buf2) };
 
-    let act_identical = gpu_act.len() == gpu_act2.len()
-        && gpu_act.iter().zip(gpu_act2.iter()).all(|(a, b)| a == b);
+    let act_identical =
+        gpu_act.len() == gpu_act2.len() && gpu_act.iter().zip(gpu_act2.iter()).all(|(a, b)| a == b);
     let rec_identical = gpu_records.len() == gpu_records2.len()
         && gpu_records.iter().zip(gpu_records2.iter()).all(|(a, b)| {
             a.hit_count == b.hit_count
@@ -1939,9 +2163,19 @@ kernel void sidecar_apply_verify(
         });
 
     if !act_identical || !rec_identical {
-        test3.fail(0.0, "GPU output differs between identical dispatches".to_string());
+        test3.fail(
+            0.0,
+            "GPU output differs between identical dispatches".to_string(),
+        );
     }
-    test3.record_error(if act_identical && rec_identical { 0.0 } else { 1.0 }, "byte_match");
+    test3.record_error(
+        if act_identical && rec_identical {
+            0.0
+        } else {
+            1.0
+        },
+        "byte_match",
+    );
     matrix.push(test3);
 
     matrix
@@ -2166,8 +2400,16 @@ kernel void rmsnorm_residual_probe(
     enc.set_buffer(4, Some(&output_buf), 0);
     enc.set_buffer(5, Some(&params_buf), 0);
 
-    let tg_size = MTLSize { width: 64, height: 1, depth: 1 };
-    let grid_size = MTLSize { width: num_tokens as u64, height: 1, depth: 1 };
+    let tg_size = MTLSize {
+        width: 64,
+        height: 1,
+        depth: 1,
+    };
+    let grid_size = MTLSize {
+        width: num_tokens as u64,
+        height: 1,
+        depth: 1,
+    };
     enc.dispatch_thread_groups(grid_size, tg_size);
     enc.end_encoding();
     cmd_buf.commit();
@@ -2207,7 +2449,11 @@ kernel void rmsnorm_residual_probe(
         };
         let abs_max = (gpu_max - cpu_max).abs();
 
-        max_rel_err = max_rel_err.max(rel_sq).max(rel_abs).max(rel_dot).max(abs_max);
+        max_rel_err = max_rel_err
+            .max(rel_sq)
+            .max(rel_abs)
+            .max(rel_dot)
+            .max(abs_max);
 
         if gpu.element_count != cpu.element_count {
             test1.fail(
@@ -2222,9 +2468,13 @@ kernel void rmsnorm_residual_probe(
 
     test1.record_error(max_rel_err, "max_rel_err");
     if max_rel_err > 1e-4 {
-        test1.fail(max_rel_err, format!(
-            "rmsnorm residual probe GPU/CPU mismatch: max_rel_err={:.2e}", max_rel_err
-        ));
+        test1.fail(
+            max_rel_err,
+            format!(
+                "rmsnorm residual probe GPU/CPU mismatch: max_rel_err={:.2e}",
+                max_rel_err
+            ),
+        );
     }
     matrix.push(test1);
 
@@ -2259,7 +2509,10 @@ kernel void rmsnorm_residual_probe(
         });
 
     if !identical {
-        test2.fail(0.0, "GPU output differs between identical dispatches".to_string());
+        test2.fail(
+            0.0,
+            "GPU output differs between identical dispatches".to_string(),
+        );
     }
     test2.record_error(if identical { 0.0 } else { 1.0 }, "byte_match");
     matrix.push(test2);
@@ -2485,8 +2738,16 @@ kernel void mlp_activation_probe(
     enc.set_buffer(3, Some(&output_buf), 0);
     enc.set_buffer(4, Some(&params_buf), 0);
 
-    let tg_size = MTLSize { width: 64, height: 1, depth: 1 };
-    let grid_size = MTLSize { width: num_samples as u64, height: 1, depth: 1 };
+    let tg_size = MTLSize {
+        width: 64,
+        height: 1,
+        depth: 1,
+    };
+    let grid_size = MTLSize {
+        width: num_samples as u64,
+        height: 1,
+        depth: 1,
+    };
     enc.dispatch_thread_groups(grid_size, tg_size);
     enc.end_encoding();
     cmd_buf.commit();
@@ -2526,14 +2787,22 @@ kernel void mlp_activation_probe(
         };
         let abs_max = (gpu_max - cpu_max).abs();
 
-        max_rel_err = max_rel_err.max(rel_sq).max(rel_abs).max(rel_dot).max(abs_max);
+        max_rel_err = max_rel_err
+            .max(rel_sq)
+            .max(rel_abs)
+            .max(rel_dot)
+            .max(abs_max);
     }
 
     test1.record_error(max_rel_err, "max_rel_err");
     if max_rel_err > 1e-4 {
-        test1.fail(max_rel_err, format!(
-            "mlp activation probe GPU/CPU mismatch: max_rel_err={:.2e}", max_rel_err
-        ));
+        test1.fail(
+            max_rel_err,
+            format!(
+                "mlp activation probe GPU/CPU mismatch: max_rel_err={:.2e}",
+                max_rel_err
+            ),
+        );
     }
     matrix.push(test1);
 
@@ -2567,7 +2836,10 @@ kernel void mlp_activation_probe(
         });
 
     if !identical {
-        test2.fail(0.0, "GPU output differs between identical dispatches".to_string());
+        test2.fail(
+            0.0,
+            "GPU output differs between identical dispatches".to_string(),
+        );
     }
     test2.record_error(if identical { 0.0 } else { 1.0 }, "byte_match");
     matrix.push(test2);
@@ -2665,11 +2937,17 @@ mod tests {
     fn test_cpu_ref_dense_gemv() {
         // Simple 2×3 matrix
         let weights: Vec<u16> = vec![
-            f32_to_f16_bits(1.0), f32_to_f16_bits(2.0), f32_to_f16_bits(3.0),
-            f32_to_f16_bits(4.0), f32_to_f16_bits(5.0), f32_to_f16_bits(6.0),
+            f32_to_f16_bits(1.0),
+            f32_to_f16_bits(2.0),
+            f32_to_f16_bits(3.0),
+            f32_to_f16_bits(4.0),
+            f32_to_f16_bits(5.0),
+            f32_to_f16_bits(6.0),
         ];
         let input: Vec<u16> = vec![
-            f32_to_f16_bits(0.5), f32_to_f16_bits(0.25), f32_to_f16_bits(0.125),
+            f32_to_f16_bits(0.5),
+            f32_to_f16_bits(0.25),
+            f32_to_f16_bits(0.125),
         ];
         let out = cpu_ref_dense_gemv(&weights, &input, 2, 3);
         assert_eq!(out.len(), 2);
@@ -2723,7 +3001,10 @@ mod tests {
             let back = f16_bits_to_f32(bits);
             assert!(
                 (back - v).abs() < 0.1 || (back.is_infinite() && v.abs() >= 65504.0),
-                "f16 roundtrip failed: {} → {:#06x} → {}", v, bits, back
+                "f16 roundtrip failed: {} → {:#06x} → {}",
+                v,
+                bits,
+                back
             );
         }
     }
@@ -2788,9 +3069,23 @@ mod tests {
         let expected_mse = (0.01 + 0.01 + 0.04 + 0.04) / 4.0;
         let expected_mae = (0.1 + 0.1 + 0.2 + 0.2) / 4.0;
 
-        assert!((mse - expected_mse).abs() < 1e-6, "MSE {} expected {}", mse, expected_mse);
-        assert!((mae - expected_mae).abs() < 1e-6, "MAE {} expected {}", mae, expected_mae);
-        assert!((cosine - 1.0).abs() < 0.1, "cosine {} should be near 1.0", cosine);
+        assert!(
+            (mse - expected_mse).abs() < 1e-6,
+            "MSE {} expected {}",
+            mse,
+            expected_mse
+        );
+        assert!(
+            (mae - expected_mae).abs() < 1e-6,
+            "MAE {} expected {}",
+            mae,
+            expected_mae
+        );
+        assert!(
+            (cosine - 1.0).abs() < 0.1,
+            "cosine {} should be near 1.0",
+            cosine
+        );
     }
 
     #[test]

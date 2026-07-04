@@ -13,18 +13,20 @@
 
 #![allow(unused_imports)]
 
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use tribunus_compute_core::compute_image::compile::ternary::{CimageHeader, ModelArtifactEntry, SegmentEntry, SegmentKind, model_artifact_tag};
-use tribunus_compute_core::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
 use tribunus_compute_core::ane_compile::compile_ane_artifacts;
-use tribunus_compute_core::compute_image::subgraph_mil::{build_matmul_mil, build_draft_layer_mil};
+use tribunus_compute_core::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
+use tribunus_compute_core::compute_image::compile::ternary::{
+    model_artifact_tag, CimageHeader, ModelArtifactEntry, SegmentEntry, SegmentKind,
+};
+use tribunus_compute_core::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
 use tribunus_compute_core::quantization::embed_cluster::*;
 
 // ── Gemma 4 12B architecture constants ──────────────────────────────
@@ -37,38 +39,63 @@ const FFN_INTERMEDIATE: usize = 15360;
 
 /// (serialized_name, rows, cols)
 const MATRICES: &[(&str, usize, usize)] = &[
-    ("model.language_model.layers.{}.self_attn.q_proj.weight",  HIDDEN_DIM, NUM_HEADS * HEAD_DIM),
-    ("model.language_model.layers.{}.self_attn.k_proj.weight",  HIDDEN_DIM, NUM_KV_HEADS * HEAD_DIM),
-    ("model.language_model.layers.{}.self_attn.v_proj.weight",  HIDDEN_DIM, NUM_KV_HEADS * HEAD_DIM),
-    ("model.language_model.layers.{}.self_attn.o_proj.weight",  NUM_HEADS * HEAD_DIM, HIDDEN_DIM),
-    ("model.language_model.layers.{}.mlp.gate_proj.weight",     HIDDEN_DIM, FFN_INTERMEDIATE),
-    ("model.language_model.layers.{}.mlp.up_proj.weight",       HIDDEN_DIM, FFN_INTERMEDIATE),
-    ("model.language_model.layers.{}.mlp.down_proj.weight",     FFN_INTERMEDIATE, HIDDEN_DIM),
+    (
+        "model.language_model.layers.{}.self_attn.q_proj.weight",
+        HIDDEN_DIM,
+        NUM_HEADS * HEAD_DIM,
+    ),
+    (
+        "model.language_model.layers.{}.self_attn.k_proj.weight",
+        HIDDEN_DIM,
+        NUM_KV_HEADS * HEAD_DIM,
+    ),
+    (
+        "model.language_model.layers.{}.self_attn.v_proj.weight",
+        HIDDEN_DIM,
+        NUM_KV_HEADS * HEAD_DIM,
+    ),
+    (
+        "model.language_model.layers.{}.self_attn.o_proj.weight",
+        NUM_HEADS * HEAD_DIM,
+        HIDDEN_DIM,
+    ),
+    (
+        "model.language_model.layers.{}.mlp.gate_proj.weight",
+        HIDDEN_DIM,
+        FFN_INTERMEDIATE,
+    ),
+    (
+        "model.language_model.layers.{}.mlp.up_proj.weight",
+        HIDDEN_DIM,
+        FFN_INTERMEDIATE,
+    ),
+    (
+        "model.language_model.layers.{}.mlp.down_proj.weight",
+        FFN_INTERMEDIATE,
+        HIDDEN_DIM,
+    ),
 ];
 
 /// Multimodal projection tensors (image + audio direct projection).
 const MULTIMODAL_WEIGHTS: &[(&str, usize, usize)] = &[
-    ("model.vision_embedder.patch_dense.weight",  3840, 6912),
-    ("model.vision_embedder.patch_dense.bias",    3840, 1),
-    ("model.vision_embedder.patch_ln1.weight",    6912, 1),
-    ("model.vision_embedder.patch_ln1.bias",      6912, 1),
-    ("model.vision_embedder.patch_ln2.weight",    3840, 1),
-    ("model.vision_embedder.patch_ln2.bias",      3840, 1),
-    ("model.vision_embedder.pos_norm.weight",     3840, 1),
-    ("model.vision_embedder.pos_norm.bias",       3840, 1),
+    ("model.vision_embedder.patch_dense.weight", 3840, 6912),
+    ("model.vision_embedder.patch_dense.bias", 3840, 1),
+    ("model.vision_embedder.patch_ln1.weight", 6912, 1),
+    ("model.vision_embedder.patch_ln1.bias", 6912, 1),
+    ("model.vision_embedder.patch_ln2.weight", 3840, 1),
+    ("model.vision_embedder.patch_ln2.bias", 3840, 1),
+    ("model.vision_embedder.pos_norm.weight", 3840, 1),
+    ("model.vision_embedder.pos_norm.bias", 3840, 1),
     ("model.embed_vision.embedding_projection.weight", 3840, 3840),
-    ("model.embed_audio.embedding_projection.weight",  3840, 640),
+    ("model.embed_audio.embedding_projection.weight", 3840, 640),
 ];
 
 /// Token embeddings — packed separately for vocabulary lookup.
-const EMBEDDING_WEIGHT: (&str, usize, usize) = (
-    "model.language_model.embed_tokens.weight", 262144, 3840
-);
+const EMBEDDING_WEIGHT: (&str, usize, usize) =
+    ("model.language_model.embed_tokens.weight", 262144, 3840);
 
 /// Final norm.
-const FINAL_NORM: (&str, usize, usize) = (
-    "model.language_model.norm.weight", 3840, 1
-);
+const FINAL_NORM: (&str, usize, usize) = ("model.language_model.norm.weight", 3840, 1);
 
 // ── FP16 conversion ─────────────────────────────────────────────────
 
@@ -77,38 +104,44 @@ fn f32_to_fp16_bits(x: f32) -> u16 {
     let sign = ((bits >> 16) & 0x8000) as u16;
     let exp = (bits >> 23) & 0xFF;
     let mant = bits & 0x7FFFFF;
-    if exp == 0 { return sign; }
+    if exp == 0 {
+        return sign;
+    }
     if exp == 0xFF {
         return if mant == 0 {
-            if sign != 0 { 0xFC00 } else { 0x7C00 }
-        } else { 0x7E00 };
+            if sign != 0 {
+                0xFC00
+            } else {
+                0x7C00
+            }
+        } else {
+            0x7E00
+        };
     }
     let exp_f16: i32 = exp as i32 - 127 + 15;
     if exp_f16 >= 0x1F {
         return if sign != 0 { 0xFC00 } else { 0x7C00 };
     }
-    if exp_f16 <= 0 { return sign; }
+    if exp_f16 <= 0 {
+        return sign;
+    }
     sign | ((exp_f16 as u16) << 10) | ((mant >> 13) as u16)
 }
-
-
 
 /// Read tensor bytes (f32 or bf16) into a Vec<f32>.
 fn tensor_to_f32(data: &[u8], dtype: safetensors::Dtype) -> Vec<f32> {
     match dtype {
-        safetensors::Dtype::F32 => {
-            data.chunks_exact(4)
-                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                .collect()
-        }
-        safetensors::Dtype::BF16 => {
-            data.chunks_exact(2)
-                .map(|c| {
-                    let u = u16::from_le_bytes([c[0], c[1]]);
-                    f32::from_bits((u as u32) << 16)
-                })
-                .collect()
-        }
+        safetensors::Dtype::F32 => data
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect(),
+        safetensors::Dtype::BF16 => data
+            .chunks_exact(2)
+            .map(|c| {
+                let u = u16::from_le_bytes([c[0], c[1]]);
+                f32::from_bits((u as u32) << 16)
+            })
+            .collect(),
         _ => panic!("unsupported dtype: {:?}", dtype),
     }
 }
@@ -125,25 +158,34 @@ fn classify_tensor(name: &str) -> &'static str {
     let n = name;
 
     // ignored: optimizer states, cached params, momentum, variance
-    if n.contains("optimizer") || n.contains("momentum")
-        || n.contains("variance") || n.contains("_cache")
-        || n.contains("adam") || n.contains("rmsprop")
-        || n.contains("ema_") || n.contains("batch_norm")
+    if n.contains("optimizer")
+        || n.contains("momentum")
+        || n.contains("variance")
+        || n.contains("_cache")
+        || n.contains("adam")
+        || n.contains("rmsprop")
+        || n.contains("ema_")
+        || n.contains("batch_norm")
     {
         return "ignored";
     }
 
     // mtp_required
-    if n.contains("mtp") || n.contains("draft")
-        || n.contains("speculative") || n.contains("proposal")
+    if n.contains("mtp")
+        || n.contains("draft")
+        || n.contains("speculative")
+        || n.contains("proposal")
     {
         return "mtp_required";
     }
 
     // multimodal_image_required — check before decoder to catch vision encoder tensors
-    if n.contains("multimodal_image") || n.contains("mm_image")
-        || n.contains("vision_") || n.contains("vision.")
-        || n.contains("image_") || n.contains("image.")
+    if n.contains("multimodal_image")
+        || n.contains("mm_image")
+        || n.contains("vision_")
+        || n.contains("vision.")
+        || n.contains("image_")
+        || n.contains("image.")
         || n.contains("patch")
         || (n.contains("projection") && n.contains("layers"))
     {
@@ -151,45 +193,56 @@ fn classify_tensor(name: &str) -> &'static str {
     }
 
     // multimodal_audio_required
-    if n.contains("multimodal_audio") || n.contains("mm_audio")
-        || n.contains("audio_") || n.contains("audio.")
-        || n.contains("waveform") || n.contains("speech")
+    if n.contains("multimodal_audio")
+        || n.contains("mm_audio")
+        || n.contains("audio_")
+        || n.contains("audio.")
+        || n.contains("waveform")
+        || n.contains("speech")
     {
         return "multimodal_audio_required";
     }
 
     // decoder_required: self_attn q/k/v/o, mlp gate/up/down
-    if n.contains("self_attn.q_proj") || n.contains("self_attn.k_proj")
-        || n.contains("self_attn.v_proj") || n.contains("self_attn.o_proj")
-        || n.ends_with(".q_proj.weight") || n.ends_with(".k_proj.weight")
-        || n.ends_with(".v_proj.weight") || n.ends_with(".o_proj.weight")
-        || n.ends_with(".gate_proj.weight") || n.ends_with(".up_proj.weight")
+    if n.contains("self_attn.q_proj")
+        || n.contains("self_attn.k_proj")
+        || n.contains("self_attn.v_proj")
+        || n.contains("self_attn.o_proj")
+        || n.ends_with(".q_proj.weight")
+        || n.ends_with(".k_proj.weight")
+        || n.ends_with(".v_proj.weight")
+        || n.ends_with(".o_proj.weight")
+        || n.ends_with(".gate_proj.weight")
+        || n.ends_with(".up_proj.weight")
         || n.ends_with(".down_proj.weight")
     {
         return "decoder_required";
     }
 
     // norm_required
-    if n.contains("input_layernorm") || n.contains("post_attention_layernorm")
-        || n.contains("pre_feedforward_layernorm") || n.contains("post_feedforward_layernorm")
-        || n.contains("final_layernorm") || n.contains("rms_norm")
-        || n.ends_with(".norm.weight") || n.ends_with("_norm.weight")
+    if n.contains("input_layernorm")
+        || n.contains("post_attention_layernorm")
+        || n.contains("pre_feedforward_layernorm")
+        || n.contains("post_feedforward_layernorm")
+        || n.contains("final_layernorm")
+        || n.contains("rms_norm")
+        || n.ends_with(".norm.weight")
+        || n.ends_with("_norm.weight")
         || n.contains(".layernorm.")
     {
         return "norm_required";
     }
 
     // text_embedding_required — check before lm_head to avoid confusing embed output
-    if n.contains("embed_tokens") || n.contains("token_embedding")
+    if n.contains("embed_tokens")
+        || n.contains("token_embedding")
         || n.contains("embedding") && !n.contains("embedding_output")
     {
         return "text_embedding_required";
     }
 
     // lm_head_required
-    if n.contains("lm_head") || n.contains("logits")
-        || n.ends_with("output.weight")
-    {
+    if n.contains("lm_head") || n.contains("logits") || n.ends_with("output.weight") {
         return "lm_head_required";
     }
 
@@ -210,7 +263,8 @@ fn read_json_file(path: &Path) -> serde_json::Value {
 
 /// Extract a u64 value from a JSON object, checking `text_config` sub-object first.
 fn config_int(config: &serde_json::Value, key: &str) -> usize {
-    config.get("text_config")
+    config
+        .get("text_config")
         .and_then(|tc| tc.get(key).and_then(|v| v.as_u64()))
         .or_else(|| config.get(key).and_then(|v| v.as_u64()))
         .unwrap_or(0) as usize
@@ -229,7 +283,8 @@ fn cmd_inspect_checkpoint(args: &[String]) {
         });
 
     // Collect all --emit values
-    let emits: Vec<String> = args.windows(2)
+    let emits: Vec<String> = args
+        .windows(2)
         .filter(|w| w[0] == "--emit")
         .map(|w| w[1].clone())
         .collect();
@@ -240,16 +295,18 @@ fn cmd_inspect_checkpoint(args: &[String]) {
     let config_path = model_dir.join("config.json");
     let config = read_json_file(&config_path);
 
-    let hidden_size          = config_int(&config, "hidden_size");
-    let num_layers           = config_int(&config, "num_hidden_layers");
-    let num_heads            = config_int(&config, "num_attention_heads");
-    let num_kv_heads         = config_int(&config, "num_key_value_heads");
-    let vocab_size           = config_int(&config, "vocab_size");
-    let intermediate_size    = config_int(&config, "intermediate_size");
+    let hidden_size = config_int(&config, "hidden_size");
+    let num_layers = config_int(&config, "num_hidden_layers");
+    let num_heads = config_int(&config, "num_attention_heads");
+    let num_kv_heads = config_int(&config, "num_key_value_heads");
+    let vocab_size = config_int(&config, "vocab_size");
+    let intermediate_size = config_int(&config, "intermediate_size");
     let max_position_embeddings = config_int(&config, "max_position_embeddings");
 
     eprintln!("  model: hidden={hidden_size}, layers={num_layers}, heads={num_heads}, kv_heads={num_kv_heads}");
-    eprintln!("         vocab={vocab_size}, ffn={intermediate_size}, max_pos={max_position_embeddings}");
+    eprintln!(
+        "         vocab={vocab_size}, ffn={intermediate_size}, max_pos={max_position_embeddings}"
+    );
 
     // ── 2. Read tokenizer_config.json ──────────────────────────────
     let tok_path = model_dir.join("tokenizer_config.json");
@@ -262,29 +319,49 @@ fn cmd_inspect_checkpoint(args: &[String]) {
 
     let bos_token_id = tok_config.get("bos_token_id").and_then(|v| v.as_u64());
     let eos_token_id = tok_config.get("eos_token_id").and_then(|v| v.as_u64());
-    let pad_token_id = tok_config.get("pad_token_id")
+    let pad_token_id = tok_config
+        .get("pad_token_id")
         .and_then(|v| v.as_u64())
-        .or_else(|| tok_config.get("pad_token_id")
-            .and_then(|v| v.as_array())
-            .and_then(|a| a.first())
-            .and_then(|v| v.as_u64()));
+        .or_else(|| {
+            tok_config
+                .get("pad_token_id")
+                .and_then(|v| v.as_array())
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_u64())
+        });
 
     // Multimodal placeholder tokens — check named fields, then additional_special_tokens
-    let image_token = tok_config.get("image_token_id").and_then(|v| v.as_u64())
-        .or_else(|| tok_config.get("additional_special_tokens")
-            .and_then(|a| a.as_array())
-            .and_then(|a| a.iter().find_map(|v| {
-                v.as_str().filter(|s| s.contains("image"))
-                    .and_then(|_| v.as_u64())
-                    .or_else(|| v.as_str().and_then(|_s| None))
-            })));
-    let audio_token = tok_config.get("audio_token_id").and_then(|v| v.as_u64())
-        .or_else(|| tok_config.get("additional_special_tokens")
-            .and_then(|a| a.as_array())
-            .and_then(|a| a.iter().find_map(|v| {
-                v.as_str().filter(|s| s.contains("audio"))
-                    .and_then(|_| v.as_u64())
-            })));
+    let image_token = tok_config
+        .get("image_token_id")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            tok_config
+                .get("additional_special_tokens")
+                .and_then(|a| a.as_array())
+                .and_then(|a| {
+                    a.iter().find_map(|v| {
+                        v.as_str()
+                            .filter(|s| s.contains("image"))
+                            .and_then(|_| v.as_u64())
+                            .or_else(|| v.as_str().and_then(|_s| None))
+                    })
+                })
+        });
+    let audio_token = tok_config
+        .get("audio_token_id")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            tok_config
+                .get("additional_special_tokens")
+                .and_then(|a| a.as_array())
+                .and_then(|a| {
+                    a.iter().find_map(|v| {
+                        v.as_str()
+                            .filter(|s| s.contains("audio"))
+                            .and_then(|_| v.as_u64())
+                    })
+                })
+        });
 
     // ── 3. Read processor_config.json ──────────────────────────────
     let proc_path = model_dir.join("processor_config.json");
@@ -295,29 +372,55 @@ fn cmd_inspect_checkpoint(args: &[String]) {
         serde_json::Value::Null
     };
 
-    let patch_size           = config_int(&proc_config, "patch_size");
-    let pooling_kernel       = config_int(&proc_config, "pooling_kernel");
-    let soft_token_default   = proc_config.get("soft_token_default").and_then(|v| v.as_u64())
+    let patch_size = config_int(&proc_config, "patch_size");
+    let pooling_kernel = config_int(&proc_config, "pooling_kernel");
+    let soft_token_default = proc_config
+        .get("soft_token_default")
+        .and_then(|v| v.as_u64())
         .or_else(|| proc_config.get("soft_token").and_then(|v| v.as_u64()))
         .or_else(|| proc_config.get("vision_tokens").and_then(|v| v.as_u64()))
         .unwrap_or(256) as usize;
-    let soft_token_image     = proc_config.get("soft_token_image").and_then(|v| v.as_u64())
-        .or_else(|| proc_config.get("image_soft_tokens").and_then(|v| v.as_u64()))
+    let soft_token_image = proc_config
+        .get("soft_token_image")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            proc_config
+                .get("image_soft_tokens")
+                .and_then(|v| v.as_u64())
+        })
         .unwrap_or(0) as usize;
-    let soft_token_audio     = proc_config.get("soft_token_audio").and_then(|v| v.as_u64())
-        .or_else(|| proc_config.get("audio_soft_tokens").and_then(|v| v.as_u64()))
+    let soft_token_audio = proc_config
+        .get("soft_token_audio")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            proc_config
+                .get("audio_soft_tokens")
+                .and_then(|v| v.as_u64())
+        })
         .unwrap_or(0) as usize;
-    let max_patch_count      = proc_config.get("max_patch_count").and_then(|v| v.as_u64())
+    let max_patch_count = proc_config
+        .get("max_patch_count")
+        .and_then(|v| v.as_u64())
         .or_else(|| proc_config.get("max_images").and_then(|v| v.as_u64()))
         .unwrap_or(0) as usize;
-    let width_divisibility   = proc_config.get("width_divisibility").and_then(|v| v.as_u64())
+    let width_divisibility = proc_config
+        .get("width_divisibility")
+        .and_then(|v| v.as_u64())
         .or_else(|| proc_config.get("width_align").and_then(|v| v.as_u64()))
         .unwrap_or(1) as usize;
-    let height_divisibility  = proc_config.get("height_divisibility").and_then(|v| v.as_u64())
+    let height_divisibility = proc_config
+        .get("height_divisibility")
+        .and_then(|v| v.as_u64())
         .or_else(|| proc_config.get("height_align").and_then(|v| v.as_u64()))
         .unwrap_or(1) as usize;
-    let sample_rate          = proc_config.get("sample_rate").and_then(|v| v.as_u64())
-        .or_else(|| proc_config.get("audio_sample_rate").and_then(|v| v.as_u64()))
+    let sample_rate = proc_config
+        .get("sample_rate")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            proc_config
+                .get("audio_sample_rate")
+                .and_then(|v| v.as_u64())
+        })
         .unwrap_or(16000) as usize;
 
     // ── 4. Collect tensor metadata (names, shapes, dtypes) ─────────
@@ -325,22 +428,26 @@ fn cmd_inspect_checkpoint(args: &[String]) {
     let index_path = model_dir.join("model.safetensors.index.json");
     let (tensor_names, mut tensor_shapes, mut tensor_dtypes) = if index_path.exists() {
         let index = read_json_file(&index_path);
-        let weight_map = index["weight_map"].as_object()
-            .unwrap_or_else(|| {
-                eprintln!("ERROR: no \"weight_map\" in {}", index_path.display());
-                std::process::exit(1);
-            });
+        let weight_map = index["weight_map"].as_object().unwrap_or_else(|| {
+            eprintln!("ERROR: no \"weight_map\" in {}", index_path.display());
+            std::process::exit(1);
+        });
 
         let names: Vec<String> = weight_map.keys().cloned().collect();
-        eprintln!("  index: {} tensors in {} shard(s)", names.len(),
-            weight_map.values().collect::<HashSet<_>>().len());
+        eprintln!(
+            "  index: {} tensors in {} shard(s)",
+            names.len(),
+            weight_map.values().collect::<HashSet<_>>().len()
+        );
 
         // Read safetensor headers to get shapes and dtypes
-        let mut shard_files: Vec<PathBuf> = weight_map.values()
+        let mut shard_files: Vec<PathBuf> = weight_map
+            .values()
             .filter_map(|v| v.as_str())
             .map(|s| model_dir.join(s))
             .collect::<HashSet<_>>()
-            .into_iter().collect();
+            .into_iter()
+            .collect();
         shard_files.sort();
 
         let mut shapes: HashMap<String, Vec<usize>> = HashMap::new();
@@ -418,11 +525,14 @@ fn cmd_inspect_checkpoint(args: &[String]) {
 
     for name in &tensor_names {
         let shape = tensor_shapes.remove(name).unwrap_or_default();
-        let dtype = tensor_dtypes.remove(name).unwrap_or_else(|| "UNKNOWN".to_string());
+        let dtype = tensor_dtypes
+            .remove(name)
+            .unwrap_or_else(|| "UNKNOWN".to_string());
         let param_count: u64 = shape.iter().map(|&d| d as u64).product();
         let classification = classify_tensor(name);
 
-        let entry = category_stats.entry(classification)
+        let entry = category_stats
+            .entry(classification)
             .or_insert_with(CategoryStats::default);
         entry.count += 1;
         entry.total_params += param_count;
@@ -457,13 +567,22 @@ fn cmd_inspect_checkpoint(args: &[String]) {
         "mtp_required",
         "unknown",
         "ignored",
-    ].iter().map(|&cat| {
-        let s = category_stats.get(cat).cloned().unwrap_or(CategoryStats { count: 0, total_params: 0 });
-        (cat.to_string(), serde_json::json!({
-            "count": s.count,
-            "total_params": s.total_params,
-        }))
-    }).collect();
+    ]
+    .iter()
+    .map(|&cat| {
+        let s = category_stats.get(cat).cloned().unwrap_or(CategoryStats {
+            count: 0,
+            total_params: 0,
+        });
+        (
+            cat.to_string(),
+            serde_json::json!({
+                "count": s.count,
+                "total_params": s.total_params,
+            }),
+        )
+    })
+    .collect();
 
     let inventory = serde_json::json!({
         "model_revision": config.get("_name_or_path")
@@ -510,28 +629,24 @@ fn cmd_inspect_checkpoint(args: &[String]) {
     for emit_path in &emits {
         let lower = emit_path.to_lowercase();
         if lower.ends_with("tensor_inventory.json") {
-            let json_str = serde_json::to_string_pretty(&inventory)
-                .unwrap_or_else(|e| {
-                    eprintln!("ERROR: serializing tensor_inventory: {e}");
-                    std::process::exit(1);
-                });
-            fs::write(emit_path, &json_str)
-                .unwrap_or_else(|e| {
-                    eprintln!("ERROR: writing {emit_path}: {e}");
-                    std::process::exit(1);
-                });
+            let json_str = serde_json::to_string_pretty(&inventory).unwrap_or_else(|e| {
+                eprintln!("ERROR: serializing tensor_inventory: {e}");
+                std::process::exit(1);
+            });
+            fs::write(emit_path, &json_str).unwrap_or_else(|e| {
+                eprintln!("ERROR: writing {emit_path}: {e}");
+                std::process::exit(1);
+            });
             eprintln!("  emitted tensor_inventory.json -> {emit_path}");
         } else if lower.ends_with("processor_contract.json") {
-            let json_str = serde_json::to_string_pretty(&contract)
-                .unwrap_or_else(|e| {
-                    eprintln!("ERROR: serializing processor_contract: {e}");
-                    std::process::exit(1);
-                });
-            fs::write(emit_path, &json_str)
-                .unwrap_or_else(|e| {
-                    eprintln!("ERROR: writing {emit_path}: {e}");
-                    std::process::exit(1);
-                });
+            let json_str = serde_json::to_string_pretty(&contract).unwrap_or_else(|e| {
+                eprintln!("ERROR: serializing processor_contract: {e}");
+                std::process::exit(1);
+            });
+            fs::write(emit_path, &json_str).unwrap_or_else(|e| {
+                eprintln!("ERROR: writing {emit_path}: {e}");
+                std::process::exit(1);
+            });
             eprintln!("  emitted processor_contract.json -> {emit_path}");
         } else {
             eprintln!("WARNING: unrecognized --emit target \"{emit_path}\" (expected: tensor_inventory.json or processor_contract.json)");
@@ -541,7 +656,10 @@ fn cmd_inspect_checkpoint(args: &[String]) {
     // ── 9. Fail on large unknown tensors ───────────────────────────
     if !unknown_large.is_empty() {
         eprintln!();
-        eprintln!("ERROR: {} unknown tensor(s) exceed 1M parameters:", unknown_large.len());
+        eprintln!(
+            "ERROR: {} unknown tensor(s) exceed 1M parameters:",
+            unknown_large.len()
+        );
         for t in &unknown_large {
             eprintln!("  {} — {} params", t["name"], t["param_count"]);
         }
@@ -555,9 +673,17 @@ fn cmd_inspect_checkpoint(args: &[String]) {
 
 // ── Metal shader compilation ────────────────────────────────────────
 fn compile_metal_lib() -> Vec<u8> {
-    if std::process::Command::new("xcrun").arg("--version").output().is_err() { return Vec::new(); }
+    if std::process::Command::new("xcrun")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return Vec::new();
+    }
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
-    let src_dir = std::path::Path::new(&manifest_dir).join("src").join("compute_image");
+    let src_dir = std::path::Path::new(&manifest_dir)
+        .join("src")
+        .join("compute_image");
     let shader_dirs = &[
         src_dir.join("templates"),
         src_dir.join("megakernel").join("shaders"),
@@ -573,7 +699,9 @@ fn compile_metal_lib() -> Vec<u8> {
             }
         }
     }
-    if metal_files.is_empty() { return Vec::new(); }
+    if metal_files.is_empty() {
+        return Vec::new();
+    }
     let tmp = std::env::temp_dir().join("gemma4_metal_build");
     let _ = std::fs::create_dir_all(&tmp);
     let mut air_files = Vec::new();
@@ -581,17 +709,30 @@ fn compile_metal_lib() -> Vec<u8> {
         let stem = src.file_stem().unwrap().to_string_lossy();
         let air = tmp.join(format!("{stem}.air"));
         let out = std::process::Command::new("xcrun")
-            .args(["-sdk", "macosx", "metal", "-c"]).arg(src).arg("-o").arg(&air).output();
-        if out.map(|o| o.status.success()).unwrap_or(false) { air_files.push(air); }
+            .args(["-sdk", "macosx", "metal", "-c"])
+            .arg(src)
+            .arg("-o")
+            .arg(&air)
+            .output();
+        if out.map(|o| o.status.success()).unwrap_or(false) {
+            air_files.push(air);
+        }
     }
-    if air_files.is_empty() { return Vec::new(); }
+    if air_files.is_empty() {
+        return Vec::new();
+    }
     let metallib = tmp.join("kernels.metallib");
     let mut cmd = std::process::Command::new("xcrun");
-    cmd.args(["-sdk", "macosx", "metallib", "-o"]).arg(&metallib);
-    for air in &air_files { cmd.arg(air); }
+    cmd.args(["-sdk", "macosx", "metallib", "-o"])
+        .arg(&metallib);
+    for air in &air_files {
+        cmd.arg(air);
+    }
     if cmd.status().map(|s| s.success()).unwrap_or(false) {
         std::fs::read(&metallib).unwrap_or_default()
-    } else { Vec::new() }
+    } else {
+        Vec::new()
+    }
 }
 
 fn gemma4_kv_decompress_mil() -> Vec<u8> {
@@ -599,15 +740,19 @@ fn gemma4_kv_decompress_mil() -> Vec<u8> {
         .into_bytes()
 }
 
-
 fn tar_mlmodelc_dirs(mlmodelc_paths: &[String]) -> Vec<u8> {
     let mut tar_bytes = Vec::new();
     {
         let mut builder = tar::Builder::new(&mut tar_bytes);
         for path_str in mlmodelc_paths {
             let dir_path = std::path::Path::new(path_str);
-            if !dir_path.is_dir() { continue; }
-            for entry in walkdir::WalkDir::new(dir_path).into_iter().filter_map(|e| e.ok()) {
+            if !dir_path.is_dir() {
+                continue;
+            }
+            for entry in walkdir::WalkDir::new(dir_path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 let rel = entry.path().strip_prefix(dir_path).unwrap_or(entry.path());
                 if entry.file_type().is_file() {
                     let data = std::fs::read(entry.path()).unwrap_or_default();
@@ -638,8 +783,14 @@ fn generate_ane_mil_packages(offsets: &HashMap<String, (u64, u64, usize)>) -> Ve
     // Vision patch embed: patch_dense [3840, 6912]
     if offsets.contains_key("model.vision_embedder.patch_dense.weight") {
         if let Ok(prog) = build_matmul_mil(
-            "image_patches", "patch_dense", "patch_features",
-            1, 3840, 6912, &[], true,
+            "image_patches",
+            "patch_dense",
+            "patch_features",
+            1,
+            3840,
+            6912,
+            &[],
+            true,
         ) {
             let mut buf = Vec::new();
             prog.encode(&mut buf).ok();
@@ -650,8 +801,14 @@ fn generate_ane_mil_packages(offsets: &HashMap<String, (u64, u64, usize)>) -> Ve
     // Vision final projection: embedding_projection [3840, 3840]
     if offsets.contains_key("model.embed_vision.embedding_projection.weight") {
         if let Ok(prog) = build_matmul_mil(
-            "patch_features", "embedding_proj", "projected_features",
-            1, 3840, 3840, &[], true,
+            "patch_features",
+            "embedding_proj",
+            "projected_features",
+            1,
+            3840,
+            3840,
+            &[],
+            true,
         ) {
             let mut buf = Vec::new();
             prog.encode(&mut buf).ok();
@@ -663,8 +820,14 @@ fn generate_ane_mil_packages(offsets: &HashMap<String, (u64, u64, usize)>) -> Ve
     // Gemma4 uses a single audio projection (decoder hidden → audio latent space)
     if offsets.contains_key("model.embed_audio.embedding_projection.weight") {
         if let Ok(prog) = build_matmul_mil(
-            "audio_features", "audio_embed_proj", "projected_audio",
-            1, 3840, 640, &[], true,
+            "audio_features",
+            "audio_embed_proj",
+            "projected_audio",
+            1,
+            3840,
+            640,
+            &[],
+            true,
         ) {
             let mut buf = Vec::new();
             prog.encode(&mut buf).ok();
@@ -675,8 +838,14 @@ fn generate_ane_mil_packages(offsets: &HashMap<String, (u64, u64, usize)>) -> Ve
     // MTP pre-projection: [1024, 3840]
     if offsets.contains_key("pre_projection.weight") {
         if let Ok(prog) = build_matmul_mil(
-            "draft_hidden", "pre_proj", "main_space",
-            1, 1024, 3840, &[], true,
+            "draft_hidden",
+            "pre_proj",
+            "main_space",
+            1,
+            1024,
+            3840,
+            &[],
+            true,
         ) {
             let mut buf = Vec::new();
             prog.encode(&mut buf).ok();
@@ -687,8 +856,14 @@ fn generate_ane_mil_packages(offsets: &HashMap<String, (u64, u64, usize)>) -> Ve
     // MTP post-projection: [3840, 1024]
     if offsets.contains_key("post_projection.weight") {
         if let Ok(prog) = build_matmul_mil(
-            "main_hidden", "post_proj", "draft_space",
-            1, 3840, 1024, &[], true,
+            "main_hidden",
+            "post_proj",
+            "draft_space",
+            1,
+            3840,
+            1024,
+            &[],
+            true,
         ) {
             let mut buf = Vec::new();
             prog.encode(&mut buf).ok();
@@ -714,11 +889,27 @@ fn generate_ane_mil_packages(offsets: &HashMap<String, (u64, u64, usize)>) -> Ve
         let up = offsets.get(&up_key);
         let down = offsets.get(&down_key);
 
-        if q.is_some() && k.is_some() && v.is_some() && gate.is_some() && up.is_some() && down.is_some() {
+        if q.is_some()
+            && k.is_some()
+            && v.is_some()
+            && gate.is_some()
+            && up.is_some()
+            && down.is_some()
+        {
             if let Ok(prog) = build_draft_layer_mil(
-                "draft_hidden", 1024, 8, 8, 128,
+                "draft_hidden",
+                1024,
+                8,
+                8,
+                128,
                 &[], // rms_w — placeholder (stateless, declared as input)
-                &[], &[], &[], &[], &[], &[], true,
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                true,
             ) {
                 let mut buf = Vec::new();
                 prog.encode(&mut buf).ok();
@@ -828,7 +1019,6 @@ fn main() {
         }
     }
 
-
     // ── CLUSTER & QUANTIZE EMBEDDING TABLE ───────────────────────────
     {
         let dim = HIDDEN_DIM;
@@ -837,7 +1027,11 @@ fn main() {
             let k = 256;
             if n_rows < k * 2 {
                 eprintln!("  Too few embedding rows ({n_rows}) for {k} clusters; skipping centroid scheme.");
-                process_weights(&vocab_embedding_raw_f32, &mut vocab_scales, &mut vocab_nibbles);
+                process_weights(
+                    &vocab_embedding_raw_f32,
+                    &mut vocab_scales,
+                    &mut vocab_nibbles,
+                );
                 centroid_nibbles = vec![0u8; (256 * dim + 255) / 256 * 64];
                 centroid_scales = vec![0u8; ((256 * dim + 255) / 256) * 2];
                 cluster_map_bytes = vec![0u8; n_rows * 4];
@@ -846,15 +1040,16 @@ fn main() {
                 let start = std::time::Instant::now();
                 let mut centroids = kmeans_plusplus(&vocab_embedding_raw_f32, k, n_rows, dim);
                 for _iter in 0..20 {
-                    let (_assignments, delta) = kmeans_iterate(
-                        &vocab_embedding_raw_f32, &mut centroids, n_rows, dim, k
-                    );
-                    if delta < 1e-6 { break; }
+                    let (_assignments, delta) =
+                        kmeans_iterate(&vocab_embedding_raw_f32, &mut centroids, n_rows, dim, k);
+                    if delta < 1e-6 {
+                        break;
+                    }
                 }
-                let (assignments, _delta) = kmeans_iterate(
-                    &vocab_embedding_raw_f32, &mut centroids, n_rows, dim, k
-                );
-                let reordered = reorder_by_cluster(&vocab_embedding_raw_f32, &assignments, n_rows, dim, k);
+                let (assignments, _delta) =
+                    kmeans_iterate(&vocab_embedding_raw_f32, &mut centroids, n_rows, dim, k);
+                let reordered =
+                    reorder_by_cluster(&vocab_embedding_raw_f32, &assignments, n_rows, dim, k);
                 eprintln!("{:.1}s", start.elapsed().as_secs_f64());
                 process_weights(&reordered, &mut vocab_scales, &mut vocab_nibbles);
                 process_weights(&centroids, &mut centroid_scales, &mut centroid_nibbles);
@@ -930,7 +1125,7 @@ fn main() {
                 process_weights(&data, &mut all_scales, &mut all_weights);
                 total_elements += data.len();
             } else {
-                    println!("\n  WARNING: {key} not found");
+                println!("\n  WARNING: {key} not found");
             }
         }
 
@@ -970,7 +1165,9 @@ fn main() {
 
     if !mtp_tensors.is_empty() {
         println!("  Found {} MTP tensor(s):", mtp_tensors.len());
-        for t in &mtp_tensors { println!("    {t}"); }
+        for t in &mtp_tensors {
+            println!("    {t}");
+        }
     } else {
         println!("  No MTP heads found (model may not have them)");
     }
@@ -978,11 +1175,16 @@ fn main() {
     // ── MTP Draft Model (optional external draft decoder) ──────────
     let mut draft_segment_count: u32 = 0;
     if let Some(ref draft_dir) = draft_model_dir {
-        println!("
-  ── MTP Draft Model ────────────────────────────");
+        println!(
+            "
+  ── MTP Draft Model ────────────────────────────"
+        );
         let draft_path = Path::new(draft_dir).join("model.safetensors");
         if !draft_path.exists() {
-            eprintln!("  WARNING: draft model.safetensors not found at {}", draft_path.display());
+            eprintln!(
+                "  WARNING: draft model.safetensors not found at {}",
+                draft_path.display()
+            );
         } else {
             let draft_bytes = std::fs::read(&draft_path).unwrap_or_else(|e| {
                 eprintln!("  ERROR: cannot read draft safetensors: {e}");
@@ -994,8 +1196,10 @@ fn main() {
             println!("  Draft tensors: {}", draft_names.len());
 
             for name in &draft_names {
-                let is_1d = name.ends_with(".bias") || name.ends_with("norm.weight")
-                    || name.ends_with("_ln.weight") || name.ends_with("_ln.bias")
+                let is_1d = name.ends_with(".bias")
+                    || name.ends_with("norm.weight")
+                    || name.ends_with("_ln.weight")
+                    || name.ends_with("_ln.bias")
                     || name.ends_with("layer_scalar");
                 if is_1d {
                     if let Ok(tv) = draft_st.tensor(name) {
@@ -1012,11 +1216,15 @@ fn main() {
                     let n_elems = f32_data.len();
                     let nib_off = all_weights.len() as u64;
                     let scl_off = all_scales.len() as u64;
-                    ane_ternary_offsets.insert(name.to_string(), (nib_off, scl_off, f32_data.len()));
+                    ane_ternary_offsets
+                        .insert(name.to_string(), (nib_off, scl_off, f32_data.len()));
                     process_weights(&f32_data, &mut all_scales, &mut all_weights);
                     total_elements += n_elems;
                     let n_blocks = (n_elems + 255) / 256;
-                    println!("    draft: {name:<55} {} elems, {} blocks", n_elems, n_blocks);
+                    println!(
+                        "    draft: {name:<55} {} elems, {} blocks",
+                        n_elems, n_blocks
+                    );
                 }
             }
             draft_segment_count = 1;
@@ -1035,9 +1243,12 @@ fn main() {
 
     println!(
         "  Quantized {} weights in {:.1?}",
-        total_elements, quant_elapsed);
-    println!("  {} blocks, {:.1} MB scales, {:.1} MB nibbles",
-             n_blocks, mb_scales, mb_weights);
+        total_elements, quant_elapsed
+    );
+    println!(
+        "  {} blocks, {:.1} MB scales, {:.1} MB nibbles",
+        n_blocks, mb_scales, mb_weights
+    );
 
     // ── Step 3: Load MIL program ───────────────────────────────
     println!("\n  ── Compiling .cimage ────────────────────────────────");
@@ -1064,8 +1275,10 @@ fn main() {
     writer.write_all(&vec![0u8; header_size as usize]).unwrap();
 
     // Compile Metal shaders to .metallib
-    println!("
-  ── Compiling Metal shaders ─────────────────────────");
+    println!(
+        "
+  ── Compiling Metal shaders ─────────────────────────"
+    );
     let (metallib_bytes, metal_duration) = match metal_handle.join() {
         Ok(v) => v,
         Err(e) => {
@@ -1073,15 +1286,25 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let overlapped = if metal_duration < quant_elapsed { metal_duration } else { quant_elapsed };
+    let overlapped = if metal_duration < quant_elapsed {
+        metal_duration
+    } else {
+        quant_elapsed
+    };
     println!("  Metal kernel lib: {} bytes", metallib_bytes.len());
-    println!("  Metal compilation: {:.1}s (overlapped {:.1}s with quantization)",
-        metal_duration.as_secs_f64(), overlapped.as_secs_f64());
+    println!(
+        "  Metal compilation: {:.1}s (overlapped {:.1}s with quantization)",
+        metal_duration.as_secs_f64(),
+        overlapped.as_secs_f64()
+    );
 
     // Generate ANE MIL programs embedded in the cimage.
     // Runtime compiles them via xcrun coremlcompiler or Rust ANE compiler on first load.
     let ane_island_tar: Vec<u8> = generate_ane_mil_packages(&ane_ternary_offsets);
-    println!("  ANE island tar: {} bytes (MIL programs embedded)", ane_island_tar.len());
+    println!(
+        "  ANE island tar: {} bytes (MIL programs embedded)",
+        ane_island_tar.len()
+    );
 
     // Generate ANE programs
     println!("  ── Generating ANE programs ─────────────────────────");
@@ -1097,11 +1320,11 @@ fn main() {
     // Main decoder layers: q_proj, k_proj, v_proj, o_proj, gate, up, down
     let mut weight_off: u64 = 0;
     let mut scale_off: u64 = 0;
-    let h = HIDDEN_DIM as u64;          // 3840
-    let nq = (NUM_HEADS * HEAD_DIM) as u64;  // 16 * 256 = 4096
+    let h = HIDDEN_DIM as u64; // 3840
+    let nq = (NUM_HEADS * HEAD_DIM) as u64; // 16 * 256 = 4096
     let nk = (NUM_KV_HEADS * HEAD_DIM) as u64; // 8 * 256 = 2048
-    let ffn = FFN_INTERMEDIATE as u64;   // 15360
-    // Elements per tensor: [q, k, v, o, gate, up, down]
+    let ffn = FFN_INTERMEDIATE as u64; // 15360
+                                       // Elements per tensor: [q, k, v, o, gate, up, down]
     let per_tensor_elems = [h * nq, h * nk, h * nk, nq * h, h * ffn, h * ffn, ffn * h];
     for layer in exec_graph.layers.iter_mut().filter(|n| n.node_kind == 0) {
         let start_weight = weight_off;
@@ -1123,8 +1346,12 @@ fn main() {
         layer.num_heads = NUM_HEADS as u16;
     }
     let exec_graph_bytes = exec_graph.to_bytes();
-    println!("  Execution graph: {} bytes, {} nodes, {} epochs",
-        exec_graph_bytes.len(), exec_graph.node_count, exec_graph.num_compaction_epochs);
+    println!(
+        "  Execution graph: {} bytes, {} nodes, {} epochs",
+        exec_graph_bytes.len(),
+        exec_graph.node_count,
+        exec_graph.num_compaction_epochs
+    );
 
     // Page-align helper
     let page_align = |w: &mut BufWriter<std::fs::File>| -> std::io::Result<u64> {
@@ -1157,34 +1384,67 @@ fn main() {
     writer.write_all(&kv_decompress_bytes).unwrap();
 
     // Build segment directory (8 slots)
-    let mut segments = [SegmentEntry { kind: SegmentKind::MetalLib as u32, offset: 0, length: 0 }; 9];
-    segments[0] = SegmentEntry { kind: SegmentKind::MetalLib as u32, offset: metal_offset, length: metallib_bytes.len() as u64 };
-    segments[1] = SegmentEntry { kind: SegmentKind::TernaryWeights as u32, offset: weights_offset, length: all_weights.len() as u64 };
-    segments[2] = SegmentEntry { kind: SegmentKind::BlockScales as u32, offset: scales_offset, length: all_scales.len() as u64 };
-    segments[3] = SegmentEntry { kind: SegmentKind::AneArchive as u32, offset: ane_prefill_offset, length: mil_bytes.len() as u64 };
-    segments[4] = SegmentEntry { kind: SegmentKind::AneArchive as u32, offset: ane_decompress_offset, length: kv_decompress_bytes.len() as u64 };
-
-
+    let mut segments = [SegmentEntry {
+        kind: SegmentKind::MetalLib as u32,
+        offset: 0,
+        length: 0,
+    }; 9];
+    segments[0] = SegmentEntry {
+        kind: SegmentKind::MetalLib as u32,
+        offset: metal_offset,
+        length: metallib_bytes.len() as u64,
+    };
+    segments[1] = SegmentEntry {
+        kind: SegmentKind::TernaryWeights as u32,
+        offset: weights_offset,
+        length: all_weights.len() as u64,
+    };
+    segments[2] = SegmentEntry {
+        kind: SegmentKind::BlockScales as u32,
+        offset: scales_offset,
+        length: all_scales.len() as u64,
+    };
+    segments[3] = SegmentEntry {
+        kind: SegmentKind::AneArchive as u32,
+        offset: ane_prefill_offset,
+        length: mil_bytes.len() as u64,
+    };
+    segments[4] = SegmentEntry {
+        kind: SegmentKind::AneArchive as u32,
+        offset: ane_decompress_offset,
+        length: kv_decompress_bytes.len() as u64,
+    };
 
     // Write AneArchive segment 5 (ANE islands for full inference)
     let ane_islands_offset = page_align(&mut writer).unwrap();
     writer.write_all(&ane_island_tar).unwrap();
-    segments[5] = SegmentEntry { kind: SegmentKind::AneArchive as u32, offset: ane_islands_offset, length: ane_island_tar.len() as u64 };
+    segments[5] = SegmentEntry {
+        kind: SegmentKind::AneArchive as u32,
+        offset: ane_islands_offset,
+        length: ane_island_tar.len() as u64,
+    };
 
     // ── ModelArtifacts (tokenizer, special token map) ────────────
     let mut model_artifacts: Vec<u8> = Vec::new();
 
     // Type 0x01: SentencePiece tokenizer
-    let model_dir = shard_paths.first()
+    let model_dir = shard_paths
+        .first()
         .and_then(|(p, _)| p.parent())
         .unwrap_or_else(|| Path::new("."));
     // Try tokenizer.model (SentencePiece) then tokenizer.json (HuggingFace Fast)
-    let tokenizer_paths = [model_dir.join("tokenizer.model"), model_dir.join("tokenizer.json")];
+    let tokenizer_paths = [
+        model_dir.join("tokenizer.model"),
+        model_dir.join("tokenizer.json"),
+    ];
     if let Some(tok_path) = tokenizer_paths.iter().find(|p| p.exists()) {
         if let Ok(data) = std::fs::read(tok_path) {
             ModelArtifactEntry::encode(model_artifact_tag::TOKENIZER, &data, &mut model_artifacts);
-            println!("  Tokenizer: {} bytes ({})", data.len(),
-                tok_path.file_name().and_then(|n| n.to_str()).unwrap_or(""));
+            println!(
+                "  Tokenizer: {} bytes ({})",
+                data.len(),
+                tok_path.file_name().and_then(|n| n.to_str()).unwrap_or("")
+            );
         }
     } else {
         eprintln!("  WARNING: no tokenizer found (tried .model and .json)");
@@ -1207,31 +1467,70 @@ fn main() {
         "audio_hop_ms": 10
     });
     let token_map_bytes = serde_json::to_vec(&token_map).unwrap_or_default();
-    ModelArtifactEntry::encode(model_artifact_tag::TOKEN_MAP, &token_map_bytes, &mut model_artifacts);
+    ModelArtifactEntry::encode(
+        model_artifact_tag::TOKEN_MAP,
+        &token_map_bytes,
+        &mut model_artifacts,
+    );
 
     // ── Embedding auxiliary data ──────────────────────────────────────
     if !vocab_nibbles.is_empty() {
-        ModelArtifactEntry::encode(model_artifact_tag::EMBED_NIBBLES, &vocab_nibbles, &mut model_artifacts);
-        ModelArtifactEntry::encode(model_artifact_tag::EMBED_SCALES, &vocab_scales, &mut model_artifacts);
-        ModelArtifactEntry::encode(model_artifact_tag::CENTROID_NIBBLES, &centroid_nibbles, &mut model_artifacts);
-        ModelArtifactEntry::encode(model_artifact_tag::CENTROID_SCALES, &centroid_scales, &mut model_artifacts);
-        ModelArtifactEntry::encode(model_artifact_tag::CLUSTER_MAP, &cluster_map_bytes, &mut model_artifacts);
+        ModelArtifactEntry::encode(
+            model_artifact_tag::EMBED_NIBBLES,
+            &vocab_nibbles,
+            &mut model_artifacts,
+        );
+        ModelArtifactEntry::encode(
+            model_artifact_tag::EMBED_SCALES,
+            &vocab_scales,
+            &mut model_artifacts,
+        );
+        ModelArtifactEntry::encode(
+            model_artifact_tag::CENTROID_NIBBLES,
+            &centroid_nibbles,
+            &mut model_artifacts,
+        );
+        ModelArtifactEntry::encode(
+            model_artifact_tag::CENTROID_SCALES,
+            &centroid_scales,
+            &mut model_artifacts,
+        );
+        ModelArtifactEntry::encode(
+            model_artifact_tag::CLUSTER_MAP,
+            &cluster_map_bytes,
+            &mut model_artifacts,
+        );
     }
     if !aux_norm_fp16.is_empty() {
-        ModelArtifactEntry::encode(model_artifact_tag::AUX_NORMS, &aux_norm_fp16, &mut model_artifacts);
+        ModelArtifactEntry::encode(
+            model_artifact_tag::AUX_NORMS,
+            &aux_norm_fp16,
+            &mut model_artifacts,
+        );
     }
-    println!("  Model artifacts: {} bytes ({} entries)", model_artifacts.len(),
-        (model_artifacts.len() as f64 / 8.0).ceil() as u32);
+    println!(
+        "  Model artifacts: {} bytes ({} entries)",
+        model_artifacts.len(),
+        (model_artifacts.len() as f64 / 8.0).ceil() as u32
+    );
 
     // Write ExecutionGraph segment 6
     let exec_graph_offset = page_align(&mut writer).unwrap();
     writer.write_all(&exec_graph_bytes).unwrap();
-    segments[6] = SegmentEntry::new(SegmentKind::ExecutionGraph, exec_graph_offset, exec_graph_bytes.len() as u64);
+    segments[6] = SegmentEntry::new(
+        SegmentKind::ExecutionGraph,
+        exec_graph_offset,
+        exec_graph_bytes.len() as u64,
+    );
 
     // Write ModelArtifacts segment 7 (tokenizer, special token map)
     let artifacts_offset = page_align(&mut writer).unwrap();
     writer.write_all(&model_artifacts).unwrap();
-    segments[7] = SegmentEntry::new(SegmentKind::ModelArtifacts, artifacts_offset, model_artifacts.len() as u64);
+    segments[7] = SegmentEntry::new(
+        SegmentKind::ModelArtifacts,
+        artifacts_offset,
+        model_artifacts.len() as u64,
+    );
 
     let mut hasher = Sha256::new();
     hasher.update(&all_weights);
@@ -1247,7 +1546,7 @@ fn main() {
     // Write header at position 0
     let header = CimageHeader {
         magic: *b"PRISM\0\0\0",
-        version: 6,  // v6 adds auxiliary data (embedding, centroids, cluster map, norms) in ModelArtifacts
+        version: 6, // v6 adds auxiliary data (embedding, centroids, cluster map, norms) in ModelArtifacts
         segment_count: 8 + draft_segment_count,
         payload_hash,
         num_layers: NUM_LAYERS as u32,
@@ -1299,7 +1598,10 @@ fn main() {
     println!();
     println!("  ── Result ──────────────────────────────────────────────");
     println!("  Output:     {output}");
-    println!("  File size:  {:.1} MB ({file_size} bytes)", file_size as f64 / (1024.0 * 1024.0));
+    println!(
+        "  File size:  {:.1} MB ({file_size} bytes)",
+        file_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  Params:     {total_elements}");
     println!("  Blocks:     {n_blocks}");
     println!("  Compressed: {compression_ratio:.1}× vs FP16");
@@ -1307,16 +1609,14 @@ fn main() {
     println!();
     println!("  ▶ Runtime ready: tribunus-compute-image load --cimage {output}");
 
-   // ── Step 6: ANE programs generated above ────────────────────
+    // ── Step 6: ANE programs generated above ────────────────────
     // ANE programs are now generated and embedded during cimage packing.
     // See compile_metal_lib() and gemma4_kv_decompress_mil() above.
 }
 
 // ── Safetensors loading helpers ─────────────────────────────────────
 
-fn load_tensor(key: &str, shards: &[(PathBuf, Vec<u8>)])
-    -> Option<(Vec<f32>, Vec<usize>)>
-{
+fn load_tensor(key: &str, shards: &[(PathBuf, Vec<u8>)]) -> Option<(Vec<f32>, Vec<usize>)> {
     let (_, data) = shards.iter().find(|(_, data)| {
         // Check if this shard contains the key (cheap: just check metadata)
         safetensors::SafeTensors::deserialize(data)
@@ -1337,7 +1637,11 @@ fn collect_local_safetensors(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     for entry in std::fs::read_dir(dir).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
-        if path.extension().map(|e| e == "safetensors").unwrap_or(false) {
+        if path
+            .extension()
+            .map(|e| e == "safetensors")
+            .unwrap_or(false)
+        {
             let data = std::fs::read(&path).unwrap();
             shards.push((path, data));
         }
@@ -1415,7 +1719,7 @@ fn download_repo_safetensors(repo_id: &str) -> Vec<(PathBuf, Vec<u8>)> {
 }
 
 /// Generate a placeholder MIL program (E5 format).
-fn generate_placeholder_mil() /* TODO: pass --mil to override with real MIL program */ -> Vec<u8> {
+fn generate_placeholder_mil() -> Vec<u8> {
     let mut buf = Vec::with_capacity(64);
     buf.extend_from_slice(b"\xE5\x00\x00\x00");
     buf.extend_from_slice(&1u32.to_le_bytes());
@@ -1426,9 +1730,7 @@ fn generate_placeholder_mil() /* TODO: pass --mil to override with real MIL prog
 
 /// Read `--key <value>` pairs from args.
 fn get_opt<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
-    args.windows(2)
-        .find(|w| w[0] == key)
-        .map(|w| w[1].as_str())
+    args.windows(2).find(|w| w[0] == key).map(|w| w[1].as_str())
 }
 
 /// Read all values for a repeatable `--key <value>` flag.

@@ -5,8 +5,8 @@
 
 use std::sync::Mutex;
 
-use crate::runtime::ledger::ledger::TransitionLedger;
 use crate::runtime::ledger::entry::TransitionReceipt;
+use crate::runtime::ledger::ledger::TransitionLedger;
 
 /// Resource wrapper for the rolling transition ledger.
 ///
@@ -58,9 +58,12 @@ impl TransitionLedgerResource {
                 .map_err(LedgerExportError::Serialization)?;
             output.push(b'\n');
         }
-        Ok(String::from_utf8(output).map_err(|e| LedgerExportError::Serialization(
-            serde_json::Error::io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        ))?)
+        Ok(String::from_utf8(output).map_err(|e| {
+            LedgerExportError::Serialization(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e,
+            )))
+        })?)
     }
 }
 

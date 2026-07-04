@@ -217,8 +217,8 @@ mod tests {
     fn sample_decode_v1_contract() -> ActivationContract {
         ActivationContract {
             abi: sample_decode_v1_abi(),
-            element_count: 262144,       // 64 * 4096
-            byte_count: 524288,          // 262144 * 2 (FP16)
+            element_count: 262144, // 64 * 4096
+            byte_count: 524288,    // 262144 * 2 (FP16)
             shape: vec![64, 4096],
             stride: vec![4096, 1],
             physical_layout: PhysicalLayout::ContiguousRowMajor,
@@ -271,8 +271,8 @@ mod tests {
         let abi = ActivationAbi::DecodeActivationV1(params);
         let contract = ActivationContract {
             abi,
-            element_count: 1_048_576,       // 128 * 8192
-            byte_count: 2_097_152,           // 1_048_576 * 2
+            element_count: 1_048_576, // 128 * 8192
+            byte_count: 2_097_152,    // 1_048_576 * 2
             shape: vec![128, 8192],
             stride: vec![8192, 1],
             physical_layout: PhysicalLayout::ContiguousRowMajor,

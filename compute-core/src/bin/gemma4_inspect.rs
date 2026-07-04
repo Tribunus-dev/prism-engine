@@ -116,10 +116,9 @@ fn main() {
         }
         if st_path.extension().map_or(false, |e| e == "json") {
             // Index file
-            let index: serde_json::Value = serde_json::from_reader(BufReader::new(
-                fs::File::open(st_path).unwrap(),
-            ))
-            .unwrap_or_default();
+            let index: serde_json::Value =
+                serde_json::from_reader(BufReader::new(fs::File::open(st_path).unwrap()))
+                    .unwrap_or_default();
 
             if let Some(weight_map) = index.get("weight_map").and_then(|w| w.as_object()) {
                 for (name, _file) in weight_map {
@@ -143,8 +142,10 @@ fn main() {
             if let Some(tensors) = header.as_object() {
                 for (name, info) in tensors {
                     if let Some(shape) = info.get("shape").and_then(|s| s.as_array()) {
-                        let dims: Vec<usize> =
-                            shape.iter().filter_map(|v| v.as_u64().map(|x| x as usize)).collect();
+                        let dims: Vec<usize> = shape
+                            .iter()
+                            .filter_map(|v| v.as_u64().map(|x| x as usize))
+                            .collect();
                         tensor_shapes.insert(name.clone(), dims);
                     }
                 }
@@ -201,8 +202,11 @@ fn main() {
 
     // Fail on large unknowns
     if !unknown_large.is_empty() {
-        eprintln!("\nERROR: {} unknown tensor(s) exceed {} parameter threshold:",
-            unknown_large.len(), UNKNOWN_PARAM_THRESHOLD);
+        eprintln!(
+            "\nERROR: {} unknown tensor(s) exceed {} parameter threshold:",
+            unknown_large.len(),
+            UNKNOWN_PARAM_THRESHOLD
+        );
         for t in &unknown_large {
             eprintln!("  {} ({:?})", t["name"], t["shape"]);
         }
@@ -256,7 +260,10 @@ fn main() {
     // ── Write output files ────────────────────────────────────────
     for emit_path in &emit_paths {
         let path = Path::new(emit_path);
-        let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let file_stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
 
         match file_stem {
             "tensor_inventory" | "inventory" | "gemma4_tensor_inventory" => {

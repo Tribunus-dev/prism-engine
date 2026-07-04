@@ -54,13 +54,10 @@ pub unsafe extern "C" fn prism_compile_and_pack(
 /// Initialize the runtime multiplexer from a compiled .cimage.
 /// Returns a pointer to an OpaqueMultiplexer, or null on failure.
 #[no_mangle]
-pub unsafe extern "C" fn prism_runtime_init(
-    cimage_path: *const c_char,
-) -> *mut OpaqueMultiplexer {
+pub unsafe extern "C" fn prism_runtime_init(cimage_path: *const c_char) -> *mut OpaqueMultiplexer {
     #[cfg(feature = "compute-core")]
     {
-        tribunus_compute_core::ffi::prism_runtime_init(cimage_path)
-            as *mut OpaqueMultiplexer
+        tribunus_compute_core::ffi::prism_runtime_init(cimage_path) as *mut OpaqueMultiplexer
     }
     #[cfg(not(feature = "compute-core"))]
     {
@@ -113,9 +110,13 @@ pub unsafe extern "C" fn prism_execute_multimodal_ex(
 #[no_mangle]
 pub extern "C" fn prism_device_count() -> u32 {
     #[cfg(feature = "compute-core")]
-    { tribunus_compute_core::ffi::prism_device_count() }
+    {
+        tribunus_compute_core::ffi::prism_device_count()
+    }
     #[cfg(not(feature = "compute-core"))]
-    { 0 }
+    {
+        0
+    }
 }
 
 /// Fill a PrismDeviceInfo struct for device at `index`.
@@ -123,47 +124,77 @@ pub extern "C" fn prism_device_count() -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn prism_device_info(index: u32, info: *mut c_void) -> c_int {
     #[cfg(feature = "compute-core")]
-    { tribunus_compute_core::ffi::prism_device_info(index, info as *mut tribunus_compute_core::ffi::PrismDeviceInfo) }
+    {
+        tribunus_compute_core::ffi::prism_device_info(
+            index,
+            info as *mut tribunus_compute_core::ffi::PrismDeviceInfo,
+        )
+    }
     #[cfg(not(feature = "compute-core"))]
-    { let _ = (index, info); -1 }
+    {
+        let _ = (index, info);
+        -1
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn prism_device_info_free_name(name: *mut c_char) {
     #[cfg(feature = "compute-core")]
-    { tribunus_compute_core::ffi::prism_device_info_free_name(name) }
+    {
+        tribunus_compute_core::ffi::prism_device_info_free_name(name)
+    }
     #[cfg(not(feature = "compute-core"))]
-    { let _ = name; }
+    {
+        let _ = name;
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn prism_device_info_free_vendor(vendor: *mut c_char) {
     #[cfg(feature = "compute-core")]
-    { tribunus_compute_core::ffi::prism_device_info_free_vendor(vendor) }
+    {
+        tribunus_compute_core::ffi::prism_device_info_free_vendor(vendor)
+    }
     #[cfg(not(feature = "compute-core"))]
-    { let _ = vendor; }
+    {
+        let _ = vendor;
+    }
 }
 
 #[no_mangle]
 pub extern "C" fn prism_device_list_json() -> *mut c_char {
     #[cfg(feature = "compute-core")]
-    { unsafe { tribunus_compute_core::ffi::prism_device_list_json() } }
+    {
+        unsafe { tribunus_compute_core::ffi::prism_device_list_json() }
+    }
     #[cfg(not(feature = "compute-core"))]
-    { std::ptr::null_mut() }
+    {
+        std::ptr::null_mut()
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn prism_free_json_string(s: *mut c_char) {
     #[cfg(feature = "compute-core")]
-    { tribunus_compute_core::ffi::prism_free_json_string(s) }
+    {
+        tribunus_compute_core::ffi::prism_free_json_string(s)
+    }
     #[cfg(not(feature = "compute-core"))]
-    { let _ = s; }
+    {
+        let _ = s;
+    }
 }
 
 #[no_mangle]
 pub extern "C" fn prism_load_config(config: *mut c_void) {
     #[cfg(feature = "compute-core")]
-    { tribunus_compute_core::ffi::prism_load_config(config as *mut tribunus_compute_core::ffi::PrismServerConfig) }
+    {
+        tribunus_compute_core::ffi::prism_load_config(
+            config as *mut tribunus_compute_core::ffi::PrismServerConfig,
+        )
+    }
     #[cfg(not(feature = "compute-core"))]
-    { let _ = config; }
+    {
+        let _ = config;
+    }
 }

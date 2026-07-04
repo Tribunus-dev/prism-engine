@@ -154,7 +154,10 @@ impl MultimodalPromptPlan {
     #[allow(dead_code)]
     pub fn is_multimodal(&self) -> bool {
         self.image_positions.iter().any(|_| true)
-            || self.embedding_spans.iter().any(|s| s.modality != InputModality::Text)
+            || self
+                .embedding_spans
+                .iter()
+                .any(|s| s.modality != InputModality::Text)
     }
 }
 

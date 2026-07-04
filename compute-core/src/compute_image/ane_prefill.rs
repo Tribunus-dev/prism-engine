@@ -215,10 +215,10 @@ pub fn compile_prefill_mil(
         output_name: "next_hidden".into(),
         inputs: vec![],
         outputs: vec![
-            ("Q".into(), vec![1, 4096, 1, 32]),      // 16 heads × 256 dim
-            ("K".into(), vec![1, 2048, 1, 32]),      // 8 KV heads × 256 dim
-            ("V".into(), vec![1, 2048, 1, 32]),      // 8 KV heads × 256 dim
-            ("next_hidden".into(), vec![1, 3840, 1, 32]),  // hidden dim
+            ("Q".into(), vec![1, 4096, 1, 32]),           // 16 heads × 256 dim
+            ("K".into(), vec![1, 2048, 1, 32]),           // 8 KV heads × 256 dim
+            ("V".into(), vec![1, 2048, 1, 32]),           // 8 KV heads × 256 dim
+            ("next_hidden".into(), vec![1, 3840, 1, 32]), // hidden dim
         ],
     };
 

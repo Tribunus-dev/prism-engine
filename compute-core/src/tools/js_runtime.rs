@@ -47,11 +47,22 @@ pub fn set_web_driver(driver: Arc<dyn WebDriver>) {
 }
 
 pub enum WebRequest {
-    Navigate { url: String },
+    Navigate {
+        url: String,
+    },
     Snapshot,
-    Interact { id: u32, action: String, value: Option<String> },
-    EvaluateJs { script: String },
-    Download { url: String, filename: String },
+    Interact {
+        id: u32,
+        action: String,
+        value: Option<String>,
+    },
+    EvaluateJs {
+        script: String,
+    },
+    Download {
+        url: String,
+        filename: String,
+    },
 }
 
 fn do_web_request(req: WebRequest) -> Result<String, io::Error> {
@@ -63,10 +74,13 @@ fn do_web_request(req: WebRequest) -> Result<String, io::Error> {
         match req {
             WebRequest::Navigate { url } => driver.navigate(&url),
             WebRequest::Snapshot => driver.snapshot(),
-            WebRequest::Interact { id, action, value } => driver.interact(id, &action, value.as_deref()),
+            WebRequest::Interact { id, action, value } => {
+                driver.interact(id, &action, value.as_deref())
+            }
             WebRequest::EvaluateJs { script } => driver.evaluate_js(&script),
             WebRequest::Download { url, filename } => driver.download(&url, &filename),
-        }.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        }
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     })
 }
 
@@ -88,8 +102,15 @@ fn op_web_interact(#[string] args_json: String) -> Result<String, io::Error> {
     let parsed: serde_json::Value = serde_json::from_str(&args_json)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("web_interact: {e}")))?;
     let id = parsed.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let value = parsed.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let action = parsed
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let value = parsed
+        .get("value")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     do_web_request(WebRequest::Interact { id, action, value })
 }
 
@@ -126,8 +147,12 @@ fn op_write_file(#[string] path: String, #[string] content: String) -> Result<()
     use crate::tools::sandbox;
     let root = SANDBOX_CFG.with(|c| c.borrow().as_ref().unwrap().root.clone());
     let root = Path::new(&root);
-    let canon = sandbox::resolve_sandbox_path_relaxed(&path, root)
-        .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, format!("write {path}: {e}")))?;
+    let canon = sandbox::resolve_sandbox_path_relaxed(&path, root).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("write {path}: {e}"),
+        )
+    })?;
     if let Some(parent) = canon.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -178,8 +203,14 @@ fn op_console_log(#[string] msg: String) {
 extension!(
     prism_sandbox,
     ops = [
-        op_read_file, op_write_file, op_list_directory, op_console_log,
-        op_web_navigate, op_web_snapshot, op_web_interact, op_web_evaluate_js,
+        op_read_file,
+        op_write_file,
+        op_list_directory,
+        op_console_log,
+        op_web_navigate,
+        op_web_snapshot,
+        op_web_interact,
+        op_web_evaluate_js,
         op_web_download,
     ],
 );
@@ -203,13 +234,11 @@ pub fn run_javascript(
     _timeout_ms: Option<u64>,
 ) -> JsExecutionResult {
     let start = Instant::now();
-    let root = root_path
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| {
-            std::env::var("PRISM_SANDBOX_ROOT")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
-        });
+    let root = root_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+        std::env::var("PRISM_SANDBOX_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
+    });
 
     // AST security validation — block dangerous dynamic execution patterns
     if let Err(reason) = ast_guard::validate_agent_script(code) {
@@ -261,7 +290,10 @@ pub fn run_javascript(
     match runtime.execute_script("user_code", wrapped) {
         Ok(_) => {
             let output = SANDBOX_CFG.with(|c| {
-                c.borrow().as_ref().map(|cfg| cfg.output.borrow().clone()).unwrap_or_default()
+                c.borrow()
+                    .as_ref()
+                    .map(|cfg| cfg.output.borrow().clone())
+                    .unwrap_or_default()
             });
             JsExecutionResult {
                 ok: true,
@@ -272,7 +304,10 @@ pub fn run_javascript(
         }
         Err(e) => {
             let output = SANDBOX_CFG.with(|c| {
-                c.borrow().as_ref().map(|cfg| cfg.output.borrow().clone()).unwrap_or_default()
+                c.borrow()
+                    .as_ref()
+                    .map(|cfg| cfg.output.borrow().clone())
+                    .unwrap_or_default()
             });
             JsExecutionResult {
                 ok: false,

@@ -146,7 +146,10 @@ fn all_slots_retired(arena: &AppleSharedArena, epoch: u64) -> bool {
 
 /// Returns true when any slot has been poisoned.
 fn any_slot_poisoned(arena: &AppleSharedArena) -> bool {
-    arena.slots.values().any(|s| matches!(s.state, SlotState::Poisoned { .. }))
+    arena
+        .slots
+        .values()
+        .any(|s| matches!(s.state, SlotState::Poisoned { .. }))
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -154,8 +157,7 @@ fn any_slot_poisoned(arena: &AppleSharedArena) -> bool {
 #[test]
 fn test_ane_failure_triggers_fallback_continuity() {
     let manifest = make_arena_manifest();
-    let mut arena = AppleSharedArena::install(&manifest)
-        .expect("install arena from manifest");
+    let mut arena = AppleSharedArena::install(&manifest).expect("install arena from manifest");
 
     // Phase 1: Run 10 healthy epochs.
     for epoch in 0..10 {
@@ -183,10 +185,7 @@ fn test_ane_failure_triggers_fallback_continuity() {
         "slot 1 should be poisoned after ANE failure"
     );
     assert!(
-        matches!(
-            arena.slot(1).unwrap().state,
-            SlotState::Poisoned { .. }
-        ),
+        matches!(arena.slot(1).unwrap().state, SlotState::Poisoned { .. }),
         "slot 1 state should be Poisoned"
     );
 
@@ -249,15 +248,24 @@ fn test_ane_failure_triggers_fallback_continuity() {
 #[test]
 fn test_slot_poison_rejects_further_normal_transition() {
     let manifest = make_arena_manifest();
-    let mut arena = AppleSharedArena::install(&manifest)
-        .expect("install arena");
+    let mut arena = AppleSharedArena::install(&manifest).expect("install arena");
 
     // Reserve and then poison slot 0.
-    arena.slot_mut(0).unwrap().reserve(1, ExecutionLane::AccelerateCpu).unwrap();
-    arena.slot_mut(0).unwrap().poison(1, SlotFailureReason::AllocationPrevented);
+    arena
+        .slot_mut(0)
+        .unwrap()
+        .reserve(1, ExecutionLane::AccelerateCpu)
+        .unwrap();
+    arena
+        .slot_mut(0)
+        .unwrap()
+        .poison(1, SlotFailureReason::AllocationPrevented);
 
     // Attempting to transition from Poisoned should fail.
-    let result = arena.slot_mut(0).unwrap().mark_reading(1, ExecutionLane::CoreMlAne);
+    let result = arena
+        .slot_mut(0)
+        .unwrap()
+        .mark_reading(1, ExecutionLane::CoreMlAne);
     assert!(
         result.is_err(),
         "transition from Poisoned should be rejected"
@@ -265,10 +273,7 @@ fn test_slot_poison_rejects_further_normal_transition() {
 
     // The slot stays poisoned.
     assert!(
-        matches!(
-            arena.slot(0).unwrap().state,
-            SlotState::Poisoned { .. }
-        ),
+        matches!(arena.slot(0).unwrap().state, SlotState::Poisoned { .. }),
         "slot should remain Poisoned after failed transition"
     );
 }

@@ -11,14 +11,14 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::super::manifest::{MaterializationEvent, SessionId};
-use crate::image::types::ArtifactDigest;
 use super::super::server::{
-    CImageId, ContextProfileId, CoreMlVisibilityState,
-    InferenceAdmissionReceipt, InferenceCancelledReceipt, InferenceExecutionPolicy,
-    InferenceFailureReceipt, InferenceOutputReceipt, InferenceTerminalState, KvEpochReceipt,
-    LaneExecutionReceipt, MemoryPressureReceipt, MultiIslandInferenceReceipt, ReceptionId,
-    RequestId, WeightEvictionStatus, WeightResidencyReceipt,
+    CImageId, ContextProfileId, CoreMlVisibilityState, InferenceAdmissionReceipt,
+    InferenceCancelledReceipt, InferenceExecutionPolicy, InferenceFailureReceipt,
+    InferenceOutputReceipt, InferenceTerminalState, KvEpochReceipt, LaneExecutionReceipt,
+    MemoryPressureReceipt, MultiIslandInferenceReceipt, ReceptionId, RequestId,
+    WeightEvictionStatus, WeightResidencyReceipt,
 };
+use crate::image::types::ArtifactDigest;
 
 /// Thread-safe store that builds, persists, and retrieves inference receipts.
 ///
@@ -320,12 +320,12 @@ fn is_leap(year: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::manifest::{ExecutionLane, InferencePhase};
+    use super::super::super::server::KvEpochId;
+    use super::super::super::server::KvEpochState;
     use super::super::super::server::{
         InferenceFailureClass, InferenceSessionState, MemoryPressureLevel,
     };
-    use super::super::super::manifest::{ExecutionLane, InferencePhase};
-    use super::super::super::server::KvEpochState;
-    use super::super::super::server::KvEpochId;
     use super::*;
 
     #[test]
@@ -477,7 +477,11 @@ mod tests {
         let receipt = store.get_receipt(&sid).expect("receipt exists");
         assert!(receipt.cancellation.is_some());
         assert_eq!(
-            receipt.cancellation.as_ref().unwrap().completed_decode_tokens,
+            receipt
+                .cancellation
+                .as_ref()
+                .unwrap()
+                .completed_decode_tokens,
             42
         );
     }

@@ -6,18 +6,18 @@
 
 use std::collections::HashMap;
 
+use crate::backend::coreai_iosurface::{CoreAiComputePolicy, CoreAiIOSurfaceExecutable};
+use crate::backend::metal_consumer::MetalConsumer;
+use crate::backend::metal_iosurface::{
+    MetalExecutable, MetalResourceFormat, MetalResourceKind, MetalResourceView,
+};
+use crate::compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
 use crate::compute_image::apple_cimage_manifest::{
     AppleTriLaneArtifactManifest, IOSurfaceSlotManifest as CimageSlotManifest,
 };
 use crate::compute_image::apple_shared_arena::{
     AppleSharedArena, IOSurfaceSlotManifest, SlotReuseClass,
 };
-use crate::backend::coreai_iosurface::{CoreAiComputePolicy, CoreAiIOSurfaceExecutable};
-use crate::backend::metal_iosurface::{
-    MetalExecutable, MetalResourceFormat, MetalResourceKind, MetalResourceView,
-};
-use crate::backend::metal_consumer::MetalConsumer;
-use crate::compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
 
 // ── Installation result ──────────────────────────────────────────────────
 
@@ -112,10 +112,15 @@ pub fn install_apple_tri_lane(
         if slot.manifest.dtype != "float16" && slot.manifest.dtype != "fp16" {
             continue;
         }
-        let att = slot.attestation.as_ref()
+        let att = slot
+            .attestation
+            .as_ref()
             .ok_or_else(|| format!("slot {}: missing IOSurface allocation attestation", id))?;
         if att.iosurface_id == 0 {
-            return Err(format!("slot {}: FP16 production requires nonzero IOSurface identity", id));
+            return Err(format!(
+                "slot {}: FP16 production requires nonzero IOSurface identity",
+                id
+            ));
         }
         if !att.attested {
             return Err(format!("slot {}: IOSurface attestation failed", id));
@@ -293,9 +298,9 @@ mod tests {
         AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, CoreAiArtifactManifest,
         MetalArtifactManifest,
     };
-    use crate::compute_image::apple_shared_arena::SlotState;
-    use crate::compute_image::apple_shared_arena::LiveIOSurfaceSlot;
     use crate::compute_image::apple_shared_arena::IOSurfaceAllocationAttestation;
+    use crate::compute_image::apple_shared_arena::LiveIOSurfaceSlot;
+    use crate::compute_image::apple_shared_arena::SlotState;
 
     fn dummy_hardware() -> AppleHardwareCompatibility {
         AppleHardwareCompatibility {
@@ -405,8 +410,12 @@ mod tests {
         let manifest = dummy_manifest();
         let model_dir = std::path::Path::new("/tmp/models");
 
-        let result = install_apple_tri_lane(&manifest, model_dir, CoreAiComputePolicy::CpuAndNeuralEngine)
-            .expect("installation should succeed");
+        let result = install_apple_tri_lane(
+            &manifest,
+            model_dir,
+            CoreAiComputePolicy::CpuAndNeuralEngine,
+        )
+        .expect("installation should succeed");
 
         // Arena should have been created with the ring_depth from the manifest
         assert_eq!(result.arena.ring_depth, manifest.arena.ring_depth);
@@ -431,18 +440,31 @@ mod tests {
         let manifest = dummy_manifest();
         let model_dir = std::path::Path::new("/tmp/models");
 
-        let result = install_apple_tri_lane(&manifest, model_dir, CoreAiComputePolicy::CpuAndNeuralEngine)
-            .expect("installation should succeed");
+        let result = install_apple_tri_lane(
+            &manifest,
+            model_dir,
+            CoreAiComputePolicy::CpuAndNeuralEngine,
+        )
+        .expect("installation should succeed");
 
         // Should have one Core ML executable matching the artifact
         assert_eq!(result.coreai_executables.len(), 1);
-        let exec = result.coreai_executables.get("coreai_attn").expect("coreai_attn executable");
+        let exec = result
+            .coreai_executables
+            .get("coreai_attn")
+            .expect("coreai_attn executable");
         assert_eq!(exec.artifact_id, "coreai_attn");
         assert_eq!(exec.compute_policy, CoreAiComputePolicy::CpuAndNeuralEngine);
-        assert!(!exec.loaded, "executable should not be loaded before warmup");
+        assert!(
+            !exec.loaded,
+            "executable should not be loaded before warmup"
+        );
 
         // Warmup results should be present and successful
-        let warmup = result.warmup_results.get("coreai_attn").expect("warmup result");
+        let warmup = result
+            .warmup_results
+            .get("coreai_attn")
+            .expect("warmup result");
         let record = warmup.as_ref().expect("warmup should succeed");
         assert!(record.warmup_success);
         assert!(record.compile_success);
@@ -456,8 +478,12 @@ mod tests {
         let manifest = dummy_manifest();
         let model_dir = std::path::Path::new("/tmp/models");
 
-        let mut result = install_apple_tri_lane(&manifest, model_dir, CoreAiComputePolicy::CpuAndNeuralEngine)
-            .expect("installation should succeed");
+        let mut result = install_apple_tri_lane(
+            &manifest,
+            model_dir,
+            CoreAiComputePolicy::CpuAndNeuralEngine,
+        )
+        .expect("installation should succeed");
 
         let mut exec = result
             .coreai_executables
@@ -470,12 +496,21 @@ mod tests {
             tolerance: 0.01,
         };
 
-        let record =
-            warmup_with_arena(&mut exec, &mut result.arena, &warmup_contract).expect("warmup should succeed");
+        let record = warmup_with_arena(&mut exec, &mut result.arena, &warmup_contract)
+            .expect("warmup should succeed");
 
-        assert!(exec.loaded, "executable should be marked loaded after warmup");
-        assert!(record.warmup_success, "warmup should be reported as success");
-        assert!(record.steady_state_latency_ns > 0, "warmup should have measured some latency");
+        assert!(
+            exec.loaded,
+            "executable should be marked loaded after warmup"
+        );
+        assert!(
+            record.warmup_success,
+            "warmup should be reported as success"
+        );
+        assert!(
+            record.steady_state_latency_ns > 0,
+            "warmup should have measured some latency"
+        );
 
         // Verify slot bindings are present through warmup validation
         assert!(
@@ -495,7 +530,14 @@ mod tests {
     // ── Attestation tests ────────────────────────────────────────────
 
     /// Helper: create a minimal slot with an attestation.
-    fn slot_with_attestation(id: u32, attested: bool, pixel_format: u32, width: u32, height: u32, capacity: u64) -> LiveIOSurfaceSlot {
+    fn slot_with_attestation(
+        id: u32,
+        attested: bool,
+        pixel_format: u32,
+        width: u32,
+        height: u32,
+        capacity: u64,
+    ) -> LiveIOSurfaceSlot {
         let mut slot = LiveIOSurfaceSlot {
             manifest: IOSurfaceSlotManifest {
                 slot_id: id,
@@ -585,9 +627,15 @@ mod tests {
         let arena = AppleSharedArena::install(&manifest).expect("arena install should succeed");
 
         for (_id, slot) in arena.slots.iter() {
-            let att = slot.attestation.as_ref()
+            let att = slot
+                .attestation
+                .as_ref()
                 .expect("every allocated slot should have an attestation");
-            assert!(att.attested, "attestation should pass for slot {}", att.slot_id);
+            assert!(
+                att.attested,
+                "attestation should pass for slot {}",
+                att.slot_id
+            );
             assert_eq!(att.manifest_layout_digest, "digest_00000000");
         }
     }
@@ -599,8 +647,11 @@ mod tests {
         for fmt in [0x4C303068u32, 0x4C303066u32] {
             let slot = slot_with_attestation(1, false, fmt, 64, 64, 8192);
             let att = slot.attestation.unwrap();
-            let fp16_ok = att.actual_pixel_format == 0x4C303068 || att.actual_pixel_format == 0x4C303066;
-            let attested = fp16_ok && att.actual_width > 0 && att.actual_height > 0
+            let fp16_ok =
+                att.actual_pixel_format == 0x4C303068 || att.actual_pixel_format == 0x4C303066;
+            let attested = fp16_ok
+                && att.actual_width > 0
+                && att.actual_height > 0
                 && att.actual_byte_capacity >= 4096;
             assert!(attested, "FP16 format 0x{:08x} should attest", fmt);
         }
@@ -612,7 +663,8 @@ mod tests {
         // ARGB format (common non-fp16)
         let slot = slot_with_attestation(1, false, 0x10000000, 64, 64, 8192);
         let att = slot.attestation.unwrap();
-        let fp16_ok = att.actual_pixel_format == 0x4C303068 || att.actual_pixel_format == 0x4C303066;
+        let fp16_ok =
+            att.actual_pixel_format == 0x4C303068 || att.actual_pixel_format == 0x4C303066;
         assert!(!fp16_ok, "ARGB pixel format should not be FP16");
     }
 
@@ -621,8 +673,10 @@ mod tests {
     fn test_attestation_capacity_mismatch_rejected() {
         let slot = slot_with_attestation(1, false, 0x4C303068, 64, 64, 1024);
         let att = slot.attestation.unwrap();
-        let attested = (att.actual_pixel_format == 0x4C303068 || att.actual_pixel_format == 0x4C303066)
-            && att.actual_width > 0 && att.actual_height > 0
+        let attested = (att.actual_pixel_format == 0x4C303068
+            || att.actual_pixel_format == 0x4C303066)
+            && att.actual_width > 0
+            && att.actual_height > 0
             && att.actual_byte_capacity >= 4096;
         assert!(!attested, "capacity 1024 < 4096 should fail attestation");
     }
@@ -630,8 +684,12 @@ mod tests {
     /// 5. precreate_metal_textures succeeds when all slots have valid attestations.
     #[test]
     fn test_precreate_metal_textures_succeeds() {
-        let mut result = install_apple_tri_lane(&dummy_manifest(), std::path::Path::new("/tmp/models"),
-            CoreAiComputePolicy::CpuAndNeuralEngine).expect("install should succeed");
+        let mut result = install_apple_tri_lane(
+            &dummy_manifest(),
+            std::path::Path::new("/tmp/models"),
+            CoreAiComputePolicy::CpuAndNeuralEngine,
+        )
+        .expect("install should succeed");
 
         // Assign explicit attestations (step 2 generates synthetic ones, but
         // we use explicit values here for clarity).
@@ -656,8 +714,12 @@ mod tests {
     /// 6. precreate_metal_textures fails when a slot has no attestation.
     #[test]
     fn test_precreate_metal_textures_fails_missing_attestation() {
-        let mut result = install_apple_tri_lane(&dummy_manifest(), std::path::Path::new("/tmp/models"),
-            CoreAiComputePolicy::CpuAndNeuralEngine).expect("install should succeed");
+        let mut result = install_apple_tri_lane(
+            &dummy_manifest(),
+            std::path::Path::new("/tmp/models"),
+            CoreAiComputePolicy::CpuAndNeuralEngine,
+        )
+        .expect("install should succeed");
 
         // Clear attestations from all slots, then give slot 1 a valid one.
         // Slot 0 remains without attestation to trigger the failure path in
@@ -666,7 +728,9 @@ mod tests {
             slot.attestation = None;
         }
         for (id, slot) in result.arena.slots.iter_mut() {
-            if *id == 0 { continue; }
+            if *id == 0 {
+                continue;
+            }
             slot.attestation = Some(IOSurfaceAllocationAttestation {
                 slot_id: *id,
                 iosurface_id: 1,

@@ -35,6 +35,7 @@ pub fn spawn_npu_completion_thread(
         // ^ placeholder — replace with the actual FFI wait call.
 
         // Publish the completed sequence number.
-        port.completed_atomic().store(seq, std::sync::atomic::Ordering::Release);
+        port.completed_atomic()
+            .store(seq, std::sync::atomic::Ordering::Release);
     })
 }

@@ -1,5 +1,5 @@
-use crate::tools::{FunctionCall, ToolDefinition};
 use crate::tools::list_devices::tool_list_devices;
+use crate::tools::{FunctionCall, ToolDefinition};
 use serde_json::json;
 use std::path::Path;
 
@@ -10,7 +10,10 @@ pub fn execute_tool_call(call: &FunctionCall) -> Result<serde_json::Value, Strin
 }
 
 /// Execute a sandbox tool call with an explicit sandbox root.
-pub fn sandbox_execute(call: &FunctionCall, root: Option<&Path>) -> Result<serde_json::Value, String> {
+pub fn sandbox_execute(
+    call: &FunctionCall,
+    root: Option<&Path>,
+) -> Result<serde_json::Value, String> {
     let root = sandbox_root(root);
     let result = match call.name.as_str() {
         "read_file" => crate::tools::sandbox::tool_read_file(&root, &call.arguments),
@@ -157,7 +160,9 @@ pub fn default_sandbox_tools() -> Vec<ToolDefinition> {
 fn tool_javascript(root: &Path, args: &serde_json::Value) -> serde_json::Value {
     let code = match args.get("code").and_then(|v| v.as_str()) {
         Some(s) => s,
-        None => return json!({"ok": false, "error": "missing 'code' argument", "code": "MISSING_ARG"}),
+        None => {
+            return json!({"ok": false, "error": "missing 'code' argument", "code": "MISSING_ARG"})
+        }
     };
     let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
     let result = crate::tools::js_runtime::run_javascript(code, Some(root), timeout_ms);

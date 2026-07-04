@@ -148,10 +148,7 @@ impl fmt::Display for ScheduleError {
                 )
             }
             ScheduleError::UnknownTarget { system, target } => {
-                write!(
-                    f,
-                    "{system:?} references unknown target system {target:?}"
-                )
+                write!(f, "{system:?} references unknown target system {target:?}")
             }
         }
     }

@@ -10,12 +10,12 @@
 //! config, and architecture properties from GGUF files, then feeds them into
 //! the compile_sequential/compile_tensix pipeline to produce a ComputeImage.
 
-use sha2::{Digest, Sha256};
+use crate::config::ManifestModality;
 use half::{bf16, f16};
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use crate::config::ManifestModality;
 
 /// Minimum GGUF version supported for import.
 pub const MIN_GGUF_VERSION: u32 = 3;
@@ -39,12 +39,16 @@ pub mod keys {
 
 /// Look up a metadata value by key, trying both the exact key and
 /// architecture-prefixed versions.
-fn meta_val(metadata: &[(String, String)], arch: &str, generic_key: &str) -> Option<(String, String)> {
+fn meta_val(
+    metadata: &[(String, String)],
+    arch: &str,
+    generic_key: &str,
+) -> Option<(String, String)> {
     // Try architecture-prefixed key first (e.g. "gemma4.block_count")
     let with_prefix = format!("{arch}.{generic_key}");
     if let Some(kv) = metadata.iter().find(|(k, _)| *k == with_prefix) {
         return Some(kv.clone());
-}
+    }
     // Fall back to generic key (e.g. "llama.block_count")
     metadata.iter().find(|(k, _)| *k == generic_key).cloned()
 }
@@ -300,7 +304,9 @@ fn read_typed_value<R: Read>(r: &mut R, typ: u32) -> Result<String, String> {
             let count = read_u64_le(r)?;
             // For large arrays (tokenizer vocab), return a placeholder.
             if count > 10000 {
-                for _ in 0..count { read_typed_value(r, elem_type)?; }
+                for _ in 0..count {
+                    read_typed_value(r, elem_type)?;
+                }
                 return Ok(format!("[<{} elements>]", count));
             }
             let mut elems = Vec::with_capacity(count as usize);
@@ -422,7 +428,13 @@ pub fn parse_gguf_header(
                                 // Accept the name if all bytes are readable ASCII/UTF-8
                                 // and the name ends in a weight suffix
                                 let name_str = String::from_utf8_lossy(&name_buf);
-                                if name_str.chars().all(|c| c.is_ascii_graphic() || c.is_ascii_whitespace() || c == '.' || c == '_' || c == '/') {
+                                if name_str.chars().all(|c| {
+                                    c.is_ascii_graphic()
+                                        || c.is_ascii_whitespace()
+                                        || c == '.'
+                                        || c == '_'
+                                        || c == '/'
+                                }) {
                                     // Seek back to re-read with proper read_string
                                     let rewind = 8 + len as i64;
                                     f.seek(SeekFrom::Current(-rewind))
@@ -527,17 +539,19 @@ pub fn extract_architecture(
     // Use flex lookups that check both architecture-prefixed keys
     // (gemma4.embedding_length) and generic keys (llama.embedding_length)
     let hidden_size = meta_u64_flex(metadata, arch, "embedding_length").unwrap_or(4096) as u32;
-    let num_attention_heads = meta_u64_flex(metadata, arch, "attention.head_count").unwrap_or(32) as u32;
-    let num_kv_heads =
-        meta_u64_flex(metadata, arch, "attention.head_count_kv").unwrap_or(num_attention_heads as u64) as u32;
+    let num_attention_heads =
+        meta_u64_flex(metadata, arch, "attention.head_count").unwrap_or(32) as u32;
+    let num_kv_heads = meta_u64_flex(metadata, arch, "attention.head_count_kv")
+        .unwrap_or(num_attention_heads as u64) as u32;
     let head_dim = meta_u64_flex(metadata, arch, "attention.head_dim")
         .unwrap_or((hidden_size / num_attention_heads) as u64) as u32;
     let num_hidden_layers = meta_u64_flex(metadata, arch, "block_count").unwrap_or(32) as u32;
     let vocab_size = meta_u64_flex(metadata, arch, "vocab_size").unwrap_or(32000) as u32;
-    let intermediate_size =
-        meta_u64_flex(metadata, arch, "feed_forward_length").unwrap_or(hidden_size as u64 * 4) as u32;
+    let intermediate_size = meta_u64_flex(metadata, arch, "feed_forward_length")
+        .unwrap_or(hidden_size as u64 * 4) as u32;
     let max_seq_len = meta_u64_flex(metadata, arch, "context_length").unwrap_or(131072) as u32;
-    let rms_norm_eps = meta_f64_flex(metadata, arch, "attention.layer_norm_rms_epsilon").unwrap_or(1e-6);
+    let rms_norm_eps =
+        meta_f64_flex(metadata, arch, "attention.layer_norm_rms_epsilon").unwrap_or(1e-6);
     let rope_theta = meta_f64_flex(metadata, arch, "rope.freq_base").unwrap_or(10000.0);
 
     let num_layers = num_hidden_layers as usize;
@@ -705,32 +719,56 @@ fn gguf_file_type_to_mode_str(file_type: u32) -> Option<String> {
 
 /// Dequantize a GGML-quantized tensor to f32.
 /// Supports: f32, f16, bf16, q8_0, q4_0.
-pub fn dequantize_ggml_tensor(data: &[u8], dtype: &str, num_elements: usize) -> Result<Vec<f32>, String> {
+pub fn dequantize_ggml_tensor(
+    data: &[u8],
+    dtype: &str,
+    num_elements: usize,
+) -> Result<Vec<f32>, String> {
     match dtype {
         "f32" => {
             if data.len() < num_elements * 4 {
                 return Err(format!(
                     "f32 data too short: {} bytes for {} elements",
-                    data.len(), num_elements
+                    data.len(),
+                    num_elements
                 ));
             }
-            Ok(data[..num_elements * 4].chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+            Ok(data[..num_elements * 4]
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect())
         }
         "f16" => {
             if data.len() < num_elements * 2 {
-                return Err(format!("f16 data too short: {} bytes for {} elements", data.len(), num_elements));
+                return Err(format!(
+                    "f16 data too short: {} bytes for {} elements",
+                    data.len(),
+                    num_elements
+                ));
             }
-            Ok(data[..num_elements * 2].chunks_exact(2).map(|c| f16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32()).collect())
+            Ok(data[..num_elements * 2]
+                .chunks_exact(2)
+                .map(|c| f16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32())
+                .collect())
         }
         "bf16" => {
             if data.len() < num_elements * 2 {
-                return Err(format!("bf16 data too short: {} bytes for {} elements", data.len(), num_elements));
+                return Err(format!(
+                    "bf16 data too short: {} bytes for {} elements",
+                    data.len(),
+                    num_elements
+                ));
             }
-            Ok(data[..num_elements * 2].chunks_exact(2).map(|c| bf16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32()).collect())
+            Ok(data[..num_elements * 2]
+                .chunks_exact(2)
+                .map(|c| bf16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32())
+                .collect())
         }
         "q8_0" => Ok(dequantize_ggml_q8_0(data, num_elements)),
         "q4_0" => Ok(dequantize_ggml_q4_0(data, num_elements)),
-        _ => Err(format!("unsupported GGML dtype for dequantization: {dtype}")),
+        _ => Err(format!(
+            "unsupported GGML dtype for dequantization: {dtype}"
+        )),
     }
 }
 
@@ -744,11 +782,15 @@ fn dequantize_ggml_q8_0(data: &[u8], num_elements: usize) -> Vec<f32> {
     let mut out = Vec::with_capacity(num_elements);
     for b in 0..block_count {
         let offset = b * Q8_0_BYTES_PER_BLOCK;
-        if offset + Q8_0_BYTES_PER_BLOCK > data.len() { break; }
+        if offset + Q8_0_BYTES_PER_BLOCK > data.len() {
+            break;
+        }
         let scale_bits = u16::from_le_bytes([data[offset], data[offset + 1]]);
         let scale = f16::from_bits(scale_bits).to_f32();
         let vals_start = offset + 2;
-        let remaining = num_elements.saturating_sub(b * Q8_0_BLOCK_SIZE).min(Q8_0_BLOCK_SIZE);
+        let remaining = num_elements
+            .saturating_sub(b * Q8_0_BLOCK_SIZE)
+            .min(Q8_0_BLOCK_SIZE);
         for i in 0..remaining {
             out.push((data[vals_start + i] as i8 as f32) * scale);
         }
@@ -766,11 +808,15 @@ fn dequantize_ggml_q4_0(data: &[u8], num_elements: usize) -> Vec<f32> {
     let mut out = Vec::with_capacity(num_elements);
     for b in 0..block_count {
         let offset = b * Q4_0_BYTES_PER_BLOCK;
-        if offset + Q4_0_BYTES_PER_BLOCK > data.len() { break; }
+        if offset + Q4_0_BYTES_PER_BLOCK > data.len() {
+            break;
+        }
         let scale_bits = u16::from_le_bytes([data[offset], data[offset + 1]]);
         let scale = f16::from_bits(scale_bits).to_f32();
         let nibbles_start = offset + 2;
-        let remaining = num_elements.saturating_sub(b * Q4_0_BLOCK_SIZE).min(Q4_0_BLOCK_SIZE);
+        let remaining = num_elements
+            .saturating_sub(b * Q4_0_BLOCK_SIZE)
+            .min(Q4_0_BLOCK_SIZE);
         for i in 0..remaining {
             let byte = data[nibbles_start + i / 2];
             let nibble = if i % 2 == 0 { byte & 0x0F } else { byte >> 4 };
@@ -785,18 +831,19 @@ fn dequantize_ggml_q4_0(data: &[u8], num_elements: usize) -> Vec<f32> {
 /// Read a single tensor from a GGUF file and dequantize to f32.
 /// Uses mmap for zero-copy access.
 pub fn read_gguf_tensor_f32(path: &Path, meta: &GgufTensorMeta) -> Result<Vec<f32>, String> {
-    let file = File::open(path)
-        .map_err(|e| format!("Cannot open GGUF file for tensor read: {}", e))?;
-    let mmap = unsafe {
-        memmap2::Mmap::map(&file)
-            .map_err(|e| format!("Cannot mmap GGUF file: {}", e))?
-    };
+    let file =
+        File::open(path).map_err(|e| format!("Cannot open GGUF file for tensor read: {}", e))?;
+    let mmap =
+        unsafe { memmap2::Mmap::map(&file).map_err(|e| format!("Cannot mmap GGUF file: {}", e))? };
     let start = meta.byte_offset as usize;
     let end = start + meta.byte_size as usize;
     if end > mmap.len() {
         return Err(format!(
             "Tensor {} offset {} size {} exceeds file size {}",
-            meta.name, meta.byte_offset, meta.byte_size, mmap.len()
+            meta.name,
+            meta.byte_offset,
+            meta.byte_size,
+            mmap.len()
         ));
     }
     let raw = &mmap[start..end];
@@ -987,11 +1034,16 @@ mod tests {
     fn test_dequantize_q8_0() {
         let mut buf = Vec::with_capacity(Q8_0_BYTES_PER_BLOCK);
         buf.extend_from_slice(&0x4000u16.to_le_bytes()); // scale = 2.0
-        for i in 0..32u8 { buf.push(i); }
+        for i in 0..32u8 {
+            buf.push(i);
+        }
         let result = dequantize_ggml_q8_0(&buf, 32);
         assert_eq!(result.len(), 32);
         for i in 0..32 {
-            assert!((result[i] - (i as i8 as f32 * 2.0)).abs() < 1e-4, "mismatch at {i}");
+            assert!(
+                (result[i] - (i as i8 as f32 * 2.0)).abs() < 1e-4,
+                "mismatch at {i}"
+            );
         }
     }
 
@@ -999,19 +1051,28 @@ mod tests {
     fn test_dequantize_q4_0() {
         let mut buf = Vec::with_capacity(Q4_0_BYTES_PER_BLOCK);
         buf.extend_from_slice(&0x3C00u16.to_le_bytes()); // scale = 1.0
-        for _ in 0..16 { buf.push(0x10); }
+        for _ in 0..16 {
+            buf.push(0x10);
+        }
         let result = dequantize_ggml_q4_0(&buf, 32);
         assert_eq!(result.len(), 32);
         for i in 0..32 {
             let expected = if i % 2 == 0 { -8.0 } else { -7.0 };
-            assert!((result[i] - expected).abs() < 1e-4, "mismatch at {i}: {} != {}", result[i], expected);
+            assert!(
+                (result[i] - expected).abs() < 1e-4,
+                "mismatch at {i}: {} != {}",
+                result[i],
+                expected
+            );
         }
     }
 
     #[test]
     fn test_dequantize_f32() {
         let data: Vec<u8> = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32]
-            .iter().flat_map(|v| v.to_le_bytes()).collect();
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
         let result = dequantize_ggml_tensor(&data, "f32", 4).unwrap();
         assert_eq!(result.len(), 4);
         assert!((result[2] - 3.0).abs() < 1e-6);
@@ -1019,17 +1080,38 @@ mod tests {
 
     #[test]
     fn test_gguf_name_to_hf_llama() {
-        assert_eq!(gguf_name_to_hf_name("token_embd.weight", "llama").unwrap(), "model.embed_tokens.weight");
-        assert_eq!(gguf_name_to_hf_name("output.weight", "llama").unwrap(), "model.lm_head.weight");
-        assert_eq!(gguf_name_to_hf_name("blk.0.attn_q.weight", "llama").unwrap(), "model.layers.0.self_attn.q_proj.weight");
-        assert_eq!(gguf_name_to_hf_name("blk.0.ffn_gate.weight", "llama").unwrap(), "model.layers.0.mlp.gate_proj.weight");
-        assert_eq!(gguf_name_to_hf_name("blk.0.attn_norm.weight", "llama").unwrap(), "model.layers.0.input_layernorm.weight");
+        assert_eq!(
+            gguf_name_to_hf_name("token_embd.weight", "llama").unwrap(),
+            "model.embed_tokens.weight"
+        );
+        assert_eq!(
+            gguf_name_to_hf_name("output.weight", "llama").unwrap(),
+            "model.lm_head.weight"
+        );
+        assert_eq!(
+            gguf_name_to_hf_name("blk.0.attn_q.weight", "llama").unwrap(),
+            "model.layers.0.self_attn.q_proj.weight"
+        );
+        assert_eq!(
+            gguf_name_to_hf_name("blk.0.ffn_gate.weight", "llama").unwrap(),
+            "model.layers.0.mlp.gate_proj.weight"
+        );
+        assert_eq!(
+            gguf_name_to_hf_name("blk.0.attn_norm.weight", "llama").unwrap(),
+            "model.layers.0.input_layernorm.weight"
+        );
         assert!(gguf_name_to_hf_name("rope_freqs.weight", "llama").is_none());
     }
 
     #[test]
     fn test_gguf_name_to_hf_gemma4() {
-        assert_eq!(gguf_name_to_hf_name("token_embd.weight", "gemma4").unwrap(), "language_model.model.embed_tokens.weight");
-        assert_eq!(gguf_name_to_hf_name("blk.12.attn_q.weight", "gemma4").unwrap(), "language_model.model.layers.12.self_attn.q_proj.weight");
+        assert_eq!(
+            gguf_name_to_hf_name("token_embd.weight", "gemma4").unwrap(),
+            "language_model.model.embed_tokens.weight"
+        );
+        assert_eq!(
+            gguf_name_to_hf_name("blk.12.attn_q.weight", "gemma4").unwrap(),
+            "language_model.model.layers.12.self_attn.q_proj.weight"
+        );
     }
 }

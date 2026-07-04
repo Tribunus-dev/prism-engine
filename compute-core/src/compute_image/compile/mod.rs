@@ -1,36 +1,36 @@
 //! ComputeImage compilation pipeline — source loading, quantization,
 //! sequential/differential compilation, diagnostics, and publishing.
 
-pub mod source;
-mod quantize;
+mod download;
 mod emit;
 mod pipeline;
-mod download;
+mod quantize;
+pub mod source;
 
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod coreai;
-pub mod hardware;
-pub mod portfolio;
-pub mod ternary;
-pub mod int4_pack;
 pub mod draft_loader;
-#[cfg(feature = "tensix")]
-pub mod tensix;
 pub mod execution_graph;
-pub mod ternary_pipeline;
-pub mod kernel_types;
+pub mod hardware;
+pub mod int4_pack;
 #[cfg(feature = "prism-backend")]
 pub mod kernel_dispatch;
 #[cfg(feature = "prism-backend")]
 pub mod kernel_registry;
+pub mod kernel_types;
+pub mod portfolio;
+#[cfg(feature = "tensix")]
+pub mod tensix;
+pub mod ternary;
+pub mod ternary_pipeline;
 #[cfg(feature = "prism-backend")]
 pub mod validation_matrix;
 
-pub use source::*;
-pub use quantize::*;
+pub use download::*;
 pub(crate) use emit::*;
 pub use pipeline::*;
-pub use download::*;
+pub use quantize::*;
+pub use source::*;

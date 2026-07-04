@@ -6,9 +6,9 @@
 //! boundaries, ensuring deterministic ordering and an authoritative mutation
 //! seam for the future append-only receipt ledger.
 
-use crate::runtime::scheduling::metadata::{Stage, SystemId};
 use crate::runtime::scheduling::error::CommandError;
-use crate::runtime::world::{Entity, Component};
+use crate::runtime::scheduling::metadata::{Stage, SystemId};
+use crate::runtime::world::{Component, Entity};
 use serde::Serialize;
 
 // ---------------------------------------------------------------------------
@@ -79,11 +79,7 @@ pub struct CommandWriter<'a> {
 
 impl<'a> CommandWriter<'a> {
     /// Create a new writer bound to a buffer for the given stage and system.
-    pub fn new(
-        buffer: &'a mut Vec<StampedCommand>,
-        stage: Stage,
-        system_id: SystemId,
-    ) -> Self {
+    pub fn new(buffer: &'a mut Vec<StampedCommand>, stage: Stage, system_id: SystemId) -> Self {
         Self {
             buffer,
             stage,

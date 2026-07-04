@@ -2,10 +2,10 @@
 //! segment pipeline, handles quantized weight triplets, and builds the
 //! source identity / manifest hash for deterministic compilation.
 
+use crate::compute_image::compile::source::SourceTensor;
 use crate::compute_image::manifest::{
     Manifest, QuantizationDesc, SegmentKind, ShardHash, SourceIdentity,
 };
-use crate::compute_image::compile::source::SourceTensor;
 use crate::config::PackedLinearShapes;
 use mlx_rs::Array;
 use serde::Serialize;

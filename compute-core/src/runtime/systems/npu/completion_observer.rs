@@ -13,8 +13,8 @@ use crate::runtime::resources::NpuCompletionPort;
 use crate::runtime::scheduling::access::{ComponentSet, ResourceSet};
 use crate::runtime::scheduling::command::CommandWriter;
 use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
 };
 use crate::runtime::world::World;
 
@@ -75,11 +75,7 @@ impl ErasedSystem for NpuCompletionObserver {
         &NPU_COMPLETION_OBSERVER_META
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // Poll the NPU completion port — single load-acquire.
         let completed = match world.get_resource::<NpuCompletionPort>() {
             Some(port) => port.poll_completed(),

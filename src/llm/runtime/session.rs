@@ -238,11 +238,13 @@ mod compute_session {
             InferenceSessionState::EstablishingResidency
             | InferenceSessionState::Resident
             | InferenceSessionState::Prefilling => ControlSessionState::PrefillRunning,
-            InferenceSessionState::PublishingKvEpoch
-            | InferenceSessionState::Ready => ControlSessionState::PrefillReady,
+            InferenceSessionState::PublishingKvEpoch | InferenceSessionState::Ready => {
+                ControlSessionState::PrefillReady
+            }
             InferenceSessionState::Decoding => ControlSessionState::Decoding,
-            InferenceSessionState::CompressingKv
-            | InferenceSessionState::RefreshingContext => ControlSessionState::Decoding,
+            InferenceSessionState::CompressingKv | InferenceSessionState::RefreshingContext => {
+                ControlSessionState::Decoding
+            }
             InferenceSessionState::Cancelling | InferenceSessionState::Cancelled => {
                 ControlSessionState::Cancelled
             }
@@ -277,11 +279,8 @@ mod compute_session {
             eos_token_id: u32,
             max_tokens: u32,
         ) -> Result<(), String> {
-            let session = GenerationControlSession::new(
-                session_id.0.to_string(),
-                eos_token_id,
-                max_tokens,
-            );
+            let session =
+                GenerationControlSession::new(session_id.0.to_string(), eos_token_id, max_tokens);
             let mut sessions = self
                 .sessions
                 .lock()

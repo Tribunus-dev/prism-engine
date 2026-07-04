@@ -5,8 +5,8 @@
 //! → `zeDeviceGetProperties` to discover Intel integrated and discrete GPUs.
 //! On non-Linux platforms this probe returns an empty vec.
 
-use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo, PcieLinkInfo};
 use super::DeviceProbe;
+use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo, PcieLinkInfo};
 
 /// Probes Intel GPUs via the Level Zero driver API.
 pub struct LevelZeroProbe;
@@ -64,36 +64,33 @@ mod ffi {
     /// WARNING: every field offset matters — a misaligned layout reads garbage.
     #[repr(C)]
     pub struct ze_device_properties_t {
-        pub stype: u32,                                        // 0
-        pub pNext: *const std::ffi::c_void,                    // 8
-        pub deviceType: u32,                                   // 16
-        pub vendorId: u32,                                     // 20
-        pub deviceId: u32,                                     // 24
-        pub flags: u32,                                        // 28 — must be before subdeviceId
-        pub subdeviceId: u32,                                  // 32
-        pub coreClockRate: u32,                                // 36
-        pub maxMemAllocSize: u64,                              // 40
-        pub maxHardwareContexts: u32,                          // 48
-        pub maxCommandQueuePriority: u32,                      // 52
-        pub numThreadsPerEU: u32,                              // 56
-        pub physicalEUSimdWidth: u32,                          // 60
-        pub numEUsPerSubslice: u32,                            // 64
-        pub numSubslicesPerSlice: u32,                         // 68
-        pub numSlices: u32,                                    // 72
-        pub timerResolution: u64,                              // 76
-        pub timestampValidBits: u32,                           // 84
-        pub kernelTimestampValidBits: u32,                     // 88
-        pub uuid: [u8; 16],                                    // 92
-        pub name: [std::os::raw::c_char; 256],                 // 108
+        pub stype: u32,                        // 0
+        pub pNext: *const std::ffi::c_void,    // 8
+        pub deviceType: u32,                   // 16
+        pub vendorId: u32,                     // 20
+        pub deviceId: u32,                     // 24
+        pub flags: u32,                        // 28 — must be before subdeviceId
+        pub subdeviceId: u32,                  // 32
+        pub coreClockRate: u32,                // 36
+        pub maxMemAllocSize: u64,              // 40
+        pub maxHardwareContexts: u32,          // 48
+        pub maxCommandQueuePriority: u32,      // 52
+        pub numThreadsPerEU: u32,              // 56
+        pub physicalEUSimdWidth: u32,          // 60
+        pub numEUsPerSubslice: u32,            // 64
+        pub numSubslicesPerSlice: u32,         // 68
+        pub numSlices: u32,                    // 72
+        pub timerResolution: u64,              // 76
+        pub timestampValidBits: u32,           // 84
+        pub kernelTimestampValidBits: u32,     // 88
+        pub uuid: [u8; 16],                    // 92
+        pub name: [std::os::raw::c_char; 256], // 108
     }
 
     #[link(name = "ze_loader")]
     extern "C" {
         pub fn zeInit(flags: u32) -> ze_result_t;
-        pub fn zeDriverGet(
-            pCount: *mut u32,
-            phDrivers: *mut *mut std::ffi::c_void,
-        ) -> ze_result_t;
+        pub fn zeDriverGet(pCount: *mut u32, phDrivers: *mut *mut std::ffi::c_void) -> ze_result_t;
         pub fn zeDriverGetProperties(
             hDriver: *mut std::ffi::c_void,
             pProperties: *mut ze_driver_properties_t,
@@ -237,7 +234,8 @@ fn probe_level_zero_devices() -> Vec<DeviceInfo> {
             };
 
             // Compute units = execution units: slices × subslices × EUs per subslice.
-            let compute_units = props.numSlices * props.numSubslicesPerSlice * props.numEUsPerSubslice;
+            let compute_units =
+                props.numSlices * props.numSubslicesPerSlice * props.numEUsPerSubslice;
 
             // Memory estimation.
             // On integrated GPUs maxMemAllocSize is not VRAM but max per-allocation

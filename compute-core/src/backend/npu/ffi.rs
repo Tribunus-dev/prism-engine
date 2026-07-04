@@ -40,11 +40,7 @@ extern "C" {
     ) -> u64;
 
     /// Non-blocking poll. Returns 1 if complete, 0 if still running.
-    pub fn npu_poll_completion(
-        target: TargetNpu,
-        session: *mut c_void,
-        submission_id: u64,
-    ) -> i32;
+    pub fn npu_poll_completion(target: TargetNpu, session: *mut c_void, submission_id: u64) -> i32;
 
     /// Release a loaded graph session.
     pub fn npu_destroy_session(target: TargetNpu, session: *mut c_void);

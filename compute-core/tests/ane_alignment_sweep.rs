@@ -155,7 +155,6 @@ fn ane_alignment_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), vec![seq_len as i64, H])],
             outputs: vec![(out_name.clone(), vec![seq_len as i64, FFN])],
-
         };
 
         let model_path = match compile(&tag, prog, meta) {

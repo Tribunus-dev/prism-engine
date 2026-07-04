@@ -12,6 +12,7 @@
 use crate::compilation::level1::gates::check_numerical;
 use crate::compilation::level1::scheduler::{Level1Config, Level1Scheduler};
 use crate::compilation::level2::bridge::CoreMLTeacher;
+use crate::compilation::level2::compiler::ensure_teacher_bundles;
 use crate::compilation::level2::gates::{
     check_joint_acceptance_rate, AcceptanceThresholds, JointAcceptanceResult,
 };
@@ -25,7 +26,9 @@ use crate::compilation::phase_types::{
 use crate::compilation::receipt::{BlockReceipt, EngineExecutionLog};
 use crate::server::state::{MemoryAllocationBroker, ServerOperationalMode};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 
 /// Request payload for `/v1/distill`.
@@ -114,14 +117,17 @@ impl DistillationEngine {
         }
     }
 
-    pub async fn submit(
-        &self,
-        request: DistillationRequest,
-    ) -> Result<String, String> {
+    pub async fn submit(&self, request: DistillationRequest) -> Result<String, String> {
+        let mut request = request;
         let mut jobs = self.jobs.lock().await;
         let job_id = request.job_id.clone();
         if jobs.contains_key(&job_id) {
             return Err(format!("job {} already exists", job_id));
+        }
+        if request.model_dir.is_none() {
+            if let Some(path) = default_level2_model_dir(&job_id) {
+                request.model_dir = Some(path);
+            }
         }
         let total_blocks = 48;
         let has_model_dir = request.model_dir.is_some();
@@ -163,10 +169,12 @@ impl DistillationEngine {
             receipt_count: j.block_receipts.len(),
             level2_used: j.level2_used,
             level2_fallback_verified: j.level2_fallback_verified,
-            joint_acceptance_rate: j.joint_acceptance_result
+            joint_acceptance_rate: j
+                .joint_acceptance_result
                 .as_ref()
                 .map(|r| r.acceptance_rate),
-            joint_acceptance_passed: j.joint_acceptance_result
+            joint_acceptance_passed: j
+                .joint_acceptance_result
                 .as_ref()
                 .map(|r| r.passed)
                 .unwrap_or(false),
@@ -180,6 +188,46 @@ impl DistillationEngine {
     }
 }
 
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
+fn default_level2_model_dir(job_id: &str) -> Option<String> {
+    Some(
+        std::env::temp_dir()
+            .join("prism-distill-coreml")
+            .join(job_id)
+            .join("teacher-models")
+            .to_string_lossy()
+            .to_string(),
+    )
+}
+
+#[cfg(not(all(target_os = "macos", feature = "prism-backend")))]
+fn default_level2_model_dir(_job_id: &str) -> Option<String> {
+    None
+}
+
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
+fn prepare_level2_model_dir(
+    job_id: &str,
+    model_dir: &str,
+    config: &Level1Config,
+    total_microbatches: usize,
+) -> Result<PathBuf, String> {
+    let path = PathBuf::from(model_dir);
+    ensure_teacher_bundles(&path, config.hidden_dim, total_microbatches)
+        .map_err(|e| format!("job {job_id}: prepare Core ML teacher bundles: {e}"))?;
+    Ok(path)
+}
+
+#[cfg(not(all(target_os = "macos", feature = "prism-backend")))]
+fn prepare_level2_model_dir(
+    _job_id: &str,
+    model_dir: &str,
+    _config: &Level1Config,
+    _total_microbatches: usize,
+) -> Result<PathBuf, String> {
+    Ok(PathBuf::from(model_dir))
+}
+
 // ── Level 2 helper (gated on macOS + prism-backend) ──────────────────────
 
 /// Run the Level 2 Core ML teacher pipeline for one block.
@@ -188,7 +236,7 @@ impl DistillationEngine {
 fn run_level2_block(
     config: &Level1Config,
     model_dir: &str,
-    block_idx: usize,
+    _block_idx: usize,
 ) -> Option<(u64, bool)> {
     let teacher = CoreMLTeacher::new(model_dir);
     let mut sched = Level2Scheduler::new(
@@ -245,6 +293,14 @@ async fn run_distillation_loop(
 ) {
     broker.set_mode(ServerOperationalMode::Distilling);
     let ceiling = MemoryAllocationBroker::DISTILL_SUB_CEILING_BYTES;
+    const LEVEL2_PIPELINE_MICROBATCHES: usize = 8;
+    let config = Level1Config {
+        microbatch: 4096,
+        hidden_dim: 3840,
+        pages_per_row: 2,
+        budget: MemoryBudget::m1_16gb_default(),
+        objective_weights: None,
+    };
 
     // ── Ingesting ────────────────────────────────────────────────────────
     {
@@ -255,8 +311,26 @@ async fn run_distillation_loop(
         }
     }
 
+    let prepared_model_dir = if let Some(ref model_dir) = model_dir {
+        match prepare_level2_model_dir(&job_id, model_dir, &config, LEVEL2_PIPELINE_MICROBATCHES) {
+            Ok(path) => Some(path),
+            Err(error) => {
+                let mut j = jobs.lock().await;
+                if let Some(job) = j.get_mut(&job_id) {
+                    job.state = DistillationState::Failed;
+                    job.error = Some(error);
+                }
+                broker.set_mode(ServerOperationalMode::Idle);
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
     // ── Compiling (block-by-block) ───────────────────────────────────────
     for block_idx in 0..total_blocks {
+        let block_started_at = Instant::now();
         if broker.available() < 100_000_000 {
             let mut j = jobs.lock().await;
             if let Some(job) = j.get_mut(&job_id) {
@@ -270,29 +344,24 @@ async fn run_distillation_loop(
         broker.declare(ceiling);
 
         // ── Level 1: Metal teacher + Ternary student + Accelerate reducer ──
-        let config = Level1Config {
-            microbatch: 4096,
-            hidden_dim: 3840,
-            pages_per_row: 2,
-            budget: MemoryBudget::m1_16gb_default(),
-            objective_weights: None,
-        };
-
-        let mut l1 = Level1Scheduler::new(config.clone(), 8);
+        let mut l1 = Level1Scheduler::new(config.clone(), LEVEL2_PIPELINE_MICROBATCHES);
         l1.initialize();
         while l1.step() {}
 
         let mse = l1.reducer().output_mse.unwrap_or(f64::INFINITY);
         let cosine = l1.reducer().cosine_similarity.unwrap_or(0.0);
-        let residual = l1.reducer().residual_relative_error.unwrap_or(f64::INFINITY);
+        let residual = l1
+            .reducer()
+            .residual_relative_error
+            .unwrap_or(f64::INFINITY);
         let l1_peak = l1.peak_memory();
 
         // ── Level 2: Core ML teacher (when available) ──────────────────────
         let mut l2_peak = 0u64;
         let mut l2_fallback_verified = false;
 
-        if let Some(ref md) = model_dir {
-            if let Some((pk, fv)) = run_level2_block(&config, md, block_idx) {
+        if let Some(ref md) = prepared_model_dir {
+            if let Some((pk, fv)) = run_level2_block(&config, &md.to_string_lossy(), block_idx) {
                 l2_peak = pk;
                 l2_fallback_verified = fv;
             }
@@ -306,7 +375,10 @@ async fn run_distillation_loop(
         numerical_drift.insert("output_mse".into(), mse as f32);
         numerical_drift.insert("cosine_similarity".into(), cosine as f32);
         numerical_drift.insert("residual_error".into(), residual as f32);
-        numerical_drift.insert("gate_passed".into(), if num_result.passed { 1.0 } else { 0.0 });
+        numerical_drift.insert(
+            "gate_passed".into(),
+            if num_result.passed { 1.0 } else { 0.0 },
+        );
 
         let receipt = BlockReceipt {
             block_index: block_idx,
@@ -317,10 +389,18 @@ async fn run_distillation_loop(
             optimal_scale_dtype: "two_level_int8".into(),
             numerical_drift,
             execution_provenance: EngineExecutionLog {
-                backend_requested: if level2_requested { "Level2-CoreML".into() } else { "Level1-Metal".into() },
-                backend_observed: if l2_fallback_verified { "Level2-CoreML".into() } else { "Level1-Metal".into() },
+                backend_requested: if level2_requested {
+                    "Level2-CoreML".into()
+                } else {
+                    "Level1-Metal".into()
+                },
+                backend_observed: if l2_fallback_verified {
+                    "Level2-CoreML".into()
+                } else {
+                    "Level1-Metal".into()
+                },
                 zero_copy_verified: false,
-                wall_time_ms: 0.0,
+                wall_time_ms: block_started_at.elapsed().as_secs_f64() * 1000.0,
                 peak_arena_bytes: l2_peak.max(l1_peak),
             },
         };
@@ -350,19 +430,18 @@ async fn run_distillation_loop(
         }
     }
 
-    // TODO(#distill): Wire real speculative decoding acceptance measurement
-    // once the ternary MTP drafter is loaded. The gate currently FAILS by
-    // default to prevent silent pass-through without measurement.
-    let ja = check_joint_acceptance_rate(
-        &AcceptanceThresholds::default(),
-        None,
-    );
+    let ja = check_joint_acceptance_rate(&AcceptanceThresholds::default(), None);
 
     {
         let mut j = jobs.lock().await;
         if let Some(job) = j.get_mut(&job_id) {
             job.joint_acceptance_result = Some(ja);
-            if job.joint_acceptance_result.as_ref().map(|r| r.passed).unwrap_or(false) {
+            if job
+                .joint_acceptance_result
+                .as_ref()
+                .map(|r| r.passed)
+                .unwrap_or(false)
+            {
                 job.state = DistillationState::Completed;
             } else {
                 // Gate failed — still mark Verifying so the user can inspect receipts.
@@ -381,10 +460,7 @@ async fn run_distillation_loop(
             alignment: 64,
             producer_phase: None,
             consumer_phases: vec![],
-            permitted_providers: vec![
-                ProviderKind::CoreML,
-                ProviderKind::Metal,
-            ],
+            permitted_providers: vec![ProviderKind::CoreML, ProviderKind::Metal],
             residency_class: ResidencyClass::Unified,
             max_bytes: 0,
             mutable: false,

@@ -27,7 +27,7 @@ use crate::runtime::resources::vision::VisionEncoderResource;
 use crate::runtime::scheduling::access::{ComponentSet, ResourceSet};
 use crate::runtime::scheduling::command::CommandWriter;
 use crate::runtime::scheduling::metadata::{
-    ExecutionClass, ErasedSystem, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult, SystemSpec,
 };
 use crate::runtime::world::{Entity, World};
@@ -94,11 +94,7 @@ impl ErasedSystem for VisionInferenceSystem {
         &VISION_INFERENCE_META
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // 1. Check if a VisionEncoder resource is loaded.
         let has_encoder = world
             .get_resource::<VisionEncoderResource>()

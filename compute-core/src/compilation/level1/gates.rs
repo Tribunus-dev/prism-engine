@@ -6,14 +6,12 @@
 //!   3. Runtime — actual Metal kernel execution matches cost model
 //!   4. Memory — hostile workload stays under 10.75 GB emergency ceiling
 
-use super::super::receipt::{
-    BlockMetric, CertificationSection, RollingMetric,
-};
+use super::super::receipt::{BlockMetric, CertificationSection, RollingMetric};
 
-use super::scheduler::{Level1Config, Level1Scheduler};
-use super::teacher::MetalTeacher;
-use super::student::TernaryStudent;
 use super::reducer::AccelerateReducer;
+use super::scheduler::{Level1Config, Level1Scheduler};
+use super::student::TernaryStudent;
+use super::teacher::MetalTeacher;
 
 // ── Determinism gate ────────────────────────────────────────────────────────
 
@@ -36,11 +34,37 @@ pub fn check_determinism() -> DeterminismResult {
 
     let mut sched1 = Level1Scheduler::new(config, total);
     sched1.run();
-    let records1: Vec<_> = sched1.phase_records().iter().map(|r| (r.phase_type.clone(), r.provider.clone(), r.input_slots.clone(), r.output_slots.clone(), r.peak_bytes, r.transition_count)).collect();
+    let records1: Vec<_> = sched1
+        .phase_records()
+        .iter()
+        .map(|r| {
+            (
+                r.phase_type.clone(),
+                r.provider.clone(),
+                r.input_slots.clone(),
+                r.output_slots.clone(),
+                r.peak_bytes,
+                r.transition_count,
+            )
+        })
+        .collect();
 
     let mut sched2 = Level1Scheduler::new(Level1Config::default(), total);
     sched2.run();
-    let records2: Vec<_> = sched2.phase_records().iter().map(|r| (r.phase_type.clone(), r.provider.clone(), r.input_slots.clone(), r.output_slots.clone(), r.peak_bytes, r.transition_count)).collect();
+    let records2: Vec<_> = sched2
+        .phase_records()
+        .iter()
+        .map(|r| {
+            (
+                r.phase_type.clone(),
+                r.provider.clone(),
+                r.input_slots.clone(),
+                r.output_slots.clone(),
+                r.peak_bytes,
+                r.transition_count,
+            )
+        })
+        .collect();
 
     // Compare: semantic fields must match (phase_type, provider, input/output slots,
     // peak_bytes, transition_count).  Timing fields (started_at_ns, completed_at_ns,
@@ -178,7 +202,8 @@ pub fn check_runtime() -> RuntimeResult {
     let lane_scale_bytes = (hidden_dim * words_per_row) as u64;
     let input_bytes = hidden_dim as u64 * 2;
     let output_bytes = hidden_dim as u64 * 2;
-    let estimated_bytes = packed_bytes + page_scale_bytes + lane_scale_bytes + input_bytes + output_bytes;
+    let estimated_bytes =
+        packed_bytes + page_scale_bytes + lane_scale_bytes + input_bytes + output_bytes;
 
     // Peak Metal allocation: buffers for weights + scales + input + output.
     // On a CPU fallback this is 0; on real Metal this matches estimated_bytes
@@ -266,7 +291,11 @@ pub fn check_memory() -> MemoryResult {
     let under_ceiling = check.predicted_peak <= budget.emergency_ceiling_bytes;
 
     // Swap growth: if the check fails, the system would swap; otherwise near zero.
-    let swap_growth_bytes = if check.fits { 0 } else { check.predicted_peak - budget.process_budget_bytes };
+    let swap_growth_bytes = if check.fits {
+        0
+    } else {
+        check.predicted_peak - budget.process_budget_bytes
+    };
 
     // Resume after interruption: not verified in this static check.
     // In production this would fork the process and verify state recovery.
@@ -315,24 +344,33 @@ mod tests {
     #[ignore = "requires full model weights and calibration corpus"]
     fn test_numerical_gate() {
         let result = check_numerical();
-        assert!(result.passed, "Numerical gate failed: MSE={:?}, cosine={:?}, residual={:?}",
+        assert!(
+            result.passed,
+            "Numerical gate failed: MSE={:?}, cosine={:?}, residual={:?}",
             result.metrics.first().map(|m| m.output_mse),
             result.metrics.first().map(|m| m.cosine_similarity),
-            result.metrics.first().map(|m| m.residual_relative_error));
+            result.metrics.first().map(|m| m.residual_relative_error)
+        );
     }
 
     #[test]
     #[ignore = "requires Metal kernel execution on real hardware"]
     fn test_runtime_gate() {
         let result = check_runtime();
-        assert!(result.passed, "Runtime gate failed: dispatch={}, tolerance={}, duration_ns={}",
-            result.dispatch_count, result.prediction_tolerance_met, result.kernel_duration_ns);
+        assert!(
+            result.passed,
+            "Runtime gate failed: dispatch={}, tolerance={}, duration_ns={}",
+            result.dispatch_count, result.prediction_tolerance_met, result.kernel_duration_ns
+        );
     }
 
     #[test]
     fn test_memory_gate() {
         let result = check_memory();
-        assert!(result.passed, "Memory gate failed: peak={}, ceiling={}",
-            result.peak_resident_bytes, result.under_emergency_ceiling);
+        assert!(
+            result.passed,
+            "Memory gate failed: peak={}, ceiling={}",
+            result.peak_resident_bytes, result.under_emergency_ceiling
+        );
     }
 }

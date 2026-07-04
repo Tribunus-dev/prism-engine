@@ -156,13 +156,9 @@ impl PrismInferenceServer {
     /// Delegates to the session manager for admission and initial state
     /// setup. On success, a cancellation handle is registered with the
     /// cancellation manager so the session can be cancelled later.
-    pub fn create_session(
-        &self,
-        request: CreateSessionRequest,
-    ) -> Result<SessionId, String> {
+    pub fn create_session(&self, request: CreateSessionRequest) -> Result<SessionId, String> {
         let session_id = self.session_manager.create_session(request)?;
-        self.cancellation_manager
-            .register_handle(session_id);
+        self.cancellation_manager.register_handle(session_id);
         Ok(session_id)
     }
 
@@ -183,8 +179,7 @@ impl PrismInferenceServer {
 
         // If a cancellation handle was provided, register it.
         if let Some(ref handle) = cancel {
-            self.cancellation_manager
-                .register_handle(handle.session_id);
+            self.cancellation_manager.register_handle(handle.session_id);
         }
 
         // Spawn generation work on the tokio runtime.
@@ -222,10 +217,7 @@ impl PrismInferenceServer {
     /// Delegates to the cancellation manager, which marks the session
     /// as cancelled. Downstream consumers check
     /// `cancellation_manager.is_cancelled` before proceeding with work.
-    pub fn cancel(
-        &self,
-        handle: CancellationHandle,
-    ) -> Result<InferenceCancelledReceipt, String> {
+    pub fn cancel(&self, handle: CancellationHandle) -> Result<InferenceCancelledReceipt, String> {
         self.cancellation_manager.cancel(&handle)
     }
 

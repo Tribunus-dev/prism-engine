@@ -132,7 +132,10 @@ mod tests {
         assert_eq!(broker.mode(), ServerOperationalMode::Idle);
         assert!(!broker.is_distilling());
         assert_eq!(broker.allocated(), 0);
-        assert_eq!(broker.available(), MemoryAllocationBroker::PRISM_CEILING_BYTES);
+        assert_eq!(
+            broker.available(),
+            MemoryAllocationBroker::PRISM_CEILING_BYTES
+        );
     }
 
     #[test]

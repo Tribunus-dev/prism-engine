@@ -36,11 +36,25 @@ pub enum SlotFailureReason {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SlotState {
     Free,
-    Reserved { epoch: u64, producer: ExecutionLane },
-    Writing { epoch: u64, producer: ExecutionLane },
-    Ready { epoch: u64, producer: ExecutionLane },
-    Reading { epoch: u64, consumer: ExecutionLane },
-    Retired { epoch: u64 },
+    Reserved {
+        epoch: u64,
+        producer: ExecutionLane,
+    },
+    Writing {
+        epoch: u64,
+        producer: ExecutionLane,
+    },
+    Ready {
+        epoch: u64,
+        producer: ExecutionLane,
+    },
+    Reading {
+        epoch: u64,
+        consumer: ExecutionLane,
+    },
+    Retired {
+        epoch: u64,
+    },
     Poisoned {
         epoch: u64,
         reason: SlotFailureReason,
@@ -124,7 +138,7 @@ pub struct LiveIOSurfaceSlot {
     pub state: SlotState,
     pub generation: u64,
     pub layout_digest: String,
-    pub metal_view: Option<String>,   // Metal resource view descriptor
+    pub metal_view: Option<String>,  // Metal resource view descriptor
     pub coreai_view: Option<String>, // Core ML IOSurface view descriptor
     /// Per-slot IOSurface backing (None when mocked)
     pub backing_arena: Option<crate::arena::Arena>,
@@ -249,7 +263,10 @@ impl AppleSharedArena {
         for slot in self.slots.values() {
             match &slot.state {
                 SlotState::Free => free += 1,
-                SlotState::Reserved { .. } | SlotState::Writing { .. } | SlotState::Ready { .. } | SlotState::Reading { .. } => {
+                SlotState::Reserved { .. }
+                | SlotState::Writing { .. }
+                | SlotState::Ready { .. }
+                | SlotState::Reading { .. } => {
                     leased += 1;
                 }
                 SlotState::Retired { .. } => pending_release += 1,
@@ -264,7 +281,7 @@ impl AppleSharedArena {
             leased_slots: leased,
             free_slots: free,
             pending_release_slots: pending_release,
-            allocation_failures: 0,   // tracked externally via counters
+            allocation_failures: 0, // tracked externally via counters
             release_failures: 0,
             high_watermark: total_slots.max(leased),
         }
@@ -279,7 +296,9 @@ impl AppleSharedArena {
 
     /// Install an arena from its sealed manifest.
     /// Fails if any constraint cannot be satisfied exactly — no silent reshaping.
-    pub fn install(manifest: &crate::compute_image::apple_cimage_manifest::AppleSharedArenaManifest) -> Result<Self, String> {
+    pub fn install(
+        manifest: &crate::compute_image::apple_cimage_manifest::AppleSharedArenaManifest,
+    ) -> Result<Self, String> {
         if manifest.allocation_bytes == 0 {
             return Err("allocation_bytes must be > 0".into());
         }
@@ -287,7 +306,10 @@ impl AppleSharedArena {
             return Err("arena manifest has no slots".into());
         }
         let mut arena = Self::new(
-            format!("arena-{}", &manifest.arena_layout_digest[..8.min(manifest.arena_layout_digest.len())]),
+            format!(
+                "arena-{}",
+                &manifest.arena_layout_digest[..8.min(manifest.arena_layout_digest.len())]
+            ),
             manifest.ring_depth,
         );
         arena.layout_digest = manifest.arena_layout_digest.clone();
@@ -296,7 +318,9 @@ impl AppleSharedArena {
             let reuse_class = match slot_manifest.reuse_class.as_str() {
                 "exclusive" => SlotReuseClass::Exclusive,
                 "shared_readonly" => SlotReuseClass::SharedReadOnly,
-                _ => SlotReuseClass::RingReuse { ring_depth: manifest.ring_depth },
+                _ => SlotReuseClass::RingReuse {
+                    ring_depth: manifest.ring_depth,
+                },
             };
             let slot = LiveIOSurfaceSlot {
                 manifest: IOSurfaceSlotManifest {
@@ -328,24 +352,39 @@ impl AppleSharedArena {
         for slot_entry in arena.slots.values_mut() {
             let byte_count = slot_entry.manifest.byte_length;
             if byte_count > 0 {
-                let pw = slot_entry.manifest.physical_shape.first().copied().unwrap_or(1);
-                let ph = slot_entry.manifest.physical_shape.get(1).copied().unwrap_or(1);
+                let pw = slot_entry
+                    .manifest
+                    .physical_shape
+                    .first()
+                    .copied()
+                    .unwrap_or(1);
+                let ph = slot_entry
+                    .manifest
+                    .physical_shape
+                    .get(1)
+                    .copied()
+                    .unwrap_or(1);
                 // Float16 slots use dtype-aware allocator (creates CVPixelBuffer with
                 // kCVPixelFormatType_OneComponent16Half). Other slots use generic surface.
                 let backing = match slot_entry.manifest.dtype.as_str() {
-                    "float16" | "fp16" =>
-                        crate::arena::Arena::new(pw, ph, crate::arena::DataType::Float16),
-                    _ =>
-                        crate::arena::Arena::new_bytes(byte_count as u32),
+                    "float16" | "fp16" => {
+                        crate::arena::Arena::new(pw, ph, crate::arena::DataType::Float16)
+                    }
+                    _ => crate::arena::Arena::new_bytes(byte_count as u32),
                 }
-                    .map_err(|e| format!("failed to allocate backing for slot {}: {}",
-                        slot_entry.manifest.slot_id, e))?;
+                .map_err(|e| {
+                    format!(
+                        "failed to allocate backing for slot {}: {}",
+                        slot_entry.manifest.slot_id, e
+                    )
+                })?;
                 slot_entry.backing_arena = Some(backing);
                 // Attest the IOSurface allocation against the manifest.
                 let backing = slot_entry.backing_arena.as_ref().unwrap();
                 let pixel_fmt = backing.info.pixel_format as u32;
                 let fp16_ok = pixel_fmt == 0x4C303068 || pixel_fmt == 0x4C303066;
-                let capacity = (backing.info.height as u64).saturating_mul(backing.info.bytes_per_row as u64);
+                let capacity =
+                    (backing.info.height as u64).saturating_mul(backing.info.bytes_per_row as u64);
                 slot_entry.attestation = Some(IOSurfaceAllocationAttestation {
                     slot_id: slot_entry.manifest.slot_id,
                     iosurface_id: backing.io_surface_id() as u32,
@@ -355,10 +394,21 @@ impl AppleSharedArena {
                     actual_pixel_format: pixel_fmt,
                     actual_byte_capacity: capacity,
                     manifest_layout_digest: slot_entry.layout_digest.clone(),
-                    attested: fp16_ok && backing.info.width > 0 && backing.info.height > 0 && capacity >= slot_entry.manifest.byte_length as u64,
+                    attested: fp16_ok
+                        && backing.info.width > 0
+                        && backing.info.height > 0
+                        && capacity >= slot_entry.manifest.byte_length as u64,
                 });
-                if !slot_entry.attestation.as_ref().map(|a| a.attested).unwrap_or(false) {
-                    return Err(format!("FP16 slot {} attestation failed", slot_entry.manifest.slot_id));
+                if !slot_entry
+                    .attestation
+                    .as_ref()
+                    .map(|a| a.attested)
+                    .unwrap_or(false)
+                {
+                    return Err(format!(
+                        "FP16 slot {} attestation failed",
+                        slot_entry.manifest.slot_id
+                    ));
                 }
             }
         }
@@ -388,7 +438,6 @@ impl AppleSharedArena {
             io_surface: backing.info.io_surface,
         })
     }
-
 }
 
 /// SlotEpoch for generation tracking.
@@ -437,7 +486,13 @@ mod tests {
 
         // Acquire: reserve from Free
         slot.reserve(0, ExecutionLane::CandleCpu).unwrap();
-        assert!(matches!(slot.state, SlotState::Reserved { epoch: 0, producer: ExecutionLane::CandleCpu }));
+        assert!(matches!(
+            slot.state,
+            SlotState::Reserved {
+                epoch: 0,
+                producer: ExecutionLane::CandleCpu
+            }
+        ));
 
         // Write
         slot.mark_writing(0, ExecutionLane::CandleCpu);
@@ -450,7 +505,13 @@ mod tests {
 
         // Read (consumer)
         slot.mark_reading(0, ExecutionLane::CoreAiAne).unwrap();
-        assert!(matches!(slot.state, SlotState::Reading { epoch: 0, consumer: ExecutionLane::CoreAiAne }));
+        assert!(matches!(
+            slot.state,
+            SlotState::Reading {
+                epoch: 0,
+                consumer: ExecutionLane::CoreAiAne
+            }
+        ));
 
         // Retire
         slot.retire(0);
@@ -482,9 +543,7 @@ mod tests {
         slot.mark_ready(0, ExecutionLane::MlxGpu);
 
         // Try reading with wrong epoch
-        let err = slot
-            .mark_reading(1, ExecutionLane::CoreAiAne)
-            .unwrap_err();
+        let err = slot.mark_reading(1, ExecutionLane::CoreAiAne).unwrap_err();
         assert!(err.contains("not ready for reading"));
     }
 
@@ -503,7 +562,9 @@ mod tests {
                 epoch: 0,
                 reason: r,
             } => {
-                assert!(matches!(r, SlotFailureReason::MetalDispatchFailed(msg) if msg == "encoder OOM"));
+                assert!(
+                    matches!(r, SlotFailureReason::MetalDispatchFailed(msg) if msg == "encoder OOM")
+                );
             }
             other => panic!("expected Poisoned, got {:?}", other),
         }

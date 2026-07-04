@@ -5,13 +5,13 @@ use crate::lut::graph::{ActivationFunction, ComputeNode, ModelGraph, TensorRole}
 use std::collections::HashMap;
 use std::path::Path;
 
-#[cfg(feature = "prism-backend")]
-use tribunus_compute_core::lut::evaluator::{
-    attention_cpu, gelu_inplace, lut_gemv_cpu, rms_norm_inplace,
-    rope_inplace, silu_inplace, vec_add_inplace,
-};
 #[cfg(not(feature = "prism-backend"))]
 pub(crate) use crate::lut::cpu_fallback::*;
+#[cfg(feature = "prism-backend")]
+use tribunus_compute_core::lut::evaluator::{
+    attention_cpu, gelu_inplace, lut_gemv_cpu, rms_norm_inplace, rope_inplace, silu_inplace,
+    vec_add_inplace,
+};
 
 #[derive(Debug, Default)]
 pub struct InferenceStats {

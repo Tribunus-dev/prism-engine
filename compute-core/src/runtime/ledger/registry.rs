@@ -54,8 +54,8 @@ impl ComponentTypeRegistry {
         self.decoders.insert(
             type_id,
             Box::new(move |bytes: &[u8]| {
-                let data: T =
-                    serde_json::from_slice(bytes).map_err(|_| LedgerProjectionError::InvalidSemanticPayload)?;
+                let data: T = serde_json::from_slice(bytes)
+                    .map_err(|_| LedgerProjectionError::InvalidSemanticPayload)?;
                 Ok(decoder(&data))
             }),
         );
@@ -134,7 +134,9 @@ mod tests {
     #[test]
     fn empty_registry_returns_error() {
         let reg = ComponentTypeRegistry::new();
-        let err = reg.project(&TypeId::of::<WorkerAssignment>(), &[]).unwrap_err();
+        let err = reg
+            .project(&TypeId::of::<WorkerAssignment>(), &[])
+            .unwrap_err();
         assert!(matches!(err, LedgerProjectionError::InvalidSemanticPayload));
     }
 
@@ -156,7 +158,9 @@ mod tests {
             }
         });
 
-        let payload = reg.project(&TypeId::of::<WorkerAssignment>(), &bytes).unwrap();
+        let payload = reg
+            .project(&TypeId::of::<WorkerAssignment>(), &bytes)
+            .unwrap();
         match payload {
             SemanticCommandPayload::WorkerAssigned {
                 worker_id,
@@ -182,7 +186,9 @@ mod tests {
             assigned_at: Instant::now(),
         };
         let bytes = serde_json::to_vec(&wa).unwrap();
-        let p = reg.project(&TypeId::of::<WorkerAssignment>(), &bytes).unwrap();
+        let p = reg
+            .project(&TypeId::of::<WorkerAssignment>(), &bytes)
+            .unwrap();
         assert!(matches!(p, SemanticCommandPayload::WorkerAssigned { .. }));
 
         // WorkerLifecycle
@@ -192,8 +198,13 @@ mod tests {
             last_transition_at: Instant::now(),
         };
         let bytes = serde_json::to_vec(&wl).unwrap();
-        let p = reg.project(&TypeId::of::<WorkerLifecycle>(), &bytes).unwrap();
-        assert!(matches!(p, SemanticCommandPayload::WorkerRequestPhaseTransitioned { .. }));
+        let p = reg
+            .project(&TypeId::of::<WorkerLifecycle>(), &bytes)
+            .unwrap();
+        assert!(matches!(
+            p,
+            SemanticCommandPayload::WorkerRequestPhaseTransitioned { .. }
+        ));
 
         // WorkerHeartbeat
         let wh = WorkerHeartbeat {
@@ -203,8 +214,13 @@ mod tests {
             last_heartbeat_at: Instant::now(),
         };
         let bytes = serde_json::to_vec(&wh).unwrap();
-        let p = reg.project(&TypeId::of::<WorkerHeartbeat>(), &bytes).unwrap();
-        assert!(matches!(p, SemanticCommandPayload::WorkerHeartbeatObserved { .. }));
+        let p = reg
+            .project(&TypeId::of::<WorkerHeartbeat>(), &bytes)
+            .unwrap();
+        assert!(matches!(
+            p,
+            SemanticCommandPayload::WorkerHeartbeatObserved { .. }
+        ));
     }
 
     #[test]
@@ -216,7 +232,9 @@ mod tests {
             }
         });
 
-        let err = reg.project(&TypeId::of::<WorkerAssignment>(), b"not json").unwrap_err();
+        let err = reg
+            .project(&TypeId::of::<WorkerAssignment>(), b"not json")
+            .unwrap_err();
         assert!(matches!(err, LedgerProjectionError::InvalidSemanticPayload));
     }
 

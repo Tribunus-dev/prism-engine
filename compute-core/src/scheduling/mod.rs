@@ -37,10 +37,8 @@ pub mod tri_lane_orchestrator;
 pub mod weight_residency;
 pub use token_budget::*;
 
+pub use prism_session::{PrismExecutionMode, PrismStepRequest, PrismStepResult, SchedulingMode};
 pub use saved_request::SavedRequest;
-pub use prism_session::{
-    PrismExecutionMode, PrismStepRequest, PrismStepResult, SchedulingMode,
-};
 pub use saved_request::{
     MAX_PREEMPTIONS_BEFORE_BOOST, PRIORITY_DEFAULT, PRIORITY_HIGHEST, PRIORITY_LOWEST,
     STARVATION_PRIORITY_BOOST,

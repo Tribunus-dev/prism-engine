@@ -18,25 +18,23 @@
 /// | Token         | Record in `WorkerStream`; transition `AwaitingFirstEvent`→`Streaming` |
 /// | Completion    | Transition `Completing`; write `WorkerOutcome::success`; deliver via Registry |
 /// | Failure       | Transition `Failed`; write `WorkerOutcome::failure`        |
-
 use std::sync::OnceLock;
 
-use crate::runtime::scheduling::command::CommandWriter;
-use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
-};
-use crate::runtime::world::{Entity, World};
 use crate::runtime::components::{
-    WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
-    WorkerStream, WorkerRequestPhase,
     worker_health::{TerminalStatus, WorkerErrorCategory},
-    WORKER_EVENT_DRAIN_SYSTEM,
+    WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
+    WorkerRequestPhase, WorkerStream, WORKER_EVENT_DRAIN_SYSTEM,
 };
 use crate::runtime::resources::{
-    MonotonicClockResource, WorkerDiagnosticsResource, WorkerEventSource,
-    WorkerResponseRegistry, EventKind,
+    EventKind, MonotonicClockResource, WorkerDiagnosticsResource, WorkerEventSource,
+    WorkerResponseRegistry,
 };
+use crate::runtime::scheduling::command::CommandWriter;
+use crate::runtime::scheduling::metadata::{
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
+};
+use crate::runtime::world::{Entity, World};
 
 // ---------------------------------------------------------------------------
 // System
@@ -61,9 +59,23 @@ impl Default for WorkerEventDrainSystem {
 }
 
 impl SystemSpec for WorkerEventDrainSystem {
-    type Reads = (WorkerAssignment, WorkerLifecycle, WorkerRequest, WorkerHeartbeat);
-    type Writes = (WorkerLifecycle, WorkerStream, WorkerHeartbeat, WorkerOutcome);
-    type ReadResources = (WorkerEventSource, WorkerResponseRegistry, MonotonicClockResource);
+    type Reads = (
+        WorkerAssignment,
+        WorkerLifecycle,
+        WorkerRequest,
+        WorkerHeartbeat,
+    );
+    type Writes = (
+        WorkerLifecycle,
+        WorkerStream,
+        WorkerHeartbeat,
+        WorkerOutcome,
+    );
+    type ReadResources = (
+        WorkerEventSource,
+        WorkerResponseRegistry,
+        MonotonicClockResource,
+    );
     type WriteResources = (WorkerDiagnosticsResource, WorkerResponseRegistry);
 
     const NAME: &'static str = "worker_event_drain";
@@ -76,15 +88,13 @@ impl SystemSpec for WorkerEventDrainSystem {
 
 impl ErasedSystem for WorkerEventDrainSystem {
     fn metadata(&self) -> &SystemMetadata {
-        self.metadata
-            .get_or_init(|| <WorkerEventDrainSystem as SystemSpec>::metadata().expect("WorkerEventDrainSystem metadata"))
+        self.metadata.get_or_init(|| {
+            <WorkerEventDrainSystem as SystemSpec>::metadata()
+                .expect("WorkerEventDrainSystem metadata")
+        })
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // -- 1. Drain event batch -------------------------------------------------
         let events = {
             let Some(event_source) = world.get_resource::<WorkerEventSource>() else {
@@ -125,14 +135,16 @@ impl ErasedSystem for WorkerEventDrainSystem {
             }) {
                 Some((e, _, _, _)) => *e,
                 None => {
-                    world.get_resource::<WorkerDiagnosticsResource>()
+                    world
+                        .get_resource::<WorkerDiagnosticsResource>()
                         .map(|d| d.record_stale_event_drop());
                     continue;
                 }
             };
 
             let Some(lifecycle) = world.get::<WorkerLifecycle>(entity) else {
-                world.get_resource::<WorkerDiagnosticsResource>()
+                world
+                    .get_resource::<WorkerDiagnosticsResource>()
                     .map(|d| d.record_stale_event_drop());
                 continue;
             };
@@ -143,8 +155,7 @@ impl ErasedSystem for WorkerEventDrainSystem {
                 EventKind::Token { .. } => {
                     matches!(
                         phase,
-                        WorkerRequestPhase::AwaitingFirstEvent
-                            | WorkerRequestPhase::Streaming
+                        WorkerRequestPhase::AwaitingFirstEvent | WorkerRequestPhase::Streaming
                     )
                 }
                 EventKind::Completion { .. } => {
@@ -159,14 +170,14 @@ impl ErasedSystem for WorkerEventDrainSystem {
                 EventKind::Progress { .. } => {
                     matches!(
                         phase,
-                        WorkerRequestPhase::AwaitingFirstEvent
-                            | WorkerRequestPhase::Streaming
+                        WorkerRequestPhase::AwaitingFirstEvent | WorkerRequestPhase::Streaming
                     )
                 }
             };
 
             if !valid {
-                world.get_resource::<WorkerDiagnosticsResource>()
+                world
+                    .get_resource::<WorkerDiagnosticsResource>()
                     .map(|d| d.record_lifecycle_rejection());
                 continue;
             }
@@ -211,9 +222,7 @@ impl ErasedSystem for WorkerEventDrainSystem {
                     if let Some(registry) = world.get_resource::<WorkerResponseRegistry>() {
                         let _ = registry.deliver_response(
                             &event.request_id,
-                            format!("ok:{}:{} tokens",
-                                event.assignment_generation,
-                                ""),
+                            format!("ok:{}:{} tokens", event.assignment_generation, ""),
                         );
                     }
                 }

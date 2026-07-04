@@ -86,7 +86,11 @@ fn projection_role_values_are_distinct() {
     ];
     let mut seen = HashSet::new();
     for role in &roles {
-        assert!(seen.insert(*role as u16), "duplicate role value: {:?}", role);
+        assert!(
+            seen.insert(*role as u16),
+            "duplicate role value: {:?}",
+            role
+        );
     }
 }
 

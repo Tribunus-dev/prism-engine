@@ -11,12 +11,12 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::arena::Arena;
 use tribunus_compute_core::arena::DataType;
 use tribunus_compute_core::coreml_bridge::CoreMlModel;
 use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
-use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::mlpackage::{write_mlpackage, ModelMeta};
 
 const BATCH: i64 = 1;
@@ -47,7 +47,10 @@ fn build_test_model() -> Result<(PathBuf, String), String> {
     let w = b.last_name().unwrap_or("weight_0").to_string();
     let b = b.matmul("input", &w);
     let out = b.last_name().unwrap_or("matmul_0").to_string();
-    let prog = b.output(&out).build().map_err(|e| format!("MIL build: {:?}", e))?;
+    let prog = b
+        .output(&out)
+        .build()
+        .map_err(|e| format!("MIL build: {:?}", e))?;
 
     let meta = ModelMeta {
         model_name: "fp16_test".into(),
@@ -60,14 +63,18 @@ fn build_test_model() -> Result<(PathBuf, String), String> {
         outputs: vec![(out.clone(), vec![BATCH, HIDDEN])],
     };
 
-    let mlpackage_dir = write_mlpackage(prog, model_dir, &meta)
-        .map_err(|e| format!("mlpackage write: {}", e))?;
+    let mlpackage_dir =
+        write_mlpackage(prog, model_dir, &meta).map_err(|e| format!("mlpackage write: {}", e))?;
     let output_dir = model_dir.join("compiled");
     std::fs::create_dir_all(&output_dir).map_err(|e| format!("mkdir: {}", e))?;
     let receipt = tribunus_compute_core::coreml_pipeline::compile_mlpackage(
-        &mlpackage_dir, &output_dir, "fp16_test",
-        "cpuAndNeuralEngine", "iOS15",
-    ).map_err(|e| format!("compile: {}", e))?;
+        &mlpackage_dir,
+        &output_dir,
+        "fp16_test",
+        "cpuAndNeuralEngine",
+        "iOS15",
+    )
+    .map_err(|e| format!("compile: {}", e))?;
 
     let compiled = PathBuf::from(&receipt.compiled_modelc_path);
     Ok((compiled, out))
@@ -89,7 +96,8 @@ fn ws8a1_model_builds_and_loads() {
     let model = CoreMlModel::load_with_compute_units(
         &path.to_string_lossy(),
         tribunus_compute_core::coreml_bridge::CoreMlComputeUnits::CpuAndNeuralEngine,
-    ).expect("model must load");
+    )
+    .expect("model must load");
     assert!(path.exists(), "modelc path exists");
 }
 
@@ -99,12 +107,13 @@ fn ws8a1_model_produces_identity_output() {
     let model = CoreMlModel::load_with_compute_units(
         &path.to_string_lossy(),
         tribunus_compute_core::coreml_bridge::CoreMlComputeUnits::CpuAndNeuralEngine,
-    ).expect("model must load");
+    )
+    .expect("model must load");
 
-    let mut input = Arena::new(BATCH as u32, HIDDEN as u32, DataType::Float16)
-        .expect("input arena");
-    let mut output = Arena::new(BATCH as u32, HIDDEN as u32, DataType::Float32)
-        .expect("output arena");
+    let mut input =
+        Arena::new(BATCH as u32, HIDDEN as u32, DataType::Float16).expect("input arena");
+    let mut output =
+        Arena::new(BATCH as u32, HIDDEN as u32, DataType::Float32).expect("output arena");
 
     // Write test pattern [1.0, 2.0, ..., 64.0]
     unsafe {
@@ -114,22 +123,27 @@ fn ws8a1_model_produces_identity_output() {
             let sign = ((bits >> 31) & 1) as u16;
             let exp = ((bits >> 23) & 0xFF) as i32;
             let mant = bits & 0x7FFFFF;
-            let f16 = if exp == 0 { sign << 15 }
-                else if exp == 255 { (sign << 15) | 0x7C00 }
-                else {
-                    let ne = exp - 127 + 15;
-                    if ne <= 0 { sign << 15 }
-                    else if ne >= 31 { (sign << 15) | 0x7C00 }
-                    else {
-                        let nm = mant >> 13;
-                        (sign << 15) | ((ne as u16) << 10) | (nm as u16)
-                    }
-                };
+            let f16 = if exp == 0 {
+                sign << 15
+            } else if exp == 255 {
+                (sign << 15) | 0x7C00
+            } else {
+                let ne = exp - 127 + 15;
+                if ne <= 0 {
+                    sign << 15
+                } else if ne >= 31 {
+                    (sign << 15) | 0x7C00
+                } else {
+                    let nm = mant >> 13;
+                    (sign << 15) | ((ne as u16) << 10) | (nm as u16)
+                }
+            };
             ptr.add(i).write(f16);
         }
     }
 
-    model.predict("input", &input.info, &out_name, &mut output.info)
+    model
+        .predict("input", &input.info, &out_name, &mut output.info)
         .expect("predict must succeed");
 
     // Verify output ≈ input (identity matmul)
@@ -145,15 +159,29 @@ fn f16_to_f32(h: u16) -> f32 {
     let mant = (h & 0x3FF) as u32;
     if exp == 0 {
         let v = (mant as f32) * 2.0f32.powi(-24);
-        if sign != 0 { -v } else { v }
+        if sign != 0 {
+            -v
+        } else {
+            v
+        }
     } else if exp == 31 {
         if mant == 0 {
-            if sign != 0 { f32::NEG_INFINITY } else { f32::INFINITY }
-        } else { f32::NAN }
+            if sign != 0 {
+                f32::NEG_INFINITY
+            } else {
+                f32::INFINITY
+            }
+        } else {
+            f32::NAN
+        }
     } else {
         let normalized = 1.0 + (mant as f32) / 1024.0;
         let exponent = 2.0f32.powi((exp as i32) - 15);
         let v = normalized * exponent;
-        if sign != 0 { -v } else { v }
+        if sign != 0 {
+            -v
+        } else {
+            v
+        }
     }
 }

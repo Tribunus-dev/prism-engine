@@ -1,9 +1,9 @@
+use super::npu_pump::NpuWeightPump;
+use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
-use std::collections::HashMap;
 use std::sync::Mutex;
-use parking_lot::RwLock;
-use super::npu_pump::NpuWeightPump;
 
 pub const STATE_IDLE: u8 = 0;
 pub const STATE_PREFETCHING: u8 = 1;
@@ -30,10 +30,16 @@ impl AgentSlot {
         }
     }
     pub fn try_transition(&self, expected: u8, target: u8) -> bool {
-        self.state.compare_exchange(expected, target, Ordering::AcqRel, Ordering::Acquire).is_ok()
+        self.state
+            .compare_exchange(expected, target, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
     }
-    pub fn load_state(&self) -> u8 { self.state.load(Ordering::Acquire) }
-    pub fn store_state(&self, state: u8) { self.state.store(state, Ordering::Release); }
+    pub fn load_state(&self) -> u8 {
+        self.state.load(Ordering::Acquire)
+    }
+    pub fn store_state(&self, state: u8) {
+        self.state.store(state, Ordering::Release);
+    }
 }
 
 unsafe impl Sync for AgentSlot {}
@@ -101,23 +107,25 @@ impl MultiplexerState {
         let max_out = intermediate_dim.max(hidden_dim) as usize;
         let rows_per_agent = (max_out + 31) / 32;
         let cols = intermediate_dim.max(hidden_dim) as usize;
-        let slc_size = crate::compute_image::compile::ternary::swizzled_buffer_size(rows_per_agent, cols);
+        let slc_size =
+            crate::compute_image::compile::ternary::swizzled_buffer_size(rows_per_agent, cols);
         let mut buf = vec![0u8; slc_size];
         self.slc_buf_ptr = Some(buf.as_mut_ptr());
         self.slc_buf = Some(buf);
 
         use crate::compute_image::compile::ternary::SegmentKind;
-        let weights = header.segment(SegmentKind::TernaryWeights)
+        let weights = header
+            .segment(SegmentKind::TernaryWeights)
             .expect("cimage must have TernaryWeights segment");
         let main_bytes = weights.length as usize;
         let slot_size = (main_bytes / 32).max(1);
         let mut world = self.world.write();
         for i in 0..32 {
             if let Some(entity) = world.spawn() {
-                world.insert(entity, AgentSlot::new(
-                    i as u32,
-                    (weights.offset as usize) + i * slot_size,
-                ));
+                world.insert(
+                    entity,
+                    AgentSlot::new(i as u32, (weights.offset as usize) + i * slot_size),
+                );
                 world.insert(entity, crate::runtime::components::KVCacheRef::new(4096));
                 world.insert(entity, crate::runtime::components::ToolRegistry::new());
                 world.insert(entity, crate::runtime::components::AgentConfig::new());

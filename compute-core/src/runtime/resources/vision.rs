@@ -5,7 +5,7 @@
 //! Systems check for this resource to determine whether vision inference
 //! is available.
 
-use crate::runtime::scheduling::component_id::{SchedulableResource, ResourceId};
+use crate::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 use crate::vision::encoder::VisionEncoder;
 
 /// Stable resource ID for VisionEncoderResource (21+ — next after NPU).

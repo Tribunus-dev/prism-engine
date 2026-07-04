@@ -4,8 +4,8 @@
 
 use sha2::{Digest, Sha256};
 
-use super::*;
 use super::lanes::TensorTransferPlan;
+use super::*;
 
 // ── Evaluation policy ────────────────────────────────────────────────────
 

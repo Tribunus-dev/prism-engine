@@ -261,7 +261,6 @@ fn bench_all() {
                     output_name: on.clone(),
                     inputs: vec![("x".into(), vec![1, m])],
                     outputs: vec![(on.clone(), vec![1, n])],
-        
                 };
                 all.push((
                     lb,
@@ -293,7 +292,6 @@ fn bench_all() {
                     output_name: on.clone(),
                     inputs: vec![("x".into(), vec![1, h])],
                     outputs: vec![(on.clone(), vec![1, h])],
-        
                 };
                 all.push((
                     lb,
@@ -325,7 +323,6 @@ fn bench_all() {
                     output_name: on.clone(),
                     inputs: vec![("a".into(), vec![1, h]), ("b".into(), vec![1, h])],
                     outputs: vec![(on.clone(), vec![1, h])],
-        
                 };
                 all.push((
                     lb,

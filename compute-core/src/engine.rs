@@ -11,7 +11,6 @@
 //! - ECS-only operation: no worker subprocess, no WorkerSupervisor.
 //! - `Drop` clears loaded model state.
 
-
 use std::path::PathBuf;
 
 use crate::engine_error::{EngineError, EngineErrorCode};
@@ -29,10 +28,10 @@ use crate::compute_image::{
     clear_mlx_cache, mlx_active_memory_bytes, mlx_cache_memory_bytes, mlx_get_memory_limit,
 };
 use crate::hybrid_profile::{HybridExecutor, HybridProfile};
+use crate::runtime::world::World;
 use crate::scheduling::{
     PhaseKind, Scheduler, SchedulerConfig, TokenBudgetConfig, TokenBudgetScheduler, TokenWorkUnit,
 };
-use crate::runtime::world::World;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -153,10 +152,7 @@ impl std::fmt::Debug for ComputeEngine {
             )
             .field("backend_routing", &self.backend_routing)
             .field("peak_memory_used", &self.peak_memory_used)
-            .field(
-                "ecs_world",
-                &self.ecs_world.as_ref().map(|_| "Some(World)"),
-            )
+            .field("ecs_world", &self.ecs_world.as_ref().map(|_| "Some(World)"))
             .field(
                 "ecs_schedule",
                 &self.ecs_schedule.as_ref().map(|_| "Some(Schedule)"),
@@ -560,13 +556,13 @@ impl ComputeEngine {
         input_ids: &[u32],
         _max_tokens: u32,
     ) -> Result<GenerationHandle, EngineError> {
-        use crate::runtime::components::{
-            WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome,
-            WorkerRequest, WorkerStream,
-        };
         use crate::runtime::components::worker_request::RequestClass;
-        use crate::runtime::resources::{WorkerIngressQueue, IngressEntry};
+        use crate::runtime::components::{
+            WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
+            WorkerStream,
+        };
         use crate::runtime::resources::WorkerResponseRegistry;
+        use crate::runtime::resources::{IngressEntry, WorkerIngressQueue};
         use crate::streaming::{generation_channel, GenerationEvent};
 
         let world = self.ecs_world.as_mut().ok_or_else(|| {
@@ -596,8 +592,7 @@ impl ComputeEngine {
         } else {
             input_ids.to_vec()
         };
-        let payload =
-            serde_json::to_vec(&prompt_ids).unwrap_or_else(|_| vec![]);
+        let payload = serde_json::to_vec(&prompt_ids).unwrap_or_else(|_| vec![]);
         let worker_id = format!("ecs-{request_id}");
 
         world.insert(
@@ -610,11 +605,8 @@ impl ComputeEngine {
         world.insert(entity, WorkerStream::default());
 
         // -- 2. Push to WorkerIngressQueue --------------------------------
-        let (response_tx, response_rx) =
-            std::sync::mpsc::channel::<String>();
-        if let Some(registry) =
-            world.get_resource::<WorkerResponseRegistry>()
-        {
+        let (response_tx, response_rx) = std::sync::mpsc::channel::<String>();
+        if let Some(registry) = world.get_resource::<WorkerResponseRegistry>() {
             registry.register_pending(&request_id, response_tx);
         }
         if let Some(queue) = world.get_resource_mut::<WorkerIngressQueue>() {
@@ -636,9 +628,7 @@ impl ComputeEngine {
         let (sender, stream) = generation_channel(None);
         sender.send_terminal(match &outcome {
             Some(o) if o.is_success() => GenerationEvent::Done,
-            Some(_) => {
-                GenerationEvent::Error("worker failed".to_string())
-            }
+            Some(_) => GenerationEvent::Error("worker failed".to_string()),
             None => GenerationEvent::Done,
         });
 
@@ -779,7 +769,6 @@ impl ComputeEngine {
             mlx_version: self.capabilities.mlx_version.clone(),
         }
     }
-
 }
 
 // -- BackendInstance implementations --------------------------------------

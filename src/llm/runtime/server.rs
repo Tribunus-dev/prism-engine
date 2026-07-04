@@ -8,7 +8,11 @@
 use std::sync::{Arc, OnceLock};
 
 #[cfg(feature = "server")]
-use axum::{extract::{Path, State}, routing::{delete, get, post}, Json, Router};
+use axum::{
+    extract::{Path, State},
+    routing::{delete, get, post},
+    Json, Router,
+};
 #[cfg(feature = "server")]
 use serde_json::{json, Value};
 
@@ -146,10 +150,7 @@ fn parse_session_id(id: &str) -> Result<SessionId, String> {
 
 /// POST /v1/sessions - create a new inference session.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn create_session(
-    State(_server): State<AppState>,
-    Json(_body): Json<Value>,
-) -> Json<Value> {
+async fn create_session(State(_server): State<AppState>, Json(_body): Json<Value>) -> Json<Value> {
     Json(json!({
         "status": "accepted",
         "session_id": null,
@@ -159,10 +160,7 @@ async fn create_session(
 
 /// POST /v1/sessions - create a new inference session (compute-core).
 #[cfg(all(feature = "server", feature = "prism-backend"))]
-async fn create_session(
-    State(server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+async fn create_session(State(server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let request: CreateSessionRequest = match serde_json::from_value(body) {
         Ok(r) => r,
         Err(e) => {
@@ -235,7 +233,9 @@ async fn generate(
         #[serde(default)]
         stream: bool,
     }
-    fn default_max_tokens() -> u32 { 256 }
+    fn default_max_tokens() -> u32 {
+        256
+    }
 
     let gen_body: GenerateBody = match serde_json::from_value(body) {
         Ok(b) => b,
@@ -245,7 +245,8 @@ async fn generate(
                 [("content-type", "application/json")],
                 serde_json::to_vec(&json!({"status":"error","message":format!(
                     "invalid request: {}", e
-                )})).unwrap(),
+                )}))
+                .unwrap(),
             )
                 .into_response();
         }
@@ -293,14 +294,12 @@ async fn generate(
             });
             Sse::new(stream).into_response()
         }
-        Err(e) => {
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                [("content-type", "application/json")],
-                serde_json::to_vec(&json!({"status":"error","message":e})).unwrap(),
-            )
-                .into_response()
-        }
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            [("content-type", "application/json")],
+            serde_json::to_vec(&json!({"status":"error","message":e})).unwrap(),
+        )
+            .into_response(),
     }
 }
 
@@ -354,10 +353,7 @@ async fn cancel(
 
 /// POST /v1/sessions/{id}/compress - compress KV cache.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn compress(
-    State(_server): State<AppState>,
-    Path(_id): Path<String>,
-) -> Json<Value> {
+async fn compress(State(_server): State<AppState>, Path(_id): Path<String>) -> Json<Value> {
     Json(json!({
         "status": "accepted",
         "message": "compression not yet implemented"
@@ -366,10 +362,7 @@ async fn compress(
 
 /// POST /v1/sessions/{id}/compress - compress KV cache (compute-core).
 #[cfg(all(feature = "server", feature = "prism-backend"))]
-async fn compress(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-) -> Json<Value> {
+async fn compress(State(server): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let session_id = match parse_session_id(&id) {
         Ok(sid) => sid,
         Err(e) => {
@@ -422,7 +415,11 @@ async fn refresh(
     };
 
     // Parse the context-refresh plan from the request body.
-    let _prompt: String = body.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let _prompt: String = body
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     // Create a fresh epoch for the refreshed context.
     let epoch_id = match server.kv_manager.create_epoch(None) {
@@ -443,10 +440,7 @@ async fn refresh(
 
 /// GET /v1/sessions/{id} - get session state.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn get_session(
-    State(_server): State<AppState>,
-    Path(_id): Path<String>,
-) -> Json<Value> {
+async fn get_session(State(_server): State<AppState>, Path(_id): Path<String>) -> Json<Value> {
     Json(json!({
         "status": "ok",
         "session_id": _id,
@@ -456,10 +450,7 @@ async fn get_session(
 
 /// GET /v1/sessions/{id} - get session state (compute-core).
 #[cfg(all(feature = "server", feature = "prism-backend"))]
-async fn get_session(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-) -> Json<Value> {
+async fn get_session(State(server): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let session_id = match parse_session_id(&id) {
         Ok(sid) => sid,
         Err(e) => {
@@ -485,10 +476,7 @@ async fn get_session(
 
 /// GET /v1/sessions/{id}/receipt - get session receipt.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn get_receipt(
-    State(_server): State<AppState>,
-    Path(_id): Path<String>,
-) -> Json<Value> {
+async fn get_receipt(State(_server): State<AppState>, Path(_id): Path<String>) -> Json<Value> {
     Json(json!({
         "status": "ok",
         "message": "receipt retrieval not yet implemented"
@@ -497,10 +485,7 @@ async fn get_receipt(
 
 /// GET /v1/sessions/{id}/receipt - get session receipt (compute-core).
 #[cfg(all(feature = "server", feature = "prism-backend"))]
-async fn get_receipt(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-) -> Json<Value> {
+async fn get_receipt(State(server): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let session_id = match parse_session_id(&id) {
         Ok(sid) => sid,
         Err(e) => {
@@ -526,10 +511,7 @@ async fn get_receipt(
 
 /// DELETE /v1/sessions/{id} - delete a session.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn delete_session(
-    State(_server): State<AppState>,
-    Path(_id): Path<String>,
-) -> Json<Value> {
+async fn delete_session(State(_server): State<AppState>, Path(_id): Path<String>) -> Json<Value> {
     Json(json!({
         "status": "accepted",
         "message": "session deletion not yet implemented"
@@ -538,10 +520,7 @@ async fn delete_session(
 
 /// DELETE /v1/sessions/{id} - delete a session (compute-core).
 #[cfg(all(feature = "server", feature = "prism-backend"))]
-async fn delete_session(
-    State(server): State<AppState>,
-    Path(id): Path<String>,
-) -> Json<Value> {
+async fn delete_session(State(server): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let session_id = match parse_session_id(&id) {
         Ok(sid) => sid,
         Err(e) => {
@@ -565,9 +544,7 @@ async fn delete_session(
 
 /// GET /v1/capabilities - list server capabilities.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn get_capabilities(
-    State(_server): State<AppState>,
-) -> Json<Value> {
+async fn get_capabilities(State(_server): State<AppState>) -> Json<Value> {
     use super::modality::ModalityCapabilities;
     let mc = ModalityCapabilities::current();
     Json(json!({
@@ -585,13 +562,15 @@ async fn get_capabilities(
 
 /// GET /v1/capabilities - list server capabilities (compute-core).
 #[cfg(all(feature = "server", feature = "prism-backend"))]
-async fn get_capabilities(
-    State(server): State<AppState>,
-) -> Json<Value> {
+async fn get_capabilities(State(server): State<AppState>) -> Json<Value> {
     use super::modality::ModalityCapabilities;
     let mc = ModalityCapabilities::current();
     // Report capabilities from the compute-core shared-tensor registry.
-    let mut caps: Vec<String> = mc.active_capabilities().into_iter().map(String::from).collect();
+    let mut caps: Vec<String> = mc
+        .active_capabilities()
+        .into_iter()
+        .map(String::from)
+        .collect();
     caps.push("prism-backend".to_string());
     caps.push("sse-streaming".to_string());
     caps.push("session-lifecycle".to_string());
@@ -622,9 +601,7 @@ async fn get_capabilities(
 
 /// GET /v1/health - health check.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn health(
-    State(_server): State<AppState>,
-) -> Json<Value> {
+async fn health(State(_server): State<AppState>) -> Json<Value> {
     Json(json!({
         "status": "ok"
     }))
@@ -632,9 +609,7 @@ async fn health(
 
 /// GET /v1/health - health check (compute-core).
 #[cfg(all(feature = "server", feature = "prism-backend"))]
-async fn health(
-    State(server): State<AppState>,
-) -> Json<Value> {
+async fn health(State(server): State<AppState>) -> Json<Value> {
     Json(json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
@@ -648,10 +623,7 @@ async fn health(
 
 /// POST /v1/images/generate - generate an image from a text prompt.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn generate_image(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+async fn generate_image(State(_server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let _ = body;
     Json(json!({
         "status": "accepted",
@@ -660,20 +632,18 @@ async fn generate_image(
 }
 
 /// POST /v1/images/generate - generate an image (compute-core).
-#[cfg(all(feature = "server", feature = "prism-backend", any(feature = "generation-image", feature = "generation-diffusion")))]
-async fn generate_image(
-    State(server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+#[cfg(all(
+    feature = "server",
+    feature = "prism-backend",
+    any(feature = "generation-image", feature = "generation-diffusion")
+))]
+async fn generate_image(State(server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     use crate::image::ImageGenerationRequest;
     let model_path = body
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("default");
-    let prompt = body
-        .get("prompt")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let prompt = body.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
     let width = body.get("width").and_then(|v| v.as_u64()).unwrap_or(1024) as u32;
     let height = body.get("height").and_then(|v| v.as_u64()).unwrap_or(1024) as u32;
     let request = ImageGenerationRequest::new(prompt.to_string(), width, height);
@@ -696,11 +666,12 @@ async fn generate_image(
 }
 
 /// POST /v1/images/generate - feature not enabled stub (prism-backend without image/diffusion).
-#[cfg(all(feature = "server", feature = "prism-backend", not(any(feature = "generation-image", feature = "generation-diffusion"))))]
-async fn generate_image(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+#[cfg(all(
+    feature = "server",
+    feature = "prism-backend",
+    not(any(feature = "generation-image", feature = "generation-diffusion"))
+))]
+async fn generate_image(State(_server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let _ = body;
     Json(json!({
         "status": "error",
@@ -712,10 +683,7 @@ async fn generate_image(
 
 /// POST /v1/audio/speech - generate speech from text.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn generate_audio(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+async fn generate_audio(State(_server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let _ = body;
     Json(json!({
         "status": "accepted",
@@ -724,19 +692,17 @@ async fn generate_audio(
 }
 
 /// POST /v1/audio/speech - generate speech (compute-core).
-#[cfg(all(feature = "server", feature = "prism-backend", feature = "generation-audio"))]
-async fn generate_audio(
-    State(server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+#[cfg(all(
+    feature = "server",
+    feature = "prism-backend",
+    feature = "generation-audio"
+))]
+async fn generate_audio(State(server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let model_path = body
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("default");
-    let text = body
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
     let params = crate::audio::AudioParams {
         voice: body.get("voice").and_then(|v| v.as_str()).map(String::from),
     };
@@ -756,11 +722,12 @@ async fn generate_audio(
 }
 
 /// POST /v1/audio/speech - feature not enabled stub (prism-backend without audio).
-#[cfg(all(feature = "server", feature = "prism-backend", not(feature = "generation-audio")))]
-async fn generate_audio(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+#[cfg(all(
+    feature = "server",
+    feature = "prism-backend",
+    not(feature = "generation-audio")
+))]
+async fn generate_audio(State(_server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let _ = body;
     Json(json!({
             "status": "error",
@@ -772,10 +739,7 @@ async fn generate_audio(
 
 /// POST /v1/video/generate - generate a video from a text prompt.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
-async fn generate_video(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+async fn generate_video(State(_server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let _ = body;
     Json(json!({
         "status": "accepted",
@@ -784,21 +748,22 @@ async fn generate_video(
 }
 
 /// POST /v1/video/generate - generate a video (compute-core).
-#[cfg(all(feature = "server", feature = "prism-backend", feature = "generation-video"))]
-async fn generate_video(
-    State(server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+#[cfg(all(
+    feature = "server",
+    feature = "prism-backend",
+    feature = "generation-video"
+))]
+async fn generate_video(State(server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let model_path = body
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("default");
-    let prompt = body
-        .get("prompt")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let prompt = body.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
     let params = crate::video::VideoParams {
-        num_frames: body.get("num_frames").and_then(|v| v.as_u64()).unwrap_or(16) as u32,
+        num_frames: body
+            .get("num_frames")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(16) as u32,
         fps: body.get("fps").and_then(|v| v.as_u64()).unwrap_or(24) as u32,
         seed: body.get("seed").and_then(|v| v.as_u64()).unwrap_or(42),
     };
@@ -816,11 +781,12 @@ async fn generate_video(
 }
 
 /// POST /v1/video/generate - feature not enabled stub (prism-backend without video).
-#[cfg(all(feature = "server", feature = "prism-backend", not(feature = "generation-video")))]
-async fn generate_video(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
+#[cfg(all(
+    feature = "server",
+    feature = "prism-backend",
+    not(feature = "generation-video")
+))]
+async fn generate_video(State(_server): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let _ = body;
     Json(json!({
         "status": "error",
@@ -853,10 +819,7 @@ async fn generate_embeddings(
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("default");
-    let text = body
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
     match server.generate_embeddings(model_path, text) {
         Ok(embeddings) => Json(json!({
             "status": "ok",

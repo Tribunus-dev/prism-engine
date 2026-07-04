@@ -1458,7 +1458,11 @@ mod tests {
         // Empty data auto-fills zeros; the const may not appear in MIL text
         // if the backend elides zero-initialized values. Just verify the builder
         // produces valid MIL program text.
-        assert!(text.contains("program("), "expected valid MIL program: {}", text);
+        assert!(
+            text.contains("program("),
+            "expected valid MIL program: {}",
+            text
+        );
     }
 
     #[test]

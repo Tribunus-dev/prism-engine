@@ -11,11 +11,10 @@ use std::sync::Mutex;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
+use tribunus_compute_core::config::ServerConfig;
+use tribunus_compute_core::device;
 use tribunus_compute_core::engine::ComputeEngine as CoreComputeEngine;
 use tribunus_compute_core::streaming::GenerationHandle;
-use tribunus_compute_core::device;
-use tribunus_compute_core::config::ServerConfig;
-
 
 // ── Device Enumeration ───────────────────────────────────────────────────
 
@@ -88,8 +87,7 @@ pub fn load_config_from(path: String) -> NapiServerConfig {
 
 #[napi]
 pub fn config_json() -> String {
-    serde_json::to_string_pretty(&ServerConfig::load())
-        .unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string_pretty(&ServerConfig::load()).unwrap_or_else(|_| "{}".to_string())
 }
 
 // ── Capabilities ────────────────────────────────────────────────────────
@@ -245,13 +243,16 @@ impl PrismInferenceServer {
     #[napi]
     pub fn create_session(&self, model_digest: String) -> Result<String> {
         let mut engine = CoreComputeEngine::new().map_err(to_napi_err)?;
-        engine.load_model(model_digest.clone()).map_err(to_napi_err)?;
+        engine
+            .load_model(model_digest.clone())
+            .map_err(to_napi_err)?;
 
         let session_id = format!("sess-{}", uuid::Uuid::new_v4());
 
-        let mut sessions = self.sessions.lock().map_err(|e| {
-            Error::from_reason(format!("sessions lock: {}", e))
-        })?;
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|e| Error::from_reason(format!("sessions lock: {}", e)))?;
 
         if sessions.len() >= self.config.max_concurrent as usize {
             return Err(Error::from_reason("max concurrent sessions reached"));
@@ -287,17 +288,21 @@ impl PrismInferenceServer {
         input_ids: Vec<i32>,
         max_tokens: u32,
     ) -> Result<NapiGenerationResult> {
-        let mut sessions = self.sessions.lock().map_err(|e| {
-            Error::from_reason(format!("sessions lock: {}", e))
-        })?;
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|e| Error::from_reason(format!("sessions lock: {}", e)))?;
 
-        let session = sessions.get_mut(&session_id).ok_or_else(|| {
-            Error::from_reason(format!("session not found: {}", session_id))
-        })?;
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| Error::from_reason(format!("session not found: {}", session_id)))?;
 
         let ids: Vec<u32> = input_ids.into_iter().map(|id| id as u32).collect();
         let t0 = std::time::Instant::now();
-        let handle = session.engine.generate(&ids, max_tokens).map_err(to_napi_err)?;
+        let handle = session
+            .engine
+            .generate(&ids, max_tokens)
+            .map_err(to_napi_err)?;
         let t1 = std::time::Instant::now();
 
         let job_id = handle.job_id.clone();
@@ -323,13 +328,14 @@ impl PrismInferenceServer {
     /// Returns a usage receipt for the cancelled session.
     #[napi]
     pub fn cancel(&self, session_id: String) -> Result<NapiUsageReceipt> {
-        let mut sessions = self.sessions.lock().map_err(|e| {
-            Error::from_reason(format!("sessions lock: {}", e))
-        })?;
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|e| Error::from_reason(format!("sessions lock: {}", e)))?;
 
-        let session = sessions.get_mut(&session_id).ok_or_else(|| {
-            Error::from_reason(format!("session not found: {}", session_id))
-        })?;
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| Error::from_reason(format!("session not found: {}", session_id)))?;
 
         // Attempt to cancel the engine's generation.
         let _ = session.engine.cancel_generation(session_id.clone());
@@ -343,9 +349,7 @@ impl PrismInferenceServer {
             output_tokens: session.output_tokens,
             prefill_duration_ms: session.prefill_duration_ms as i64,
             decode_duration_ms: session.decode_duration_ms as i64,
-            total_duration_ms: (session.prefill_duration_ms
-                + session.decode_duration_ms)
-                as i64,
+            total_duration_ms: (session.prefill_duration_ms + session.decode_duration_ms) as i64,
             final_state: "cancelled".into(),
         })
     }
@@ -354,13 +358,14 @@ impl PrismInferenceServer {
     /// Returns a final usage receipt.
     #[napi]
     pub fn close_session(&self, session_id: String) -> Result<NapiUsageReceipt> {
-        let mut sessions = self.sessions.lock().map_err(|e| {
-            Error::from_reason(format!("sessions lock: {}", e))
-        })?;
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|e| Error::from_reason(format!("sessions lock: {}", e)))?;
 
-        let session = sessions.remove(&session_id).ok_or_else(|| {
-            Error::from_reason(format!("session not found: {}", session_id))
-        })?;
+        let session = sessions
+            .remove(&session_id)
+            .ok_or_else(|| Error::from_reason(format!("session not found: {}", session_id)))?;
 
         // Engine's Drop handles GPU/memory cleanup.
 
@@ -371,9 +376,7 @@ impl PrismInferenceServer {
             output_tokens: session.output_tokens,
             prefill_duration_ms: session.prefill_duration_ms as i64,
             decode_duration_ms: session.decode_duration_ms as i64,
-            total_duration_ms: (session.prefill_duration_ms
-                + session.decode_duration_ms)
-                as i64,
+            total_duration_ms: (session.prefill_duration_ms + session.decode_duration_ms) as i64,
             final_state: session.state,
         })
     }

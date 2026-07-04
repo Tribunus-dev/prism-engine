@@ -2,7 +2,10 @@
 
 use crate::backend::accelerate_ffi;
 use crate::backend::routing::*;
-use crate::backend::{BackendCapabilities, DType, EvaluationReceipt, MatmulOp, QuantizedMatmulOp, QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle};
+use crate::backend::{
+    BackendCapabilities, DType, EvaluationReceipt, MatmulOp, QuantizedMatmulOp,
+    QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle,
+};
 use crate::memory::allocator::IosurfaceAllocator;
 use parking_lot::Mutex;
 use std::ptr::NonNull;
@@ -40,7 +43,9 @@ impl UncachedF32Buffer {
         };
         assert!(ptr != libc::MAP_FAILED, "mmap failed for uncached buffer");
         // Zero the memory
-        unsafe { std::ptr::write_bytes(ptr as *mut u8, 0u8, size); }
+        unsafe {
+            std::ptr::write_bytes(ptr as *mut u8, 0u8, size);
+        }
         Self {
             ptr: NonNull::new(ptr as *mut f32).unwrap(),
             len,
@@ -75,7 +80,9 @@ pub struct UncachedF32Buffer {
 #[cfg(not(target_os = "macos"))]
 impl UncachedF32Buffer {
     pub fn new(len: usize) -> Self {
-        Self { vec: vec![0.0f32; len] }
+        Self {
+            vec: vec![0.0f32; len],
+        }
     }
     pub fn as_slice(&self) -> &[f32] {
         &self.vec
@@ -567,8 +574,7 @@ impl TensorBackend for AccelerateBackend {
                     return Err("create_owned_from_bytes: U32 data length not multiple of 4".into());
                 }
                 // SAFETY: align_to is safe — it handles alignment and returns properly aligned slices
-                let data_u32: &[u32] =
-                    unsafe { data.align_to::<u32>() }.1;
+                let data_u32: &[u32] = unsafe { data.align_to::<u32>() }.1;
                 let data_f32: Vec<f32> = data_u32.iter().map(|&v| v as f32).collect();
                 self.create_f32(&data_f32, shape)
             }
@@ -1397,11 +1403,7 @@ impl TensorBackend for AccelerateBackend {
         }
     }
 
-    fn concatenate(
-        &mut self,
-        tensors: &[TensorHandle],
-        axis: i32,
-    ) -> Result<TensorHandle, String> {
+    fn concatenate(&mut self, tensors: &[TensorHandle], axis: i32) -> Result<TensorHandle, String> {
         if tensors.is_empty() {
             return Err("concatenate: empty tensor list".into());
         }
@@ -1538,9 +1540,8 @@ impl TensorBackend for AccelerateBackend {
             let mut remaining = o;
             let mut src_linear = 0;
             for d in (0..ndim).rev() {
-                let pos_d = (start[d]
-                    + (remaining % out_shape[d] as usize) as i32 * strides[d])
-                    as usize;
+                let pos_d =
+                    (start[d] + (remaining % out_shape[d] as usize) as i32 * strides[d]) as usize;
                 let dim_stride = x_shape[d + 1..]
                     .iter()
                     .try_fold(1usize, |acc, &d| acc.checked_mul(d as usize))
@@ -1568,23 +1569,19 @@ impl TensorBackend for AccelerateBackend {
                 let shape = self.stored_shape(x)?.to_vec();
                 match dtype {
                     DType::I8 => {
-                        let converted: Vec<f32> =
-                            data.iter().map(|&v| (v as i8) as f32).collect();
+                        let converted: Vec<f32> = data.iter().map(|&v| (v as i8) as f32).collect();
                         self.create_f32(&converted, &shape)
                     }
                     DType::U8 => {
-                        let converted: Vec<f32> =
-                            data.iter().map(|&v| (v as u8) as f32).collect();
+                        let converted: Vec<f32> = data.iter().map(|&v| (v as u8) as f32).collect();
                         self.create_f32(&converted, &shape)
                     }
                     DType::I32 => {
-                        let converted: Vec<f32> =
-                            data.iter().map(|&v| (v as i32) as f32).collect();
+                        let converted: Vec<f32> = data.iter().map(|&v| (v as i32) as f32).collect();
                         self.create_f32(&converted, &shape)
                     }
                     DType::U32 => {
-                        let converted: Vec<f32> =
-                            data.iter().map(|&v| (v as u32) as f32).collect();
+                        let converted: Vec<f32> = data.iter().map(|&v| (v as u32) as f32).collect();
                         self.create_f32(&converted, &shape)
                     }
                     _ => Err(format!(

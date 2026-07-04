@@ -5,8 +5,8 @@
 //! with `Ordering::Acquire` — identical to the IOSurface pattern used
 //! by the Metal backend's `StreamObservationSystem`.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // NpuCompletionPort

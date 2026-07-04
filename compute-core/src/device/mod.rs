@@ -23,8 +23,8 @@
 
 pub mod probes;
 
-use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 // ── Core types ──────────────────────────────────────────────────────────────
 
@@ -129,8 +129,8 @@ pub struct DeviceMemoryInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct PcieLinkInfo {
-    pub generation: u32,   // 3, 4, 5
-    pub lanes: u32,        // 4, 8, 16
+    pub generation: u32, // 3, 4, 5
+    pub lanes: u32,      // 4, 8, 16
     pub max_speed_gb_per_sec: f64,
 }
 
@@ -276,10 +276,7 @@ impl Serialize for DeviceRegistry {
         let mut state = serializer.serialize_struct("DeviceRegistry", 3)?;
         state.serialize_field("device_count", &self.devices.len())?;
         state.serialize_field("devices", &self.devices)?;
-        state.serialize_field(
-            "default_device",
-            &self.default_device.map(|id| id.0),
-        )?;
+        state.serialize_field("default_device", &self.default_device.map(|id| id.0))?;
         state.end()
     }
 }

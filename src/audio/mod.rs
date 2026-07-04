@@ -161,18 +161,14 @@ fn generate_via_compute_core(
     params: AudioParams,
 ) -> Result<AudioGenerationReceipt, PrismAudioError> {
     use tribunus_compute_core::audio_provider::{
-        AudioGenerationError, AudioGenerationProvider, AudioGenerationRequest,
-        TextToSpeechProvider,
+        AudioGenerationError, AudioGenerationProvider, AudioGenerationRequest, TextToSpeechProvider,
     };
 
-    let provider = TextToSpeechProvider::new(model_path)
-        .map_err(|e| match e {
-            AudioGenerationError::ModelNotFound(p) => PrismAudioError::ModelNotFound(p),
-            AudioGenerationError::GenerationFailed(m) => PrismAudioError::GenerationFailed(m),
-            AudioGenerationError::UnsupportedModelType(m) => {
-                PrismAudioError::UnsupportedModelType(m)
-            }
-        })?;
+    let provider = TextToSpeechProvider::new(model_path).map_err(|e| match e {
+        AudioGenerationError::ModelNotFound(p) => PrismAudioError::ModelNotFound(p),
+        AudioGenerationError::GenerationFailed(m) => PrismAudioError::GenerationFailed(m),
+        AudioGenerationError::UnsupportedModelType(m) => PrismAudioError::UnsupportedModelType(m),
+    })?;
 
     let request = AudioGenerationRequest {
         model_path: model_path.to_string(),

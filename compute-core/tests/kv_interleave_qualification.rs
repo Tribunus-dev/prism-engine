@@ -171,7 +171,10 @@ fn test_01_prefetch_worker_compilation() {
         "persistent_kv_prefetch_worker compiled: {:.1}ms",
         elapsed.as_secs_f64() * 1e3
     );
-    println!("  threadgroup size: {}", pso.max_total_threads_per_threadgroup());
+    println!(
+        "  threadgroup size: {}",
+        pso.max_total_threads_per_threadgroup()
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -222,15 +225,15 @@ fn test_02_prefetch_worker_epoch_exit() {
     let cb = queue.new_command_buffer();
     let enc = cb.new_compute_command_encoder();
     enc.set_compute_pipeline_state(&pso);
-    enc.set_buffer(0, Some(&queue_buf), 0);  // queue
-    enc.set_buffer(1, Some(&scratch_k), 0);   // kv_k_nibbles
-    enc.set_buffer(2, Some(&scratch_v), 0);   // kv_v_nibbles
-    enc.set_buffer(5, Some(&scratch_k), 0);   // scratch_k
-    enc.set_buffer(6, Some(&scratch_v), 0);   // scratch_v
-    enc.set_buffer(7, Some(&headers), 0);     // headers
-    enc.set_buffer(8, Some(&epoch_ctrl), 0);  // epoch_control
-    enc.set_buffer(9, Some(&receipt), 0);     // receipt
-    // max_tokens_per_epoch at buffer(10) — doesn't matter for worker alone
+    enc.set_buffer(0, Some(&queue_buf), 0); // queue
+    enc.set_buffer(1, Some(&scratch_k), 0); // kv_k_nibbles
+    enc.set_buffer(2, Some(&scratch_v), 0); // kv_v_nibbles
+    enc.set_buffer(5, Some(&scratch_k), 0); // scratch_k
+    enc.set_buffer(6, Some(&scratch_v), 0); // scratch_v
+    enc.set_buffer(7, Some(&headers), 0); // headers
+    enc.set_buffer(8, Some(&epoch_ctrl), 0); // epoch_control
+    enc.set_buffer(9, Some(&receipt), 0); // receipt
+                                          // max_tokens_per_epoch at buffer(10) — doesn't matter for worker alone
     let max_tokens = device.new_buffer_with_data(
         &TOKEN_BUDGET as *const u32 as *const std::ffi::c_void,
         4,
@@ -239,8 +242,16 @@ fn test_02_prefetch_worker_epoch_exit() {
     enc.set_buffer(10, Some(&max_tokens), 0);
 
     enc.dispatch_threads(
-        MTLSize { width: 1, height: 1, depth: 1 },
-        MTLSize { width: TG_SIZE, height: 1, depth: 1 },
+        MTLSize {
+            width: 1,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: TG_SIZE,
+            height: 1,
+            depth: 1,
+        },
     );
     enc.end_encoding();
 

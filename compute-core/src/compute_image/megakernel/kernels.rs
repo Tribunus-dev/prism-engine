@@ -152,7 +152,12 @@ pub fn compile_kernel_from_metallib(
         .map_err(|e| format!("get_function: {:?}", e))?;
     device
         .new_compute_pipeline_state_with_function(&function)
-        .map_err(|e| format!("pipeline state for {:?}: {:?}", "gemma4_full_decode_persistent", e))
+        .map_err(|e| {
+            format!(
+                "pipeline state for {:?}: {:?}",
+                "gemma4_full_decode_persistent", e
+            )
+        })
 }
 
 #[cfg(test)]
@@ -182,7 +187,10 @@ mod tests {
 
     #[test]
     fn shader_src_int4_is_non_empty() {
-        assert!(!SHADER_SRC_INT4.is_empty(), "SHADER_SRC_INT4 must not be empty");
+        assert!(
+            !SHADER_SRC_INT4.is_empty(),
+            "SHADER_SRC_INT4 must not be empty"
+        );
     }
 
     #[test]
@@ -195,7 +203,10 @@ mod tests {
 
     #[test]
     fn persistent_gemv_src_is_non_empty() {
-        assert!(!PERSISTENT_GEMV_SRC.is_empty(), "PERSISTENT_GEMV_SRC must not be empty");
+        assert!(
+            !PERSISTENT_GEMV_SRC.is_empty(),
+            "PERSISTENT_GEMV_SRC must not be empty"
+        );
     }
 
     #[test]

@@ -85,11 +85,7 @@ impl ReadinessGates {
     ///
     /// Available only when the `mlx-backend` feature is enabled.
     #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-    pub fn run_all(
-        &mut self,
-        tokenizer: Option<&TribunusTokenizer>,
-        runtime_mode: RuntimeMode,
-    ) {
+    pub fn run_all(&mut self, tokenizer: Option<&TribunusTokenizer>, runtime_mode: RuntimeMode) {
         // Gate 1: Worker Health — skipped (no worker process in ECS-only mode)
         if let Some(g) = self.gates.iter_mut().find(|g| g.name == "worker_health") {
             g.status = GateStatus::Skipped;

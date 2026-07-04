@@ -3,9 +3,9 @@
 //! Loads pre-compiled .mlmodelc models from the `.cimage` auxiliary
 //! section (embedded model bytes) into CoreAiModel instances.
 
-use crate::arena::DataType;
 use super::Orchestrator;
 use crate::arena::Arena;
+use crate::arena::DataType;
 use crate::compute_image::compaction;
 use crate::coreai_bridge::CoreAiModel;
 

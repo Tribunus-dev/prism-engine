@@ -2,9 +2,9 @@
 //!
 //! Available on Linux with the ROCm toolkit installed.
 
+use super::DeviceProbe;
 #[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
 use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo, PcieLinkInfo};
-use super::DeviceProbe;
 
 /// Probes AMD GPUs accessible through the ROCm (HIP) runtime.
 pub struct RocmProbe;
@@ -21,9 +21,9 @@ impl DeviceProbe for RocmProbe {
 
 #[cfg(target_os = "linux")]
 mod platform {
+    use super::*;
     use std::ffi::CStr;
     use std::mem;
-    use super::*;
 
     const HIP_SUCCESS: i32 = 0;
 
@@ -31,11 +31,11 @@ mod platform {
     struct hipDeviceProp_t {
         name: [i8; 256],
         totalGlobalMem: usize,
-        _pad1: [u8; 48],        // offset 264→312: sharedMemPerBlock..maxGridSize
+        _pad1: [u8; 48], // offset 264→312: sharedMemPerBlock..maxGridSize
         clockRate: i32,
-        _pad2: [u8; 28],        // offset 316→344: memoryClockRate..minor
+        _pad2: [u8; 28], // offset 316→344: memoryClockRate..minor
         multiProcessorCount: i32,
-        _pad3: [u8; 1024],      // tail — skip everything after
+        _pad3: [u8; 1024], // tail — skip everything after
     }
 
     #[link(name = "amdhip64")]
@@ -83,7 +83,7 @@ mod platform {
                 clock_mhz: (props.clockRate / 1000) as u32,
                 ane_cores: 0,
                 supports_f16: true,
-                supports_bf16: false,  // only CDNA2+/RDNA3+ native BF16
+                supports_bf16: false, // only CDNA2+/RDNA3+ native BF16
                 supports_int8: true,
                 supports_ternary: false,
                 pcie_link: Some(PcieLinkInfo {

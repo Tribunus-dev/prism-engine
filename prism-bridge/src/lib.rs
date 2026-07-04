@@ -17,16 +17,19 @@
 //!
 //! Drag the generated `.swift` and `.h` files into your Xcode project.
 
-use tribunus_compute_core::agent;
-use tribunus_compute_core::tools;
-use tribunus_compute_core::config::{self, ServerConfig, HardwareTarget, CompileQuantMode, GenerationRegime, KvCacheMode};
-use tribunus_compute_core::config::operation_route::OperationRoute;
-use tribunus_compute_core::device::{self, DeviceKind, BackendKind, DeviceMemoryInfo, PcieLinkInfo};
-use tribunus_compute_core::runtime::agent_slot::MultiplexerState;
-use tribunus_compute_core::compute_image::cimage_loader::load_cimage_mmap;
-use std::sync::Arc;
 use std::path::Path;
-
+use std::sync::Arc;
+use tribunus_compute_core::agent;
+use tribunus_compute_core::compute_image::cimage_loader::load_cimage_mmap;
+use tribunus_compute_core::config::operation_route::OperationRoute;
+use tribunus_compute_core::config::{
+    self, CompileQuantMode, GenerationRegime, HardwareTarget, KvCacheMode, ServerConfig,
+};
+use tribunus_compute_core::device::{
+    self, BackendKind, DeviceKind, DeviceMemoryInfo, PcieLinkInfo,
+};
+use tribunus_compute_core::runtime::agent_slot::MultiplexerState;
+use tribunus_compute_core::tools;
 
 /// Errors that can cross the UniFFI boundary.
 #[derive(Debug, Clone, uniffi::Error, thiserror::Error)]
@@ -83,9 +86,15 @@ pub struct BridgeAgentState {
 #[derive(uniffi::Enum, Clone)]
 pub enum BridgeStepOutcome {
     Generating,
-    AwaitingTools { tools: Vec<BridgeToolCall> },
-    AwaitingSubagents { subagents: Vec<BridgeSubagentHandle> },
-    Finished { result: String },
+    AwaitingTools {
+        tools: Vec<BridgeToolCall>,
+    },
+    AwaitingSubagents {
+        subagents: Vec<BridgeSubagentHandle>,
+    },
+    Finished {
+        result: String,
+    },
 }
 
 /// Combined result payload returned to Swift.
@@ -113,10 +122,7 @@ pub struct BridgeToolDefinition {
 /// pure state transition, and returns the new state + outcome.  The app is
 /// responsible for calling inference externally and feeding the output here.
 #[uniffi::export]
-pub fn prism_agent_step(
-    state_json: String,
-    model_output: String,
-) -> BridgeStepResult {
+pub fn prism_agent_step(state_json: String, model_output: String) -> BridgeStepResult {
     // ── Deserialise ─────────────────────────────────────────────────
     let mut inner: agent::AgentState = match serde_json::from_str(&state_json) {
         Ok(s) => s,
@@ -313,10 +319,10 @@ pub fn prism_compile_gguf(
     let result = tribunus_compute_core::compute_image::compile::compile_gguf_unchecked(
         &gguf_path,
         &output_dir,
-        None,   // quantize_mode — auto-detect from target
-        None,   // ane_models_dir — optional pre-compiled ANE models
-        None,   // metallib_path — optional pre-compiled Metal kernels
-        None,   // mlx_capture_dir — optional MLX capture output
+        None, // quantize_mode — auto-detect from target
+        None, // ane_models_dir — optional pre-compiled ANE models
+        None, // metallib_path — optional pre-compiled Metal kernels
+        None, // mlx_capture_dir — optional MLX capture output
     );
 
     match result {
@@ -359,8 +365,8 @@ impl BridgeMultiplexer {
     #[uniffi::constructor]
     pub fn load(cimage_path: String, _model_dir: String) -> Result<Arc<Self>, BridgeError> {
         let path = Path::new(&cimage_path);
-        let (mmap, header) =
-            load_cimage_mmap(path).map_err(|e| BridgeError::CimageLoadFailed(format!("load cimage: {e}")))?;
+        let (mmap, header) = load_cimage_mmap(path)
+            .map_err(|e| BridgeError::CimageLoadFailed(format!("load cimage: {e}")))?;
         let mmap_arc = Arc::new(mmap);
         let mut state = MultiplexerState::new();
         state.init_from_cimage(mmap_arc, &header, 3840, 18432);
@@ -451,8 +457,8 @@ pub fn prism_run_js(
     sandbox_root: String,
     driver: Option<Box<dyn BrowserRuntimeDriver>>,
 ) -> String {
-    use tribunus_compute_core::tools::js_runtime::{self, WebDriver};
     use std::sync::Arc;
+    use tribunus_compute_core::tools::js_runtime::{self, WebDriver};
 
     if let Some(d) = driver {
         struct DriverWrapper {
@@ -461,29 +467,60 @@ pub fn prism_run_js(
         impl WebDriver for DriverWrapper {
             fn navigate(&self, url: &str) -> Result<String, String> {
                 let r = self.inner.navigate(url.to_string());
-                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+                if r.starts_with("ERROR:") {
+                    Err(r)
+                } else {
+                    Ok(r)
+                }
             }
             fn snapshot(&self) -> Result<String, String> {
                 let r = self.inner.snapshot();
-                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+                if r.starts_with("ERROR:") {
+                    Err(r)
+                } else {
+                    Ok(r)
+                }
             }
-            fn interact(&self, id: u32, action: &str, value: Option<&str>) -> Result<String, String> {
-                let r = self.inner.interact(id, action.to_string(), value.map(|s| s.to_string()));
-                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+            fn interact(
+                &self,
+                id: u32,
+                action: &str,
+                value: Option<&str>,
+            ) -> Result<String, String> {
+                let r = self
+                    .inner
+                    .interact(id, action.to_string(), value.map(|s| s.to_string()));
+                if r.starts_with("ERROR:") {
+                    Err(r)
+                } else {
+                    Ok(r)
+                }
             }
             fn evaluate_js(&self, script: &str) -> Result<String, String> {
                 let r = self.inner.evaluate_js(script.to_string());
-                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+                if r.starts_with("ERROR:") {
+                    Err(r)
+                } else {
+                    Ok(r)
+                }
             }
             fn download(&self, url: &str, filename: &str) -> Result<String, String> {
                 let r = self.inner.download(url.to_string(), filename.to_string());
-                if r.starts_with("ERROR:") { Err(r) } else { Ok(r) }
+                if r.starts_with("ERROR:") {
+                    Err(r)
+                } else {
+                    Ok(r)
+                }
             }
         }
         js_runtime::set_web_driver(Arc::new(DriverWrapper { inner: d }));
     }
 
-    let root = if sandbox_root.is_empty() { None } else { Some(std::path::Path::new(&sandbox_root)) };
+    let root = if sandbox_root.is_empty() {
+        None
+    } else {
+        Some(std::path::Path::new(&sandbox_root))
+    };
     let result = js_runtime::run_javascript(&code, root, None);
     serde_json::to_string(&result).unwrap_or_default()
 }
@@ -595,7 +632,7 @@ impl From<DeviceKind> for BridgeDeviceKind {
             DeviceKind::GpuUnified => Self::GpuUnified,
             DeviceKind::Npu => Self::Npu,
             DeviceKind::Accelerator => Self::Accelerator,
-}
+        }
     }
 }
 
@@ -627,7 +664,7 @@ impl From<BackendKind> for BridgeBackendKind {
             BackendKind::CandleCpu => Self::CandleCpu,
             BackendKind::Cpu => Self::Cpu,
             BackendKind::Tensix => Self::Tensix,
-    }
+        }
     }
 }
 
@@ -647,7 +684,7 @@ impl From<DeviceMemoryInfo> for BridgeDeviceMemoryInfo {
             free_bytes: m.free_bytes,
             bandwidth_gb_per_sec: m.bandwidth_gb_per_sec,
             unified_with_cpu: m.unified_with_cpu,
-}
+        }
     }
 }
 
@@ -722,7 +759,10 @@ pub fn prism_list_devices() -> Vec<BridgeDeviceInfo> {
             supports_bf16: d.supports_bf16,
             supports_int8: d.supports_int8,
             supports_ternary: d.supports_ternary,
-            pcie_link: d.pcie_link.as_ref().map(|p| BridgePcieLinkInfo::from(p.clone())),
+            pcie_link: d
+                .pcie_link
+                .as_ref()
+                .map(|p| BridgePcieLinkInfo::from(p.clone())),
         })
         .collect()
 }
@@ -804,7 +844,9 @@ impl From<BridgeCompileQuantMode> for CompileQuantMode {
             BridgeCompileQuantMode::Nf4 { group_size } => Self::Nf4 { group_size },
             BridgeCompileQuantMode::Af8 { group_size } => Self::Af8 { group_size },
             BridgeCompileQuantMode::Ternary { group_size } => Self::Ternary { group_size },
-            BridgeCompileQuantMode::TernaryTile640 { group_size } => Self::TernaryTile640 { group_size },
+            BridgeCompileQuantMode::TernaryTile640 { group_size } => {
+                Self::TernaryTile640 { group_size }
+            }
             // AutoDetect has no corresponding core variant; choose reasonable default
             BridgeCompileQuantMode::AutoDetect => Self::Nf4 { group_size: 64 },
         }
@@ -1096,8 +1138,7 @@ pub fn prism_load_config_from(path: String) -> BridgeServerConfig {
 /// Return the current server configuration as a JSON string.
 #[uniffi::export]
 pub fn prism_config_json() -> String {
-    serde_json::to_string_pretty(&ServerConfig::load())
-        .unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string_pretty(&ServerConfig::load()).unwrap_or_else(|_| "{}".to_string())
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1130,27 +1171,23 @@ fn bridge_outcome_from(
                 })
                 .collect(),
         },
-        agent::StepOutcome::SubagentSpawned(handle) => {
-            BridgeStepOutcome::AwaitingSubagents {
-                subagents: vec![BridgeSubagentHandle {
-                    id: handle.id,
-                    goal: handle.goal.clone(),
-                    sandbox_subpath: handle.sandbox_subpath.clone(),
-                    tool_allowlist: handle.tool_allowlist.clone(),
-                    max_revisions: 3,
-                }],
-            }
-        }
+        agent::StepOutcome::SubagentSpawned(handle) => BridgeStepOutcome::AwaitingSubagents {
+            subagents: vec![BridgeSubagentHandle {
+                id: handle.id,
+                goal: handle.goal.clone(),
+                sandbox_subpath: handle.sandbox_subpath.clone(),
+                tool_allowlist: handle.tool_allowlist.clone(),
+                max_revisions: 3,
+            }],
+        },
         agent::StepOutcome::SubagentResult { .. } => {
             // This is an internal transition — the app feeds subagent
             // results via an explicit call, not through step().
             BridgeStepOutcome::Generating
         }
-        agent::StepOutcome::Finished { output } => {
-            BridgeStepOutcome::Finished {
-                result: output.clone(),
-            }
-        }
+        agent::StepOutcome::Finished { output } => BridgeStepOutcome::Finished {
+            result: output.clone(),
+        },
         agent::StepOutcome::Idle => BridgeStepOutcome::Finished {
             result: String::new(),
         },

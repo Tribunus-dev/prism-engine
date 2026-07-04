@@ -10,10 +10,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::compilation::region_catalogue::{RegionAdmission, RegionCatalogue};
-use crate::model_adapter::CanonicalModel;
 use crate::compilation::ane_eligibility::AneEligibility;
 use crate::compilation::phase_ir::{PhaseRegion, RegionId};
+use crate::compilation::region_catalogue::{RegionAdmission, RegionCatalogue};
+use crate::model_adapter::CanonicalModel;
 
 // ── Scheduled operation ──────────────────────────────────────────────────
 
@@ -89,29 +89,155 @@ pub fn build_region_plan(
 
     for layer in 0..n_layers {
         // Attention block
-        push_op(&mut ops, &mut op_index, layer, "rms_norm", "attn_norm", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "q_projection", "q", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "k_projection", "k", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "v_projection", "v", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "rotary_embedding", "rope", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "attention_score", "attn_score", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "softmax", "softmax", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "attention_value_aggregation", "attn_aggregate", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "output_projection", "o", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "residual_add", "residual_attn", catalogue);
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "rms_norm",
+            "attn_norm",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "q_projection",
+            "q",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "k_projection",
+            "k",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "v_projection",
+            "v",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "rotary_embedding",
+            "rope",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "attention_score",
+            "attn_score",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "softmax",
+            "softmax",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "attention_value_aggregation",
+            "attn_aggregate",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "output_projection",
+            "o",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "residual_add",
+            "residual_attn",
+            catalogue,
+        );
 
         // MLP block
-        push_op(&mut ops, &mut op_index, layer, "rms_norm", "mlp_norm", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "gate_projection", "gate", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "silu_activation", "silu", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "up_projection", "up", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "down_projection", "down", catalogue);
-        push_op(&mut ops, &mut op_index, layer, "residual_add", "residual_mlp", catalogue);
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "rms_norm",
+            "mlp_norm",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "gate_projection",
+            "gate",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "silu_activation",
+            "silu",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "up_projection",
+            "up",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "down_projection",
+            "down",
+            catalogue,
+        );
+        push_op(
+            &mut ops,
+            &mut op_index,
+            layer,
+            "residual_add",
+            "residual_mlp",
+            catalogue,
+        );
     }
 
     // Post-layer ops
-    push_op(&mut ops, &mut op_index, n_layers, "final_norm", "final_norm", catalogue);
-    push_op(&mut ops, &mut op_index, n_layers, "logits_projection", "lm_head", catalogue);
+    push_op(
+        &mut ops,
+        &mut op_index,
+        n_layers,
+        "final_norm",
+        "final_norm",
+        catalogue,
+    );
+    push_op(
+        &mut ops,
+        &mut op_index,
+        n_layers,
+        "logits_projection",
+        "lm_head",
+        catalogue,
+    );
 
     // Partition into Core ML islands
     let coreai_islands = partition_islands(&ops);
@@ -144,9 +270,9 @@ fn push_op(
     role: &str,
     cat: &RegionCatalogue,
 ) {
-    let entry = cat.find(family).unwrap_or_else(|| {
-        panic!("catalogue missing required op: {family}")
-    });
+    let entry = cat
+        .find(family)
+        .unwrap_or_else(|| panic!("catalogue missing required op: {family}"));
     ops.push(ScheduledOp {
         op_index: *op_index,
         layer,
@@ -192,9 +318,7 @@ fn partition_islands(ops: &[ScheduledOp]) -> Vec<CoreAiIsland> {
 
 /// Run the ANE eligibility pass on a set of operations and produce PhaseRegions.
 /// Each region is a contiguous group of ops with homogeneous eligibility.
-pub fn build_phase_regions(
-    plan: &RegionExecutionPlan,
-) -> Vec<PhaseRegion> {
+pub fn build_phase_regions(plan: &RegionExecutionPlan) -> Vec<PhaseRegion> {
     // For now: return one PhaseRegion per CoreML island, marked as MetalOnly.
     // Full eligibility integration will run AneEligibility::classify_ane_eligibility().
     let mut regions = Vec::new();
@@ -236,8 +360,8 @@ pub fn build_phase_regions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_adapter::CanonicalModel;
     use crate::config::{AttentionKind, RopeSpec, TextArchitecture};
+    use crate::model_adapter::CanonicalModel;
 
     fn make_test_canonical(n_layers: u32) -> CanonicalModel {
         let arch = TextArchitecture {
@@ -330,13 +454,19 @@ mod tests {
         let cat = RegionCatalogue::fp16_alpha();
         let plan = build_region_plan(&model, &cat);
 
-        let partitioned: u32 = plan.coreai_islands.iter()
+        let partitioned: u32 = plan
+            .coreai_islands
+            .iter()
             .map(|i| i.ops.len() as u32)
             .sum::<u32>()
             + plan.metal_ops.len() as u32
             + plan.cpu_ops.len() as u32;
         // Each op belongs to exactly one partition (island or metal or cpu)
-        assert_eq!(partitioned, plan.ops.len() as u32,
-            "all {} ops must be in a partition", plan.ops.len());
+        assert_eq!(
+            partitioned,
+            plan.ops.len() as u32,
+            "all {} ops must be in a partition",
+            plan.ops.len()
+        );
     }
 }

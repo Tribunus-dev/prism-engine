@@ -40,6 +40,10 @@ impl XorShift32 {
         }
     }
 
+    fn seeded(seed: u32) -> Self {
+        Self { state: seed.max(1) }
+    }
+
     /// Returns a random f32 in [0.0, 1.0).
     fn gen_f32(&mut self) -> f32 {
         self.state ^= self.state << 13;
@@ -162,10 +166,21 @@ impl SpeculativeDecoding {
     /// Longer values increase potential speedup but also the risk of
     /// wasted work when many tokens are rejected.
     pub fn new(speculation_length: usize) -> Self {
+        let seed = 0xdead_beeu32.wrapping_add(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u32)
+                .unwrap_or(0x7a3b_c9d1),
+        );
+        Self::with_seed(speculation_length, seed)
+    }
+
+    /// Create a new speculative decoding orchestrator with a fixed RNG seed.
+    pub fn with_seed(speculation_length: usize, seed: u32) -> Self {
         Self {
             speculation_length,
             stats: SpecDecodeStats::default(),
-            rng: XorShift32::new(),
+            rng: XorShift32::seeded(seed),
         }
     }
 

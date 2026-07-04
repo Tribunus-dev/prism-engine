@@ -8,10 +8,18 @@ fn main() -> Result<(), String> {
 
     let (metadata, tensors) = tribunus_compute_core::gguf::parse_gguf_header(&path)?;
     let arch = tribunus_compute_core::gguf::extract_architecture(&metadata)?;
-    eprintln!("Model: {} ({} layers, hidden={})", arch.model_type, arch.num_hidden_layers, arch.hidden_size);
+    eprintln!(
+        "Model: {} ({} layers, hidden={})",
+        arch.model_type, arch.num_hidden_layers, arch.hidden_size
+    );
 
-    let tens: Vec<_> = tensors.iter()
-        .filter(|t| t.shape.len() == 2 && (t.name.contains("attn_") || t.name.contains("ffn_")) && t.name.ends_with(".weight"))
+    let tens: Vec<_> = tensors
+        .iter()
+        .filter(|t| {
+            t.shape.len() == 2
+                && (t.name.contains("attn_") || t.name.contains("ffn_"))
+                && t.name.ends_with(".weight")
+        })
         .take(limit)
         .collect();
 
@@ -24,8 +32,13 @@ fn main() -> Result<(), String> {
         // Count finite values
         let finite_n = orig.iter().filter(|v| v.is_finite()).count();
         if finite_n < n / 2 {
-            eprintln!("  {} [{}×{}] ** {:.1}% inf/NaN — skip", t.name, rows, cols,
-                100.0 * (n - finite_n) as f64 / n as f64);
+            eprintln!(
+                "  {} [{}×{}] ** {:.1}% inf/NaN — skip",
+                t.name,
+                rows,
+                cols,
+                100.0 * (n - finite_n) as f64 / n as f64
+            );
             continue;
         }
 
@@ -33,7 +46,9 @@ fn main() -> Result<(), String> {
         // scale computation and ternary comparison use only valid data.
         let mut orig = orig;
         for v in orig.iter_mut() {
-            if !v.is_finite() { *v = 0.0; }
+            if !v.is_finite() {
+                *v = 0.0;
+            }
         }
 
         // Ternary tile640 quantize → dequantize on finite values only
@@ -48,13 +63,21 @@ fn main() -> Result<(), String> {
                 let mut absmax = 0.0f32;
                 for c in ts..te {
                     let a = orig[base + c].abs();
-                    if a > absmax { absmax = a; }
+                    if a > absmax {
+                        absmax = a;
+                    }
                 }
                 let scale = if absmax > 1e-12 { absmax } else { 1.0 };
                 let inv = 1.0 / scale;
                 for c in ts..te {
                     let val = orig[base + c] * inv;
-                    let d = if val > 0.5 { 1.0 } else if val < -0.5 { -1.0 } else { 0.0 };
+                    let d = if val > 0.5 {
+                        1.0
+                    } else if val < -0.5 {
+                        -1.0
+                    } else {
+                        0.0
+                    };
                     recon[base + c] = d * scale;
                 }
             }
@@ -75,18 +98,30 @@ fn main() -> Result<(), String> {
             let ab = err.abs() as f32;
             sq += (err * err) as f64;
             ae += ab as f64;
-            if ab > max_ae { max_ae = ab; }
+            if ab > max_ae {
+                max_ae = ab;
+            }
             let denom = o.abs().max(1e-10);
             let re = ab / denom;
-            if re > max_re { max_re = re; }
+            if re > max_re {
+                max_re = re;
+            }
             checked += 1;
         }
 
         let rmse = (sq / checked as f64).sqrt();
         let mae = ae / checked as f64;
         eprintln!("  {} [{}×{}]", t.name, rows, cols);
-        eprintln!("    finite: {}/{} ({:.2}%)", finite_n, n, 100.0 * finite_n as f64 / n as f64);
-        eprintln!("    RMSE: {:.6e}  MAE: {:.6e}  MaxAbsErr: {:.6e}", rmse, mae, max_ae);
+        eprintln!(
+            "    finite: {}/{} ({:.2}%)",
+            finite_n,
+            n,
+            100.0 * finite_n as f64 / n as f64
+        );
+        eprintln!(
+            "    RMSE: {:.6e}  MAE: {:.6e}  MaxAbsErr: {:.6e}",
+            rmse, mae, max_ae
+        );
         eprintln!("    MaxRelErr: {:.6}", max_re);
         eprintln!();
     }

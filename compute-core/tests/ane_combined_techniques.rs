@@ -571,7 +571,6 @@ fn ane_combined_techniques_sweep() {
             output_name: out_name.clone(),
             inputs: vec![("x".into(), input_shape.clone())],
             outputs: vec![(out_name.clone(), output_shape.clone())],
-
         };
 
         // ── Compile ───────────────────────────────────────────────

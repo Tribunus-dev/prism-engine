@@ -10,7 +10,6 @@
 use crate::compilation::tri_lane::{AppleFallbackPlan, FallbackStatus};
 use crate::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
 
-
 /// Trait for injecting controlled Core ML failures in production tests.
 pub trait CoreAiFailureInjector: std::fmt::Debug {
     /// Return `true` when the injector wants to simulate a failure at this epoch.
@@ -48,19 +47,13 @@ pub enum FallbackTrigger {
         actual_ns: u64,
     },
     /// Output tensor values failed numerical validation (RMS error, NaN, etc.).
-    OutputValidationFailed {
-        epoch: u64,
-        max_error: f64,
-    },
+    OutputValidationFailed { epoch: u64, max_error: f64 },
     /// Numerical guard (e.g. bit-exactness contract) was violated.
     NumericalGuardFailed(String),
     /// Lane explicitly disabled by operator or configuration.
     ExplicitLaneDisablement(String),
     /// Repeated unhealthy latency detected across consecutive epochs.
-    RepeatedUnhealthyLatency {
-        epoch: u64,
-        consecutive: u32,
-    },
+    RepeatedUnhealthyLatency { epoch: u64, consecutive: u32 },
     /// Unrecoverable runtime exception from the Core ML or Metal layer.
     RuntimeException(String),
 }
@@ -351,7 +344,9 @@ mod tests {
 
         // First hard failure — counter increments but stays below threshold.
         assert!(
-            !mgr.evaluate(&FallbackTrigger::ArtifactLoadFailed("missing.mlmodelc".into())),
+            !mgr.evaluate(&FallbackTrigger::ArtifactLoadFailed(
+                "missing.mlmodelc".into()
+            )),
             "first hard failure should not trigger"
         );
         assert_eq!(mgr.consecutive_failures, 1);
@@ -401,7 +396,10 @@ mod tests {
 
         mgr.activate(42, "artifact load failed".into());
 
-        assert!(mgr.is_active(), "manager must report active after activation");
+        assert!(
+            mgr.is_active(),
+            "manager must report active after activation"
+        );
         match &mgr.status {
             FallbackStatus::Activated { epoch, reason } => {
                 assert_eq!(*epoch, 42);
@@ -479,7 +477,10 @@ mod tests {
             "slot 2 (Ready) must remain untouched"
         );
         assert!(
-            matches!(arena.slot(4).unwrap().state, SlotState::Retired { epoch: 42 }),
+            matches!(
+                arena.slot(4).unwrap().state,
+                SlotState::Retired { epoch: 42 }
+            ),
             "slot 4 (Retired) must remain untouched"
         );
 
@@ -565,7 +566,9 @@ mod tests {
         assert!(
             mgr.evaluate_with_injector(
                 2,
-                Some(&FallbackTrigger::ArtifactLoadFailed("missing.mlmodelc".into())),
+                Some(&FallbackTrigger::ArtifactLoadFailed(
+                    "missing.mlmodelc".into()
+                )),
             ),
             "injector must be checked before actual triggers"
         );
@@ -579,7 +582,9 @@ mod tests {
         assert!(
             mgr2.evaluate_with_injector(
                 3,
-                Some(&FallbackTrigger::ArtifactLoadFailed("missing.mlmodelc".into())),
+                Some(&FallbackTrigger::ArtifactLoadFailed(
+                    "missing.mlmodelc".into()
+                )),
             ),
             "actual trigger must fire when injector is absent"
         );
@@ -691,7 +696,10 @@ mod tests {
             primary_manifest.tensor_id, fallback_manifest.tensor_id,
             "tensor_id must match"
         );
-        assert_eq!(primary_manifest.dtype, fallback_manifest.dtype, "dtype must match");
+        assert_eq!(
+            primary_manifest.dtype, fallback_manifest.dtype,
+            "dtype must match"
+        );
         assert_eq!(
             primary_manifest.logical_shape, fallback_manifest.logical_shape,
             "logical_shape must match"
@@ -704,7 +712,10 @@ mod tests {
             primary_manifest.strides_bytes, fallback_manifest.strides_bytes,
             "strides_bytes must match"
         );
-        assert_eq!(primary_manifest.layout, fallback_manifest.layout, "layout must match");
+        assert_eq!(
+            primary_manifest.layout, fallback_manifest.layout,
+            "layout must match"
+        );
         assert_eq!(
             primary_manifest.byte_length, fallback_manifest.byte_length,
             "byte_length must match"

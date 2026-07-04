@@ -10,7 +10,10 @@ fn main() -> Result<(), String> {
 
     let (metadata, tensors) = tribunus_compute_core::gguf::parse_gguf_header(&path)?;
     let arch = tribunus_compute_core::gguf::extract_architecture(&metadata)?;
-    eprintln!("Model: {} ({} layers, hidden={})", arch.model_type, arch.num_hidden_layers, arch.hidden_size);
+    eprintln!(
+        "Model: {} ({} layers, hidden={})",
+        arch.model_type, arch.num_hidden_layers, arch.hidden_size
+    );
 
     // Open mmap for raw block reads
     let f = std::fs::File::open(&path).map_err(|e| format!("open: {e}"))?;
@@ -18,8 +21,14 @@ fn main() -> Result<(), String> {
 
     // Process each 2D weight tensor
     for t in &tensors {
-        if t.shape.len() != 2 || !t.name.ends_with(".weight") { continue; }
-        if let Some(filt) = filter { if !t.name.contains(filt) { continue; } }
+        if t.shape.len() != 2 || !t.name.ends_with(".weight") {
+            continue;
+        }
+        if let Some(filt) = filter {
+            if !t.name.contains(filt) {
+                continue;
+            }
+        }
 
         let rows = t.shape[0] as usize;
         let cols = t.shape[1] as usize;
@@ -40,22 +49,38 @@ fn main() -> Result<(), String> {
 
         for b in 0..n_blocks {
             let off = b * 34;
-            if off + 34 > data.len() { break; }
+            if off + 34 > data.len() {
+                break;
+            }
             let bits = u16::from_le_bytes([data[off], data[off + 1]]);
             let scale = half::f16::from_bits(bits).to_f32();
 
-            if scale.is_nan() { nan_count += 1; continue; }
-            if !scale.is_finite() { inf_count += 1; continue; }
+            if scale.is_nan() {
+                nan_count += 1;
+                continue;
+            }
+            if !scale.is_finite() {
+                inf_count += 1;
+                continue;
+            }
 
             let abs_s = scale.abs();
-            if abs_s > max_scale { max_scale = abs_s; }
-            if abs_s < min_scale { min_scale = abs_s; }
+            if abs_s > max_scale {
+                max_scale = abs_s;
+            }
+            if abs_s < min_scale {
+                min_scale = abs_s;
+            }
             sum_scale += abs_s as f64;
-            if abs_s > 60000.0 { overflow_count += 1; }
+            if abs_s > 60000.0 {
+                overflow_count += 1;
+            }
             scales.push(abs_s);
         }
 
-        if scales.len() == 0 { continue; }
+        if scales.len() == 0 {
+            continue;
+        }
         scales.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
         let mean = sum_scale / scales.len() as f64;
@@ -71,10 +96,16 @@ fn main() -> Result<(), String> {
         println!("\n{} [{}×{}]", t.name, rows, cols);
         println!("  blocks: {} | scale: median={:.1} mean={:.1} p95={:.1} p99={:.1} p999={:.1} max={:.1}",
             n_blocks, median, mean, p95, p99, p999, max_s);
-        println!("  inf: {:.2}% | >60K: {:.2}% | nan: {}", p_inf, p_overflow, nan_count);
+        println!(
+            "  inf: {:.2}% | >60K: {:.2}% | nan: {}",
+            p_inf, p_overflow, nan_count
+        );
         if *max_s > 60000.0 {
             let exceeded_by = *max_s - 65504.0;
-            println!("  ** OVERFLOW: max scale {} exceeds f16 max 65504 by {:.0}", max_s, exceeded_by);
+            println!(
+                "  ** OVERFLOW: max scale {} exceeds f16 max 65504 by {:.0}",
+                max_s, exceeded_by
+            );
         }
         if *max_s > 65504.0 {
             println!("  ** CONFIRMED: scales exceed f16 max — BF16→f16 overflow during conversion");

@@ -48,8 +48,7 @@ impl CalibrationStore {
             .records
             .iter()
             .filter(|r| {
-                r.hardware_signature == hardware
-                    && r.region_fingerprint == region_fingerprint
+                r.hardware_signature == hardware && r.region_fingerprint == region_fingerprint
             })
             .collect();
 
@@ -58,10 +57,8 @@ impl CalibrationStore {
         }
 
         let count = records.len() as u64;
-        let avg_ane_ns: u64 =
-            records.iter().map(|r| r.measured_ane_ns).sum::<u64>() / count;
-        let avg_metal_ns: u64 =
-            records.iter().map(|r| r.measured_metal_ns).sum::<u64>() / count;
+        let avg_ane_ns: u64 = records.iter().map(|r| r.measured_ane_ns).sum::<u64>() / count;
+        let avg_metal_ns: u64 = records.iter().map(|r| r.measured_metal_ns).sum::<u64>() / count;
 
         (avg_ane_ns as f64) <= (1.0 - threshold) * (avg_metal_ns as f64)
     }
@@ -69,17 +66,12 @@ impl CalibrationStore {
     /// Average epoch wall time for a given hardware and region fingerprint.
     ///
     /// Returns `None` when no matching records exist.
-    pub fn avg_epoch_wall_ns(
-        &self,
-        hardware: &str,
-        region_fingerprint: &str,
-    ) -> Option<u64> {
+    pub fn avg_epoch_wall_ns(&self, hardware: &str, region_fingerprint: &str) -> Option<u64> {
         let records: Vec<_> = self
             .records
             .iter()
             .filter(|r| {
-                r.hardware_signature == hardware
-                    && r.region_fingerprint == region_fingerprint
+                r.hardware_signature == hardware && r.region_fingerprint == region_fingerprint
             })
             .collect();
 
@@ -88,7 +80,10 @@ impl CalibrationStore {
         }
 
         Some(
-            records.iter().map(|r| r.measured_epoch_wall_ns).sum::<u64>()
+            records
+                .iter()
+                .map(|r| r.measured_epoch_wall_ns)
+                .sum::<u64>()
                 / records.len() as u64,
         )
     }

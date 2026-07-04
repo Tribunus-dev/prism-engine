@@ -8,9 +8,9 @@ use crate::compute_image::phase_dag::{EmittedPhase, PhaseKind};
 use crate::scheduling::execution_context::ExecutionContext;
 use crate::scheduling::phase_runner::execution::{
     AccelElementWiseRunner, AccelMatMulRunner, ArenaAllocRunner, CoreAiGraphRunner,
-    LegacyMlxEpilogueRunner, LegacyMlxLayerRunner, LegacyMlxPrologueRunner,
-    MetalFusedKernelRunner, MlxDecodeRunner, PhaseRunner, ResidualRmsNormRunner, SamplingRunner,
-    SyncBarrierRunner, TransferRunner, WeightResidencyRunner,
+    LegacyMlxEpilogueRunner, LegacyMlxLayerRunner, LegacyMlxPrologueRunner, MetalFusedKernelRunner,
+    MlxDecodeRunner, PhaseRunner, ResidualRmsNormRunner, SamplingRunner, SyncBarrierRunner,
+    TransferRunner, WeightResidencyRunner,
 };
 use crate::scheduling::phase_runner::fallback;
 

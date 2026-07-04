@@ -61,19 +61,14 @@ impl SystemSpec for LegacyBridgeSystem {
 
 impl ErasedSystem for LegacyBridgeSystem {
     fn metadata(&self) -> &SystemMetadata {
-        static META: std::sync::LazyLock<SystemMetadata> =
-            std::sync::LazyLock::new(|| {
-                <LegacyBridgeSystem as SystemSpec>::metadata()
-                    .expect("LegacyBridgeSystem metadata construction")
-            });
+        static META: std::sync::LazyLock<SystemMetadata> = std::sync::LazyLock::new(|| {
+            <LegacyBridgeSystem as SystemSpec>::metadata()
+                .expect("LegacyBridgeSystem metadata construction")
+        });
         &META
     }
 
-    fn run(
-        &mut self,
-        _world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, _world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // Placeholder — no-op until the legacy bridge path is wired.
         SystemResult::ok()
     }

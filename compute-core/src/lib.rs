@@ -30,8 +30,6 @@ pub mod analysis;
     )
 ))]
 pub mod ane;
-#[cfg(feature = "prism-backend")]
-pub mod ane_compile;
 #[cfg(all(
     target_os = "macos",
     any(
@@ -40,6 +38,8 @@ pub mod ane_compile;
     )
 ))]
 pub mod ane_bridge;
+#[cfg(feature = "prism-backend")]
+pub mod ane_compile;
 #[cfg(all(
     target_os = "macos",
     any(
@@ -93,12 +93,28 @@ pub mod bridge;
     feature = "prism-backend"
 ))]
 pub mod cache;
+#[cfg(feature = "prism-backend")]
+pub mod calibration;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
 pub mod capability;
 pub mod cli;
+#[cfg(any(
+    any(
+        feature = "mlx-backend",
+        feature = "prism-backend",
+        feature = "backend-cpu"
+    ),
+    feature = "prism-backend",
+))]
+pub mod compilation;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
+pub mod compile;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
@@ -119,35 +135,14 @@ pub mod compile_state;
     feature = "prism-backend"
 ))]
 pub mod compiler;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
-pub mod compile;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend", feature = "backend-cpu"),
-    feature = "prism-backend",
-))]
-pub mod compilation;
-#[cfg(feature = "prism-backend")]
-pub mod calibration;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
-pub mod evidence;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi"))]
 pub mod compute_image;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi"))]
-pub mod ffi;
 pub mod compute_image_v0;
 pub mod compute_ir;
 pub mod compute_lane;
 pub mod compute_service;
 pub mod config;
 pub mod config_namespace;
-/// Device registry — runtime hardware enumeration and capability discovery.
-pub mod device;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
@@ -206,6 +201,8 @@ pub mod crash_breadcrumb;
     feature = "prism-backend"
 ))]
 pub mod decode_attribution;
+/// Device registry — runtime hardware enumeration and capability discovery.
+pub mod device;
 pub mod diffusion;
 #[cfg(feature = "generation-diffusion")]
 pub mod diffusion_provider;
@@ -222,6 +219,11 @@ pub mod errors;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+pub mod evidence;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
 pub mod executor;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -234,6 +236,8 @@ pub mod experiment;
     feature = "prism-backend"
 ))]
 pub mod external_array;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi"))]
+pub mod ffi;
 pub mod fusion_region;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -256,11 +260,6 @@ pub mod gpu_memory;
     feature = "prism-backend"
 ))]
 pub mod gpu_worker;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
-pub mod parsing;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
@@ -299,6 +298,11 @@ pub mod layout_transform;
     feature = "prism-backend"
 ))]
 pub mod loader;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
+pub mod parsing;
 #[cfg(feature = "generation-video")]
 pub mod video_provider;
 #[macro_use]
@@ -523,6 +527,8 @@ pub mod speculative;
 ))]
 pub mod supervisor_crash;
 
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod agent;
 #[cfg(feature = "candle-cpu")]
 pub mod candle_cpu_backend;
 #[cfg(feature = "storage-adapters")]
@@ -536,8 +542,6 @@ pub mod toolchain_attest;
     feature = "prism-backend"
 ))]
 pub mod tools;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod agent;
 pub mod transform_recipe;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),

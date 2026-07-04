@@ -10,13 +10,17 @@
 //! bounded residency, and output parity. No-copy Metal buffers remain v2.
 
 pub mod adapter;
+pub mod ane_compile;
+pub mod ane_prefill;
 pub mod apple_cimage_manifest;
 pub mod apple_shared_arena;
+pub mod cimage_loader;
+pub mod cimage_packer;
+pub mod compaction;
 pub mod compatibility;
 pub mod compile;
 pub mod content_store;
 pub mod diag;
-pub mod orchestrator;
 pub mod executable;
 pub mod execution_shape;
 pub mod fallback_plan;
@@ -31,8 +35,8 @@ pub mod hw_assessment;
 pub mod hw_bench_suite;
 pub mod kernel_provider;
 pub mod kernel_selection;
-pub mod kv_plan;
 pub mod kv_interleave;
+pub mod kv_plan;
 #[cfg(feature = "tensix")]
 pub mod layout_tensix;
 pub mod manifest;
@@ -40,10 +44,11 @@ pub mod megakernel;
 pub mod metal_codegen;
 #[cfg(test)]
 pub mod metal_codegen_model_test;
-pub mod metal_pipeline;
 pub mod metal_epilogue;
+pub mod metal_pipeline;
 pub mod model_family;
 pub mod multimodal;
+pub mod orchestrator;
 pub mod phase_dag;
 pub mod phase_fallback;
 pub mod phase_graph;
@@ -59,19 +64,14 @@ pub mod receipts;
 pub mod residency;
 pub mod segment;
 pub mod source;
+pub mod speculative_routing;
 pub mod subgraph_mil;
 #[cfg(feature = "tensix")]
 pub mod tensix;
+pub mod tree_attention;
 pub mod variants;
 pub mod verification;
 pub mod verify;
-pub mod ane_prefill;
-pub mod cimage_loader;
-pub mod ane_compile;
-pub mod cimage_packer;
-pub mod compaction;
-pub mod speculative_routing;
-pub mod tree_attention;
 pub mod vm_manager;
 
 pub use manifest::{
@@ -79,13 +79,13 @@ pub use manifest::{
     mlx_cache_memory_bytes, mlx_get_memory_limit, mlx_peak_memory_bytes, read,
     representation_aware_admission_estimate, resolve_tensor_name, set_mlx_cache_limit,
     set_mlx_memory_limit, validate_manifest_for_abi, validate_physical_dtype,
-    validate_tensor_for_mapped_abi, validate_tensor_layout, AliasEntry, CompilationAuthority,
-    CompileReceipt, CompiledImage, CompiledImageReader, CopyClassification, ImageBuilder,
-    LeaseState, Manifest, ManifestVerification, NativeCapabilityReport, QuantizationDesc,
-    RepresentationAdmissionEstimate, ResidencyPlan, ResolvedTensorBinding, Segment, SegmentKind,
-    SegmentLease, SegmentReceipt, ShardHash, StageProfile, StorageAbiSpec, StorageBackend,
-    TensorEntry, TensorLease, STORAGE_ABI_COPIED_V0, STORAGE_ABI_MAPPED_NO_COPY_V1,
-    CImageHeader, CIMAGE_MAGIC,
+    validate_tensor_for_mapped_abi, validate_tensor_layout, AliasEntry, CImageHeader,
+    CompilationAuthority, CompileReceipt, CompiledImage, CompiledImageReader, CopyClassification,
+    ImageBuilder, LeaseState, Manifest, ManifestVerification, NativeCapabilityReport,
+    QuantizationDesc, RepresentationAdmissionEstimate, ResidencyPlan, ResolvedTensorBinding,
+    Segment, SegmentKind, SegmentLease, SegmentReceipt, ShardHash, StageProfile, StorageAbiSpec,
+    StorageBackend, TensorEntry, TensorLease, CIMAGE_MAGIC, STORAGE_ABI_COPIED_V0,
+    STORAGE_ABI_MAPPED_NO_COPY_V1,
 };
 
 pub use kv_plan::{KVDtype, KvCachePlan, KvLayout, PrefixCompatibilityKey};

@@ -11,9 +11,9 @@
 //!   4. Apply inverse Hadamard transform (Hadamard is self-inverse)
 //!   5. Write FP16 output to IOSurface
 
-use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use crate::arena::Arena;
 use crate::arena::DataType;
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 
 /// Generate MIL program text for KV cache decompression.
 ///
@@ -78,12 +78,7 @@ pub fn generate_kv_decompress_mil(head_dim: u32, n_kv_heads: u32, bits: u32) -> 
 ///   3. Softmax
 ///   4. Output @ V
 ///   5. Write attention output to IOSurface
-pub fn generate_attention_mil(
-    n_heads: u32,
-    n_kv_heads: u32,
-    head_dim: u32,
-    window: u32,
-) -> String {
+pub fn generate_attention_mil(n_heads: u32, n_kv_heads: u32, head_dim: u32, window: u32) -> String {
     let mut mil = String::new();
     mil.push_str("// Tribunus ANE Sliding Window Attention\n");
     mil.push_str(&format!(
@@ -277,8 +272,7 @@ impl AneCompressor {
     /// (decompressed output = head_dim × n_kv_heads FP16 elements).
     pub fn new(head_dim: u32, n_kv_heads: u32) -> Result<Self, String> {
         let l2_compress_mil = generate_kv_compress_mil(head_dim, n_kv_heads, 3);
-        let l2_decompress_mil =
-            generate_kv_decompress_mil(head_dim, n_kv_heads, 3);
+        let l2_decompress_mil = generate_kv_decompress_mil(head_dim, n_kv_heads, 3);
         let l3_compress_mil = generate_l3_compress_mil(head_dim, n_kv_heads);
         let l3_decompress_mil = generate_l3_decompress_mil(head_dim, n_kv_heads);
 
@@ -308,7 +302,12 @@ impl AneCompressor {
     ///
     /// Copies `fp16_data` (length = head_dim × n_kv_heads) into the input
     /// arena, runs the L3 compress model, and returns the packed 2-bit bytes.
-    pub fn compress_to_l3(&self, fp16_data: &[f32], head_dim: u32, n_kv_heads: u32) -> Result<Vec<u8>, String> {
+    pub fn compress_to_l3(
+        &self,
+        fp16_data: &[f32],
+        head_dim: u32,
+        n_kv_heads: u32,
+    ) -> Result<Vec<u8>, String> {
         let elem_count = (head_dim * n_kv_heads) as usize;
         if fp16_data.len() < elem_count {
             return Err(format!(
@@ -324,7 +323,12 @@ impl AneCompressor {
     ///
     /// Copies `packed_data` into the input arena, runs the L3 decompress
     /// model, and returns the decompressed FP16 values.
-    pub fn decompress_from_l3(&self, packed_data: &[u8], head_dim: u32, n_kv_heads: u32) -> Result<Vec<f32>, String> {
+    pub fn decompress_from_l3(
+        &self,
+        packed_data: &[u8],
+        head_dim: u32,
+        n_kv_heads: u32,
+    ) -> Result<Vec<f32>, String> {
         let packed_size = ((head_dim * n_kv_heads * 2) / 16).max(64) as usize;
         if packed_data.len() < packed_size {
             return Err(format!(
@@ -337,19 +341,32 @@ impl AneCompressor {
     }
 
     /// Compress FP16 page data to 3.5-bit L2 format via the ANE.
-    pub fn compress_to_l2(&self, fp16_data: &[f32], head_dim: u32, n_kv_heads: u32, _bits: u32) -> Result<Vec<u8>, String> {
+    pub fn compress_to_l2(
+        &self,
+        fp16_data: &[f32],
+        head_dim: u32,
+        n_kv_heads: u32,
+        _bits: u32,
+    ) -> Result<Vec<u8>, String> {
         let elem_count = (head_dim * n_kv_heads) as usize;
         if fp16_data.len() < elem_count {
             return Err(format!(
                 "AneCompressor: need {} elements for L2 compress, got {}",
-                elem_count, fp16_data.len()
+                elem_count,
+                fp16_data.len()
             ));
         }
         self.run_compress_l2(fp16_data, elem_count)
     }
 
     /// Decompress 3.5-bit L2 packed bytes back to FP16 via the ANE.
-    pub fn decompress_from_l2(&self, packed_data: &[u8], head_dim: u32, n_kv_heads: u32, _bits: u32) -> Result<Vec<f32>, String> {
+    pub fn decompress_from_l2(
+        &self,
+        packed_data: &[u8],
+        head_dim: u32,
+        n_kv_heads: u32,
+        _bits: u32,
+    ) -> Result<Vec<f32>, String> {
         let elem_count = (head_dim * n_kv_heads) as usize;
         self.run_decompress_l2(packed_data, elem_count)
     }
@@ -357,23 +374,54 @@ impl AneCompressor {
     // ── Internal helpers ──────────────────────────────────────────────
 
     fn run_compress_l3(&self, fp16_data: &[f32], elem_count: usize) -> Result<Vec<u8>, String> {
-        self.run_compress(&self.l3_compress, fp16_data, elem_count, Self::L3_INPUT, Self::L3_OUTPUT)
+        self.run_compress(
+            &self.l3_compress,
+            fp16_data,
+            elem_count,
+            Self::L3_INPUT,
+            Self::L3_OUTPUT,
+        )
     }
 
     fn run_decompress_l3(&self, packed_data: &[u8], elem_count: usize) -> Result<Vec<f32>, String> {
-        self.run_decompress(&self.l3_decompress, packed_data, elem_count, Self::L3_INPUT, Self::L3_OUTPUT)
+        self.run_decompress(
+            &self.l3_decompress,
+            packed_data,
+            elem_count,
+            Self::L3_INPUT,
+            Self::L3_OUTPUT,
+        )
     }
 
     fn run_compress_l2(&self, fp16_data: &[f32], elem_count: usize) -> Result<Vec<u8>, String> {
-        self.run_compress(&self.l2_compress, fp16_data, elem_count, Self::L2_COMPRESS_INPUT, Self::L2_COMPRESS_OUTPUT)
+        self.run_compress(
+            &self.l2_compress,
+            fp16_data,
+            elem_count,
+            Self::L2_COMPRESS_INPUT,
+            Self::L2_COMPRESS_OUTPUT,
+        )
     }
 
     fn run_decompress_l2(&self, packed_data: &[u8], elem_count: usize) -> Result<Vec<f32>, String> {
-        self.run_decompress(&self.l2_decompress, packed_data, elem_count, Self::L2_DECOMPRESS_INPUT, Self::L2_DECOMPRESS_OUTPUT)
+        self.run_decompress(
+            &self.l2_decompress,
+            packed_data,
+            elem_count,
+            Self::L2_DECOMPRESS_INPUT,
+            Self::L2_DECOMPRESS_OUTPUT,
+        )
     }
 
     /// Run a compress model: copy FP16 bytes into input arena, predict, read output bytes.
-    fn run_compress(&self, model: &CoreAiModel, fp16_data: &[f32], elem_count: usize, input_name: &str, output_name: &str) -> Result<Vec<u8>, String> {
+    fn run_compress(
+        &self,
+        model: &CoreAiModel,
+        fp16_data: &[f32],
+        elem_count: usize,
+        input_name: &str,
+        output_name: &str,
+    ) -> Result<Vec<u8>, String> {
         // SAFETY: we own the arenas and hold the only references.
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -396,7 +444,14 @@ impl AneCompressor {
     }
 
     /// Run a decompress model: copy packed bytes into input arena, predict, read FP16 output.
-    fn run_decompress(&self, model: &CoreAiModel, packed_data: &[u8], elem_count: usize, input_name: &str, output_name: &str) -> Result<Vec<f32>, String> {
+    fn run_decompress(
+        &self,
+        model: &CoreAiModel,
+        packed_data: &[u8],
+        elem_count: usize,
+        input_name: &str,
+        output_name: &str,
+    ) -> Result<Vec<f32>, String> {
         let packed_len = packed_data.len();
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -428,8 +483,8 @@ impl AneCompressor {
         // const → mut cast on output_arena is safe.
         let input_info = &self.input_arena.info;
         let output_info = &self.output_arena.info;
-        let c_in = std::ffi::CString::new(input_name)
-            .map_err(|e| format!("CString input_name: {}", e))?;
+        let c_in =
+            std::ffi::CString::new(input_name).map_err(|e| format!("CString input_name: {}", e))?;
         let c_out = std::ffi::CString::new(output_name)
             .map_err(|e| format!("CString output_name: {}", e))?;
         let rc = unsafe {
@@ -442,7 +497,10 @@ impl AneCompressor {
             )
         };
         if rc != 0 {
-            return Err(format!("AneCompressor: ANE predict failed with code {}", rc));
+            return Err(format!(
+                "AneCompressor: ANE predict failed with code {}",
+                rc
+            ));
         }
         Ok(())
     }
@@ -523,15 +581,27 @@ mod tests {
     #[test]
     fn test_generate_kv_decompress_mil_contains_expected_sections() {
         let mil = generate_kv_decompress_mil(120, 8, 3);
-        assert!(mil.contains("head_dim: 120"), "header should contain head_dim");
-        assert!(mil.contains("n_kv_heads: 8"), "header should contain n_kv_heads");
+        assert!(
+            mil.contains("head_dim: 120"),
+            "header should contain head_dim"
+        );
+        assert!(
+            mil.contains("n_kv_heads: 8"),
+            "header should contain n_kv_heads"
+        );
         assert!(mil.contains("bits: 3"), "header should contain bits");
         assert!(mil.contains("compressed_input"), "should declare input");
         assert!(mil.contains("decompressed_output"), "should declare output");
-        assert!(mil.contains("type: dequantize"), "should have dequantize layer");
+        assert!(
+            mil.contains("type: dequantize"),
+            "should have dequantize layer"
+        );
         assert!(mil.contains("mode: \"polar\""), "should use polar mode");
         assert!(mil.contains("type: add"), "should have add layer for QJL");
-        assert!(mil.contains("type: hadamard_transform"), "should have Hadamard");
+        assert!(
+            mil.contains("type: hadamard_transform"),
+            "should have Hadamard"
+        );
     }
 
     #[test]
@@ -539,7 +609,10 @@ mod tests {
         // head_dim=120, n_kv_heads=8, bits=3
         // packed = max(120*8*3/16, 64) = max(180, 64) = 180
         let mil = generate_kv_decompress_mil(120, 8, 3);
-        assert!(mil.contains("(float16, 180)"), "packed input size should be 180");
+        assert!(
+            mil.contains("(float16, 180)"),
+            "packed input size should be 180"
+        );
 
         // output = 120 * 8 = 960
         assert!(mil.contains("(float16, 960)"), "output size should be 960");
@@ -550,7 +623,10 @@ mod tests {
         // Small config: packed size would be below minimum
         let mil = generate_kv_decompress_mil(64, 1, 3);
         // packed = max(64*1*3/16, 64) = max(12, 64) = 64
-        assert!(mil.contains("(float16, 64)"), "minimum packed size should be 64");
+        assert!(
+            mil.contains("(float16, 64)"),
+            "minimum packed size should be 64"
+        );
     }
 
     #[test]
@@ -559,8 +635,14 @@ mod tests {
         assert!(mil.contains("query"), "should have query input");
         assert!(mil.contains("key"), "should have key input");
         assert!(mil.contains("value"), "should have value input");
-        assert!(mil.contains("attention_output"), "should have attention output");
-        assert!(mil.contains("type: batched_matmul"), "should have batched_matmul");
+        assert!(
+            mil.contains("attention_output"),
+            "should have attention output"
+        );
+        assert!(
+            mil.contains("type: batched_matmul"),
+            "should have batched_matmul"
+        );
         assert!(mil.contains("type: softmax"), "should have softmax");
     }
 
@@ -578,7 +660,13 @@ mod tests {
         assert!(!mil.is_empty(), "MIL text should not be empty");
         assert!(mil.starts_with('#'), "MIL should start with header comment");
         assert!(mil.contains("layer dequant {"), "should open dequant layer");
-        assert!(mil.contains("layer qjl_correct {"), "should open qjl_correct layer");
-        assert!(mil.contains("layer inv_hadamard {"), "should open inv_hadamard layer");
+        assert!(
+            mil.contains("layer qjl_correct {"),
+            "should open qjl_correct layer"
+        );
+        assert!(
+            mil.contains("layer inv_hadamard {"),
+            "should open inv_hadamard layer"
+        );
     }
 }

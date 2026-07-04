@@ -2,8 +2,8 @@
 //!
 //! Each command variant maps to a typed semantic payload for the ledger.
 
-use crate::runtime::ledger::entry::SemanticStampedCommand;
 use crate::runtime::ledger::entry::SemanticCommandPayload;
+use crate::runtime::ledger::entry::SemanticStampedCommand;
 use crate::runtime::ledger::error::LedgerProjectionError;
 use crate::runtime::ledger::registry::ComponentTypeRegistry;
 use crate::runtime::scheduling::command::{Command, StampedCommand};
@@ -13,11 +13,17 @@ use crate::runtime::scheduling::command::{Command, StampedCommand};
 /// The receipt representation is stable, separately serializable, and
 /// independent of Rust memory layout or type-erased payload bytes.
 pub trait SemanticReceipt {
-    fn semantic_receipt(&self, registry: &ComponentTypeRegistry) -> Result<SemanticStampedCommand, LedgerProjectionError>;
+    fn semantic_receipt(
+        &self,
+        registry: &ComponentTypeRegistry,
+    ) -> Result<SemanticStampedCommand, LedgerProjectionError>;
 }
 
 impl SemanticReceipt for StampedCommand {
-    fn semantic_receipt(&self, registry: &ComponentTypeRegistry) -> Result<SemanticStampedCommand, LedgerProjectionError> {
+    fn semantic_receipt(
+        &self,
+        registry: &ComponentTypeRegistry,
+    ) -> Result<SemanticStampedCommand, LedgerProjectionError> {
         let cmd = match &self.command {
             Command::Spawn => SemanticCommandPayload::EntitySpawned {
                 entity_kind: "worker_request".to_string(),
@@ -25,14 +31,14 @@ impl SemanticReceipt for StampedCommand {
             Command::Despawn(entity) => SemanticCommandPayload::EntityDespawned {
                 reason: format!("entity {} despawned", entity.0),
             },
-            Command::Insert { entity: _, type_id, payload } => {
-                registry.project(type_id, payload)?
-            }
-            Command::Remove { entity, .. } => {
-                SemanticCommandPayload::EntityDespawned {
-                    reason: format!("component removed from entity {}", entity.0),
-                }
-            }
+            Command::Insert {
+                entity: _,
+                type_id,
+                payload,
+            } => registry.project(type_id, payload)?,
+            Command::Remove { entity, .. } => SemanticCommandPayload::EntityDespawned {
+                reason: format!("component removed from entity {}", entity.0),
+            },
         };
 
         Ok(SemanticStampedCommand {

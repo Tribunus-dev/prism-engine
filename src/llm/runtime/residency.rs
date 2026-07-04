@@ -10,8 +10,7 @@ use std::sync::Mutex;
 
 use super::super::manifest::{LlmCapabilityManifest, LlmModelFamily, SessionId};
 use super::super::server::{
-    CoreMlVisibilityState, WeightEvictionStatus, WeightResidencyKey,
-    WeightResidencyReceipt,
+    CoreMlVisibilityState, WeightEvictionStatus, WeightResidencyKey, WeightResidencyReceipt,
 };
 
 /// Handle tracking a loaded model's runtime state in unified memory.
@@ -89,9 +88,7 @@ impl WeightResidencyManager {
     ) -> Result<WeightResidencyKey, String> {
         let key = WeightResidencyKey {
             cimage_digest: crate::image::types::ArtifactDigest(path.to_string()),
-            tensor_manifest_digest: crate::image::types::ArtifactDigest(format!(
-                "tensor:{path}"
-            )),
+            tensor_manifest_digest: crate::image::types::ArtifactDigest(format!("tensor:{path}")),
             provider_kind: "runtime:llm".into(),
             dtype_profile: "default".into(),
         };
@@ -159,9 +156,7 @@ impl WeightResidencyManager {
             .ok_or_else(|| "weight residency key not found".to_string())?;
 
         if !handle.session_leases.remove(session_id) {
-            return Err(
-                "session not holding a lease on this weight residency".to_string(),
-            );
+            return Err("session not holding a lease on this weight residency".to_string());
         }
         handle.lease_count = handle.lease_count.saturating_sub(1);
         Ok(())
@@ -420,15 +415,12 @@ mod prism_backend {
     use std::sync::Mutex;
 
     use tribunus_compute_core::kv_cache::KvCache;
-    use tribunus_compute_core::profiled_executor::{
-        LoadedProfiledModel, ProfiledInferenceSession,
-     };
+    use tribunus_compute_core::profiled_executor::{LoadedProfiledModel, ProfiledInferenceSession};
     use tribunus_compute_core::residency::ResidencyManager;
-     
-     use super::super::super::manifest::{LlmCapabilityManifest, SessionId};
-     use super::super::super::server::{
-        CoreMlVisibilityState, WeightEvictionStatus, WeightResidencyKey,
-        WeightResidencyReceipt,
+
+    use super::super::super::manifest::{LlmCapabilityManifest, SessionId};
+    use super::super::super::server::{
+        CoreMlVisibilityState, WeightEvictionStatus, WeightResidencyKey, WeightResidencyReceipt,
     };
     use crate::image::types::ArtifactDigest;
 
@@ -500,9 +492,7 @@ mod prism_backend {
             // 1. Delegate to LoadedProfiledModel (the weight-loading half of
             //    ProfiledInferenceSession).
             let loaded_model = LoadedProfiledModel::new(Path::new(path))
-                .map_err(|e| {
-                    format!("ComputeWeightResidencyManager::load_cimage: {e}")
-                })?;
+                .map_err(|e| format!("ComputeWeightResidencyManager::load_cimage: {e}"))?;
 
             let weight_bytes = loaded_model.materialized_bytes.max(1);
             let layer_count = loaded_model.layers.len();
@@ -514,10 +504,7 @@ mod prism_backend {
             let kv_caches: Vec<KvCache> = (0..layer_count)
                 .map(|_| {
                     KvCache::new(
-                        manifest
-                            .kv_cache_contract
-                            .page_token_capacity
-                            .max(128) as u32,
+                        manifest.kv_cache_contract.page_token_capacity.max(128) as u32,
                         manifest.kv_cache_contract.kv_head_count as u32,
                         manifest.kv_cache_contract.head_dimension as u32,
                         false,
@@ -525,8 +512,7 @@ mod prism_backend {
                 })
                 .collect();
 
-            let mut session =
-                ProfiledInferenceSession::new(path.to_string(), kv_caches);
+            let mut session = ProfiledInferenceSession::new(path.to_string(), kv_caches);
             session.setup_from_model(&loaded_model);
 
             let key = WeightResidencyKey {
@@ -552,18 +538,15 @@ mod prism_backend {
             *self
                 .model
                 .lock()
-                .map_err(|_| "model lock poisoned".to_string())? =
-                Some(loaded_model);
+                .map_err(|_| "model lock poisoned".to_string())? = Some(loaded_model);
             *self
                 .session
                 .lock()
-                .map_err(|_| "session lock poisoned".to_string())? =
-                Some(session);
+                .map_err(|_| "session lock poisoned".to_string())? = Some(session);
             *self
                 .loaded_key
                 .lock()
-                .map_err(|_| "loaded key lock poisoned".to_string())? =
-                Some(key.clone());
+                .map_err(|_| "loaded key lock poisoned".to_string())? = Some(key.clone());
 
             Ok(key)
         }
@@ -617,10 +600,7 @@ mod prism_backend {
                 .map_err(|_| "session leases lock poisoned".to_string())?;
 
             if !leases.remove(session_id) {
-                return Err(
-                    "session not holding a lease on this weight residency"
-                        .to_string(),
-                );
+                return Err("session not holding a lease on this weight residency".to_string());
             }
 
             let mut count = self
@@ -645,16 +625,9 @@ mod prism_backend {
         /// Reports `cache_hit: true` when a model is loaded (the most recent
         /// load covering this key), together with the materialized byte count
         /// and current lease count.
-        pub fn get_residency_receipt(
-            &self,
-            key: &WeightResidencyKey,
-        ) -> WeightResidencyReceipt {
-            let model_guard =
-                self.model.lock().unwrap_or_else(|e| e.into_inner());
-            let count = self
-                .lease_count
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+        pub fn get_residency_receipt(&self, key: &WeightResidencyKey) -> WeightResidencyReceipt {
+            let model_guard = self.model.lock().unwrap_or_else(|e| e.into_inner());
+            let count = self.lease_count.lock().unwrap_or_else(|e| e.into_inner());
 
             let cache_hit = model_guard.is_some();
             let weight_bytes = model_guard
@@ -683,14 +656,8 @@ mod prism_backend {
         /// Returns all weight residency keys whose lease count is zero,
         /// making them eligible for eviction.
         pub fn eviction_eligible(&self) -> Vec<WeightResidencyKey> {
-            let key_guard = self
-                .loaded_key
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            let count = self
-                .lease_count
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let key_guard = self.loaded_key.lock().unwrap_or_else(|e| e.into_inner());
+            let count = self.lease_count.lock().unwrap_or_else(|e| e.into_inner());
 
             if *count == 0 {
                 key_guard.iter().cloned().collect()
@@ -713,14 +680,11 @@ mod prism_backend {
         /// Returns a [`ProfiledInferenceSession`] back to the manager after
         /// inference is complete.
         pub fn return_session(&self, session: ProfiledInferenceSession) {
-            *self.session.lock().unwrap_or_else(|e| e.into_inner()) =
-                Some(session);
+            *self.session.lock().unwrap_or_else(|e| e.into_inner()) = Some(session);
         }
 
         /// Returns a reference to the stored loaded model, if any.
-        pub fn model_ref(
-            &self,
-        ) -> Option<std::sync::MutexGuard<'_, Option<LoadedProfiledModel>>> {
+        pub fn model_ref(&self) -> Option<std::sync::MutexGuard<'_, Option<LoadedProfiledModel>>> {
             self.model.lock().ok()
         }
 

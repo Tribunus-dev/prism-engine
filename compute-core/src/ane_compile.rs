@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::compute_image::compile::SourceTensor;
 use crate::compute_image::compile::coreai::compile_ane_islands;
+use crate::compute_image::compile::SourceTensor;
 use crate::config::{build_execution_plan, parse_config};
 use crate::config_namespace::resolve_namespace;
 
@@ -24,11 +24,11 @@ use crate::config_namespace::resolve_namespace;
 pub fn compile_ane_artifacts(model_dir: &Path) -> Result<Vec<String>, String> {
     // ── 1. Read config.json ────────────────────────────────────────────
     let config_path = model_dir.join("config.json");
-    let config_str = config_path.to_str().ok_or_else(|| {
-        format!("non-UTF-8 config path: {}", config_path.display())
-    })?;
-    let (arch, _quant_meta, _manifest) = parse_config(config_str)
-        .map_err(|e| format!("config parse failed: {}", e))?;
+    let config_str = config_path
+        .to_str()
+        .ok_or_else(|| format!("non-UTF-8 config path: {}", config_path.display()))?;
+    let (arch, _quant_meta, _manifest) =
+        parse_config(config_str).map_err(|e| format!("config parse failed: {}", e))?;
 
     // ── 2. Load safetensors from model_dir/weights/ ────────────────────
     let weights_dir = model_dir.join("weights");
@@ -79,7 +79,8 @@ pub fn compile_ane_artifacts(model_dir: &Path) -> Result<Vec<String>, String> {
                 return Err(format!("duplicate tensor name: {}", name));
             }
 
-            let view = safetensors.tensor(&name)
+            let view = safetensors
+                .tensor(&name)
                 .map_err(|e| format!("tensor {}: {:?}", name, e))?;
 
             source_tensors.insert(
@@ -124,24 +125,17 @@ pub fn compile_ane_artifacts(model_dir: &Path) -> Result<Vec<String>, String> {
 
     // ── 5. Create output directory ────────────────────────────────────
     let output_dir = model_dir.join("ane");
-    std::fs::create_dir_all(&output_dir)
-        .map_err(|e| format!("create ane output dir: {}", e))?;
+    std::fs::create_dir_all(&output_dir).map_err(|e| format!("create ane output dir: {}", e))?;
 
     // ── 6. Compile ANE islands with real weights ──────────────────────
-    compile_ane_islands(
-        &plan_with_fusion,
-        &arch,
-        &output_dir, true,
-    )
-    .map_err(|e| format!("ANE compilation failed: {}", e))?;
+    compile_ane_islands(&plan_with_fusion, &arch, &output_dir, true)
+        .map_err(|e| format!("ANE compilation failed: {}", e))?;
 
     // ── 7. Collect generated .mlmodelc paths ──────────────────────────
     let mut mlmodelc_paths: Vec<String> = Vec::new();
     for island in &plan_with_fusion.fused_ane_islands {
         let full_path = output_dir.join(&island.modelc_relpath);
-        mlmodelc_paths.push(
-            full_path.to_string_lossy().into_owned(),
-        );
+        mlmodelc_paths.push(full_path.to_string_lossy().into_owned());
     }
 
     Ok(mlmodelc_paths)

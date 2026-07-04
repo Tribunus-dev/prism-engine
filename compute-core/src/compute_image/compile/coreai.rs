@@ -16,14 +16,14 @@
 //!    serialises it as an `.mlpackage`, and runs `xcrun coremlcompiler`
 //!    to produce a `.mlmodelc` ready for IOSurface-backed inference.
 
-use coreml_proto::proto::mil_spec;
-use std::collections::HashMap;
-use std::path::Path;
 use crate::compute_image::hw_assessment::ConcurrencyPlan;
 use crate::compute_image::subgraph_mil;
 use crate::coreai_pipeline;
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
+use coreml_proto::proto::mil_spec;
+use std::collections::HashMap;
+use std::path::Path;
 
 // ── Known subgraph catalog ──────────────────────────────────────────────────
 
@@ -234,26 +234,36 @@ pub fn compile_subgraph(
             let down_w = weights
                 .get("down_w")
                 .map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_mlp_block_mil("x",
-            hidden_dim,
-            intermediate_dim,
-            gate_w,
-            up_w,
-            down_w,
-            stateless,)?
+            subgraph_mil::build_mlp_block_mil(
+                "x",
+                hidden_dim,
+                intermediate_dim,
+                gate_w,
+                up_w,
+                down_w,
+                stateless,
+            )?
         }
         "rmsnorm_qkv" => {
             let rms_w = weights.get("rms_w").map_or(&[] as &[f32], |v| v.as_slice());
             let q_w = weights.get("q_w").map_or(&[] as &[f32], |v| v.as_slice());
             let k_w = weights.get("k_w").map_or(&[] as &[f32], |v| v.as_slice());
             let v_w = weights.get("v_w").map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_rmsnorm_qkv_mil("x", hidden_dim, n_heads, n_kv_heads, head_dim, rms_w, q_w, k_w, v_w, stateless,)?
+            subgraph_mil::build_rmsnorm_qkv_mil(
+                "x", hidden_dim, n_heads, n_kv_heads, head_dim, rms_w, q_w, k_w, v_w, stateless,
+            )?
         }
         "output_proj" => {
             let weight_values = weights
                 .get("weight_values")
                 .map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_output_proj_mil("x", hidden_dim, vocab_dim, weight_values, stateless)?
+            subgraph_mil::build_output_proj_mil(
+                "x",
+                hidden_dim,
+                vocab_dim,
+                weight_values,
+                stateless,
+            )?
         }
         "ffn_output" => {
             let gate_w = weights
@@ -266,21 +276,25 @@ pub fn compile_subgraph(
             let lm_head_w = weights
                 .get("lm_head_w")
                 .map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_ffn_output_mil("x",
-            hidden_dim,
-            intermediate_dim,
-            vocab_dim,
-            gate_w,
-            up_w,
-            down_w,
-            lm_head_w,
-            stateless,)?
+            subgraph_mil::build_ffn_output_mil(
+                "x",
+                hidden_dim,
+                intermediate_dim,
+                vocab_dim,
+                gate_w,
+                up_w,
+                down_w,
+                lm_head_w,
+                stateless,
+            )?
         }
         "qkv_bundle" => {
             let q_w = weights.get("q_w").map_or(&[] as &[f32], |v| v.as_slice());
             let k_w = weights.get("k_w").map_or(&[] as &[f32], |v| v.as_slice());
             let v_w = weights.get("v_w").map_or(&[] as &[f32], |v| v.as_slice());
-            subgraph_mil::build_qkv_bundle_mil("x", hidden_dim, n_heads, n_kv_heads, head_dim, q_w, k_w, v_w, stateless,)?
+            subgraph_mil::build_qkv_bundle_mil(
+                "x", hidden_dim, n_heads, n_kv_heads, head_dim, q_w, k_w, v_w, stateless,
+            )?
         }
         _ => {
             return Err(format!(
@@ -294,9 +308,8 @@ pub fn compile_subgraph(
     // Before serializing, verify the compiled program satisfies all
     // ANE hardware invariants.  If this fails, the .mlmodelc would
     // silently fall back to CPU/GPU — catch it here at compile time.
-    validate_ane_program(&program).map_err(|e| {
-        format!("ANE validation failed for subgraph '{}': {}", name, e)
-    })?;
+    validate_ane_program(&program)
+        .map_err(|e| format!("ANE validation failed for subgraph '{}': {}", name, e))?;
 
     // Phase 2: Write .mlpackage
     let mlpackage_dir = output_dir.join(format!("{}.mlpackage", name));
@@ -497,15 +510,19 @@ pub fn validate_ane_program(program: &mil_spec::Program) -> Result<(), String> {
             for out in &op.outputs {
                 if let Some(ref vt) = out.r#type {
                     if let Some(mil_spec::value_type::Type::TensorType(tt)) = &vt.r#type {
-                        let dims: Vec<i64> = tt.dimensions.iter().filter_map(|d| {
-                            d.dimension.as_ref().and_then(|dim| {
-                                if let mil_spec::dimension::Dimension::Constant(c) = dim {
-                                    Some(c.size as i64)
-                                } else {
-                                    None
-                                }
+                        let dims: Vec<i64> = tt
+                            .dimensions
+                            .iter()
+                            .filter_map(|d| {
+                                d.dimension.as_ref().and_then(|dim| {
+                                    if let mil_spec::dimension::Dimension::Constant(c) = dim {
+                                        Some(c.size as i64)
+                                    } else {
+                                        None
+                                    }
+                                })
                             })
-                        }).collect();
+                            .collect();
 
                         if dims.len() == 4 {
                             // Rule 3: trailing dimension * 2 (Float16) must be 64-byte aligned.
@@ -535,7 +552,10 @@ pub fn validate_ane_program(program: &mil_spec::Program) -> Result<(), String> {
         let mut names = Vec::new();
         for func in program.functions.values() {
             let active_block = func.block_specializations.get(&func.opset);
-            let block = match active_block { Some(b) => b, None => continue };
+            let block = match active_block {
+                Some(b) => b,
+                None => continue,
+            };
             for op in &block.operations {
                 if op.r#type.to_lowercase() == "const" {
                     for out in &op.outputs {
@@ -561,7 +581,10 @@ pub fn validate_ane_program(program: &mil_spec::Program) -> Result<(), String> {
             let mut found_cast = false;
             for func in program.functions.values() {
                 let active_block = func.block_specializations.get(&func.opset);
-                let block = match active_block { Some(b) => b, None => continue };
+                let block = match active_block {
+                    Some(b) => b,
+                    None => continue,
+                };
                 for op in &block.operations {
                     if op.r#type.to_lowercase() == "cast" {
                         for inp in op.inputs.values() {
@@ -632,7 +655,6 @@ pub fn compile_ane_islands(
     let kk = hd * nk;
 
     for island in &execution_plan.fused_ane_islands {
-
         // ── Build weights HashMap ──────────────────────────────────────
         let mut weights: std::collections::HashMap<String, Vec<f32>> =
             std::collections::HashMap::new();
@@ -723,7 +745,14 @@ pub fn compile_ane_islands(
         };
 
         // ── Compile subgraph with weights ──────────────────────────────
-        let modelc_path = compile_subgraph(&island.island_id, &ops, &shapes, &weights, output_dir, stateless)?;
+        let modelc_path = compile_subgraph(
+            &island.island_id,
+            &ops,
+            &shapes,
+            &weights,
+            output_dir,
+            stateless,
+        )?;
         eprintln!(
             "[compile_coreml] compiled {} → {}/{}",
             island.island_id,

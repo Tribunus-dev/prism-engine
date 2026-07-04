@@ -9,9 +9,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 // Runtime residency contract reused for compile-phase tensor tracking.
-pub use crate::backend::residency::{
-    TensorResidency, TransferDecision, BackendId, MemoryDomain,
-};
+pub use crate::backend::residency::{BackendId, MemoryDomain, TensorResidency, TransferDecision};
 
 // ── Core identities ───────────────────────────────────────────────────────
 
@@ -106,10 +104,7 @@ pub enum MutationClass {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CompileDeterminism {
     BitExact,
-    NumericallyBounded {
-        abs_error: f32,
-        rel_error: f32,
-    },
+    NumericallyBounded { abs_error: f32, rel_error: f32 },
     Unknown,
 }
 
@@ -381,7 +376,6 @@ mod tests {
         assert_eq!(key, restored);
     }
 }
-
 
 // ── Distillation phase taxonomy ────────────────────────────────────────────
 

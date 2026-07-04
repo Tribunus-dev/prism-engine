@@ -9,11 +9,13 @@
 
 use crate::calibration::accelerate::dot_product;
 #[cfg(feature = "metal-dispatch")]
-use half;
-#[cfg(feature = "metal-dispatch")]
-use crate::compute_image::compile::kernel_dispatch::{create_dispatchers, DenseProjectionDispatcher, RegistryRef};
+use crate::compute_image::compile::kernel_dispatch::{
+    create_dispatchers, DenseProjectionDispatcher, RegistryRef,
+};
 #[cfg(feature = "metal-dispatch")]
 use crate::compute_image::compile::kernel_types::{KernelReceipt, ProjectionParams};
+#[cfg(feature = "metal-dispatch")]
+use half;
 #[cfg(feature = "metal-dispatch")]
 use metal::*;
 
@@ -38,7 +40,11 @@ impl WeightStore {
         for i in 0..n {
             data[i] = ((i as f64).sin() * 0.01) as f32;
         }
-        WeightStore { data, in_dim, out_dim }
+        WeightStore {
+            data,
+            in_dim,
+            out_dim,
+        }
     }
 }
 
@@ -159,10 +165,22 @@ impl MetalTeacher {
             input_fp16.push(half::f16::from_f32(v).to_bits());
         }
 
-        // Convert f32 weights to fp16 for the Metal codebook buffer.
-        let mut weights_fp16: Vec<u16> = Vec::with_capacity(self.weights.data.len());
-        for &v in &self.weights.data {
-            weights_fp16.push(half::f16::from_f32(v).to_bits());
+        // Build the 16-entry per-row codebook expected by palettized_gemv.
+        // This is a compact approximation of the dense teacher weights, not a
+        // full dense matrix upload.
+        let mut codebook_fp16 = Vec::with_capacity(self.weights.out_dim * 16);
+        let sample_width = self.weights.in_dim.min(16);
+        for row in 0..self.weights.out_dim {
+            let row_offset = row * self.weights.in_dim;
+            for i in 0..16 {
+                let src_col = if sample_width == 0 {
+                    0
+                } else {
+                    i % sample_width
+                };
+                let v = self.weights.data[row_offset + src_col];
+                codebook_fp16.push(half::f16::from_f32(v).to_bits());
+            }
         }
 
         let params = ProjectionParams {
@@ -178,25 +196,6 @@ impl MetalTeacher {
         let queue = device.new_command_queue();
         let cmd_buf = queue.new_command_buffer();
 
-        // Codebook buffer: fp16 weights for the palettized_gemv kernel.
-        let codebook = device.new_buffer_with_data(
-            weights_fp16.as_ptr() as *const std::ffi::c_void,
-            (weights_fp16.len() * 2) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
-
-        // Indices buffer: simple linear mapping (palettized_gemv expects 2 bytes per index).
-        let idx_count = (in_dim as usize * out_dim as usize) / 2;
-        let mut indices = vec![0u8; idx_count];
-        for i in 0..indices.len() {
-            indices[i] = (i % 16) as u8; // cycle through codebook entries
-        }
-        let indices_buf = device.new_buffer_with_data(
-            indices.as_ptr() as *const std::ffi::c_void,
-            indices.len() as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
-
         // Input buffer: fp16 activations
         let input_buf = device.new_buffer_with_data(
             input_fp16.as_ptr() as *const std::ffi::c_void,
@@ -205,10 +204,8 @@ impl MetalTeacher {
         );
 
         // Output buffer: fp16 result
-        let output_buf = device.new_buffer(
-            (out_dim as u64) * 2,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let output_buf =
+            device.new_buffer((out_dim as u64) * 2, MTLResourceOptions::StorageModeShared);
 
         let mut receipt = KernelReceipt {
             kernel_id: 0,
@@ -224,6 +221,29 @@ impl MetalTeacher {
             logical_sidecar_bytes: 0,
             logical_activation_bytes: 0,
         };
+
+        // Build packed 4-bit indices (two per byte) matching palettized_gemv.
+        let idx_count = (in_dim as usize * out_dim as usize) / 2;
+        let mut indices = vec![0u8; idx_count];
+        for row in 0..out_dim as usize {
+            let row_base = row * (in_dim as usize / 2);
+            for c in 0..(in_dim as usize / 2) {
+                let idx_lo = ((c * 2) % 16) as u8;
+                let idx_hi = ((c * 2 + 1) % 16) as u8;
+                indices[row_base + c] = idx_lo | (idx_hi << 4);
+            }
+        }
+
+        let codebook = device.new_buffer_with_data(
+            codebook_fp16.as_ptr() as *const std::ffi::c_void,
+            (codebook_fp16.len() * 2) as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let indices_buf = device.new_buffer_with_data(
+            indices.as_ptr() as *const std::ffi::c_void,
+            indices.len() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
 
         dispatcher.dispatch(
             cmd_buf,

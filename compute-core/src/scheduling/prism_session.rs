@@ -4,16 +4,13 @@
 //! a single generation request tracked through prompt processing, decode epochs,
 //! and completion with an evidence log of runtime decisions.
 
-
 use crate::backend::coreai_iosurface::CoreAiIOSurfaceExecutable;
 use crate::backend::metal_consumer::MetalConsumer;
 use crate::compilation::epoch_scheduler::EpochScheduler;
 use crate::compilation::failure_injector::FailureInjector;
 use crate::compilation::tri_lane::EpochRouteOrigin;
-use crate::scheduling::tri_lane_orchestrator::{
-    PhaseVariantSet, TriLaneOrchestrator,
-};
 use crate::compute_image::apple_shared_arena::AppleSharedArena;
+use crate::scheduling::tri_lane_orchestrator::{PhaseVariantSet, TriLaneOrchestrator};
 
 // PrismSessionRequest
 // ---------------------------------------------------------------------------
@@ -285,7 +282,6 @@ pub struct PrismStepResult {
     pub lane_receipts: Vec<crate::scheduling::tri_lane_orchestrator::TriLaneExecutionReceipt>,
 }
 
-
 // ---------------------------------------------------------------------------
 // PrismSession
 // ---------------------------------------------------------------------------
@@ -350,14 +346,15 @@ impl PrismSession {
 
         // 2. Process all available lane completions from the channel
         //    In production, this runs in a Tokio select loop with timeout.
-        let completions: Vec<_> = orchestrator.completion_rx
-        .as_mut()
-        .map(|rx| std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>())
-        .unwrap_or_default();
+        let completions: Vec<_> = orchestrator
+            .completion_rx
+            .as_mut()
+            .map(|rx| std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>())
+            .unwrap_or_default();
 
         for c in completions {
-                orchestrator.apply_completion(c)?;
-            }
+            orchestrator.apply_completion(c)?;
+        }
 
         // 3. Apply the submit-origin completion (synchronous receipt)
         orchestrator.apply_completion(completion)?;
@@ -378,11 +375,10 @@ impl PrismSession {
         self.advance_state();
 
         Ok(PrismStepResult {
-            output: request.inputs,  // passthrough stub
+            output: request.inputs, // passthrough stub
             lane_receipts,
         })
     }
-
 
     /// Advance the session's generation state (called after each epoch
     /// completes).
@@ -412,7 +408,12 @@ impl PrismSession {
         metal_consumer: &mut MetalConsumer,
         injector: &dyn FailureInjector,
     ) -> Result<Option<u32>, String> {
-        if self.scheduler.terminated || matches!(self.generation_state, GenerationState::Completed | GenerationState::Failed(_)) {
+        if self.scheduler.terminated
+            || matches!(
+                self.generation_state,
+                GenerationState::Completed | GenerationState::Failed(_)
+            )
+        {
             return Ok(None);
         }
 

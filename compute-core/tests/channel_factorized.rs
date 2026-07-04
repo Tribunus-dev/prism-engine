@@ -330,10 +330,10 @@ fn detect_cpu_fallback(
         .map_err(|e| format!("load CPU branch {}: {}", branch, e))?;
 
     // Allocate arenas.
-    let input_arena = Arena::new(1, h_chunk, DataType::Float16)
-        .map_err(|e| format!("input arena: {}", e))?;
-    let output_arena = Arena::new(1, ffn_chunk, DataType::Float16)
-        .map_err(|e| format!("output arena: {}", e))?;
+    let input_arena =
+        Arena::new(1, h_chunk, DataType::Float16).map_err(|e| format!("input arena: {}", e))?;
+    let output_arena =
+        Arena::new(1, ffn_chunk, DataType::Float16).map_err(|e| format!("output arena: {}", e))?;
 
     // Fill input.
     {

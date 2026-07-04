@@ -99,7 +99,10 @@ pub unsafe fn prism_compile_and_pack(
     ) {
         Ok(_) => 0,
         Err(e) => {
-            eprintln!("[ffi] compile_and_pack failed: {} ({} elements)", e, main_elements);
+            eprintln!(
+                "[ffi] compile_and_pack failed: {} ({} elements)",
+                e, main_elements
+            );
             -6
         }
     }
@@ -107,9 +110,7 @@ pub unsafe fn prism_compile_and_pack(
 
 /// Initialize the runtime multiplexer from a compiled .cimage.
 /// Returns a pointer to an OpaqueMultiplexer, or null on failure.
-pub unsafe fn prism_runtime_init(
-    cimage_path: *const c_char,
-) -> *mut OpaqueMultiplexer {
+pub unsafe fn prism_runtime_init(cimage_path: *const c_char) -> *mut OpaqueMultiplexer {
     if cimage_path.is_null() {
         return std::ptr::null_mut();
     }
@@ -295,9 +296,7 @@ pub unsafe fn prism_device_info_free_vendor(vendor: *mut c_char) {
 pub unsafe fn prism_device_list_json() -> *mut c_char {
     let registry = DeviceRegistry::discover();
     let json = registry.to_json_pretty();
-    std::ffi::CString::new(json)
-        .unwrap_or_default()
-        .into_raw()
+    std::ffi::CString::new(json).unwrap_or_default().into_raw()
 }
 
 /// Free a JSON string allocated by prism_device_list_json().
@@ -315,8 +314,8 @@ pub struct PrismServerConfig {
     pub port: u16,
     pub max_concurrent: u32,
     pub rate_limit_per_min: u32,
-    pub log_level: [u8; 32],        // fixed-size buffer for C safety
-    pub runtime_mode: [u8; 32],     // fixed-size buffer for C safety
+    pub log_level: [u8; 32],    // fixed-size buffer for C safety
+    pub runtime_mode: [u8; 32], // fixed-size buffer for C safety
     pub kv_cache_tiers: u32,
     pub compression_ratio: f64,
     pub evolkv_enabled: bool,
@@ -325,7 +324,7 @@ pub struct PrismServerConfig {
     pub spechub_enabled: bool,
     pub exo_enabled: bool,
     pub exo_port: u16,
-    pub model_path: [u8; 1024],     // fixed-size buffer, empty if none
+    pub model_path: [u8; 1024], // fixed-size buffer, empty if none
     pub auto_download: bool,
 }
 

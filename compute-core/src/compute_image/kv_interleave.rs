@@ -131,8 +131,7 @@ impl KvScratchHeader {
     /// Return a reference to the buffer-state AtomicU32 alias within the
     /// opaque device-control block (offset 0).
     fn state_atomic(&self) -> &AtomicU32 {
-        let ptr = &self.control._opaque_atomic_storage as *const [u8; 32]
-            as *const AtomicU32;
+        let ptr = &self.control._opaque_atomic_storage as *const [u8; 32] as *const AtomicU32;
         unsafe { &*ptr }
     }
 
@@ -141,7 +140,8 @@ impl KvScratchHeader {
         // The zeroed state reads as KV_STATE_EMPTY (0), but write it
         // explicitly so the initialisation is visible even when the
         // opaque block is later changed to non-zero defaults.
-        s.state_atomic().store(KvBufferState::Empty as u32, Ordering::Relaxed);
+        s.state_atomic()
+            .store(KvBufferState::Empty as u32, Ordering::Relaxed);
         s
     }
 
@@ -300,10 +300,11 @@ impl KvPrefetchQueueAbi {
             return None;
         }
         let idx = (deq & self.mask) as usize;
-        let req = unsafe {
-            (self.entries.as_ptr().add(idx) as *const KvPrefetchRequest).read_volatile()
-        };
-        self.dequeue_pos.value.store(deq.wrapping_add(1), Ordering::Release);
+        let req =
+            unsafe { (self.entries.as_ptr().add(idx) as *const KvPrefetchRequest).read_volatile() };
+        self.dequeue_pos
+            .value
+            .store(deq.wrapping_add(1), Ordering::Release);
         Some((deq, req))
     }
 
@@ -350,11 +351,7 @@ impl KvPrefetchArena {
         (x + a - 1) & !(a - 1)
     }
 
-    pub fn total_arena_bytes(
-        scratch_set_count: usize,
-        k_bytes: usize,
-        v_bytes: usize,
-    ) -> usize {
+    pub fn total_arena_bytes(scratch_set_count: usize, k_bytes: usize, v_bytes: usize) -> usize {
         const SIMD_ALIGN: usize = 256;
         const PAGE_ALIGN: usize = 4096;
 
@@ -367,11 +364,7 @@ impl KvPrefetchArena {
         set_bytes + queue_bytes + telemetry_bytes
     }
 
-    pub fn layout(
-        max_context: u32,
-        num_kv_heads: u32,
-        head_dim: u32,
-    ) -> Self {
+    pub fn layout(max_context: u32, num_kv_heads: u32, head_dim: u32) -> Self {
         const SIMD_ALIGN: usize = 256;
         const PAGE_ALIGN: usize = 4096;
         let (k_bytes, v_bytes) = Self::bytes_per_set(max_context, num_kv_heads, head_dim);
@@ -395,7 +388,8 @@ impl KvPrefetchArena {
             v_bytes,
         };
         let queue_offset = Self::align_up(2 * set_stride, PAGE_ALIGN);
-        let telemetry_offset = queue_offset + Self::align_up(size_of::<KvPrefetchQueueAbi>(), PAGE_ALIGN);
+        let telemetry_offset =
+            queue_offset + Self::align_up(size_of::<KvPrefetchQueueAbi>(), PAGE_ALIGN);
         let total = telemetry_offset + PAGE_ALIGN;
 
         Self {
@@ -869,7 +863,10 @@ pub struct Tier2Telemetry {
 
 impl Default for Tier2Telemetry {
     fn default() -> Self {
-        Self { is_available: false, memory_stall_ratio: 0.0 }
+        Self {
+            is_available: false,
+            memory_stall_ratio: 0.0,
+        }
     }
 }
 
@@ -900,7 +897,11 @@ impl KvInterleavePlan {
 
         Self {
             enabled: has_atomics,
-            mode: if has_atomics { KvPipelineMode::Adaptive } else { KvPipelineMode::Disabled },
+            mode: if has_atomics {
+                KvPipelineMode::Adaptive
+            } else {
+                KvPipelineMode::Disabled
+            },
             scratch_set_count: 2,
             prefetch_queue_capacity: 16,
             cache_worker_count: 1,
@@ -1030,17 +1031,29 @@ mod tests {
     fn scratch_header_state_transitions() {
         let h = KvScratchHeader::new();
         assert_eq!(h.load_state(), KvBufferState::Empty);
-        assert!(h.compare_exchange_state(KvBufferState::Empty, KvBufferState::Queued).is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Empty, KvBufferState::Queued)
+            .is_ok());
         assert_eq!(h.load_state(), KvBufferState::Queued);
-        assert!(h.compare_exchange_state(KvBufferState::Queued, KvBufferState::Filling).is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Queued, KvBufferState::Filling)
+            .is_ok());
         assert_eq!(h.load_state(), KvBufferState::Filling);
-        assert!(h.compare_exchange_state(KvBufferState::Filling, KvBufferState::Ready).is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Filling, KvBufferState::Ready)
+            .is_ok());
         assert_eq!(h.load_state(), KvBufferState::Ready);
-        assert!(h.compare_exchange_state(KvBufferState::Ready, KvBufferState::Consuming).is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Ready, KvBufferState::Consuming)
+            .is_ok());
         assert_eq!(h.load_state(), KvBufferState::Consuming);
-        assert!(h.compare_exchange_state(KvBufferState::Consuming, KvBufferState::Reclaimable).is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Consuming, KvBufferState::Reclaimable)
+            .is_ok());
         assert_eq!(h.load_state(), KvBufferState::Reclaimable);
-        assert!(h.compare_exchange_state(KvBufferState::Reclaimable, KvBufferState::Empty).is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Reclaimable, KvBufferState::Empty)
+            .is_ok());
         assert_eq!(h.load_state(), KvBufferState::Empty);
     }
 
@@ -1050,9 +1063,15 @@ mod tests {
         // transitions through Ready -> Consuming -> Reclaimable,
         // and the kv_generation in metadata is preserved.
         let h = KvScratchHeader::new();
-        assert!(h.compare_exchange_state(KvBufferState::Empty, KvBufferState::Queued).is_ok());
-        assert!(h.compare_exchange_state(KvBufferState::Queued, KvBufferState::Filling).is_ok());
-        assert!(h.compare_exchange_state(KvBufferState::Filling, KvBufferState::Ready).is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Empty, KvBufferState::Queued)
+            .is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Queued, KvBufferState::Filling)
+            .is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Filling, KvBufferState::Ready)
+            .is_ok());
 
         // Set the generation tag in metadata.
         unsafe {
@@ -1061,8 +1080,12 @@ mod tests {
         }
         assert_eq!(h.metadata.kv_generation, 7);
 
-        assert!(h.compare_exchange_state(KvBufferState::Ready, KvBufferState::Consuming).is_ok());
-        assert!(h.compare_exchange_state(KvBufferState::Consuming, KvBufferState::Reclaimable).is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Ready, KvBufferState::Consuming)
+            .is_ok());
+        assert!(h
+            .compare_exchange_state(KvBufferState::Consuming, KvBufferState::Reclaimable)
+            .is_ok());
         assert_eq!(h.load_state(), KvBufferState::Reclaimable);
 
         // Verify generation is preserved through the reclaim cycle.
@@ -1075,29 +1098,35 @@ mod tests {
         let outcome = AtomicU32::new(OUTCOME_NONE);
 
         // Decode consumer claims and marks consumable.
-        assert!(outcome.compare_exchange(
-            OUTCOME_NONE,
-            OUTCOME_READY_CONSUMABLE,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ).is_ok());
+        assert!(outcome
+            .compare_exchange(
+                OUTCOME_NONE,
+                OUTCOME_READY_CONSUMABLE,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok());
         assert_eq!(outcome.load(Ordering::Acquire), OUTCOME_READY_CONSUMABLE);
 
         // CAS from consumable -> none must fail (already consumed).
-        assert!(outcome.compare_exchange(
-            OUTCOME_NONE,
-            OUTCOME_BYPASSED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ).is_err());
+        assert!(outcome
+            .compare_exchange(
+                OUTCOME_NONE,
+                OUTCOME_BYPASSED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err());
 
         // Helper could still cancel from consumable.
-        assert!(outcome.compare_exchange(
-            OUTCOME_READY_CONSUMABLE,
-            OUTCOME_CANCELED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ).is_ok());
+        assert!(outcome
+            .compare_exchange(
+                OUTCOME_READY_CONSUMABLE,
+                OUTCOME_CANCELED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok());
         assert_eq!(outcome.load(Ordering::Acquire), OUTCOME_CANCELED);
     }
 

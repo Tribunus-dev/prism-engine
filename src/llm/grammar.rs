@@ -50,9 +50,7 @@ impl GrammarConfig {
     ///
     /// Call [`compile`](Self::compile) to produce a runnable [`GrammarEngine`].
     pub fn new(gbnf: impl Into<String>) -> Self {
-        Self {
-            gbnf: gbnf.into(),
-        }
+        Self { gbnf: gbnf.into() }
     }
 
     /// Compile the grammar into a [`GrammarEngine`] ready for token masking.
@@ -106,11 +104,7 @@ impl GrammarEngine {
     /// are valid from the current FSM state.
     ///
     /// `true` = token is allowed, `false` = forbidden.
-    pub fn valid_token_mask(
-        &self,
-        tokenizer: &GrammarTokenizer,
-        vocab_size: usize,
-    ) -> Vec<bool> {
+    pub fn valid_token_mask(&self, tokenizer: &GrammarTokenizer, vocab_size: usize) -> Vec<bool> {
         self.fsm.valid_token_mask(tokenizer, vocab_size)
     }
 

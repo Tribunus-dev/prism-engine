@@ -249,7 +249,10 @@ pub(crate) fn apply_quantize_to_loaded(
                 eprintln!("[quantize] {} ternary tile640 → GPU", wb.name);
                 continue;
             }
-            eprintln!("[quantize] {} ternary tile640 → CPU fallback (Metal unavailable)", wb.name);
+            eprintln!(
+                "[quantize] {} ternary tile640 → CPU fallback (Metal unavailable)",
+                wb.name
+            );
         }
 
         // Convert FP16/BF16 raw bytes to F32.

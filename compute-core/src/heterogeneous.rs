@@ -68,8 +68,12 @@ impl SharedMemoryIsland {
         let arena_dtype = match dtype {
             mlx_rs::Dtype::Float16 => DataType::Float16,
             mlx_rs::Dtype::Float32 => DataType::Float32,
-            _ => return Err(mlx_rs::error::Exception::custom(
-                format!("unsupported arena dtype: {:?}", dtype))),
+            _ => {
+                return Err(mlx_rs::error::Exception::custom(format!(
+                    "unsupported arena dtype: {:?}",
+                    dtype
+                )))
+            }
         };
         let arena_id = alloc
             .allocate(1, n, arena_dtype)

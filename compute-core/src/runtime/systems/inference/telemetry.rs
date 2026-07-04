@@ -11,8 +11,8 @@ use lazy_static::lazy_static;
 use crate::runtime::scheduling::access::{ComponentSet, ResourceSet};
 use crate::runtime::scheduling::command::CommandWriter;
 use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
 };
 use crate::runtime::world::World;
 
@@ -80,11 +80,7 @@ impl ErasedSystem for TelemetryObservationSystem {
         &TELEMETRY_OBSERVATION_META
     }
 
-    fn run(
-        &mut self,
-        _world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, _world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // Placeholder — full implementation will:
         // 1. Query for all session entities
         // 2. Sample counters: tokens_generated, cache_hit_rate, working_set_pressure

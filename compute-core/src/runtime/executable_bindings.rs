@@ -164,8 +164,8 @@ impl BindingManager {
 mod tests {
     use super::*;
     use crate::compute_image::content_store::index::{
-        ContentAddressedContentStore, ContentObjectEntry, ContentObjectKind,
-        ContentStoreVersion, ImmutableSegment, ResidencyClass,
+        ContentAddressedContentStore, ContentObjectEntry, ContentObjectKind, ContentStoreVersion,
+        ImmutableSegment, ResidencyClass,
     };
 
     // ------------------------------------------------------------------

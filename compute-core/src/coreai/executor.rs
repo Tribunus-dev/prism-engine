@@ -204,7 +204,6 @@ impl CoreAiArtifactExecutor for AppleCoreAiArtifactExecutor {
 mod tests {
     use super::*;
     use crate::coreai::fixture::{CoreAiExecutionPolicy, NamedTensorInput};
-    
 
     /// Helper to build a minimal artifact handle.
     fn dummy_handle(path: &str) -> CoreAiArtifactHandle {

@@ -8,9 +8,9 @@
 //!
 //! Platform-gated: actual probe only on Linux; non-Linux returns empty Vec.
 
+use super::DeviceProbe;
 #[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
 use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo};
-use super::DeviceProbe;
 
 /// Probes CUDA-capable GPUs via the CUDA Runtime API.
 pub struct CudaProbe;
@@ -29,9 +29,9 @@ impl DeviceProbe for CudaProbe {
 
 #[cfg(target_os = "linux")]
 mod platform {
+    use super::*;
     use std::ffi::CStr;
     use std::mem;
-    use super::*;
 
     const CUDA_SUCCESS: i32 = 0;
 
@@ -83,18 +83,18 @@ mod platform {
         _maxSurface2DLayered: [i32; 3],
         _maxSurfaceCubemap: i32,
         _maxSurfaceCubemapLayered: [i32; 2],
-        _surfaceAlignment: usize,       // ~584
-        _concurrentKernels: i32,        // 592
-        _ECCEnabled: i32,               // 596
-        pciBusID: i32,                  // 600
-        pciDeviceID: i32,               // 604
-        pciDomainID: i32,               // 608
-        _tccDriver: i32,                // 612
-        _asyncEngineCount: i32,         // 616
-        _unifiedAddressing: i32,        // 620
-        memoryClockRate: i32,           // 624
-        memoryBusWidth: i32,            // 628
-        l2CacheSize: i32,               // 632
+        _surfaceAlignment: usize, // ~584
+        _concurrentKernels: i32,  // 592
+        _ECCEnabled: i32,         // 596
+        pciBusID: i32,            // 600
+        pciDeviceID: i32,         // 604
+        pciDomainID: i32,         // 608
+        _tccDriver: i32,          // 612
+        _asyncEngineCount: i32,   // 616
+        _unifiedAddressing: i32,  // 620
+        memoryClockRate: i32,     // 624
+        memoryBusWidth: i32,      // 628
+        l2CacheSize: i32,         // 632
         _maxThreadsPerMultiProcessor: i32,
         _maxBlocksPerMultiProcessor: i32,
         _concurrentManagedAccess: i32,
@@ -130,7 +130,7 @@ mod platform {
         _deviceNumaId: i32,
         _deviceNumaConfig: i32,
         _hostNumaMultinodeIpcSupported: i32,
-        _reserved: [u8; 220],          // forward-compat padding
+        _reserved: [u8; 220], // forward-compat padding
     }
 
     extern "C" {
@@ -219,7 +219,11 @@ mod platform {
     /// Heuristic PCIe generation from device generation and name.
     fn pcie_generation(name: &str, major: i32, minor: i32) -> u32 {
         let cc = major * 10 + minor;
-        if name.contains("RTX 40") || name.contains("RTX 50") || name.contains("H100") || name.contains("B100") {
+        if name.contains("RTX 40")
+            || name.contains("RTX 50")
+            || name.contains("H100")
+            || name.contains("B100")
+        {
             5
         } else if name.contains("RTX 30") || name.contains("A100") || cc >= 80 {
             4

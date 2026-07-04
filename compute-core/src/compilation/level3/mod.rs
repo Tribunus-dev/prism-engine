@@ -15,6 +15,6 @@
 //! router (`routing::Level3Router`) maintains a capability fingerprint cache
 //! and selects the best available route.
 
+pub mod gates;
 pub mod providers;
 pub mod routing;
-pub mod gates;

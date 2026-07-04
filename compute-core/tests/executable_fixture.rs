@@ -3,17 +3,15 @@
 
 #[cfg(test)]
 mod tests {
+    use tribunus_compute_core::compute_image::content_store::index::{
+        ContentAddressedContentStore, ContentStoreVersion,
+    };
     use tribunus_compute_core::compute_image::executable::admission::ExecutableAdmissionError;
     use tribunus_compute_core::compute_image::executable::provenance::CompilerProvenance;
     use tribunus_compute_core::compute_image::executable::schema::{
         CompileTimeReceiptBundle, ExecutableFormatVersion, ModelIdentity,
         SealedComputeImageExecutable,
     };
-    use tribunus_compute_core::compute_image::content_store::index::{
-    };
-use tribunus_compute_core::compute_image::content_store::index::{
-    ContentAddressedContentStore, ContentStoreVersion,
-};
     use tribunus_compute_core::compute_image::executable::seal::ExecutableSeal;
     use tribunus_compute_core::integration::ContentHash;
 

@@ -12,22 +12,20 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use crate::runtime::scheduling::command::CommandWriter;
-use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
-};
-use crate::runtime::world::World;
 use crate::runtime::components::{
-    WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
-    WorkerRequestPhase,
     worker_health::{TerminalStatus, WorkerErrorCategory},
-    WORKER_EVENT_DRAIN_SYSTEM, WORKER_WATCHDOG_SYSTEM,
+    WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
+    WorkerRequestPhase, WORKER_EVENT_DRAIN_SYSTEM, WORKER_WATCHDOG_SYSTEM,
 };
 use crate::runtime::resources::{
-    MonotonicClockResource, WorkerDiagnosticsResource, WorkerPoolResource,
-    WorkerResponseRegistry,
+    MonotonicClockResource, WorkerDiagnosticsResource, WorkerPoolResource, WorkerResponseRegistry,
 };
+use crate::runtime::scheduling::command::CommandWriter;
+use crate::runtime::scheduling::metadata::{
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
+};
+use crate::runtime::world::World;
 
 // ---------------------------------------------------------------------------
 // Watchdog policy
@@ -88,10 +86,19 @@ impl Default for WorkerWatchdogSystem {
 }
 
 impl SystemSpec for WorkerWatchdogSystem {
-    type Reads = (WorkerAssignment, WorkerLifecycle, WorkerHeartbeat, WorkerRequest);
+    type Reads = (
+        WorkerAssignment,
+        WorkerLifecycle,
+        WorkerHeartbeat,
+        WorkerRequest,
+    );
     type Writes = (WorkerLifecycle, WorkerOutcome);
     type ReadResources = MonotonicClockResource;
-    type WriteResources = (WorkerPoolResource, WorkerDiagnosticsResource, WorkerResponseRegistry);
+    type WriteResources = (
+        WorkerPoolResource,
+        WorkerDiagnosticsResource,
+        WorkerResponseRegistry,
+    );
 
     const NAME: &'static str = "worker_watchdog";
     const ID: SystemId = WORKER_WATCHDOG_SYSTEM;
@@ -104,15 +111,12 @@ impl SystemSpec for WorkerWatchdogSystem {
 
 impl ErasedSystem for WorkerWatchdogSystem {
     fn metadata(&self) -> &SystemMetadata {
-        self.metadata
-            .get_or_init(|| <Self as SystemSpec>::metadata().expect("WorkerWatchdogSystem metadata"))
+        self.metadata.get_or_init(|| {
+            <Self as SystemSpec>::metadata().expect("WorkerWatchdogSystem metadata")
+        })
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // Reference time for all elapsed calculations.
         // Snapshot Copy values to avoid holding Ref borrows across mutable operations.
         let now = {
@@ -135,20 +139,17 @@ impl ErasedSystem for WorkerWatchdogSystem {
             .collect();
 
         for entity in actives {
-            let phase = world
-                .get::<WorkerLifecycle>(entity)
-                .map(|lc| lc.phase);
+            let phase = world.get::<WorkerLifecycle>(entity).map(|lc| lc.phase);
 
             let Some(phase) = phase else {
                 continue;
             };
 
             // Determine the timeout and time-since-last-activity for this entity.
-            let (since_last_event, timeout) =
-                match compute_idle_time(world, entity, phase, now) {
-                    Some(v) => v,
-                    None => continue,
-                };
+            let (since_last_event, timeout) = match compute_idle_time(world, entity, phase, now) {
+                Some(v) => v,
+                None => continue,
+            };
 
             // No timeout exceeded.
             if since_last_event < timeout {
@@ -238,7 +239,9 @@ fn compute_idle_time(
             let age = now.saturating_duration_since(assignment.assigned_at);
             Some((age, Duration::from_secs(30)))
         }
-        WorkerRequestPhase::Dispatching | WorkerRequestPhase::Streaming | WorkerRequestPhase::CancelRequested => {
+        WorkerRequestPhase::Dispatching
+        | WorkerRequestPhase::Streaming
+        | WorkerRequestPhase::CancelRequested => {
             // Time since last heartbeat.
             let heartbeat = world.get::<WorkerHeartbeat>(entity)?;
             let age = now.saturating_duration_since(heartbeat.last_heartbeat_at);
@@ -251,8 +254,8 @@ fn compute_idle_time(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::world::World;
     use crate::runtime::components::WorkerAssignment;
+    use crate::runtime::world::World;
 
     fn setup_world() -> World {
         let mut world = World::with_capacity(64);
@@ -306,7 +309,10 @@ mod tests {
 
     #[test]
     fn has_after_edge_to_event_drain() {
-        assert_eq!(<WorkerWatchdogSystem as SystemSpec>::AFTER, &[WORKER_EVENT_DRAIN_SYSTEM]);
+        assert_eq!(
+            <WorkerWatchdogSystem as SystemSpec>::AFTER,
+            &[WORKER_EVENT_DRAIN_SYSTEM]
+        );
     }
 
     #[test]

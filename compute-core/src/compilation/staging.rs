@@ -176,8 +176,7 @@ impl<T: Send> StagingRing<T> {
             let state = self.slot_state(idx);
             if matches!(state, SlotState::GpuComplete | SlotState::CpuValidated) {
                 // Claim the slot by transitioning to Reclaimable.
-                if self
-                    .slot_states[idx]
+                if self.slot_states[idx]
                     .compare_exchange(
                         state as u8,
                         SlotState::Reclaimable as u8,
@@ -259,31 +258,51 @@ mod tests {
         }
 
         // Empty → CpuFilled
-        assert!(ring.transition(0, SlotState::Empty, SlotState::CpuFilled).is_ok());
+        assert!(ring
+            .transition(0, SlotState::Empty, SlotState::CpuFilled)
+            .is_ok());
         assert_eq!(ring.slot_state(0), SlotState::CpuFilled);
 
         // CpuFilled → AneSubmitted
-        assert!(ring.transition(0, SlotState::CpuFilled, SlotState::AneSubmitted).is_ok());
+        assert!(ring
+            .transition(0, SlotState::CpuFilled, SlotState::AneSubmitted)
+            .is_ok());
         assert_eq!(ring.slot_state(0), SlotState::AneSubmitted);
 
         // AneSubmitted → AneComplete
-        assert!(ring.transition(0, SlotState::AneSubmitted, SlotState::AneComplete).is_ok());
+        assert!(ring
+            .transition(0, SlotState::AneSubmitted, SlotState::AneComplete)
+            .is_ok());
         assert_eq!(ring.slot_state(0), SlotState::AneComplete);
 
         // AneComplete → CpuValidated
-        assert!(ring.transition(0, SlotState::AneComplete, SlotState::CpuValidated).is_ok());
+        assert!(ring
+            .transition(0, SlotState::AneComplete, SlotState::CpuValidated)
+            .is_ok());
         assert_eq!(ring.slot_state(0), SlotState::CpuValidated);
 
         // CpuValidated → Empty (via pop path — done manually via transition)
-        assert!(ring.transition(0, SlotState::CpuValidated, SlotState::Reclaimable).is_ok());
-        assert!(ring.transition(0, SlotState::Reclaimable, SlotState::Empty).is_ok());
+        assert!(ring
+            .transition(0, SlotState::CpuValidated, SlotState::Reclaimable)
+            .is_ok());
+        assert!(ring
+            .transition(0, SlotState::Reclaimable, SlotState::Empty)
+            .is_ok());
         assert_eq!(ring.slot_state(0), SlotState::Empty);
 
         // Now test the GPU path on slot 1.
-        assert!(ring.transition(1, SlotState::Empty, SlotState::CpuFilled).is_ok());
-        assert!(ring.transition(1, SlotState::CpuFilled, SlotState::GpuSubmitted).is_ok());
-        assert!(ring.transition(1, SlotState::GpuSubmitted, SlotState::GpuComplete).is_ok());
-        assert!(ring.transition(1, SlotState::GpuComplete, SlotState::CpuValidated).is_ok());
+        assert!(ring
+            .transition(1, SlotState::Empty, SlotState::CpuFilled)
+            .is_ok());
+        assert!(ring
+            .transition(1, SlotState::CpuFilled, SlotState::GpuSubmitted)
+            .is_ok());
+        assert!(ring
+            .transition(1, SlotState::GpuSubmitted, SlotState::GpuComplete)
+            .is_ok());
+        assert!(ring
+            .transition(1, SlotState::GpuComplete, SlotState::CpuValidated)
+            .is_ok());
         assert_eq!(ring.slot_state(1), SlotState::CpuValidated);
     }
 
@@ -301,7 +320,9 @@ mod tests {
         assert!(err.unwrap_err().contains("Empty"));
 
         // Empty → CpuFilled, then try duplicate transition.
-        assert!(ring.transition(0, SlotState::Empty, SlotState::CpuFilled).is_ok());
+        assert!(ring
+            .transition(0, SlotState::Empty, SlotState::CpuFilled)
+            .is_ok());
         let err = ring.transition(0, SlotState::Empty, SlotState::CpuFilled);
         assert!(err.is_err(), "double-claim should fail");
         assert!(err.unwrap_err().contains("CpuFilled"));
@@ -406,8 +427,10 @@ mod tests {
         // Set up one slot as CpuFilled.
         ring.try_push(42).unwrap();
         // Set up another as GpuComplete.
-        ring.transition(0, SlotState::CpuFilled, SlotState::GpuSubmitted).unwrap();
-        ring.transition(0, SlotState::GpuSubmitted, SlotState::GpuComplete).unwrap();
+        ring.transition(0, SlotState::CpuFilled, SlotState::GpuSubmitted)
+            .unwrap();
+        ring.transition(0, SlotState::GpuSubmitted, SlotState::GpuComplete)
+            .unwrap();
 
         let n_threads = 8;
         let mut handles = Vec::with_capacity(n_threads);
@@ -458,8 +481,10 @@ mod tests {
         ring.try_push(200).unwrap();
         assert_eq!(ring.slot_state(0), SlotState::CpuFilled);
         // Advance to GpuComplete, pop, confirm value.
-        ring.transition(0, SlotState::CpuFilled, SlotState::GpuSubmitted).unwrap();
-        ring.transition(0, SlotState::GpuSubmitted, SlotState::GpuComplete).unwrap();
+        ring.transition(0, SlotState::CpuFilled, SlotState::GpuSubmitted)
+            .unwrap();
+        ring.transition(0, SlotState::GpuSubmitted, SlotState::GpuComplete)
+            .unwrap();
         let (_, val) = ring.try_pop().unwrap();
         assert_eq!(val, 200);
     }

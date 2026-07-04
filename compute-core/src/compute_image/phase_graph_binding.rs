@@ -1,6 +1,4 @@
-use crate::compute_image::phase_graph::{
-    PhaseId, ResolvedPhaseBinding,
-};
+use crate::compute_image::phase_graph::{PhaseId, ResolvedPhaseBinding};
 use serde::{Deserialize, Serialize};
 
 /// Registry that resolves artifact bindings for phases.

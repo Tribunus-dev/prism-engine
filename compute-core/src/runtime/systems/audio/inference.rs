@@ -16,19 +16,19 @@
 
 use lazy_static::lazy_static;
 
-use crate::runtime::scheduling::command::CommandWriter;
-use crate::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult, SystemSpec,
-};
-use crate::runtime::world::{Entity, World};
 use crate::runtime::components::{
-    WorkerRequest, WorkerStream,
     worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase},
     worker_request::RequestClass,
+    WorkerRequest, WorkerStream,
 };
 use crate::runtime::resources::audio::AudioEncoderResource;
 use crate::runtime::resources::text_to_speech::TextToSpeechResource;
+use crate::runtime::scheduling::command::CommandWriter;
+use crate::runtime::scheduling::metadata::{
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult, SystemSpec,
+};
+use crate::runtime::world::{Entity, World};
 
 // ---------------------------------------------------------------------------
 // AudioFeatures — marker component for entities with encoded audio features
@@ -121,11 +121,7 @@ impl ErasedSystem for AudioInferenceSystem {
         &AUDIO_INFERENCE_METADATA
     }
 
-    fn run(
-        &mut self,
-        world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         // Check audio resources — skip if neither encoder nor TTS is loaded.
         let has_encoder = world
             .get_resource::<AudioEncoderResource>()
@@ -174,10 +170,7 @@ impl ErasedSystem for AudioInferenceSystem {
                 if let Some(lc) = world.get_mut::<WorkerLifecycle>(entity) {
                     let _ = lc.transition_to(WorkerRequestPhase::Failed);
                 }
-                eprintln!(
-                    "[audio_inference] entity {} failed: {msg}",
-                    entity.0
-                );
+                eprintln!("[audio_inference] entity {} failed: {msg}", entity.0);
             }
         }
 
@@ -228,7 +221,9 @@ impl AudioInferenceSystem {
             }
             #[cfg(not(feature = "generation-tts"))]
             {
-                return Err("TTS support not available (generation-tts feature disabled)".to_string());
+                return Err(
+                    "TTS support not available (generation-tts feature disabled)".to_string(),
+                );
             }
         }
 
@@ -244,11 +239,7 @@ impl AudioInferenceSystem {
 
     /// Run ASR: preprocess audio → encode → write feature handle to
     /// [`AudioFeatures`] component.
-    fn run_asr(
-        world: &mut World,
-        entity: Entity,
-        payload: &[u8],
-    ) -> Result<(), String> {
+    fn run_asr(world: &mut World, entity: Entity, payload: &[u8]) -> Result<(), String> {
         // Extract the audio input from payload.
         let audio_input = if payload.starts_with(b"ASR:") {
             std::str::from_utf8(&payload[4..])
@@ -283,9 +274,7 @@ impl AudioInferenceSystem {
         // Store the feature tensor in the global array registry so downstream
         // text-model systems can retrieve it via AudioFeatures.handle.
         let num_frames = features.shape().get(0).copied().unwrap_or(0) as usize;
-        let handle = crate::bridge::ARRAY_REGISTRY
-            .write()
-            .insert(features, None);
+        let handle = crate::bridge::ARRAY_REGISTRY.write().insert(features, None);
 
         // Insert AudioFeatures component onto the entity.
         let audio_feat = AudioFeatures {
@@ -300,11 +289,7 @@ impl AudioInferenceSystem {
     /// Run TTS: tokenize text → synthesize audio → write PCM to
     /// [`WorkerStream`].
     #[cfg(feature = "generation-tts")]
-    fn run_tts(
-        world: &mut World,
-        entity: Entity,
-        payload: &[u8],
-    ) -> Result<(), String> {
+    fn run_tts(world: &mut World, entity: Entity, payload: &[u8]) -> Result<(), String> {
         // Extract the text from payload.
         let text = if payload.starts_with(b"TTS:") {
             std::str::from_utf8(&payload[4..])
@@ -332,8 +317,7 @@ impl AudioInferenceSystem {
             .map_err(|e| format!("TTS synthesize: {e}"))?;
 
         // Encode PCM as WAV bytes.
-        let wav_bytes =
-            crate::generation::text_to_speech::pcm_to_wav(&pcm_samples, sample_rate);
+        let wav_bytes = crate::generation::text_to_speech::pcm_to_wav(&pcm_samples, sample_rate);
 
         // Write audio data to WorkerStream via record_output.
         if let Some(stream) = world.get_mut::<WorkerStream>(entity) {

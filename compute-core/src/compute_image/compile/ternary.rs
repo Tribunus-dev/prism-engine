@@ -87,8 +87,8 @@ pub struct SegmentEntry {
 }
 /// Type tags for ModelArtifacts segment entries.
 pub mod model_artifact_tag {
-    pub const TOKENIZER: u32 = 0x01;     // SentencePiece .model proto
-    pub const TOKEN_MAP: u32 = 0x04;     // Multimodal special token map (JSON)
+    pub const TOKENIZER: u32 = 0x01; // SentencePiece .model proto
+    pub const TOKEN_MAP: u32 = 0x04; // Multimodal special token map (JSON)
     pub const CHAT_TEMPLATE: u32 = 0x05; // Chat prompt template string
     pub const GENERATION_CONFIG: u32 = 0x06; // Sampling params (JSON)
     /// Ternary-packed embedding table (nibbles reordered by cluster)
@@ -134,17 +134,25 @@ impl<'a> Iterator for ModelArtifactIter<'a> {
     type Item = (u32, &'a [u8]);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos + 8 > self.blob.len() { return None; }
+        if self.pos + 8 > self.blob.len() {
+            return None;
+        }
         let tag = u32::from_le_bytes([
-            self.blob[self.pos], self.blob[self.pos+1],
-            self.blob[self.pos+2], self.blob[self.pos+3],
+            self.blob[self.pos],
+            self.blob[self.pos + 1],
+            self.blob[self.pos + 2],
+            self.blob[self.pos + 3],
         ]);
         let len = u32::from_le_bytes([
-            self.blob[self.pos+4], self.blob[self.pos+5],
-            self.blob[self.pos+6], self.blob[self.pos+7],
+            self.blob[self.pos + 4],
+            self.blob[self.pos + 5],
+            self.blob[self.pos + 6],
+            self.blob[self.pos + 7],
         ]) as usize;
         self.pos += 8;
-        if self.pos + len > self.blob.len() { return None; }
+        if self.pos + len > self.blob.len() {
+            return None;
+        }
         let data = &self.blob[self.pos..self.pos + len];
         self.pos += len;
         Some((tag, data))
@@ -153,7 +161,11 @@ impl<'a> Iterator for ModelArtifactIter<'a> {
 
 impl SegmentEntry {
     pub fn new(kind: SegmentKind, offset: u64, length: u64) -> Self {
-        Self { kind: kind as u32, offset, length }
+        Self {
+            kind: kind as u32,
+            offset,
+            length,
+        }
     }
 }
 
@@ -278,29 +290,45 @@ pub struct TensorRecord {
 }
 
 impl TensorRecord {
-    pub fn new(offset: u64, length: u64) -> Self { Self { offset, length } }
+    pub fn new(offset: u64, length: u64) -> Self {
+        Self { offset, length }
+    }
 }
 
 /// Backward-compatible type aliases
 pub type PrismCimageHeader = CimageHeader;
 pub type PrismCimageLayoutMeta = CimageLayoutMeta;
 /// Backward-compatible function alias
-pub fn verify_prism_cimage(bytes: &[u8]) -> Result<(PrismCimageHeader, PrismCimageLayoutMeta), String> {
+pub fn verify_prism_cimage(
+    bytes: &[u8],
+) -> Result<(PrismCimageHeader, PrismCimageLayoutMeta), String> {
     verify_cimage(bytes)
 }
 
 pub fn verify_cimage(bytes: &[u8]) -> Result<(CimageHeader, CimageLayoutMeta), String> {
-    if bytes.len() < core::mem::size_of::<CimageHeader>() { return Err("too small".into()); }
-    let header: CimageHeader = unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const CimageHeader) };
-    if &header.magic != &PRISM_MAGIC { return Err("bad magic".into()); }
+    if bytes.len() < core::mem::size_of::<CimageHeader>() {
+        return Err("too small".into());
+    }
+    let header: CimageHeader =
+        unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const CimageHeader) };
+    if &header.magic != &PRISM_MAGIC {
+        return Err("bad magic".into());
+    }
     // Try to find LayoutMeta segment in directory; return default if absent
-    let layout = header.segment(SegmentKind::LayoutMeta)
+    let layout = header
+        .segment(SegmentKind::LayoutMeta)
         .and_then(|entry| {
             let end = (entry.offset as usize).checked_add(entry.length as usize)?;
-            if end > bytes.len() || entry.length as usize != core::mem::size_of::<CimageLayoutMeta>() {
+            if end > bytes.len()
+                || entry.length as usize != core::mem::size_of::<CimageLayoutMeta>()
+            {
                 return None;
             }
-            Some(unsafe { std::ptr::read_unaligned(bytes.as_ptr().add(entry.offset as usize) as *const CimageLayoutMeta) })
+            Some(unsafe {
+                std::ptr::read_unaligned(
+                    bytes.as_ptr().add(entry.offset as usize) as *const CimageLayoutMeta
+                )
+            })
         })
         .unwrap_or_default();
     Ok((header, layout))
@@ -354,7 +382,9 @@ pub fn repack_ternary_to_swizzled_u8(
     slc_width: usize,
 ) {
     let expected = swizzled_buffer_size(rows, cols);
-    if slc_buf.len() < expected { return; }
+    if slc_buf.len() < expected {
+        return;
+    }
     slc_buf[..expected].fill(0);
 
     let ts = 640usize;
@@ -368,23 +398,31 @@ pub fn repack_ternary_to_swizzled_u8(
         for t in 0..nt {
             for lane in 0..32 {
                 let po = row * nt * 32 * 4 + t * 32 * 4 + lane * 4;
-                if po + 4 > ternary_bytes.len() { break; }
+                if po + 4 > ternary_bytes.len() {
+                    break;
+                }
 
                 let packed = u32::from_le_bytes([
-                    ternary_bytes[po], ternary_bytes[po + 1],
-                    ternary_bytes[po + 2], ternary_bytes[po + 3],
+                    ternary_bytes[po],
+                    ternary_bytes[po + 1],
+                    ternary_bytes[po + 2],
+                    ternary_bytes[po + 3],
                 ]);
 
                 let mut rem = packed;
                 for vi in 0..20 {
                     let col = t * ts + lane * 20 + vi;
-                    if col >= cols { break; }
+                    if col >= cols {
+                        break;
+                    }
 
                     let digit = (rem % 3) as u8;
                     rem /= 3;
 
                     let (byte_off, shift) = swizzled_byte_offset(row, col, slc_width);
-                    if byte_off >= expected { continue; }
+                    if byte_off >= expected {
+                        continue;
+                    }
 
                     temp[byte_off][shift as usize] = digit;
                     count[byte_off] += 1;
@@ -402,7 +440,12 @@ pub fn repack_ternary_to_swizzled_u8(
             // Partial quartet at tensor edge — encode what's filled
             let mut state: u8 = 0;
             for s in (0..4).rev() {
-                state = state * 3 + if s < count[bi] { temp[bi][s as usize] } else { 0 };
+                state = state * 3
+                    + if s < count[bi] {
+                        temp[bi][s as usize]
+                    } else {
+                        0
+                    };
             }
             slc_buf[bi] = state;
         }
@@ -416,11 +459,27 @@ fn f32_to_fp16_bits(x: f32) -> u16 {
     let s = ((bits >> 16) & 0x8000) as u16;
     let e = (bits >> 23) & 0xFF;
     let m = bits & 0x7FFFFF;
-    if e == 0 { return s; }
-    if e == 0xFF { return if m == 0 { if s != 0 { 0xFC00 } else { 0x7C00 } } else { 0x7E00 }; }
+    if e == 0 {
+        return s;
+    }
+    if e == 0xFF {
+        return if m == 0 {
+            if s != 0 {
+                0xFC00
+            } else {
+                0x7C00
+            }
+        } else {
+            0x7E00
+        };
+    }
     let ef = e as i32 - 127 + 15;
-    if ef >= 0x1F { return if s != 0 { 0xFC00 } else { 0x7C00 }; }
-    if ef <= 0 { return s; }
+    if ef >= 0x1F {
+        return if s != 0 { 0xFC00 } else { 0x7C00 };
+    }
+    if ef <= 0 {
+        return s;
+    }
     s | ((ef as u16) << 10) | ((m >> 13) as u16)
 }
 
@@ -429,8 +488,24 @@ pub fn fp16_to_f32(b: [u8; 2]) -> f32 {
     let s = (((bits >> 15) & 1) as f32) * -2.0 + 1.0;
     let e = (bits >> 10) & 0x1F;
     let m = (bits & 0x03FF) as f32;
-    if e == 0 { return if m == 0.0 { 0.0 } else { s * (m / 1024.0) * 2.0_f32.powi(-14) }; }
-    if e == 0x1F { return if m == 0.0 { if s > 0.0 { f32::INFINITY } else { f32::NEG_INFINITY } } else { f32::NAN }; }
+    if e == 0 {
+        return if m == 0.0 {
+            0.0
+        } else {
+            s * (m / 1024.0) * 2.0_f32.powi(-14)
+        };
+    }
+    if e == 0x1F {
+        return if m == 0.0 {
+            if s > 0.0 {
+                f32::INFINITY
+            } else {
+                f32::NEG_INFINITY
+            }
+        } else {
+            f32::NAN
+        };
+    }
     s * (1.0 + m / 1024.0) * 2.0_f32.powi(e as i32 - 15)
 }
 
@@ -443,7 +518,11 @@ pub fn ternary_quantize_block(block: &[f32; 256]) -> ([u8; 2], [u8; 64]) {
         let mut b: u8 = 0;
         for (j, &v) in chk.iter().enumerate() {
             let sn = (v / scale).round().clamp(-1.0, 1.0) as i8;
-            b |= (match sn { 1 => 0b01, -1 => 0b10, _ => 0b00 }) << (j * 2);
+            b |= (match sn {
+                1 => 0b01,
+                -1 => 0b10,
+                _ => 0b00,
+            }) << (j * 2);
         }
         nib[i] = b;
     }
@@ -454,7 +533,9 @@ pub fn generate_ane_swizzled_weights(raw_bf16: &[u8], out_dim: u32, in_dim: u32)
     let rows = out_dim as usize;
     let cols = in_dim as usize;
     let total = swizzled_buffer_size(rows, cols);
-    if total == 0 { return Vec::new(); }
+    if total == 0 {
+        return Vec::new();
+    }
     let mut swz = vec![0u8; total];
     let mut temp = vec![[0u8; 4]; total];
     let mut cnt = vec![0u8; total];
@@ -468,12 +549,18 @@ pub fn generate_ane_swizzled_weights(raw_bf16: &[u8], out_dim: u32, in_dim: u32)
         for j in 0..n {
             let bo = (st + j) * 2;
             if bo + 1 < raw_bf16.len() {
-                blk[j] = f32::from_bits((u16::from_le_bytes([raw_bf16[bo], raw_bf16[bo + 1]]) as u32) << 16);
+                blk[j] = f32::from_bits(
+                    (u16::from_le_bytes([raw_bf16[bo], raw_bf16[bo + 1]]) as u32) << 16,
+                );
             }
         }
         let (_sc, nib) = ternary_quantize_block(&blk);
         for j in 0..n {
-            let d = match (nib[j / 4] >> ((j % 4) * 2)) & 0x03 { 0b01 => 1, 0b10 => 2, _ => 0 };
+            let d = match (nib[j / 4] >> ((j % 4) * 2)) & 0x03 {
+                0b01 => 1,
+                0b10 => 2,
+                _ => 0,
+            };
             let vi = st + j;
             let (bi2, sh) = swizzled_byte_offset(vi / cols, vi % cols, cols);
             temp[bi2][sh as usize] = d;
@@ -481,10 +568,14 @@ pub fn generate_ane_swizzled_weights(raw_bf16: &[u8], out_dim: u32, in_dim: u32)
         }
     }
     for b in 0..total {
-        if cnt[b] == 0 { continue; }
+        if cnt[b] == 0 {
+            continue;
+        }
         let q = &temp[b];
         let mut s: u8 = 0;
-        for sh in (0..4).rev() { s = s * 3 + if sh < cnt[b] { q[sh as usize] } else { 0 }; }
+        for sh in (0..4).rev() {
+            s = s * 3 + if sh < cnt[b] { q[sh as usize] } else { 0 };
+        }
         swz[b] = s;
     }
     swz
@@ -510,7 +601,9 @@ pub fn requantize_kv_to_swizzled_u8(
     let total = seq_len * kv_dim;
     let nb = (total + 255) / 256;
     let expected = swizzled_buffer_size(seq_len, kv_dim);
-    if slc_buf.len() < expected { return; }
+    if slc_buf.len() < expected {
+        return;
+    }
     slc_buf[..expected].fill(0);
 
     let mut temp = vec![[0u8; 4]; expected];
@@ -529,7 +622,11 @@ pub fn requantize_kv_to_swizzled_u8(
         }
         let (_sc, nib) = ternary_quantize_block(&blk);
         for j in 0..n {
-            let d = match (nib[j / 4] >> ((j % 4) * 2)) & 0x03 { 0b01 => 1u8, 0b10 => 2u8, _ => 0u8 };
+            let d = match (nib[j / 4] >> ((j % 4) * 2)) & 0x03 {
+                0b01 => 1u8,
+                0b10 => 2u8,
+                _ => 0u8,
+            };
             let vi = st + j;
             let (bi2, sh) = swizzled_byte_offset(vi / kv_dim, vi % kv_dim, kv_dim);
             temp[bi2][sh as usize] = d;
@@ -537,10 +634,14 @@ pub fn requantize_kv_to_swizzled_u8(
         }
     }
     for b in 0..expected {
-        if cnt[b] == 0 { continue; }
+        if cnt[b] == 0 {
+            continue;
+        }
         let q = &temp[b];
         let mut s: u8 = 0;
-        for sh in (0..4).rev() { s = s * 3 + if sh < cnt[b] { q[sh as usize] } else { 0 }; }
+        for sh in (0..4).rev() {
+            s = s * 3 + if sh < cnt[b] { q[sh as usize] } else { 0 };
+        }
         slc_buf[b] = s;
     }
 }
@@ -551,54 +652,89 @@ mod tests {
 
     #[test]
     fn test_swizzle_bijection() {
-        let w = 640; let h = 240;
+        let w = 640;
+        let h = 240;
         let tb = ((h + 15) / 16) * (w / 16) * 64;
         let mut seen = vec![[false; 4]; tb];
-        for r in 0..h { for c in 0..w {
-            let (b, sh) = swizzled_byte_offset(r, c, w);
-            assert!(b < tb); assert!(!seen[b][sh]); seen[b][sh] = true;
-        }}
-        for slots in &seen { for &u in slots { assert!(u); } }
+        for r in 0..h {
+            for c in 0..w {
+                let (b, sh) = swizzled_byte_offset(r, c, w);
+                assert!(b < tb);
+                assert!(!seen[b][sh]);
+                seen[b][sh] = true;
+            }
+        }
+        for slots in &seen {
+            for &u in slots {
+                assert!(u);
+            }
+        }
     }
 
     #[test]
     fn test_repack_roundtrip() {
-        let cols = 640; let rows = 32;
+        let cols = 640;
+        let rows = 32;
         let nt = (cols + 639) / 640;
         // Build mock ternary data in GPU format
         let mut ternary = vec![0u8; rows * nt * 32 * 4];
         let mut expected_digits = vec![0u8; rows * cols];
-        for r in 0..rows { for c in 0..cols {
-            let d = ((r * cols + c) % 3) as u8;
-            expected_digits[r * cols + c] = d;
-            // Set digit in the u32 pack
-            let tile = c / 640;
-            let lane = (c % 640) / 20;
-            let vi = (c % 640) % 20;
-            let po = r * nt * 32 * 4 + tile * 32 * 4 + lane * 4;
-            if po + 4 > ternary.len() { continue; }
-            let mut pk = u32::from_le_bytes([ternary[po], ternary[po+1], ternary[po+2], ternary[po+3]]);
-            let mut mul = 1u32;
-            for _ in 0..vi { mul *= 3; }
-            pk = (pk / (mul * 3)) * (mul * 3) + d as u32 * mul + pk % mul;
-            ternary[po..po+4].copy_from_slice(&pk.to_le_bytes());
-        }}
+        for r in 0..rows {
+            for c in 0..cols {
+                let d = ((r * cols + c) % 3) as u8;
+                expected_digits[r * cols + c] = d;
+                // Set digit in the u32 pack
+                let tile = c / 640;
+                let lane = (c % 640) / 20;
+                let vi = (c % 640) % 20;
+                let po = r * nt * 32 * 4 + tile * 32 * 4 + lane * 4;
+                if po + 4 > ternary.len() {
+                    continue;
+                }
+                let mut pk = u32::from_le_bytes([
+                    ternary[po],
+                    ternary[po + 1],
+                    ternary[po + 2],
+                    ternary[po + 3],
+                ]);
+                let mut mul = 1u32;
+                for _ in 0..vi {
+                    mul *= 3;
+                }
+                pk = (pk / (mul * 3)) * (mul * 3) + d as u32 * mul + pk % mul;
+                ternary[po..po + 4].copy_from_slice(&pk.to_le_bytes());
+            }
+        }
 
         let tb = swizzled_buffer_size(rows, cols);
         let mut slc = vec![0u8; tb];
         repack_ternary_to_swizzled_u8(&ternary, rows, cols, &mut slc, cols);
 
         let mut lut = [[0i8; 4]; 81];
-        for s in 0u8..81 { let mut x = s;
-            for j in 0..4 { lut[s as usize][j] = match x % 3 { 1 => 1, 2 => -1, _ => 0 }; x /= 3; }
+        for s in 0u8..81 {
+            let mut x = s;
+            for j in 0..4 {
+                lut[s as usize][j] = match x % 3 {
+                    1 => 1,
+                    2 => -1,
+                    _ => 0,
+                };
+                x /= 3;
+            }
         }
 
-        for r in 0..rows { for c in 0..cols {
-            let (b, sh) = swizzled_byte_offset(r, c, cols);
-            let decoded = lut[slc[b] as usize][sh];
-            let expected = match expected_digits[r * cols + c] { 1 => 1, 2 => -1, _ => 0 };
-            assert_eq!(decoded, expected, "Mismatch at ({r},{c})");
-        }}
+        for r in 0..rows {
+            for c in 0..cols {
+                let (b, sh) = swizzled_byte_offset(r, c, cols);
+                let decoded = lut[slc[b] as usize][sh];
+                let expected = match expected_digits[r * cols + c] {
+                    1 => 1,
+                    2 => -1,
+                    _ => 0,
+                };
+                assert_eq!(decoded, expected, "Mismatch at ({r},{c})");
+            }
+        }
     }
 
     #[test]
@@ -607,7 +743,7 @@ mod tests {
         for i in 0..640 * 240 {
             let v = ((i as f32 * 1.618) % 6.0) - 3.0;
             let bits = (v.to_bits() >> 16) as u16;
-            src[i*2..i*2+2].copy_from_slice(&bits.to_le_bytes());
+            src[i * 2..i * 2 + 2].copy_from_slice(&bits.to_le_bytes());
         }
         let swz = generate_ane_swizzled_weights(&src, 240, 640);
         assert!(!swz.is_empty());
@@ -620,7 +756,9 @@ mod tests {
         let cols = 640;
         let nt = (cols + 639) / 640;
         let mut src = vec![0.0f32; rows * cols];
-        for i in 0..rows * cols { src[i] = ((i as f32 * 1.618) % 6.0) - 3.0; }
+        for i in 0..rows * cols {
+            src[i] = ((i as f32 * 1.618) % 6.0) - 3.0;
+        }
         let mut ternary = vec![0u8; rows * nt * 32 * 4];
         let mut scales = Vec::new();
         let nb = (rows * cols + 255) / 256;
@@ -628,33 +766,66 @@ mod tests {
             let st = bi * 256;
             let n = (rows * cols - st).min(256);
             let mut blk = [0.0f32; 256];
-            for j in 0..n { blk[j] = src[st + j]; }
+            for j in 0..n {
+                blk[j] = src[st + j];
+            }
             let (sc, nib) = ternary_quantize_block(&blk);
             scales.push(sc);
             for j in 0..n {
-                let d = match (nib[j / 4] >> ((j % 4) * 2)) & 0x03 { 0b01 => 1, 0b10 => 2, _ => 0 };
+                let d = match (nib[j / 4] >> ((j % 4) * 2)) & 0x03 {
+                    0b01 => 1,
+                    0b10 => 2,
+                    _ => 0,
+                };
                 let vi = st + j;
-                let po = (vi / cols) * nt * 32 * 4 + ((vi % cols) / 640) * 32 * 4 + (((vi % cols) % 640) / 20) * 4;
-                if po + 4 > ternary.len() { continue; }
-                let mut pk = u32::from_le_bytes([ternary[po], ternary[po+1], ternary[po+2], ternary[po+3]]);
+                let po = (vi / cols) * nt * 32 * 4
+                    + ((vi % cols) / 640) * 32 * 4
+                    + (((vi % cols) % 640) / 20) * 4;
+                if po + 4 > ternary.len() {
+                    continue;
+                }
+                let mut pk = u32::from_le_bytes([
+                    ternary[po],
+                    ternary[po + 1],
+                    ternary[po + 2],
+                    ternary[po + 3],
+                ]);
                 let sub = (vi % cols) % 640 % 20;
                 let mut mul = 1u32;
-                for _ in 0..sub { mul *= 3; }
+                for _ in 0..sub {
+                    mul *= 3;
+                }
                 pk = (pk / (mul * 3)) * (mul * 3) + d as u32 * mul + pk % mul;
-                ternary[po..po+4].copy_from_slice(&pk.to_le_bytes());
+                ternary[po..po + 4].copy_from_slice(&pk.to_le_bytes());
             }
         }
         let tb = swizzled_buffer_size(rows, cols);
         let mut slc = vec![0u8; tb];
         repack_ternary_to_swizzled_u8(&ternary, rows, cols, &mut slc, cols);
         let mut lut = [[0i8; 4]; 81];
-        for s in 0u8..81 { let mut x = s;
-            for j in 0..4 { lut[s as usize][j] = match x % 3 { 1 => 1, 2 => -1, _ => 0 }; x /= 3; }
+        for s in 0u8..81 {
+            let mut x = s;
+            for j in 0..4 {
+                lut[s as usize][j] = match x % 3 {
+                    1 => 1,
+                    2 => -1,
+                    _ => 0,
+                };
+                x /= 3;
+            }
         }
         // Build LUT and decode
         let mut lut = [[0i8; 4]; 81];
-        for s in 0u8..81 { let mut x = s;
-            for j in 0..4 { lut[s as usize][j] = match x % 3 { 1 => 1, 2 => -1, _ => 0 }; x /= 3; }
+        for s in 0u8..81 {
+            let mut x = s;
+            for j in 0..4 {
+                lut[s as usize][j] = match x % 3 {
+                    1 => 1,
+                    2 => -1,
+                    _ => 0,
+                };
+                x /= 3;
+            }
         }
         // Build expected digits directly from the quantizer source
         let mut expected_i8 = vec![0i8; rows * cols];
@@ -662,77 +833,120 @@ mod tests {
             let bi = vi / 256;
             let st = bi * 256;
             let mut blk = [0.0f32; 256];
-            for j in 0..(rows * cols - st).min(256) { blk[j] = src[st + j]; }
+            for j in 0..(rows * cols - st).min(256) {
+                blk[j] = src[st + j];
+            }
             let (sc, nib) = ternary_quantize_block(&blk);
             let _sc_f32 = fp16_to_f32(sc);
             let off = vi - st;
             let nibble = (nib[off / 4] >> ((off % 4) * 2)) & 0x03;
-            expected_i8[vi] = match nibble { 0b01 => 1, 0b10 => -1, _ => 0 };
+            expected_i8[vi] = match nibble {
+                0b01 => 1,
+                0b10 => -1,
+                _ => 0,
+            };
         }
         // Verify LUT-decoded values match expected
         let mut err = 0u32;
-        for r in 0..rows { for c in 0..cols {
-            let (b, sh) = swizzled_byte_offset(r, c, cols);
-            let got = lut[slc[b] as usize][sh];
-            let exp = expected_i8[r * cols + c];
-            if got != exp { err += 1; if err <= 3 { eprintln!("({r},{c}): got {got} exp {exp}"); } }
-        }}
-        assert_eq!(err, 0, "{err} mismatches — pure ternary digit mismatch, not FP16 precision");
+        for r in 0..rows {
+            for c in 0..cols {
+                let (b, sh) = swizzled_byte_offset(r, c, cols);
+                let got = lut[slc[b] as usize][sh];
+                let exp = expected_i8[r * cols + c];
+                if got != exp {
+                    err += 1;
+                    if err <= 3 {
+                        eprintln!("({r},{c}): got {got} exp {exp}");
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            err, 0,
+            "{err} mismatches — pure ternary digit mismatch, not FP16 precision"
+        );
         eprintln!("[pump smoke] {rows}x{cols}: {} values match", rows * cols);
     }
 
     #[test]
     fn test_kv_requantizer_roundtrip() {
-        let seq_len = 64; let kv_dim = 256;
+        let seq_len = 64;
+        let kv_dim = 256;
         let mut kv = vec![0u8; seq_len * kv_dim * 2];
         for i in 0..seq_len * kv_dim {
             let v = ((i as f32 * 1.618) % 2.0) - 1.0;
             let bits = f32_to_fp16_bits(v);
-            kv[i*2..i*2+2].copy_from_slice(&bits.to_le_bytes());
+            kv[i * 2..i * 2 + 2].copy_from_slice(&bits.to_le_bytes());
         }
         let mut swz = vec![0u8; swizzled_buffer_size(seq_len, kv_dim)];
         requantize_kv_to_swizzled_u8(&kv, seq_len, kv_dim, &mut swz);
         let mut lut = [[0i8; 4]; 81];
-        for s in 0u8..81 { let mut x = s;
-            for j in 0..4 { lut[s as usize][j] = match x % 3 { 1 => 1, 2 => -1, _ => 0 }; x /= 3; }
+        for s in 0u8..81 {
+            let mut x = s;
+            for j in 0..4 {
+                lut[s as usize][j] = match x % 3 {
+                    1 => 1,
+                    2 => -1,
+                    _ => 0,
+                };
+                x /= 3;
+            }
         }
         for i in 0..(seq_len * kv_dim).min(500) {
             let (b, sh) = swizzled_byte_offset(i / kv_dim, i % kv_dim, kv_dim);
             let got = lut[swz[b] as usize][sh];
-            let bits = u16::from_le_bytes([kv[i*2], kv[i*2+1]]);
+            let bits = u16::from_le_bytes([kv[i * 2], kv[i * 2 + 1]]);
             let v = fp16_to_f32(bits.to_le_bytes());
             let bi = i / 256;
             let st = bi * 256;
             let mut max_v = 0.0f32;
-            for j in st..(st+256).min(seq_len * kv_dim) {
-                let bj = u16::from_le_bytes([kv[j*2], kv[j*2+1]]);
+            for j in st..(st + 256).min(seq_len * kv_dim) {
+                let bj = u16::from_le_bytes([kv[j * 2], kv[j * 2 + 1]]);
                 max_v = max_v.max(fp16_to_f32(bj.to_le_bytes()).abs());
             }
             let mag = if max_v > 1e-6 { max_v } else { 1.0 };
-            let snapped = if v.abs() > mag * 0.5 { if v > 0.0 { mag } else { -mag } } else { 0.0 };
+            let snapped = if v.abs() > mag * 0.5 {
+                if v > 0.0 {
+                    mag
+                } else {
+                    -mag
+                }
+            } else {
+                0.0
+            };
             let exp = (snapped / mag).round() as i8;
-            assert!((got - exp).abs() <= 1, "Mismatch at {i}: got {got} exp {exp} v={v}");
+            assert!(
+                (got - exp).abs() <= 1,
+                "Mismatch at {i}: got {got} exp {exp} v={v}"
+            );
         }
     }
-
 
     #[test]
     fn test_embed_ternary_roundtrip() {
         // Embed table: [vocab_size, hidden_dim] = [32000, 3840] typical
-        let vocab = 512;  // small for test speed
+        let vocab = 512; // small for test speed
         let hd = 128;
         let mut embed = vec![0u8; (vocab * hd) as usize * 2];
         for i in 0..(vocab * hd) as usize {
             let v = ((i as f32 * 1.618) % 2.0) - 1.0;
             let bits = f32_to_fp16_bits(v);
-            embed[i*2..i*2+2].copy_from_slice(&bits.to_le_bytes());
+            embed[i * 2..i * 2 + 2].copy_from_slice(&bits.to_le_bytes());
         }
         let swz = generate_ane_swizzled_weights(&embed, vocab, hd);
         assert_eq!(swz.len(), swizzled_buffer_size(vocab as usize, hd as usize));
         // Decode one row via LUT and verify it matches the original ternary snap
         let mut lut = [[0i8; 4]; 81];
-        for s in 0u8..81 { let mut x = s;
-            for j in 0..4 { lut[s as usize][j] = match x % 3 { 1 => 1, 2 => -1, _ => 0 }; x /= 3; }
+        for s in 0u8..81 {
+            let mut x = s;
+            for j in 0..4 {
+                lut[s as usize][j] = match x % 3 {
+                    1 => 1,
+                    2 => -1,
+                    _ => 0,
+                };
+                x /= 3;
+            }
         }
         // Pick token 42, decode its embedding row
         let row = 42;
@@ -741,17 +955,31 @@ mod tests {
             let (b, sh) = swizzled_byte_offset(row, col, hd as usize);
             let decoded = lut[swz[b] as usize][sh];
             let i = row * hd as usize + col;
-            let bits = u16::from_le_bytes([embed[i*2], embed[i*2+1]]);
+            let bits = u16::from_le_bytes([embed[i * 2], embed[i * 2 + 1]]);
             let v = fp16_to_f32(bits.to_le_bytes());
             let bi = i / 256;
             let st = bi * 256;
             let end = (st + 256).min((vocab * hd) as usize);
             let mut max_v = 0.0f32;
-            for j in st..end { let bj = u16::from_le_bytes([embed[j*2], embed[j*2+1]]); max_v = max_v.max(fp16_to_f32(bj.to_le_bytes()).abs()); }
+            for j in st..end {
+                let bj = u16::from_le_bytes([embed[j * 2], embed[j * 2 + 1]]);
+                max_v = max_v.max(fp16_to_f32(bj.to_le_bytes()).abs());
+            }
             let mag = if max_v > 1e-6 { max_v } else { 1.0 };
-            let snapped = if v.abs() > mag * 0.5 { if v > 0.0 { mag } else { -mag } } else { 0.0 };
+            let snapped = if v.abs() > mag * 0.5 {
+                if v > 0.0 {
+                    mag
+                } else {
+                    -mag
+                }
+            } else {
+                0.0
+            };
             let exp = (snapped / mag).round() as i8;
-            assert!((decoded - exp).abs() <= 1, "Embed mismatch at [{row},{col}]: got {decoded} exp {exp} v={v}");
+            assert!(
+                (decoded - exp).abs() <= 1,
+                "Embed mismatch at [{row},{col}]: got {decoded} exp {exp} v={v}"
+            );
         }
     }
 
@@ -759,10 +987,10 @@ mod tests {
     fn layer_directory_round_trip() {
         let entry = LayerDirectoryEntry {
             weights_offset: 0x1000,
-            weights_length: 0x28A_0000,    // ~40.7 MB per layer (48 layers of 12B)
+            weights_length: 0x28A_0000, // ~40.7 MB per layer (48 layers of 12B)
             scales_offset: 0x200,
-            scales_length: 318_048,         // ~318K scales per layer
-            layer_kind: 0,                  // decoder block
+            scales_length: 318_048, // ~318K scales per layer
+            layer_kind: 0,          // decoder block
             flags: 0,
         };
 
@@ -795,5 +1023,4 @@ mod tests {
         assert_eq!(e.layer_kind, 0);
         assert_eq!(e.flags, 0);
     }
-
 }
