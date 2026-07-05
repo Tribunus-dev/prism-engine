@@ -1886,6 +1886,98 @@ mod stage0_tap_tests {
         });
     }
 
+    /// Fused-pair gate: fused_full_pair_real(k, k+1) must equal two chained
+    /// decode_layer_full_real dispatches — bitwise-expected, because BOTH
+    /// paths hold the intermediate boundary in half precision (threadgroup
+    /// h_buf vs device round-trip both quantize to f16).
+    #[test]
+    fn transport_b_pair_matches_two_singles() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            use crate::compute_image::megakernel::kernels::compile_layer_library;
+            use metal::MTLResourceOptions;
+
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let input = taps.post_embed();
+            let hidden = taps.hidden_dim();
+
+            // Reference: layers 0 then 1 via the group-1 audit chain.
+            let device = metal::Device::system_default().expect("metal device");
+            let singles = orch
+                .decode_audit_group1(&device, &input, 0, 4)
+                .expect("group-1 chain");
+            let expect = &singles[1]; // boundary after layer 1
+
+            // Fused pair (0, 1) in one dispatch.
+            let lib = compile_layer_library(&device).expect("compile");
+            let f = lib.get_function("fused_full_pair_real", None).expect("entry");
+            let pso = device
+                .new_compute_pipeline_state_with_function(&f)
+                .expect("pso");
+            let opts = MTLResourceOptions::StorageModeShared;
+            let in_buf = device.new_buffer((hidden * 2) as u64, opts);
+            unsafe {
+                let dst = in_buf.contents() as *mut u16;
+                for (i, &v) in input.iter().enumerate() {
+                    *dst.add(i) = f16::from_f32(v).to_bits();
+                }
+            }
+            let out_buf = device.new_buffer((hidden * 2) as u64, opts);
+            let stride = (NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
+            let kv = |_| device.new_buffer(4 * stride * 2, opts);
+            let (ka, va, kb, vb) = (kv(0), kv(1), kv(2), kv(3));
+            let ffn = device.new_buffer(2 * 15360 * 2, opts);
+            let norms = self_norms(&orch);
+            let queue = device.new_command_queue();
+            let cb = queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&pso);
+            enc.set_buffer(0, Some(&in_buf), 0);
+            enc.set_buffer(1, Some(&out_buf), 0);
+            enc.set_buffer(2, Some(&ka), 0);
+            enc.set_buffer(3, Some(&va), 0);
+            enc.set_buffer(4, Some(&orch.deployment.weights_buffer), 0);
+            enc.set_buffer(5, Some(norms), 0);
+            enc.set_buffer(6, Some(&orch.kernel_buffers.head_gates), 0);
+            enc.set_buffer(7, Some(&ffn), 0);
+            let (la, pos, lb) = (0u32, 0u32, 1u32);
+            enc.set_bytes(8, 4, &la as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(9, 4, &pos as *const u32 as *const std::ffi::c_void);
+            enc.set_buffer(10, Some(&kb), 0);
+            enc.set_buffer(11, Some(&vb), 0);
+            enc.set_bytes(12, 4, &lb as *const u32 as *const std::ffi::c_void);
+            enc.dispatch_thread_groups(
+                metal::MTLSize { width: 1, height: 1, depth: 1 },
+                metal::MTLSize { width: 256, height: 1, depth: 1 },
+            );
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
+
+            let got: Vec<f32> = unsafe {
+                std::slice::from_raw_parts(out_buf.contents() as *const u16, hidden)
+            }
+            .iter()
+            .map(|&b| f16::from_bits(b).to_f32())
+            .collect();
+            let max_abs = got
+                .iter()
+                .zip(expect)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(
+                max_abs == 0.0,
+                "fused pair vs two singles: expected bitwise-identical (both quantize the \
+                 intermediate to f16), max |Δ| = {max_abs}"
+            );
+            eprintln!("[transport-b] pair == two singles (bitwise)  PASS");
+        });
+    }
+
     fn self_norms(orch: &Orchestrator) -> &metal::Buffer {
         orch.deployment
             .norms_buffer
