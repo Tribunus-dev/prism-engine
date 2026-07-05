@@ -10,9 +10,21 @@
 //! or Hessian-diagonal estimates, threshold selection, per-page and per-channel
 //! scale solves, sidecar ranking, deterministic reductions, and receipt hashing.
 
+// Std-only — compiles and unit-tests everywhere (Linux CI included). Its
+// Metal-driving producer fns are cfg-stubbed internally.
+pub mod kd_gate;
+
+// Metal/Accelerate-coupled Level 1 pipeline — same reachability as when the
+// whole `level1` module was `prism-backend`-gated.
+#[cfg(feature = "prism-backend")]
 pub mod checkpoint;
+#[cfg(feature = "prism-backend")]
 pub mod gates;
+#[cfg(feature = "prism-backend")]
 pub mod reducer;
+#[cfg(feature = "prism-backend")]
 pub mod scheduler;
+#[cfg(feature = "prism-backend")]
 pub mod student;
+#[cfg(feature = "prism-backend")]
 pub mod teacher;
