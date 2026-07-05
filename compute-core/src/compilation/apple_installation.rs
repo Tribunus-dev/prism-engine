@@ -259,10 +259,26 @@ struct Nf4Tile640ArenaAbi {
     metadata_byte_length: u64,
 }
 
+/// Natural (element-size) alignment a slot's byte_offset must satisfy so both
+/// lanes can read it without a misaligned access. Note: the manifest's
+/// `required_alignment` (e.g. 16384) is the IOSurface *base* allocation
+/// alignment, not the per-view offset requirement — enforcing 16 KB per slot
+/// would wrongly reject valid tightly-packed arenas, so we enforce the
+/// dtype-natural offset alignment that actually governs correct reads.
+fn dtype_elem_align(dtype: &str) -> u64 {
+    match dtype.to_ascii_lowercase().as_str() {
+        "u8" | "uint8" | "i8" | "int8" => 1,
+        "f16" | "float16" | "half" | "bf16" | "bfloat16" | "u16" | "uint16" => 2,
+        "f32" | "float32" | "u32" | "uint32" | "i32" | "int32" => 4,
+        _ => 1,
+    }
+}
+
 fn derive_nf4_tile640_arena_abi(
     weight: &CimageSlotManifest,
     scale: &CimageSlotManifest,
     bias: &CimageSlotManifest,
+    arena_capacity: u64,
 ) -> Result<Nf4Tile640ArenaAbi, String> {
     let layout = Nf4Tile640Layout::canonical();
     if weight.logical_shape.len() != 2 || scale.logical_shape.len() != 2 || bias.logical_shape.len() != 2
@@ -330,6 +346,49 @@ fn derive_nf4_tile640_arena_abi(
             "NF4Tile640 bias slot {} length mismatch: expected {}, got {}",
             bias.slot_id, expected_metadata_byte_length, bias.byte_length
         ));
+    }
+
+    // ── Shared-arena residency checks — offsets, not just sizes ──────────
+    // Both lanes read the SAME bytes at these offsets, so prove each slot is
+    // naturally aligned for its dtype, lands inside the arena, and none of the
+    // three overlap — before either lane binds. This closes the gap where the
+    // old derivation validated lengths but let a mis-laid offset overlap or
+    // overflow and still bind "successfully".
+    let triplet = [("weight", weight), ("scale", scale), ("bias", bias)];
+    for (name, slot) in triplet {
+        let elem_align = dtype_elem_align(&slot.dtype);
+        if elem_align != 0 && slot.byte_offset % elem_align != 0 {
+            return Err(format!(
+                "NF4Tile640 {} slot {} byte_offset {} is not {}-byte aligned for dtype {}",
+                name, slot.slot_id, slot.byte_offset, elem_align, slot.dtype
+            ));
+        }
+        let end = slot.byte_offset.checked_add(slot.byte_length).ok_or_else(|| {
+            format!(
+                "NF4Tile640 {} slot {} byte_offset+byte_length overflows u64",
+                name, slot.slot_id
+            )
+        })?;
+        if end > arena_capacity {
+            return Err(format!(
+                "NF4Tile640 {} slot {} runs past arena end: {} + {} = {} > capacity {}",
+                name, slot.slot_id, slot.byte_offset, slot.byte_length, end, arena_capacity
+            ));
+        }
+    }
+    for i in 0..triplet.len() {
+        for j in (i + 1)..triplet.len() {
+            let (a_name, a) = triplet[i];
+            let (b_name, b) = triplet[j];
+            let a_end = a.byte_offset + a.byte_length;
+            let b_end = b.byte_offset + b.byte_length;
+            if a.byte_offset < b_end && b.byte_offset < a_end {
+                return Err(format!(
+                    "NF4Tile640 shared-arena overlap: {} slot {} [{}, {}) intersects {} slot {} [{}, {})",
+                    a_name, a.slot_id, a.byte_offset, a_end, b_name, b.slot_id, b.byte_offset, b_end
+                ));
+            }
+        }
     }
 
     Ok(Nf4Tile640ArenaAbi {
@@ -470,7 +529,12 @@ pub fn install_apple_tri_lane(
         if let Some((weights, scales, biases)) =
             nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids)
         {
-            let _abi = derive_nf4_tile640_arena_abi(weights, scales, biases)?;
+            let _abi = derive_nf4_tile640_arena_abi(
+                weights,
+                scales,
+                biases,
+                manifest.arena.allocation_bytes,
+            )?;
             executable.bind_nf4_tile640_triplet(
                 weights.slot_id,
                 weights.byte_offset,
@@ -514,7 +578,12 @@ pub fn install_apple_tri_lane(
         if let Some((weights, scales, biases)) =
             nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids)
         {
-            let abi = derive_nf4_tile640_arena_abi(weights, scales, biases)?;
+            let abi = derive_nf4_tile640_arena_abi(
+                weights,
+                scales,
+                biases,
+                manifest.arena.allocation_bytes,
+            )?;
             executable.bind_nf4_tile640_triplet(
                 weights.slot_id,
                 weights.byte_offset,
@@ -1001,7 +1070,13 @@ mod tests {
         let output_slot_ids = parse_slot_ids(&coreai_artifact.output_slots).expect("slot ids");
         let (weights, scales, biases) =
             nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids).expect("nf4 triplet");
-        let abi = derive_nf4_tile640_arena_abi(weights, scales, biases).expect("nf4 abi");
+        let abi = derive_nf4_tile640_arena_abi(
+            weights,
+            scales,
+            biases,
+            manifest.arena.allocation_bytes,
+        )
+        .expect("nf4 abi");
 
         let mut coreai = CoreAiIOSurfaceExecutable::new(
             &coreai_artifact.artifact_id,
@@ -1123,9 +1198,84 @@ mod tests {
             required_alignment: 16384,
         };
 
-        let abi = derive_nf4_tile640_arena_abi(&weight, &scale, &bias).expect("nf4 abi");
+        let arena_capacity = bias.byte_offset + bias.byte_length;
+        let abi = derive_nf4_tile640_arena_abi(&weight, &scale, &bias, arena_capacity)
+            .expect("nf4 abi");
         assert_eq!(abi.weight_byte_length, weight.byte_length);
         assert_eq!(abi.metadata_byte_length, scale.byte_length);
+    }
+
+    /// Build a valid NF4Tile640 triplet (rank-2, canonical widths, naturally
+    /// aligned, non-overlapping) plus a fitting arena capacity, for negative
+    /// tests to perturb one field at a time.
+    fn nf4_valid_triplet() -> (
+        CimageSlotManifest,
+        CimageSlotManifest,
+        CimageSlotManifest,
+        u64,
+    ) {
+        let layout = Nf4Tile640Layout::canonical();
+        let out_dim = 3u32;
+        let prb = layout.packed_row_bytes(1280);
+        let mrv = layout.metadata_row_values(1280);
+        let meta_bytes = u64::from(out_dim) * u64::from(mrv) * 4;
+        let mk = |slot_id, tensor_id: &str, off, len, dtype: &str, cols| CimageSlotManifest {
+            slot_id,
+            tensor_id: tensor_id.into(),
+            byte_offset: off,
+            byte_length: len,
+            dtype: dtype.into(),
+            logical_shape: vec![out_dim, cols],
+            physical_shape: vec![out_dim, cols],
+            strides_bytes: vec![u64::from(cols), 1],
+            layout: "row_major".into(),
+            producer: ExecutionLane::AccelerateCpu,
+            consumer: ExecutionLane::CoreAiAne,
+            reuse_class: "shared_readonly".into(),
+            required_alignment: 16384,
+        };
+        let wlen = u64::from(out_dim) * u64::from(prb);
+        let weight = mk(20, "packed_nf4_weights", 0, wlen, "u8", prb);
+        let scale = mk(21, "scales", wlen, meta_bytes, "f32", mrv);
+        let bias = mk(22, "biases", wlen + meta_bytes, meta_bytes, "f32", mrv);
+        let capacity = wlen + 2 * meta_bytes;
+        (weight, scale, bias, capacity)
+    }
+
+    #[test]
+    fn test_derive_nf4_rejects_inconsistent_and_unsafe_layouts() {
+        // sanity: the unperturbed triplet is accepted.
+        let (w, s, b, cap) = nf4_valid_triplet();
+        assert!(derive_nf4_tile640_arena_abi(&w, &s, &b, cap).is_ok());
+
+        // row-count mismatch
+        let (mut w2, s2, b2, cap2) = nf4_valid_triplet();
+        w2.logical_shape[0] += 1;
+        assert!(derive_nf4_tile640_arena_abi(&w2, &s2, &b2, cap2).is_err());
+
+        // weight byte_length mismatch
+        let (mut w3, s3, b3, cap3) = nf4_valid_triplet();
+        w3.byte_length += 320;
+        assert!(derive_nf4_tile640_arena_abi(&w3, &s3, &b3, cap3).is_err());
+
+        // metadata width mismatch (scale vs bias)
+        let (w4, mut s4, b4, cap4) = nf4_valid_triplet();
+        s4.logical_shape[1] += 1;
+        assert!(derive_nf4_tile640_arena_abi(&w4, &s4, &b4, cap4).is_err());
+
+        // misaligned FP32 metadata offset (not a multiple of 4)
+        let (w5, mut s5, b5, cap5) = nf4_valid_triplet();
+        s5.byte_offset += 2;
+        assert!(derive_nf4_tile640_arena_abi(&w5, &s5, &b5, cap5).is_err());
+
+        // out of arena bounds
+        let (w6, s6, b6, cap6) = nf4_valid_triplet();
+        assert!(derive_nf4_tile640_arena_abi(&w6, &s6, &b6, cap6 - 1).is_err());
+
+        // overlapping slots (scale starts inside the weight region)
+        let (w7, mut s7, b7, cap7) = nf4_valid_triplet();
+        s7.byte_offset = 4; // inside [0, weight_len)
+        assert!(derive_nf4_tile640_arena_abi(&w7, &s7, &b7, cap7).is_err());
     }
 
     // ── test_warmup_validates_slot_presence ─────────────────────────────

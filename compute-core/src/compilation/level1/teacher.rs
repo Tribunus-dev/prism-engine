@@ -275,3 +275,75 @@ impl Default for MetalTeacher {
         Self::new()
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Real Gemma 4 teacher forward (full graph via the Orchestrator megakernel)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `MetalTeacher` above is the Level-1 *numerical-parity proxy* (one synthetic
+// dense GEMV for reducer comparison). This is the REAL teacher: it runs the
+// full Gemma 4 forward over a compiled `.cimage` and returns logits, which the
+// distillation loop scores against the student (see compilation::distill_core,
+// compilation::bench_metrics).
+//
+// ARCHITECTURE: Gemma 4's forward — embed → 48 layers of
+// {RMSNorm, QKV, attention, O-proj, FFN gate/up/SiLU/down} → final norm →
+// logits, with the KV cache threaded across positions — is implemented as a
+// single fused **megakernel** inside [`Orchestrator`], NOT as a chain of per-op
+// dispatchers. The per-op dispatchers in `kernel_dispatch` cover projections
+// (incl. `Nf4Tile640ProjectionDispatcher`), fused RMSNorm+QKV and
+// O-proj+residual, plus numerical *probes* — but attention/SDPA, FFN, embedding,
+// and the logit projection are fused into the megakernel. Re-implementing them
+// op-by-op would duplicate (and diverge from) the proven megakernel, so the
+// teacher delegates to it. `decode_token_logits` (added on Orchestrator) is the
+// hook that surfaces the megakernel's per-step logits.
+#[cfg(feature = "prism-backend")]
+pub struct Gemma4Teacher {
+    orch: crate::compute_image::orchestrator::Orchestrator,
+}
+
+#[cfg(feature = "prism-backend")]
+impl Gemma4Teacher {
+    /// Load a teacher `.cimage` (batch 1, NF4/native — no int4 expansion).
+    pub fn load(cimage: impl AsRef<std::path::Path>) -> Result<Self, String> {
+        let orch = crate::compute_image::orchestrator::Orchestrator::from_cimage(
+            cimage.as_ref(),
+            1,
+            false,
+        )?;
+        Ok(Self { orch })
+    }
+
+    /// Full-graph forward: prefill `prompt[..n-1]` to build the KV context, then
+    /// decode the last token and return the next-position logit vector.
+    ///
+    /// NOTE: this advances the KV cache. Call [`load`] again (or reset) for an
+    /// independent context — successive calls continue the same sequence.
+    pub fn logits_after(&mut self, prompt: &[u32]) -> Result<Vec<f32>, String> {
+        if prompt.is_empty() {
+            return Err("Gemma4Teacher: empty prompt".into());
+        }
+        if prompt.len() > 1 {
+            self.orch.prefill_text(&prompt[..prompt.len() - 1])?;
+        }
+        let (_next, logits) = self.orch.decode_token_logits(prompt[prompt.len() - 1])?;
+        Ok(logits)
+    }
+
+    /// Teacher-forced pass over `tokens`: one logit vector per position, each
+    /// predicting the next token — the per-position distillation / perplexity
+    /// signal. Feeds the true tokens in order (advancing the KV cache).
+    pub fn teacher_forced(&mut self, tokens: &[u32]) -> Result<Vec<Vec<f32>>, String> {
+        let mut per_position = Vec::with_capacity(tokens.len());
+        for &t in tokens {
+            let (_next, logits) = self.orch.decode_token_logits(t)?;
+            per_position.push(logits);
+        }
+        Ok(per_position)
+    }
+
+    /// Borrow the underlying orchestrator (e.g. to reset slots between eval docs).
+    pub fn orchestrator_mut(&mut self) -> &mut crate::compute_image::orchestrator::Orchestrator {
+        &mut self.orch
+    }
+}

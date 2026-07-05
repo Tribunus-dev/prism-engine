@@ -23,6 +23,10 @@ fn main() {
             "palettized_gemm.metal",
             "fused_gate_up.metal",
             "ternary_tile640_gemv.metal",
+            // NF4 teacher forward GEMV — without this the kernel is never
+            // compiled into the metallib and KernelRegistry cannot find
+            // `fused_gemv_nf4_tile640_fp32`, so the teacher cimage can't execute.
+            "nf4_tile640_gemv.metal",
         ];
         for src in metal_sources {
             println!(

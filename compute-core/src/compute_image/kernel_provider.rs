@@ -162,10 +162,11 @@ pub fn compile_with_providers(
 /// Handles NF4 (NormalFloat4 codebook) — the MLX provider cannot.
 pub struct TribunusNativeProvider;
 
-/// NF4 codebook constant (must match nf4_contract.h).
+/// NF4 codebook constant — symmetric [-1,1] NF4 (must match compile/quantize.rs
+/// and nf4_contract.h). Previous asymmetric [-1,2] table wasted indices 13–15.
 const NF4_CODEBOOK: [f32; 16] = [
-    -1.0, -0.8480, -0.5698, -0.3940, -0.2419, -0.1057, 0.0, 0.1057, 0.2419, 0.3940, 0.5698, 0.8480,
-    1.0, 1.2588, 1.5862, 2.0,
+    -1.0, -0.6961928, -0.5250731, -0.3949175, -0.2844414, -0.1847734, -0.09105, 0.0, 0.0795803,
+    0.1609302, 0.2461123, 0.3379152, 0.4407099, 0.562617, 0.7229568, 1.0,
 ];
 
 fn generate_nf4_kernel_source(k: u32, n: u32, group_size: u32) -> String {

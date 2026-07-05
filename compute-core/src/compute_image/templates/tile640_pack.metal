@@ -169,11 +169,13 @@ kernel void q8_0_ternary_pack(
 //         scales_f32  [N × num_tiles × 5]     (f32)
 //         biases_f32  [N × num_tiles × 5]     (f32, currently zero)
 
+// Symmetric [-1,1] NF4 codebook — must match compile/quantize.rs::NF4_CODEBOOK.
+// (Previous asymmetric [-1,2] table left indices 13–15 unreachable under absmax.)
 constant float NF4_CODEBOOK[16] = {
-    -1.0f, -0.8480f, -0.5698f, -0.3940f,
-    -0.2419f, -0.1057f, 0.0f, 0.1057f,
-    0.2419f, 0.3940f, 0.5698f, 0.8480f,
-    1.0f, 1.2588f, 1.5862f, 2.0f
+    -1.0f, -0.6961928f, -0.5250731f, -0.3949175f,
+    -0.2844414f, -0.1847734f, -0.09105f, 0.0f,
+    0.0795803f, 0.1609302f, 0.2461123f, 0.3379152f,
+    0.4407099f, 0.562617f, 0.7229568f, 1.0f
 };
 
 inline float decode_word_to_float(ushort bits, bool bf16_input) {
