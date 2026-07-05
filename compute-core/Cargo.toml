@@ -69,6 +69,13 @@ ane = []
 metal-dispatch = ["dep:metal", "dep:objc", "dep:block"]
 server = ["dep:axum", "dep:tower-http"]
 
+# Opt-in vendor GPU probes. Each links a vendor runtime (`libamdhip64`,
+# `libze_loader`) that only exists on machines with that SDK installed, so
+# they MUST stay off by default — an unconditional `#[link]` in either probe
+# breaks the link step of every Linux build on machines without the SDK.
+rocm-probe = []
+level-zero-probe = []
+
 # Features referenced in cfg attributes throughout the codebase.
 # These are declared as inactive features so `unexpected_cfgs` lint is clean.
 candle-cpu = []
