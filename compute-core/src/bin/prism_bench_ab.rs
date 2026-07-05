@@ -57,6 +57,14 @@ struct Args {
     /// KD softmax temperature.
     #[arg(long, default_value = "2.0")]
     temperature: f32,
+    /// Max draft length for the speculative-decoding projection table.
+    #[arg(long, default_value = "8")]
+    spec_max_k: usize,
+    /// Assumed verify-pass cost in teacher decode steps for the projection
+    /// (1.0 = memory-bound ideal: weights read once for k+1 positions). The
+    /// verify path is PROJECTED — prism has no multi-token verify kernel yet.
+    #[arg(long, default_value = "1.0")]
+    spec_verify_factor: f64,
 }
 
 #[cfg(not(feature = "prism-backend"))]
@@ -93,7 +101,8 @@ fn load_tokens(path: &Option<PathBuf>, n: usize, vocab_cap: u32, seed: u64) -> V
 fn main() {
     use std::time::Instant;
     use tribunus_compute_core::compilation::bench_metrics::{
-        compare, effective_bpw, perplexity, throughput_stats, token_nll, ModelRunMetrics,
+        compare, effective_bpw, perplexity, spec_decode_projection, throughput_stats, token_nll,
+        ModelRunMetrics,
     };
     use tribunus_compute_core::compilation::distill_core::{kd_divergence_batch, top1_agreement};
     use tribunus_compute_core::compute_image::orchestrator::Orchestrator;
@@ -228,6 +237,68 @@ fn main() {
             } else {
                 "?".to_string()
             }
+        );
+
+        // ── Speculative-decoding projection ────────────────────────────
+        // Student drafts k tokens, teacher verifies in one pass → teacher-
+        // quality output faster than teacher-alone decode. Projected from
+        // the SAME per-position logits captured during the PPL pass and the
+        // measured decode medians of THIS run.
+        let cost_ratio =
+            t_metrics.decode_tok_s.median.max(1e-9) / s_metrics.decode_tok_s.median.max(1e-9);
+        let proj = spec_decode_projection(
+            &flat_t,
+            &flat_s,
+            vocab,
+            cost_ratio,
+            args.spec_verify_factor,
+            args.spec_max_k,
+        );
+
+        println!("\n── speculative-decoding projection (student drafts, teacher verifies) ──");
+        println!(
+            "  acceptance      : greedy {:.1}%   sampling(T=1) {:.1}%   over {} positions",
+            proj.alpha_greedy * 100.0,
+            proj.alpha_sampling * 100.0,
+            n
+        );
+        println!(
+            "  step cost ratio : student/teacher = {:.3} (measured decode medians)",
+            proj.cost_ratio
+        );
+        println!(
+            "  verify factor   : {:.2} × teacher step (PROJECTED — no multi-token verify path exists yet)",
+            proj.verify_factor
+        );
+        println!(
+            "   k   tok/cycle(greedy)  tok/cycle(sampling)  cycle cost  speedup(greedy)  speedup(sampling)"
+        );
+        let best_k = proj.best_greedy().map(|r| r.k).unwrap_or(0);
+        for row in &proj.rows {
+            println!(
+                "  {:>2}        {:>6.3}              {:>6.3}          {:>5.2}        {:>5.2}×           {:>5.2}×{}",
+                row.k,
+                row.tokens_greedy,
+                row.tokens_sampling,
+                row.cycle_cost,
+                row.speedup_greedy,
+                row.speedup_sampling,
+                if row.k == best_k { "   ← best" } else { "" }
+            );
+        }
+        if let Some(best) = proj.best_greedy() {
+            println!(
+                "\n→ projected: draft k={} → {:.2}× teacher-quality decode (greedy, lossless w.r.t. teacher).",
+                best.k, best.speedup_greedy
+            );
+        }
+        println!(
+            "  caveats: offline approximation (both models teacher-forced on the fixed eval\n  \
+             stream, not a self-drafted trajectory); verify pass modeled at {:.2}× a teacher\n  \
+             step — the megakernel has no batched verification today (KERNEL_AUDIT.md /\n  \
+             PER_OP_FORWARD_PLAN.md); tok/cycle is empirical-windowed, respecting bursty\n  \
+             agreement rather than assuming i.i.d. acceptance.",
+            proj.verify_factor
         );
     }
 }
