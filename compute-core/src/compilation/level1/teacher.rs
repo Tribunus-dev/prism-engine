@@ -341,16 +341,38 @@ impl Gemma4Teacher {
         Ok(logits)
     }
 
-    /// Teacher-forced pass over `tokens`: one logit vector per position, each
-    /// predicting the next token — the per-position distillation / perplexity
-    /// signal. Feeds the true tokens in order (advancing the KV cache).
-    pub fn teacher_forced(&mut self, tokens: &[u32]) -> Result<Vec<Vec<f32>>, String> {
-        let mut per_position = Vec::with_capacity(tokens.len());
-        for &t in tokens {
+    /// Teacher-forced pass over `tokens`: per-position next-token logits — the
+    /// distillation / perplexity signal. Feeds the true tokens in order
+    /// (advancing the KV cache).
+    ///
+    /// Returns ONE flat row-major `[positions × vocab]` buffer plus the vocab
+    /// width. Rows are appended as they decode, so the resident footprint is
+    /// the flat buffer plus a single transient row — never two copies of the
+    /// full logits. (The earlier `Vec<Vec<f32>>` shape held the nested rows
+    /// AND the flattened copy alive simultaneously during scoring — a ~2×
+    /// transient peak the low-memory validation lane cannot afford; see the
+    /// `kd_gate` module docs for the budget math.)
+    pub fn teacher_forced_flat(&mut self, tokens: &[u32]) -> Result<(Vec<f32>, usize), String> {
+        let mut flat: Vec<f32> = Vec::new();
+        let mut vocab = 0usize;
+        for (i, &t) in tokens.iter().enumerate() {
             let (_next, logits) = self.orch.decode_token_logits(t)?;
-            per_position.push(logits);
+            if i == 0 {
+                vocab = logits.len();
+                if vocab == 0 {
+                    return Err("teacher_forced_flat: empty logit row at position 0".into());
+                }
+                // One reservation for the whole pass — no growth reallocations.
+                flat.reserve_exact(vocab * tokens.len());
+            } else if logits.len() != vocab {
+                return Err(format!(
+                    "teacher_forced_flat: ragged logit row at position {i}: {} vs vocab {vocab}",
+                    logits.len()
+                ));
+            }
+            flat.extend_from_slice(&logits);
         }
-        Ok(per_position)
+        Ok((flat, vocab))
     }
 
     /// Borrow the underlying orchestrator (e.g. to reset slots between eval docs).
