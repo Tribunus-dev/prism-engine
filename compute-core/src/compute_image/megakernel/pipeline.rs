@@ -79,9 +79,16 @@ impl Megakernel {
         queue: &CommandQueue,
         deployment: &CimageDeployment,
         int4_mode: bool,
+        tap_mode: super::kernels::TapMode,
     ) -> Result<Self, String> {
         let num_slots = compute_num_slots(device);
-        let pso = if let Some(metallib_buf) = &deployment.metallib_buffer {
+        let taps = tap_mode.is_tapped();
+        // A precompiled metallib was built WITHOUT `-DPRISM_TAPS` — using it in
+        // a tapped-audit build would silently produce an untapped kernel (the
+        // pre-mode env convention had exactly this hole: TRIBUNUS_TAPS=1 plus a
+        // shipped metallib meant stale taps caught only by the progress-counter
+        // refusal). Audit builds therefore ALWAYS runtime-compile from source.
+        let pso = if let (Some(metallib_buf), false) = (&deployment.metallib_buffer, taps) {
             let ptr = metallib_buf.contents() as *const u8;
             let len = metallib_buf.length() as usize;
             let data = unsafe { std::slice::from_raw_parts(ptr, len) };
@@ -91,7 +98,12 @@ impl Megakernel {
                 compile_kernel_from_metallib(device, data)?
             }
         } else {
-            super::kernels::compile_kernel(device, int4_mode)?
+            if taps && deployment.metallib_buffer.is_some() {
+                eprintln!(
+                    "[megakernel] tapped-audit mode: ignoring precompiled metallib,                      runtime-compiling the tapped kernel from source"
+                );
+            }
+            super::kernels::compile_kernel(device, int4_mode, taps)?
         };
 
         // Compile KV interleave kernels if enabled
