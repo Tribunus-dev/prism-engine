@@ -809,6 +809,19 @@ fn quantize_nf4_matrix_from_raw(
     ))
 }
 
+/// Pack a row-major `[out_dim × in_dim]` weight matrix into the interleaved
+/// NF4Tile640 arena (packed nibbles + per-group FP32 scale/bias).
+///
+/// PARTIAL-TILE CONTRACT: `in_dim` need NOT be a multiple of 640. The tile count
+/// is `ceil(in_dim / 640)`, and columns in the range `[in_dim, tile_count*640)`
+/// are **zero-padded** (see the `col < in_dim` guard below): a padded slot holds
+/// 0.0, which NF4 quantizes to code 7 (= 0.0), so it dequantizes back to exactly
+/// 0.0 and contributes nothing to the GEMV. The matching kernel
+/// (`fused_gemv_nf4_tile640_fp32`) additionally guards its activation read with
+/// `if col >= in_dim continue`, because the input vector is only `in_dim` long —
+/// the zero weight would otherwise still trigger an out-of-bounds `in_vector`
+/// load. Keep these two in lockstep: this packer and that kernel are the two
+/// halves of the same partial-tile contract (verified by `tools/nf4_forward_ref.rs`).
 fn quantize_nf4_tile640_matrix_from_raw(
     raw: &[u8],
     dtype: &str,
@@ -847,6 +860,9 @@ fn quantize_nf4_tile640_matrix_from_raw(
                 let group_col0 = tile_col0 + group * group_size;
                 for (i, slot) in group_vals.iter_mut().enumerate() {
                     let col = group_col0 + i;
+                    // Partial last tile: pad past the real width with 0.0 (→ NF4
+                    // code 7 → dequants to 0.0). The kernel guards the matching
+                    // in_vector read against in_dim. See the fn doc comment.
                     *slot = if col < in_dim_u {
                         decode_scalar_from_raw(raw, bf16, row_elem_offset + col)
                     } else {
