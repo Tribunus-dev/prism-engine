@@ -466,7 +466,13 @@ mod tests {
     }
 
     /// Benchmark all four variants at representative Gemma Q-projection shape.
+    ///
+    /// Ignored by default: this is a BENCHMARK (full 3840-dim projection ×
+    /// several variants × iterations) that takes many minutes in an
+    /// unoptimized test build and stalls the whole suite. Run explicitly:
+    /// `cargo test --release -- --ignored bench_q_projection_shape`.
     #[test]
+    #[ignore = "benchmark, minutes-long in debug builds — run with --ignored under --release"]
     fn bench_q_projection_shape() {
         let x = generate_test_input(K, 42);
         let (w, s, b) = generate_test_weights(K, N, GROUP_SIZE, 99);
