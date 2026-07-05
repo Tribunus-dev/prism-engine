@@ -679,6 +679,7 @@ impl MultiSpecDraftModel {
     /// token (the most likely token per its sampling strategy).  This is
     /// a simplified sparse representation: the full softmax distribution
     /// would provide richer signals for the SpecHub joint distribution.
+    #[cfg(feature = "mlx-backend")] // research surface: SpecHub joint verification
     pub fn get_draft_probs(&self, draft_tokens: &[Vec<u32>]) -> Result<mlx_rs::Array, String> {
         let num_drafts = draft_tokens.len();
         let seq_len = if num_drafts > 0 {
@@ -723,6 +724,7 @@ impl MultiSpecDraftModel {
     ///
     /// Returns a [`SpecHubVerification`] with the accepted token sequence
     /// and acceptance statistics.
+    #[cfg(feature = "mlx-backend")] // research surface: SpecHub joint verification
     pub fn verify_with_spechub(
         &self,
         draft_tokens: &[Vec<u32>],
@@ -1223,6 +1225,7 @@ fn reweigh_with_subset(
 ///    assigns >30% probability to it), accept the consensus token.
 /// 4. Otherwise, identify the compatible subset of drafts (Jaccard >= 0.3)
 ///    and re-weigh their predictions against the target distribution.
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub fn spechub_verify(
     draft_probs: &mlx_rs::Array,
     target_logits: &mlx_rs::Array,
