@@ -72,6 +72,42 @@ pub const PERSISTENT_GEMV_SRC: &str = include_str!("shaders/persistent_gemv.meta
 // ====================================================================
 //  Compilation
 // ====================================================================
+/// Runtime-compile `decode_per_layer.metal` (Transport B fused layer kernels)
+/// and return the library. Same xcrun path as the megakernel. Used by the
+/// per-layer parity test and, once migrated, by `decode_fused`.
+pub(crate) fn compile_layer_library(device: &Device) -> Result<metal::Library, String> {
+    const SRC: &str = include_str!("shaders/decode_per_layer.metal");
+    let tmp = std::env::temp_dir().join("tribunus-decode-per-layer");
+    let _ = std::fs::create_dir_all(&tmp);
+    let src_path = tmp.join("decode_per_layer.metal");
+    let air_path = tmp.join("decode_per_layer.air");
+    let lib_path = tmp.join("decode_per_layer.metallib");
+    std::fs::write(&src_path, SRC).map_err(|e| format!("write layer source: {e}"))?;
+    let ok = std::process::Command::new("xcrun")
+        .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
+        .arg(src_path.to_str().unwrap())
+        .arg("-o")
+        .arg(air_path.to_str().unwrap())
+        .status()
+        .map_err(|e| format!("xcrun metal: {e}"))?;
+    if !ok.success() {
+        return Err("decode_per_layer compilation failed".into());
+    }
+    let ok = std::process::Command::new("xcrun")
+        .args(["-sdk", "macosx", "metallib", "-o"])
+        .arg(lib_path.to_str().unwrap())
+        .arg(air_path.to_str().unwrap())
+        .status()
+        .map_err(|e| format!("xcrun metallib: {e}"))?;
+    if !ok.success() {
+        return Err("decode_per_layer linking failed".into());
+    }
+    let data = std::fs::read(&lib_path).map_err(|e| format!("read metallib: {e}"))?;
+    device
+        .new_library_with_data(&data)
+        .map_err(|e| format!("load layer library: {e}"))
+}
+
 /// Whether Stage 0 activation taps are requested for this process
 /// (`TRIBUNUS_TAPS=1`). Read at kernel-compile time: the persistent kernel is
 /// compiled and dispatched once per Orchestrator, so taps are a
