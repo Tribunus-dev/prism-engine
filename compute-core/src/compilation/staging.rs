@@ -199,11 +199,37 @@ impl<T: Send> StagingRing<T> {
         None
     }
 
+    /// Whether `from → to` is a legal lifecycle edge. The slot lifecycle is
+    /// a state machine, not a free-for-all: skipping states (e.g. Empty →
+    /// AneSubmitted with no data written) would hand a lane an unfilled slot.
+    fn legal_edge(from: SlotState, to: SlotState) -> bool {
+        use SlotState::*;
+        matches!(
+            (from, to),
+            (Empty, CpuFilled)
+                | (CpuFilled, AneSubmitted)
+                | (CpuFilled, GpuSubmitted)
+                | (AneSubmitted, AneComplete)
+                | (GpuSubmitted, GpuComplete)
+                | (AneComplete, CpuValidated)
+                | (GpuComplete, CpuValidated)
+                | (GpuComplete, Reclaimable)
+                | (CpuValidated, Reclaimable)
+                | (Reclaimable, Empty)
+        )
+    }
+
     /// Atomically transition a slot from one state to another.
     ///
-    /// Returns `Ok(())` on success, or `Err` with the actual current state
-    /// on mismatch.
+    /// Rejects illegal lifecycle edges (see [`Self::legal_edge`]) before
+    /// touching the slot. Returns `Ok(())` on success, or `Err` with the
+    /// rejection reason / actual current state on mismatch.
     pub fn transition(&self, idx: usize, from: SlotState, to: SlotState) -> Result<(), String> {
+        if !Self::legal_edge(from, to) {
+            return Err(format!(
+                "slot {idx}: {from:?} → {to:?} is not a legal lifecycle edge"
+            ));
+        }
         let actual = self.slot_states[idx].compare_exchange(
             from as u8,
             to as u8,
@@ -394,6 +420,30 @@ mod tests {
             }
         });
 
+        // Lane thread: advances CpuFilled slots through the GPU lifecycle so
+        // they become consumable. Without it this test LIVELOCKED: the
+        // producer fills all 4 slots to CpuFilled and spins on "ring full",
+        // while the consumer spins forever on try_pop (which only consumes
+        // GpuComplete/CpuValidated).
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ring_lane = Arc::clone(&ring);
+        let done_lane = Arc::clone(&done);
+        let lane = thread::spawn(move || {
+            while !done_lane.load(Ordering::Acquire) {
+                for i in 0..4 {
+                    if ring_lane
+                        .transition(i, SlotState::CpuFilled, SlotState::GpuSubmitted)
+                        .is_ok()
+                    {
+                        ring_lane
+                            .transition(i, SlotState::GpuSubmitted, SlotState::GpuComplete)
+                            .unwrap();
+                    }
+                }
+                thread::yield_now();
+            }
+        });
+
         let ring_cons = Arc::clone(&ring);
         let consumer = thread::spawn(move || {
             let mut seen = vec![false; n_items];
@@ -413,6 +463,8 @@ mod tests {
 
         producer.join().expect("producer panicked");
         consumer.join().expect("consumer panicked");
+        done.store(true, Ordering::Release);
+        lane.join().expect("lane panicked");
     }
 
     // -----------------------------------------------------------------------
@@ -469,6 +521,14 @@ mod tests {
         for cycle in 0..2 {
             for v in 0..4 {
                 ring.try_push(v + cycle * 100).unwrap();
+            }
+            // try_pop only consumes GpuComplete/CpuValidated slots — run the
+            // lane lifecycle first (CpuFilled slots are NOT consumable).
+            for i in 0..4 {
+                ring.transition(i, SlotState::CpuFilled, SlotState::GpuSubmitted)
+                    .unwrap();
+                ring.transition(i, SlotState::GpuSubmitted, SlotState::GpuComplete)
+                    .unwrap();
             }
             for v in 0..4 {
                 let (idx, val) = ring.try_pop().unwrap();
