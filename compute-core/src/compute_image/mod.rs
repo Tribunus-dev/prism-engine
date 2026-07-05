@@ -62,6 +62,7 @@ pub mod program;
 pub mod quant;
 pub mod receipts;
 pub mod residency;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod segment;
 pub mod source;
 pub mod speculative_routing;
@@ -71,6 +72,7 @@ pub mod tensix;
 pub mod tree_attention;
 pub mod variants;
 pub mod verification;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod verify;
 pub mod vm_manager;
 
@@ -98,13 +100,15 @@ pub use compile::{
 
 pub use compile::hardware::run_hardware_assessment;
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX image runtime
 pub use segment::{ImageRuntime, LayerLease};
 
+#[cfg(feature = "mlx-backend")] // research surface: image-dir verifier
 pub use verify::{
     publish_image, run_diagnostics, verify, DiagnosticIssue, DiagnosticReport, GlobalDiagnostic,
     LayerDiagnostic,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "mlx-backend"))] // tests drive the MLX compile pipeline
 mod tests {
     use super::*;
     use crate::compute_image::manifest::SourceIdentity;
