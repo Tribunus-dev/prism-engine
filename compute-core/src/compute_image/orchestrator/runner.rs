@@ -783,6 +783,38 @@ impl Orchestrator {
         Ok((sample_argmax_f32(&logits), logits))
     }
 
+    /// Decode one token on slot 0 and return `(argmax, logits, taps)` — the
+    /// Stage 0 audit hook (kernels/STAGE0_TAPS_SPEC.md, Transport A).
+    ///
+    /// Requires the megakernel to have been compiled with taps — set
+    /// `TRIBUNUS_TAPS=1` BEFORE constructing this Orchestrator (the persistent
+    /// kernel compiles taps in at construction time). Errors rather than
+    /// returning stale/zeroed taps otherwise, and verifies the in-kernel
+    /// progress counter reached the final slot before trusting the buffer.
+    pub fn decode_token_logits_with_taps(
+        &mut self,
+        token_id: u32,
+    ) -> Result<(u32, Vec<f32>, LayerTaps), String> {
+        if !crate::compute_image::megakernel::kernels::taps_requested() {
+            return Err(
+                "taps not enabled: set TRIBUNUS_TAPS=1 before constructing the Orchestrator"
+                    .into(),
+            );
+        }
+        let logits = self.decode_slot_logits(0, token_id)?;
+        let progress = self.megakernel.read_tap_progress(&self.kernel_buffers);
+        let expected = 2 * LAYERS + 1;
+        if progress != expected {
+            return Err(format!(
+                "tap progress {progress} != expected final slot {expected} — \
+                 kernel not compiled with -DPRISM_TAPS?"
+            ));
+        }
+        let raw = self.megakernel.read_layer_taps(&self.kernel_buffers);
+        let taps = LayerTaps::from_raw(raw)?;
+        Ok((sample_argmax_f32(&logits), logits, taps))
+    }
+
     /// Decode one or more tokens using MTP speculative verification.
     ///
     /// Uses slot 0 for the primary decode, then submits draft candidates
@@ -1459,4 +1491,170 @@ impl Orchestrator {
     /// Signal that ANE prefill is active (runs concurrently with GPU decode).
     #[deprecated(since = "0.2.0", note = "use prefill_text(&mut self, prompt) instead")]
     pub fn prefill_from_ane(&mut self) {}
+}
+
+/// Stage 0 activation taps for one decoded token (STAGE0_TAPS_SPEC.md slot
+/// map). Holds the raw f16 bits; accessors convert to f32. The hidden width
+/// is derived from the buffer length, so the view cannot desync from the
+/// kernel's HIDDEN_DIM.
+pub struct LayerTaps {
+    raw: Vec<u16>,
+    hidden: usize,
+}
+
+impl LayerTaps {
+    fn from_raw(raw: Vec<u16>) -> Result<Self, String> {
+        let slots = 2 * LAYERS as usize + 2;
+        if raw.is_empty() || raw.len() % slots != 0 {
+            return Err(format!(
+                "tap buffer len {} is not a multiple of {slots} slots",
+                raw.len()
+            ));
+        }
+        let hidden = raw.len() / slots;
+        Ok(LayerTaps { raw, hidden })
+    }
+
+    fn slot(&self, s: usize) -> Vec<f32> {
+        self.raw[s * self.hidden..(s + 1) * self.hidden]
+            .iter()
+            .map(|&b| f16::from_bits(b).to_f32())
+            .collect()
+    }
+
+    pub fn hidden_dim(&self) -> usize {
+        self.hidden
+    }
+    /// Slot 0: embedding output, before layer 0.
+    pub fn post_embed(&self) -> Vec<f32> {
+        self.slot(0)
+    }
+    /// Slot 2k+1: layer `k` after the attention residual.
+    pub fn post_attention(&self, layer: usize) -> Vec<f32> {
+        self.slot(2 * layer + 1)
+    }
+    /// Slot 2k+2: layer `k` after the FFN residual — the layer boundary.
+    pub fn post_layer(&self, layer: usize) -> Vec<f32> {
+        self.slot(2 * layer + 2)
+    }
+    /// Final pre-logits hidden (post final norm).
+    pub fn final_hidden(&self) -> Vec<f32> {
+        self.slot(2 * LAYERS as usize + 1)
+    }
+}
+
+// ── Stage 0 tap tests (Mac; real cimage; env-gated) ─────────────────────────
+// Taps are a process-env, kernel-compile-time property, so these tests mutate
+// TRIBUNUS_TAPS around Orchestrator construction and MUST run serially:
+//   TRIBUNUS_TEST_CIMAGE=/path/to/model.cimage \
+//   cargo test --features prism-backend stage0_taps -- --test-threads=1
+#[cfg(all(test, feature = "prism-backend"))]
+mod stage0_tap_tests {
+    use super::*;
+
+    fn cimage() -> Option<String> {
+        std::env::var("TRIBUNUS_TEST_CIMAGE").ok()
+    }
+
+    fn with_taps_env<T>(on: bool, f: impl FnOnce() -> T) -> T {
+        if on {
+            std::env::set_var("TRIBUNUS_TAPS", "1");
+        } else {
+            std::env::remove_var("TRIBUNUS_TAPS");
+        }
+        let out = f();
+        std::env::remove_var("TRIBUNUS_TAPS");
+        out
+    }
+
+    fn finite_nonzero(v: &[f32]) -> bool {
+        v.iter().all(|x| x.is_finite()) && v.iter().any(|x| *x != 0.0)
+    }
+
+    /// (a) Self-consistency: every tap slot is populated and finite; the
+    /// residual stream evolves across layers; the final norm visibly
+    /// transforms the last layer boundary.
+    #[test]
+    fn stage0_taps_self_consistency() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let (_tok, logits, taps) =
+                orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            assert!(!logits.is_empty());
+            assert!(finite_nonzero(&taps.post_embed()), "embed tap empty");
+            for k in [0usize, 5, 24, LAYERS as usize - 1] {
+                assert!(finite_nonzero(&taps.post_attention(k)), "attn tap {k}");
+                assert!(finite_nonzero(&taps.post_layer(k)), "layer tap {k}");
+            }
+            assert!(finite_nonzero(&taps.final_hidden()));
+            // The stream must actually evolve (identity layers would be a bug).
+            assert_ne!(taps.post_embed(), taps.post_layer(0));
+            // The final norm transforms the last boundary state.
+            assert_ne!(taps.post_layer(LAYERS as usize - 1), taps.final_hidden());
+        });
+    }
+
+    /// (b) Determinism: two fresh tapped orchestrators produce bitwise-equal
+    /// tap buffers for the same token stream.
+    #[test]
+    fn stage0_taps_deterministic() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            let run = || {
+                let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+                let mut all = Vec::new();
+                for t in [7u32, 42, 99] {
+                    let (_a, _l, taps) =
+                        orch.decode_token_logits_with_taps(t).expect("decode");
+                    all.push(taps.raw.clone());
+                }
+                all
+            };
+            assert_eq!(run(), run(), "taps not bitwise deterministic");
+        });
+    }
+
+    /// (c) Taps-off identity: without the define the kernel is compiled from
+    /// byte-identical preprocessed source — logits must match the tapped
+    /// build (bitwise expected; asserted via argmax + tight max-abs so a
+    /// compiler-scheduling delta is visible but diagnosable), and the taps
+    /// API must refuse rather than serve a stale buffer.
+    #[test]
+    fn stage0_taps_off_identity() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        let tapped = with_taps_env(true, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            orch.decode_token_logits(7).expect("tapped decode").1
+        });
+        let plain = with_taps_env(false, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let out = orch.decode_token_logits(7).expect("plain decode").1;
+            assert!(
+                orch.decode_token_logits_with_taps(7).is_err(),
+                "taps API must refuse when the kernel was compiled without taps"
+            );
+            out
+        });
+        assert_eq!(
+            sample_argmax_f32(&tapped),
+            sample_argmax_f32(&plain),
+            "argmax must be identical between tapped and untapped builds"
+        );
+        let max_abs = tapped
+            .iter()
+            .zip(&plain)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_abs == 0.0, "expected bitwise-identical logits, max |Δ| = {max_abs}");
+    }
 }
