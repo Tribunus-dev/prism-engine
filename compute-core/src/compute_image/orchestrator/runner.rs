@@ -815,6 +815,113 @@ impl Orchestrator {
         Ok((sample_argmax_f32(&logits), logits, taps))
     }
 
+    /// Transport B, fusion group size 1 (the audit-pass configuration from
+    /// STAGE0_TAPS_SPEC.md): dispatch `decode_layer_full_real` once per layer
+    /// in a single command buffer, CHAINING per-layer device buffers — layer
+    /// k's output buffer is layer k+1's input, and those 48 resident buffers
+    /// ARE the blit-free boundary taps (read back after completion, no
+    /// copies, no function constants, zero shader deltas).
+    ///
+    /// KV is the fused path's fp16 clean mode with per-layer caches sized for
+    /// short audit windows. At `seq_position == 0` each layer is numerically
+    /// identical to the megakernel's math; across the 48-layer chain the
+    /// output drifts from the megakernel taps only by the megakernel's own
+    /// ternary-KV noise (zero at pos 0) plus fp16 accumulation-order deltas —
+    /// the parity test emits the per-layer drift curve.
+    ///
+    /// Production fusion (2–4 layers/dispatch) migrates separately once the
+    /// pair/triple/quad bodies are real; this is the tap-bearing audit lane.
+    pub fn decode_audit_group1(
+        &self,
+        device: &metal::Device,
+        hidden_in: &[f32],
+        seq_position: u32,
+        audit_max_seq: u32,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        use crate::compute_image::megakernel::kernels::compile_layer_library;
+
+        const HIDDEN: usize = 3840;
+        if hidden_in.len() != HIDDEN {
+            return Err(format!("hidden_in len {} != {HIDDEN}", hidden_in.len()));
+        }
+        let norms = self
+            .deployment
+            .norms_buffer
+            .as_ref()
+            .ok_or("deployment missing norms buffer")?;
+
+        let lib = compile_layer_library(device)?;
+        let f = lib
+            .get_function("decode_layer_full_real", None)
+            .map_err(|e| format!("decode_layer_full_real: {e}"))?;
+        let pso = device
+            .new_compute_pipeline_state_with_function(&f)
+            .map_err(|e| format!("layer PSO: {e}"))?;
+
+        let opts = metal::MTLResourceOptions::StorageModeShared;
+        let mk_hidden = || device.new_buffer((HIDDEN * 2) as u64, opts);
+        // boundary[0] = input; boundary[k+1] = layer k's output (the tap).
+        let mut boundaries: Vec<metal::Buffer> = Vec::with_capacity(LAYERS as usize + 1);
+        let in_buf = mk_hidden();
+        unsafe {
+            let dst = in_buf.contents() as *mut u16;
+            for (i, &v) in hidden_in.iter().enumerate() {
+                *dst.add(i) = f16::from_f32(v).to_bits();
+            }
+        }
+        boundaries.push(in_buf);
+        for _ in 0..LAYERS {
+            boundaries.push(mk_hidden());
+        }
+
+        let stride = (NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
+        let kv_bytes = audit_max_seq.max(1) as u64 * stride * 2;
+        let kv: Vec<(metal::Buffer, metal::Buffer)> = (0..LAYERS)
+            .map(|_| (device.new_buffer(kv_bytes, opts), device.new_buffer(kv_bytes, opts)))
+            .collect();
+        let ffn_scratch = device.new_buffer(2 * 15360 * 2, opts);
+
+        let queue = device.new_command_queue();
+        let cb = queue.new_command_buffer();
+        let enc = cb.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&pso);
+        for layer in 0..LAYERS as usize {
+            enc.set_buffer(0, Some(&boundaries[layer]), 0);
+            enc.set_buffer(1, Some(&boundaries[layer + 1]), 0);
+            enc.set_buffer(2, Some(&kv[layer].0), 0);
+            enc.set_buffer(3, Some(&kv[layer].1), 0);
+            enc.set_buffer(4, Some(&self.deployment.weights_buffer), 0);
+            enc.set_buffer(5, Some(norms), 0);
+            enc.set_buffer(6, Some(&self.kernel_buffers.head_gates), 0);
+            enc.set_buffer(7, Some(&ffn_scratch), 0);
+            let li = layer as u32;
+            enc.set_bytes(8, 4, &li as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(
+                9,
+                4,
+                &seq_position as *const u32 as *const std::ffi::c_void,
+            );
+            enc.dispatch_thread_groups(
+                metal::MTLSize { width: 1, height: 1, depth: 1 },
+                metal::MTLSize { width: 256, height: 1, depth: 1 },
+            );
+        }
+        enc.end_encoding();
+        cb.commit();
+        cb.wait_until_completed();
+
+        // The chained buffers are the taps — read every layer boundary back.
+        Ok(boundaries[1..]
+            .iter()
+            .map(|b| {
+                unsafe { std::slice::from_raw_parts(b.contents() as *const u16, HIDDEN) }
+                    .iter()
+                    .map(|&bits| f16::from_bits(bits).to_f32())
+                    .collect()
+            })
+            .collect())
+    }
+
     /// Decode one or more tokens using MTP speculative verification.
     ///
     /// Uses slot 0 for the primary decode, then submits draft candidates
@@ -914,6 +1021,13 @@ impl Orchestrator {
     /// 6. For positions the draft chain did not cover, accept MTP predictions.
     /// 7. Advance `seq_pos` by the number of accepted tokens.
     /// Run fused per-layer Metal decode driven by graph fusion analysis.
+    ///
+    /// NOTE: the group-size-1 AUDIT configuration now lives in
+    /// [`Self::decode_audit_group1`], dispatching the REAL
+    /// `decode_layer_full_real` body with chained boundary-tap buffers; the
+    /// pair/triple/quad kernels this path dispatches are still identity
+    /// stubs, so this function remains non-functional for real decode until
+    /// those bodies are authored and this binding migrates to the new ABI.
     /// Groups of up to 4 consecutive same-kind decoder layers are dispatched
     /// as a single fused kernel, reducing command-buffer overhead and
     /// eliminating intermediate global buffer writes.
@@ -1714,6 +1828,61 @@ mod stage0_tap_tests {
                 "Transport B layer 0 vs Transport A tap: rel-L2 {rel:.3e} (expected fp16-tight at pos 0)"
             );
             eprintln!("[transport-b] layer0 parity rel-L2 = {rel:.3e}  PASS");
+        });
+    }
+
+    /// Transport B end-to-end (all 48 layers, group size 1): chain the real
+    /// fused layer body from the post-embed tap and compare EVERY boundary
+    /// buffer (the blit-free taps) against Transport A's post_layer taps.
+    /// Emits the per-layer drift curve; gates on the final boundary.
+    /// Full logits parity additionally needs the embed/final-norm/logits
+    /// stages migrated — the final boundary here is the last fused-path
+    /// state before those megakernel-only stages.
+    #[test]
+    fn transport_b_full_depth_matches_taps() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let device = metal::Device::system_default().expect("metal device");
+            let boundaries = orch
+                .decode_audit_group1(&device, &taps.post_embed(), 0, 4)
+                .expect("group-1 audit chain");
+            assert_eq!(boundaries.len(), LAYERS as usize);
+            let rel = |a: &[f32], g: &[f32]| -> f64 {
+                let (mut se, mut den) = (0.0f64, 0.0f64);
+                for (x, y) in a.iter().zip(g) {
+                    se += (*x as f64 - *y as f64).powi(2);
+                    den += (*y as f64).powi(2);
+                }
+                (se / den.max(1e-30)).sqrt()
+            };
+            let mut worst = (0usize, 0.0f64);
+            for k in 0..LAYERS as usize {
+                let d = rel(&boundaries[k], &taps.post_layer(k));
+                if d > worst.1 {
+                    worst = (k, d);
+                }
+                if k % 8 == 0 || k == LAYERS as usize - 1 {
+                    eprintln!("[transport-b] layer {k:2} drift rel-L2 = {d:.3e}");
+                }
+            }
+            let final_drift = rel(
+                &boundaries[LAYERS as usize - 1],
+                &taps.post_layer(LAYERS as usize - 1),
+            );
+            eprintln!(
+                "[transport-b] worst layer {} ({:.3e}); final boundary {:.3e}",
+                worst.0, worst.1, final_drift
+            );
+            assert!(
+                final_drift < 5e-3,
+                "48-layer chained drift {final_drift:.3e} exceeds the 5e-3 gate (worst at layer {})",
+                worst.0
+            );
         });
     }
 
