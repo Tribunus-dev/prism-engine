@@ -2,7 +2,9 @@
 //! sequential/differential compilation, diagnostics, and publishing.
 
 mod download;
+#[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
 mod emit;
+#[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
 mod pipeline;
 mod quantize;
 pub mod source;
@@ -30,7 +32,9 @@ pub mod ternary_pipeline;
 pub mod validation_matrix;
 
 pub use download::*;
+#[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
 pub(crate) use emit::*;
+#[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
 pub use pipeline::*;
 pub use quantize::*;
 pub use source::*;
