@@ -8,6 +8,7 @@
 //! - [`types`]: Shared multi-modal input types (Image, Audio, Video).
 
 pub mod decoder;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod encoder;
 
 pub use decoder::{extract_frames, MAX_VIDEO_FRAMES};
