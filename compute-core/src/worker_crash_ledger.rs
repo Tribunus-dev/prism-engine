@@ -159,6 +159,22 @@ mod tests {
     use super::*;
     use std::io::Read;
 
+    /// The ledger reads TRIBUNUS_CRASH_DIR (process-global) at call time, and
+    /// every test points it at its own temp dir — running them in parallel
+    /// interleaves set_var calls, so records land in other tests' dirs
+    /// (NotFound reads, cross-test dedup pollution). Serialize all env-touching
+    /// tests through one lock.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // record() caches its open file handle in the process-global
+        // CRASH_LEDGER on first use, which would pin all subsequent tests to
+        // the FIRST test's temp dir regardless of the env var. Start each
+        // serialized test with a fresh (unopened) ledger.
+        *CRASH_LEDGER.lock() = None;
+        guard
+    }
+
     /// Helper: return a temporary path for the crash ledger.
     fn tmp_crash_dir() -> PathBuf {
         let dir = std::env::temp_dir()
@@ -170,6 +186,7 @@ mod tests {
 
     #[test]
     fn test_record_appends_jsonl() {
+        let _env = env_lock();
         let dir = tmp_crash_dir();
         // Override the env var for the test scope.
         std::env::set_var("TRIBUNUS_CRASH_DIR", dir.to_str().unwrap());
@@ -210,6 +227,7 @@ mod tests {
 
     #[test]
     fn test_record_multiple_lines() {
+        let _env = env_lock();
         let dir = tmp_crash_dir();
         std::env::set_var("TRIBUNUS_CRASH_DIR", dir.to_str().unwrap());
 
@@ -228,6 +246,7 @@ mod tests {
 
     #[test]
     fn test_recent_signatures_dedup() {
+        let _env = env_lock();
         let dir = tmp_crash_dir();
         std::env::set_var("TRIBUNUS_CRASH_DIR", dir.to_str().unwrap());
 
@@ -279,6 +298,7 @@ mod tests {
 
     #[test]
     fn test_recent_signatures_limit() {
+        let _env = env_lock();
         let dir = tmp_crash_dir();
         std::env::set_var("TRIBUNUS_CRASH_DIR", dir.to_str().unwrap());
 
@@ -316,6 +336,7 @@ mod tests {
 
     #[test]
     fn test_recent_signatures_empty_file() {
+        let _env = env_lock();
         let dir = tmp_crash_dir();
         std::env::set_var("TRIBUNUS_CRASH_DIR", dir.to_str().unwrap());
         fs::create_dir_all(&dir).unwrap();
@@ -326,6 +347,7 @@ mod tests {
 
     #[test]
     fn test_no_file_returns_empty() {
+        let _env = env_lock();
         // Use a nonexistent dir so `recent_signatures` finds nothing.
         std::env::set_var("TRIBUNUS_CRASH_DIR", "/tmp/tribunus_test_nonexistent_XXXX");
         let sigs = WorkerCrashLedger::recent_signatures(10);
