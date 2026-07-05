@@ -7,36 +7,36 @@
 #[cfg(target_os = "macos")]
 #[cfg(all(
     target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
+    feature = "mlx-backend"
 ))]
 pub mod accelerate;
 #[cfg(target_os = "macos")]
 #[cfg(all(
     target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
+    feature = "mlx-backend"
 ))]
 pub mod accelerate_ffi;
 /// Accelerate CPU execution lane — arena-view-based ops on CPU-accessible
 /// memory (zero-copy, no FFI). Pure Rust fallback with no OS dependency.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 pub mod accelerate_lane;
 pub mod authority;
 #[cfg(target_os = "macos")]
 #[cfg(all(
     target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
+    feature = "mlx-backend"
 ))]
 pub mod coreai;
 /// Core ML execution lane — compiled subgraph on ANE.
 #[cfg(all(
     target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
+    feature = "mlx-backend"
 ))]
 pub mod coreai_iosurface;
 /// Core ML IOSurface binding — validated executable binding.
 #[cfg(all(
     target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
+    feature = "mlx-backend"
 ))]
 pub mod coreai_lane;
 /// CPU attention scheduler — L2-cache-aware work partition + work-stealing
@@ -44,10 +44,10 @@ pub mod coreai_lane;
 #[cfg(feature = "candle-cpu")]
 pub mod cpu_attn;
 pub mod evaluation;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 pub mod flex_dispatch;
 pub mod graph;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod heterogeneous_executor;
 #[cfg(feature = "intel")]
 pub mod intel_level_zero;
@@ -55,7 +55,7 @@ pub mod intel_level_zero;
 #[cfg(feature = "intel")]
 pub mod intel_usm;
 /// Metal consumer — validates Core ML output slots against CPU references.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 pub mod metal_consumer;
 /// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
 pub mod metal_iosurface;
@@ -63,7 +63,7 @@ pub mod metal_iosurface;
 pub mod npu;
 /// PlacementSet and hazard tracking — op placement legality and cross-lane sync.
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "mlx-backend",
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix"
@@ -76,16 +76,16 @@ pub mod shared_event;
 pub mod tensor_registry;
 /// Unified execution arena — single mmap-backed memory region for all lanes.
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "mlx-backend",
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix"
 ))]
 pub mod unified_arena;
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 use mlx_rs::ops;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 use mlx_rs::Array;
 
 // ── DType ──────────────────────────────────────────────────────────────────
@@ -368,7 +368,7 @@ pub trait TensorBackend {
 
     /// Return the residency record for the tensor identified by `handle`.
     #[cfg(any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "mlx-backend",
         feature = "candle-cpu",
         feature = "intel",
         feature = "tensix"
@@ -379,7 +379,7 @@ pub trait TensorBackend {
 
     /// Record a transfer event for the tensor identified by `handle`.
     #[cfg(any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
+        feature = "mlx-backend",
         feature = "candle-cpu",
         feature = "intel",
         feature = "tensix"
@@ -399,7 +399,7 @@ pub trait TensorBackend {
 /// `to`. Returns the [`residency::TransferDecision`] so the scheduler can
 /// plan the mapping and log the event.
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "mlx-backend",
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix"
@@ -414,14 +414,14 @@ pub fn check_transfer<T: TensorBackend>(
     Ok(decision)
 }
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 // ── MLX backend ────────────────────────────────────────────────────────────
 
 /// MLX-backed implementation of [`TensorBackend`].
 ///
 /// Stores arrays in generational slot-maps indexed by `TensorHandle`. A free
 /// list recycles slots from released handles. Slot generations are bumped
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 pub struct MlxBackend {
     arrays: Vec<Option<Array>>,
     generations: Vec<u32>,
@@ -432,7 +432,7 @@ pub struct MlxBackend {
     name: String,
 }
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 impl MlxBackend {
     /// Create a new empty backend.
     pub fn new() -> Self {
@@ -519,14 +519,14 @@ impl MlxBackend {
     }
 }
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 impl Default for MlxBackend {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 impl TensorBackend for MlxBackend {
     // ── Creation ───────────────────────────────────────────────────────
 
