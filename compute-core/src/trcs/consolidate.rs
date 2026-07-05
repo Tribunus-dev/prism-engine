@@ -3,7 +3,7 @@ use crate::trcs::arrangement::{PhysicalDeltaRowDyn, SupportTable};
 use crate::trcs::errors::TrcsError;
 use std::collections::HashMap;
 
-use crate::trcs::fact::{WeightedFact, RelationId, CompactTuple};
+use crate::trcs::fact::{RelationId, CompactTuple};
 use crate::trcs::revision::RevisionFrontierId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
