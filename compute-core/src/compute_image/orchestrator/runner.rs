@@ -1020,6 +1020,142 @@ impl Orchestrator {
     ///    p_main(draft) / p_draft(draft) > threshold.
     /// 6. For positions the draft chain did not cover, accept MTP predictions.
     /// 7. Advance `seq_pos` by the number of accepted tokens.
+    /// Transport B fused decode over the REAL kernels for ALL group sizes.
+    /// Chains ceil(48 / group_size) dispatches — one of
+    /// decode_layer_full_real / fused_full_{pair,triple,quad}_real per group —
+    /// with per-layer fp16 KV sliced (by offset) out of one arena, and the
+    /// group-boundary buffers chained (the blit-free taps at group
+    /// granularity, exactly the STAGE0_TAPS_SPEC Transport B policy: audit
+    /// passes use group_size 1, production fuses 2–4 and taps only group
+    /// boundaries). Returns the group-end boundary states in order.
+    ///
+    /// This is the working replacement for the legacy `decode_fused` binding
+    /// (which still targets the identity stubs' old ABI); the fusion-analyzer
+    /// wiring migrates here once the graph descriptor carries real layers.
+    pub fn decode_fused_real(
+        &self,
+        device: &metal::Device,
+        hidden_in: &[f32],
+        seq_position: u32,
+        audit_max_seq: u32,
+        group_size: u32,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        use crate::compute_image::megakernel::kernels::compile_layer_library;
+
+        const HIDDEN: usize = 3840;
+        if !(1..=4).contains(&group_size) {
+            return Err(format!("group_size {group_size} not in 1..=4"));
+        }
+        if hidden_in.len() != HIDDEN {
+            return Err(format!("hidden_in len {} != {HIDDEN}", hidden_in.len()));
+        }
+        let norms = self
+            .deployment
+            .norms_buffer
+            .as_ref()
+            .ok_or("deployment missing norms buffer")?;
+        let lib = compile_layer_library(device)?;
+        let entry = |n: u32| match n {
+            1 => "decode_layer_full_real",
+            2 => "fused_full_pair_real",
+            3 => "fused_full_triple_real",
+            _ => "fused_full_quad_real",
+        };
+        // PSOs for every group size that can occur (full groups + remainder).
+        let mut psos: std::collections::HashMap<u32, metal::ComputePipelineState> =
+            std::collections::HashMap::new();
+        let mut sizes: Vec<u32> = vec![group_size];
+        let rem = LAYERS % group_size;
+        if rem != 0 {
+            sizes.push(rem);
+        }
+        for n in sizes {
+            let f = lib
+                .get_function(entry(n), None)
+                .map_err(|e| format!("{}: {e}", entry(n)))?;
+            psos.insert(
+                n,
+                device
+                    .new_compute_pipeline_state_with_function(&f)
+                    .map_err(|e| format!("PSO {}: {e}", entry(n)))?,
+            );
+        }
+
+        let opts = metal::MTLResourceOptions::StorageModeShared;
+        let in_buf = device.new_buffer((HIDDEN * 2) as u64, opts);
+        unsafe {
+            let dst = in_buf.contents() as *mut u16;
+            for (i, &v) in hidden_in.iter().enumerate() {
+                *dst.add(i) = f16::from_f32(v).to_bits();
+            }
+        }
+        // Per-layer KV: one arena, sliced by offset per layer.
+        let stride = (NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
+        let per_layer_kv = audit_max_seq.max(1) as u64 * stride * 2;
+        let kv_k = device.new_buffer(per_layer_kv * LAYERS as u64, opts);
+        let kv_v = device.new_buffer(per_layer_kv * LAYERS as u64, opts);
+        let ffn_scratch = device.new_buffer(2 * 15360 * 2, opts);
+
+        let queue = device.new_command_queue();
+        let cb = queue.new_command_buffer();
+        let enc = cb.new_compute_command_encoder();
+        let mut boundaries: Vec<metal::Buffer> = Vec::new();
+        let mut current = in_buf;
+        let mut layer = 0u32;
+        while layer < LAYERS {
+            let n = group_size.min(LAYERS - layer);
+            let pso = &psos[&n];
+            let out = device.new_buffer((HIDDEN * 2) as u64, opts);
+            enc.set_compute_pipeline_state(pso);
+            enc.set_buffer(0, Some(&current), 0);
+            enc.set_buffer(1, Some(&out), 0);
+            enc.set_buffer(2, Some(&kv_k), (layer as u64) * per_layer_kv);
+            enc.set_buffer(3, Some(&kv_v), (layer as u64) * per_layer_kv);
+            enc.set_buffer(4, Some(&self.deployment.weights_buffer), 0);
+            enc.set_buffer(5, Some(norms), 0);
+            enc.set_buffer(6, Some(&self.kernel_buffers.head_gates), 0);
+            enc.set_buffer(7, Some(&ffn_scratch), 0);
+            enc.set_bytes(8, 4, &layer as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(
+                9,
+                4,
+                &seq_position as *const u32 as *const std::ffi::c_void,
+            );
+            // Layers b/c/d: KV slices + indices at 10.. in steps of 3.
+            for j in 1..n {
+                let l = layer + j;
+                let base = 10 + (j - 1) * 3;
+                enc.set_buffer(base as u64, Some(&kv_k), (l as u64) * per_layer_kv);
+                enc.set_buffer((base + 1) as u64, Some(&kv_v), (l as u64) * per_layer_kv);
+                enc.set_bytes(
+                    (base + 2) as u64,
+                    4,
+                    &l as *const u32 as *const std::ffi::c_void,
+                );
+            }
+            enc.dispatch_thread_groups(
+                metal::MTLSize { width: 1, height: 1, depth: 1 },
+                metal::MTLSize { width: 256, height: 1, depth: 1 },
+            );
+            boundaries.push(out.clone());
+            current = out;
+            layer += n;
+        }
+        enc.end_encoding();
+        cb.commit();
+        cb.wait_until_completed();
+
+        Ok(boundaries
+            .iter()
+            .map(|b| {
+                unsafe { std::slice::from_raw_parts(b.contents() as *const u16, HIDDEN) }
+                    .iter()
+                    .map(|&bits| f16::from_bits(bits).to_f32())
+                    .collect()
+            })
+            .collect())
+    }
+
     /// Run fused per-layer Metal decode driven by graph fusion analysis.
     ///
     /// NOTE: the group-size-1 AUDIT configuration now lives in
@@ -1975,6 +2111,52 @@ mod stage0_tap_tests {
                  intermediate to f16), max |Δ| = {max_abs}"
             );
             eprintln!("[transport-b] pair == two singles (bitwise)  PASS");
+        });
+    }
+
+    /// Fusion-ladder gate: for every production group size, the fused chain's
+    /// group-end boundaries must be BITWISE-equal to the group-1 chain's
+    /// boundaries at the same layers (both paths quantize every compared
+    /// boundary to f16; the fused path's INTERNAL boundaries stay in
+    /// threadgroup memory and are intentionally not compared — that is what
+    /// fusion elides).
+    #[test]
+    fn transport_b_groups_match_singles() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let input = taps.post_embed();
+            let device = metal::Device::system_default().expect("metal device");
+            let singles = orch
+                .decode_audit_group1(&device, &input, 0, 4)
+                .expect("group-1 chain");
+            for gs in [2u32, 3, 4] {
+                let groups = orch
+                    .decode_fused_real(&device, &input, 0, 4, gs)
+                    .expect("fused chain");
+                let mut layer = 0u32;
+                for (gi, got) in groups.iter().enumerate() {
+                    let n = gs.min(LAYERS - layer);
+                    let end_layer = (layer + n - 1) as usize;
+                    let expect = &singles[end_layer];
+                    let max_abs = got
+                        .iter()
+                        .zip(expect)
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0.0f32, f32::max);
+                    assert!(
+                        max_abs == 0.0,
+                        "group_size {gs}, group {gi} (end layer {end_layer}): expected \
+                         bitwise-identical, max |Δ| = {max_abs}"
+                    );
+                    layer += n;
+                }
+                eprintln!("[transport-b] group_size {gs}: all group boundaries bitwise  PASS");
+            }
         });
     }
 
