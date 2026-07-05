@@ -695,6 +695,14 @@ impl Orchestrator {
     /// contains the prefill positions and attention covers the full
     /// context.
     pub fn decode_slot(&mut self, slot_id: u32, token_id: u32) -> Result<u32, String> {
+        Ok(sample_argmax(&self.decode_slot_logits(slot_id, token_id)?))
+    }
+
+    /// Like [`decode_slot`] but returns the full output logit vector instead of
+    /// just the argmax token. Used by the benchmark harness to score perplexity,
+    /// KL divergence, and top-1 agreement. Behaviour (KV advance, eviction) is
+    /// identical — `decode_slot` is a thin argmax wrapper over this.
+    pub fn decode_slot_logits(&mut self, slot_id: u32, token_id: u32) -> Result<Vec<f32>, String> {
         let slot = slot_id as usize;
         let seq_pos = self.slot_seq_pos[slot];
 
@@ -750,13 +758,21 @@ impl Orchestrator {
             .reset_work_slot(&self.kernel_buffers, slot_id);
 
         self.slot_seq_pos[slot] = seq_pos + 1;
-        Ok(sample_argmax(&logits))
+        Ok(logits)
     }
 
     /// Decode one token using slot 0 (convenience wrapper).
     #[inline]
     pub fn decode_token(&mut self, token_id: u32) -> Result<u32, String> {
         self.decode_slot(0, token_id)
+    }
+
+    /// Decode on slot 0 returning `(argmax_token, full_logits)` — the scoring
+    /// hook for the benchmark harness (perplexity / KL / top-1 agreement).
+    #[inline]
+    pub fn decode_token_logits(&mut self, token_id: u32) -> Result<(u32, Vec<f32>), String> {
+        let logits = self.decode_slot_logits(0, token_id)?;
+        Ok((sample_argmax(&logits), logits))
     }
 
     /// Decode one or more tokens using MTP speculative verification.
