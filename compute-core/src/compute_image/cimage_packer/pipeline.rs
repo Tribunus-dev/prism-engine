@@ -719,6 +719,7 @@ pub(crate) fn compile_and_pack_god_binary(
     const SEG_MM_DESCRIPTOR: usize = 15;
     const SEG_MM_POSITION: usize = 16;
     const SEG_MM_AUX: usize = 17;
+    const SEG_MM_PROJ_BIASES: usize = 18;
 
     if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
         crate::compute_image::compile::apply_quantize_to_loaded(loaded, qmode)
@@ -803,6 +804,9 @@ pub(crate) fn compile_and_pack_god_binary(
             .map(|segments| segments.projection_scales.len() as u64),
         multimodal
             .as_ref()
+            .map(|segments| segments.projection_biases.len() as u64),
+        multimodal
+            .as_ref()
             .map(|segments| segments.descriptor.len() as u64),
         multimodal
             .as_ref()
@@ -825,6 +829,15 @@ pub(crate) fn compile_and_pack_god_binary(
                 .unwrap_or(false)
             {
                 SEG_MM_PROJ_SCALES as u16
+            } else {
+                u16::MAX
+            };
+            desc.projection_bias_segment_index = if plan
+                .multimodal_projection_biases
+                .map(|segment| segment.length > 0)
+                .unwrap_or(false)
+            {
+                SEG_MM_PROJ_BIASES as u16
             } else {
                 u16::MAX
             };
@@ -1189,6 +1202,7 @@ pub(crate) fn compile_and_pack_god_binary(
         for (segment, bytes) in [
             (plan.multimodal_projection_weights, &multimodal.projection_weights),
             (plan.multimodal_projection_scales, &multimodal.projection_scales),
+            (plan.multimodal_projection_biases, &multimodal.projection_biases),
             (plan.multimodal_input_descriptor, &multimodal.descriptor),
             (
                 plan.multimodal_position_embeddings,
@@ -1316,6 +1330,15 @@ pub(crate) fn compile_and_pack_god_binary(
         if segment.length > 0 {
             segments[SEG_MM_PROJ_SCALES] = SegmentEntry::new(
                 SegmentKind::MultimodalProjectionScales,
+                segment.offset,
+                segment.length,
+            );
+        }
+    }
+    if let Some(segment) = plan.multimodal_projection_biases {
+        if segment.length > 0 {
+            segments[SEG_MM_PROJ_BIASES] = SegmentEntry::new(
+                SegmentKind::MultimodalProjectionBiases,
                 segment.offset,
                 segment.length,
             );
@@ -1607,6 +1630,10 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
             multimodal.projection_scales.len() as u64,
         );
         push_slot(
+            SegmentKind::MultimodalProjectionBiases,
+            multimodal.projection_biases.len() as u64,
+        );
+        push_slot(
             SegmentKind::MultimodalInputDescriptor,
             multimodal.descriptor.len() as u64,
         );
@@ -1655,6 +1682,8 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
                 find_slot_index(SegmentKind::MultimodalProjectionWeights);
             desc.projection_scale_segment_index =
                 find_slot_index(SegmentKind::MultimodalProjectionScales);
+            desc.projection_bias_segment_index =
+                find_slot_index(SegmentKind::MultimodalProjectionBiases);
             desc.position_embedding_segment_index =
                 find_slot_index(SegmentKind::MultimodalPositionEmbeddings);
             desc.auxiliary_weight_segment_index =
@@ -1721,6 +1750,7 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         for bytes in [
             &multimodal.projection_weights,
             &multimodal.projection_scales,
+            &multimodal.projection_biases,
             &multimodal.descriptor,
             &multimodal.position_embeddings,
             &multimodal.auxiliary_weights,
@@ -1796,6 +1826,11 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
             SegmentKind::MultimodalProjectionScales => {
                 if let Some(multimodal) = &multimodal {
                     payload_hasher.update(&multimodal.projection_scales);
+                }
+            }
+            SegmentKind::MultimodalProjectionBiases => {
+                if let Some(multimodal) = &multimodal {
+                    payload_hasher.update(&multimodal.projection_biases);
                 }
             }
             SegmentKind::MultimodalInputDescriptor => {
@@ -2298,6 +2333,10 @@ fn synthesize_model_artifacts(input_dir: &Path, manifest: Option<&Manifest>) -> 
 struct SynthesizedMultimodalSegments {
     projection_weights: Vec<u8>,
     projection_scales: Vec<u8>,
+    /// Byte-parallel to `projection_scales` (kernels/MULTIMODAL_NF4_BIAS_ABI.md):
+    /// filled in lockstep from `{stem}.biases` sidecar tensors. Empty when the
+    /// quantizer emitted no biases — the v1-compat shape.
+    projection_biases: Vec<u8>,
     descriptor: Vec<u8>,
     position_embeddings: Vec<u8>,
     auxiliary_weights: Vec<u8>,
@@ -2329,6 +2368,7 @@ fn synthesize_multimodal_segments_for_loaded(
 
     let mut projection_weights = Vec::new();
     let mut projection_scales = Vec::new();
+    let mut projection_biases = Vec::new();
     let mut position_embeddings = Vec::new();
     let mut auxiliary_weights = Vec::new();
     let mut image_records = Vec::new();
@@ -2373,12 +2413,45 @@ fn synthesize_multimodal_segments_for_loaded(
 
         let stem = name.strip_suffix(".weight").unwrap_or(name);
         let scale_name = format!("{}.scales", stem);
+        let bias_name = format!("{}.biases", stem);
+        let mut record_flags = 0u8;
         let (scale_offset, scale_length, layout_code, quantization_kind) =
             if let Some(scale_tensor) = loaded.source_tensors.get(&scale_name) {
                 let scale_bytes = source_tensor_view(scale_tensor, &loaded.mmap_bytes).to_vec();
                 if !scale_bytes.is_empty() {
                     let scale_offset = projection_scales.len() as u64;
                     projection_scales.extend_from_slice(&scale_bytes);
+                    // Bias sidecar: captured byte-parallel to the scales. The
+                    // parallelism contract is structural — the bias segment
+                    // advances in lockstep with the scale segment, so a
+                    // record's scale_offset/scale_length address both. That
+                    // only holds if EVERY scaled record carries biases, which
+                    // the all-or-none check after this loop enforces.
+                    if let Some(bias_tensor) = loaded.source_tensors.get(&bias_name) {
+                        let bias_bytes =
+                            source_tensor_view(bias_tensor, &loaded.mmap_bytes).to_vec();
+                        if !bias_bytes.is_empty() {
+                            if bias_bytes.len() != scale_bytes.len() {
+                                return Err(std::io::Error::other(format!(
+                                    "multimodal bias sidecar {bias_name} is {} bytes but \
+                                     {scale_name} is {} — biases must be scale-parallel \
+                                     ([tiles × 5] f32 per row)",
+                                    bias_bytes.len(),
+                                    scale_bytes.len()
+                                )));
+                            }
+                            let bias_offset = projection_biases.len() as u64;
+                            if bias_offset != scale_offset {
+                                return Err(std::io::Error::other(format!(
+                                    "multimodal bias segment desynchronized at {bias_name}: \
+                                     bias cursor {bias_offset} vs scale cursor {scale_offset} \
+                                     — a preceding scaled record lacked its bias sidecar"
+                                )));
+                            }
+                            projection_biases.extend_from_slice(&bias_bytes);
+                            record_flags |= ProjectionTensorRecord::FLAG_HAS_BIAS;
+                        }
+                    }
                     (
                         scale_offset,
                         scale_bytes.len() as u64,
@@ -2415,7 +2488,7 @@ fn synthesize_multimodal_segments_for_loaded(
             rank: logical_shape.len() as u8,
             layout: layout_code,
             quantization_kind,
-            flags: 0,
+            flags: record_flags,
             dims: dims4(&logical_shape),
         };
         match class {
@@ -2486,9 +2559,26 @@ fn synthesize_multimodal_segments_for_loaded(
         });
     }
 
+    // All-or-none bias policy: the parallel-layout contract (bias offsets ≡
+    // scale offsets) is only sound when every scaled record carried a bias
+    // sidecar. A partial set means the quantizer output is inconsistent —
+    // fail the pack rather than seal an artifact whose bias views would
+    // silently misalign. (The lockstep cursor check above catches orderings
+    // where a scaled-but-biasless record precedes a biased one; this catches
+    // the trailing case.)
+    if !projection_biases.is_empty() && projection_biases.len() != projection_scales.len() {
+        return Err(std::io::Error::other(format!(
+            "multimodal bias segment is {} bytes but the scale segment is {} — \
+             bias sidecars must be present for ALL scaled projections or none",
+            projection_biases.len(),
+            projection_scales.len()
+        )));
+    }
+
     Ok(Some(SynthesizedMultimodalSegments {
         projection_weights,
         projection_scales,
+        projection_biases,
         descriptor,
         position_embeddings,
         auxiliary_weights,
@@ -2681,6 +2771,10 @@ fn synthesize_multimodal_segments(
     Ok(Some(SynthesizedMultimodalSegments {
         projection_weights,
         projection_scales,
+        // The directory-manifest schema has no bias tensor ids (its quant
+        // descriptor predates the bias ABI) — artifacts packed through this
+        // path stay zero-bias v1-compat, records keep flags == 0.
+        projection_biases: Vec::new(),
         descriptor,
         position_embeddings,
         auxiliary_weights,
