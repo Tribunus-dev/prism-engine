@@ -17,6 +17,7 @@ pub mod ane_lane;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod apple_installation;
 pub mod arena;
+pub mod bench_metrics;
 pub mod bridge_provider;
 pub mod distill_core;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
