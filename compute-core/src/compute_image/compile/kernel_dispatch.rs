@@ -1940,3 +1940,161 @@ pub fn dispatch_fused_multimodal(
     cmd_buf.wait_until_completed();
     start.elapsed().as_nanos() as u64
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NF4Tile640 live-forward execution smoke test (Mac / Metal only)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Proves the teacher single-GEMV forward actually EXECUTES end-to-end on the GPU
+// and matches a CPU reference of the same quantized weights: pack a matrix into
+// the interleaved NF4Tile640 arena → build Metal buffers → run
+// Nf4Tile640ProjectionDispatcher → read back → compare. Requires a Metal device
+// and `nf4_tile640_gemv.metal` compiled into the metallib (see build.rs).
+// Run on macOS: `cargo test -p tribunus-compute-core --features prism-backend
+// nf4_forward_exec`.
+//
+// AUTHORED, NOT COMPILED HERE (no Metal toolchain in the dev sandbox). The
+// layout + arithmetic mirror tools/nf4_forward_ref.rs, which IS Linux-verified.
+#[cfg(all(test, feature = "metal-dispatch"))]
+mod nf4_forward_exec_tests {
+    use super::*;
+
+    const NF4: [f32; 16] = [
+        -1.0, -0.6961928, -0.5250731, -0.3949175, -0.2844414, -0.1847734, -0.09105, 0.0, 0.0795803,
+        0.1609302, 0.2461123, 0.3379152, 0.4407099, 0.562617, 0.7229568, 1.0,
+    ];
+    const TILE: usize = 640;
+    const GROUP: usize = 128;
+    const GPT: usize = 5;
+    const LANES: usize = 32;
+    const VPL: usize = 4;
+    const BYTES_TILE: usize = 320;
+    const BYTES_GROUP: usize = 64;
+
+    fn nearest(v: f32) -> u8 {
+        let mut b = 0u8;
+        let mut bd = (v - NF4[0]).abs();
+        for (i, &l) in NF4.iter().enumerate().skip(1) {
+            let d = (v - l).abs();
+            if d < bd {
+                bd = d;
+                b = i as u8;
+            }
+        }
+        b
+    }
+
+    fn pack(w: &[f32], rows: usize, cols: usize) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+        let tiles = cols / TILE;
+        let mut packed = vec![0u8; rows * tiles * BYTES_TILE];
+        let mut scales = vec![0f32; rows * tiles * GPT];
+        for r in 0..rows {
+            for t in 0..tiles {
+                for g in 0..GPT {
+                    let mut absmax = 0f32;
+                    for gl in 0..GROUP {
+                        absmax = absmax.max(w[r * cols + t * TILE + g * GROUP + gl].abs());
+                    }
+                    let scale = if absmax > 1e-12 { absmax } else { 1.0 };
+                    scales[r * tiles * GPT + t * GPT + g] = scale;
+                    let inv = 1.0 / scale;
+                    for lane in 0..LANES {
+                        for i in 0..VPL {
+                            let col = t * TILE + g * GROUP + lane * VPL + i;
+                            let idx = nearest((w[r * cols + col] * inv).clamp(-1.0, 1.0));
+                            let byte = r * tiles * BYTES_TILE
+                                + t * BYTES_TILE
+                                + g * BYTES_GROUP
+                                + lane * 2
+                                + (i / 2);
+                            packed[byte] |= idx << ((i % 2) * 4);
+                        }
+                    }
+                }
+            }
+        }
+        (packed, scales, vec![0f32; rows * tiles * GPT])
+    }
+
+    fn cpu_gemv(packed: &[u8], scales: &[f32], x: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+        let tiles = cols / TILE;
+        let mut y = vec![0f32; rows];
+        for r in 0..rows {
+            let mut acc = 0f32;
+            for col in 0..cols {
+                let (t, wt) = (col / TILE, col % TILE);
+                let (g, gl) = (wt / GROUP, wt % GROUP);
+                let (lane, i) = (gl / VPL, gl % VPL);
+                let byte = packed[r * tiles * BYTES_TILE
+                    + t * BYTES_TILE
+                    + g * BYTES_GROUP
+                    + lane * 2
+                    + (i / 2)];
+                let idx = if i % 2 == 0 { byte & 0x0F } else { (byte >> 4) & 0x0F };
+                acc += NF4[idx as usize] * scales[r * tiles * GPT + t * GPT + g] * x[col];
+            }
+            y[r] = acc;
+        }
+        y
+    }
+
+    #[test]
+    fn nf4_forward_exec_matches_cpu() {
+        let device = match Device::system_default() {
+            Some(d) => d,
+            None => {
+                eprintln!("no Metal device — skipping NF4 forward execution test");
+                return;
+            }
+        };
+        let registry: RegistryRef = Arc::new(Mutex::new(KernelRegistry::new(&device)));
+
+        let (rows, cols) = (32usize, 640usize);
+        let w: Vec<f32> = (0..rows * cols).map(|k| ((k as f32) * 0.017).sin() * 0.05).collect();
+        let x: Vec<f32> = (0..cols).map(|k| ((k as f32) * 0.011).cos()).collect();
+        let (packed, scales, biases) = pack(&w, rows, cols);
+        let cpu = cpu_gemv(&packed, &scales, &x, rows, cols);
+
+        let mk = |bytes: &[u8]| {
+            device.new_buffer_with_data(
+                bytes.as_ptr() as *const std::ffi::c_void,
+                bytes.len() as u64,
+                MTLResourceOptions::StorageModeShared,
+            )
+        };
+        let as_bytes = |f: &[f32]| -> Vec<u8> { f.iter().flat_map(|v| v.to_ne_bytes()).collect() };
+        let pk = mk(&packed);
+        let sc = mk(&as_bytes(&scales));
+        let bi = mk(&as_bytes(&biases));
+        let inb = mk(&as_bytes(&x));
+        let out = device.new_buffer((rows * 4) as u64, MTLResourceOptions::StorageModeShared);
+
+        let params = ProjectionParams {
+            in_dim: cols as u32,
+            out_dim: rows as u32,
+            page_count: (cols / TILE) as u32,
+            page_width: TILE as u32,
+            mode_flags: 0,
+            probe_seed: 0,
+            reserved: [0; 5],
+        };
+        let mut receipt: KernelReceipt = unsafe { std::mem::zeroed() };
+
+        let queue = device.new_command_queue();
+        let cb = queue.new_command_buffer();
+        let disp = Nf4Tile640ProjectionDispatcher::new(registry);
+        disp.dispatch(cb, &pk, &sc, &bi, &inb, &out, &params, &mut receipt);
+        cb.commit();
+        cb.wait_until_completed();
+
+        let gpu = unsafe { std::slice::from_raw_parts(out.contents() as *const f32, rows) };
+        let mut maxd = 0f32;
+        for r in 0..rows {
+            maxd = maxd.max((gpu[r] - cpu[r]).abs());
+        }
+        assert!(
+            maxd < 1e-3,
+            "GPU vs CPU NF4Tile640 GEMV mismatch: max abs err {maxd}"
+        );
+    }
+}
