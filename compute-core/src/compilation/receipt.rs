@@ -348,6 +348,12 @@ pub struct BlockReceipt {
     pub optimal_scale_dtype: String,
     pub numerical_drift: HashMap<String, f32>,
     pub execution_provenance: EngineExecutionLog,
+    /// SHA-256 of the `.parity` sidecar produced by the pipelined parity
+    /// validator (kernels/STAGE0_TAPS_SPEC.md) — binds the artifact to its
+    /// parity evidence. `None` when no parity stage ran. Serde-default so
+    /// pre-existing serialized receipts still deserialize.
+    #[serde(default)]
+    pub parity_digest: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineExecutionLog {
