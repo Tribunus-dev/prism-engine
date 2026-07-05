@@ -66,11 +66,9 @@ pub mod arena_pool;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod attention;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod audio;
 #[cfg(feature = "generation-tts")]
 pub mod audio_provider;
@@ -78,9 +76,10 @@ pub mod audio_provider;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod autopsy;
 pub mod backend;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod benchmark;
 #[cfg(all(
     target_os = "macos",
@@ -89,6 +88,7 @@ pub mod benchmark;
         feature = "prism-backend"
     )
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod bridge;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -226,17 +226,20 @@ pub mod evidence;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod executor;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod executor_projection;
 pub mod experiment;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod external_array;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi"))]
 pub mod ffi;
@@ -245,6 +248,7 @@ pub mod fusion_region;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod gemma;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -261,11 +265,13 @@ pub mod gpu_memory;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod gpu_worker;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod heterogeneous;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -274,7 +280,7 @@ pub mod heterogeneous;
 pub mod hybrid_profile;
 #[cfg(feature = "generation-image")]
 pub mod image_provider;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod inference;
 pub mod inference_profile;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
@@ -313,22 +319,22 @@ pub mod logging;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod editing;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod exo;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod lora;
 pub mod lut;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod mapped_image;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -360,11 +366,13 @@ pub mod mlpackage;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod mlx_api_compat;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod mlx_executor;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -385,6 +393,7 @@ pub mod mlx_runtime_probe;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod model;
 pub mod model_adapter;
 #[cfg(any(
@@ -392,7 +401,7 @@ pub mod model_adapter;
     feature = "prism-backend"
 ))]
 pub mod model_cache;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod model_runtime;
 pub mod model_store;
 #[cfg(any(
@@ -417,17 +426,20 @@ pub mod plugin;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod primitives;
 pub mod profile_compiler;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod profiled_executor;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod profiled_model;
 #[cfg(any(
     any(
@@ -446,17 +458,22 @@ pub mod projection_executor;
     feature = "intel",
     feature = "tensix"
 ))]
+/// Always-available projection data types (see module docs).
+pub mod projection_types;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod projection_identity;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod projection_tests;
 pub mod quantization;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod quantized;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod readiness_gates;
@@ -466,6 +483,7 @@ pub mod receipts;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod replay_projection;
 pub mod requalification;
 #[cfg(any(
@@ -549,6 +567,7 @@ pub mod transform_recipe;
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod treatment;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
