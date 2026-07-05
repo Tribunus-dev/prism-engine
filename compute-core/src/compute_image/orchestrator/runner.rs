@@ -20,6 +20,7 @@ use crate::compute_image::compile::kernel_dispatch::{
 use crate::compute_image::compile::kernel_registry::KernelRegistry;
 use crate::compute_image::compile::kernel_types::{KernelReceipt, ProjectionParams};
 use crate::compute_image::megakernel::{KernelBuffers, Megakernel};
+pub use crate::compute_image::megakernel::kernels::TapMode;
 use crate::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
 use crate::compute_image::multimodal::binding::SealedMultimodalBindings;
 use crate::compute_image::multimodal::descriptor::ProjectionTensorRecord;
@@ -98,6 +99,11 @@ pub struct Orchestrator {
     /// model bytes. Built at ingest time by gemma4_ingest via
     /// coremlcompiler. One model instance per work queue slot.
     pub prefill_model: Option<CoreAiModel>,
+    /// How this orchestrator was built with respect to Stage 0 activation
+    /// taps — decided at construction, recorded in operational receipts. The
+    /// parity audit refuses to run against an `Untapped` teacher before any
+    /// decoding begins ([`Self::decode_token_logits_with_taps`]).
+    pub tap_mode: TapMode,
 }
 
 impl Orchestrator {
@@ -163,17 +169,62 @@ impl Orchestrator {
             MTLResourceOptions::StorageModeShared,
         );
 
-        // v1-compat fallback: multimodal records cannot yet describe bias
-        // residency (see kernels/MULTIMODAL_NF4_BIAS_ABI.md for the spec that
-        // closes this). Numerically exact for every artifact the symmetric
-        // NF4 quantizer produces (bias ≡ 0 by construction); biases are
-        // scale-parallel ([tiles×5] f32), hence the scale_length sizing.
-        let zero_biases = vec![0u8; record.scale_length as usize];
-        let biases_buf = self.device.new_buffer_with_data(
-            zero_biases.as_ptr() as *const std::ffi::c_void,
-            zero_biases.len() as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        // Bias residency (kernels/MULTIMODAL_NF4_BIAS_ABI.md, implemented):
+        // when the record carries FLAG_HAS_BIAS and the artifact seals a bias
+        // segment, bind the REAL resident biases — addressed by the record's
+        // scale geometry per the parallel-layout contract. Otherwise fall
+        // back to a zero buffer, which is numerically exact for every
+        // artifact the symmetric NF4 quantizer produces (bias ≡ 0 by
+        // construction). The taken path is logged per projection so there is
+        // never ambiguity about whether the shared bias arena was used
+        // (PRODUCTION_CONTRACT.md).
+        let resident_biases = if record.has_bias() {
+            match self.deployment.multimodal_projection_biases_buffer.as_ref() {
+                Some(buf) => Some(buf),
+                None => {
+                    return Err(format!(
+                        "projection record {:#x} sets FLAG_HAS_BIAS but the loaded \
+                         artifact has no MultimodalProjectionBiases segment — refusing \
+                         the silent zero fallback for a record that declares residency",
+                        record.logical_name_hash
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+        let zero_biases;
+        let (biases_buf, biases_offset): (&metal::Buffer, u64) = match resident_biases {
+            Some(buf) => {
+                eprintln!(
+                    "[multimodal-nf4] projection {:#x}: bias residency = RESIDENT \
+                     (segment-backed, offset {}, {} bytes)",
+                    record.logical_name_hash, record.scale_offset, record.scale_length
+                );
+                (buf, record.scale_offset)
+            }
+            None => {
+                eprintln!(
+                    "[multimodal-nf4] projection {:#x}: bias residency = ZERO-FALLBACK \
+                     (v1-compat: record has no FLAG_HAS_BIAS)",
+                    record.logical_name_hash
+                );
+                zero_biases = self.device.new_buffer(
+                    record.scale_length.max(4),
+                    MTLResourceOptions::StorageModeShared,
+                );
+                // Metal shared buffers are zero-initialized only on some
+                // paths; make the fallback contract explicit.
+                unsafe {
+                    std::ptr::write_bytes(
+                        zero_biases.contents() as *mut u8,
+                        0,
+                        record.scale_length.max(4) as usize,
+                    );
+                }
+                (&zero_biases, 0)
+            }
+        };
 
         let registry = Arc::new(Mutex::new(KernelRegistry::new(&self.device)));
         let dispatcher = Nf4Tile640ProjectionDispatcher::new(registry);
@@ -206,14 +257,14 @@ impl Orchestrator {
             &cb,
             weights,
             scales,
-            &biases_buf,
+            biases_buf,
             &input_buf,
             &output_buf,
             &params,
             Nf4Tile640Offsets {
                 weights_offset: record.weight_offset,
                 scales_offset: record.scale_offset,
-                biases_offset: 0,
+                biases_offset,
             },
             &mut receipt,
         );
@@ -341,6 +392,22 @@ impl Orchestrator {
         batch_size: u32,
         int4_mode: bool,
     ) -> Result<Self, String> {
+        // Back-compat: the tap mode defaults from the environment
+        // (`TRIBUNUS_TAPS=1` ⇒ tapped-audit). New call sites — the parity
+        // stage in particular — pass the mode explicitly.
+        Self::from_cimage_with_mode(path, batch_size, int4_mode, TapMode::from_env())
+    }
+
+    /// [`Self::from_cimage`] with the tap mode stated explicitly — the
+    /// declared-mode construction path (PRODUCTION_CONTRACT.md): audit
+    /// tooling passes [`TapMode::TappedAudit`] and never depends on ambient
+    /// environment variables; production passes [`TapMode::Untapped`].
+    pub fn from_cimage_with_mode(
+        path: impl AsRef<std::path::Path>,
+        batch_size: u32,
+        int4_mode: bool,
+        tap_mode: TapMode,
+    ) -> Result<Self, String> {
         let path = path.as_ref();
         let device = Device::system_default().ok_or("no Metal device available")?;
         let queue = device.new_command_queue();
@@ -348,7 +415,7 @@ impl Orchestrator {
         if int4_mode {
             deployment.maybe_expand_to_int4(&device)?;
         }
-        let megakernel = Megakernel::new(&device, &queue, &deployment, int4_mode)?;
+        let megakernel = Megakernel::new(&device, &queue, &deployment, int4_mode, tap_mode)?;
         let tree_attn = TreeAttention::new(&device)?;
         let kernel_buffers = megakernel.launch(&deployment, batch_size)?;
 
@@ -440,6 +507,7 @@ impl Orchestrator {
             vm_manager: VmManager::new(),
             compaction_pass: 0,
             prefill_model,
+            tap_mode,
         })
     }
 
@@ -795,9 +863,11 @@ impl Orchestrator {
         &mut self,
         token_id: u32,
     ) -> Result<(u32, Vec<f32>, LayerTaps), String> {
-        if !crate::compute_image::megakernel::kernels::taps_requested() {
+        if !self.tap_mode.is_tapped() {
             return Err(
-                "taps not enabled: set TRIBUNUS_TAPS=1 before constructing the Orchestrator"
+                "taps not enabled: this Orchestrator was constructed Untapped — build it \
+                 with from_cimage_with_mode(.., TapMode::TappedAudit) (or TRIBUNUS_TAPS=1 \
+                 for the env-default constructor) before requesting taps"
                     .into(),
             );
         }
@@ -1896,6 +1966,43 @@ mod stage0_tap_tests {
 
     fn finite_nonzero(v: &[f32]) -> bool {
         v.iter().all(|x| x.is_finite()) && v.iter().any(|x| *x != 0.0)
+    }
+
+    /// Tap mode is an explicit construction parameter, not an ambient env
+    /// convention: with TRIBUNUS_TAPS **unset**, `from_cimage_with_mode(..,
+    /// TappedAudit)` must produce a fully tapped orchestrator, and an
+    /// explicitly `Untapped` one must refuse the taps API even if the env
+    /// var IS set (the mode wins over the environment).
+    #[test]
+    fn tap_mode_explicit_construction_beats_env() {
+        let Some(path) = cimage() else { return };
+        // Explicit TappedAudit, env unset → taps work.
+        let (argmax_a, taps_ok) = with_taps_env(false, || {
+            let mut orch =
+                Orchestrator::from_cimage_with_mode(&path, 1, false, TapMode::TappedAudit)
+                    .expect("tapped orchestrator");
+            assert_eq!(orch.tap_mode, TapMode::TappedAudit);
+            let (next, _logits, taps) = orch
+                .decode_token_logits_with_taps(7)
+                .expect("explicit mode must not need TRIBUNUS_TAPS");
+            (next, finite_nonzero(taps.post_embed()))
+        });
+        assert!(taps_ok, "post-embed tap must be populated");
+        // Explicit Untapped, env SET → the taps API refuses (mode wins).
+        let argmax_b = with_taps_env(true, || {
+            let mut orch =
+                Orchestrator::from_cimage_with_mode(&path, 1, false, TapMode::Untapped)
+                    .expect("untapped orchestrator");
+            assert_eq!(orch.tap_mode, TapMode::Untapped);
+            assert!(
+                orch.decode_token_logits_with_taps(7).is_err(),
+                "Untapped orchestrator must refuse the taps API even with TRIBUNUS_TAPS=1"
+            );
+            let (next, _logits) = orch.decode_token_logits(7).expect("plain decode");
+            next
+        });
+        // Same token, same artifact → same greedy pick on both modes.
+        assert_eq!(argmax_a, argmax_b, "tap mode must not change decode output");
     }
 
     /// (a) Self-consistency: every tap slot is populated and finite; the
