@@ -30,7 +30,14 @@ pub struct MultimodalInputDescriptorV1 {
     pub image_patch_size: u16,
     pub image_pooling_kernel: u16,
     pub image_channels: u16,
-    pub image_reserved: u16,
+    /// Segment index of `SegmentKind::MultimodalProjectionBiases`, or
+    /// `u16::MAX` when absent. Occupies the slot formerly named
+    /// `image_reserved` — same offset, same width, so the descriptor layout,
+    /// magic, and version are untouched (v1-compatible by construction).
+    /// v1 packers wrote 0 here, which is why the per-record
+    /// [`ProjectionTensorRecord::FLAG_HAS_BIAS`] gate — not this index — is
+    /// the load-bearing guard against misreading old artifacts.
+    pub projection_bias_segment_index: u16,
     pub image_min_soft_tokens: u32,
     pub image_default_soft_tokens: u32,
     pub image_max_soft_tokens: u32,
@@ -111,6 +118,17 @@ impl ProjectionTensorRecord {
     pub const QUANTIZATION_NONE: u8 = 0;
     pub const QUANTIZATION_NF4_TILE640: u8 = 1;
 
+    /// This record's biases are resident in the
+    /// `MultimodalProjectionBiases` segment, byte-parallel to its scales
+    /// (`scale_offset`/`scale_length` address both segments). Every packer
+    /// before the bias ABI wrote `flags = 0`, so v1 artifacts can never take
+    /// the bias path — not even by accident.
+    pub const FLAG_HAS_BIAS: u8 = 1 << 0;
+
+    pub fn has_bias(&self) -> bool {
+        self.flags & Self::FLAG_HAS_BIAS != 0
+    }
+
     pub fn is_nf4_tile640(&self) -> bool {
         self.layout == Self::LAYOUT_NF4_TILE640
             && self.quantization_kind == Self::QUANTIZATION_NF4_TILE640
@@ -140,6 +158,17 @@ impl ProjectionTensorRecord {
                 "NF4Tile640 scale_length mismatch for projection: expected {}, got {}",
                 expected_scale_length, self.scale_length
             ));
+        }
+
+        // Bias parallelism contract: a record flagged FLAG_HAS_BIAS addresses
+        // the bias segment through its scale geometry, so the flag is only
+        // meaningful when that geometry exists.
+        if self.has_bias() && self.scale_length == 0 {
+            return Err(
+                "projection record sets FLAG_HAS_BIAS but has scale_length == 0 — \
+                 biases are scale-parallel and need the scale geometry"
+                    .into(),
+            );
         }
 
         Ok(layout)
