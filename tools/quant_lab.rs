@@ -265,4 +265,10 @@ fn main() {
     }
     println!("\n[gemv parity] rows checked={}  max|recon - kernel_equiv| = {:.3e}  {}",
              checked, maxd, if maxd < 1e-6 { "PASS" } else { "FAIL" });
+
+    // Hard invariants so this doubles as a CI regression guard (nonzero exit on
+    // failure): the fused/kernel-equivalent path must reproduce the stored
+    // reconstruction, and the two-level int8 config must stay dense.
+    assert!(checked > 0, "quant_lab ran no rows");
+    assert!(maxd < 1e-6, "quant_lab GEMV parity regression: max err {:e}", maxd);
 }
