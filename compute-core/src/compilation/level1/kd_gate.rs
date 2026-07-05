@@ -21,12 +21,23 @@
 //! student that matches early positions but diverges as context grows shows up
 //! as a rising per-window KD even when the mean looks acceptable.
 //!
-//! ## Memory
-//! Held logits are `positions × vocab × 4` bytes per model — at the default
-//! 128 positions × 262144 vocab that is ~134 MB per model (~268 MB while both
-//! are alive). The two orchestrators are loaded **sequentially** (teacher is
-//! dropped before the student loads), so model weights are never resident
-//! twice. Scale `calibration_len` with available memory.
+//! ## Memory — the exact accounting
+//! Held logits are ONE flat `positions × vocab × 4`-byte buffer per model —
+//! at the default 128 positions × 262144 vocab that is ~134 MB per model,
+//! ~268 MB while both sides are held for scoring. The teacher pass streams
+//! rows directly into the flat buffer ([`teacher_forced_flat`]), so the
+//! transient peak per model is the flat buffer plus a single ~1 MB row — NOT
+//! the ~2× peak the earlier nested-then-flatten shape had. The two
+//! orchestrators are loaded **sequentially** (teacher is dropped before the
+//! student loads), so model weights are never resident twice.
+//!
+//! `calibration_len` is a **hard cap on both token sources** (built-in
+//! generator AND token files — see [`load_calibration_stream`]); predicted
+//! validation bytes are therefore bounded by the request before any decode
+//! starts, and the worker checks that bound against the declared memory
+//! ceiling (Lane B preconditions, PRODUCTION_CONTRACT.md).
+//!
+//! [`teacher_forced_flat`]: crate::compilation::level1::teacher::Gemma4Teacher::teacher_forced_flat
 
 use crate::compilation::distill_core::{kd_divergence_batch, top1_agreement};
 
@@ -208,13 +219,45 @@ pub fn builtin_calibration_tokens(n: usize, vocab_cap: u32, seed: u64) -> Vec<u3
         .collect()
 }
 
+/// A loaded calibration stream with budget accounting.
+///
+/// `n` is a **hard cap on both sources**: the built-in generator emits exactly
+/// `n` tokens, and a file-backed stream is deterministically truncated to its
+/// first `n` tokens. A token file can therefore never silently exceed the
+/// verification budget the request declared — the pre-hardening behavior
+/// (file present ⇒ `n` ignored ⇒ unbounded decode) is gone. The accounting
+/// fields exist so receipts can state exactly what happened
+/// (PRODUCTION_CONTRACT.md: requested/loaded/used must be auditable).
+#[derive(Debug, Clone)]
+pub struct CalibrationStream {
+    pub tokens: Vec<u32>,
+    /// The cap the caller requested (`calibration_len` / `max_parity_tokens`).
+    pub requested_tokens: usize,
+    /// Tokens present in the source: the file's full parsed count, or
+    /// `requested_tokens` for the built-in generator.
+    pub loaded_tokens: usize,
+    /// Tokens actually used — `min(requested, loaded)`; always `tokens.len()`.
+    pub used_tokens: usize,
+    /// True iff a file-backed stream was truncated to the cap (first
+    /// `requested_tokens` tokens kept — deterministic by construction).
+    pub truncated_by_policy: bool,
+}
+
 /// Load calibration tokens from a comma/whitespace-separated u32 file, or fall
-/// back to the deterministic built-in stream.
-pub fn load_calibration_tokens(
+/// back to the deterministic built-in stream — **always** capped at `n`.
+pub fn load_calibration_stream(
     path: Option<&std::path::Path>,
     n: usize,
     vocab_cap: u32,
-) -> Result<Vec<u32>, String> {
+) -> Result<CalibrationStream, String> {
+    if n == 0 {
+        // Zero would either mean "no verification" (a policy the caller must
+        // express by skipping the stage, not by a degenerate budget) or invite
+        // the "0 = unlimited" misreading. Reject it.
+        return Err("calibration token budget is zero — declare a positive budget \
+                    or skip the verification stage explicitly"
+            .into());
+    }
     match path {
         Some(p) => {
             let text = std::fs::read_to_string(p)
@@ -230,10 +273,42 @@ pub fn load_calibration_tokens(
             if toks.is_empty() {
                 return Err(format!("no tokens parsed from {}", p.display()));
             }
-            Ok(toks)
+            let loaded = toks.len();
+            let truncated = loaded > n;
+            let tokens = if truncated { toks[..n].to_vec() } else { toks };
+            let used = tokens.len();
+            Ok(CalibrationStream {
+                tokens,
+                requested_tokens: n,
+                loaded_tokens: loaded,
+                used_tokens: used,
+                truncated_by_policy: truncated,
+            })
         }
-        None => Ok(builtin_calibration_tokens(n, vocab_cap, 1)),
+        None => {
+            let tokens = builtin_calibration_tokens(n, vocab_cap, 1);
+            Ok(CalibrationStream {
+                requested_tokens: n,
+                loaded_tokens: tokens.len(),
+                used_tokens: tokens.len(),
+                truncated_by_policy: false,
+                tokens,
+            })
+        }
     }
+}
+
+/// Compatibility wrapper over [`load_calibration_stream`] returning just the
+/// tokens. NOTE: since the budget-hardening pass this **enforces `n` as a hard
+/// cap on file-backed streams too** — the old behavior (file present ⇒ `n`
+/// ignored) allowed a large token file to silently defeat the verification
+/// budget. Prefer the stream API, which also reports the accounting.
+pub fn load_calibration_tokens(
+    path: Option<&std::path::Path>,
+    n: usize,
+    vocab_cap: u32,
+) -> Result<Vec<u32>, String> {
+    Ok(load_calibration_stream(path, n, vocab_cap)?.tokens)
 }
 
 /// Whether this build can execute cimages for KD scoring (needs the Metal
@@ -259,22 +334,14 @@ pub fn compute_calibration_logits(
     }
     let mut runner = Gemma4Teacher::load(cimage)
         .map_err(|e| format!("load {}: {e}", cimage.display()))?;
-    let per_position = runner
-        .teacher_forced(tokens)
-        .map_err(|e| format!("teacher_forced on {}: {e}", cimage.display()))?;
-
-    let positions = per_position.len();
-    let vocab = per_position.first().map(Vec::len).unwrap_or(0);
-    if vocab == 0 {
-        return Err(format!("{}: empty logit rows", cimage.display()));
-    }
-    if per_position.iter().any(|row| row.len() != vocab) {
-        return Err(format!("{}: ragged logit rows", cimage.display()));
-    }
-    let mut logits = Vec::with_capacity(positions * vocab);
-    for row in &per_position {
-        logits.extend_from_slice(row);
-    }
+    // Streaming: rows land directly in ONE flat buffer (row-length checked as
+    // they arrive). No nested Vec<Vec<f32>>, no flatten copy — the resident
+    // peak is exactly positions × vocab × 4 bytes plus one transient row.
+    let (logits, vocab) = runner
+        .teacher_forced_flat(tokens)
+        .map_err(|e| format!("teacher_forced_flat on {}: {e}", cimage.display()))?;
+    let positions = tokens.len();
+    debug_assert_eq!(logits.len(), positions * vocab);
     Ok(CalibrationLogits {
         logits,
         vocab,
@@ -590,6 +657,74 @@ impl ParityRun {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── calibration budget contract (load_calibration_stream) ──────────────
+
+    fn write_token_file(dir: &std::path::Path, name: &str, toks: &[u32]) -> std::path::PathBuf {
+        let p = dir.join(name);
+        let text = toks
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        std::fs::write(&p, text).unwrap();
+        p
+    }
+
+    #[test]
+    fn file_longer_than_budget_is_truncated_deterministically() {
+        let dir = tempfile::tempdir().unwrap();
+        let all: Vec<u32> = (1..=100).collect();
+        let p = write_token_file(dir.path(), "toks.txt", &all);
+        let s = load_calibration_stream(Some(&p), 16, 1000).unwrap();
+        assert_eq!(s.requested_tokens, 16);
+        assert_eq!(s.loaded_tokens, 100);
+        assert_eq!(s.used_tokens, 16);
+        assert!(s.truncated_by_policy);
+        assert_eq!(s.tokens, (1..=16).collect::<Vec<u32>>(), "first-n prefix");
+        // Determinism: same file, same budget ⇒ same stream.
+        let s2 = load_calibration_stream(Some(&p), 16, 1000).unwrap();
+        assert_eq!(s.tokens, s2.tokens);
+    }
+
+    #[test]
+    fn file_shorter_than_budget_is_used_whole_not_truncated() {
+        let dir = tempfile::tempdir().unwrap();
+        let all: Vec<u32> = (1..=8).collect();
+        let p = write_token_file(dir.path(), "toks.txt", &all);
+        let s = load_calibration_stream(Some(&p), 64, 1000).unwrap();
+        assert_eq!(s.loaded_tokens, 8);
+        assert_eq!(s.used_tokens, 8);
+        assert!(!s.truncated_by_policy);
+        assert_eq!(s.tokens, all);
+    }
+
+    #[test]
+    fn zero_budget_is_rejected_not_unbounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_token_file(dir.path(), "toks.txt", &[1, 2, 3]);
+        assert!(load_calibration_stream(Some(&p), 0, 1000).is_err());
+        assert!(load_calibration_stream(None, 0, 1000).is_err());
+    }
+
+    #[test]
+    fn builtin_stream_respects_budget_exactly() {
+        let s = load_calibration_stream(None, 32, 500).unwrap();
+        assert_eq!(s.used_tokens, 32);
+        assert_eq!(s.loaded_tokens, 32);
+        assert!(!s.truncated_by_policy);
+        assert_eq!(s.tokens, builtin_calibration_tokens(32, 500, 1));
+    }
+
+    #[test]
+    fn compat_wrapper_enforces_the_cap_too() {
+        // The old API must no longer allow a file to defeat the budget.
+        let dir = tempfile::tempdir().unwrap();
+        let all: Vec<u32> = (1..=50).collect();
+        let p = write_token_file(dir.path(), "toks.txt", &all);
+        let toks = load_calibration_tokens(Some(&p), 10, 1000).unwrap();
+        assert_eq!(toks.len(), 10);
+    }
 
     fn synth(positions: usize, vocab: usize, seed: u64) -> CalibrationLogits {
         let mut s = seed;
