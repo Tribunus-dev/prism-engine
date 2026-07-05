@@ -5,6 +5,7 @@
 //! top-level convenience reader.
 
 pub mod builder;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod runtime;
 pub mod types;
 
@@ -48,6 +49,7 @@ pub fn image_build_attestation() -> serde_json::Value {
 
 // ── Telemetry helpers ──────────────────────────────────────────────────────
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 /// Returns MLX active memory in bytes, or 0 if the mlx-rs API is unavailable.
 pub fn mlx_active_memory_bytes() -> u64 {
     #[cfg(target_os = "macos")]
@@ -62,6 +64,7 @@ pub fn mlx_active_memory_bytes() -> u64 {
     }
 }
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 /// Returns MLX cache memory in bytes, or 0 if the mlx-rs API is unavailable.
 pub fn mlx_cache_memory_bytes() -> u64 {
     #[cfg(target_os = "macos")]
@@ -77,6 +80,7 @@ pub fn mlx_cache_memory_bytes() -> u64 {
 }
 
 /// Returns MLX peak memory in bytes, or 0 if unavailable.
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub fn mlx_peak_memory_bytes() -> u64 {
     #[cfg(target_os = "macos")]
     {
@@ -90,6 +94,7 @@ pub fn mlx_peak_memory_bytes() -> u64 {
     }
 }
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 /// Clear the MLX Metal allocator cache. Returns the number of bytes freed.
 pub fn clear_mlx_cache() -> u64 {
     let before = mlx_cache_memory_bytes();
@@ -101,6 +106,7 @@ pub fn clear_mlx_cache() -> u64 {
     before.saturating_sub(after)
 }
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 /// Set the MLX Metal cache limit in bytes. Returns the previous limit.
 pub fn set_mlx_cache_limit(limit_bytes: u64) -> u64 {
     #[cfg(target_os = "macos")]
@@ -116,6 +122,7 @@ pub fn set_mlx_cache_limit(limit_bytes: u64) -> u64 {
     }
 }
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 /// Get the MLX Metal active memory limit in bytes.
 pub fn mlx_get_memory_limit() -> u64 {
     #[cfg(target_os = "macos")]
@@ -130,6 +137,7 @@ pub fn mlx_get_memory_limit() -> u64 {
     }
 }
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 /// Set the MLX Metal active memory limit in bytes. Returns the previous limit.
 pub fn set_mlx_memory_limit(limit_bytes: u64) -> u64 {
     #[cfg(target_os = "macos")]
@@ -320,14 +328,34 @@ impl NativeCapabilityReport {
     /// Probe the current native environment.
     pub fn probe() -> Self {
         let metal_available = {
-            #[cfg(target_os = "macos")]
+            // Research surface: ask MLX (matches historical probe behavior).
+            #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
             {
                 let mut res: bool = false;
                 unsafe { mlx_sys::mlx_metal_is_available(&mut res) };
                 res
             }
-            #[cfg(not(target_os = "macos"))]
-            false
+            // Hermetic production surface: ask Metal directly — the probe must
+            // not require the MLX build (PRODUCTION_CONTRACT.md).
+            #[cfg(all(
+                target_os = "macos",
+                not(feature = "mlx-backend"),
+                feature = "metal-dispatch"
+            ))]
+            {
+                metal::Device::system_default().is_some()
+            }
+            #[cfg(any(
+                all(
+                    target_os = "macos",
+                    not(feature = "mlx-backend"),
+                    not(feature = "metal-dispatch")
+                ),
+                not(target_os = "macos")
+            ))]
+            {
+                false
+            }
         };
 
         let supports_memory_telemetry = mlx_active_memory_bytes() > 0 || metal_available;
