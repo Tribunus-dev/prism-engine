@@ -7,11 +7,19 @@ use crate::config::CompileQuantMode;
 // NF4 codebook
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// These are the 16 quantiles of a standard normal distribution,
-/// symmetric around zero, with equal area under the curve per interval.
+/// The 16 NormalFloat4 levels (QLoRA/bitsandbytes NF4): normal-distribution
+/// quantiles normalized to [-1, 1], denser near zero. All 16 are reachable
+/// under absmax scaling (`normalized ∈ [-1,1]`), unlike the previous asymmetric
+/// [-1, 2] table whose positive tail (indices 13–15) was structurally dead —
+/// which cost ~19% reconstruction fidelity (see tools/nf4tile640_ref.rs).
+///
+/// SOURCE OF TRUTH: this constant is duplicated in bin/tribunus-artifact-admission.rs,
+/// compute_image/kernel_provider.rs, and templates/tile640_pack.metal — keep all
+/// four in sync. Changing it is FORMAT-BREAKING: existing NF4 `.cimage` files must
+/// be re-packed (stored indices remap to different values).
 pub(crate) const NF4_CODEBOOK: [f32; 16] = [
-    -1.0, -0.8480, -0.5698, -0.3940, -0.2419, -0.1057, 0.0, 0.1057, 0.2419, 0.3940, 0.5698, 0.8480,
-    1.0, 1.2588, 1.5862, 2.0,
+    -1.0, -0.6961928, -0.5250731, -0.3949175, -0.2844414, -0.1847734, -0.09105, 0.0, 0.0795803,
+    0.1609302, 0.2461123, 0.3379152, 0.4407099, 0.562617, 0.7229568, 1.0,
 ];
 
 /// Find the nearest NF4 codebook index for a given normalized value.
