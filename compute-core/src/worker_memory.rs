@@ -293,6 +293,7 @@ pub fn sample_page_faults() -> u64 {
 /// [`compute_image::set_mlx_cache_limit`] calls and finishes with a
 /// [`compute_image::clear_mlx_cache`] so the new limits take effect
 /// immediately.
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub fn configure_mlx_memory_limits(active_limit_bytes: u64, cache_limit_bytes: u64) {
     compute_image::set_mlx_memory_limit(active_limit_bytes);
     compute_image::set_mlx_cache_limit(cache_limit_bytes);
@@ -307,6 +308,7 @@ pub fn configure_mlx_memory_limits(active_limit_bytes: u64, cache_limit_bytes: u
 ///
 /// # Panics
 /// Panics when the admission estimate exceeds the machine's usable memory.
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub fn configure_mlx_limits_for_model(
     estimate: &crate::model_runtime::ModelAdmissionEstimate,
     machine: &MachineProfile,
