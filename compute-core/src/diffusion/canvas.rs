@@ -237,7 +237,11 @@ mod tests {
         };
 
         let changed = canvas.update(&output);
-        assert_eq!(changed, 2, "two positions should change");
+        // Three state mutations: two commits + one remask. update() counts a
+        // remask as a change (it rewrites the token and zeroes confidence) —
+        // note this also means remask-only steps reset the unchanged_steps
+        // stall counter.
+        assert_eq!(changed, 3, "two commits + one remask should change");
 
         assert!(canvas.committed[0]);
         assert!(canvas.committed[1]);

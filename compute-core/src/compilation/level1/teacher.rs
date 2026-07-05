@@ -53,6 +53,17 @@ impl WeightStore {
 /// Wraps the Accelerate/vDSP-based dense GEMV that runs the teacher model on
 /// a microbatch of tokens.  Stateless — each call receives a microbatch index
 /// and produces output activations into the internal output buffer.
+/// ⚠ SYNTHETIC PROXY — NOT the real model. Weights are a deterministic
+/// sinusoid (`WeightStore::new`) and the Metal path uploads a compact
+/// approximation/codebook, not a dense checkpoint matrix. It exists to
+/// exercise scheduling, memory ceilings, and reducer plumbing at realistic
+/// SHAPES. Any accuracy/MSE/cosine number measured against it validates the
+/// pipeline's mechanics, not model quality — do not interpret Level 1/2 gate
+/// metrics as model fidelity while this proxy is the teacher.
+/// The checkpoint-backed teacher is [`Gemma4Teacher`] (below); today it feeds
+/// the model-level KD gate (`level1::kd_gate` via `distill_worker`), and the
+/// per-layer gate graduation is blocked on per-layer real-teacher activations
+/// (kernels/PER_OP_FORWARD_PLAN.md Stage 0/7).
 pub struct MetalTeacher {
     weights: WeightStore,
     output: Vec<f32>,

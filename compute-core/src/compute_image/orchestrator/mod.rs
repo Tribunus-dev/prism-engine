@@ -125,6 +125,21 @@ pub fn f32_from_half(x: u16) -> f32 {
     f32::from_bits(fp32_bits)
 }
 
+/// Greedy argmax over f32 logits (the scoring-API side of the boundary —
+/// `decode_slot_logits` converts the megakernel's FP16 bits to f32 once, and
+/// everything downstream of it works in f32).
+pub fn sample_argmax_f32(logits: &[f32]) -> u32 {
+    let mut best = 0u32;
+    let mut best_v = f32::MIN;
+    for (i, &v) in logits.iter().enumerate() {
+        if v > best_v {
+            best_v = v;
+            best = i as u32;
+        }
+    }
+    best
+}
+
 /// Greedy argmax over FP16 logits.
 pub fn sample_argmax(logits: &[u16]) -> u32 {
     let mut best = 0u32;

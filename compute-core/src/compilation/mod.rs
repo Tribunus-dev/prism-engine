@@ -41,7 +41,9 @@ pub mod staging;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod tri_lane;
 
-#[cfg(feature = "prism-backend")]
+// Not gated here: `level1/mod.rs` gates each Metal/CoreML-dependent submodule
+// on `prism-backend` individually, so the std-only pieces (`kd_gate`) compile
+// and unit-test on every host, Linux CI included.
 pub mod level1;
 #[cfg(all(target_os = "macos", feature = "prism-backend"))]
 pub mod level2;

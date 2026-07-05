@@ -238,10 +238,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_valid_image() {
-        let mut image = create_valid_image();
-
+    /// Recompute and install the canonical schema hash — REQUIRED after any
+    /// mutation of hash-covered fields (which is nearly all of them).
+    fn seal_schema_hash(image: &mut ComputeImageV0) {
         let mut canonical = image.clone();
         canonical.schema_hash = "".into();
         canonical.created_at = "".into();
@@ -253,7 +252,12 @@ mod tests {
         let mut hasher = sha2::Sha256::new();
         sha2::Digest::update(&mut hasher, json.as_bytes());
         image.schema_hash = format!("{:x}", hasher.finalize());
+    }
 
+    #[test]
+    fn test_valid_image() {
+        let mut image = create_valid_image();
+        seal_schema_hash(&mut image);
         assert!(verify_v0_image(&image, VerifierOptions::default()).is_ok());
     }
 
@@ -268,17 +272,18 @@ mod tests {
     fn test_dirty_tree_fails() {
         let mut image = create_valid_image();
         image.compute_scope_dirty = true;
+        // compute_scope_dirty participates in the schema hash — re-seal, so
+        // the ONLY failure under default options is the dirty-tree check
+        // (and the override genuinely isolates it).
+        seal_schema_hash(&mut image);
         assert!(verify_v0_image(&image, VerifierOptions::default()).is_err());
-        assert!(
-            verify_v0_image(
-                &image,
-                VerifierOptions {
-                    override_dirty_tree: true
-                }
-            )
-            .is_ok(),
-            "Should pass with override"
+        let r = verify_v0_image(
+            &image,
+            VerifierOptions {
+                override_dirty_tree: true,
+            },
         );
+        assert!(r.is_ok(), "Should pass with override; errors: {:?}", r.err());
     }
 
     #[test]

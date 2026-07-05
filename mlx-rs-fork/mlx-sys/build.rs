@@ -219,6 +219,13 @@ fn build_and_link_mlx_c() {
         "cargo:rustc-link-search=native={}/lib",
         install_prefix.display()
     );
+    // RHEL-family distros (Fedora, Amazon Linux) install to lib64/ under
+    // CMAKE_INSTALL_PREFIX. Nonexistent search dirs are ignored, so emitting
+    // both keeps Debian/macOS unaffected.
+    println!(
+        "cargo:rustc-link-search=native={}/lib64",
+        install_prefix.display()
+    );
     println!("cargo:rustc-link-lib=static=mlx");
     println!("cargo:rustc-link-lib=static=mlxc");
 

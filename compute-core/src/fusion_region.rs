@@ -603,7 +603,7 @@ mod tests {
             (FusionImplBackend::MlxGpu, "\"mlx_gpu\""),
             (FusionImplBackend::MlxCpu, "\"mlx_cpu\""),
             (FusionImplBackend::Accelerate, "\"accelerate\""),
-            (FusionImplBackend::CoreAiAne, "\"core_ml_ane\""),
+            (FusionImplBackend::CoreAiAne, "\"core_ai_ane\""),
             (FusionImplBackend::RustNeon, "\"rust_neon\""),
             (FusionImplBackend::FusionOnly, "\"fusion_only\""),
         ];

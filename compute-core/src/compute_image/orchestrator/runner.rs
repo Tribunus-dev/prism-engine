@@ -6,8 +6,8 @@
 
 use super::kernel_fusion;
 use super::{
-    generate_speculative_candidates, sample_argmax, GLOBAL_HEAD_DIM, LAYERS, MAX_CONTEXT,
-    MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS,
+    generate_speculative_candidates, sample_argmax, sample_argmax_f32, GLOBAL_HEAD_DIM, LAYERS,
+    MAX_CONTEXT, MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS,
 };
 use crate::arena::Arena;
 use crate::arena::DataType;
@@ -163,6 +163,11 @@ impl Orchestrator {
             MTLResourceOptions::StorageModeShared,
         );
 
+        // v1-compat fallback: multimodal records cannot yet describe bias
+        // residency (see kernels/MULTIMODAL_NF4_BIAS_ABI.md for the spec that
+        // closes this). Numerically exact for every artifact the symmetric
+        // NF4 quantizer produces (bias ≡ 0 by construction); biases are
+        // scale-parallel ([tiles×5] f32), hence the scale_length sizing.
         let zero_biases = vec![0u8; record.scale_length as usize];
         let biases_buf = self.device.new_buffer_with_data(
             zero_biases.as_ptr() as *const std::ffi::c_void,
@@ -695,7 +700,7 @@ impl Orchestrator {
     /// contains the prefill positions and attention covers the full
     /// context.
     pub fn decode_slot(&mut self, slot_id: u32, token_id: u32) -> Result<u32, String> {
-        Ok(sample_argmax(&self.decode_slot_logits(slot_id, token_id)?))
+        Ok(sample_argmax_f32(&self.decode_slot_logits(slot_id, token_id)?))
     }
 
     /// Like [`decode_slot`] but returns the full output logit vector instead of
@@ -751,14 +756,17 @@ impl Orchestrator {
         }
         // ── End eviction ──
 
-        let logits = self
+        // read_slot_logits returns the megakernel's raw FP16 logits as u16
+        // half-bits; the scoring API contract here is f32 (the bench harness,
+        // KD gate, and Gemma4Teacher::teacher_forced all consume f32).
+        let raw = self
             .megakernel
             .read_slot_logits(&self.kernel_buffers, slot_id, 0);
         self.megakernel
             .reset_work_slot(&self.kernel_buffers, slot_id);
 
         self.slot_seq_pos[slot] = seq_pos + 1;
-        Ok(logits)
+        Ok(raw.iter().map(|&b| f16::from_bits(b).to_f32()).collect())
     }
 
     /// Decode one token using slot 0 (convenience wrapper).
@@ -772,7 +780,146 @@ impl Orchestrator {
     #[inline]
     pub fn decode_token_logits(&mut self, token_id: u32) -> Result<(u32, Vec<f32>), String> {
         let logits = self.decode_slot_logits(0, token_id)?;
-        Ok((sample_argmax(&logits), logits))
+        Ok((sample_argmax_f32(&logits), logits))
+    }
+
+    /// Decode one token on slot 0 and return `(argmax, logits, taps)` — the
+    /// Stage 0 audit hook (kernels/STAGE0_TAPS_SPEC.md, Transport A).
+    ///
+    /// Requires the megakernel to have been compiled with taps — set
+    /// `TRIBUNUS_TAPS=1` BEFORE constructing this Orchestrator (the persistent
+    /// kernel compiles taps in at construction time). Errors rather than
+    /// returning stale/zeroed taps otherwise, and verifies the in-kernel
+    /// progress counter reached the final slot before trusting the buffer.
+    pub fn decode_token_logits_with_taps(
+        &mut self,
+        token_id: u32,
+    ) -> Result<(u32, Vec<f32>, LayerTaps), String> {
+        if !crate::compute_image::megakernel::kernels::taps_requested() {
+            return Err(
+                "taps not enabled: set TRIBUNUS_TAPS=1 before constructing the Orchestrator"
+                    .into(),
+            );
+        }
+        let logits = self.decode_slot_logits(0, token_id)?;
+        let progress = self.megakernel.read_tap_progress(&self.kernel_buffers);
+        let expected = 2 * LAYERS + 1;
+        if progress != expected {
+            return Err(format!(
+                "tap progress {progress} != expected final slot {expected} — \
+                 kernel not compiled with -DPRISM_TAPS?"
+            ));
+        }
+        let raw = self.megakernel.read_layer_taps(&self.kernel_buffers);
+        let taps = LayerTaps::from_raw(raw)?;
+        Ok((sample_argmax_f32(&logits), logits, taps))
+    }
+
+    /// Transport B, fusion group size 1 (the audit-pass configuration from
+    /// STAGE0_TAPS_SPEC.md): dispatch `decode_layer_full_real` once per layer
+    /// in a single command buffer, CHAINING per-layer device buffers — layer
+    /// k's output buffer is layer k+1's input, and those 48 resident buffers
+    /// ARE the blit-free boundary taps (read back after completion, no
+    /// copies, no function constants, zero shader deltas).
+    ///
+    /// KV is the fused path's fp16 clean mode with per-layer caches sized for
+    /// short audit windows. At `seq_position == 0` each layer is numerically
+    /// identical to the megakernel's math; across the 48-layer chain the
+    /// output drifts from the megakernel taps only by the megakernel's own
+    /// ternary-KV noise (zero at pos 0) plus fp16 accumulation-order deltas —
+    /// the parity test emits the per-layer drift curve.
+    ///
+    /// Production fusion (2–4 layers/dispatch) migrates separately once the
+    /// pair/triple/quad bodies are real; this is the tap-bearing audit lane.
+    pub fn decode_audit_group1(
+        &self,
+        device: &metal::Device,
+        hidden_in: &[f32],
+        seq_position: u32,
+        audit_max_seq: u32,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        use crate::compute_image::megakernel::kernels::compile_layer_library;
+
+        const HIDDEN: usize = 3840;
+        if hidden_in.len() != HIDDEN {
+            return Err(format!("hidden_in len {} != {HIDDEN}", hidden_in.len()));
+        }
+        let norms = self
+            .deployment
+            .norms_buffer
+            .as_ref()
+            .ok_or("deployment missing norms buffer")?;
+
+        let lib = compile_layer_library(device)?;
+        let f = lib
+            .get_function("decode_layer_full_real", None)
+            .map_err(|e| format!("decode_layer_full_real: {e}"))?;
+        let pso = device
+            .new_compute_pipeline_state_with_function(&f)
+            .map_err(|e| format!("layer PSO: {e}"))?;
+
+        let opts = metal::MTLResourceOptions::StorageModeShared;
+        let mk_hidden = || device.new_buffer((HIDDEN * 2) as u64, opts);
+        // boundary[0] = input; boundary[k+1] = layer k's output (the tap).
+        let mut boundaries: Vec<metal::Buffer> = Vec::with_capacity(LAYERS as usize + 1);
+        let in_buf = mk_hidden();
+        unsafe {
+            let dst = in_buf.contents() as *mut u16;
+            for (i, &v) in hidden_in.iter().enumerate() {
+                *dst.add(i) = f16::from_f32(v).to_bits();
+            }
+        }
+        boundaries.push(in_buf);
+        for _ in 0..LAYERS {
+            boundaries.push(mk_hidden());
+        }
+
+        let stride = (NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
+        let kv_bytes = audit_max_seq.max(1) as u64 * stride * 2;
+        let kv: Vec<(metal::Buffer, metal::Buffer)> = (0..LAYERS)
+            .map(|_| (device.new_buffer(kv_bytes, opts), device.new_buffer(kv_bytes, opts)))
+            .collect();
+        let ffn_scratch = device.new_buffer(2 * 15360 * 2, opts);
+
+        let queue = device.new_command_queue();
+        let cb = queue.new_command_buffer();
+        let enc = cb.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&pso);
+        for layer in 0..LAYERS as usize {
+            enc.set_buffer(0, Some(&boundaries[layer]), 0);
+            enc.set_buffer(1, Some(&boundaries[layer + 1]), 0);
+            enc.set_buffer(2, Some(&kv[layer].0), 0);
+            enc.set_buffer(3, Some(&kv[layer].1), 0);
+            enc.set_buffer(4, Some(&self.deployment.weights_buffer), 0);
+            enc.set_buffer(5, Some(norms), 0);
+            enc.set_buffer(6, Some(&self.kernel_buffers.head_gates), 0);
+            enc.set_buffer(7, Some(&ffn_scratch), 0);
+            let li = layer as u32;
+            enc.set_bytes(8, 4, &li as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(
+                9,
+                4,
+                &seq_position as *const u32 as *const std::ffi::c_void,
+            );
+            enc.dispatch_thread_groups(
+                metal::MTLSize { width: 1, height: 1, depth: 1 },
+                metal::MTLSize { width: 256, height: 1, depth: 1 },
+            );
+        }
+        enc.end_encoding();
+        cb.commit();
+        cb.wait_until_completed();
+
+        // The chained buffers are the taps — read every layer boundary back.
+        Ok(boundaries[1..]
+            .iter()
+            .map(|b| {
+                unsafe { std::slice::from_raw_parts(b.contents() as *const u16, HIDDEN) }
+                    .iter()
+                    .map(|&bits| f16::from_bits(bits).to_f32())
+                    .collect()
+            })
+            .collect())
     }
 
     /// Decode one or more tokens using MTP speculative verification.
@@ -873,10 +1020,230 @@ impl Orchestrator {
     ///    p_main(draft) / p_draft(draft) > threshold.
     /// 6. For positions the draft chain did not cover, accept MTP predictions.
     /// 7. Advance `seq_pos` by the number of accepted tokens.
+    /// Transport B fused decode over the REAL kernels for ALL group sizes.
+    /// Chains ceil(48 / group_size) dispatches — one of
+    /// decode_layer_full_real / fused_full_{pair,triple,quad}_real per group —
+    /// with per-layer fp16 KV sliced (by offset) out of one arena, and the
+    /// group-boundary buffers chained (the blit-free taps at group
+    /// granularity, exactly the STAGE0_TAPS_SPEC Transport B policy: audit
+    /// passes use group_size 1, production fuses 2–4 and taps only group
+    /// boundaries). Returns the group-end boundary states in order.
+    ///
+    /// This is the working replacement for the legacy `decode_fused` binding
+    /// (which still targets the identity stubs' old ABI); the fusion-analyzer
+    /// wiring migrates here once the graph descriptor carries real layers.
+    pub fn decode_fused_real(
+        &self,
+        device: &metal::Device,
+        hidden_in: &[f32],
+        seq_position: u32,
+        audit_max_seq: u32,
+        group_size: u32,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        if !(1..=4).contains(&group_size) {
+            return Err(format!("group_size {group_size} not in 1..=4"));
+        }
+        // Uniform tiling of all 48 layers (remainder gets a smaller group).
+        let mut groups = Vec::new();
+        let mut layer = 0u32;
+        while layer < LAYERS {
+            let n = group_size.min(LAYERS - layer);
+            groups.push((layer, n));
+            layer += n;
+        }
+        self.fused_chain(device, hidden_in, seq_position, audit_max_seq, &groups)
+    }
+
+    /// Analyzer-driven fused decode: `kernel_fusion::analyze_graph` on the
+    /// execution-graph descriptor decides the group sizes (1–4, same-kind
+    /// consecutive decoder layers), and each group dispatches its ladder
+    /// kernel via [`Self::fused_chain`]. This is the graph-descriptor path
+    /// the legacy `decode_fused` stub binding is deprecated in favor of.
+    pub fn decode_fused_graph(
+        &self,
+        device: &metal::Device,
+        graph: &ExecutionGraphDescriptor,
+        hidden_in: &[f32],
+        seq_position: u32,
+        audit_max_seq: u32,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        let analysis = kernel_fusion::analyze_graph(graph);
+        let mut groups: Vec<(u32, u32)> = Vec::new();
+        let mut expected_next: Option<u32> = None;
+        for g in &analysis {
+            let node = graph
+                .layers
+                .get(g.start_layer)
+                .ok_or_else(|| format!("fusion group start {} out of range", g.start_layer))?;
+            if node.node_kind != NodeKind::DecoderLayer as u8 {
+                continue; // non-decoder nodes (multimodal prefix etc.) are not layer groups
+            }
+            if !(1..=4).contains(&g.count) {
+                return Err(format!(
+                    "analyzer produced group of {} layers at {} — ladder kernels cover 1..=4",
+                    g.count, g.start_layer
+                ));
+            }
+            let layer_index = node.layer_index;
+            if let Some(exp) = expected_next {
+                if layer_index != exp {
+                    return Err(format!(
+                        "non-contiguous decoder coverage: expected layer {exp}, group starts at {layer_index}"
+                    ));
+                }
+            }
+            expected_next = Some(layer_index + g.count);
+            groups.push((layer_index, g.count));
+        }
+        match expected_next {
+            Some(n) if n == LAYERS => {}
+            other => {
+                return Err(format!(
+                    "graph covers decoder layers up to {other:?}, expected exactly {LAYERS}"
+                ))
+            }
+        }
+        self.fused_chain(device, hidden_in, seq_position, audit_max_seq, &groups)
+    }
+
+    /// Shared fused-ladder chain: one dispatch per `(start_layer, count)`
+    /// group, boundary buffers chained (the Transport B group-boundary taps),
+    /// per-layer fp16 KV sliced by offset from one arena.
+    fn fused_chain(
+        &self,
+        device: &metal::Device,
+        hidden_in: &[f32],
+        seq_position: u32,
+        audit_max_seq: u32,
+        groups: &[(u32, u32)],
+    ) -> Result<Vec<Vec<f32>>, String> {
+        use crate::compute_image::megakernel::kernels::compile_layer_library;
+
+        const HIDDEN: usize = 3840;
+        if hidden_in.len() != HIDDEN {
+            return Err(format!("hidden_in len {} != {HIDDEN}", hidden_in.len()));
+        }
+        if groups.is_empty() {
+            return Err("empty fusion group list".into());
+        }
+        let norms = self
+            .deployment
+            .norms_buffer
+            .as_ref()
+            .ok_or("deployment missing norms buffer")?;
+        let lib = compile_layer_library(device)?;
+        let entry = |n: u32| match n {
+            1 => "decode_layer_full_real",
+            2 => "fused_full_pair_real",
+            3 => "fused_full_triple_real",
+            _ => "fused_full_quad_real",
+        };
+        // PSOs for every distinct group size in the plan.
+        let mut psos: std::collections::HashMap<u32, metal::ComputePipelineState> =
+            std::collections::HashMap::new();
+        let mut sizes: Vec<u32> = groups.iter().map(|&(_, n)| n).collect();
+        sizes.sort_unstable();
+        sizes.dedup();
+        for n in sizes {
+            let f = lib
+                .get_function(entry(n), None)
+                .map_err(|e| format!("{}: {e}", entry(n)))?;
+            psos.insert(
+                n,
+                device
+                    .new_compute_pipeline_state_with_function(&f)
+                    .map_err(|e| format!("PSO {}: {e}", entry(n)))?,
+            );
+        }
+
+        let opts = metal::MTLResourceOptions::StorageModeShared;
+        let in_buf = device.new_buffer((HIDDEN * 2) as u64, opts);
+        unsafe {
+            let dst = in_buf.contents() as *mut u16;
+            for (i, &v) in hidden_in.iter().enumerate() {
+                *dst.add(i) = f16::from_f32(v).to_bits();
+            }
+        }
+        // Per-layer KV: one arena, sliced by offset per layer.
+        let stride = (NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
+        let per_layer_kv = audit_max_seq.max(1) as u64 * stride * 2;
+        let kv_k = device.new_buffer(per_layer_kv * LAYERS as u64, opts);
+        let kv_v = device.new_buffer(per_layer_kv * LAYERS as u64, opts);
+        let ffn_scratch = device.new_buffer(2 * 15360 * 2, opts);
+
+        let queue = device.new_command_queue();
+        let cb = queue.new_command_buffer();
+        let enc = cb.new_compute_command_encoder();
+        let mut boundaries: Vec<metal::Buffer> = Vec::new();
+        let mut current = in_buf;
+        for &(layer, n) in groups {
+            let pso = &psos[&n];
+            let out = device.new_buffer((HIDDEN * 2) as u64, opts);
+            enc.set_compute_pipeline_state(pso);
+            enc.set_buffer(0, Some(&current), 0);
+            enc.set_buffer(1, Some(&out), 0);
+            enc.set_buffer(2, Some(&kv_k), (layer as u64) * per_layer_kv);
+            enc.set_buffer(3, Some(&kv_v), (layer as u64) * per_layer_kv);
+            enc.set_buffer(4, Some(&self.deployment.weights_buffer), 0);
+            enc.set_buffer(5, Some(norms), 0);
+            enc.set_buffer(6, Some(&self.kernel_buffers.head_gates), 0);
+            enc.set_buffer(7, Some(&ffn_scratch), 0);
+            enc.set_bytes(8, 4, &layer as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(
+                9,
+                4,
+                &seq_position as *const u32 as *const std::ffi::c_void,
+            );
+            // Layers b/c/d: KV slices + indices at 10.. in steps of 3.
+            for j in 1..n {
+                let l = layer + j;
+                let base = 10 + (j - 1) * 3;
+                enc.set_buffer(base as u64, Some(&kv_k), (l as u64) * per_layer_kv);
+                enc.set_buffer((base + 1) as u64, Some(&kv_v), (l as u64) * per_layer_kv);
+                enc.set_bytes(
+                    (base + 2) as u64,
+                    4,
+                    &l as *const u32 as *const std::ffi::c_void,
+                );
+            }
+            enc.dispatch_thread_groups(
+                metal::MTLSize { width: 1, height: 1, depth: 1 },
+                metal::MTLSize { width: 256, height: 1, depth: 1 },
+            );
+            boundaries.push(out.clone());
+            current = out;
+        }
+        enc.end_encoding();
+        cb.commit();
+        cb.wait_until_completed();
+
+        Ok(boundaries
+            .iter()
+            .map(|b| {
+                unsafe { std::slice::from_raw_parts(b.contents() as *const u16, HIDDEN) }
+                    .iter()
+                    .map(|&bits| f16::from_bits(bits).to_f32())
+                    .collect()
+            })
+            .collect())
+    }
+
     /// Run fused per-layer Metal decode driven by graph fusion analysis.
+    ///
+    /// NOTE: the group-size-1 AUDIT configuration now lives in
+    /// [`Self::decode_audit_group1`], dispatching the REAL
+    /// `decode_layer_full_real` body with chained boundary-tap buffers; the
+    /// pair/triple/quad kernels this path dispatches are still identity
+    /// stubs, so this function remains non-functional for real decode until
+    /// those bodies are authored and this binding migrates to the new ABI.
     /// Groups of up to 4 consecutive same-kind decoder layers are dispatched
     /// as a single fused kernel, reducing command-buffer overhead and
     /// eliminating intermediate global buffer writes.
+    #[deprecated(
+        note = "binds the identity-stub kernels via the old ABI and computes nothing; \
+                use decode_fused_graph (analyzer-driven) or decode_fused_real (fixed \
+                group size) — both dispatch the real fused ladder"
+    )]
     pub fn decode_fused(
         &self,
         device: &metal::Device,
@@ -1451,4 +1818,466 @@ impl Orchestrator {
     /// Signal that ANE prefill is active (runs concurrently with GPU decode).
     #[deprecated(since = "0.2.0", note = "use prefill_text(&mut self, prompt) instead")]
     pub fn prefill_from_ane(&mut self) {}
+}
+
+/// Stage 0 activation taps for one decoded token (STAGE0_TAPS_SPEC.md slot
+/// map). Holds the raw f16 bits; accessors convert to f32. The hidden width
+/// is derived from the buffer length, so the view cannot desync from the
+/// kernel's HIDDEN_DIM.
+pub struct LayerTaps {
+    raw: Vec<u16>,
+    hidden: usize,
+}
+
+impl LayerTaps {
+    fn from_raw(raw: Vec<u16>) -> Result<Self, String> {
+        let slots = 2 * LAYERS as usize + 2;
+        if raw.is_empty() || raw.len() % slots != 0 {
+            return Err(format!(
+                "tap buffer len {} is not a multiple of {slots} slots",
+                raw.len()
+            ));
+        }
+        let hidden = raw.len() / slots;
+        Ok(LayerTaps { raw, hidden })
+    }
+
+    fn slot(&self, s: usize) -> Vec<f32> {
+        self.raw[s * self.hidden..(s + 1) * self.hidden]
+            .iter()
+            .map(|&b| f16::from_bits(b).to_f32())
+            .collect()
+    }
+
+    pub fn hidden_dim(&self) -> usize {
+        self.hidden
+    }
+    /// Slot 0: embedding output, before layer 0.
+    pub fn post_embed(&self) -> Vec<f32> {
+        self.slot(0)
+    }
+    /// Slot 2k+1: layer `k` after the attention residual.
+    pub fn post_attention(&self, layer: usize) -> Vec<f32> {
+        self.slot(2 * layer + 1)
+    }
+    /// Slot 2k+2: layer `k` after the FFN residual — the layer boundary.
+    pub fn post_layer(&self, layer: usize) -> Vec<f32> {
+        self.slot(2 * layer + 2)
+    }
+    /// Final pre-logits hidden (post final norm).
+    pub fn final_hidden(&self) -> Vec<f32> {
+        self.slot(2 * LAYERS as usize + 1)
+    }
+}
+
+// ── Stage 0 tap tests (Mac; real cimage; env-gated) ─────────────────────────
+// Taps are a process-env, kernel-compile-time property, so these tests mutate
+// TRIBUNUS_TAPS around Orchestrator construction and MUST run serially:
+//   TRIBUNUS_TEST_CIMAGE=/path/to/model.cimage \
+//   cargo test --features prism-backend stage0_taps -- --test-threads=1
+#[cfg(all(test, feature = "prism-backend"))]
+mod stage0_tap_tests {
+    use super::*;
+
+    fn cimage() -> Option<String> {
+        std::env::var("TRIBUNUS_TEST_CIMAGE").ok()
+    }
+
+    fn with_taps_env<T>(on: bool, f: impl FnOnce() -> T) -> T {
+        if on {
+            std::env::set_var("TRIBUNUS_TAPS", "1");
+        } else {
+            std::env::remove_var("TRIBUNUS_TAPS");
+        }
+        let out = f();
+        std::env::remove_var("TRIBUNUS_TAPS");
+        out
+    }
+
+    fn finite_nonzero(v: &[f32]) -> bool {
+        v.iter().all(|x| x.is_finite()) && v.iter().any(|x| *x != 0.0)
+    }
+
+    /// (a) Self-consistency: every tap slot is populated and finite; the
+    /// residual stream evolves across layers; the final norm visibly
+    /// transforms the last layer boundary.
+    #[test]
+    fn stage0_taps_self_consistency() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let (_tok, logits, taps) =
+                orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            assert!(!logits.is_empty());
+            assert!(finite_nonzero(&taps.post_embed()), "embed tap empty");
+            for k in [0usize, 5, 24, LAYERS as usize - 1] {
+                assert!(finite_nonzero(&taps.post_attention(k)), "attn tap {k}");
+                assert!(finite_nonzero(&taps.post_layer(k)), "layer tap {k}");
+            }
+            assert!(finite_nonzero(&taps.final_hidden()));
+            // The stream must actually evolve (identity layers would be a bug).
+            assert_ne!(taps.post_embed(), taps.post_layer(0));
+            // The final norm transforms the last boundary state.
+            assert_ne!(taps.post_layer(LAYERS as usize - 1), taps.final_hidden());
+        });
+    }
+
+    /// (b) Determinism: two fresh tapped orchestrators produce bitwise-equal
+    /// tap buffers for the same token stream.
+    #[test]
+    fn stage0_taps_deterministic() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            let run = || {
+                let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+                let mut all = Vec::new();
+                for t in [7u32, 42, 99] {
+                    let (_a, _l, taps) =
+                        orch.decode_token_logits_with_taps(t).expect("decode");
+                    all.push(taps.raw.clone());
+                }
+                all
+            };
+            assert_eq!(run(), run(), "taps not bitwise deterministic");
+        });
+    }
+
+    /// Transport B gate: the REAL decode_layer_full_real body must reproduce
+    /// the megakernel's layer-0 boundary (Transport A taps) at position 0 —
+    /// where the fp16-KV fused kernel and the megakernel are numerically
+    /// identical by construction (the megakernel also attends over fresh fp16
+    /// scratch before ternary-packing).
+    #[test]
+    fn transport_b_layer0_matches_taps() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            use crate::compute_image::megakernel::kernels::compile_layer_library;
+            use metal::MTLResourceOptions;
+
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            // Position 0: first decode on a fresh orchestrator.
+            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let input = taps.post_embed();
+            let expect = taps.post_layer(0);
+            let hidden = taps.hidden_dim();
+
+            let device = metal::Device::system_default().expect("metal device");
+            let lib = compile_layer_library(&device).expect("compile decode_per_layer");
+            let f = lib
+                .get_function("decode_layer_full_real", None)
+                .expect("entry point");
+            let pso = device
+                .new_compute_pipeline_state_with_function(&f)
+                .expect("pso");
+
+            let half_bits = |v: &[f32]| -> Vec<u8> {
+                v.iter()
+                    .flat_map(|&x| half::f16::from_f32(x).to_bits().to_le_bytes())
+                    .collect()
+            };
+            let mk = |bytes: &[u8]| {
+                device.new_buffer_with_data(
+                    bytes.as_ptr() as *const std::ffi::c_void,
+                    bytes.len() as u64,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            };
+            let in_buf = mk(&half_bits(&input));
+            let out_buf =
+                device.new_buffer((hidden * 2) as u64, MTLResourceOptions::StorageModeShared);
+            let stride = (NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
+            let kv_len = 4 * stride * 2; // tiny max_seq for pos 0
+            let kv_k = device.new_buffer(kv_len, MTLResourceOptions::StorageModeShared);
+            let kv_v = device.new_buffer(kv_len, MTLResourceOptions::StorageModeShared);
+            let ffn = device.new_buffer(2 * 15360 * 2, MTLResourceOptions::StorageModeShared);
+            let norms = self_norms(&orch);
+            let queue = device.new_command_queue();
+            let cb = queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&pso);
+            enc.set_buffer(0, Some(&in_buf), 0);
+            enc.set_buffer(1, Some(&out_buf), 0);
+            enc.set_buffer(2, Some(&kv_k), 0);
+            enc.set_buffer(3, Some(&kv_v), 0);
+            enc.set_buffer(4, Some(&orch.deployment.weights_buffer), 0);
+            enc.set_buffer(5, Some(norms), 0);
+            enc.set_buffer(6, Some(&orch.kernel_buffers.head_gates), 0);
+            enc.set_buffer(7, Some(&ffn), 0);
+            let layer0 = 0u32;
+            let pos0 = 0u32;
+            enc.set_bytes(8, 4, &layer0 as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(9, 4, &pos0 as *const u32 as *const std::ffi::c_void);
+            enc.dispatch_thread_groups(
+                metal::MTLSize { width: 1, height: 1, depth: 1 },
+                metal::MTLSize { width: 256, height: 1, depth: 1 },
+            );
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
+
+            let got: Vec<f32> = unsafe {
+                std::slice::from_raw_parts(out_buf.contents() as *const u16, hidden)
+            }
+            .iter()
+            .map(|&b| f16::from_bits(b).to_f32())
+            .collect();
+            let (mut se, mut den) = (0.0f64, 0.0f64);
+            for (a, g) in got.iter().zip(&expect) {
+                se += (*a as f64 - *g as f64).powi(2);
+                den += (*g as f64).powi(2);
+            }
+            let rel = (se / den.max(1e-30)).sqrt();
+            assert!(
+                rel < 1e-3,
+                "Transport B layer 0 vs Transport A tap: rel-L2 {rel:.3e} (expected fp16-tight at pos 0)"
+            );
+            eprintln!("[transport-b] layer0 parity rel-L2 = {rel:.3e}  PASS");
+        });
+    }
+
+    /// Transport B end-to-end (all 48 layers, group size 1): chain the real
+    /// fused layer body from the post-embed tap and compare EVERY boundary
+    /// buffer (the blit-free taps) against Transport A's post_layer taps.
+    /// Emits the per-layer drift curve; gates on the final boundary.
+    /// Full logits parity additionally needs the embed/final-norm/logits
+    /// stages migrated — the final boundary here is the last fused-path
+    /// state before those megakernel-only stages.
+    #[test]
+    fn transport_b_full_depth_matches_taps() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let device = metal::Device::system_default().expect("metal device");
+            let boundaries = orch
+                .decode_audit_group1(&device, &taps.post_embed(), 0, 4)
+                .expect("group-1 audit chain");
+            assert_eq!(boundaries.len(), LAYERS as usize);
+            let rel = |a: &[f32], g: &[f32]| -> f64 {
+                let (mut se, mut den) = (0.0f64, 0.0f64);
+                for (x, y) in a.iter().zip(g) {
+                    se += (*x as f64 - *y as f64).powi(2);
+                    den += (*y as f64).powi(2);
+                }
+                (se / den.max(1e-30)).sqrt()
+            };
+            let mut worst = (0usize, 0.0f64);
+            for k in 0..LAYERS as usize {
+                let d = rel(&boundaries[k], &taps.post_layer(k));
+                if d > worst.1 {
+                    worst = (k, d);
+                }
+                if k % 8 == 0 || k == LAYERS as usize - 1 {
+                    eprintln!("[transport-b] layer {k:2} drift rel-L2 = {d:.3e}");
+                }
+            }
+            let final_drift = rel(
+                &boundaries[LAYERS as usize - 1],
+                &taps.post_layer(LAYERS as usize - 1),
+            );
+            eprintln!(
+                "[transport-b] worst layer {} ({:.3e}); final boundary {:.3e}",
+                worst.0, worst.1, final_drift
+            );
+            assert!(
+                final_drift < 5e-3,
+                "48-layer chained drift {final_drift:.3e} exceeds the 5e-3 gate (worst at layer {})",
+                worst.0
+            );
+        });
+    }
+
+    /// Fused-pair gate: fused_full_pair_real(k, k+1) must equal two chained
+    /// decode_layer_full_real dispatches — bitwise-expected, because BOTH
+    /// paths hold the intermediate boundary in half precision (threadgroup
+    /// h_buf vs device round-trip both quantize to f16).
+    #[test]
+    fn transport_b_pair_matches_two_singles() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            use crate::compute_image::megakernel::kernels::compile_layer_library;
+            use metal::MTLResourceOptions;
+
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let input = taps.post_embed();
+            let hidden = taps.hidden_dim();
+
+            // Reference: layers 0 then 1 via the group-1 audit chain.
+            let device = metal::Device::system_default().expect("metal device");
+            let singles = orch
+                .decode_audit_group1(&device, &input, 0, 4)
+                .expect("group-1 chain");
+            let expect = &singles[1]; // boundary after layer 1
+
+            // Fused pair (0, 1) in one dispatch.
+            let lib = compile_layer_library(&device).expect("compile");
+            let f = lib.get_function("fused_full_pair_real", None).expect("entry");
+            let pso = device
+                .new_compute_pipeline_state_with_function(&f)
+                .expect("pso");
+            let opts = MTLResourceOptions::StorageModeShared;
+            let in_buf = device.new_buffer((hidden * 2) as u64, opts);
+            unsafe {
+                let dst = in_buf.contents() as *mut u16;
+                for (i, &v) in input.iter().enumerate() {
+                    *dst.add(i) = f16::from_f32(v).to_bits();
+                }
+            }
+            let out_buf = device.new_buffer((hidden * 2) as u64, opts);
+            let stride = (NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
+            let kv = |_| device.new_buffer(4 * stride * 2, opts);
+            let (ka, va, kb, vb) = (kv(0), kv(1), kv(2), kv(3));
+            let ffn = device.new_buffer(2 * 15360 * 2, opts);
+            let norms = self_norms(&orch);
+            let queue = device.new_command_queue();
+            let cb = queue.new_command_buffer();
+            let enc = cb.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(&pso);
+            enc.set_buffer(0, Some(&in_buf), 0);
+            enc.set_buffer(1, Some(&out_buf), 0);
+            enc.set_buffer(2, Some(&ka), 0);
+            enc.set_buffer(3, Some(&va), 0);
+            enc.set_buffer(4, Some(&orch.deployment.weights_buffer), 0);
+            enc.set_buffer(5, Some(norms), 0);
+            enc.set_buffer(6, Some(&orch.kernel_buffers.head_gates), 0);
+            enc.set_buffer(7, Some(&ffn), 0);
+            let (la, pos, lb) = (0u32, 0u32, 1u32);
+            enc.set_bytes(8, 4, &la as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(9, 4, &pos as *const u32 as *const std::ffi::c_void);
+            enc.set_buffer(10, Some(&kb), 0);
+            enc.set_buffer(11, Some(&vb), 0);
+            enc.set_bytes(12, 4, &lb as *const u32 as *const std::ffi::c_void);
+            enc.dispatch_thread_groups(
+                metal::MTLSize { width: 1, height: 1, depth: 1 },
+                metal::MTLSize { width: 256, height: 1, depth: 1 },
+            );
+            enc.end_encoding();
+            cb.commit();
+            cb.wait_until_completed();
+
+            let got: Vec<f32> = unsafe {
+                std::slice::from_raw_parts(out_buf.contents() as *const u16, hidden)
+            }
+            .iter()
+            .map(|&b| f16::from_bits(b).to_f32())
+            .collect();
+            let max_abs = got
+                .iter()
+                .zip(expect)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(
+                max_abs == 0.0,
+                "fused pair vs two singles: expected bitwise-identical (both quantize the \
+                 intermediate to f16), max |Δ| = {max_abs}"
+            );
+            eprintln!("[transport-b] pair == two singles (bitwise)  PASS");
+        });
+    }
+
+    /// Fusion-ladder gate: for every production group size, the fused chain's
+    /// group-end boundaries must be BITWISE-equal to the group-1 chain's
+    /// boundaries at the same layers (both paths quantize every compared
+    /// boundary to f16; the fused path's INTERNAL boundaries stay in
+    /// threadgroup memory and are intentionally not compared — that is what
+    /// fusion elides).
+    #[test]
+    fn transport_b_groups_match_singles() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        with_taps_env(true, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let input = taps.post_embed();
+            let device = metal::Device::system_default().expect("metal device");
+            let singles = orch
+                .decode_audit_group1(&device, &input, 0, 4)
+                .expect("group-1 chain");
+            for gs in [2u32, 3, 4] {
+                let groups = orch
+                    .decode_fused_real(&device, &input, 0, 4, gs)
+                    .expect("fused chain");
+                let mut layer = 0u32;
+                for (gi, got) in groups.iter().enumerate() {
+                    let n = gs.min(LAYERS - layer);
+                    let end_layer = (layer + n - 1) as usize;
+                    let expect = &singles[end_layer];
+                    let max_abs = got
+                        .iter()
+                        .zip(expect)
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0.0f32, f32::max);
+                    assert!(
+                        max_abs == 0.0,
+                        "group_size {gs}, group {gi} (end layer {end_layer}): expected \
+                         bitwise-identical, max |Δ| = {max_abs}"
+                    );
+                    layer += n;
+                }
+                eprintln!("[transport-b] group_size {gs}: all group boundaries bitwise  PASS");
+            }
+        });
+    }
+
+    fn self_norms(orch: &Orchestrator) -> &metal::Buffer {
+        orch.deployment
+            .norms_buffer
+            .as_ref()
+            .expect("deployment carries a norms buffer")
+    }
+
+    /// (c) Taps-off identity: without the define the kernel is compiled from
+    /// byte-identical preprocessed source — logits must match the tapped
+    /// build (bitwise expected; asserted via argmax + tight max-abs so a
+    /// compiler-scheduling delta is visible but diagnosable), and the taps
+    /// API must refuse rather than serve a stale buffer.
+    #[test]
+    fn stage0_taps_off_identity() {
+        let Some(path) = cimage() else {
+            eprintln!("skipping: set TRIBUNUS_TEST_CIMAGE (and run --test-threads=1)");
+            return;
+        };
+        let tapped = with_taps_env(true, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            orch.decode_token_logits(7).expect("tapped decode").1
+        });
+        let plain = with_taps_env(false, || {
+            let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
+            let out = orch.decode_token_logits(7).expect("plain decode").1;
+            assert!(
+                orch.decode_token_logits_with_taps(7).is_err(),
+                "taps API must refuse when the kernel was compiled without taps"
+            );
+            out
+        });
+        assert_eq!(
+            sample_argmax_f32(&tapped),
+            sample_argmax_f32(&plain),
+            "argmax must be identical between tapped and untapped builds"
+        );
+        let max_abs = tapped
+            .iter()
+            .zip(&plain)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_abs == 0.0, "expected bitwise-identical logits, max |Δ| = {max_abs}");
+    }
 }

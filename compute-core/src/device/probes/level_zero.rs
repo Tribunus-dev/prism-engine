@@ -3,9 +3,19 @@
 //!
 //! Calls `zeInit` → `zeDriverGet` → `zeDriverGetProperties` → `zeDeviceGet`
 //! → `zeDeviceGetProperties` to discover Intel integrated and discrete GPUs.
-//! On non-Linux platforms this probe returns an empty vec.
+//!
+//! Requires the `level-zero-probe` feature (default OFF): the FFI block links
+//! `libze_loader`, which only exists where the Intel graphics/oneAPI stack is
+//! installed. An unconditional `#[link]` here made EVERY Linux build of the
+//! crate fail at link time on machines without it (CI included) — the probe
+//! must be opt-in. Without the feature (or off Linux), `probe()` returns an
+//! empty vec.
 
 use super::DeviceProbe;
+#[cfg_attr(
+    not(all(target_os = "linux", feature = "level-zero-probe")),
+    allow(unused_imports)
+)]
 use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo, PcieLinkInfo};
 
 /// Probes Intel GPUs via the Level Zero driver API.
@@ -13,11 +23,11 @@ pub struct LevelZeroProbe;
 
 impl DeviceProbe for LevelZeroProbe {
     fn probe(&self) -> Vec<DeviceInfo> {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "level-zero-probe"))]
         {
             probe_level_zero_devices()
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(all(target_os = "linux", feature = "level-zero-probe")))]
         {
             Vec::new()
         }
@@ -30,7 +40,7 @@ impl DeviceProbe for LevelZeroProbe {
 
 // ── Linux FFI + probe logic ───────────────────────────────────────────────
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "level-zero-probe"))]
 mod ffi {
     #![allow(non_camel_case_types, dead_code)]
 
@@ -111,7 +121,7 @@ mod ffi {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "level-zero-probe"))]
 fn probe_level_zero_devices() -> Vec<DeviceInfo> {
     use ffi::*;
     use std::ffi::CStr;
