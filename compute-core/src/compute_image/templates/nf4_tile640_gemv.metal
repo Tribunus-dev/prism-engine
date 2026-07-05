@@ -1,11 +1,15 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// Symmetric [-1,1] NF4 codebook — MUST match compile/quantize.rs::NF4_CODEBOOK.
+// (Was the asymmetric [-1,2] table, whose indices 13–15 were unreachable and
+// which is what the weights are NO LONGER packed with — using it here would
+// dequant every weight to the wrong value.)
 constant float nf4_table_fp32[16] = {
-    -1.0f, -0.8480f, -0.5698f, -0.3940f,
-    -0.2419f, -0.1057f, 0.0f, 0.1057f,
-    0.2419f, 0.3940f, 0.5698f, 0.8480f,
-    1.0f, 1.2588f, 1.5862f, 2.0f
+    -1.0f, -0.6961928f, -0.5250731f, -0.3949175f,
+    -0.2844414f, -0.1847734f, -0.09105f, 0.0f,
+    0.0795803f, 0.1609302f, 0.2461123f, 0.3379152f,
+    0.4407099f, 0.562617f, 0.7229568f, 1.0f
 };
 
 // Canonical NF4 Tile640 GEMV kernel.
