@@ -1040,14 +1040,91 @@ impl Orchestrator {
         audit_max_seq: u32,
         group_size: u32,
     ) -> Result<Vec<Vec<f32>>, String> {
-        use crate::compute_image::megakernel::kernels::compile_layer_library;
-
-        const HIDDEN: usize = 3840;
         if !(1..=4).contains(&group_size) {
             return Err(format!("group_size {group_size} not in 1..=4"));
         }
+        // Uniform tiling of all 48 layers (remainder gets a smaller group).
+        let mut groups = Vec::new();
+        let mut layer = 0u32;
+        while layer < LAYERS {
+            let n = group_size.min(LAYERS - layer);
+            groups.push((layer, n));
+            layer += n;
+        }
+        self.fused_chain(device, hidden_in, seq_position, audit_max_seq, &groups)
+    }
+
+    /// Analyzer-driven fused decode: `kernel_fusion::analyze_graph` on the
+    /// execution-graph descriptor decides the group sizes (1–4, same-kind
+    /// consecutive decoder layers), and each group dispatches its ladder
+    /// kernel via [`Self::fused_chain`]. This is the graph-descriptor path
+    /// the legacy `decode_fused` stub binding is deprecated in favor of.
+    pub fn decode_fused_graph(
+        &self,
+        device: &metal::Device,
+        graph: &ExecutionGraphDescriptor,
+        hidden_in: &[f32],
+        seq_position: u32,
+        audit_max_seq: u32,
+    ) -> Result<Vec<Vec<f32>>, String> {
+        let analysis = kernel_fusion::analyze_graph(graph);
+        let mut groups: Vec<(u32, u32)> = Vec::new();
+        let mut expected_next: Option<u32> = None;
+        for g in &analysis {
+            let node = graph
+                .layers
+                .get(g.start_layer)
+                .ok_or_else(|| format!("fusion group start {} out of range", g.start_layer))?;
+            if node.node_kind != NodeKind::DecoderLayer as u8 {
+                continue; // non-decoder nodes (multimodal prefix etc.) are not layer groups
+            }
+            if !(1..=4).contains(&g.count) {
+                return Err(format!(
+                    "analyzer produced group of {} layers at {} — ladder kernels cover 1..=4",
+                    g.count, g.start_layer
+                ));
+            }
+            let layer_index = node.layer_index;
+            if let Some(exp) = expected_next {
+                if layer_index != exp {
+                    return Err(format!(
+                        "non-contiguous decoder coverage: expected layer {exp}, group starts at {layer_index}"
+                    ));
+                }
+            }
+            expected_next = Some(layer_index + g.count);
+            groups.push((layer_index, g.count));
+        }
+        match expected_next {
+            Some(n) if n == LAYERS => {}
+            other => {
+                return Err(format!(
+                    "graph covers decoder layers up to {other:?}, expected exactly {LAYERS}"
+                ))
+            }
+        }
+        self.fused_chain(device, hidden_in, seq_position, audit_max_seq, &groups)
+    }
+
+    /// Shared fused-ladder chain: one dispatch per `(start_layer, count)`
+    /// group, boundary buffers chained (the Transport B group-boundary taps),
+    /// per-layer fp16 KV sliced by offset from one arena.
+    fn fused_chain(
+        &self,
+        device: &metal::Device,
+        hidden_in: &[f32],
+        seq_position: u32,
+        audit_max_seq: u32,
+        groups: &[(u32, u32)],
+    ) -> Result<Vec<Vec<f32>>, String> {
+        use crate::compute_image::megakernel::kernels::compile_layer_library;
+
+        const HIDDEN: usize = 3840;
         if hidden_in.len() != HIDDEN {
             return Err(format!("hidden_in len {} != {HIDDEN}", hidden_in.len()));
+        }
+        if groups.is_empty() {
+            return Err("empty fusion group list".into());
         }
         let norms = self
             .deployment
@@ -1061,14 +1138,12 @@ impl Orchestrator {
             3 => "fused_full_triple_real",
             _ => "fused_full_quad_real",
         };
-        // PSOs for every group size that can occur (full groups + remainder).
+        // PSOs for every distinct group size in the plan.
         let mut psos: std::collections::HashMap<u32, metal::ComputePipelineState> =
             std::collections::HashMap::new();
-        let mut sizes: Vec<u32> = vec![group_size];
-        let rem = LAYERS % group_size;
-        if rem != 0 {
-            sizes.push(rem);
-        }
+        let mut sizes: Vec<u32> = groups.iter().map(|&(_, n)| n).collect();
+        sizes.sort_unstable();
+        sizes.dedup();
         for n in sizes {
             let f = lib
                 .get_function(entry(n), None)
@@ -1101,9 +1176,7 @@ impl Orchestrator {
         let enc = cb.new_compute_command_encoder();
         let mut boundaries: Vec<metal::Buffer> = Vec::new();
         let mut current = in_buf;
-        let mut layer = 0u32;
-        while layer < LAYERS {
-            let n = group_size.min(LAYERS - layer);
+        for &(layer, n) in groups {
             let pso = &psos[&n];
             let out = device.new_buffer((HIDDEN * 2) as u64, opts);
             enc.set_compute_pipeline_state(pso);
@@ -1139,7 +1212,6 @@ impl Orchestrator {
             );
             boundaries.push(out.clone());
             current = out;
-            layer += n;
         }
         enc.end_encoding();
         cb.commit();
@@ -1167,6 +1239,11 @@ impl Orchestrator {
     /// Groups of up to 4 consecutive same-kind decoder layers are dispatched
     /// as a single fused kernel, reducing command-buffer overhead and
     /// eliminating intermediate global buffer writes.
+    #[deprecated(
+        note = "binds the identity-stub kernels via the old ABI and computes nothing; \
+                use decode_fused_graph (analyzer-driven) or decode_fused_real (fixed \
+                group size) — both dispatch the real fused ladder"
+    )]
     pub fn decode_fused(
         &self,
         device: &metal::Device,
