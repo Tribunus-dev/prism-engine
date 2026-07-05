@@ -227,10 +227,17 @@ impl DiffusionSampler {
     /// to EOS and marked committed. Returns `true` if any collapse happened.
     pub fn apply_eos_collapse(&self, canvas: &mut TokenCanvas) -> bool {
         // Find the first committed EOS position.
+        // Only a COMMITTED EOS collapses the tail (per the contract above) —
+        // matching on any speculative EOS token would collapse the canvas on
+        // an uncommitted draft.
         let eos_pos = canvas
             .tokens
             .iter()
-            .position(|t| t.as_ref().copied() == Some(self.eos_token_id));
+            .enumerate()
+            .position(|(i, t)| {
+                canvas.committed.get(i).copied().unwrap_or(false)
+                    && t.as_ref().copied() == Some(self.eos_token_id)
+            });
 
         let Some(eos_idx) = eos_pos else {
             return false;
@@ -460,8 +467,11 @@ mod tests {
         let canvas = TokenCanvas::new(4, 0, 0);
 
         // Logits: 4 positions, 6 vocab; each position has a clear winner.
+        // pos0's winner must NOT be token 0: with eos_token_id = 0, sampling
+        // it IS an EOS trigger — the old fixture manufactured the very EOS the
+        // test then asserted absent.
         let logits: Vec<f32> = vec![
-            10.0, 1.0, 1.0, 1.0, 1.0, 1.0, // pos0: token 0
+            1.0, 1.0, 1.0, 1.0, 10.0, 1.0, // pos0: token 4
             1.0, 10.0, 1.0, 1.0, 1.0, 1.0, // pos1: token 1
             1.0, 1.0, 10.0, 1.0, 1.0, 1.0, // pos2: token 2
             1.0, 1.0, 1.0, 10.0, 1.0, 1.0, // pos3: token 3
@@ -469,7 +479,7 @@ mod tests {
 
         let output = sampler.sample(&logits, 4, 6, &canvas);
         assert_eq!(output.token_ids.len(), 4);
-        assert_eq!(output.token_ids, vec![0, 1, 2, 3]);
+        assert_eq!(output.token_ids, vec![4, 1, 2, 3]);
         assert_eq!(output.commit_mask.len(), 4);
         assert_eq!(output.remask_mask.len(), 4);
         // With greedy temp=0 and high logit separation, all should commit.
@@ -596,6 +606,8 @@ mod tests {
         assert_eq!(canvas.tokens[2], Some(0));
         assert_eq!(canvas.tokens[3], Some(0));
         assert_eq!(canvas.tokens[4], Some(0));
-        assert_eq!(canvas.total_committed, 5);
+        // Positions 1 (the EOS) + 2,3,4 (collapsed) are committed; position 0
+        // was never committed and sits BEFORE the EOS — collapse doesn't touch it.
+        assert_eq!(canvas.total_committed, 4);
     }
 }
