@@ -371,3 +371,54 @@ pub struct GlobalMetrics {
     pub tokens_per_joule_estimate: f32,
     pub bits_per_weight_effective: f32,
 }
+
+/// The small, strict **operational receipt** emitted alongside the richer
+/// research receipts (PRODUCTION_CONTRACT.md). One per job, written at every
+/// terminal state. Answers the field-debugging questions — what build ran,
+/// in which modes, against which budgets, and whether policy truncated
+/// anything — without reading prose docs or a transcript.
+///
+/// All fields are honest about their provenance: `accounted_validation_bytes`
+/// counts the validation buffers this code allocated (held logits, tap
+/// slots), NOT process RSS — it is a contract check, not a profiler.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationalReceipt {
+    /// Compiled feature surface, e.g. `"prism-backend"` or
+    /// `"prism-backend+mlx-backend"` (the research build).
+    pub build_profile: String,
+    /// Whether the MLX research stack was linked into this binary.
+    pub mlx_linked: bool,
+    /// Declared validation intent from the request (wire string of
+    /// `ValidationMode`).
+    pub validation_mode: String,
+    /// Teacher tap mode actually used (`"untapped"` / `"tapped-audit"`),
+    /// `None` when no teacher was constructed.
+    pub teacher_tap_mode: Option<String>,
+    /// Multimodal bias policy from the request, plus what the loaded teacher
+    /// artifact actually supports: `"resident"`, `"zero-fallback"`, or
+    /// `"not-applicable"` (text-only artifact).
+    pub multimodal_bias_policy: String,
+    pub multimodal_bias_residency: Option<String>,
+
+    // ── Calibration budget accounting (KD stage) ────────────────────────
+    pub calibration_requested_tokens: Option<usize>,
+    pub calibration_loaded_tokens: Option<usize>,
+    pub calibration_used_tokens: Option<usize>,
+    pub calibration_truncated_by_policy: Option<bool>,
+
+    // ── Parity budget accounting ────────────────────────────────────────
+    pub parity_requested_tokens: Option<usize>,
+    pub parity_used_tokens: Option<usize>,
+
+    // ── Lane B memory contract ──────────────────────────────────────────
+    /// Bytes Lane B predicted it would hold before any decode started.
+    pub predicted_validation_bytes: Option<u64>,
+    /// The ceiling the request declared for Lane B.
+    pub validation_memory_ceiling_bytes: Option<u64>,
+    /// Peak accounted validation allocation (see struct docs — not RSS).
+    pub accounted_validation_bytes: Option<u64>,
+
+    /// Terminal failure classification (`"gate-rejection"`,
+    /// `"abi-mismatch"`, `"operational"`), `None` on success.
+    pub failure_class: Option<String>,
+}
