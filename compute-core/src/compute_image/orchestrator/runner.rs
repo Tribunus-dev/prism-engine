@@ -6,8 +6,8 @@
 
 use super::kernel_fusion;
 use super::{
-    generate_speculative_candidates, sample_argmax, GLOBAL_HEAD_DIM, LAYERS, MAX_CONTEXT,
-    MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS,
+    generate_speculative_candidates, sample_argmax, sample_argmax_f32, GLOBAL_HEAD_DIM, LAYERS,
+    MAX_CONTEXT, MAX_SURVIVORS, NUM_KV_HEADS, NUM_SLOTS,
 };
 use crate::arena::Arena;
 use crate::arena::DataType;
@@ -163,6 +163,11 @@ impl Orchestrator {
             MTLResourceOptions::StorageModeShared,
         );
 
+        // v1-compat fallback: multimodal records cannot yet describe bias
+        // residency (see kernels/MULTIMODAL_NF4_BIAS_ABI.md for the spec that
+        // closes this). Numerically exact for every artifact the symmetric
+        // NF4 quantizer produces (bias ≡ 0 by construction); biases are
+        // scale-parallel ([tiles×5] f32), hence the scale_length sizing.
         let zero_biases = vec![0u8; record.scale_length as usize];
         let biases_buf = self.device.new_buffer_with_data(
             zero_biases.as_ptr() as *const std::ffi::c_void,
@@ -695,7 +700,7 @@ impl Orchestrator {
     /// contains the prefill positions and attention covers the full
     /// context.
     pub fn decode_slot(&mut self, slot_id: u32, token_id: u32) -> Result<u32, String> {
-        Ok(sample_argmax(&self.decode_slot_logits(slot_id, token_id)?))
+        Ok(sample_argmax_f32(&self.decode_slot_logits(slot_id, token_id)?))
     }
 
     /// Like [`decode_slot`] but returns the full output logit vector instead of
@@ -751,14 +756,17 @@ impl Orchestrator {
         }
         // ── End eviction ──
 
-        let logits = self
+        // read_slot_logits returns the megakernel's raw FP16 logits as u16
+        // half-bits; the scoring API contract here is f32 (the bench harness,
+        // KD gate, and Gemma4Teacher::teacher_forced all consume f32).
+        let raw = self
             .megakernel
             .read_slot_logits(&self.kernel_buffers, slot_id, 0);
         self.megakernel
             .reset_work_slot(&self.kernel_buffers, slot_id);
 
         self.slot_seq_pos[slot] = seq_pos + 1;
-        Ok(logits)
+        Ok(raw.iter().map(|&b| f16::from_bits(b).to_f32()).collect())
     }
 
     /// Decode one token using slot 0 (convenience wrapper).
@@ -772,7 +780,7 @@ impl Orchestrator {
     #[inline]
     pub fn decode_token_logits(&mut self, token_id: u32) -> Result<(u32, Vec<f32>), String> {
         let logits = self.decode_slot_logits(0, token_id)?;
-        Ok((sample_argmax(&logits), logits))
+        Ok((sample_argmax_f32(&logits), logits))
     }
 
     /// Decode one or more tokens using MTP speculative verification.
