@@ -82,6 +82,13 @@ pub enum SegmentKind {
     Nf4Tile640Weights = 26,
     /// FP32 bias metadata corresponding to packed quantized weights.
     BlockBiases = 27,
+    /// Multimodal projection biases, laid out **byte-parallel to
+    /// MultimodalProjectionScales** ([tiles × 5] f32 per row): a projection
+    /// record needs no independent bias offsets — its `scale_offset` /
+    /// `scale_length` address this segment too. Gated per record by
+    /// `ProjectionTensorRecord::FLAG_HAS_BIAS`; v1 artifacts (flags == 0)
+    /// never take the bias path (kernels/MULTIMODAL_NF4_BIAS_ABI.md).
+    MultimodalProjectionBiases = 28,
 }
 
 /// One entry in the cimage segment directory.
