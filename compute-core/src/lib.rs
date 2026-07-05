@@ -17,10 +17,7 @@ compile_error!(
 
 extern crate self as tribunus_compute_core;
 
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub mod analysis;
 #[cfg(all(
     target_os = "macos",
@@ -32,10 +29,7 @@ pub mod analysis;
 pub mod ane;
 #[cfg(all(
     target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
+    feature = "mlx-backend"
 ))]
 pub mod ane_bridge;
 #[cfg(feature = "prism-backend")]
@@ -145,10 +139,7 @@ pub mod compute_lane;
 pub mod compute_service;
 pub mod config;
 pub mod config_namespace;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub mod contracts;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -208,10 +199,7 @@ pub mod device;
 pub mod diffusion;
 #[cfg(feature = "generation-diffusion")]
 pub mod diffusion_provider;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub mod engine;
 pub mod engine_error;
 pub mod engine_policy;
@@ -273,10 +261,7 @@ pub mod gpu_worker;
 ))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod heterogeneous;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub mod hybrid_profile;
 #[cfg(feature = "generation-image")]
 pub mod image_provider;
@@ -290,10 +275,7 @@ pub mod integration;
     feature = "prism-backend"
 ))]
 pub mod kv_arena;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub mod kv_cache;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -301,10 +283,7 @@ pub mod kv_cache;
 ))]
 pub mod layout_compiler;
 pub mod layout_transform;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub mod loader;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -396,10 +375,7 @@ pub mod mlx_runtime_probe;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod model;
 pub mod model_adapter;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub mod model_cache;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod model_runtime;
@@ -442,10 +418,7 @@ pub mod profiled_executor;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod profiled_model;
 #[cfg(any(
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    ),
+    feature = "mlx-backend",
     feature = "candle-cpu"
 ))]
 pub mod projection_executor;
@@ -491,13 +464,16 @@ pub mod requalification;
     feature = "prism-backend"
 ))]
 pub mod research;
+#[cfg(feature = "mlx-backend")]
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod research_contracts;
+#[cfg(feature = "mlx-backend")]
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
 ))]
 pub mod research_metrics;
+#[cfg(feature = "mlx-backend")]
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
@@ -525,15 +501,13 @@ pub mod runtime_trace;
 pub mod scheduling;
 #[cfg(feature = "server")]
 pub mod server;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub mod session;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+/// Pure-data types for KV cache, usable without mlx dependency.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod kv_cache_types;
+
+#[cfg(feature = "mlx-backend")]
 pub mod sidecar;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -596,10 +570,7 @@ pub mod worker_dispatch;
 ))]
 pub mod worker_memory;
 pub mod worker_protocol;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(feature = "mlx-backend")]
 pub use crate::session::{
     ControlSessionState, GenerationControlSession, InferenceSession, InferenceSessionState,
     SamplerConfig,

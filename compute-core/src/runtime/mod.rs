@@ -35,6 +35,7 @@ pub use executable_bindings::*;
 pub use executable_lane::*;
 pub use executable_profile::*;
 pub use executable_seal::*;
+#[cfg(feature = "mlx-backend")]
 pub use executable_session::*;
 pub use interceptors::*;
 pub use signal_bus::*;

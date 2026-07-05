@@ -9,6 +9,7 @@
 //! Design docs in `docs/omlx-prefix-cache.md` and `docs/omlx-ssd-cache.md`.
 
 pub mod chunk_kv;
+#[cfg(feature = "mlx-backend")]
 pub mod evolkv;
 pub mod paged_ssd_cache;
 pub mod prefix_cache;

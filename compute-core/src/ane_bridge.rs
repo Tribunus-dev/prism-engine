@@ -175,29 +175,29 @@ impl AneProgramCache {
     }
 }
 
+/// Standalone description of an ANE inference step.
+///
+/// Replaces the mlx-gated `hybrid_profile::ExecutionStep::AneInference` variant
+/// so that the ANE bridge can compile under prism-backend without an MLX
+/// dependency.
+#[derive(Debug, Clone)]
+pub struct AneInferenceStep {
+    pub mil_text: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub tag: String,
+}
+
 /// Execute a single AneInference step through the ANE bridge.
 ///
 /// Extracts the MIL text, tag, and I/O tensor names from the step,
 /// retrieves or compiles the program via program_cache, evaluates it,
 /// and returns a minimal BoundaryExecutionReceipt.
 pub fn execute_ane_step(
-    step: &crate::hybrid_profile::ExecutionStep,
+    step: &AneInferenceStep,
     program_cache: &AneProgramCache,
 ) -> Result<crate::backend::routing::BoundaryExecutionReceipt, String> {
-    let (mil_text, inputs, outputs, tag) = match step {
-        crate::hybrid_profile::ExecutionStep::AneInference {
-            mil_text,
-            inputs,
-            outputs,
-            tag,
-        } => (mil_text, inputs, outputs, tag),
-        _ => {
-            return Err(format!(
-                "execute_ane_step: expected AneInference step, got {:?}",
-                step
-            ))
-        }
-    };
+    let AneInferenceStep { mil_text, inputs, outputs, tag } = step;
 
     let program = program_cache.get_or_compile(mil_text, tag)?;
 

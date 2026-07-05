@@ -330,6 +330,7 @@ pub fn configure_mlx_limits_for_model(
 
 // ── MLX memory snapshot ────────────────────────────────────────────────────
 
+#[cfg(feature = "mlx-backend")]
 /// A point-in-time snapshot of MLX Metal allocator state.
 #[derive(Debug, Clone, Copy)]
 pub struct MlxMemorySnapshot {
@@ -341,6 +342,7 @@ pub struct MlxMemorySnapshot {
     pub peak_bytes: u64,
 }
 
+#[cfg(feature = "mlx-backend")]
 /// Sample current MLX Metal allocator counters.
 ///
 /// If MLX has not been initialised all fields will be 0 – this is not an
@@ -355,6 +357,7 @@ pub fn sample_mlx_memory() -> MlxMemorySnapshot {
 
 // ── Combined telemetry ─────────────────────────────────────────────────────
 
+#[cfg(feature = "mlx-backend")]
 /// A unified memory telemetry record pairing process RSS with MLX allocator
 /// state at a single instant.
 #[derive(Debug, Clone)]
@@ -367,6 +370,7 @@ pub struct MemoryTelemetry {
     pub timestamp: Instant,
 }
 
+#[cfg(feature = "mlx-backend")]
 /// Sample process RSS and MLX allocator state in one shot.
 pub fn sample_memory_telemetry(pid: u32) -> MemoryTelemetry {
     MemoryTelemetry {
@@ -455,6 +459,7 @@ mod tests {
         let _ = rss;
     }
 
+#[cfg(all(test, feature = "mlx-backend"))]
     #[test]
     fn test_mlx_snapshot_does_not_panic() {
         // MLX may not be initialised, so the snapshot may be all-zero.
@@ -466,6 +471,7 @@ mod tests {
         let _ = snap.peak_bytes;
     }
 
+#[cfg(all(test, feature = "mlx-backend"))]
     #[test]
     fn test_mlx_snapshot_struct() {
         let snap = sample_mlx_memory();
@@ -480,6 +486,7 @@ mod tests {
         );
     }
 
+#[cfg(all(test, feature = "mlx-backend"))]
     #[test]
     fn test_memory_telemetry() {
         let t = sample_memory_telemetry(0);
@@ -517,6 +524,7 @@ mod tests {
         assert_eq!(usable_after_system_reserve(0), 0);
     }
 
+#[cfg(all(test, feature = "mlx-backend"))]
     #[test]
     fn test_configure_mlx_limits_does_not_panic() {
         // No crash when setting limits, regardless of MLX init state.

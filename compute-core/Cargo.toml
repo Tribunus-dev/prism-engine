@@ -74,7 +74,7 @@ default = []
 prism-backend = ["dep:coreml-proto", "server", "metal-dispatch"]
 # 2. RESEARCH — the MLX executor/model stack and everything built on it.
 #    Requires the MLX source tree (see mlx-rs-fork/mlx-sys/build.rs).
-mlx-backend = ["dep:mlx-rs", "dep:mlx-sys"]
+mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
 # Convenience alias for the pre-split meaning of prism-backend (both surfaces).
 research = ["prism-backend", "mlx-backend"]
 # 3. TOOLING — packers, reference harnesses, admission tools ride whichever
@@ -103,6 +103,8 @@ private-development = []
 image = []
 msgpack = []
 coreai-backend = []
+
+flux-klein-mlx = []
 
 # Positive capability gates — independent of execution path.
 # Each gates a generation module. Enable with the backend of your choice.
@@ -171,4 +173,4 @@ required-features = ["prism-backend"]
 [[bin]]
 name = "tribunus-compute-image"
 path = "src/bin/tribunus-compute-image.rs"
-required-features = ["prism-backend"]
+required-features = ["research"]

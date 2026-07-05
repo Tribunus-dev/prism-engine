@@ -643,7 +643,7 @@ fn run_parity_stage(
     // a long-lived worker reusing an untapped kernel here. The structural
     // check below is belt-and-braces (it also catches a future constructor
     // regression), and it runs BEFORE any decoding begins.
-    use crate::compute_image::orchestrator::runner::TapMode;
+    use crate::compute_image::megakernel::TapMode;
     let mut orch = Orchestrator::from_cimage_with_mode(
         std::path::Path::new(&request.teacher_checkpoint),
         1,

@@ -22,12 +22,15 @@ pub mod worker_process_manager;
 pub mod worker_response_registry;
 pub mod worker_supervision_config;
 
+#[cfg(feature = "mlx-backend")]
 pub use audio::AudioEncoderResource;
+#[cfg(feature = "mlx-backend")]
 pub use kv_cache_coordinator::{KVCacheCoordinator, LiveKvCache};
 pub use legacy_worker_bridge::LegacyWorkerBridge;
 pub use monotonic_clock::MonotonicClockResource;
 pub use npu_completion_port::NpuCompletionPort;
 pub use text_to_speech::TextToSpeechResource;
+#[cfg(feature = "mlx-backend")]
 pub use vision::VisionEncoderResource;
 pub use worker_diagnostics::WorkerDiagnosticsResource;
 pub use worker_event_source::{EventKind, WorkerEventEnvelope, WorkerEventSource};

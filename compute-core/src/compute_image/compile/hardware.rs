@@ -241,7 +241,7 @@ fn bench_accelerate_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBen
 const BENCH_SHAPES: &[(u32, u32)] = &[(32, 4096), (64, 4096), (128, 4096), (256, 4096)];
 
 /// Benchmark matmul on the real MlxBackend (GPU/ANE on M1).
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 fn bench_matmul_mlx(candidate: &KernelCandidate, m: u32, k: u32) -> KernelBenchResult {
     use crate::backend::{MatmulOp, MlxBackend, TensorBackend};
 
@@ -306,7 +306,7 @@ fn bench_matmul_mlx(candidate: &KernelCandidate, m: u32, k: u32) -> KernelBenchR
 }
 
 /// Benchmark rms_norm on the real MlxBackend.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 fn bench_rms_norm_mlx(candidate: &KernelCandidate, m: u32, k: u32) -> KernelBenchResult {
     use crate::backend::{MlxBackend, RmsNormOp, TensorBackend};
 
@@ -373,7 +373,7 @@ fn bench_rms_norm_mlx(candidate: &KernelCandidate, m: u32, k: u32) -> KernelBenc
 }
 
 /// Run real MLX benchmarks for all MLX-backed candidates.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")]
 fn bench_mlx_candidates(candidates: &[KernelCandidate]) -> Vec<KernelBenchResult> {
     let mut results = Vec::new();
     for candidate in candidates {
@@ -394,7 +394,7 @@ fn bench_mlx_candidates(candidates: &[KernelCandidate]) -> Vec<KernelBenchResult
 }
 
 /// Stub: return empty results when mlx-backend feature is disabled.
-#[cfg(not(any(feature = "mlx-backend", feature = "prism-backend")))]
+#[cfg(not(feature = "mlx-backend"))]
 fn bench_mlx_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBenchResult> {
     Vec::new()
 }

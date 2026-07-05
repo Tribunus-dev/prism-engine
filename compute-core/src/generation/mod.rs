@@ -5,14 +5,15 @@
 //! diffusion language model for parallel text generation, image understanding,
 //! function calling, code generation, and reasoning.
 
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+#[cfg(feature = "flux-klein-mlx")]
 pub mod text_to_image;
-#[cfg(feature = "generation-image")]
+#[cfg(all(feature = "generation-image", feature = "flux-klein-mlx"))]
 pub use text_to_image::TextToImageGenerator;
 
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod diffusiongemma;
-pub use diffusiongemma::{
+#[cfg(feature = "mlx-backend")]
+pub use self::diffusiongemma::{
     AdaptiveParallelTokens, ChatCompletion, ChatMessage, ContentPart, DiffusionModel,
     DiffusionSampler, FunctionCall, ToolDefinition, UsageInfo,
 };

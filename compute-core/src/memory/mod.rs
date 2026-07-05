@@ -15,6 +15,7 @@ pub mod iosurface_storage;
 pub mod monitor;
 pub mod plan;
 pub mod pool;
+#[cfg(feature = "mlx-backend")]
 pub mod telemetry;
 
 pub use allocator::BlockHandle;

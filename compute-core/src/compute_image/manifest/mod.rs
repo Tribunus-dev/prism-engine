@@ -11,6 +11,7 @@ pub mod types;
 
 // Re-export everything from submodules.
 pub use builder::*;
+#[cfg(feature = "mlx-backend")]
 pub use runtime::*;
 pub use types::*;
 
@@ -358,7 +359,10 @@ impl NativeCapabilityReport {
             }
         };
 
+        #[cfg(feature = "mlx-backend")]
         let supports_memory_telemetry = mlx_active_memory_bytes() > 0 || metal_available;
+        #[cfg(not(feature = "mlx-backend"))]
+        let supports_memory_telemetry = metal_available;
         let supports_cache_control = metal_available;
         let supports_quantized_matmul = true;
         let supports_dequantize = true;
@@ -392,6 +396,7 @@ impl NativeCapabilityReport {
 // ── Convenience reader ─────────────────────────────────────────────────────
 
 /// Open a compiled image from `image_dir` and return a `CompiledImageReader`.
+#[cfg(feature = "mlx-backend")]
 pub fn read(image_dir: &str) -> crate::Result<CompiledImageReader> {
     CompiledImageReader::open(std::path::Path::new(image_dir))
 }

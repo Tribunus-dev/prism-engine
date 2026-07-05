@@ -48,6 +48,7 @@ use crate::decode_attribution::backend_adapters::{
     conformance, coreai_adapter, predict_loop, reference_adapter as ref_eval, BackendSupportTier,
 };
 
+#[cfg(feature = "mlx-backend")]
 use crate::decode_attribution::backend_adapters::mlx_adapter;
 
 /// Run one decode-attribution measurement.
@@ -454,14 +455,23 @@ pub fn run_backend(
             steady_iters,
             tolerance,
         ),
-        "mlx" => run_backend_mlx(
+"mlx" => {
+            #[cfg(feature = "mlx-backend")]
+            {
+                run_backend_mlx(
             &mut r,
             family,
             profile,
             warmup_iters,
             steady_iters,
             tolerance,
-        ),
+                )
+            }
+            #[cfg(not(feature = "mlx-backend"))]
+            {
+                r.mark_skipped_by_support("MLX backend not available".to_string());
+            }
+        },
         "reference" => run_backend_reference(&mut r, family, profile),
         other => {
             r.mark_predict_blocked("predict", format!("unknown backend: {other}"));
@@ -922,6 +932,7 @@ fn run_backend_accelerate(
 }
 
 /// Run the MLX backend: matmul only with forced evaluation.
+#[cfg(feature = "mlx-backend")]
 fn run_backend_mlx(
     r: &mut DecodeAttributionReceipt,
     family: &GraphFamily,

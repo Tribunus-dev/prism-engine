@@ -5,38 +5,29 @@
 //! `mlx_rs::Array` operations behind a generational slot-map registry.
 
 #[cfg(target_os = "macos")]
-#[cfg(all(
-    target_os = "macos",
-    feature = "mlx-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod accelerate;
 #[cfg(target_os = "macos")]
-#[cfg(all(
-    target_os = "macos",
-    feature = "mlx-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod accelerate_ffi;
 /// Accelerate CPU execution lane — arena-view-based ops on CPU-accessible
 /// memory (zero-copy, no FFI). Pure Rust fallback with no OS dependency.
-#[cfg(feature = "mlx-backend")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod accelerate_lane;
 pub mod authority;
 #[cfg(target_os = "macos")]
-#[cfg(all(
-    target_os = "macos",
-    feature = "mlx-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod coreai;
 /// Core ML execution lane — compiled subgraph on ANE.
 #[cfg(all(
     target_os = "macos",
-    feature = "mlx-backend"
+    any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod coreai_iosurface;
 /// Core ML IOSurface binding — validated executable binding.
 #[cfg(all(
     target_os = "macos",
-    feature = "mlx-backend"
+    any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod coreai_lane;
 /// CPU attention scheduler — L2-cache-aware work partition + work-stealing
@@ -44,10 +35,10 @@ pub mod coreai_lane;
 #[cfg(feature = "candle-cpu")]
 pub mod cpu_attn;
 pub mod evaluation;
-#[cfg(feature = "mlx-backend")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod flex_dispatch;
 pub mod graph;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))] // research surface: MLX executor/model stack
 pub mod heterogeneous_executor;
 #[cfg(feature = "intel")]
 pub mod intel_level_zero;
@@ -55,7 +46,7 @@ pub mod intel_level_zero;
 #[cfg(feature = "intel")]
 pub mod intel_usm;
 /// Metal consumer — validates Core ML output slots against CPU references.
-#[cfg(feature = "mlx-backend")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod metal_consumer;
 /// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
 pub mod metal_iosurface;
@@ -64,6 +55,7 @@ pub mod npu;
 /// PlacementSet and hazard tracking — op placement legality and cross-lane sync.
 #[cfg(any(
     feature = "mlx-backend",
+    feature = "prism-backend",
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix"
@@ -77,6 +69,7 @@ pub mod tensor_registry;
 /// Unified execution arena — single mmap-backed memory region for all lanes.
 #[cfg(any(
     feature = "mlx-backend",
+    feature = "prism-backend",
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix"

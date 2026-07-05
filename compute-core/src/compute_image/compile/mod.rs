@@ -2,6 +2,7 @@
 //! sequential/differential compilation, diagnostics, and publishing.
 
 mod download;
+pub mod archive;
 #[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
 mod emit;
 #[cfg(feature = "mlx-backend")] // research surface: MLX compile lane

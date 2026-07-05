@@ -103,7 +103,14 @@ impl SharedTensorCapabilityReport {
             supports_ane_private_runtime: {
                 #[cfg(target_os = "macos")]
                 {
-                    crate::ane_bridge::AneProgram::init().is_ok()
+                    #[cfg(feature = "mlx-backend")]
+                    {
+                        crate::ane_bridge::AneProgram::init().is_ok()
+                    }
+                    #[cfg(not(feature = "mlx-backend"))]
+                    {
+                        false
+                    }
                 }
                 #[cfg(not(target_os = "macos"))]
                 {

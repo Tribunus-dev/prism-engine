@@ -412,14 +412,28 @@ impl RunInstrumentationContext {
 
 fn sample_process_memory(counters: CounterSnapshot) -> MemorySnapshot {
     MemorySnapshot {
-        mlx_active: crate::compute_image::mlx_active_memory_bytes(),
-        mlx_cache: crate::compute_image::mlx_cache_memory_bytes(),
+        mlx_active: mlx_active_fallback(),
+        mlx_cache: mlx_cache_fallback(),
         rss: crate::worker_memory::sample_process_rss_self(),
         materialized: counters.materialized,
         file_read: counters.file_read,
         kv: counters.kv,
     }
 }
+
+#[cfg(feature = "mlx-backend")]
+#[inline]
+fn mlx_active_fallback() -> u64 { crate::compute_image::mlx_active_memory_bytes() }
+#[cfg(not(feature = "mlx-backend"))]
+#[inline]
+fn mlx_active_fallback() -> u64 { 0 }
+
+#[cfg(feature = "mlx-backend")]
+#[inline]
+fn mlx_cache_fallback() -> u64 { crate::compute_image::mlx_cache_memory_bytes() }
+#[cfg(not(feature = "mlx-backend"))]
+#[inline]
+fn mlx_cache_fallback() -> u64 { 0 }
 
 #[derive(Clone)]
 pub struct NativeTraceCollector {

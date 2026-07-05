@@ -534,7 +534,7 @@ impl HybridExecutor {
                 }
                 3 => {
                     // ── ANE dispatch ───────────────────────────────────────
-                    let stub_step = ExecutionStep::AneInference {
+                    let stub_step = crate::ane_bridge::AneInferenceStep {
                         mil_text: String::new(),
                         inputs: Vec::new(),
                         outputs: Vec::new(),

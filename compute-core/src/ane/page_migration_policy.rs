@@ -19,6 +19,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "mlx-backend")]
 use crate::runtime::resources::kv_cache_coordinator::{
     KVCacheTier, PageBacking, PageMigrationPolicy, TiersPage,
 };
@@ -47,6 +48,7 @@ pub struct AnePageMigrationPolicy {
     pub hot_threshold: Duration,
 }
 
+#[cfg(feature = "mlx-backend")]
 impl AnePageMigrationPolicy {
     pub fn new(
         compressor: Arc<AneCompressor>,
@@ -158,6 +160,7 @@ impl AnePageMigrationPolicy {
     }
 }
 
+#[cfg(feature = "mlx-backend")]
 impl PageMigrationPolicy for AnePageMigrationPolicy {
     fn evaluate_tick(&self, page: &mut TiersPage, now: Instant) -> Result<(), String> {
         let age = self.page_age(page, now);
@@ -190,5 +193,24 @@ impl PageMigrationPolicy for AnePageMigrationPolicy {
 
     fn name(&self) -> &'static str {
         "ane_page_migration_policy"
+    }
+}
+
+#[cfg(not(feature = "mlx-backend"))]
+impl AnePageMigrationPolicy {
+    pub fn new(
+        compressor: Arc<AneCompressor>,
+        head_dim: u32,
+        n_kv_heads: u32,
+        cold_threshold: Duration,
+        hot_threshold: Duration,
+    ) -> Self {
+        Self {
+            compressor,
+            head_dim,
+            n_kv_heads,
+            cold_threshold,
+            hot_threshold,
+        }
     }
 }

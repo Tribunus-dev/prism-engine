@@ -5,6 +5,7 @@
 //! Manages request queuing, prefill/decode phase scheduling, batch construction,
 //! and token budget allocation across concurrent requests.
 
+#[cfg(feature = "mlx-backend")]
 pub mod activation_arena;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod activation_binding;
@@ -36,7 +37,9 @@ pub mod prism_session;
 pub mod ready_queue;
 pub mod receipts;
 pub mod request;
+#[cfg(feature = "mlx-backend")]
 pub mod saved_request;
+#[cfg(feature = "mlx-backend")]
 pub mod scheduler;
 pub mod slot;
 pub mod token_budget;
@@ -46,11 +49,14 @@ pub mod weight_residency;
 pub use token_budget::*;
 
 pub use prism_session::{PrismExecutionMode, PrismStepRequest, PrismStepResult, SchedulingMode};
+#[cfg(feature = "mlx-backend")]
 pub use saved_request::SavedRequest;
+#[cfg(feature = "mlx-backend")]
 pub use saved_request::{
     MAX_PREEMPTIONS_BEFORE_BOOST, PRIORITY_DEFAULT, PRIORITY_HIGHEST, PRIORITY_LOWEST,
     STARVATION_PRIORITY_BOOST,
 };
+#[cfg(feature = "mlx-backend")]
 pub use scheduler::Scheduler;
 
 use std::sync::{Arc, LazyLock};

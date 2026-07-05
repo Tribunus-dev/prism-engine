@@ -8,6 +8,7 @@
 pub mod accelerate;
 pub mod coreai;
 pub mod dataset;
+#[cfg(feature = "mlx-backend")]
 pub mod mlx;
 pub mod params;
 pub mod receipts;

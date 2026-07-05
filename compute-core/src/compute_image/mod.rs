@@ -57,6 +57,7 @@ pub mod phase_graph_builder;
 pub mod phase_graph_validation;
 pub mod phase_program_version;
 pub mod pipeline;
+#[cfg(feature = "mlx-backend")]
 pub mod plan;
 pub mod program;
 pub mod quant;
@@ -77,25 +78,36 @@ pub mod verify;
 pub mod vm_manager;
 
 pub use manifest::{
-    build_tensor_catalog, clear_mlx_cache, is_valid_storage_abi, mlx_active_memory_bytes,
-    mlx_cache_memory_bytes, mlx_get_memory_limit, mlx_peak_memory_bytes, read,
-    representation_aware_admission_estimate, resolve_tensor_name, set_mlx_cache_limit,
-    set_mlx_memory_limit, validate_manifest_for_abi, validate_physical_dtype,
+    is_valid_storage_abi,
+    representation_aware_admission_estimate, validate_manifest_for_abi, validate_physical_dtype,
     validate_tensor_for_mapped_abi, validate_tensor_layout, AliasEntry, CImageHeader,
-    CompilationAuthority, CompileReceipt, CompiledImage, CompiledImageReader, CopyClassification,
+    CompilationAuthority, CompileReceipt, CompiledImage, CopyClassification,
     ImageBuilder, LeaseState, Manifest, ManifestVerification, NativeCapabilityReport,
-    QuantizationDesc, RepresentationAdmissionEstimate, ResidencyPlan, ResolvedTensorBinding,
+    image_build_attestation,
+    QuantizationDesc, RepresentationAdmissionEstimate, ResidencyPlan,
     Segment, SegmentKind, SegmentLease, SegmentReceipt, ShardHash, StageProfile, StorageAbiSpec,
     StorageBackend, TensorEntry, TensorLease, CIMAGE_MAGIC, STORAGE_ABI_COPIED_V0,
     STORAGE_ABI_MAPPED_NO_COPY_V1,
 };
 
+#[cfg(feature = "mlx-backend")]
+pub use manifest::{
+    build_tensor_catalog, clear_mlx_cache, mlx_active_memory_bytes, read,
+    mlx_cache_memory_bytes, mlx_get_memory_limit, mlx_peak_memory_bytes,
+    resolve_tensor_name, set_mlx_cache_limit, set_mlx_memory_limit,
+    CompiledImageReader, ResolvedTensorBinding,
+};
+
 pub use kv_plan::{KVDtype, KvCachePlan, KvLayout, PrefixCompatibilityKey};
 
 pub use compile::{
-    compile_differential, compile_with_authority, compile_with_authority_speculative, diff_tensors,
-    download_hf_model, image_build_attestation, load_source_tensor_table, parse_hf_source,
+    diff_tensors, download_hf_model, load_source_tensor_table, parse_hf_source,
     SourceTensorInfo,
+};
+
+#[cfg(feature = "mlx-backend")]
+pub use compile::{
+    compile_differential, compile_with_authority, compile_with_authority_speculative,
 };
 
 pub use compile::hardware::run_hardware_assessment;

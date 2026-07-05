@@ -12,4 +12,5 @@ pub mod decoder;
 pub mod encoder;
 
 pub use decoder::{extract_frames, MAX_VIDEO_FRAMES};
+#[cfg(feature = "mlx-backend")]
 pub use encoder::{FrameEncoder, TemporalAggregation, VideoConfig, VideoEncoder};
