@@ -454,26 +454,29 @@ inline void apply_rope(threadgroup half* qk, uint num_heads, uint h_dim,
 // by the composer script, so the weight-stream map cannot drift.
 // ═══════════════════════════════════════════════════════════════════════════
 
-kernel void decode_layer_full_real(
-    device const half*  hidden_in    [[buffer(0)]],  // [HIDDEN_DIM]
-    device half*        hidden_out   [[buffer(1)]],  // [HIDDEN_DIM]
-    device half*        kv_cache_k   [[buffer(2)]],  // [max_seq × NUM_KV_HEADS × GLOBAL_HEAD_DIM] fp16, THIS layer
-    device half*        kv_cache_v   [[buffer(3)]],
-    device const uint*  ternary_w    [[buffer(4)]],  // megakernel layer weight stream
-    device const half*  norms        [[buffer(5)]],  // megakernel norms aux stream
-    device const half*  head_gates   [[buffer(6)]],  // NUM_Q_HEADS × f16
-    device half*        ffn_scratch  [[buffer(7)]],  // [2 × FFN_INTER] gate/up staging
-    constant uint&      layer_index  [[buffer(8)]],
-    constant uint&      seq_position [[buffer(9)]],
-    uint tid   [[thread_index_in_threadgroup]],
-    uint tg_sz [[threads_per_threadgroup]])
+// The single source of truth for one fused layer: operates entirely on
+// threadgroup state so callers decide whether the boundary touches device
+// memory (group-1 audit) or stays resident (pair/triple/quad fusion — the
+// intermediate NEVER round-trips through device memory, which is the point
+// of fusing).
+inline void run_layer_full(
+    threadgroup half* h_buf,
+    threadgroup half* n_buf,
+    threadgroup half* q_chunk,
+    threadgroup float* shared_sums,
+    threadgroup half* scores,
+    threadgroup half* attn_out,
+    device half* kv_cache_k,
+    device half* kv_cache_v,
+    device const uint* ternary_w,
+    device const half* norms,
+    device const half* head_gates,
+    device half* ffn_scratch,
+    uint layer_index,
+    uint seq_position,
+    uint tid,
+    uint tg_sz)
 {
-    threadgroup half h_buf[HIDDEN_DIM];
-    threadgroup half n_buf[HIDDEN_DIM];
-    threadgroup half q_chunk[2 * GLOBAL_HEAD_DIM];
-    threadgroup float shared_sums[256];
-    threadgroup half scores[MAX_CTX];
-
     uint layer = layer_index;
     bool shared_layer = ((layer + 1) % 6 == 0);
     uint h_dim = shared_layer ? GLOBAL_HEAD_DIM : HEAD_DIM;
@@ -481,10 +484,6 @@ kernel void decode_layer_full_real(
     uint scratch_stride = NUM_KV_HEADS * GLOBAL_HEAD_DIM;
     uint current_pos = seq_position;
     uint num_cached = seq_position + 1; // after this token's K/V scatter
-
-    // Load residual stream.
-    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) h_buf[i] = hidden_in[i];
-    threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // --- 1. Input RMSNorm (same weights convention as the megakernel) ----
     device const half* in_norm_w = norms + layer * HIDDEN_DIM;
@@ -497,8 +496,7 @@ kernel void decode_layer_full_real(
     uint vw_base = layer_base + V_OFF;
     uint ow_base = layer_base + O_OFF;
 
-    // Attention accumulator lives where the megakernel puts it.
-    threadgroup half attn_out[HIDDEN_DIM];
+    // Attention accumulator (caller-provided threadgroup storage).
     for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) attn_out[i] = 0;
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -670,7 +668,106 @@ kernel void decode_layer_full_real(
             h_buf[row] += (half)dp_total;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
+}
 
-    // Emit the layer boundary state.
+// ── Threadgroup state bundle shared by every wrapper ─────────────────────
+#define PRISM_LAYER_LOCALS                          \
+    threadgroup half h_buf[HIDDEN_DIM];             \
+    threadgroup half n_buf[HIDDEN_DIM];             \
+    threadgroup half q_chunk[2 * GLOBAL_HEAD_DIM];  \
+    threadgroup float shared_sums[256];             \
+    threadgroup half scores[MAX_CTX];               \
+    threadgroup half attn_out[HIDDEN_DIM];
+
+// One layer per dispatch — the group-size-1 audit lane (boundary = device
+// buffer = the blit-free tap).
+kernel void decode_layer_full_real(
+    device const half*  hidden_in    [[buffer(0)]],
+    device half*        hidden_out   [[buffer(1)]],
+    device half*        kv_cache_k   [[buffer(2)]],
+    device half*        kv_cache_v   [[buffer(3)]],
+    device const uint*  ternary_w    [[buffer(4)]],
+    device const half*  norms        [[buffer(5)]],
+    device const half*  head_gates   [[buffer(6)]],
+    device half*        ffn_scratch  [[buffer(7)]],
+    constant uint&      layer_index  [[buffer(8)]],
+    constant uint&      seq_position [[buffer(9)]],
+    uint tid   [[thread_index_in_threadgroup]],
+    uint tg_sz [[threads_per_threadgroup]])
+{
+    PRISM_LAYER_LOCALS
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) h_buf[i] = hidden_in[i];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k, kv_cache_v, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index, seq_position, tid, tg_sz);
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) hidden_out[i] = h_buf[i];
+}
+
+// Two consecutive layers per dispatch — the FINAL intended fused-pair
+// implementation. The intermediate boundary lives only in threadgroup h_buf:
+// one device round-trip eliminated, exactly what the fusion exists for. The
+// two layers keep separate per-layer KV caches (buffers 2/3 and 10/11) and
+// share the ffn staging scratch sequentially.
+kernel void fused_full_pair_real(
+    device const half*  hidden_in     [[buffer(0)]],
+    device half*        hidden_out    [[buffer(1)]],
+    device half*        kv_cache_k_a  [[buffer(2)]],
+    device half*        kv_cache_v_a  [[buffer(3)]],
+    device const uint*  ternary_w     [[buffer(4)]],
+    device const half*  norms         [[buffer(5)]],
+    device const half*  head_gates    [[buffer(6)]],
+    device half*        ffn_scratch   [[buffer(7)]],
+    constant uint&      layer_index_a [[buffer(8)]],
+    constant uint&      seq_position  [[buffer(9)]],
+    device half*        kv_cache_k_b  [[buffer(10)]],
+    device half*        kv_cache_v_b  [[buffer(11)]],
+    constant uint&      layer_index_b [[buffer(12)]],
+    uint tid   [[thread_index_in_threadgroup]],
+    uint tg_sz [[threads_per_threadgroup]])
+{
+    PRISM_LAYER_LOCALS
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) h_buf[i] = hidden_in[i];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_a, kv_cache_v_a, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_a, seq_position, tid, tg_sz);
+    // Intermediate boundary stays resident in h_buf — no device write.
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_b, kv_cache_v_b, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_b, seq_position, tid, tg_sz);
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) hidden_out[i] = h_buf[i];
+}
+
+// SWA-pair alias: h_dim (256 local vs 512 shared) is derived from the layer
+// index INSIDE run_layer_full, so the swa/full split is a scheduling-side
+// distinction only — the body is identical. Kept as its own entry so
+// decode_fused's attention_kind dispatch keys keep working.
+kernel void fused_swa_pair_real(
+    device const half*  hidden_in     [[buffer(0)]],
+    device half*        hidden_out    [[buffer(1)]],
+    device half*        kv_cache_k_a  [[buffer(2)]],
+    device half*        kv_cache_v_a  [[buffer(3)]],
+    device const uint*  ternary_w     [[buffer(4)]],
+    device const half*  norms         [[buffer(5)]],
+    device const half*  head_gates    [[buffer(6)]],
+    device half*        ffn_scratch   [[buffer(7)]],
+    constant uint&      layer_index_a [[buffer(8)]],
+    constant uint&      seq_position  [[buffer(9)]],
+    device half*        kv_cache_k_b  [[buffer(10)]],
+    device half*        kv_cache_v_b  [[buffer(11)]],
+    constant uint&      layer_index_b [[buffer(12)]],
+    uint tid   [[thread_index_in_threadgroup]],
+    uint tg_sz [[threads_per_threadgroup]])
+{
+    PRISM_LAYER_LOCALS
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) h_buf[i] = hidden_in[i];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_a, kv_cache_v_a, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_a, seq_position, tid, tg_sz);
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_b, kv_cache_v_b, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_b, seq_position, tid, tg_sz);
     for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) hidden_out[i] = h_buf[i];
 }
