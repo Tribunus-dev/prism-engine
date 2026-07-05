@@ -375,6 +375,24 @@ impl Megakernel {
             std::ptr::write_bytes(head_gates.contents(), 0, head_gates_bytes as usize);
         }
 
+        // ── Stage 0 activation taps (STAGE0_TAPS_SPEC.md, Transport A) ──
+        // [(2·LAYERS+2) × HIDDEN_DIM] f16 (~735 KB) + 4-byte progress atomic.
+        // Written only by PSOs compiled with -DPRISM_TAPS=1 (TRIBUNUS_TAPS=1);
+        // otherwise inert. Always allocated: the cost is negligible and it
+        // keeps buffer binding unconditional.
+        let tap_slots = (2 * LAYERS + 2) as u64;
+        let layer_taps = self.device.new_buffer(
+            tap_slots * HIDDEN_DIM as u64 * 2,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let tap_progress = self
+            .device
+            .new_buffer(4, MTLResourceOptions::StorageModeShared);
+        unsafe {
+            // u32::MAX = "no tap slot completed yet".
+            std::ptr::write_bytes(tap_progress.contents(), 0xFF, 4);
+        }
+
         // ── KV prefetch arena ───────────────────────────────────────
         let arena_layout = KvPrefetchArena::layout(MAX_CONTEXT, NUM_KV_HEADS, GLOBAL_HEAD_DIM);
         let kv_prefetch_arena = self.device.new_buffer(
@@ -467,6 +485,8 @@ impl Megakernel {
         enc.set_buffer(25, Some(&*completion_counter), 0);
         enc.set_buffer(28, Some(&*draft_output), 0);
         enc.set_buffer(29, Some(&*head_gates), 0);
+        enc.set_buffer(31, Some(&*layer_taps), 0);
+        enc.set_buffer(32, Some(&*tap_progress), 0);
 
         // Threadgroup scratch for ternary->FP16 decompress in tile-GEMV:
         // 640 halves = 1280 bytes at index 0 (consumed by the `tile_scratch`
@@ -605,6 +625,8 @@ impl Megakernel {
             entropy_map,
             active_mask,
             head_gates,
+            layer_taps,
+            tap_progress,
             draft_output,
             kv_prefetch_arena: Some(kv_prefetch_arena),
             pso_decode: self.pso_decode.clone(),
@@ -836,6 +858,8 @@ impl Megakernel {
         );
         enc.set_buffer(28, Some(&buffers.draft_output), 0);
         enc.set_buffer(29, Some(&buffers.head_gates), 0);
+        enc.set_buffer(31, Some(&buffers.layer_taps), 0);
+        enc.set_buffer(32, Some(&buffers.tap_progress), 0);
         // Slot 30: kv_prefetch_queue from arena
         if let Some(layout) = &buffers.arena_layout {
             enc.set_buffer(30, Some(&kv_prefetch_arena), layout.queue_offset as u64);
@@ -1021,6 +1045,20 @@ impl Megakernel {
         unsafe { std::slice::from_raw_parts(ptr, n).to_vec() }
     }
 
+    /// Read the Stage 0 activation tap buffer: raw f16 bits in
+    /// [(2·LAYERS+2) × HIDDEN_DIM] slot order (STAGE0_TAPS_SPEC slot map).
+    /// Meaningful only when the kernel was compiled with taps.
+    pub fn read_layer_taps(&self, buffers: &KernelBuffers) -> Vec<u16> {
+        let n = (2 * LAYERS as usize + 2) * HIDDEN_DIM as usize;
+        let ptr = buffers.layer_taps.contents() as *const u16;
+        unsafe { std::slice::from_raw_parts(ptr, n).to_vec() }
+    }
+
+    /// Read the tap progress counter (last completed slot; u32::MAX = none).
+    pub fn read_tap_progress(&self, buffers: &KernelBuffers) -> u32 {
+        unsafe { *(buffers.tap_progress.contents() as *const u32) }
+    }
+
     /// Reset slot state after reading results.
     pub fn reset_work_slot(&self, _buffers: &KernelBuffers, _slot_id: u32) {
         // no-op: ring entries are naturally consumed by the GPU
@@ -1097,6 +1135,11 @@ pub struct KernelBuffers {
     pub draft_output: metal::Buffer,
     /// Per-head attention gates (NUM_Q_HEADS × f16). sigmoid(gate) gates the SDPA output.
     pub head_gates: metal::Buffer,
+    /// Stage 0 activation taps: [(2·LAYERS+2) × HIDDEN_DIM] f16 slots
+    /// (STAGE0_TAPS_SPEC.md). Inert unless the kernel was compiled with taps.
+    pub layer_taps: metal::Buffer,
+    /// Last completed tap slot (device-scope atomic u32; u32::MAX = none).
+    pub tap_progress: metal::Buffer,
     // KV interleave
     pub kv_prefetch_arena: Option<metal::Buffer>,
     pub pso_decode: Option<ComputePipelineState>,
