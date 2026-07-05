@@ -159,6 +159,11 @@ pub struct CimageDeployment {
     pub multimodal_projection_weights_buffer: Option<metal::Buffer>,
     /// Sealed multimodal projection scales segment, when present.
     pub multimodal_projection_scales_buffer: Option<metal::Buffer>,
+    /// Resolved `MultimodalProjectionBiases` segment (byte-parallel to the
+    /// scales segment). `None` on v1 artifacts and text-only cimages — the
+    /// runner then takes the documented zero-bias fallback
+    /// (kernels/MULTIMODAL_NF4_BIAS_ABI.md).
+    pub multimodal_projection_biases_buffer: Option<metal::Buffer>,
     /// Sealed multimodal position embeddings segment, when present.
     pub multimodal_position_embeddings_buffer: Option<metal::Buffer>,
     /// Sealed multimodal auxiliary weights segment, when present.
@@ -402,6 +407,7 @@ impl CimageDeployment {
             scalars_buffer: None,
             multimodal_projection_weights_buffer: None,
             multimodal_projection_scales_buffer: None,
+            multimodal_projection_biases_buffer: None,
             multimodal_position_embeddings_buffer: None,
             multimodal_auxiliary_weights_buffer: None,
             mil_buffer: None,
@@ -597,6 +603,9 @@ impl CimageDeployment {
                 .map(|seg| mk_buf(&seg)),
             multimodal_projection_scales_buffer: header
                 .segment(SegmentKind::MultimodalProjectionScales)
+                .map(|seg| mk_buf(&seg)),
+            multimodal_projection_biases_buffer: header
+                .segment(SegmentKind::MultimodalProjectionBiases)
                 .map(|seg| mk_buf(&seg)),
             multimodal_position_embeddings_buffer: header
                 .segment(SegmentKind::MultimodalPositionEmbeddings)
