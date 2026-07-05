@@ -13,6 +13,7 @@
 pub mod accelerate_adapter;
 pub mod conformance;
 pub mod coreai_adapter;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod mlx_adapter;
 pub mod predict_loop;
 pub mod reference_adapter;

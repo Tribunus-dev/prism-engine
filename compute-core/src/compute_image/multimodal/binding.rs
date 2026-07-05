@@ -22,6 +22,26 @@ pub struct ProjectionTensorBinding {
     pub record: ProjectionTensorRecord,
     pub weights: SealedSegmentBinding,
     pub scales: Option<SealedSegmentBinding>,
+    /// The bias segment, present only when the record carries
+    /// `FLAG_HAS_BIAS` AND the artifact seals a
+    /// `MultimodalProjectionBiases` segment. Per the parallel-layout
+    /// contract the record's `scale_offset`/`scale_length` address this
+    /// segment — see [`Self::bias_view_geometry`].
+    pub biases: Option<SealedSegmentBinding>,
+}
+
+impl ProjectionTensorBinding {
+    /// (offset, length) of this record's bias bytes **within the bias
+    /// segment** — by the parallel-layout contract these are exactly the
+    /// record's scale geometry. Returns `None` when the record has no
+    /// resident biases (v1-compat zero-bias path).
+    pub fn bias_view_geometry(&self) -> Option<(u64, u64)> {
+        self.biases?;
+        if !self.record.has_bias() {
+            return None;
+        }
+        Some((self.record.scale_offset, self.record.scale_length))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +52,7 @@ pub struct SealedMultimodalBindings {
     pub projection_precision: ProjectionPrecision,
     pub weight_segment: SealedSegmentBinding,
     pub scale_segment: Option<SealedSegmentBinding>,
+    pub bias_segment: Option<SealedSegmentBinding>,
     pub position_segment: Option<SealedSegmentBinding>,
     pub auxiliary_segment: Option<SealedSegmentBinding>,
     pub image_projection_bindings: Vec<ProjectionTensorBinding>,
@@ -190,65 +211,20 @@ impl SealedMultimodalBindings {
         records: &[ProjectionTensorRecord],
     ) -> Result<Self, String> {
         let (header, _) = verify_cimage(mmap_data)?;
-        let weight_segment = resolve_segment(
+        Self::from_verified_parts(
             &header.segments,
             header.segment_count as usize,
-            descriptor.projection_weight_segment_index,
-            SegmentKind::MultimodalProjectionWeights,
-        )?;
-        let scale_segment = resolve_optional_segment(
-            &header.segments,
-            header.segment_count as usize,
-            descriptor.projection_scale_segment_index,
-            SegmentKind::MultimodalProjectionScales,
-        )?;
-        let position_segment = resolve_optional_segment(
-            &header.segments,
-            header.segment_count as usize,
-            descriptor.position_embedding_segment_index,
-            SegmentKind::MultimodalPositionEmbeddings,
-        )?;
-        let auxiliary_segment = resolve_optional_segment(
-            &header.segments,
-            header.segment_count as usize,
-            descriptor.auxiliary_weight_segment_index,
-            SegmentKind::MultimodalAuxiliaryWeights,
-        )?;
-
-        let mut image_projection_bindings = Vec::new();
-        let mut audio_projection_bindings = Vec::new();
-        for record in records {
-            let Some(role) = projection_role_from_raw(record.role) else {
-                continue;
-            };
-            let binding = ProjectionTensorBinding {
-                role,
-                record: *record,
-                weights: weight_segment,
-                scales: scale_segment,
-            };
-            if is_image_role(role) {
-                image_projection_bindings.push(binding);
-            } else if is_audio_role(role) {
-                audio_projection_bindings.push(binding);
-            }
-        }
-
-        Ok(Self {
             descriptor,
             summary,
             capabilities,
             projection_precision,
-            weight_segment,
-            scale_segment,
-            position_segment,
-            auxiliary_segment,
-            image_projection_bindings,
-            audio_projection_bindings,
-        })
+            records,
+        )
     }
 
-    #[cfg(test)]
+    /// Resolution core shared by [`Self::from_parts`] (post-`verify_cimage`)
+    /// and the synthetic-parts tests — the single home of segment resolution
+    /// and the bias parallel-view load checks.
     fn from_verified_parts(
         segments: &[SegmentEntry],
         segment_count: usize,
@@ -270,6 +246,12 @@ impl SealedMultimodalBindings {
             descriptor.projection_scale_segment_index,
             SegmentKind::MultimodalProjectionScales,
         )?;
+        let bias_segment = resolve_optional_segment(
+            segments,
+            segment_count,
+            descriptor.projection_bias_segment_index,
+            SegmentKind::MultimodalProjectionBiases,
+        )?;
         let position_segment = resolve_optional_segment(
             segments,
             segment_count,
@@ -289,11 +271,32 @@ impl SealedMultimodalBindings {
             let Some(role) = projection_role_from_raw(record.role) else {
                 continue;
             };
+            // Load-time parallel check (the derive-style triplet validation
+            // of the main arena ABI, mirrored): a flagged record must resolve
+            // a bias segment large enough for its scale-parallel view.
+            if record.has_bias() {
+                let seg = bias_segment.ok_or_else(|| {
+                    format!(
+                        "projection record {:#x} sets FLAG_HAS_BIAS but the artifact \
+                         seals no MultimodalProjectionBiases segment",
+                        record.logical_name_hash
+                    )
+                })?;
+                let end = record.scale_offset.saturating_add(record.scale_length);
+                if end > seg.length {
+                    return Err(format!(
+                        "projection record {:#x}: bias view [{}, {}) exceeds bias \
+                         segment length {} — parallel-layout contract violated",
+                        record.logical_name_hash, record.scale_offset, end, seg.length
+                    ));
+                }
+            }
             let binding = ProjectionTensorBinding {
                 role,
                 record: *record,
                 weights: weight_segment,
                 scales: scale_segment,
+                biases: if record.has_bias() { bias_segment } else { None },
             };
             if is_image_role(role) {
                 image_projection_bindings.push(binding);
@@ -309,6 +312,7 @@ impl SealedMultimodalBindings {
             projection_precision,
             weight_segment,
             scale_segment,
+            bias_segment,
             position_segment,
             auxiliary_segment,
             image_projection_bindings,
@@ -468,6 +472,163 @@ mod tests {
             scale_length: 32,
             ..ProjectionTensorRecord::default()
         }
+    }
+
+    // ── Multimodal NF4 bias ABI validation gates ────────────────────────────
+    // (kernels/MULTIMODAL_NF4_BIAS_ABI.md — implemented in the hardening pass)
+
+    fn make_segments_with_biases(bias_len: u64) -> [SegmentEntry; CIMAGE_SEGMENT_CAPACITY] {
+        let mut segments = make_segments();
+        segments[4] = SegmentEntry {
+            kind: SegmentKind::MultimodalProjectionBiases as u32,
+            offset: 16384,
+            length: bias_len,
+        };
+        segments
+    }
+
+    fn flagged_record(role: ProjectionRole, scale_offset: u64) -> ProjectionTensorRecord {
+        ProjectionTensorRecord {
+            role: role as u16,
+            weight_length: 128,
+            scale_offset,
+            scale_length: 32,
+            flags: ProjectionTensorRecord::FLAG_HAS_BIAS,
+            ..ProjectionTensorRecord::default()
+        }
+    }
+
+    fn summary() -> MultimodalArtifactSummary {
+        MultimodalArtifactSummary {
+            modalities: 0b0110,
+            image_soft_token_default: 280,
+            image_soft_token_max: 1024,
+            projection_precision: ProjectionPrecision::Nf4Tile640,
+            processor_contract_digest: [0; 32],
+            tensor_layout_digest: [0; 32],
+        }
+    }
+
+    fn caps() -> MultimodalCapabilities {
+        MultimodalCapabilities {
+            text: true,
+            image: true,
+            audio: false,
+            video: false,
+        }
+    }
+
+    #[test]
+    fn bias_view_resolves_for_flagged_record() {
+        let mut desc = make_descriptor();
+        desc.projection_bias_segment_index = 4;
+        let bindings = SealedMultimodalBindings::from_verified_parts(
+            &make_segments_with_biases(512), // == scale segment length
+            5,
+            desc,
+            summary(),
+            caps(),
+            ProjectionPrecision::Nf4Tile640,
+            &[flagged_record(ProjectionRole::ImageProjection, 64)],
+        )
+        .expect("flagged record with sealed bias segment must bind");
+        assert!(bindings.bias_segment.is_some(), "bias segment resolved");
+        let b = bindings.image_projection().expect("projection binding");
+        assert!(b.biases.is_some(), "record-level bias binding present");
+        // The parallel-layout contract: bias view geometry IS the scale geometry.
+        assert_eq!(b.bias_view_geometry(), Some((64, 32)));
+    }
+
+    #[test]
+    fn v1_record_never_takes_the_bias_path() {
+        // Bias segment sealed, but the record's flags == 0 (every v1 packer
+        // wrote 0) — the record-level gate, not the descriptor index, is the
+        // load-bearing guard.
+        let mut desc = make_descriptor();
+        desc.projection_bias_segment_index = 4;
+        let bindings = SealedMultimodalBindings::from_verified_parts(
+            &make_segments_with_biases(512),
+            5,
+            desc,
+            summary(),
+            caps(),
+            ProjectionPrecision::Nf4Tile640,
+            &[record(ProjectionRole::ImageProjection)],
+        )
+        .expect("v1 record must load unchanged");
+        let b = bindings.image_projection().expect("projection binding");
+        assert!(b.biases.is_none(), "flags==0 must never bind biases");
+        assert_eq!(b.bias_view_geometry(), None);
+    }
+
+    #[test]
+    fn v1_descriptor_zero_index_is_unreachable_behind_the_flag() {
+        // v1 packers wrote 0 into the (then-reserved) index slot. 0 aliases a
+        // real segment slot, which is exactly why the record flag gates the
+        // path: with flags == 0 the aliased index must never be consulted.
+        let desc = make_descriptor(); // bias index left at default 0
+        let bindings = SealedMultimodalBindings::from_verified_parts(
+            &make_segments(), // slot 0 is the WEIGHTS segment (the alias hazard)
+            4,
+            desc,
+            summary(),
+            caps(),
+            ProjectionPrecision::Nf4Tile640,
+            &[record(ProjectionRole::ImageProjection)],
+        )
+        .expect("v1 artifact must load");
+        // resolve_optional_segment finds slot 0 has the WRONG kind for biases,
+        // so the segment resolves to None — and the unflagged record never
+        // asks. Bit-identical v1 behavior.
+        assert!(bindings.bias_segment.is_none());
+        assert!(bindings.image_projection().unwrap().biases.is_none());
+    }
+
+    #[test]
+    fn flagged_record_without_bias_segment_is_rejected() {
+        let desc = make_descriptor(); // no bias index (u16 default 0 → wrong kind → None)
+        let err = SealedMultimodalBindings::from_verified_parts(
+            &make_segments(),
+            4,
+            desc,
+            summary(),
+            caps(),
+            ProjectionPrecision::Nf4Tile640,
+            &[flagged_record(ProjectionRole::ImageProjection, 0)],
+        )
+        .expect_err("declared residency without a sealed segment must fail loudly");
+        assert!(err.contains("FLAG_HAS_BIAS"), "actionable error: {err}");
+    }
+
+    #[test]
+    fn bias_view_out_of_bounds_is_rejected() {
+        let mut desc = make_descriptor();
+        desc.projection_bias_segment_index = 4;
+        let err = SealedMultimodalBindings::from_verified_parts(
+            &make_segments_with_biases(64), // record view [64, 96) exceeds 64
+            5,
+            desc,
+            summary(),
+            caps(),
+            ProjectionPrecision::Nf4Tile640,
+            &[flagged_record(ProjectionRole::ImageProjection, 64)],
+        )
+        .expect_err("parallel view must fit the bias segment");
+        assert!(err.contains("parallel-layout"), "actionable error: {err}");
+    }
+
+    #[test]
+    fn descriptor_layout_is_stride_stable() {
+        // The bias index reuses the former image_reserved slot: same offset,
+        // same width — the descriptor's size and every later field offset are
+        // unchanged, so v1 readers parse new artifacts and vice versa.
+        assert_eq!(std::mem::size_of::<MultimodalInputDescriptorV1>(), 176);
+        let d = MultimodalInputDescriptorV1::default();
+        let base = &d as *const _ as usize;
+        let off = (&d.projection_bias_segment_index as *const _ as usize) - base;
+        assert_eq!(off, 30, "bias index must occupy the old image_reserved slot");
+        // Record stride unchanged too (the loader walks with size_of stride).
+        assert_eq!(std::mem::size_of::<ProjectionTensorRecord>(), 80);
     }
 
     #[test]

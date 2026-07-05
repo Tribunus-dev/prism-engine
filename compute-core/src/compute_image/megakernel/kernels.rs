@@ -108,16 +108,55 @@ pub(crate) fn compile_layer_library(device: &Device) -> Result<metal::Library, S
         .map_err(|e| format!("load layer library: {e}"))
 }
 
-/// Whether Stage 0 activation taps are requested for this process
-/// (`TRIBUNUS_TAPS=1`). Read at kernel-compile time: the persistent kernel is
-/// compiled and dispatched once per Orchestrator, so taps are a
-/// construction-time property, not a per-call toggle
-/// (kernels/STAGE0_TAPS_SPEC.md, Transport A).
-pub(crate) fn taps_requested() -> bool {
-    std::env::var("TRIBUNUS_TAPS").map(|v| v == "1").unwrap_or(false)
+/// How an Orchestrator (and its persistent megakernel) is built with respect
+/// to Stage 0 activation taps — an **explicit construction-time mode**, not an
+/// ambient convention. The persistent kernel is compiled and dispatched once
+/// per Orchestrator, so tapping is decided exactly once, here
+/// (kernels/STAGE0_TAPS_SPEC.md, Transport A; PRODUCTION_CONTRACT.md).
+///
+/// The mode is recorded in the job's operational receipt so a long-running
+/// worker can never be reused in the wrong tap mode unnoticed, and the parity
+/// stage refuses an `Untapped` teacher before any decoding begins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapMode {
+    /// Production inference: taps compiled out — the preprocessed shader is
+    /// byte-identical to the pre-taps kernel (Stage 0 test c).
+    Untapped,
+    /// Audit/compile passes: `PRISM_TAP` writes + tap buffers compiled in;
+    /// per-layer activations readable through `decode_token_logits_with_taps`.
+    TappedAudit,
 }
 
-pub(crate) fn compile_kernel(device: &Device, int4: bool) -> Result<ComputePipelineState, String> {
+impl TapMode {
+    /// The environment default (`TRIBUNUS_TAPS=1` ⇒ `TappedAudit`) — the
+    /// back-compat path used by [`Orchestrator::from_cimage`]. Prefer passing
+    /// the mode explicitly via `from_cimage_with_mode`.
+    pub fn from_env() -> Self {
+        if std::env::var("TRIBUNUS_TAPS").map(|v| v == "1").unwrap_or(false) {
+            TapMode::TappedAudit
+        } else {
+            TapMode::Untapped
+        }
+    }
+
+    /// Wire string for receipts.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TapMode::Untapped => "untapped",
+            TapMode::TappedAudit => "tapped-audit",
+        }
+    }
+
+    pub fn is_tapped(&self) -> bool {
+        matches!(self, TapMode::TappedAudit)
+    }
+}
+
+pub(crate) fn compile_kernel(
+    device: &Device,
+    int4: bool,
+    taps: bool,
+) -> Result<ComputePipelineState, String> {
     let shader_src = if int4 { SHADER_SRC_INT4 } else { SHADER_SRC };
     let tmp = std::env::temp_dir().join("tribunus-full-transformer");
     let _ = std::fs::create_dir_all(&tmp);
@@ -132,7 +171,7 @@ pub(crate) fn compile_kernel(device: &Device, int4: bool) -> Result<ComputePipel
     // Step 1: Compile .metal → .air via metal compiler
     let mut cmd = std::process::Command::new("xcrun");
     cmd.args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"]);
-    if taps_requested() {
+    if taps {
         // Compiles the PRISM_TAP writes + tap buffer params in; without this
         // the preprocessed source is byte-identical to the untapped kernel.
         cmd.arg("-DPRISM_TAPS=1");

@@ -135,6 +135,10 @@ pub struct CImageLayoutPlan {
     pub multimodal_projection_weights: Option<SegmentDescriptor>,
     /// Multimodal projection scales segment. `None` for text-only cimages.
     pub multimodal_projection_scales: Option<SegmentDescriptor>,
+    /// Multimodal projection biases segment — byte-parallel to the scales
+    /// segment (same per-record offsets). `None` for text-only cimages and
+    /// for artifacts whose quantizer emitted no biases (v1-compat).
+    pub multimodal_projection_biases: Option<SegmentDescriptor>,
     /// Multimodal input descriptor segment. `None` for text-only cimages.
     pub multimodal_input_descriptor: Option<SegmentDescriptor>,
     /// Multimodal position embeddings segment. `None` for text-only cimages.
@@ -163,6 +167,7 @@ impl CImageLayoutPlan {
         execution_graph_len: u64,
         multimodal_projection_weights_len: Option<u64>,
         multimodal_projection_scales_len: Option<u64>,
+        multimodal_projection_biases_len: Option<u64>,
         multimodal_input_descriptor_len: Option<u64>,
         multimodal_position_embeddings_len: Option<u64>,
         multimodal_auxiliary_bytes: Option<u64>,
@@ -212,6 +217,9 @@ impl CImageLayoutPlan {
         let multimodal_projection_scales =
             multimodal_projection_scales_len.map(|len| next(len));
 
+        let multimodal_projection_biases =
+            multimodal_projection_biases_len.map(|len| next(len));
+
         let multimodal_position_embeddings =
             multimodal_position_embeddings_len.map(|len| next(len));
 
@@ -235,6 +243,7 @@ impl CImageLayoutPlan {
             execution_graph,
             multimodal_projection_weights,
             multimodal_projection_scales,
+            multimodal_projection_biases,
             multimodal_input_descriptor,
             multimodal_position_embeddings,
             multimodal_auxiliary_weights,

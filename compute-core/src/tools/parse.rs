@@ -290,6 +290,7 @@ pub fn fix_type_mismatches_in_object(
 /// The `messages` slice should match the original request's messages array
 /// (serde_json::Value objects with `role` and `content`).  Returns the
 /// parsed-and-repaired result, or an error string on generation failure.
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub fn retry_with_error(
     sess: &mut crate::profiled_executor::ProfiledInferenceSession,
     model: &crate::profiled_executor::LoadedProfiledModel,

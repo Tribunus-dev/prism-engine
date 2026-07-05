@@ -43,17 +43,50 @@ fn build_and_link_mlx_c() {
         cmake_args.push("-DMLX_BUILD_ACCELERATE=ON".to_string());
     }
 
-    // Use local mlx-tribunus checkout instead of fetching from GitHub.
-    // Avoids authentication issues with the private repository and
-    // guarantees a consistent source tree.
-    cmake_args.push(format!(
-        "-DFETCHCONTENT_SOURCE_DIR_MLX={}",
-        manifest_dir
-            .join("../../../mlx-tribunus")
-            .canonicalize()
-            .unwrap_or_else(|_| manifest_dir.join("../../../mlx-tribunus"))
-            .display()
-    ));
+    // Resolve the MLX source tree for cmake FetchContent. This crate is the
+    // RESEARCH surface (activated by compute-core's `mlx-backend` feature) —
+    // the production `prism-backend` build never compiles it, so an off-repo
+    // source dependency is acceptable HERE and only here. Resolution order:
+    //   1. $TRIBUNUS_MLX_SOURCE_DIR — explicit override (CI, non-sibling
+    //      checkouts, or a plain upstream ml-explore/mlx checkout).
+    //   2. ../../../mlx-tribunus — the sibling-checkout convention.
+    // Fail fast with an actionable message instead of handing cmake a path
+    // that does not exist (FetchContent's own error is opaque and looks like
+    // a network/auth problem).
+    println!("cargo:rerun-if-env-changed=TRIBUNUS_MLX_SOURCE_DIR");
+    let mlx_src = match env::var("TRIBUNUS_MLX_SOURCE_DIR") {
+        Ok(p) => {
+            let p = PathBuf::from(p);
+            if !p.join("CMakeLists.txt").is_file() {
+                panic!(
+                    "TRIBUNUS_MLX_SOURCE_DIR={} does not look like an MLX source tree \
+                     (no CMakeLists.txt). Point it at a checkout of mlx-tribunus or \
+                     upstream ml-explore/mlx.",
+                    p.display()
+                );
+            }
+            p
+        }
+        Err(_) => {
+            let sibling = manifest_dir.join("../../../mlx-tribunus");
+            let sibling = sibling.canonicalize().unwrap_or(sibling);
+            if !sibling.join("CMakeLists.txt").is_file() {
+                panic!(
+                    "mlx-sys (research surface, feature `mlx-backend`) needs an MLX \
+                     source tree and found none.\n\
+                     Looked for the sibling checkout at: {}\n\
+                     Either clone mlx-tribunus there, or set TRIBUNUS_MLX_SOURCE_DIR \
+                     to an MLX checkout.\n\
+                     If you only need the production runtime, build with \
+                     `--features prism-backend` (which does not compile mlx-sys) \
+                     instead of `--features research`/`mlx-backend`.",
+                    sibling.display()
+                );
+            }
+            sibling
+        }
+    };
+    cmake_args.push(format!("-DFETCHCONTENT_SOURCE_DIR_MLX={}", mlx_src.display()));
 
     // Metal shader compilation is disabled because the mlx-tribunus fork's
     // .metal files have bfloat16_t/half type collisions (

@@ -14,10 +14,14 @@
 //!                           encoder layers          & text tokens
 //! ```
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod cross_attn;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod direct_projector;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod encoder;
 pub mod live_capture;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod preprocess;
 
 pub use cross_attn::{inject_vision_features, CrossAttentionLayer};

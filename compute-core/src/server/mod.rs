@@ -8,9 +8,9 @@ pub mod rate_limiter;
 pub mod admin;
 #[cfg(feature = "prism-backend")]
 pub mod distill_worker;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod engine;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod routes;
 #[cfg(feature = "prism-backend")]
 pub mod state;
