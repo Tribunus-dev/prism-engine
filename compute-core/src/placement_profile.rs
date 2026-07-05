@@ -308,7 +308,8 @@ mod tests {
                 CandidateClass::AcceleratePreferred,
                 "\"acceleratePreferred\"",
             ),
-            (CandidateClass::CoreAiAneCandidate, "\"coreMlAneCandidate\""),
+            // Wire string follows the CoreML→CoreAI rename of the variant itself.
+            (CandidateClass::CoreAiAneCandidate, "\"coreAiAneCandidate\""),
             (CandidateClass::AllPreferred, "\"allPreferred\""),
             (CandidateClass::RustNeonPreferred, "\"rustNeonPreferred\""),
             (CandidateClass::ControlPlaneCpu, "\"controlPlaneCpu\""),
