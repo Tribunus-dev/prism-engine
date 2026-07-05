@@ -197,7 +197,11 @@ impl AdaptiveParallelTokens {
         // Use the predictor if available.
         if let Some(ref predictor) = self.predictor {
             match predictor.lock() {
-                Ok(mut guard) => match guard.forward(prefix_tokens) {
+                Ok(mut guard) => // UFCS pins the inherent AneDraftModel::forward (-> Vec<f32>).
+                // Plain `guard.forward(...)` fell through to an mlx_rs
+                // builder-trait `forward` under mlx-backend-only checks,
+                // producing an unsized-[f32] binding.
+                match AneDraftModel::forward(&mut guard, prefix_tokens) {
                     Ok(logits) => {
                         let entropy = self.measure_entropy(&logits);
                         return self.entropy_to_batch_size(entropy);
