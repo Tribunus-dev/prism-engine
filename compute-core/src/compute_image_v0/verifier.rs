@@ -95,7 +95,7 @@ pub fn verify_v0_image(
                     ));
                 }
 
-                if sb == "coreai" && cand.status != BackendStatus::Pass {
+                if sb == "coreml" && cand.status != BackendStatus::Pass {
                     errors.push(format!(
                         "Core ML selected for {} but is not fully runtime qualified (status: {:?})",
                         phase.phase_name, cand.status
@@ -192,7 +192,7 @@ mod tests {
                 compute_policy: "policy".into(),
                 backend_versions: BackendVersions {
                     mlx: None,
-                    coreai: None,
+                    coreml: None,
                     accelerate: None,
                 },
                 source_gate_references: vec![],

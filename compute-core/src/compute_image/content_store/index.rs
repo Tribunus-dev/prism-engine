@@ -10,7 +10,7 @@ pub type TensorShape = Vec<i64>;
 pub type TensorStrides = Vec<i64>;
 pub type TensorDType = String;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentAddressedContentStore {
     pub store_version: ContentStoreVersion,
     pub segments: Vec<ImmutableSegment>,
@@ -19,7 +19,7 @@ pub struct ContentAddressedContentStore {
     pub index_hash: ContentHash,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentStoreVersion {
     pub major: u32,
     pub minor: u32,
@@ -61,7 +61,7 @@ pub enum ContentObjectKind {
     MetalPackedWeight,
     MetalQuantizationMetadata,
     AcceleratePackedWeight,
-    CoreAiPackagePayload,
+    CoreMlPackagePayload,
     TokenizerPayload,
     KernelArtifactPayload,
     PhaseProgramPayload,

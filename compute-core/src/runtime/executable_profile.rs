@@ -29,7 +29,7 @@ pub struct RuntimeHardwareCaps {
     /// OS version string for runtime contract comparison (e.g. "14.0").
     pub os_version: String,
     /// Whether Core ML framework is available.
-    pub coreai_available: bool,
+    pub coreml_available: bool,
     /// Whether Metal framework is available.
     pub metal_available: bool,
 }
@@ -223,7 +223,7 @@ fn is_runtime_os_compatible(runtime_os: &str, min_os: &str) -> bool {
 /// on the runtime hardware.
 ///
 /// Known feature names (case-sensitive):
-/// - `"coreai"`          → hw_caps.coreai_available
+/// - `"coreml"`          → hw_caps.coreml_available
 /// - `"metal"`           → hw_caps.metal_available
 /// - `"ane"`             → hw_caps.ane_count > 0
 /// - `"unified_memory"`  → hw_caps.has_unified_memory
@@ -233,7 +233,7 @@ fn is_runtime_os_compatible(runtime_os: &str, min_os: &str) -> bool {
 fn check_feature_flags(feature_flags: &[String], hw_caps: &RuntimeHardwareCaps) -> bool {
     for flag in feature_flags {
         let available = match flag.as_str() {
-            "coreai" => hw_caps.coreai_available,
+            "coreml" => hw_caps.coreml_available,
             "metal" => hw_caps.metal_available,
             "ane" => hw_caps.ane_count > 0,
             "unified_memory" => hw_caps.has_unified_memory,
@@ -285,7 +285,7 @@ mod tests {
         unified: bool,
         ram_gb: u64,
         os: &str,
-        coreai: bool,
+        coreml: bool,
         metal: bool,
     ) -> RuntimeHardwareCaps {
         RuntimeHardwareCaps {
@@ -295,7 +295,7 @@ mod tests {
             has_unified_memory: unified,
             unified_ram_gb: ram_gb,
             os_version: os.into(),
-            coreai_available: coreai,
+            coreml_available: coreml,
             metal_available: metal,
         }
     }
@@ -384,7 +384,10 @@ mod tests {
     fn test_is_profile_compatible_missing_coreml() {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("m1");
-        profile.runtime_contract.feature_flags.push("coreai".into());
+        profile
+            .runtime_contract
+            .feature_flags
+            .push("coreml".into());
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", false, true);
         assert!(!selector.is_profile_compatible(&profile, &caps));
     }
@@ -393,8 +396,14 @@ mod tests {
     fn test_is_profile_compatible_all_feature_flags_present() {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("m1");
-        profile.runtime_contract.feature_flags.push("coreai".into());
-        profile.runtime_contract.feature_flags.push("metal".into());
+        profile
+            .runtime_contract
+            .feature_flags
+            .push("coreml".into());
+        profile
+            .runtime_contract
+            .feature_flags
+            .push("metal".into());
         profile.runtime_contract.feature_flags.push("ane".into());
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", true, true);
         assert!(selector.is_profile_compatible(&profile, &caps));
@@ -481,13 +490,22 @@ mod tests {
     #[test]
     fn test_compare_semver_less() {
         assert_eq!(compare_semver("13.0", "14.0"), std::cmp::Ordering::Less);
-        assert_eq!(compare_semver("14.0", "15.2"), std::cmp::Ordering::Less);
-        assert_eq!(compare_semver("14.5", "14.10"), std::cmp::Ordering::Less);
+        assert_eq!(
+            compare_semver("14.0", "15.2"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            compare_semver("14.5", "14.10"),
+            std::cmp::Ordering::Less
+        );
     }
 
     #[test]
     fn test_compare_semver_greater() {
-        assert_eq!(compare_semver("15.0", "14.0"), std::cmp::Ordering::Greater);
+        assert_eq!(
+            compare_semver("15.0", "14.0"),
+            std::cmp::Ordering::Greater
+        );
         assert_eq!(
             compare_semver("15.2.1", "15.2.0"),
             std::cmp::Ordering::Greater
@@ -497,16 +515,31 @@ mod tests {
     #[test]
     fn test_compare_semver_missing_components() {
         // "15" is treated as "15.0.0", "15.0" as "15.0.0"
-        assert_eq!(compare_semver("15", "15.0"), std::cmp::Ordering::Equal);
-        assert_eq!(compare_semver("14", "15.0"), std::cmp::Ordering::Less);
-        assert_eq!(compare_semver("16", "15.0"), std::cmp::Ordering::Greater);
+        assert_eq!(
+            compare_semver("15", "15.0"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            compare_semver("14", "15.0"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            compare_semver("16", "15.0"),
+            std::cmp::Ordering::Greater
+        );
     }
 
     #[test]
     fn test_compare_semver_malformed() {
         // Non-numeric components are ignored; empty -> all zeros.
-        assert_eq!(compare_semver("", "0"), std::cmp::Ordering::Equal);
-        assert_eq!(compare_semver("abc", "0.0"), std::cmp::Ordering::Equal);
+        assert_eq!(
+            compare_semver("", "0"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            compare_semver("abc", "0.0"),
+            std::cmp::Ordering::Equal
+        );
         assert_eq!(
             compare_semver("15.alpha", "15.0"),
             std::cmp::Ordering::Equal
@@ -531,8 +564,11 @@ mod tests {
     fn test_all_known_feature_flags() {
         let selector = ProfileSelector::new();
         let mut profile = make_profile("test");
-        for flag in &["coreai", "metal", "ane", "unified_memory"] {
-            profile.runtime_contract.feature_flags.push((*flag).into());
+        for flag in &["coreml", "metal", "ane", "unified_memory"] {
+            profile
+                .runtime_contract
+                .feature_flags
+                .push((*flag).into());
         }
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", true, true);
         assert!(selector.is_profile_compatible(&profile, &caps));

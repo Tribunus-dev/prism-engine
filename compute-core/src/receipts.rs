@@ -28,7 +28,7 @@ impl std::fmt::Display for CopyClassification {
                 write!(f, "materialized_layout_conversion")
             }
             CopyClassification::InternalCoremlStagingUnknown => {
-                write!(f, "internal_coreai_staging_unknown")
+                write!(f, "internal_coreml_staging_unknown")
             }
         }
     }
@@ -64,7 +64,7 @@ pub struct LeaseReceipt {
 
 /// Core ML prediction receipt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoreAiPredictionReceipt {
+pub struct CoreMlPredictionReceipt {
     pub job_id: Uuid,
     pub model_hash: String,
     pub island_id: Option<String>,
@@ -77,7 +77,7 @@ pub struct CoreAiPredictionReceipt {
     pub output_backing_feature: String,
     pub duration_ms: u64,
     pub copy_classification: CopyClassification,
-    pub internal_coreai_staging: bool, // always unknown — true = "Apple may stage internally"
+    pub internal_coreml_staging: bool, // always unknown — true = "Apple may stage internally"
     pub success: bool,
 }
 
@@ -99,18 +99,18 @@ pub struct HybridJobReceipt {
     pub session_id: Uuid,
     pub arena_creations: Vec<ArenaCreationReceipt>,
     pub compute_image_hash: String,
-    pub coreai_artifact_hash: String,
+    pub coreml_artifact_hash: String,
     pub macos_version: String,
     pub capability_report_hash: String,
     pub state_id: Option<String>,
     pub arena_a_id: Option<String>,
     pub arena_b_id: Option<String>,
     pub lease_transitions: Vec<LeaseReceipt>,
-    pub coreai_predictions: Vec<CoreAiPredictionReceipt>,
+    pub coreml_predictions: Vec<CoreMlPredictionReceipt>,
     pub state_mutations: Vec<StateMutationReceipt>,
     pub total_duration_ms: u64,
     pub application_copy_free: bool,
-    pub internal_coreai_staging: bool,
+    pub internal_coreml_staging: bool,
     pub copy_classification: CopyClassification,
     pub finalizer_count: u32,
     pub final_arena_state: String,
@@ -123,7 +123,7 @@ pub struct HybridJobReceipt {
 pub struct ReceiptEmitter {
     arena_creations: Vec<ArenaCreationReceipt>,
     lease_transitions: Vec<LeaseReceipt>,
-    coreai_predictions: Vec<CoreAiPredictionReceipt>,
+    coreml_predictions: Vec<CoreMlPredictionReceipt>,
     state_mutations: Vec<StateMutationReceipt>,
     start: Option<Instant>,
 }
@@ -184,8 +184,8 @@ impl ReceiptEmitter {
         });
     }
 
-    pub fn record_prediction(&mut self, receipt: CoreAiPredictionReceipt) {
-        self.coreai_predictions.push(receipt);
+    pub fn record_prediction(&mut self, receipt: CoreMlPredictionReceipt) {
+        self.coreml_predictions.push(receipt);
     }
 
     pub fn record_state_mutation(&mut self, receipt: StateMutationReceipt) {
@@ -198,7 +198,7 @@ impl ReceiptEmitter {
             .map(|s| s.elapsed().as_millis() as u64)
             .unwrap_or(0);
         let app_copy_free = self
-            .coreai_predictions
+            .coreml_predictions
             .iter()
             .all(|p| p.copy_classification == CopyClassification::ApplicationCopyFree);
 
@@ -207,18 +207,18 @@ impl ReceiptEmitter {
             session_id,
             arena_creations: self.arena_creations,
             compute_image_hash: String::new(),
-            coreai_artifact_hash: String::new(),
+            coreml_artifact_hash: String::new(),
             macos_version: "15.0".into(),
             capability_report_hash: String::new(),
             state_id: None,
             arena_a_id: None,
             arena_b_id: None,
             lease_transitions: self.lease_transitions,
-            coreai_predictions: self.coreai_predictions,
+            coreml_predictions: self.coreml_predictions,
             state_mutations: self.state_mutations,
             total_duration_ms: total_ms,
             application_copy_free: app_copy_free,
-            internal_coreai_staging: true, // always unknown
+            internal_coreml_staging: true, // always unknown
             copy_classification: if app_copy_free {
                 CopyClassification::ApplicationCopyFree
             } else {
@@ -263,7 +263,7 @@ mod tests {
         );
         assert_eq!(
             CopyClassification::InternalCoremlStagingUnknown.to_string(),
-            "internal_coreai_staging_unknown"
+            "internal_coreml_staging_unknown"
         );
     }
 
@@ -273,19 +273,19 @@ mod tests {
             job_id: Uuid::new_v4(),
             session_id: Uuid::new_v4(),
             compute_image_hash: "abc".into(),
-            coreai_artifact_hash: "def".into(),
+            coreml_artifact_hash: "def".into(),
             macos_version: "15.0".into(),
             capability_report_hash: "".into(),
             state_id: None,
             arena_a_id: Some("a".into()),
             arena_b_id: Some("b".into()),
             lease_transitions: vec![],
-            coreai_predictions: vec![],
+            coreml_predictions: vec![],
             state_mutations: vec![],
             arena_creations: vec![],
             total_duration_ms: 100,
             application_copy_free: true,
-            internal_coreai_staging: true,
+            internal_coreml_staging: true,
             copy_classification: CopyClassification::ApplicationCopyFree,
             finalizer_count: 2,
             final_arena_state: "free".into(),

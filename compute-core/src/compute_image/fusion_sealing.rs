@@ -48,7 +48,9 @@ pub fn verify_hash(expected: &str, metallib_bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compute_image::fusion_abi::{MetalFusionFamily, MetalLaunchContract};
+    use crate::compute_image::fusion_abi::{
+        MetalFusionFamily, MetalLaunchContract, QuantizationContract,
+    };
     use std::collections::HashMap;
 
     fn dummy_artifact() -> SealedMetalFusionArtifact {

@@ -121,7 +121,9 @@ pub fn select_fusion_plan(
         if region.input_layout.dims.is_empty() {
             rejected.push(RejectedFusionRegion {
                 region_id: region.id.clone(),
-                reason: RejectionReason::ShapeMismatch("input layout has zero dimensions".into()),
+                reason: RejectionReason::ShapeMismatch(
+                    "input layout has zero dimensions".into(),
+                ),
             });
             continue;
         }
@@ -197,10 +199,7 @@ mod tests {
         let regions = generate_all_fusion_regions();
         let plan = select_fusion_plan(&ops, &regions, FusionImplBackend::MlxGpu);
 
-        assert!(
-            !plan.selected.is_empty(),
-            "expected at least one selected fusion region"
-        );
+        assert!(!plan.selected.is_empty(), "expected at least one selected fusion region");
         assert!(
             plan.selected.iter().any(|r| r.region_id == "qkv_proj"),
             "qkv_proj should be selected"

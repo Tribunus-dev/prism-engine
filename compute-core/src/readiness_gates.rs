@@ -1,7 +1,13 @@
 use serde::Serialize;
 
 use crate::projection_identity::RuntimeMode;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+use crate::streaming::GenerationEvent;
 use crate::tokenizer::TribunusTokenizer;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+use crate::worker_protocol::StartGenerationPayload;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+use crate::worker_supervisor::WorkerSupervisor;
 
 /// Status of a single readiness gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -26,8 +32,9 @@ pub struct ReadinessGate {
 /// Aggregate readiness state that gates `/v1/chat/completions` behind a
 /// sequence of startup checks.
 ///
-/// Gates are evaluated inline by [`ReadinessGates::run_all`] which checks
-/// tokenizer availability and backend capabilities.
+/// Gates are evaluated inline by [`ReadinessGates::run_all`] which runs
+/// real one-token inference against the worker (MLX backend) or checks
+/// tokenizer and CPU backend availability (Candle CPU backend).
 pub struct ReadinessGates {
     gates: Vec<ReadinessGate>,
     ready_for_inference: bool,
@@ -85,28 +92,114 @@ impl ReadinessGates {
     ///
     /// Available only when the `mlx-backend` feature is enabled.
     #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-    pub fn run_all(&mut self, tokenizer: Option<&TribunusTokenizer>, runtime_mode: RuntimeMode) {
-        // Gate 1: Worker Health — skipped (no worker process in ECS-only mode)
-        if let Some(g) = self.gates.iter_mut().find(|g| g.name == "worker_health") {
-            g.status = GateStatus::Skipped;
+    pub fn run_all(
+        &mut self,
+        supervisor: Option<&WorkerSupervisor>,
+        tokenizer: Option<&TribunusTokenizer>,
+        runtime_mode: RuntimeMode,
+    ) {
+        // Gate 1: Worker Health
+        let worker_healthy = supervisor.map_or(false, |s| s.process_ctrl.is_alive());
+        self.set_gate("worker_health", worker_healthy);
+        if !worker_healthy {
+            return;
         }
 
         // Gate 2: Tokenizer
         let has_tokenizer = tokenizer.is_some() || runtime_mode == RuntimeMode::Experimental;
         self.set_gate("tokenizer", has_tokenizer);
         if !has_tokenizer {
-            self.ready_for_inference = self.gates.iter().all(|g| g.status == GateStatus::Passed);
             return;
         }
 
-        // Gates 3 & 4: Smoke tests — skipped (no worker process in ECS-only mode)
-        for name in &["smoke_prefill", "smoke_decode"] {
-            if let Some(g) = self.gates.iter_mut().find(|g| g.name == *name) {
-                g.status = GateStatus::Skipped;
+        // Gate 3: One-token prefill + decode smoke test
+        let supervisor = match supervisor {
+            Some(s) => s,
+            None => {
+                self.set_gate("smoke_prefill", false);
+                return;
+            }
+        };
+        let tokenizer = match tokenizer {
+            Some(t) => t,
+            None => {
+                self.set_gate("smoke_prefill", false);
+                return;
+            }
+        };
+
+        let encode_result = tokenizer.encode("Hello");
+        match encode_result {
+            Ok(prompt_token_ids) => {
+                let payload = StartGenerationPayload {
+                    generation_regime: Default::default(),
+                    denoising_steps: None,
+                    confidence_threshold: None,
+                    canvas_tokens: None,
+                    prompt_token_ids,
+                    max_output_tokens: 1,
+                    deadline_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64
+                        + 30_000,
+                    request_id: "readiness-smoke".to_string(),
+                    temperature: None,
+                    top_k: None,
+                    top_p: None,
+                    seed: None,
+                    stop_token_ids: vec![],
+                };
+                match supervisor.start_generation(&payload) {
+                    Ok(mut handle) => {
+                        let mut got_token = false;
+                        loop {
+                            match handle.stream.recv() {
+                                Some(GenerationEvent::Token(tok)) => {
+                                    if tok < 128000 {
+                                        got_token = true;
+                                    }
+                                }
+                                Some(GenerationEvent::Done) => break,
+                                Some(GenerationEvent::Error(msg)) => {
+                                    self.set_gate("smoke_prefill", false);
+                                    self.set_gate_detail(
+                                        "smoke_prefill",
+                                        Some(format!("error: {}", msg)),
+                                    );
+                                    return;
+                                }
+                                _ => break,
+                            }
+                        }
+                        if got_token {
+                            self.set_gate("smoke_prefill", true);
+                            self.set_gate("smoke_decode", true);
+                        } else {
+                            self.set_gate("smoke_prefill", false);
+                            self.set_gate_detail(
+                                "smoke_prefill",
+                                Some("no valid token received".into()),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        self.set_gate("smoke_prefill", false);
+                        self.set_gate_detail(
+                            "smoke_prefill",
+                            Some(format!("start_generation failed: {:?}", e)),
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                self.set_gate("smoke_prefill", false);
+                self.set_gate_detail(
+                    "smoke_prefill",
+                    Some(format!("tokenizer encode failed: {}", e)),
+                );
             }
         }
-
-        self.ready_for_inference = self.gates.iter().all(|g| g.status == GateStatus::Passed);
     }
 
     /// Run readiness gates for backends without a worker subprocess (e.g. Candle CPU).
@@ -152,7 +245,6 @@ impl ReadinessGates {
     }
 
     /// Set the detail string for a single gate (e.g. an error message).
-    #[allow(dead_code)]
     fn set_gate_detail(&mut self, name: &'static str, detail: Option<String>) {
         if let Some(g) = self.gates.iter_mut().find(|g| g.name == name) {
             g.detail = detail;

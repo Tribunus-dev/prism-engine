@@ -741,9 +741,9 @@ use UnsupportedCode::*;
 /// are unsupported without a static subgraph boundary. Attention phases are
 /// pending until the MIL compile path is stable and the predict bridge is
 /// fully qualified. Sampling is a host-runtime responsibility.
-pub fn coreai_support_matrix() -> BackendPhaseSupportMatrix {
+pub fn coreml_support_matrix() -> BackendPhaseSupportMatrix {
     BackendPhaseSupportMatrix {
-        backend: BackendKind::CoreAi,
+        backend: BackendKind::CoreMl,
         phases: vec![
             (TokenEmbedding, Pending { code: MilOpNotWired, reason: "embedding lookup not yet wired through MIL path" }),
             (PositionEncodingOrRope, Pending { code: MilOpNotWired, reason: "RoPE not yet compiled via MIL" }),
@@ -929,7 +929,7 @@ pub fn accelerate_support_matrix() -> BackendPhaseSupportMatrix {
 /// Return the support matrix for a given backend kind.
 pub fn support_matrix_for(backend: BackendKind) -> BackendPhaseSupportMatrix {
     match backend {
-        BackendKind::CoreAi => coreai_support_matrix(),
+        BackendKind::CoreMl => coreml_support_matrix(),
         BackendKind::Mlx => mlx_support_matrix(),
         BackendKind::Accelerate => accelerate_support_matrix(),
         BackendKind::Reference => {
@@ -961,7 +961,7 @@ pub fn decode_microphase_support_for(family: &str, backend: BackendKind) -> Phas
     };
 
     match backend {
-        BackendKind::CoreAi => match family {
+        BackendKind::CoreMl => match family {
             "decode_qkv_projection" => Native,
             "decode_attention_output_projection" => Native,
             "decode_residual_add_1" | "decode_residual_add_2" => Composed,
@@ -1011,7 +1011,7 @@ pub fn kv_phase_support_for(
     ];
     use crate::decode_attribution::backend_adapters::BackendKind::*;
     let status = match backend {
-        CoreAi => Unsupported {
+        CoreMl => Unsupported {
             code: StatefulBoundary,
             reason: "KV cache is dynamic/stateful beyond Core ML static model boundary",
         },
@@ -1276,7 +1276,7 @@ pub fn group_for_comparison(
         }
 
         let backend = match r.backend.as_str() {
-            "coreai" => BackendKind::CoreAi,
+            "coreml" => BackendKind::CoreMl,
             "mlx" => BackendKind::Mlx,
             "accelerate" => BackendKind::Accelerate,
             _ => continue,
@@ -1452,7 +1452,7 @@ mod tests {
     #[test]
     fn support_matrix_covers_all_phases() {
         let matrices = [
-            coreai_support_matrix(),
+            coreml_support_matrix(),
             mlx_support_matrix(),
             accelerate_support_matrix(),
         ];
@@ -1472,7 +1472,7 @@ mod tests {
     #[test]
     fn support_matrix_sorted_by_phase_order() {
         let matrices = [
-            coreai_support_matrix(),
+            coreml_support_matrix(),
             mlx_support_matrix(),
             accelerate_support_matrix(),
         ];
@@ -1575,7 +1575,7 @@ mod tests {
     #[test]
     fn support_matrix_for_returns_non_empty() {
         for backend in &[
-            BackendKind::CoreAi,
+            BackendKind::CoreMl,
             BackendKind::Mlx,
             BackendKind::Accelerate,
             BackendKind::Reference,
@@ -1615,7 +1615,7 @@ mod tests {
 
     #[test]
     fn support_matrix_pending_has_code_and_reason() {
-        let matrix = coreai_support_matrix();
+        let matrix = coreml_support_matrix();
         if let Some(PhaseSupportStatus::Pending { code, reason }) =
             matrix.support_for(PipelinePhase::TokenEmbedding)
         {
@@ -1796,7 +1796,7 @@ mod tests {
     #[test]
     fn kv_contracts_have_all_phases() {
         let matrices = [
-            coreai_support_matrix(),
+            coreml_support_matrix(),
             mlx_support_matrix(),
             accelerate_support_matrix(),
         ];
@@ -1850,8 +1850,8 @@ mod tests {
     }
 
     #[test]
-    fn coreai_kv_all_unsupported() {
-        let matrix = coreai_support_matrix();
+    fn coreml_kv_all_unsupported() {
+        let matrix = coreml_support_matrix();
         for &phase in &[
             PipelinePhase::KvWrite,
             PipelinePhase::KvAppend,

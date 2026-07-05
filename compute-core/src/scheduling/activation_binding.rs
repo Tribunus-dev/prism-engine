@@ -17,6 +17,9 @@
 use crate::compute_image::phase_graph::{PhaseId, TensorId, TensorLayoutContract};
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+use mlx_rs::Array;
+
 /// Arena binding describing a memory region within the activation arena.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArenaBinding {
@@ -50,7 +53,7 @@ pub enum ActivationRepresentation {
     IOSurfaceTexture(IOSurfaceTextureBinding),
     CpuAccessibleSharedMemory(CpuMemoryBinding),
     MlxArrayCompatibility(MlxArrayBinding),
-    CoreAiTensor(CoreAiTensorBinding),
+    CoreMlTensor(CoreMlTensorBinding),
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +92,7 @@ pub struct MlxArrayBinding {
 }
 
 #[derive(Debug, Clone)]
-pub struct CoreAiTensorBinding {
+pub struct CoreMlTensorBinding {
     pub name: String,
     pub multi_array_id: u64,
 }
@@ -100,7 +103,7 @@ pub enum MaterializationKind {
     MetalTextureToMetalBuffer,
     MetalBufferToMetalTexture,
     CpuAccelerateRepack,
-    CoreAiBoundaryReformat,
+    CoreMlBoundaryReformat,
     MlxCompatibilityViewCreation,
     QuantizedLayoutExpansion,
 }

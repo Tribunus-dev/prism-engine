@@ -168,7 +168,7 @@ pub fn validate_phase_graph_v2(graph: &EmittedPhaseGraphV2) -> GraphValidationRe
 
     // 6. Core ML subgraphs must have artifact bindings
     for phase in &graph.phases {
-        if phase.kind == EmittedPhaseKind::CoreAiSubgraph && phase.artifact_binding.is_none() {
+        if phase.kind == EmittedPhaseKind::CoreMlSubgraph && phase.artifact_binding.is_none() {
             errors.push(ValidationError {
                 code: ValidationErrorCode::FusedArtifactMissing,
                 message: format!(
@@ -225,9 +225,10 @@ pub fn validate_phase_graph_v1(graph: &EmittedPhaseGraph) -> GraphValidationResu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compute_image::manifest::SourceIdentity;
     use crate::compute_image::phase_graph::{
-        CancellationClass, EmittedEdgeV2, EmittedPhaseKind, EmittedPhaseV2, ExecutionClass,
-        LaneBinding,
+        CancellationClass, DeclaredFallback, EmittedEdgeV2, EmittedPhaseKind, EmittedPhaseV2,
+        ExecutionClass, LaneBinding,
     };
 
     fn make_valid_graph() -> EmittedPhaseGraphV2 {
@@ -398,16 +399,16 @@ mod tests {
     }
 
     #[test]
-    fn test_coreai_subgraph_needs_artifact() {
+    fn test_coreml_subgraph_needs_artifact() {
         let mut graph = make_valid_graph();
-        // Add a CoreAiSubgraph phase without artifact binding
-        let coreai_id = PhaseId("coreai".to_string());
+        // Add a CoreMlSubgraph phase without artifact binding
+        let coreml_id = PhaseId("coreml".to_string());
         graph.phases.push(EmittedPhaseV2 {
-            id: coreai_id.clone(),
-            kind: EmittedPhaseKind::CoreAiSubgraph,
+            id: coreml_id.clone(),
+            kind: EmittedPhaseKind::CoreMlSubgraph,
             layer_index: None,
             lane_binding: LaneBinding {
-                primary_lane: "coreai".into(),
+                primary_lane: "coreml".into(),
                 fallback_lanes: vec![],
             },
             operations: vec![],
@@ -426,13 +427,13 @@ mod tests {
         // Wire it into the DAG (bidirectional so it's reachable)
         graph.edges.push(EmittedEdgeV2 {
             from_phase: PhaseId("b".to_string()),
-            to_phase: coreai_id.clone(),
+            to_phase: coreml_id.clone(),
             semantic_kind: EdgeSemanticKind::TensorData,
             label: None,
             metadata: std::collections::HashMap::new(),
         });
         graph.edges.push(EmittedEdgeV2 {
-            from_phase: coreai_id.clone(),
+            from_phase: coreml_id.clone(),
             to_phase: PhaseId("a".to_string()),
             semantic_kind: EdgeSemanticKind::ProducerCompletion,
             label: None,

@@ -17,7 +17,7 @@ pub struct ComputePlanResult {
 /// Attempt to inspect the compute plan of a compiled Core ML model.
 ///
 /// Currently this is a stub: there is no Rust-side API for MLComputePlan
-/// exposed through the coreai_bridge. The bridge would need a new FFI
+/// exposed through the coreml_bridge. The bridge would need a new FFI
 /// binding for `MLModel.computePlanWithError:` and `MLComputePlan` to
 /// inspect program structure and cost estimates.
 ///
@@ -26,7 +26,7 @@ pub struct ComputePlanResult {
 /// compute-plan data.
 pub fn inspect_compute_plan(_mlmodelc_path: &str) -> ComputePlanResult {
     // TODO: Add FFI binding for MLComputePlan inspection.
-    // Requires: ObjC bridge exposes tribunus_coreai_inspect_compute_plan()
+    // Requires: ObjC bridge exposes tribunus_coreml_inspect_compute_plan()
     // which calls MLModel.computePlanWithError: and reads MLComputePlan
     // properties (program structure, model cost estimate, etc.).
     ComputePlanResult {

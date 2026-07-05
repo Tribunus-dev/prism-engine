@@ -32,7 +32,7 @@ impl Default for EmitterOptions {
                 compute_policy: "strict_truth".into(),
                 backend_versions: BackendVersions {
                     mlx: Some("0.22.1".into()),
-                    coreai: Some("9.0".into()),
+                    coreml: Some("9.0".into()),
                     accelerate: Some("15.5".into()),
                 },
                 source_gate_references: vec![],
@@ -148,9 +148,9 @@ fn generate_markdown_summary(image: &ComputeImageV0) -> String {
             // If the selected backend isn't MLX, but MLX passed, then it's a fallback.
             // A phase that selected Accelerate because MLX failed is also considered a fallback
             // since Accelerate is the lower-priority backend.
-            if selected != "mlx" && selected != "coreai" {
+            if selected != "mlx" && selected != "coreml" {
                 is_fallback = true;
-            } else if selected == "coreai"
+            } else if selected == "coreml"
                 && phase.backend_candidates.iter().any(|c| {
                     c.backend_name == "mlx" && c.status == super::schema::BackendStatus::Pass
                 })

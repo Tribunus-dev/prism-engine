@@ -20,6 +20,7 @@
 
 use crate::compute_image::executable::profile::ExecutableTargetProfile;
 use crate::compute_image::program::phase_program::{ExecutionLane, SerializedPhaseProgram};
+use crate::integration::ContentHash;
 
 // ---------------------------------------------------------------------------
 // Core data structures
@@ -39,7 +40,7 @@ use crate::compute_image::program::phase_program::{ExecutionLane, SerializedPhas
 #[derive(Debug, Clone, Default)]
 pub struct LaneArtifactRegistry {
     pub metal_artifacts: Vec<MetalArtifact>,
-    pub coreai_artifacts: Vec<CoreAiArtifact>,
+    pub coreml_artifacts: Vec<CoreMlArtifact>,
     pub accelerate_artifacts: Vec<AccelerateArtifact>,
 }
 
@@ -78,8 +79,8 @@ impl LaneArtifactRegistry {
                         threadgroup_size: phase.resource_reservation.threadgroup_memory as u32,
                     });
                 }
-                ExecutionLane::CoreAi => {
-                    self.coreai_artifacts.push(CoreAiArtifact {
+                ExecutionLane::CoreMl => {
+                    self.coreml_artifacts.push(CoreMlArtifact {
                         artifact_id,
                         // Resolved at load time from the .mlmodelc path.
                         modelc_path: String::new(),
@@ -107,13 +108,15 @@ impl LaneArtifactRegistry {
     /// Returns `true` when every per-lane artifact vector is empty.
     pub fn is_empty(&self) -> bool {
         self.metal_artifacts.is_empty()
-            && self.coreai_artifacts.is_empty()
+            && self.coreml_artifacts.is_empty()
             && self.accelerate_artifacts.is_empty()
     }
 
     /// Total number of artifacts across all lanes.
     pub fn total_artifacts(&self) -> usize {
-        self.metal_artifacts.len() + self.coreai_artifacts.len() + self.accelerate_artifacts.len()
+        self.metal_artifacts.len()
+            + self.coreml_artifacts.len()
+            + self.accelerate_artifacts.len()
     }
 }
 
@@ -139,7 +142,7 @@ pub struct MetalArtifact {
 /// controls whether a mutable state object is created per session for
 /// recurrent/stateful models.
 #[derive(Debug, Clone)]
-pub struct CoreAiArtifact {
+pub struct CoreMlArtifact {
     pub artifact_id: String,
     pub modelc_path: String,
     pub model_hash: String,
@@ -238,9 +241,8 @@ mod tests {
     use crate::compute_image::program::phase_program::{
         CanonicalArtifactIdentity, ExecutionKind, PhaseArtifactKind, PhaseCompletionContract,
         PhaseDependencyContract, PhaseResourceReservation, ProgramArtifactSelection,
-        SerializedPhase, SerializedPhaseProgram,
+        ProgramBinding, SerializedPhase, SerializedPhaseEdge, SerializedPhaseProgram,
     };
-    use crate::integration::ContentHash;
 
     // ── Helpers ────────────────────────────────────────────────────────
 
@@ -276,8 +278,7 @@ mod tests {
     ) -> SerializedPhase {
         SerializedPhase {
             phase_id: phase_id.into(),
-            semantic_operation:
-                crate::compute_image::program::phase_program::SemanticOperation::RmsNorm,
+            semantic_operation: crate::compute_image::program::phase_program::SemanticOperation::RmsNorm,
             lane,
             artifact_identity: CanonicalArtifactIdentity {
                 artifact_id: artifact_id.into(),
@@ -302,7 +303,10 @@ mod tests {
         }
     }
 
-    fn make_program(program_id: &str, phases: Vec<SerializedPhase>) -> SerializedPhaseProgram {
+    fn make_program(
+        program_id: &str,
+        phases: Vec<SerializedPhase>,
+    ) -> SerializedPhaseProgram {
         SerializedPhaseProgram {
             program_id: program_id.into(),
             program_hash: ContentHash(0),
@@ -354,21 +358,21 @@ mod tests {
         assert_eq!(registry.metal_artifacts.len(), 1);
         assert_eq!(registry.metal_artifacts[0].artifact_id, "metal_kernel_1");
         assert_eq!(registry.metal_artifacts[0].threadgroup_size, 1024);
-        assert!(registry.coreai_artifacts.is_empty());
+        assert!(registry.coreml_artifacts.is_empty());
         assert!(registry.accelerate_artifacts.is_empty());
     }
 
     #[test]
-    fn test_bind_for_program_coreai_phase() {
+    fn test_bind_for_program_coreml_phase() {
         let mut registry = LaneArtifactRegistry::default();
-        let phase = make_phase("p1", ExecutionLane::CoreAi, "coreai_graph_1", 0);
+        let phase = make_phase("p1", ExecutionLane::CoreMl, "coreml_graph_1", 0);
         let program = make_program("prog1", vec![phase]);
 
         registry.bind_for_program(&program).unwrap();
 
         assert!(registry.metal_artifacts.is_empty());
-        assert_eq!(registry.coreai_artifacts.len(), 1);
-        assert_eq!(registry.coreai_artifacts[0].artifact_id, "coreai_graph_1");
+        assert_eq!(registry.coreml_artifacts.len(), 1);
+        assert_eq!(registry.coreml_artifacts[0].artifact_id, "coreml_graph_1");
         assert!(registry.accelerate_artifacts.is_empty());
     }
 
@@ -381,12 +385,9 @@ mod tests {
         registry.bind_for_program(&program).unwrap();
 
         assert!(registry.metal_artifacts.is_empty());
-        assert!(registry.coreai_artifacts.is_empty());
+        assert!(registry.coreml_artifacts.is_empty());
         assert_eq!(registry.accelerate_artifacts.len(), 1);
-        assert_eq!(
-            registry.accelerate_artifacts[0].artifact_id,
-            "accel_layout_1"
-        );
+        assert_eq!(registry.accelerate_artifacts[0].artifact_id, "accel_layout_1");
     }
 
     #[test]
@@ -409,7 +410,7 @@ mod tests {
 
         let phases = vec![
             make_phase("metal_p1", ExecutionLane::Metal, "metal_proj", 512),
-            make_phase("ml_p1", ExecutionLane::CoreAi, "coreai_attn", 0),
+            make_phase("ml_p1", ExecutionLane::CoreMl, "coreml_attn", 0),
             make_phase("accel_p1", ExecutionLane::Accelerate, "accel_ffn", 0),
             make_phase("ctrl", ExecutionLane::ControlPlaneCpu, "cpu_seq", 0),
             make_phase("metal_p2", ExecutionLane::Metal, "metal_norm", 256),
@@ -424,8 +425,8 @@ mod tests {
         assert_eq!(registry.metal_artifacts[1].artifact_id, "metal_norm");
         assert_eq!(registry.metal_artifacts[1].threadgroup_size, 256);
 
-        assert_eq!(registry.coreai_artifacts.len(), 1);
-        assert_eq!(registry.coreai_artifacts[0].artifact_id, "coreai_attn");
+        assert_eq!(registry.coreml_artifacts.len(), 1);
+        assert_eq!(registry.coreml_artifacts[0].artifact_id, "coreml_attn");
 
         assert_eq!(registry.accelerate_artifacts.len(), 1);
         assert_eq!(registry.accelerate_artifacts[0].artifact_id, "accel_ffn");
@@ -459,7 +460,7 @@ mod tests {
         let profile = make_minimal_profile();
         let registry = builder.build_registry(&profile);
         assert!(registry.metal_artifacts.is_empty());
-        assert!(registry.coreai_artifacts.is_empty());
+        assert!(registry.coreml_artifacts.is_empty());
         assert!(registry.accelerate_artifacts.is_empty());
         assert!(registry.is_empty());
     }
@@ -475,23 +476,23 @@ mod tests {
                 vec![make_phase("p1", ExecutionLane::Metal, "metal_k", 512)],
             ),
         );
-        let coreai_variant = make_variant(
-            "coreai_v1",
+        let coreml_variant = make_variant(
+            "coreml_v1",
             make_program(
-                "coreai_prog",
-                vec![make_phase("p2", ExecutionLane::CoreAi, "coreai_g", 0)],
+                "coreml_prog",
+                vec![make_phase("p2", ExecutionLane::CoreMl, "coreml_g", 0)],
             ),
         );
 
         let mut profile = make_minimal_profile();
-        profile.shape_variants = vec![metal_variant, coreai_variant];
+        profile.shape_variants = vec![metal_variant, coreml_variant];
 
         let registry = builder.build_registry(&profile);
 
         assert_eq!(registry.metal_artifacts.len(), 1);
         assert_eq!(registry.metal_artifacts[0].artifact_id, "metal_k");
-        assert_eq!(registry.coreai_artifacts.len(), 1);
-        assert_eq!(registry.coreai_artifacts[0].artifact_id, "coreai_g");
+        assert_eq!(registry.coreml_artifacts.len(), 1);
+        assert_eq!(registry.coreml_artifacts[0].artifact_id, "coreml_g");
         assert!(registry.accelerate_artifacts.is_empty());
     }
 

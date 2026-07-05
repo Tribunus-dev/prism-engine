@@ -20,12 +20,10 @@ pub mod selection;
 pub mod serialization;
 pub mod validation;
 
-#[allow(ambiguous_glob_reexports)]
 pub use arena::*;
-#[allow(ambiguous_glob_reexports)]
 pub use dependencies::*;
-#[allow(ambiguous_glob_reexports)]
 pub use phase_program::*;
 pub use runtime_view::*;
+pub use selection::*;
 pub use serialization::*;
 pub use validation::*;

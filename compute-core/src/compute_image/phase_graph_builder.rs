@@ -58,7 +58,6 @@ impl PhaseGraphBuilder {
     /// Build a standard decoder-layer phase graph.
     /// Topology: ArenaAlloc -> Prologue -> LayerAttention[0] -> LayerMlp[0] -> ... -> Epilogue ->
     /// Sampling
-    #[allow(unused_assignments)]
     pub fn build_v2(&self) -> EmittedPhaseGraphV2 {
         let mut phases = Vec::new();
         let mut edges = Vec::new();
@@ -351,19 +350,19 @@ impl PhaseGraphBuilder {
             let mut meta = HashMap::new();
             if let Some(li) = pv2.layer_index {
                 meta.insert("layer_index".to_string(), li.to_string());
-            }
+        }
             if self.hidden_size > 0 {
                 meta.insert("hidden_size".to_string(), self.hidden_size.to_string());
-            }
+        }
             if self.num_heads > 0 {
                 meta.insert("n_heads".to_string(), self.num_heads.to_string());
-            }
+        }
             if self.num_kv_heads > 0 {
                 meta.insert("n_kv_heads".to_string(), self.num_kv_heads.to_string());
             }
             if self.head_dim > 0 {
                 meta.insert("head_dim".to_string(), self.head_dim.to_string());
-            }
+        }
             phases.push(EmittedPhase {
                 phase_id: pv2.id.0.clone(),
                 kind,
@@ -415,7 +414,7 @@ fn map_kind_to_v1(kind: EmittedPhaseKind) -> PhaseKind {
         EmittedPhaseKind::ExplicitMaterialization => PhaseKind::Transfer,
         EmittedPhaseKind::Synchronization => PhaseKind::SyncBarrier,
         EmittedPhaseKind::FusedMetalKernel => PhaseKind::MetalFusedKernel,
-        EmittedPhaseKind::CoreAiSubgraph => PhaseKind::CoreAiGraph,
+        EmittedPhaseKind::CoreMlSubgraph => PhaseKind::CoreMlGraph,
         EmittedPhaseKind::AccelerateBlock => PhaseKind::ResidualRmsNorm,
         EmittedPhaseKind::LegacyMlxLayer => PhaseKind::MlxDecode,
     }
@@ -441,14 +440,9 @@ mod tests {
         // Verify weight_residency phase exists
         assert!(graph.phases.iter().any(|p| p.id.0 == "weight_residency"));
         // Verify residual_rmsnorm phases exist
-        assert!(graph
-            .phases
-            .iter()
-            .any(|p| p.id.0 == "layer_0_residual_rmsnorm"));
-        assert!(graph
-            .phases
-            .iter()
-            .any(|p| p.id.0 == "layer_1_residual_rmsnorm"));
+        assert!(graph.phases.iter().any(|p| p.id.0 == "layer_0_residual_rmsnorm"));
+        assert!(graph.phases.iter().any(|p| p.id.0 == "layer_1_residual_rmsnorm"));
+
     }
 
     #[test]

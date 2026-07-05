@@ -4,7 +4,9 @@
 //! [`StepTelemetrySnapshot`] for aggregating phase receipts into a step-level
 //! picture, and [`SessionTelemetryState`] for session-wide cumulative counters.
 
-use crate::compute_image::phase_graph::{ArtifactBindingId, PhaseId, WeightResidencySetId};
+use crate::compute_image::phase_graph::{
+    ArtifactBindingId, PhaseId, WeightResidencySetId,
+};
 use crate::scheduling::receipts::PhaseReceipt;
 use std::time::Instant;
 
@@ -118,7 +120,8 @@ impl SessionTelemetryState {
 mod tests {
     use super::*;
     use crate::compute_image::fusion_abi::{
-        ArtifactHash, MetalFusionFamily, MetalLaunchContract, SealedMetalFusionArtifact,
+        ArtifactHash, MetalFusionFamily, MetalLaunchContract,
+        SealedMetalFusionArtifact,
     };
     use crate::compute_image::fusion_receipts::FusedMetalExecutionEvidence;
     use crate::compute_image::phase_dag::PhaseCompletionStatus;

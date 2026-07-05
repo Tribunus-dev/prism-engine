@@ -25,7 +25,7 @@ pub enum TransformKind {
     /// Pad a tensor along specified axes.
     Pad,
     /// Convert tensor representation for CoreML compatibility.
-    CoreAiRepresentation,
+    CoreMlRepresentation,
 }
 
 /// Backend target for executing a transformation.
@@ -36,7 +36,7 @@ pub enum TransformBackend {
     /// Execute on GPU via MLX Metal.
     Gpu,
     /// Convert to CoreML format.
-    CoreAi,
+    CoreMl,
 }
 
 /// A fully-specified tensor transform recipe.

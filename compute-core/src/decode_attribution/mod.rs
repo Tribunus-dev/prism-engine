@@ -10,7 +10,7 @@ pub mod artifact_hash;
 pub mod backend_adapters;
 pub mod breadcrumb;
 pub mod compute_plan;
-pub mod coreai_minimal_repro;
+pub mod coreml_minimal_repro;
 pub mod decode_microphase_shape_map;
 pub mod defect_clustering;
 pub mod environment;
@@ -26,6 +26,6 @@ pub mod report;
 pub mod shape_profiles;
 pub mod statistics;
 pub mod suite_manifest;
+pub mod timer_calibration;
 #[cfg(feature = "tensix")]
 pub mod tensix_decode_plan;
-pub mod timer_calibration;

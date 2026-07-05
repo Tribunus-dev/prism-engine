@@ -321,7 +321,7 @@ pub fn run_layer(
     plan: &LayerPlan,
     route: &OperationRoute,
     island: Option<&crate::heterogeneous::SharedMemoryIsland>,
-    ane_coreai_models: &[Option<std::sync::Arc<crate::coreai_bridge::CoreAiModel>>],
+    ane_coreml_models: &[Option<std::sync::Arc<crate::coreml_bridge::CoreMlModel>>],
     // Attention norm weights
     attn_norm: &Array,
     ffn_norm: &Array,
@@ -380,7 +380,7 @@ pub fn run_layer(
             &normed,
             plan,
             route,
-            ane_coreai_models,
+            ane_coreml_models,
             plan.layer_index as usize,
             island,
             qw,
@@ -407,7 +407,7 @@ pub fn run_layer(
             &normed,
             plan,
             route,
-            ane_coreai_models,
+            ane_coreml_models,
             plan.layer_index as usize,
             island,
             qw,
@@ -501,7 +501,7 @@ pub fn run_layer_with_sinks(
     plan: &LayerPlan,
     route: &OperationRoute,
     island: Option<&crate::heterogeneous::SharedMemoryIsland>,
-    ane_coreai_models: &[Option<std::sync::Arc<crate::coreai_bridge::CoreAiModel>>],
+    ane_coreml_models: &[Option<std::sync::Arc<crate::coreml_bridge::CoreMlModel>>],
     attn_norm: &Array,
     ffn_norm: &Array,
     qw: &Array,
@@ -751,7 +751,7 @@ pub fn run_layer_with_sinks(
             plan,
             route,
             island,
-            ane_coreai_models,
+            ane_coreml_models,
             attn_norm,
             ffn_norm,
             qw,
@@ -798,9 +798,9 @@ fn sliding_attention_layer(
     x: &Array,
     plan: &LayerPlan,
     route: &OperationRoute,
-    _ane_coreai_models: &[Option<std::sync::Arc<crate::coreai_bridge::CoreAiModel>>],
-    _layer_idx: usize,
-    _island: Option<&crate::heterogeneous::SharedMemoryIsland>,
+    ane_coreml_models: &[Option<std::sync::Arc<crate::coreml_bridge::CoreMlModel>>],
+    layer_idx: usize,
+    island: Option<&crate::heterogeneous::SharedMemoryIsland>,
     qw: &Array,
     qs: &Array,
     qb: &Array,
@@ -877,7 +877,8 @@ fn sliding_attention_layer(
     v.eval()?;
 
     // ANE dispatch: if this layer is routed to ANE, send Q/K/V to CoreML
-    if route.attention == crate::heterogeneous::ANE {}
+    if route.attention == crate::heterogeneous::ANE {
+    }
 
     cache.append(k, v)?;
     let (k_cached, v_cached) = cache
@@ -935,9 +936,9 @@ fn full_attention_layer(
     x: &Array,
     plan: &LayerPlan,
     route: &OperationRoute,
-    _ane_coreai_models: &[Option<std::sync::Arc<crate::coreai_bridge::CoreAiModel>>],
-    _layer_idx: usize,
-    _island: Option<&crate::heterogeneous::SharedMemoryIsland>,
+    ane_coreml_models: &[Option<std::sync::Arc<crate::coreml_bridge::CoreMlModel>>],
+    layer_idx: usize,
+    island: Option<&crate::heterogeneous::SharedMemoryIsland>,
     qw: &Array,
     qs: &Array,
     qb: &Array,
@@ -1018,7 +1019,8 @@ fn full_attention_layer(
     k.eval()?;
     v.eval()?;
     // ANE dispatch: if this layer is routed to ANE, send Q/K/V to CoreML
-    if route.attention == crate::heterogeneous::ANE {}
+    if route.attention == crate::heterogeneous::ANE {
+    }
 
     cache.append(k, v)?;
     let (k_cached, v_cached) = cache

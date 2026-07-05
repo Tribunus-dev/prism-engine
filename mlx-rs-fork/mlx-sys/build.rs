@@ -10,50 +10,32 @@ fn build_and_link_mlx_c() {
     let install_prefix = out_dir.join("install");
 
     let mut cmake_args = vec![
-        "-S".to_string(),
-        mlx_c_src.to_str().unwrap().to_string(),
-        "-B".to_string(),
-        build_dir.to_str().unwrap().to_string(),
-        format!(
-            "-DCMAKE_INSTALL_PREFIX={}",
-            install_prefix.to_str().unwrap()
-        ),
-        format!(
-            "-DCMAKE_OSX_DEPLOYMENT_TARGET={}",
-            std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "26.5".into())
-        ),
+        "-S".to_string(), mlx_c_src.to_str().unwrap().to_string(),
+        "-B".to_string(), build_dir.to_str().unwrap().to_string(),
+        format!("-DCMAKE_INSTALL_PREFIX={}", install_prefix.to_str().unwrap()),
+        format!("-DCMAKE_OSX_DEPLOYMENT_TARGET={}", std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "26.5".into())),
         "-DMLX_BUILD_METAL=OFF".to_string(),
         "-DMLX_BUILD_ACCELERATE=OFF".to_string(),
     ];
 
     #[cfg(debug_assertions)]
-    {
-        cmake_args.push("-DCMAKE_BUILD_TYPE=Debug".to_string());
-    }
+    { cmake_args.push("-DCMAKE_BUILD_TYPE=Debug".to_string()); }
     #[cfg(not(debug_assertions))]
-    {
-        cmake_args.push("-DCMAKE_BUILD_TYPE=Release".to_string());
-    }
+    { cmake_args.push("-DCMAKE_BUILD_TYPE=Release".to_string()); }
     #[cfg(feature = "metal")]
-    {
-        cmake_args.push("-DMLX_BUILD_METAL=ON".to_string());
-    }
+    { cmake_args.push("-DMLX_BUILD_METAL=ON".to_string()); }
     #[cfg(feature = "accelerate")]
-    {
-        cmake_args.push("-DMLX_BUILD_ACCELERATE=ON".to_string());
-    }
+    { cmake_args.push("-DMLX_BUILD_ACCELERATE=ON".to_string()); }
 
     // Use local mlx-tribunus checkout instead of fetching from GitHub.
-    // Avoids authentication issues with the private repository and
-    // guarantees a consistent source tree.
-    cmake_args.push(format!(
-        "-DFETCHCONTENT_SOURCE_DIR_MLX={}",
-        manifest_dir
-            .join("../../../mlx-tribunus")
-            .canonicalize()
-            .unwrap_or_else(|_| manifest_dir.join("../../../mlx-tribunus"))
-            .display()
-    ));
+    // Use local mlx-tribunus checkout if available, otherwise let CMake fetch it.
+    let local_mlx = manifest_dir.join("../../../mlx-tribunus");
+    if local_mlx.exists() {
+        cmake_args.push(format!(
+            "-DFETCHCONTENT_SOURCE_DIR_MLX={}",
+            local_mlx.canonicalize().unwrap_or_else(|_| local_mlx.clone()).display()
+        ));
+    }
 
     // Metal shader compilation is disabled because the mlx-tribunus fork's
     // .metal files have bfloat16_t/half type collisions (
@@ -82,7 +64,10 @@ fn build_and_link_mlx_c() {
     if bf16_patched.exists() && bf16_path.exists() {
         let content = std::fs::read_to_string(&bf16_patched).unwrap_or_default();
         // Upstream recommendation: use __HAVE_BFLOAT__ check (works in JIT context)
-        let content = content.replace("__has_extension(metal_bfloat)", "defined(__HAVE_BFLOAT__)");
+        let content = content.replace(
+            "__has_extension(metal_bfloat)",
+            "defined(__HAVE_BFLOAT__)",
+        );
         std::fs::write(&bf16_path, &content).unwrap();
         eprintln!("Patched bf16.h with struct-based bfloat16_t fallback (__HAVE_BFLOAT__)");
     }
@@ -136,9 +121,7 @@ fn build_and_link_mlx_c() {
                 if path.is_dir() {
                     guard_bfloat16_kernels(&path, metal_kernels);
                 } else if path.extension().map_or(false, |e| e == "metal") {
-                    let Ok(content) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
+                    let Ok(content) = std::fs::read_to_string(&path) else { continue };
                     let mut lines: Vec<&str> = content.lines().collect();
                     let mut modified = false;
                     let mut i = 0;
@@ -168,8 +151,9 @@ fn build_and_link_mlx_c() {
                                 lines.insert(i + 2, "  #endif");
                                 i += 2;
                                 modified = true;
-                                let name =
-                                    path.strip_prefix(metal_kernels).unwrap_or(&path).display();
+                                let name = path.strip_prefix(metal_kernels)
+                                    .unwrap_or(&path)
+                                    .display();
                                 eprintln!(
                                     "Patched {} line {} — guarded bfloat16 instantiation",
                                     name, i
@@ -215,10 +199,7 @@ fn build_and_link_mlx_c() {
         panic!("cmake --build failed");
     }
 
-    println!(
-        "cargo:rustc-link-search=native={}/lib",
-        install_prefix.display()
-    );
+    println!("cargo:rustc-link-search=native={}/lib", install_prefix.display());
     println!("cargo:rustc-link-lib=static=mlx");
     println!("cargo:rustc-link-lib=static=mlxc");
 
@@ -231,26 +212,20 @@ fn build_and_link_mlx_c() {
         println!("cargo:rustc-link-lib=c++");
     }
     println!("cargo:rustc-link-lib=dylib=objc");
-    if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos"
-        || std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "ios"
-    {
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos" || std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "ios" {
         println!("cargo:rustc-link-lib=framework=Foundation");
     }
 
     #[cfg(feature = "metal")]
     {
-        if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos"
-            || std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "ios"
-        {
+        if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos" || std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "ios" {
             println!("cargo:rustc-link-lib=framework=Metal");
         }
     }
 
     #[cfg(feature = "accelerate")]
     {
-        if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos"
-            || std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "ios"
-        {
+        if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "macos" || std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "ios" {
             println!("cargo:rustc-link-lib=framework=Foundation");
         }
     }
@@ -316,10 +291,6 @@ pub unsafe extern "C" fn mlx_get_memory_limit(_res: *mut usize) {}
 pub unsafe extern "C" fn mlx_set_memory_limit(_prev: *mut usize, _limit: usize) {}
 #[no_mangle]
 pub unsafe extern "C" fn mlx_metal_is_available(_res: *mut bool) -> i32 { 0 }
-#[no_mangle]
-pub unsafe extern "C" fn mlx_metal_set_capture_dir(_path: *const std::ffi::c_char) -> i32 { 0 }
-#[no_mangle]
-pub unsafe extern "C" fn mlx_level_zero_set_capture_dir(_path: *const std::ffi::c_char) -> i32 { 0 }
 #[no_mangle]
 pub unsafe extern "C" fn mlx_reshape_ffi(_x: mlx_array, _shape_ar: *const i32, _ndim: i32) -> mlx_array { std::ptr::null_mut() }
 #[no_mangle]

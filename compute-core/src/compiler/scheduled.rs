@@ -53,7 +53,7 @@ pub enum StorageClass {
     /// Metal buffer.
     Metal,
     /// Core ML multi-array.
-    CoreAiArray,
+    CoreMlArray,
     /// Virtual (not yet allocated — placeholder for planning).
     Virtual,
 }

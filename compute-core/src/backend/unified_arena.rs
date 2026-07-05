@@ -3,77 +3,9 @@
 //! mmap-backed arena. MLX, Accelerate, and Core ML receive *views* into
 //! the same underlying pages — no backend-to-backend copies.
 
-use std::hash::{Hash, Hasher};
-
-/// Handle into the unified arena, or a standalone mmap-backed view.
-#[derive(Clone, Copy, Debug)]
-pub struct ArenaView {
-    /// Offset into a UnifiedExecutionArena (for arena-allocated regions).
-    pub offset: u64,
-    /// Direct CPU pointer to the backing memory (for standalone mmap views).
-    pub cpu_ptr: *mut u8,
-    /// Byte length of the backing memory.
-    pub byte_length: u64,
-    /// Optional Metal buffer wrapping this memory (StorageModeShared, no copy).
-    pub metal_buffer: Option<*mut std::ffi::c_void>,
-}
-
-// ArenaView identity is based on offset alone (for HashMap-key usage in hazard tracking).
-impl PartialEq for ArenaView {
-    fn eq(&self, other: &Self) -> bool {
-        self.offset == other.offset
-    }
-}
-impl Eq for ArenaView {}
-impl Hash for ArenaView {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.offset.hash(state);
-    }
-}
-
-impl ArenaView {
-    /// Create a handle for an offset into a UnifiedExecutionArena.
-    pub fn from_offset(offset: u64) -> Self {
-        ArenaView {
-            offset,
-            cpu_ptr: std::ptr::null_mut(),
-            byte_length: 0,
-            metal_buffer: None,
-        }
-    }
-
-    /// Create an ArenaView backed by a page-aligned mmap slice from the
-    /// .cimage file.  `base` must be 16 KB aligned (guaranteed by
-    /// AlignedMmapBuilder).  The backing memory is wired physical RAM
-    /// shared with the ANE via IOSurface without kernel shadow copies.
-    ///
-    /// # Safety
-    /// - `base` must point to a valid, page-aligned memory region of at
-    ///   least `byte_length` bytes.
-    /// - The memory must remain valid for the lifetime of this view.
-    pub unsafe fn from_mmap_slice(
-        base: *const u8,
-        byte_length: u64,
-        device: Option<&metal::Device>,
-    ) -> Self {
-        let metal_buffer = device.map(|dev| {
-            dev.new_buffer_with_bytes_no_copy(
-                base as *mut std::ffi::c_void,
-                byte_length,
-                metal::MTLResourceOptions::StorageModeShared,
-                None,
-            )
-        });
-        // Map the Metal buffer pointer through the inner id<MTLBuffer>*
-        let metal_ptr = metal_buffer.map(|buf| buf.contents());
-        Self {
-            offset: 0,
-            cpu_ptr: base as *mut u8,
-            byte_length,
-            metal_buffer: metal_ptr,
-        }
-    }
-}
+/// Handle into the unified arena.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ArenaView(pub u64);
 
 /// Memory backing strategy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +35,6 @@ pub struct UnifiedExecutionArena {
     regions: Vec<ArenaRegion>,
     next_offset: u64,
     read_hazards: Vec<(ArenaView, ArenaView)>,
-    #[allow(dead_code)]
     write_hazards: Vec<(ArenaView, ArenaView)>,
 }
 
@@ -139,7 +70,7 @@ impl UnifiedExecutionArena {
         if self.next_offset + aligned > self.mmap_size {
             return None;
         }
-        let view = ArenaView::from_offset(self.next_offset);
+        let view = ArenaView(self.next_offset);
         self.regions.push(ArenaRegion {
             offset: self.next_offset,
             byte_size: aligned,
@@ -156,7 +87,7 @@ impl UnifiedExecutionArena {
     pub fn cpu_ptr(&self, view: ArenaView) -> Option<*mut u8> {
         self.regions
             .iter()
-            .find(|r| r.offset == view.offset)
+            .find(|r| r.offset == view.0)
             .and_then(|r| r.cpu_ptr)
     }
 

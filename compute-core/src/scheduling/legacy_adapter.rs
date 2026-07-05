@@ -36,11 +36,15 @@ impl<'a> LegacyMlxLayerInvocation<'a> {
     ///
     /// Returns the output hidden state array or an error string.
     pub fn run_layer(&mut self) -> Result<Array, String> {
-        let hidden = match self.hidden.and_then(|a| a.mlx_compatibility_view.as_ref()) {
+        let hidden = match self
+            .hidden
+            .and_then(|a| a.mlx_compatibility_view.as_ref())
+        {
             Some(arr) => arr.clone(),
             None => {
                 return Err(
-                    "no MLX compatibility view available for legacy layer execution".to_string(),
+                    "no MLX compatibility view available for legacy layer execution"
+                        .to_string(),
                 );
             }
         };
@@ -59,8 +63,14 @@ impl<'a> LegacyMlxLayerInvocation<'a> {
 
         // RoPE tables are stored as `Arc<[f32]>`; convert to `Array` for the
         // executor API.
-        let rope_cos = Array::from_slice(&rope_tables.cos, &[rope_tables.cos.len() as i32, 1]);
-        let rope_sin = Array::from_slice(&rope_tables.sin, &[rope_tables.sin.len() as i32, 1]);
+        let rope_cos = Array::from_slice(
+            &rope_tables.cos,
+            &[rope_tables.cos.len() as i32, 1],
+        );
+        let rope_sin = Array::from_slice(
+            &rope_tables.sin,
+            &[rope_tables.sin.len() as i32, 1],
+        );
 
         let lw = self.layer_weights;
 
@@ -92,7 +102,7 @@ impl<'a> LegacyMlxLayerInvocation<'a> {
             self.layer_plan,
             self.route,
             self.memory_island,
-            &[], // ane_coreai_models — empty; callers configure externally
+            &[], // ane_coreml_models — empty; callers configure externally
             &lw.input_layernorm,
             &lw.post_attention_layernorm,
             &lw.q_proj_w,
@@ -224,7 +234,7 @@ mod tests {
             k_norm: None,
         };
 
-        let invocation = LegacyMlxLayerInvocation {
+        let mut invocation = LegacyMlxLayerInvocation {
             hidden: None,
             layer_plan: &plan,
             layer_weights: &weights,

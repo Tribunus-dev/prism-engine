@@ -24,7 +24,6 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    #[allow(dead_code)]
     fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Debug => "debug",

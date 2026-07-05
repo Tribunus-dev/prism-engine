@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 
-/// C-compatible struct mirrored from coreai_arena.mm.
+/// C-compatible struct mirrored from coreml_arena.mm.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ArenaInfo {

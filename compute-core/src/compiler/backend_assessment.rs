@@ -321,7 +321,7 @@ fn build_groups(assignments: &[(OperationId, BackendId)]) -> Vec<BackendBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::routing::SynchronizationPolicy;
+    use crate::backend::routing::{EvaluationPolicy, SynchronizationPolicy};
 
     // Helper to create a test operation
     fn make_op(
@@ -362,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_score_backend_coreai_attention() {
+    fn test_score_backend_coreml_attention() {
         let op = make_op(1, OperationFamily::AttentionBlock, None, None, None, false);
         assert_eq!(score_backend(&op, BackendId(2)), 90);
     }

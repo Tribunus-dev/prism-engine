@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 
 /// Kinds of operations we track in the optimizer's internal graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
 enum OpKind {
     EmbeddingLookup,
     RmsNorm,
@@ -41,7 +40,6 @@ enum OpKind {
     Argmax,
 }
 
-#[allow(dead_code)]
 impl OpKind {
     fn name(&self) -> &'static str {
         match self {
@@ -82,10 +80,9 @@ struct OpNode {
     inputs: Vec<String>,
     /// Symbolic output tensor name(s) this node produces.
     outputs: Vec<String>,
-    #[allow(dead_code)]
     /// Known input shapes (populated by shape propagation).
     known_input_shapes: Vec<Vec<u32>>,
-    /// Known output shape
+    /// Known output shape (populated by shape propagation).
     known_output_shape: Option<Vec<u32>>,
     /// Whether this operation produces a compile-time constant value.
     is_constant: bool,
@@ -979,7 +976,9 @@ impl IntermediateSize for ModelExecutionPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{operation_route::OperationRoute, EpiloguePlan, LayerPlan, ProloguePlan};
+    use crate::config::{
+        operation_route::OperationRoute, AneFusedIsland, EpiloguePlan, LayerPlan, ProloguePlan,
+    };
 
     fn make_test_plan() -> ModelExecutionPlan {
         let layer = LayerPlan {

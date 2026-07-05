@@ -210,7 +210,7 @@ fn generate_break_even(
     let mut results = Vec::new();
 
     // Find matrix_a rows
-    let mut coreai_rows: Vec<&DecodeAttributionReceipt> = Vec::new();
+    let mut coreml_rows: Vec<&DecodeAttributionReceipt> = Vec::new();
     let mut direct_rows: Vec<&DecodeAttributionReceipt> = Vec::new();
 
     for (name, receipts) in matrix_receipts {
@@ -222,14 +222,14 @@ fn generate_break_even(
                 continue;
             }
             match r.backend.as_str() {
-                "coreai" => coreai_rows.push(r),
+                "coreml" => coreml_rows.push(r),
                 "accelerate" | "mlx" => direct_rows.push(r),
                 _ => {}
             }
         }
     }
 
-    for cm in &coreai_rows {
+    for cm in &coreml_rows {
         for d in &direct_rows {
             if cm.shape_profile != d.shape_profile {
                 continue;
@@ -244,7 +244,7 @@ fn generate_break_even(
             let denominator = (d_steady as i64) - (cm_steady as i64);
 
             let break_even = if numerator <= 0 {
-                "coreai_ahead_at_n0".to_string()
+                "coreml_ahead_at_n0".to_string()
             } else if denominator <= 0 {
                 "no_break_even".to_string()
             } else {
@@ -254,11 +254,11 @@ fn generate_break_even(
 
             results.push(serde_json::json!({
                 "shape": cm.shape_profile,
-                "coreai_backend": cm.backend_runtime_policy,
+                "coreml_backend": cm.backend_runtime_policy,
                 "direct_backend": d.backend,
-                "coreai_lifecycle_tax_ns": lifecycle_tax,
+                "coreml_lifecycle_tax_ns": lifecycle_tax,
                 "direct_prepare_tax_ns": prepare_tax,
-                "coreai_steady_p50_ns": cm_steady,
+                "coreml_steady_p50_ns": cm_steady,
                 "direct_steady_p50_ns": d_steady,
                 "break_even_iterations": break_even,
             }));
@@ -548,7 +548,7 @@ mod tests {
             },
             aggregate_exclusions: vec![super::super::lattice_validation::AggregateExclusion {
                 row_index: 1,
-                lattice_cell_id: "coverage-lattice.v2/coreai/matmul/medium/cpuOnly".to_string(),
+                lattice_cell_id: "coverage-lattice.v2/coreml/matmul/medium/cpuOnly".to_string(),
                 reason: "identity_passthrough".to_string(),
                 detail: "identity rows are excluded from latency aggregates".to_string(),
             }],
@@ -563,7 +563,7 @@ mod tests {
             backend: if lattice_cell_id.contains("mlx") {
                 "mlx".to_string()
             } else {
-                "coreai".to_string()
+                "coreml".to_string()
             },
             graph_family: if lattice_cell_id.contains("identity") {
                 "identity_passthrough".to_string()
@@ -629,7 +629,7 @@ mod tests {
             rows: vec![
                 dummy_row(
                     run_id,
-                    "coverage-lattice.v2/coreai/matmul/small/cpuOnly",
+                    "coverage-lattice.v2/coreml/matmul/small/cpuOnly",
                     "pass",
                 ),
                 dummy_row(

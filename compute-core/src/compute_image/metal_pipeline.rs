@@ -29,10 +29,7 @@ pub fn compile_metal_source(name: &str, source: &str) -> Option<MetalPipelineOut
         .map(|o| o.status.success())
         .unwrap_or(false);
     if !has_xcrun {
-        eprintln!(
-            "[metal-pipeline] xcrun not found — cannot compile '{}'",
-            name
-        );
+        eprintln!("[metal-pipeline] xcrun not found — cannot compile '{}'", name);
         return None;
     }
 
@@ -51,7 +48,7 @@ pub fn compile_metal_source(name: &str, source: &str) -> Option<MetalPipelineOut
 
     // Compile to AIR.
     let status = std::process::Command::new("xcrun")
-        .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
+        .args(["-sdk", "macosx", "metal", "-std=metal3.2", "-O3", "-c"])
         .arg(src_path.to_str().unwrap())
         .arg("-o")
         .arg(air_path.to_str().unwrap())
@@ -202,15 +199,11 @@ mod tests {
             sha256: "abcdef1234567890".into(),
             byte_length: 8,
         };
-        let artifact =
-            metal_pipeline_to_artifact("test_kernel", "test_op", &out, "test_kernel_entry");
+        let artifact = metal_pipeline_to_artifact("test_kernel", "test_op", &out, "test_kernel_entry");
         assert_eq!(artifact.artifact_id, "test_kernel");
         assert_eq!(artifact.logical_operation, "test_op");
         assert_eq!(artifact.metallib_blake3, "abcdef1234567890");
         assert_eq!(artifact.metallib_byte_length, 8);
-        assert_eq!(
-            artifact.metallib_relpath,
-            "metal/kernels/test_kernel.metallib"
-        );
+        assert_eq!(artifact.metallib_relpath, "metal/kernels/test_kernel.metallib");
     }
 }

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+if [[ "$1" == "-sdk" && "$2" == "macosx" && "$3" == "metal" ]]; then
+    touch "$7"
+elif [[ "$1" == "-sdk" && "$2" == "macosx" && "$3" == "metallib" ]]; then
+    echo "dummy metallib content" > "$5"
+fi

@@ -56,7 +56,7 @@ pub fn default_synthetic_fixtures() -> Vec<NormalizedPhaseEvidence> {
                     raw_status_string: "pass".into(),
                 },
                 BackendEvidence {
-                    backend_name: "coreai".into(),
+                    backend_name: "coreml".into(),
                     status: BackendStatus::Pass,
                     raw_status_string: "pass".into(),
                 },
@@ -84,7 +84,7 @@ pub fn default_synthetic_fixtures() -> Vec<NormalizedPhaseEvidence> {
                     raw_status_string: "pass".into(),
                 },
                 BackendEvidence {
-                    backend_name: "coreai".into(),
+                    backend_name: "coreml".into(),
                     status: BackendStatus::CompileLimited,
                     raw_status_string: "compile_limited".into(),
                 },

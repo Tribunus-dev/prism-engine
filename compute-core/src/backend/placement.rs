@@ -5,11 +5,11 @@
 use crate::backend::unified_arena::ArenaView;
 
 /// Identifies an execution lane.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ExecutionLane {
     MlxGpu,
     AccelerateCpu,
-    CoreAiAne,
+    CoreMlAne,
     CandleCpu,
     Tensix,
     IntelLevelZero,
@@ -104,19 +104,19 @@ impl HazardTracker {
 
     pub fn register_view(&mut self, view: ArenaView) {
         self.barriers
-            .entry(view.offset)
+            .entry(view.0)
             .or_insert_with(|| HazardBarrier::new(view));
     }
 
     pub fn write(&mut self, view: ArenaView, lane: ExecutionLane) {
-        if let Some(barrier) = self.barriers.get_mut(&view.offset) {
+        if let Some(barrier) = self.barriers.get_mut(&view.0) {
             barrier.write(lane);
         }
     }
 
     pub fn needs_sync(&mut self, view: ArenaView, lane: ExecutionLane) -> bool {
         self.barriers
-            .get_mut(&view.offset)
+            .get_mut(&view.0)
             .map(|b| b.read(lane))
             .unwrap_or(false)
     }

@@ -1,4 +1,4 @@
-//! Write `.mlpackage` directory bundles from `coreai-proto` Model protobufs.
+//! Write `.mlpackage` directory bundles from `coreml-proto` Model protobufs.
 //!
 //! Produces Apple-standard structure:
 //! ```text
@@ -46,9 +46,8 @@ fn write_mlpackage_inner(
     description: &ModelMeta,
     weights: &HashMap<String, Vec<u8>>,
 ) -> Result<PathBuf, String> {
-    let specification_version = required_specification_version(&program);
     let model = proto::Model {
-        specification_version,
+        specification_version: 9,
         description: Some(proto::ModelDescription {
             predicted_feature_name: String::new(),
             predicted_probabilities_name: String::new(),
@@ -133,38 +132,6 @@ fn write_mlpackage_inner(
     Ok(package_dir)
 }
 
-fn required_specification_version(program: &mil_spec::Program) -> i32 {
-    fn tensor_type_requires_v10(tt: &mil_spec::TensorType) -> bool {
-        tt.data_type == mil_spec::DataType::Int8 as i32
-    }
-
-    for function in program.functions.values() {
-        for input in &function.inputs {
-            if let Some(value_type::Type::TensorType(tt)) =
-                input.r#type.as_ref().and_then(|vt| vt.r#type.as_ref())
-            {
-                if tensor_type_requires_v10(tt) {
-                    return 10;
-                }
-            }
-        }
-        for block in function.block_specializations.values() {
-            for op in &block.operations {
-                for output in &op.outputs {
-                    if let Some(value_type::Type::TensorType(tt)) =
-                        output.r#type.as_ref().and_then(|vt| vt.r#type.as_ref())
-                    {
-                        if tensor_type_requires_v10(tt) {
-                            return 10;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    9
-}
-
 /// Metadata for the model description in the serialized protobuf.
 #[derive(Debug, Clone)]
 pub struct ModelMeta {
@@ -227,12 +194,6 @@ fn build_feature_descriptions(
         match mil_dt {
             d if d == mil_spec::DataType::Float16 as i32 => {
                 proto::array_feature_type::ArrayDataType::Float16 as i32
-            }
-            d if d == mil_spec::DataType::Int32 as i32 => {
-                proto::array_feature_type::ArrayDataType::Int32 as i32
-            }
-            d if d == mil_spec::DataType::Int8 as i32 => {
-                proto::array_feature_type::ArrayDataType::Int8 as i32
             }
             _ => proto::array_feature_type::ArrayDataType::Float32 as i32,
         }
@@ -342,44 +303,5 @@ mod tests {
         assert_eq!(a, b, "same seed + counter must produce same UUID");
         let c = deterministic_uuid("test-model", 1);
         assert_ne!(a, c, "different counter must produce different UUID");
-    }
-
-    #[test]
-    fn write_mlpackage_upgrades_spec_version_for_int8_inputs() {
-        let tmp = tempfile::tempdir().unwrap();
-        let prog = MilBuilder::new("main")
-            .input("packed_nf4_weights", mil_spec::DataType::Int8, &[2, 8])
-            .output("packed_nf4_weights")
-            .build()
-            .expect("MIL builder error");
-
-        let meta = ModelMeta {
-            model_name: "nf4-int8-interface".into(),
-            inputs: vec![("packed_nf4_weights".into(), vec![2, 8])],
-            outputs: vec![("packed_nf4_weights".into(), vec![2, 8])],
-            output_name: "packed_nf4_weights".into(),
-            ..Default::default()
-        };
-
-        let pkg_path = write_mlpackage(prog, tmp.path(), &meta).unwrap();
-        let bytes = fs::read(pkg_path.join("Data/com.apple.CoreML/model.mlmodel")).unwrap();
-        let model = proto::Model::decode(bytes.as_slice()).unwrap();
-        assert_eq!(model.specification_version, 10);
-
-        let function = model
-            .description
-            .as_ref()
-            .and_then(|d| d.functions.first())
-            .expect("function description");
-        let input = function.input.first().expect("input description");
-        let feature = input.r#type.as_ref().expect("feature type");
-        let array = match feature.r#type.as_ref().expect("feature payload") {
-            proto::feature_type::Type::MultiArrayType(array) => array,
-            other => panic!("expected multiarray type, got {other:?}"),
-        };
-        assert_eq!(
-            array.data_type,
-            proto::array_feature_type::ArrayDataType::Int8 as i32
-        );
     }
 }

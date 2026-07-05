@@ -9,6 +9,7 @@
 //! prove a live execution route.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ pub struct PhaseReceiptSnapshot {
     pub phase_id: String,
     /// Phase kind string (e.g. "layer_0_attn", "prologue").
     pub phase_kind: String,
-    /// Executing lane (e.g. "mlx", "metal", "accelerate", "coreai", "fallback").
+    /// Executing lane (e.g. "mlx", "metal", "accelerate", "coreml", "fallback").
     pub executed_subsystem: String,
     /// Concrete native symbol name (e.g. "vDSP_vadd", "matmul_4x4_neon", "SiLU").
     pub native_symbol: Option<String>,
@@ -135,9 +136,9 @@ pub struct CapabilityReport {
     pub accelerate_selected_phases: u32,
 
     // Core ML
-    pub coreai_model_load_status: SubsystemState,
-    pub coreai_compiled_subgraphs: u32,
-    pub coreai_load_failure_reason: Option<String>,
+    pub coreml_model_load_status: SubsystemState,
+    pub coreml_compiled_subgraphs: u32,
+    pub coreml_load_failure_reason: Option<String>,
 
     // KV cache
     pub kv_mode: KvCacheModeState,
@@ -176,9 +177,9 @@ impl CapabilityReport {
             accelerate_native_symbols_available: Vec::new(),
             accelerate_state: SubsystemState::NotAvailable,
             accelerate_selected_phases: 0,
-            coreai_model_load_status: SubsystemState::NotAvailable,
-            coreai_compiled_subgraphs: 0,
-            coreai_load_failure_reason: None,
+            coreml_model_load_status: SubsystemState::NotAvailable,
+            coreml_compiled_subgraphs: 0,
+            coreml_load_failure_reason: None,
             kv_mode: KvCacheModeState::None,
             kv_compression_ratio: None,
             kv_compression_active: false,
@@ -203,7 +204,8 @@ impl CapabilityReport {
     /// Write to a file path.
     pub fn write_to(&self, path: &Path) -> Result<(), String> {
         let json = self.to_json();
-        std::fs::write(path, &json).map_err(|e| format!("write capability report: {}", e))
+        std::fs::write(path, &json)
+            .map_err(|e| format!("write capability report: {}", e))
     }
 
     /// Detect feature flags from cfg conditions.
@@ -215,8 +217,8 @@ impl CapabilityReport {
         if cfg!(feature = "metal-dispatch") {
             flags.push("metal-dispatch".to_string());
         }
-        if cfg!(feature = "coreai-backend") {
-            flags.push("coreai-backend".to_string());
+        if cfg!(feature = "coreml-backend") {
+            flags.push("coreml-backend".to_string());
         }
         if cfg!(feature = "candle-cpu") {
             flags.push("candle-cpu".to_string());
@@ -256,20 +258,23 @@ impl CapabilityReport {
     pub fn fail_closed_check(&self) -> Result<(), Vec<String>> {
         let mut failures = Vec::new();
 
-        if self.metal_dispatch_enabled && (self.metal_state as u8) < (SubsystemState::Loaded as u8)
-        {
+        if self.metal_dispatch_enabled && (self.metal_state as u8) < (SubsystemState::Loaded as u8) {
             failures.push(format!(
                 "metal-dispatch feature enabled but metal_state is {:?} (< loaded)",
                 self.metal_state
             ));
         }
-        if (self.coreai_model_load_status as u8) >= (SubsystemState::Selected as u8)
-            && self.coreai_compiled_subgraphs == 0
+        if (self.coreml_model_load_status as u8) >= (SubsystemState::Selected as u8)
+            && self.coreml_compiled_subgraphs == 0
         {
-            failures.push("Core ML model selected but zero compiled subgraphs".to_string());
+            failures.push(
+                "Core ML model selected but zero compiled subgraphs".to_string(),
+            );
         }
         if self.kv_compression_active && self.kv_mode == KvCacheModeState::None {
-            failures.push("KV compression claimed active but kv_mode is None".to_string());
+            failures.push(
+                "KV compression claimed active but kv_mode is None".to_string(),
+            );
         }
         if self.total_phases > 0 && self.dispatched_phases == 0 {
             failures.push(format!(
@@ -333,15 +338,15 @@ impl CapabilityReportBuilder {
         self
     }
 
-    pub fn with_coreai_state(
+    pub fn with_coreml_state(
         mut self,
         state: SubsystemState,
         subgraphs: u32,
         failure: Option<String>,
     ) -> Self {
-        self.report.coreai_model_load_status = state;
-        self.report.coreai_compiled_subgraphs = subgraphs;
-        self.report.coreai_load_failure_reason = failure;
+        self.report.coreml_model_load_status = state;
+        self.report.coreml_compiled_subgraphs = subgraphs;
+        self.report.coreml_load_failure_reason = failure;
         self
     }
 

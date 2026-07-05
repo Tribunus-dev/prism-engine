@@ -5,16 +5,10 @@
 //! `mlx_rs::Array` operations behind a generational slot-map registry.
 
 #[cfg(target_os = "macos")]
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
+#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
 pub mod accelerate;
 #[cfg(target_os = "macos")]
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
+#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
 pub mod accelerate_ffi;
 /// Accelerate CPU execution lane — arena-view-based ops on CPU-accessible
 /// memory (zero-copy, no FFI). Pure Rust fallback with no OS dependency.
@@ -22,23 +16,11 @@ pub mod accelerate_ffi;
 pub mod accelerate_lane;
 pub mod authority;
 #[cfg(target_os = "macos")]
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub mod coreai;
+#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+pub mod coreml;
 /// Core ML execution lane — compiled subgraph on ANE.
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub mod coreai_iosurface;
-/// Core ML IOSurface binding — validated executable binding.
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub mod coreai_lane;
+#[cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+pub mod coreml_lane;
 /// CPU attention scheduler — L2-cache-aware work partition + work-stealing
 /// (ported from vLLM's cpu_attn_impl.hpp).
 #[cfg(feature = "candle-cpu")]
@@ -54,13 +36,6 @@ pub mod intel_level_zero;
 /// Intel USM zero-copy buffer abstraction for iGPU (Level Zero / oneAPI).
 #[cfg(feature = "intel")]
 pub mod intel_usm;
-/// Metal consumer — validates Core ML output slots against CPU references.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod metal_consumer;
-/// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
-pub mod metal_iosurface;
-/// NPU abstraction — unified FFI for Apple ANE, Intel VPU, AMD XDNA.
-pub mod npu;
 /// PlacementSet and hazard tracking — op placement legality and cross-lane sync.
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -70,9 +45,14 @@ pub mod npu;
 ))]
 pub mod placement;
 /// Tensor residency tracking — auditable contract for where a tensor lives.
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "candle-cpu",
+    feature = "intel",
+    feature = "tensix"
+))]
 pub mod residency;
 pub mod routing;
-pub mod shared_event;
 pub mod tensor_registry;
 /// Unified execution arena — single mmap-backed memory region for all lanes.
 #[cfg(any(

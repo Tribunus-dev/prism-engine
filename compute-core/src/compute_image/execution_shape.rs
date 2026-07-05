@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 /// Each variant identifies a distinct execution shape class — the runtime
 /// selects a compiled phase program whose `ExecutionShapeClass` best matches
 /// the incoming request shape.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ExecutionShapeClass {
     /// Single-token decode (autoregressive generation, one step).
     #[default]

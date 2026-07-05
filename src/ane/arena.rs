@@ -10,7 +10,12 @@ pub enum Dtype {
 }
 
 extern "C" {
-    fn tribunus_arena_alloc(info: *mut ArenaInfo, dim0: i32, dim1: i32, dtype: i32) -> i32;
+    fn tribunus_arena_alloc(
+        info: *mut ArenaInfo,
+        dim0: i32,
+        dim1: i32,
+        dtype: i32,
+    ) -> i32;
     fn tribunus_arena_free(info: *mut ArenaInfo);
     fn tribunus_arena_lock(info: *const ArenaInfo) -> i32;
     fn tribunus_arena_unlock(info: *const ArenaInfo) -> i32;

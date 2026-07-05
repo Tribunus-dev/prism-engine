@@ -23,7 +23,7 @@ use std::fmt;
 pub enum ComputeLane {
     Metal,
     Accelerate,
-    CoreAi,
+    CoreMl,
     Arena,
 }
 
@@ -52,7 +52,7 @@ pub enum SemanticKind {
 pub enum PhaseKind {
     MlxDecode,
     MetalFusedKernel,
-    CoreAiGraph,
+    CoreMlGraph,
     AccelMatMul,
     AccelElementWise,
     ArenaAlloc,

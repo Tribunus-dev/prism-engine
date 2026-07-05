@@ -21,7 +21,7 @@ pub struct SchedulerConfig {
     pub max_concurrent_sessions: u32,
     /// Maximum backlog of queued admission requests.
     pub admission_queue_capacity: u32,
-    /// Per-worker queue capacities keyed by worker kind (e.g. "mlx", "coreai").
+    /// Per-worker queue capacities keyed by worker kind (e.g. "mlx", "coreml").
     pub worker_queue_capacities: HashMap<String, u32>,
 }
 
@@ -48,7 +48,7 @@ pub enum SchedulerPolicy {
 pub fn default_m1_latency_config() -> SchedulerConfig {
     let mut caps = HashMap::new();
     caps.insert("mlx".to_string(), 4);
-    caps.insert("coreai".to_string(), 4);
+    caps.insert("coreml".to_string(), 4);
     caps.insert("compile".to_string(), 8);
     SchedulerConfig {
         max_concurrent_sessions: 2,
@@ -66,7 +66,7 @@ pub fn default_m1_latency_config() -> SchedulerConfig {
 pub fn default_m1_throughput_config() -> SchedulerConfig {
     let mut caps = HashMap::new();
     caps.insert("mlx".to_string(), 16);
-    caps.insert("coreai".to_string(), 16);
+    caps.insert("coreml".to_string(), 16);
     caps.insert("compile".to_string(), 32);
     SchedulerConfig {
         max_concurrent_sessions: 8,
@@ -91,7 +91,7 @@ pub fn apply_policy(policy: &SchedulerPolicy, config: &mut SchedulerConfig) {
             config.worker_queue_capacities.insert("mlx".to_string(), 4);
             config
                 .worker_queue_capacities
-                .insert("coreai".to_string(), 4);
+                .insert("coreml".to_string(), 4);
             config
                 .worker_queue_capacities
                 .insert("compile".to_string(), 8);
@@ -102,7 +102,7 @@ pub fn apply_policy(policy: &SchedulerPolicy, config: &mut SchedulerConfig) {
             config.worker_queue_capacities.insert("mlx".to_string(), 16);
             config
                 .worker_queue_capacities
-                .insert("coreai".to_string(), 16);
+                .insert("coreml".to_string(), 16);
             config
                 .worker_queue_capacities
                 .insert("compile".to_string(), 32);
@@ -113,7 +113,7 @@ pub fn apply_policy(policy: &SchedulerPolicy, config: &mut SchedulerConfig) {
             config.worker_queue_capacities.insert("mlx".to_string(), 8);
             config
                 .worker_queue_capacities
-                .insert("coreai".to_string(), 8);
+                .insert("coreml".to_string(), 8);
             config
                 .worker_queue_capacities
                 .insert("compile".to_string(), 16);
@@ -124,7 +124,7 @@ pub fn apply_policy(policy: &SchedulerPolicy, config: &mut SchedulerConfig) {
             config.worker_queue_capacities.insert("mlx".to_string(), 32);
             config
                 .worker_queue_capacities
-                .insert("coreai".to_string(), 32);
+                .insert("coreml".to_string(), 32);
             config
                 .worker_queue_capacities
                 .insert("compile".to_string(), 64);

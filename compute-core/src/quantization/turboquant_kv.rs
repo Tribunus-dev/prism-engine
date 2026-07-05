@@ -1042,7 +1042,9 @@ impl TurboQuantKvCache {
     pub fn allocated_bytes(&self) -> u64 {
         self.state
             .iter()
-            .map(|s| (s.keys.len() + s.values.len() + s.qjl_keys.len() + s.qjl_values.len()) as u64)
+            .map(|s| {
+                (s.keys.len() + s.values.len() + s.qjl_keys.len() + s.qjl_values.len()) as u64
+            })
             .sum()
     }
 }

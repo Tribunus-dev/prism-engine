@@ -13,7 +13,7 @@ pub enum EdgeSemanticKind {
     TensorData,
     ArenaOwnership,
     KvGeneration,
-    CoreAiStateEpoch,
+    CoreMlStateEpoch,
     WeightResidency,
     ProducerCompletion,
     RequestOrdering,
@@ -71,7 +71,7 @@ pub enum EmittedPhaseKind {
     ExplicitMaterialization,
     Synchronization,
     FusedMetalKernel,
-    CoreAiSubgraph,
+    CoreMlSubgraph,
     AccelerateBlock,
     LegacyMlxLayer,
 }

@@ -48,8 +48,8 @@ pub enum ClusterKind {
 impl ClusterKind {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ClusterKind::CoremlCompileContract => "coreai_compile_contract",
-            ClusterKind::CoremlPredictContract => "coreai_predict_contract",
+            ClusterKind::CoremlCompileContract => "coreml_compile_contract",
+            ClusterKind::CoremlPredictContract => "coreml_predict_contract",
             ClusterKind::MlxExecutionContract => "mlx_execution_contract",
             ClusterKind::MlxNumericalSemantics => "mlx_numerical_semantics",
             ClusterKind::AccelerateNumericalSemantics => "accelerate_numerical_semantics",
@@ -324,7 +324,7 @@ fn first_opt_hash(receipt: &DecodeAttributionReceipt) -> Option<String> {
 fn fence_valid_for(receipt: &DecodeAttributionReceipt) -> bool {
     match receipt.backend.as_str() {
         "mlx" => receipt.mlx_eval_forced,
-        "coreai" => receipt.compile_status == "pass" && receipt.load_status == "pass",
+        "coreml" => receipt.compile_status == "pass" && receipt.load_status == "pass",
         "accelerate" => {
             matches!(
                 receipt.predict_status.as_str(),
@@ -411,7 +411,7 @@ fn classify_observation(
     receipt: &DecodeAttributionReceipt,
 ) -> Classification {
     // Rule 1: Core ML compile error
-    if obs.backend == "coreai" && is_compile_error(receipt) {
+    if obs.backend == "coreml" && is_compile_error(receipt) {
         let mil_op = extract_mil_op_type(receipt);
         return Classification {
             cluster_kind: ClusterKind::CoremlCompileContract,
@@ -426,7 +426,7 @@ fn classify_observation(
     }
 
     // Rule 2: Core ML prediction error (compile succeeded, predict failed)
-    if obs.backend == "coreai"
+    if obs.backend == "coreml"
         && obs.terminal_phase == "predict"
         && obs.status == "prediction_error"
     {
@@ -1285,7 +1285,7 @@ pub fn load_receipts_from_run(run_dir: &Path) -> Result<Vec<DecodeAttributionRec
             continue;
         }
         let backend_dir = top_entry.path();
-        // backend_dir is like {run_dir}/coreai
+        // backend_dir is like {run_dir}/coreml
         let backend_entries = match std::fs::read_dir(&backend_dir) {
             Ok(e) => e.filter_map(|e| e.ok()).collect::<Vec<_>>(),
             Err(_) => continue,

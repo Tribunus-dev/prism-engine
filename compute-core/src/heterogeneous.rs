@@ -6,13 +6,12 @@ use mlx_rs::error::Result as MlxResult;
 use mlx_rs::Array;
 
 use crate::arena::Arena;
-use crate::arena::DataType;
 use crate::config::operation_route::OperationRoute;
 use crate::log_debug;
 use crate::memory::allocator::IosurfaceAllocator;
 
 use crate::compute_lane::{spawn_lane, ComputeCommand, ComputeLaneId, DeviceIdentity, LaneHandle};
-use crate::coreai_bridge::CoreAiModel;
+use crate::coreml_bridge::CoreMlModel;
 use parking_lot::Mutex;
 use std::sync::Arc;
 
@@ -65,22 +64,12 @@ impl SharedMemoryIsland {
     ) -> MlxResult<(Arc<Arena>, Array)> {
         let n = shape.iter().product::<i32>() as u32;
         let alloc = self.allocator.lock();
-        let arena_dtype = match dtype {
-            mlx_rs::Dtype::Float16 => DataType::Float16,
-            mlx_rs::Dtype::Float32 => DataType::Float32,
-            _ => {
-                return Err(mlx_rs::error::Exception::custom(format!(
-                    "unsupported arena dtype: {:?}",
-                    dtype
-                )))
-            }
-        };
         let arena_id = alloc
-            .allocate(1, n, arena_dtype)
-            .map_err(|e| mlx_rs::error::Exception::custom(e.to_string()))?;
+            .allocate(1, n, dtype)
+            .map_err(|e| mlx_rs::error::Exception::from(e.as_str()))?;
         let arena = alloc
             .get_arena(arena_id)
-            .ok_or_else(|| mlx_rs::error::Exception::custom("arena not found"))?;
+            .ok_or_else(|| mlx_rs::error::Exception::from("arena not found"))?;
         drop(alloc);
         let arena_arc = Arc::new(arena);
         let arr =
@@ -476,7 +465,7 @@ pub fn dispatch_attention_ane(
     query: &Array,
     key: &Array,
     value: &Array,
-    model: &CoreAiModel,
+    model: &CoreMlModel,
     island: &SharedMemoryIsland,
 ) -> MlxResult<Array> {
     // 1. Eval and extract Q, K, V as f32 slices
@@ -541,7 +530,7 @@ pub fn dispatch_attention_coreml(
     query: &Array,
     key: &Array,
     value: &Array,
-    ane_models: &[Option<std::sync::Arc<CoreAiModel>>],
+    ane_models: &[Option<std::sync::Arc<CoreMlModel>>],
     layer_idx: usize,
     island: &SharedMemoryIsland,
 ) -> MlxResult<Array> {
@@ -560,7 +549,7 @@ pub fn dispatch_attention_coreml(
 pub struct BackendLanes {
     pub mlx: LaneHandle,
     pub accelerate: LaneHandle,
-    pub coreai: LaneHandle,
+    pub coreml: LaneHandle,
 }
 
 /// Drain commands from a stub backend lane — accepts commands but does
@@ -595,11 +584,11 @@ pub fn create_backend_lanes() -> BackendLanes {
         move |rx| stub_runner(rx),
     );
 
-    let coreai = spawn_lane(
+    let coreml = spawn_lane(
         ComputeLaneId(2),
         DeviceIdentity {
             lane_id: ComputeLaneId(2),
-            backend_name: "coreai".into(),
+            backend_name: "coreml".into(),
             substrate: "stub".into(),
         },
         64,
@@ -609,7 +598,7 @@ pub fn create_backend_lanes() -> BackendLanes {
     BackendLanes {
         mlx,
         accelerate,
-        coreai,
+        coreml,
     }
 }
 

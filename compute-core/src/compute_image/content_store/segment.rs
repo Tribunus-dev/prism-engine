@@ -54,8 +54,7 @@ impl DeterministicSegmentWriter {
         let misalignment = current_len % self.alignment;
         if misalignment != 0 {
             let pad = self.alignment - misalignment;
-            self.buffer
-                .extend(std::iter::repeat(0u8).take(pad as usize));
+            self.buffer.extend(std::iter::repeat(0u8).take(pad as usize));
         }
         let offset = self.buffer.len() as u64;
         let payload_bytes = data.len() as u64;
@@ -82,8 +81,7 @@ impl DeterministicSegmentWriter {
         let misalignment = current_len % self.alignment;
         if misalignment != 0 {
             let pad = self.alignment - misalignment;
-            self.buffer
-                .extend(std::iter::repeat(0u8).take(pad as usize));
+            self.buffer.extend(std::iter::repeat(0u8).take(pad as usize));
         }
     }
 
@@ -102,19 +100,6 @@ impl DeterministicSegmentWriter {
 
     pub fn entry_count(&self) -> usize {
         self.entries.len()
-    }
-
-    /// Append a u32 word-aligned data block. The slice bytes are written
-    /// directly in native endianness, avoiding per-word serialization.
-    pub fn append_u32_object(
-        &mut self,
-        data: &[u32],
-        object_id: &str,
-        content_hash: ContentHash,
-    ) -> SegmentWriteReceipt {
-        let bytes =
-            unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
-        self.append_object(bytes, object_id, content_hash)
     }
 }
 

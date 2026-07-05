@@ -1,5 +1,5 @@
-use crate::integration::ContentHash;
 use serde::{Deserialize, Serialize};
+use crate::integration::ContentHash;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseGraphVerificationReceipt {

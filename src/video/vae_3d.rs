@@ -1,7 +1,7 @@
 pub fn vae_3d_decode(
-    _latent: &[f32],
+    latent: &[f32],
     frames: usize,
-    _channels: usize,
+    channels: usize,
     height: usize,
     width: usize,
 ) -> Vec<f32> {
@@ -13,7 +13,7 @@ pub fn vae_3d_decode(
     let out_height = height * 8;
     let out_width = width * 8;
 
-    let output = vec![0.0; frames * out_channels * out_height * out_width];
+    let mut output = vec![0.0; frames * out_channels * out_height * out_width];
 
     // Stub for upsampling - just returning empty vector for now as real implementation
     // would require complex 3D conv transpose and multiple layers.

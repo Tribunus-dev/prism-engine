@@ -30,7 +30,16 @@ pub fn preprocess_image(path_or_url: &str, config: &VisionArchitecture) -> Resul
     let size = config.image_size as usize;
     let channels = config.num_channels as usize;
 
-    let resized = load_resized_rgb_image(path_or_url, size, size, channels)?;
+    // 1. Load bytes — local file or remote URL.
+    let image_bytes = load_image_bytes(path_or_url)?;
+
+    // 2. Decode with stb_image or similar RGBA -> raw pixels.
+    //    We use a simple PNG/JPEG decoder via the `image` crate fallback.
+    //    Convert RGBA -> RGB when the input has 4 channels.
+    let (raw_pixels, img_w, img_h) = decode_image_to_rgb(&image_bytes)?;
+
+    // 3. Bilinear resize to (size x size).
+    let resized = bilinear_resize(&raw_pixels, img_w, img_h, size, size, channels);
 
     // 4. Normalize per channel and layout as NCHW [1, C, H, W].
     let mut float_pixels = Vec::with_capacity(channels * size * size);
@@ -47,25 +56,6 @@ pub fn preprocess_image(path_or_url: &str, config: &VisionArchitecture) -> Resul
     let dims: Vec<i32> = vec![1, channels as i32, size as i32, size as i32];
     let arr = Array::from_slice(&float_pixels, &dims);
     Ok(arr)
-}
-
-/// Load an image and resize it to the requested RGB raster dimensions.
-pub fn load_resized_rgb_image(
-    path_or_url: &str,
-    width: usize,
-    height: usize,
-    channels: usize,
-) -> Result<Vec<u8>, String> {
-    let image_bytes = load_image_bytes(path_or_url)?;
-    let (raw_pixels, img_w, img_h) = decode_image_to_rgb(&image_bytes)?;
-    Ok(bilinear_resize(
-        &raw_pixels,
-        img_w,
-        img_h,
-        width,
-        height,
-        channels,
-    ))
 }
 
 /// Load raw image bytes from a local path or remote URL.

@@ -373,9 +373,10 @@ mod tests {
     }
 }
 
-use crate::backend::residency::TensorResidency;
-use std::collections::HashMap;
+
 use std::collections::VecDeque;
+use std::collections::HashMap;
+use crate::backend::residency::TensorResidency;
 
 // ── Weight Cache ───────────────────────────────────────────────────────────
 
@@ -433,12 +434,7 @@ impl WeightCache {
         }
     }
 
-    pub fn insert(
-        &mut self,
-        key: WeightCacheKey,
-        residency: TensorResidency,
-        session_id: Option<String>,
-    ) {
+    pub fn insert(&mut self, key: WeightCacheKey, residency: TensorResidency, session_id: Option<String>) {
         let size = residency.byte_size;
 
         // Remove existing key if present
@@ -468,13 +464,7 @@ impl WeightCache {
             }
         }
 
-        self.entries.insert(
-            key.clone(),
-            WeightCacheEntry {
-                residency,
-                session_id,
-            },
-        );
+        self.entries.insert(key.clone(), WeightCacheEntry { residency, session_id });
         self.lru_order.push_back(key);
         self.current_dram_bytes += size;
     }

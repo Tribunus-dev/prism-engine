@@ -7,13 +7,13 @@ use serde::{Deserialize, Serialize};
 pub struct BackendVersionInfo {
     // ── Core ML ──────────────────────────────────────────────────────────
     /// Xcode version (e.g. "17.0"), null if unknown.
-    pub coreai_xcode_version: Option<String>,
+    pub coreml_xcode_version: Option<String>,
     /// Path to coremlcompiler binary found via xcrun.
-    pub coreai_coremlcompiler_path: Option<String>,
+    pub coreml_coremlcompiler_path: Option<String>,
     /// Core ML compiler version string, null if unavailable.
-    pub coreai_compiler_version: Option<String>,
+    pub coreml_compiler_version: Option<String>,
     /// Diagnostic note if any Core ML version is unavailable.
-    pub coreai_diagnostic: Option<String>,
+    pub coreml_diagnostic: Option<String>,
     // ── MLX ──────────────────────────────────────────────────────────────
     /// MLX library version string (e.g. "0.22.1"), null if unknown.
     pub mlx_version: Option<String>,
@@ -31,10 +31,10 @@ pub struct BackendVersionInfo {
 impl Default for BackendVersionInfo {
     fn default() -> Self {
         Self {
-            coreai_xcode_version: None,
-            coreai_coremlcompiler_path: None,
-            coreai_compiler_version: None,
-            coreai_diagnostic: None,
+            coreml_xcode_version: None,
+            coreml_coremlcompiler_path: None,
+            coreml_compiler_version: None,
+            coreml_diagnostic: None,
             mlx_version: None,
             mlx_diagnostic: None,
             accelerate_sdk_version: None,
@@ -68,7 +68,7 @@ impl Default for ExecutionKind {
 /// Structured proof of what engine executed each operation in this row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionProof {
-    /// Engine identifier: "coreai", "mlx", "accelerate", "reference", "domain_cpu".
+    /// Engine identifier: "coreml", "mlx", "accelerate", "reference", "domain_cpu".
     pub engine: String,
     /// Operations executed by the named backend.
     pub accelerated_ops: Vec<String>,
@@ -265,13 +265,13 @@ pub struct DecodeAttributionReceipt {
     /// Time spent in Python boundary (ns) — 0 for Rust-native, nonzero placeholder for future Python path.
     pub python_boundary_ns: Option<u64>,
     /// Core ML phase-split: time to build MIL program (proto generation).
-    pub coreai_mil_build_ns: u64,
+    pub coreml_mil_build_ns: u64,
     /// Core ML phase-split: time to serialize .mlpackage to disk.
-    pub coreai_package_write_ns: u64,
+    pub coreml_package_write_ns: u64,
     /// Core ML phase-split: time for xcrun coremlcompiler invocation.
-    pub coreai_compiler_ns: u64,
-    /// Core ML phase-split: time to load .mlmodelc via CoreAiModel::load.
-    pub coreai_model_load_ns: u64,
+    pub coreml_compiler_ns: u64,
+    /// Core ML phase-split: time to load .mlmodelc via CoreMlModel::load.
+    pub coreml_model_load_ns: u64,
     /// Cache hit: true when cache key (graph_hash+shape+policy+target+version) matched and reused.
     pub compile_cache_hit: bool,
     /// Amortization factor: cold_first_predict_ns / steady_p50_ns (null if predict never reached).
@@ -428,10 +428,10 @@ impl Default for DecodeAttributionReceipt {
             mlx_readback_ns: 0,
             mlx_cache_hit: false,
             python_boundary_ns: None,
-            coreai_mil_build_ns: 0,
-            coreai_package_write_ns: 0,
-            coreai_compiler_ns: 0,
-            coreai_model_load_ns: 0,
+            coreml_mil_build_ns: 0,
+            coreml_package_write_ns: 0,
+            coreml_compiler_ns: 0,
+            coreml_model_load_ns: 0,
             compile_cache_hit: false,
             amortization_factor: None,
             terminal_phase: String::new(),
@@ -551,7 +551,7 @@ mod tests {
     fn json_round_trip_with_custom_run_id() {
         let receipt = DecodeAttributionReceipt {
             run_id: "DA-0001-20260610".to_string(),
-            lattice_cell_id: "coverage-lattice.v2/coreai/matmul/medium/cpuOnly".to_string(),
+            lattice_cell_id: "coverage-lattice.v2/coreml/matmul/medium/cpuOnly".to_string(),
             ..DecodeAttributionReceipt::default()
         };
         let json = serde_json::to_string(&receipt).expect("serialize");
@@ -560,7 +560,7 @@ mod tests {
         assert_eq!(deserialized.run_id, "DA-0001-20260610");
         assert_eq!(
             deserialized.lattice_cell_id,
-            "coverage-lattice.v2/coreai/matmul/medium/cpuOnly"
+            "coverage-lattice.v2/coreml/matmul/medium/cpuOnly"
         );
     }
 }

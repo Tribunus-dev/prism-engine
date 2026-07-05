@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::compute_image::manifest::MetalKernelArtifact;
+use crate::compute_image::manifest::{MetalDispatchRecipe, MetalKernelArtifact};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Public API
@@ -128,6 +128,7 @@ impl MetalKernelRegistry {
         self.kernels.len()
     }
 }
+
 
 impl MetalKernelRegistry {
     /// Consume the registry and return the loaded kernels as a Vec.

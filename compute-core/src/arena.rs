@@ -6,16 +6,8 @@
 
 use std::ffi::c_void;
 
-/// Element data type for arena-backed tensors.
-/// Replaces `DataType` to avoid the MLX dependency.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DataType {
-    Float16,
-    Float32,
-}
-
-pub use crate::arena_info::ArenaInfo;
 use crate::external_array::ExternalStorage;
+pub use crate::arena_info::ArenaInfo;
 
 use std::os::raw::c_void as RawVoid;
 pub trait OutputBufferHint {
@@ -25,27 +17,8 @@ pub trait OutputBufferHint {
 
 extern "C" {
     fn tribunus_arena_alloc(info: *mut ArenaInfo, dim0: i32, dim1: i32, dtype: i32) -> i32;
-    #[allow(dead_code)]
     fn tribunus_arena_alloc_f32(info: *mut ArenaInfo, dim0: i32, dim1: i32) -> i32;
     fn tribunus_arena_alloc_bytes(info: *mut ArenaInfo, byte_count: i32) -> i32;
-    fn CVPixelBufferCreateWithIOSurface(
-        allocator: *mut std::ffi::c_void,
-        iosurface: *mut std::ffi::c_void,
-        attachment_keys: *mut std::ffi::c_void,
-        pixel_buffer_out: *mut *mut std::ffi::c_void,
-    ) -> i32;
-    /// Create an IOSurface from a page-aligned mmap pointer.
-    /// The IOSurface is created with the given width, height, and pixel format.
-    /// If `base` is non-null, the IOSurface memory is initialized by copying
-    /// `byte_count` bytes from `base`. Returns 0 on success, nonzero on failure.
-    pub fn tribunus_create_iosurface_from_mmap(
-        info: *mut ArenaInfo,
-        base: *const std::ffi::c_void,
-        width: i32,
-        height: i32,
-        pixel_format: u32,
-        byte_count: i32,
-    ) -> i32;
     fn tribunus_arena_free(info: *mut ArenaInfo);
     fn tribunus_arena_io_surface_id(info: *const ArenaInfo) -> i32;
     fn tribunus_arena_lock(info: *const ArenaInfo) -> i32;
@@ -64,7 +37,7 @@ extern "C" {
 /// - Freed when dropped (IOSurface + CVPixelBuffer released)
 pub struct Arena {
     pub info: ArenaInfo,
-    pub dtype: DataType,
+    pub dtype: mlx_rs::Dtype,
     /// If true, the backing memory is owned by an external system (e.g. Core ML
     /// outputBackings) and must NOT be freed by Rust.
     pub externally_owned: bool,
@@ -79,81 +52,25 @@ impl ExternalStorage for Arena {
     }
 }
 
-// SAFETY: Arena access is serialized by the lease mechanism.
-// The raw pointer is valid for the Arena's lifetime.
-// Two threads may read through the pointer concurrently but only one may write,
-// enforced by the lease system.
+// Safety: Arena memory is IOSurface-backed and accessed through MLX/Core ML
+// APIs that are thread-safe. The raw pointer is valid for the Arena's lifetime.
 unsafe impl Send for Arena {}
 unsafe impl Sync for Arena {}
 
 impl Arena {
-    /// Create an Arena wrapping an existing Metal buffer's IOSurface backing.
-    /// Core ML writes directly to the buffer — zero copy.
-    /// The Arena does NOT own the memory; the Metal buffer does.
-    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-    pub fn from_metal_buffer(
-        buffer: &metal::Buffer,
-        logical_dim0: i32,
-        logical_dim1: i32,
-        dtype: DataType,
-    ) -> Result<Self, String> {
-        use objc::{msg_send, sel, sel_impl};
-        use std::ffi::c_void;
-
-        unsafe {
-            let iosurface: *mut c_void = msg_send![buffer.as_ref(), iosurface];
-            if iosurface.is_null() {
-                return Err("Metal buffer has no IOSurface backing".into());
-            }
-
-            let element_bytes = match dtype {
-                DataType::Float16 => 2i32,
-                DataType::Float32 => 4i32,
-            };
-            let bytes_per_row = (logical_dim1 * element_bytes + 63) & !63;
-
-            let mut cv_buffer: *mut c_void = std::ptr::null_mut();
-            let status = CVPixelBufferCreateWithIOSurface(
-                std::ptr::null_mut(),
-                iosurface,
-                std::ptr::null_mut(),
-                &mut cv_buffer,
-            );
-            if status != 0 || cv_buffer.is_null() {
-                return Err(format!(
-                    "CVPixelBufferCreateWithIOSurface failed: {}",
-                    status
-                ));
-            }
-
-            let info = ArenaInfo {
-                width: logical_dim1,
-                height: logical_dim0,
-                logical_dim0,
-                logical_dim1,
-                pixel_format: 0,
-                byte_size: buffer.length() as i32,
-                bytes_per_row,
-                base_address: buffer.contents() as *mut c_void,
-                cv_buffer,
-                io_surface: iosurface,
-            };
-
-            Ok(Arena {
-                info,
-                dtype,
-                externally_owned: true,
-            })
-        }
-    }
-
     /// Allocate a new arena backed by IOSurface + CVPixelBuffer.
     ///
     /// Currently supports FP16 only. Returns an error for any other dtype.
     /// The ObjC bridge owns all storage; Rust merely holds the metadata.
-    pub fn new(logical_dim0: u32, logical_dim1: u32, dtype: DataType) -> Result<Self, String> {
+    pub fn new(logical_dim0: u32, logical_dim1: u32, dtype: mlx_rs::Dtype) -> Result<Self, String> {
         match dtype {
-            DataType::Float16 | DataType::Float32 => {}
+            mlx_rs::Dtype::Float16 | mlx_rs::Dtype::Float32 => {}
+            _ => {
+                return Err(format!(
+                    "unsupported arena dtype: {:?} (FP16/F32 only)",
+                    dtype
+                ))
+            }
         }
 
         let mut info: ArenaInfo = unsafe { std::mem::zeroed() };
@@ -195,7 +112,7 @@ impl Arena {
         if rc == 0 {
             return Ok(Arena {
                 info,
-                dtype: DataType::Float32,
+                dtype: mlx_rs::Dtype::Float32,
                 externally_owned: true,
             });
         }
@@ -203,45 +120,31 @@ impl Arena {
         // IOSurface allocation failed (pool exhausted or tensor too large).
         // Fall back to heap memory. The Drop handler correctly frees heap
         // memory when cv_buffer is null and externally_owned is false.
-        eprintln!(
-            "[arena] IOSurface alloc failed (rc={}) for {} bytes, using heap",
-            rc, byte_count
-        );
-        let mut data: Vec<u8> = vec![0u8; byte_count as usize];
-        let ptr = data.as_mut_ptr();
-        let cap = data.capacity();
-        std::mem::forget(data);
-        let info = ArenaInfo {
-            width: byte_count as i32,
-            height: 1,
-            logical_dim0: byte_count as i32,
-            logical_dim1: 1,
-            pixel_format: 0,
-            bytes_per_row: byte_count as i32,
-            byte_size: cap as i32,
+        eprintln!("[arena] IOSurface alloc failed (rc={}) for {} bytes, using heap", rc, byte_count);
+            let mut data: Vec<u8> = vec![0u8; byte_count as usize];
+            let ptr = data.as_mut_ptr();
+            let cap = data.capacity();
+            std::mem::forget(data);
+            let info = ArenaInfo {
+                width: byte_count as i32,
+                height: 1,
+                logical_dim0: byte_count as i32,
+                logical_dim1: 1,
+                pixel_format: 0,
+                bytes_per_row: byte_count as i32,
+                byte_size: cap as i32,
             base_address: ptr as *mut std::ffi::c_void,
-            cv_buffer: std::ptr::null_mut(),
-            io_surface: std::ptr::null_mut(),
-        };
+                cv_buffer: std::ptr::null_mut(),
+                io_surface: std::ptr::null_mut(),
+            };
         Ok(Arena {
-            info,
-            dtype: DataType::Float32,
-            externally_owned: false,
+                info,
+                dtype: mlx_rs::Dtype::Float32,
+                externally_owned: false,
         })
     }
 
     /// Return the physical byte size.
-    /// Set the IOSurface pixel format for this arena (e.g. 0x4C303068 = 'L00h' = half-float).
-    /// Must be called after allocation and before creating a Metal texture.
-    /// Allocate an IOSurface-backed arena with explicit pixel format, width, height,
-    /// and bytes-per-row.  The returned ArenaInfo is patched to match the requested
-    /// geometry so that Metal texture descriptors derived from it are valid.
-    pub fn set_dimensions(&mut self, width: u32, height: u32, bytes_per_row: u32) {
-        self.info.width = width as i32;
-        self.info.height = height as i32;
-        self.info.bytes_per_row = bytes_per_row as i32;
-    }
-
     pub fn byte_len(&self) -> usize {
         self.info.byte_size as usize
     }
@@ -354,10 +257,9 @@ impl OutputBufferHint for Arena {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coreai_bridge::CoreAiModel;
-    use crate::coreai_state::CoreAiStateHandle;
+    use crate::coreml_bridge::CoreMlModel;
+    use crate::coreml_state::CoreMlStateHandle;
     use crate::external_array;
-    use mlx_rs::Dtype;
     use std::sync::Arc;
 
     // ---- FP16 conversion helpers ----
@@ -437,7 +339,7 @@ mod tests {
 
         let arena = Arena {
             info,
-            dtype: DataType::Float16,
+            dtype: mlx_rs::Dtype::Float16,
             externally_owned: false,
         };
         // Drop reconstructs the Vec (cv_buffer is null, externally_owned is false,
@@ -448,8 +350,8 @@ mod tests {
 
     #[test]
     fn test_arena_ping_pong() {
-        let a = Arena::new(1, 4096, DataType::Float16).expect("arena A");
-        let b = Arena::new(1, 4096, DataType::Float16).expect("arena B");
+        let a = Arena::new(1, 4096, mlx_rs::Dtype::Float16).expect("arena A");
+        let b = Arena::new(1, 4096, mlx_rs::Dtype::Float16).expect("arena B");
         // Both IOSurface-backed — assert different io_surface_ids.
         assert_ne!(
             a.io_surface_id(),
@@ -467,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_iosurface_phase0_storage_identity() {
-        let arena = Arena::new(4, 512, DataType::Float16).expect("arena");
+        let arena = Arena::new(4, 512, mlx_rs::Dtype::Float16).expect("arena");
         let id = arena.io_surface_id();
         assert!(id > 0, "io_surface_id should be positive, got {}", id);
         assert!(!arena.info.base_address.is_null());
@@ -488,7 +390,7 @@ mod tests {
     fn test_iosurface_phase1_mlx_external() {
         let shape = [1i32, 256i32];
         let n: usize = (shape[0] * shape[1]) as usize;
-        let arena = Arena::new(1, 256, DataType::Float16).expect("arena");
+        let arena = Arena::new(1, 256, mlx_rs::Dtype::Float16).expect("arena");
 
         // Write known FP16 values via raw u16 writes.
         let values_f32: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
@@ -509,7 +411,7 @@ mod tests {
                 data_ptr as *const u8,
                 byte_len,
             ));
-            external_array::new_external_array(storage, &shape, Dtype::Float16)
+            external_array::new_external_array(storage, &shape, mlx_rs::Dtype::Float16)
         }
         .expect("external array");
 
@@ -541,17 +443,17 @@ mod tests {
 
     #[ignore = "requires CoreML modelc artifacts on disk"]
     #[test]
-    fn test_iosurface_phase2_coreai_pixelbuffer_input() {
+    fn test_iosurface_phase2_coreml_pixelbuffer_input() {
         let model_path =
-            "/tmp/tribunus-coreai-nn-identity.mlmodelc/tribunus-coreai-nn-identity.mlmodelc";
+            "/tmp/tribunus-coreml-nn-identity.mlmodelc/tribunus-coreml-nn-identity.mlmodelc";
 
-        let model = CoreAiModel::load(model_path).expect("load Core ML model");
+        let model = CoreMlModel::load(model_path).expect("load Core ML model");
         let dim0 = 1u32;
         let dim1 = 256u32;
         let n = (dim0 * dim1) as usize;
 
         // Input arena A — IOSurface-backed FP16.
-        let arena_a = Arena::new(dim0, dim1, DataType::Float16).expect("arena A");
+        let arena_a = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena A");
 
         // Write known FP16 values [1.0, 2.0, ..., 8.0].
         unsafe {
@@ -562,7 +464,7 @@ mod tests {
         }
 
         // Output arena B.
-        let mut arena_b = Arena::new(dim0, dim1, DataType::Float16).expect("arena B");
+        let mut arena_b = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena B");
 
         // Run Core ML prediction with IOSurface pixel buffer path.
         model
@@ -594,14 +496,14 @@ mod tests {
     #[test]
     fn test_iosurface_phase3_output_backings() {
         let model_path =
-            "/tmp/tribunus-coreai-nn-identity.mlmodelc/tribunus-coreai-nn-identity.mlmodelc";
+            "/tmp/tribunus-coreml-nn-identity.mlmodelc/tribunus-coreml-nn-identity.mlmodelc";
 
-        let model = CoreAiModel::load(model_path).expect("load Core ML model");
+        let model = CoreMlModel::load(model_path).expect("load Core ML model");
         let dim0 = 1u32;
         let dim1 = 256u32;
         let n = (dim0 * dim1) as usize;
 
-        let arena_a = Arena::new(dim0, dim1, DataType::Float16).expect("arena A");
+        let arena_a = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena A");
         unsafe {
             let ptr = arena_a.base_ptr() as *mut u16;
             for i in 0..n {
@@ -609,7 +511,7 @@ mod tests {
             }
         }
 
-        let mut arena_b = Arena::new(dim0, dim1, DataType::Float16).expect("arena B");
+        let mut arena_b = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena B");
 
         // Capture backing identity before prediction.
         let b_id_before = arena_b.io_surface_id();
@@ -655,16 +557,16 @@ mod tests {
     #[test]
     fn test_iosurface_phase4_full_roundtrip() {
         let model_path =
-            "/tmp/tribunus-coreai-nn-identity.mlmodelc/tribunus-coreai-nn-identity.mlmodelc";
+            "/tmp/tribunus-coreml-nn-identity.mlmodelc/tribunus-coreml-nn-identity.mlmodelc";
 
-        let model = CoreAiModel::load(model_path).expect("load Core ML model");
+        let model = CoreMlModel::load(model_path).expect("load Core ML model");
         let dim0 = 1u32;
         let dim1 = 256u32;
         let n = (dim0 * dim1) as usize;
 
         // Allocate both arenas.
-        let arena_a = Arena::new(dim0, dim1, DataType::Float16).expect("arena A");
-        let mut arena_b = Arena::new(dim0, dim1, DataType::Float16).expect("arena B");
+        let arena_a = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena A");
+        let mut arena_b = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena B");
 
         // Step 2: Write FP16 pattern [0.0, 1.0, 2.0, ..., 255.0] into arena A.
         unsafe {
@@ -685,7 +587,7 @@ mod tests {
                 external_array::new_external_array(
                     a_storage,
                     &[dim0 as i32, dim1 as i32],
-                    Dtype::Float16,
+                    mlx_rs::Dtype::Float16,
                 )
             }
             .expect("external array A");
@@ -725,7 +627,7 @@ mod tests {
                 external_array::new_external_array(
                     b_storage,
                     &[dim0 as i32, dim1 as i32],
-                    Dtype::Float16,
+                    mlx_rs::Dtype::Float16,
                 )
             }
             .expect("external array B");
@@ -775,18 +677,18 @@ mod tests {
         let model_path = "/tmp/tribunus-stateful-toy.mlmodelc/tribunus-stateful-toy.mlmodelc";
         // Hard-fail if the model doesn't exist or can't load.
         // This test is expected to pass in the verified compiler environment.
-        let model = CoreAiModel::load(model_path).expect(&format!(
+        let model = CoreMlModel::load(model_path).expect(&format!(
             "FAIL: stateful model must load from {} — compiler environment not configured?",
             model_path
         ));
-        let state = CoreAiStateHandle::new(model.ptr).expect("create state handle");
+        let state = CoreMlStateHandle::new(model.ptr).expect("create state handle");
 
         let dim0 = 1u32;
         let dim1 = 4u32;
         let n = (dim0 * dim1) as usize;
 
-        let arena_a = Arena::new(dim0, dim1, DataType::Float16).expect("arena A");
-        let mut arena_b = Arena::new(dim0, dim1, DataType::Float16).expect("arena B");
+        let arena_a = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena A");
+        let mut arena_b = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena B");
 
         for i in 0..5 {
             let val = i as f32;
@@ -834,21 +736,21 @@ mod tests {
         let model_path = "/tmp/tribunus-stateful-toy.mlmodelc/tribunus-stateful-toy.mlmodelc";
         // Hard-fail if the model doesn't exist or can't load.
         // This test is expected to pass in the verified compiler environment.
-        let model = CoreAiModel::load(model_path).expect(&format!(
+        let model = CoreMlModel::load(model_path).expect(&format!(
             "FAIL: stateful model must load from {} — compiler environment not configured?",
             model_path
         ));
-        let state_1 = CoreAiStateHandle::new(model.ptr).expect("state 1");
-        let state_2 = CoreAiStateHandle::new(model.ptr).expect("state 2");
+        let state_1 = CoreMlStateHandle::new(model.ptr).expect("state 1");
+        let state_2 = CoreMlStateHandle::new(model.ptr).expect("state 2");
 
         let dim0 = 1u32;
         let dim1 = 4u32;
         let n = (dim0 * dim1) as usize;
 
-        let mut arena_b = Arena::new(dim0, dim1, DataType::Float16).expect("arena B");
+        let mut arena_b = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena B");
 
         // Feed state_1 with [1,1,1,1] five times → accumulator [5,5,5,5]
-        let arena_s1 = Arena::new(dim0, dim1, DataType::Float16).expect("arena s1");
+        let arena_s1 = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena s1");
         for _ in 0..5 {
             unsafe {
                 let ptr = arena_s1.base_ptr() as *mut u16;
@@ -876,7 +778,7 @@ mod tests {
         }
 
         // Feed state_2 with [10,10,10,10] two times → accumulator [20,20,20,20]
-        let arena_s2 = Arena::new(dim0, dim1, DataType::Float16).expect("arena s2");
+        let arena_s2 = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena s2");
         for _ in 0..2 {
             unsafe {
                 let ptr = arena_s2.base_ptr() as *mut u16;
@@ -970,18 +872,18 @@ mod tests {
         let model_path = "/tmp/tribunus-stateful-toy.mlmodelc/tribunus-stateful-toy.mlmodelc";
         // Hard-fail if the model doesn't exist or can't load.
         // This test is expected to pass in the verified compiler environment.
-        let model = CoreAiModel::load(model_path).expect(&format!(
+        let model = CoreMlModel::load(model_path).expect(&format!(
             "FAIL: stateful model must load from {} — compiler environment not configured?",
             model_path
         ));
-        let state = CoreAiStateHandle::new(model.ptr).expect("create state handle");
+        let state = CoreMlStateHandle::new(model.ptr).expect("create state handle");
 
         let dim0 = 1u32;
         let dim1 = 4u32;
         let n = (dim0 * dim1) as usize;
 
-        let arena_a = Arena::new(dim0, dim1, DataType::Float16).expect("arena A");
-        let mut arena_b = Arena::new(dim0, dim1, DataType::Float16).expect("arena B");
+        let arena_a = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena A");
+        let mut arena_b = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena B");
 
         // Verify that rapid sequential predictions on the same state don't corrupt each other.
         // First prediction with [1,1,1,1] → accumulator [1,1,1,1]
@@ -1041,16 +943,16 @@ mod tests {
 
     #[ignore = "requires CoreML modelc artifacts on disk"]
     #[test]
-    fn test_gemma_mlp_coreai_prediction() {
+    fn test_gemma_mlp_coreml_prediction() {
         let model_path = "/tmp/tribunus-gemma-mlp.mlmodelc/tribunus-gemma-mlp.mlmodelc";
 
-        let model = CoreAiModel::load(model_path).expect("load Gemma MLP model");
+        let model = CoreMlModel::load(model_path).expect("load Gemma MLP model");
         let dim0 = 1u32;
         let dim1 = 3840u32;
         let n = (dim0 * dim1) as usize;
 
         // Input arena A — IOSurface-backed FP16.
-        let arena_a = Arena::new(dim0, dim1, DataType::Float16).expect("arena A");
+        let arena_a = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena A");
 
         // Fill with deterministic pattern: sin(i/100.0) as FP16.
         unsafe {
@@ -1061,7 +963,7 @@ mod tests {
         }
 
         // Output arena B.
-        let mut arena_b = Arena::new(dim0, dim1, DataType::Float16).expect("arena B");
+        let mut arena_b = Arena::new(dim0, dim1, mlx_rs::Dtype::Float16).expect("arena B");
 
         // Capture backing identity before prediction.
         let b_id_before = arena_b.io_surface_id();

@@ -4,6 +4,7 @@ use crate::ops::indexing::TryIndexOp;
 use crate::utils::guard::Guarded;
 use crate::utils::IntoOption;
 use crate::{error::Result, Array, ArrayElement, Stream};
+use mach_sys::mach_time;
 use mlx_internal_macros::{default_device, generate_macro};
 use parking_lot::Mutex;
 use std::borrow::Cow;
@@ -24,10 +25,7 @@ pub struct RandomState {
 
 impl RandomState {
     fn new() -> Result<Self> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64;
         Ok(Self { state: key(now)? })
     }
 

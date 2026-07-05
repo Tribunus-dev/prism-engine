@@ -1,6 +1,6 @@
 use crate::compute_image::phase_graph::WeightResidencySetId;
-use crate::profiled_executor::WorkingSetManager;
 use serde::{Deserialize, Serialize};
+use crate::profiled_executor::WorkingSetManager;
 
 /// Status of a weight residency set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

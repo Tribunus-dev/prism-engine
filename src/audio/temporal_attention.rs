@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 pub struct TemporalAttention {
     dim: usize,
     heads: usize,

@@ -4,12 +4,15 @@
 //! `docs/unified-memory-island.md`.
 
 pub mod allocator;
+pub mod ane_program_cache;
+pub mod ane_weight_dict;
 pub mod candle_bridge;
 pub mod compute_image_bridge;
-pub mod coreai_warmup;
+pub mod coreml_warmup;
 pub mod enforcer;
 pub mod iosurface_storage;
 pub mod monitor;
+pub mod orion_bridge;
 pub mod plan;
 pub mod pool;
 pub mod telemetry;

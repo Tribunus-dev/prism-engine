@@ -10,25 +10,21 @@
 //! - [`load_tensor_from_mapped_segment`] — mmap-backed tensor loading
 
 use crate::arena::Arena;
-use crate::compute_image::cimage_loader::CimageDeployment;
-use crate::compute_image::multimodal::{
-    MultimodalArtifactSummary, ProjectionTensorRecord, SealedMultimodalBindings,
-};
 use crate::compute_image::phase_dag::EmittedPhaseGraph;
+use crate::external_array::{ExternalStorage, new_external_array};
+use crate::external_array;
+use crate::external_array::BorrowedStorage;
+use std::cell::RefCell;
 use crate::compute_image::{CompiledImageReader, CopyClassification, TensorEntry};
 use crate::config::{ModelExecutionPlan, TextArchitecture, VisionArchitecture};
-use crate::coreai_bridge::CoreAiModel;
-use crate::external_array::BorrowedStorage;
-use crate::external_array::{new_external_array, ExternalStorage};
+use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 use crate::heterogeneous::SharedMemoryIsland;
 use crate::mapped_image::MappedImage;
 use crate::vision::encoder::VisionEncoder;
 use crate::worker_dispatch::LoadedMetalKernel;
 use crate::worker_dispatch::MetalKernelRegistry;
 use crate::worker_memory;
-use half::f16;
 use mlx_rs::Array;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
@@ -69,15 +65,14 @@ fn storage_dtype_to_mlx(dtype: &str) -> crate::Result<mlx_rs::Dtype> {
         "I8" | "Int8" => Ok(mlx_rs::Dtype::Int8),
         "U32" | "Uint32" => Ok(mlx_rs::Dtype::Uint32),
         other => Err(crate::Error::from_reason(format!(
-            "unsupported storage dtype: {}",
-            other
+            "unsupported storage dtype: {}", other
         ))),
     }
 }
 
-// Thread-local registry of IOSurface arenas created during weight loading.
-// `load_tensor_from_mapped_segment` pushes arenas here. The caller
-// (`LoadedProfiledModel::new`) drains them into the model struct.
+/// Thread-local registry of IOSurface arenas created during weight loading.
+/// `load_tensor_from_mapped_segment` pushes arenas here. The caller
+/// (`LoadedProfiledModel::new`) drains them into the model struct.
 thread_local! {
     static WEIGHT_ARENAS: RefCell<Vec<Arc<Arena>>> = const { RefCell::new(Vec::new()) };
 }
@@ -380,10 +375,12 @@ pub struct LoadedProfiledModel {
     pub copied_weight_bytes: u64,
     pub materialized_bytes: u64,
     pub handle_baseline: usize,
+    /// Compiled ANE programs for layers routed to Orion.
+    pub ane_cache: Option<crate::memory::ane_program_cache::AneProgramCache>,
     /// Pre-loaded CoreML models for ANE-routed attention layers, indexed by
     /// layer index. Fused islands replicate their model (via Arc) across
     /// all covered layer slots.
-    pub ane_coreai_models: Vec<Option<Arc<CoreAiModel>>>,
+    pub ane_coreml_models: Vec<Option<Arc<CoreMlModel>>>,
     /// Shared IOSurface memory island — all runtime memory allocations
     /// (intermediates, KV cache) come from this pool. MLX does NOT manage
     /// memory independently.
@@ -393,27 +390,8 @@ pub struct LoadedProfiledModel {
     pub scheduled_module: Option<crate::compiler::scheduled::ScheduledModule>,
     /// Vision encoder for multi-modal image input (None for text-only models).
     pub vision_encoder: Option<VisionEncoder>,
-    /// Sealed multimodal metadata loaded from a sibling packed `.cimage`, if present.
-    pub multimodal_summary: Option<MultimodalArtifactSummary>,
-    /// Projection table extracted from the sealed multimodal descriptor.
-    pub multimodal_projection_records: Vec<ProjectionTensorRecord>,
-    /// Structured binding for projector-ready multimodal artifacts sealed into the cimage.
-    pub multimodal_bindings: Option<SealedMultimodalBindings>,
     /// Currently active LoRA adapter (None = no adapter loaded).
     pub active_adapter: Option<crate::lora::LoraAdapter>,
-}
-
-fn tensor_table_has_prefix(reader: &CompiledImageReader, prefixes: &[&str]) -> bool {
-    reader
-        .manifest
-        .tensor_table
-        .iter()
-        .any(|entry| prefixes.iter().any(|prefix| entry.name.starts_with(prefix)))
-}
-
-fn sibling_cimage_path(image_dir: &Path) -> Option<PathBuf> {
-    let stem = image_dir.file_name()?.to_str()?;
-    Some(image_dir.with_file_name(format!("{stem}.cimage")))
 }
 
 // Safety: raw pointers are to MLX ref-counted objects (thread-safe).
@@ -421,123 +399,6 @@ unsafe impl Send for LoadedProfiledModel {}
 unsafe impl Sync for LoadedProfiledModel {}
 
 impl LoadedProfiledModel {
-    pub fn supports_image_inputs(&self) -> bool {
-        self.reader.manifest.vision_config.is_some()
-            || tensor_table_has_prefix(
-                &self.reader,
-                &[
-                    "vision_encoder.",
-                    "vision_embedder.",
-                    "embed_vision.",
-                    "model.vision_embedder.",
-                    "model.embed_vision.",
-                ],
-            )
-    }
-
-    pub fn supports_audio_inputs(&self) -> bool {
-        self.reader.manifest.audio_config.is_some()
-            || tensor_table_has_prefix(
-                &self.reader,
-                &["audio_encoder.", "embed_audio.", "model.embed_audio."],
-            )
-    }
-
-    pub fn has_legacy_vision_encoder_path(&self) -> bool {
-        self.vision_encoder.is_some()
-    }
-
-    pub fn multimodal_summary(&self) -> Option<&MultimodalArtifactSummary> {
-        self.multimodal_summary.as_ref()
-    }
-
-    pub fn multimodal_projection_records(&self) -> &[ProjectionTensorRecord] {
-        &self.multimodal_projection_records
-    }
-
-    pub fn multimodal_bindings(&self) -> Option<&SealedMultimodalBindings> {
-        self.multimodal_bindings.as_ref()
-    }
-
-    pub fn has_direct_multimodal_image_projection_path(&self) -> bool {
-        self.multimodal_bindings
-            .as_ref()
-            .map(|bindings| bindings.ready_for_direct_image_projection())
-            .unwrap_or(false)
-    }
-
-    pub fn find_tensor_name_with_suffixes(&self, suffixes: &[&str]) -> Option<String> {
-        self.reader.manifest.tensor_table.iter().find_map(|entry| {
-            suffixes
-                .iter()
-                .any(|suffix| entry.name.ends_with(suffix))
-                .then(|| entry.name.clone())
-        })
-    }
-
-    pub fn load_tensor_f32_by_name(&self, name: &str) -> crate::Result<(Vec<f32>, Vec<usize>)> {
-        let entry = self
-            .reader
-            .manifest
-            .tensor_table
-            .iter()
-            .find(|entry| entry.name == name)
-            .ok_or_else(|| crate::Error::from_reason(format!("tensor not found: {}", name)))?;
-        let segment = self
-            .mapped_image
-            .segments
-            .get(&entry.segment)
-            .ok_or_else(|| {
-                crate::Error::from_reason(format!("segment not found: {}", entry.segment))
-            })?;
-        let mapping = segment.data_slice();
-        let offset = entry.offset as usize;
-        let len = entry.byte_length as usize;
-        let end = offset.saturating_add(len);
-        if end > mapping.len() {
-            return Err(crate::Error::from_reason(format!(
-                "tensor {} out of range: {}..{} > {}",
-                name,
-                offset,
-                end,
-                mapping.len()
-            )));
-        }
-        let bytes = &mapping[offset..end];
-        let values = match entry.storage_dtype.as_str() {
-            "F32" | "Float32" => bytes
-                .chunks_exact(4)
-                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-                .collect(),
-            "BF16" | "BFloat16" => bytes
-                .chunks_exact(2)
-                .map(|chunk| {
-                    let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    f32::from_bits((bits as u32) << 16)
-                })
-                .collect(),
-            "F16" | "Float16" => bytes
-                .chunks_exact(2)
-                .map(|chunk| {
-                    let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    f16::from_bits(bits).to_f32()
-                })
-                .collect(),
-            other => {
-                return Err(crate::Error::from_reason(format!(
-                    "tensor {} has unsupported runtime dtype {}",
-                    name, other
-                )))
-            }
-        };
-        let shape = entry
-            .logical_shape
-            .iter()
-            .map(|&dim| dim as usize)
-            .collect();
-        Ok((values, shape))
-    }
-
     /// Load and construct a profiled model from a compiled image directory.
     pub fn new(image_dir: &Path) -> crate::Result<Self> {
         let handle_baseline = crate::bridge::handle_count();
@@ -630,7 +491,7 @@ impl LoadedProfiledModel {
         }
 
         let ns = detect_ns(&reader.manifest.tensor_table);
-        let _ns_str = ns.clone();
+        let ns_str = ns.clone();
         eprintln!("[detect-ns] detected namespace root: '{}'", ns);
 
         // Load global tensors
@@ -778,12 +639,12 @@ impl LoadedProfiledModel {
         // and KV cache headroom for the current sequence. Model weights
         // are MLX-managed and separate from this pool.
         let arch = &reader.manifest.architecture;
-        let scratch_bytes = arch.hidden_size as u64 * 10 * 4; // 10 f32 scratch tensors
+        let scratch_bytes = arch.hidden_size as u64 * 10 * 4;  // 10 f32 scratch tensors
         let attn_scores = (arch.max_position_embeddings as u64).min(4096)  // chunk cap
             * arch.num_attention_heads as u64 * arch.head_dim as u64 * 4;
-        let kv_per_token = 2 * arch.num_key_value_heads as u64 * arch.head_dim as u64 * 2; // FP16
-        let kv_headroom = kv_per_token * 4096; // room for 4K tokens
-        let computed_pool = (scratch_bytes + attn_scores + kv_headroom) * 125 / 100; // +25% margin
+        let kv_per_token = 2 * arch.num_key_value_heads as u64 * arch.head_dim as u64 * 2;  // FP16
+        let kv_headroom = kv_per_token * 4096;  // room for 4K tokens
+        let computed_pool = (scratch_bytes + attn_scores + kv_headroom) * 125 / 100;  // +25% margin
         let total_ram = system_memory_bytes();
         let max_pool = if total_ram > 0 {
             // Truthful: model need capped at 25% of RAM, min 16 MB
@@ -791,29 +652,25 @@ impl LoadedProfiledModel {
         } else {
             computed_pool.max(16 * 1024 * 1024)
         };
-        eprintln!(
-            "[memory] IOSurface pool: {} MB (model estimate: {} MB, RAM: {} MB)",
-            max_pool / (1024 * 1024),
-            computed_pool / (1024 * 1024),
-            total_ram / (1024 * 1024)
-        );
+        eprintln!("[memory] IOSurface pool: {} MB (model estimate: {} MB, RAM: {} MB)",
+            max_pool / (1024 * 1024), computed_pool / (1024 * 1024), total_ram / (1024 * 1024));
         let memory_island = SharedMemoryIsland::with_limit(max_pool);
 
         // ── Load ANE CoreML models for ANE-routed attention layers ─────
         let n_layers = reader.manifest.execution_plan.layers.len();
-        let mut ane_coreai_models: Vec<Option<Arc<CoreAiModel>>> = vec![None; n_layers];
+        let mut ane_coreml_models: Vec<Option<Arc<CoreMlModel>>> = vec![None; n_layers];
 
         // Load each ANE island's compiled .mlmodelc from disk.
         for island in &reader.manifest.execution_plan.fused_ane_islands {
             let modelc_path = image_dir.join(&island.modelc_relpath);
             let modelc_str = modelc_path.to_string_lossy().to_string();
-            match CoreAiModel::load(&modelc_str) {
+            match CoreMlModel::load(&modelc_str) {
                 Ok(model) => {
                     let model = Arc::new(model);
                     for &layer_idx in &island.layer_indices {
                         let idx = layer_idx as usize;
                         if idx < n_layers {
-                            ane_coreai_models[idx] = Some(model.clone());
+                            ane_coreml_models[idx] = Some(model.clone());
                         }
                     }
                     eprintln!(
@@ -831,7 +688,7 @@ impl LoadedProfiledModel {
             }
         }
 
-        let loaded_count = ane_coreai_models.iter().filter(|m| m.is_some()).count();
+        let loaded_count = ane_coreml_models.iter().filter(|m| m.is_some()).count();
         eprintln!(
             "[profiled-model] ANE CoreML models loaded for {}/{} layers",
             loaded_count, n_layers,
@@ -847,18 +704,12 @@ impl LoadedProfiledModel {
         );
 
         // ── Load vision encoder (if present) ─────────────────────────
-        let has_legacy_vision_tensors = tensor_table_has_prefix(&reader, &["vision_encoder."]);
-        let has_direct_multimodal_image_tensors = tensor_table_has_prefix(
-            &reader,
-            &[
-                "vision_embedder.",
-                "embed_vision.",
-                "model.vision_embedder.",
-                "model.embed_vision.",
-            ],
-        );
-
-        let vision_encoder = if has_legacy_vision_tensors {
+        let vision_encoder = if reader
+            .manifest
+            .tensor_table
+            .iter()
+            .any(|e| e.name.contains("vision_encoder"))
+        {
             // Find the model's vision_config from the manifest metadata.
             // Fall back to the image metadata embedded in the architecture.
             let vision_config = VisionArchitecture {
@@ -870,8 +721,6 @@ impl LoadedProfiledModel {
                 patch_size: 14,
                 num_channels: 3,
                 projection_dim: reader.manifest.architecture.hidden_size,
-                model_family: String::new(),
-                has_ane_program: false,
             };
             // Override with actual config from manifest if available.
             let vc = vision_config;
@@ -908,14 +757,10 @@ impl LoadedProfiledModel {
                     None
                 }
             }
-        } else if has_direct_multimodal_image_tensors || reader.manifest.vision_config.is_some() {
-            eprintln!(
-                "[profiled-model] multimodal image artifacts detected, but direct projector runtime binding is not wired yet; continuing without legacy vision encoder"
-            );
-            None
         } else {
             None
-        };
+        }
+        ;
 
         // ── Load compiled Metal kernel artifacts ──────────────────────────
         // Load .metallib files from the compute image, create pipeline states.
@@ -933,41 +778,12 @@ impl LoadedProfiledModel {
                         Arc::new(vec)
                     }
                     Err(e) => {
-                        eprintln!(
-                            "[profiled-model] WARNING: failed to load Metal kernels: {}",
-                            e
-                        );
+                        eprintln!("[profiled-model] WARNING: failed to load Metal kernels: {}", e);
                         Arc::new(Vec::new())
                     }
                 }
             }
         };
-
-        let (multimodal_summary, multimodal_projection_records, multimodal_bindings) =
-            match sibling_cimage_path(image_dir) {
-                Some(cimage_path) if cimage_path.exists() => {
-                    match metal::Device::system_default()
-                        .ok_or_else(|| "no Metal device available".to_string())
-                        .and_then(|device| CimageDeployment::load(&cimage_path, &device))
-                    {
-                        Ok(deployment) => {
-                            let summary = deployment.multimodal_artifact_summary();
-                            let records = deployment.multimodal_projection_records();
-                            let bindings = deployment.multimodal_bindings();
-                            (Some(summary), records, bindings)
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "[profiled-model] WARNING: failed to read sealed multimodal metadata from {}: {}",
-                                cimage_path.display(),
-                                e
-                            );
-                            (None, Vec::new(), None)
-                        }
-                    }
-                }
-                _ => (None, Vec::new(), None),
-            };
 
         Ok(Self {
             image_dir: image_dir.to_path_buf(),
@@ -988,13 +804,11 @@ impl LoadedProfiledModel {
             copied_weight_bytes,
             materialized_bytes,
             handle_baseline,
-            ane_coreai_models,
+            ane_cache: None,
+            ane_coreml_models,
             memory_island,
             scheduled_module,
             vision_encoder,
-            multimodal_summary,
-            multimodal_projection_records,
-            multimodal_bindings,
             active_adapter: None,
             // Metal kernels: start empty; populated by the fused-kernel
             metal_kernels,
@@ -1022,7 +836,6 @@ impl std::fmt::Debug for LoadedProfiledModel {
 /// when the ANE kernel driver exposes the DMA interface.
 pub struct AneDmaPrefetcher {
     /// Temporary IOSurface arena for DMA writes.
-    #[allow(dead_code)]
     io_arena: Arena,
 }
 
@@ -1031,8 +844,8 @@ impl AneDmaPrefetcher {
     pub fn new() -> Result<Self, String> {
         // 4MB buffer — enough for a single layer's weights (~400MB for a 2-layer window
         // but we only buffer the DMA transfer, not the full weight storage).
-        let io_arena =
-            Arena::new_bytes(1024 * 1024).map_err(|e| format!("DMA prefetcher arena: {}", e))?;
+        let io_arena = Arena::new(1024 * 1024, 1, mlx_rs::Dtype::Uint8)
+            .map_err(|e| format!("DMA prefetcher arena: {}", e))?;
         Ok(Self { io_arena })
     }
 
@@ -1076,7 +889,6 @@ pub struct LayerWeightStreamer {
     /// Prefetch window size (default: 2, meaning weights for layer N and N+1 are resident)
     prefetch_window: u32,
     /// IO buffer for DMA transfers (IOSurface-backed)
-    #[allow(dead_code)]
     io_buffer: Arena,
     /// ANE prefetcher for async DMA
     ane_prefetcher: Option<AneDmaPrefetcher>,
@@ -1116,7 +928,7 @@ impl LayerWeightStreamer {
         reader: Arc<CompiledImageReader>,
     ) -> Result<Self, String> {
         let detected_ns = Self::detect_ns_from_reader(&reader);
-        let io_buffer = Arena::new_bytes(4 * 1024 * 1024)
+        let io_buffer = Arena::new(4 * 1024 * 1024, 1, mlx_rs::Dtype::Uint8)
             .map_err(|e| format!("weight streamer io arena: {}", e))?;
 
         let ane_prefetcher = AneDmaPrefetcher::new().ok();

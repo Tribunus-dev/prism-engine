@@ -1,8 +1,6 @@
 use crate::inference::execution_image_state::ComputeImageState;
 use crate::inference::inference_session_state::InferenceSessionState;
-use crate::inference::inference_step_state::{
-    InferenceMode, InferenceStepOutput, InferenceStepState,
-};
+use crate::inference::inference_step_state::{InferenceStepState, InferenceStepOutput, InferenceMode};
 use crate::scheduling::phase_engine::PhaseEngine;
 
 /// Thin adapter that turns ProfiledInferenceSession methods into

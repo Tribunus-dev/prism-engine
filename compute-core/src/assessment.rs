@@ -25,7 +25,7 @@ pub enum TokenPhase {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssessmentConfig {
     /// Names of the backends to benchmark (e.g. `"mlx"`, `"accelerate"`,
-    /// `"ane"`, `"coreai"`).
+    /// `"ane"`, `"coreml"`).
     pub backends: Vec<String>,
 
     /// Sequence lengths to probe.

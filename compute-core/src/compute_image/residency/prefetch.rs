@@ -23,7 +23,7 @@
 //! of the runtime memory manager.
 
 use crate::compute_image::residency::plan::{
-    PrefetchAction, PrefetchPriority, RequiredWeightObject,
+    PrefetchAction, PrefetchPriority, RequiredWeightObject, RequiredWeightObjectId,
 };
 use crate::compute_image::residency::ResidencyClass;
 
@@ -230,6 +230,8 @@ impl PrefetchScheduleBuilder {
                 .then_with(|| a.priority.priority_rank().cmp(&b.priority.priority_rank()))
         });
     }
+
+
 }
 
 // ── Priority ordering helpers ────────────────────────────────────────
@@ -254,7 +256,7 @@ mod tests {
 
     fn make_weight(id: &str, class: ResidencyClass, bytes: u64) -> RequiredWeightObject {
         RequiredWeightObject {
-            object_id: id.to_string(),
+            object_id: RequiredWeightObjectId::from(id),
             residency_class: class,
             estimated_bytes: bytes,
         }

@@ -29,7 +29,7 @@ pub struct TargetContext {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendVersions {
     pub mlx: Option<String>,
-    pub coreai: Option<String>,
+    pub coreml: Option<String>,
     pub accelerate: Option<String>,
 }
 

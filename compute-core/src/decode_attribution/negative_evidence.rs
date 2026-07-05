@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::Instant;
 
-use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
-use crate::coreai_pipeline;
+use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
+use crate::coreml_pipeline;
 use crate::decode_attribution::environment::capture_host_environment;
 use crate::decode_attribution::graph_catalog;
 use crate::decode_attribution::receipt::DecodeAttributionReceipt;
@@ -30,7 +30,7 @@ pub fn run_negative_evidence(run_id: &str, _output_dir: &Path) -> DecodeAttribut
             macos_version: "unknown".into(),
             xcode_build_version: "unknown".into(),
             coremlcompiler_version: "unknown".into(),
-            coreai_compiler_available: false,
+            coreml_compiler_available: false,
         }
     });
 
@@ -109,12 +109,12 @@ pub fn run_negative_evidence(run_id: &str, _output_dir: &Path) -> DecodeAttribut
     r.source_package_sha256 = sha256_dir(&mlpackage_path);
 
     // Phase 2: Compile
-    let compile_result = coreai_pipeline::compile_mlpackage(
+    let compile_result = coreml_pipeline::compile_mlpackage(
         &mlpackage_path,
         temp_dir.path(),
         "neg",
         compute_units,
-        "com.apple.coreai.ops.15_0",
+        "com.apple.coreml.ops.15_0",
     );
 
     let receipt = match compile_result {
@@ -133,12 +133,12 @@ pub fn run_negative_evidence(run_id: &str, _output_dir: &Path) -> DecodeAttribut
     r.compiler_stderr_sha256 = receipt.toolchain.stderr_sha256;
 
     // Phase 3: Load from deliberately broken path
-    r.runtime_compute_units = CoreAiComputeUnits::CpuAndGpu.name().to_string();
+    r.runtime_compute_units = CoreMlComputeUnits::CpuAndGpu.name().to_string();
 
     let load_start = Instant::now();
     let fake_path = "/tmp/nonexistent/deadbeef.mlmodelc";
     let load_result =
-        CoreAiModel::load_with_compute_units(fake_path, CoreAiComputeUnits::CpuAndGpu);
+        CoreMlModel::load_with_compute_units(fake_path, CoreMlComputeUnits::CpuAndGpu);
 
     r.load_duration_ns = load_start.elapsed().as_nanos() as u64;
     r.load_success = false;

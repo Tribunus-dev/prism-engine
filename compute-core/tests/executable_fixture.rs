@@ -3,9 +3,6 @@
 
 #[cfg(test)]
 mod tests {
-    use tribunus_compute_core::compute_image::content_store::index::{
-        ContentAddressedContentStore, ContentStoreVersion,
-    };
     use tribunus_compute_core::compute_image::executable::admission::ExecutableAdmissionError;
     use tribunus_compute_core::compute_image::executable::provenance::CompilerProvenance;
     use tribunus_compute_core::compute_image::executable::schema::{
@@ -30,13 +27,7 @@ mod tests {
             },
             model_graph_hash: ContentHash(1),
             tokenizer_hash: ContentHash(2),
-            content_store: ContentAddressedContentStore {
-                store_version: ContentStoreVersion { major: 1, minor: 0 },
-                segments: vec![],
-                objects: vec![],
-                aliases: vec![],
-                index_hash: ContentHash(0),
-            },
+            content_store: Default::default(),
             target_profiles: vec![],
             executable_seal: ExecutableSeal {
                 root_hash: ContentHash(0),

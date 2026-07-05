@@ -16,7 +16,7 @@ pub enum ExecutableAdmissionError {
     ArenaPlanUnsatisfied,
     ResidencyPlanUnsatisfied,
     KvPlanUnsatisfied,
-    CoreAiArtifactUnavailable,
+    CoreMlArtifactUnavailable,
     MetalPipelineUnavailable,
     AccelerateArtifactUnavailable,
     StateDomainUnavailable,

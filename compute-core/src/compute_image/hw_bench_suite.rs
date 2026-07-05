@@ -34,7 +34,7 @@ pub fn generate_candidates() -> Vec<KernelCandidate> {
                     } else {
                         None
                     },
-                    coreai_subgraph: None,
+                    coreml_subgraph: None,
                 });
             }
         }

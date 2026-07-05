@@ -141,8 +141,6 @@ impl Drop for AneProgram {
     }
 }
 
-// SAFETY: ANE runtime state is accessed only by the ANE multiplexer thread which is single-threaded.
-// The ANE program handle (ptr: *mut c_void) is initialized once and never mutated concurrently.
 unsafe impl Send for AneProgram {}
 unsafe impl Sync for AneProgram {}
 

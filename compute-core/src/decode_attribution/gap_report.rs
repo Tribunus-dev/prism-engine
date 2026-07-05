@@ -153,7 +153,7 @@ pub struct ComputeGap {
 pub struct BackendGapMatrix {
     pub basis: String,
     pub phases: Vec<String>,
-    pub coreai: Vec<String>,
+    pub coreml: Vec<String>,
     pub mlx: Vec<String>,
     pub accelerate: Vec<String>,
 }
@@ -770,7 +770,7 @@ fn parse_kv_contract_value(contract: &Value, backend: Option<&str>) -> Option<Co
             blocks_release_claim: false,
         }),
         "backend_owned" => {
-            let backend_is_coreml = backend.as_deref() == Some("coreai");
+            let backend_is_coreml = backend.as_deref() == Some("coreml");
             if backend_is_coreml {
                 Some(ComputeGap {
                     gap_id: String::new(),
@@ -1396,7 +1396,7 @@ pub fn normalize_gaps(
     let false_qualification_risks_detected = assigned.iter().any(|gap| {
         gap.severity.is_s4()
             && gap.classification == GapClassification::BackendOwnershipGap
-            && gap.backend.as_deref() == Some("coreai")
+            && gap.backend.as_deref() == Some("coreml")
             && gap
                 .phase
                 .as_deref()
@@ -1435,7 +1435,7 @@ pub fn build_backend_gap_matrix() -> BackendGapMatrix {
         .copied()
         .map(phase_str)
         .collect();
-    let mut coreai = Vec::with_capacity(phases.len());
+    let mut coreml = Vec::with_capacity(phases.len());
     let mut mlx = Vec::with_capacity(phases.len());
     let mut accelerate = Vec::with_capacity(phases.len());
 
@@ -1488,7 +1488,7 @@ pub fn build_backend_gap_matrix() -> BackendGapMatrix {
             support_status_to_cell(&status)
         };
 
-        coreai.push(cell_to_string(status_for_backend(BackendKind::CoreAi)).into());
+        coreml.push(cell_to_string(status_for_backend(BackendKind::CoreMl)).into());
         mlx.push(cell_to_string(status_for_backend(BackendKind::Mlx)).into());
         accelerate.push(cell_to_string(status_for_backend(BackendKind::Accelerate)).into());
     }
@@ -1496,7 +1496,7 @@ pub fn build_backend_gap_matrix() -> BackendGapMatrix {
     BackendGapMatrix {
         basis: "declared_support_functions".into(),
         phases,
-        coreai,
+        coreml,
         mlx,
         accelerate,
     }
@@ -1536,7 +1536,7 @@ pub fn generate_fix_gates(gaps: &[ComputeGap]) -> Vec<FixGate> {
             "COREML-STATEFUL-BRIDGE-QUALIFICATION-0001",
             "critical",
             "Owns Core ML KV ownership risks",
-            gate_coreai_stateful_bridge as fn(&ComputeGap) -> bool,
+            gate_coreml_stateful_bridge as fn(&ComputeGap) -> bool,
             "Core ML KV ownership risks",
         ),
         (
@@ -1650,9 +1650,9 @@ fn gate_mlx_kv(gap: &ComputeGap) -> bool {
         && gap.status == GapStatus::PendingQualification
 }
 
-fn gate_coreai_stateful_bridge(gap: &ComputeGap) -> bool {
+fn gate_coreml_stateful_bridge(gap: &ComputeGap) -> bool {
     gap.classification == GapClassification::BackendOwnershipGap
-        && gap.backend.as_deref() == Some("coreai")
+        && gap.backend.as_deref() == Some("coreml")
 }
 
 fn gate_accelerate_composed(gap: &ComputeGap) -> bool {
@@ -1848,7 +1848,7 @@ pub fn generate_summary_md(
         lines.push(format!(
             "| {} | {} | {} | {} |",
             phase,
-            backend_matrix.coreai.get(idx).cloned().unwrap_or_default(),
+            backend_matrix.coreml.get(idx).cloned().unwrap_or_default(),
             backend_matrix.mlx.get(idx).cloned().unwrap_or_default(),
             backend_matrix
                 .accelerate
@@ -2155,7 +2155,7 @@ mod tests {
                 classification: GapClassification::BackendOwnershipGap,
                 status: GapStatus::NeedsTriage,
                 message: "risk".into(),
-                backend: Some("coreai".into()),
+                backend: Some("coreml".into()),
                 phase: Some("kv_read".into()),
                 family: None,
                 shape_profile: None,
@@ -2207,7 +2207,7 @@ mod tests {
             classification: GapClassification::BackendOwnershipGap,
             status: GapStatus::NeedsTriage,
             message: "risk".into(),
-            backend: Some("coreai".into()),
+            backend: Some("coreml".into()),
             phase: Some("kv_read".into()),
             family: None,
             shape_profile: None,
@@ -2245,11 +2245,11 @@ mod tests {
     }
 
     #[test]
-    fn kv_contract_backend_owned_coreai_is_s4() {
+    fn kv_contract_backend_owned_coreml_is_s4() {
         let contract = serde_json::json!({
             "contract_id": "kv.kv_read/decode_small_v1/len16",
             "profile_id": "decode_small_v1",
-            "backend": "coreai",
+            "backend": "coreml",
             "phase": "kv_read",
             "ownership": "backend_owned",
             "mutation": "read_only"
@@ -2262,11 +2262,11 @@ mod tests {
     #[test]
     fn tier2_pending_becomes_gap() {
         let row = Tier2SupportRow {
-            row_id: "tier2/decode_mlp_gate_up_silu/default/small/coreai/cpuOnly".into(),
+            row_id: "tier2/decode_mlp_gate_up_silu/default/small/coreml/cpuOnly".into(),
             family: "decode_mlp_gate_up_silu".into(),
             shape_profile: "small".into(),
             semantic_shape_profile: "decode_small_v1".into(),
-            backend: "coreai".into(),
+            backend: "coreml".into(),
             support_status: "pending_BridgeNotQualified".into(),
             reason: Some("decode microphase predict bridge not yet qualified".into()),
             blocked_by_tier1_defect: Some("cluster_001".into()),

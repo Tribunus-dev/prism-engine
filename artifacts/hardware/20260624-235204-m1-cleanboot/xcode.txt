@@ -1,2 +1,0 @@
-Xcode 26.5
-Build version 17F42

@@ -25,7 +25,7 @@ pub enum FusionImplBackend {
     /// Accelerate.framework (vDSP / vImage).
     Accelerate,
     /// Core ML ANE island.
-    CoreAiAne,
+    CoreMlAne,
     /// Rust NEON SIMD path.
     RustNeon,
     /// Fusion-only placeholder (no standalone kernel available).
@@ -194,7 +194,7 @@ fn qkv_proj_region() -> FusionRegion {
             parity_passed: true,
         },
         FusionImpl {
-            backend: FusionImplBackend::CoreAiAne,
+            backend: FusionImplBackend::CoreMlAne,
             implementation_type: ImplementationType::FusedAneIsland,
             qualification_status: QualificationStatus::Unqualified,
             boundary_latency_us: 110,
@@ -292,7 +292,7 @@ fn gate_up_proj_region() -> FusionRegion {
             parity_passed: true,
         },
         FusionImpl {
-            backend: FusionImplBackend::CoreAiAne,
+            backend: FusionImplBackend::CoreMlAne,
             implementation_type: ImplementationType::FusedAneIsland,
             qualification_status: QualificationStatus::Unqualified,
             boundary_latency_us: 88,
@@ -481,7 +481,7 @@ fn self_attn_region() -> FusionRegion {
             parity_passed: true,
         },
         FusionImpl {
-            backend: FusionImplBackend::CoreAiAne,
+            backend: FusionImplBackend::CoreMlAne,
             implementation_type: ImplementationType::FusedAneIsland,
             qualification_status: QualificationStatus::Unqualified,
             boundary_latency_us: 210,
@@ -603,7 +603,7 @@ mod tests {
             (FusionImplBackend::MlxGpu, "\"mlx_gpu\""),
             (FusionImplBackend::MlxCpu, "\"mlx_cpu\""),
             (FusionImplBackend::Accelerate, "\"accelerate\""),
-            (FusionImplBackend::CoreAiAne, "\"core_ml_ane\""),
+            (FusionImplBackend::CoreMlAne, "\"core_ml_ane\""),
             (FusionImplBackend::RustNeon, "\"rust_neon\""),
             (FusionImplBackend::FusionOnly, "\"fusion_only\""),
         ];

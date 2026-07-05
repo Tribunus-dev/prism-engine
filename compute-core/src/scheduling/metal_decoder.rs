@@ -5,6 +5,7 @@
 //! single IOSurface-backed buffer; the kernel binds them at offset 0 and
 //! offset `dim_m × 16 × 2` respectively.
 
+
 use metal::{Buffer, CommandQueue, ComputePipelineState, Device, Library};
 
 use crate::scheduling::benchmark_harness::MetalDecoder;
@@ -24,7 +25,6 @@ const PLACEHOLDER_TOKEN: u32 = 0;
 /// | 4    | `dim_n` (scalar)     | `uint`          | —                     |
 /// | 5    | `dim_m` (scalar)     | `uint`          | —                     |
 pub struct PalettizedGemvDecoder {
-    #[allow(dead_code)]
     device: Device,
     command_queue: CommandQueue,
     pipeline_state: ComputePipelineState,
@@ -91,7 +91,9 @@ impl PalettizedGemvDecoder {
     pub fn fill_dummy_input(&self) {
         let n = self.dim_n as usize;
         let data = vec![0x3c00u16; n]; // 0x3c00 = 1.0 in IEEE 754 binary16
-        let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, n * 2) };
+        let bytes = unsafe {
+            std::slice::from_raw_parts(data.as_ptr() as *const u8, n * 2)
+        };
         unsafe {
             std::ptr::copy_nonoverlapping(
                 bytes.as_ptr(),
@@ -126,8 +128,8 @@ impl MetalDecoder for PalettizedGemvDecoder {
         let cb_offset = self.codebook_byte_size();
 
         encoder.set_buffer(0, Some(&self.input_activations), 0);
-        encoder.set_buffer(1, Some(&self.weight_arena), 0); // codebook_block
-        encoder.set_buffer(2, Some(&self.weight_arena), cb_offset); // indices_block
+        encoder.set_buffer(1, Some(&self.weight_arena), 0);          // codebook_block
+        encoder.set_buffer(2, Some(&self.weight_arena), cb_offset);  // indices_block
         encoder.set_buffer(3, Some(&self.output_logits), 0);
         encoder.set_bytes(4, 4, &self.dim_n as *const u32 as *const _);
         encoder.set_bytes(5, 4, &self.dim_m as *const u32 as *const _);
@@ -146,12 +148,43 @@ impl MetalDecoder for PalettizedGemvDecoder {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn test_codebook_byte_size() {
-        // codebook = dim_m * 16 * 2 (fp16)
-        assert_eq!(896u64 * 16 * 2, 28672);
-        // test that the calculation method exists and returns expected value
-        // Without a real Metal device we can't construct a full decoder
+        let device = Device::system_default().expect("Metal device required");
+        let dummy = device.new_buffer(4096, metal::MTLResourceOptions::StorageModeShared);
+        // Can't construct decoder without a metallib, but we can test the calculation
+        // by making it a standalone function
+        static_assert_codebook_size();
+    }
+
+    fn static_assert_codebook_size() {
+        // dim_m=896, dim_n=896 → codebook = 896 × 16 × 2 = 28672 bytes
+        let decoder = create_dummy();
+        let size = decoder.codebook_byte_size();
+        assert_eq!(size, 28672);
+    }
+
+    fn create_dummy() -> PalettizedGemvDecoder {
+        // Test-only: decoder with zero-size buffers, never actually stepped
+        PalettizedGemvDecoder {
+            device: unsafe { std::mem::zeroed() },
+            command_queue: unsafe { std::mem::zeroed() },
+            pipeline_state: unsafe { std::mem::zeroed() },
+            weight_arena: unsafe { std::mem::zeroed() },
+            input_activations: unsafe { std::mem::zeroed() },
+            output_logits: unsafe { std::mem::zeroed() },
+            dim_m: 896,
+            dim_n: 896,
+        }
+    }
+
+    #[test]
+    fn test_struct_size() {
+        let size = std::mem::size_of::<PalettizedGemvDecoder>();
+        eprintln!("PalettizedGemvDecoder struct size: {size} bytes");
+        let _ = create_dummy();
+        assert!(size < 1024, "struct too large: {size}");
     }
 }

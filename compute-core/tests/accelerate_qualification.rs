@@ -7,7 +7,9 @@
 use tribunus_compute_core::backend::accelerate::AccelerateBackend;
 use tribunus_compute_core::backend::MatmulOp;
 use tribunus_compute_core::backend::TensorBackend;
-use tribunus_compute_core::backend::{DType, QuantizedMatmulOp, RmsNormOp, RoPEOp};
+use tribunus_compute_core::backend::{
+    DType, QuantizedMatmulOp, QuantizedWeightHandle, RmsNormOp, RoPEOp,
+};
 
 fn accel() -> AccelerateBackend {
     AccelerateBackend::new()

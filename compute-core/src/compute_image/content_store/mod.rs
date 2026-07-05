@@ -1,17 +1,17 @@
 //! Content-addressed immutable object store for SealedComputeImageExecutable.
 
-pub mod aliases;
 pub mod index;
-pub mod integrity;
+pub mod segment;
+pub mod packing;
 pub mod layout;
 pub mod mmap;
-pub mod packing;
-pub mod segment;
+pub mod integrity;
+pub mod aliases;
 
-pub use aliases::*;
 pub use index::*;
-pub use integrity::*;
+pub use segment::*;
+pub use packing::*;
 pub use layout::*;
 pub use mmap::*;
-pub use packing::*;
-pub use segment::*;
+pub use integrity::*;
+pub use aliases::*;

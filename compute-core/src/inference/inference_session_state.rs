@@ -1,12 +1,16 @@
-use crate::executor::SinkState;
-use crate::inference::inference_step_state::StepReceiptLedger;
 use crate::kv_cache::KvCache;
 use crate::kv_cache::LiveKvCache;
-use crate::profiled_executor::WorkingSetManager;
+use crate::inference::inference_step_state::StepReceiptLedger;
 use crate::scheduling::receipts::PhaseReceipt;
-use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crate::executor::SinkState;
+use crate::profiled_executor::WorkingSetManager;
+use crate::backend::accelerate_lane::AccelerateLane;
+use crate::backend::coreml_lane::CoreMlLane;
+use crate::runtime::executable_session::RuntimeBackends;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 /// Unique identifier for an inference session.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
@@ -21,7 +25,7 @@ pub struct InferenceSessionState {
     pub kv_caches: Vec<LiveKvCache>,
     pub sink_states: Vec<SinkState>,
     pub working_set: Option<WorkingSetManager>,
-    pub coreai_models: CoreAiModelRegistryStub,
+    pub coreml_models: CoreMlModelRegistryStub,
     pub lane_registry: LaneRegistryStub,
     pub cancellation: Arc<AtomicBool>,
     pub session_epoch: AtomicU64,
@@ -30,7 +34,7 @@ pub struct InferenceSessionState {
 
 /// Stub for the Core ML model registry.
 /// In a full implementation this loads artifacts once at session creation time.
-pub struct CoreAiModelRegistryStub;
+pub struct CoreMlModelRegistryStub;
 
 /// Stub for the lane registry.
 pub struct LaneRegistryStub;
@@ -43,7 +47,7 @@ impl InferenceSessionState {
             kv_caches: live_caches,
             sink_states,
             working_set: None,
-            coreai_models: CoreAiModelRegistryStub,
+            coreml_models: CoreMlModelRegistryStub,
             lane_registry: LaneRegistryStub,
             cancellation: Arc::new(AtomicBool::new(false)),
             session_epoch: AtomicU64::new(0),

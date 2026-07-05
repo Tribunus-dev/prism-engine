@@ -21,8 +21,7 @@
 //! IOSurface-backed [`Arena`] instances — zero CPU copy.
 
 use crate::arena::Arena;
-use crate::arena::DataType;
-use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
+use crate::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
 
 // ---------------------------------------------------------------------------
 // Feature-name constants for Core ML binding I/O
@@ -108,7 +107,7 @@ fn f16_to_f32(h: u16) -> f32 {
 /// into ANE SRAM for zero-latency GPU access.
 pub struct HotRowPredictor {
     /// ANE-based predictor Core ML model.
-    model: CoreAiModel,
+    model: CoreMlModel,
     /// Input arena: takes the hidden state as FP16 values, shaped `[1, hidden_size]`.
     input_arena: Arena,
     /// Output arena: returns `[num_candidates, 2]` FP16 pairs (token_id, confidence).
@@ -136,16 +135,16 @@ impl HotRowPredictor {
     /// * `hidden_size` — model's hidden state dimension (e.g. 3840).
     /// * `num_candidates` — number of candidate token IDs to predict (e.g. 64).
     pub fn new(model_path: &str, hidden_size: u32, num_candidates: u32) -> Result<Self, String> {
-        let model = CoreAiModel::load_with_compute_units(
+        let model = CoreMlModel::load_with_compute_units(
             model_path,
-            CoreAiComputeUnits::CpuAndNeuralEngine,
+            CoreMlComputeUnits::CpuAndNeuralEngine,
         )?;
 
         // Input arena: one FP16 value per hidden dimension, shaped [1, hidden_size].
-        let input_arena = Arena::new(1, hidden_size, DataType::Float16)?;
+        let input_arena = Arena::new(1, hidden_size, mlx_rs::Dtype::Float16)?;
 
         // Output arena: [num_candidates, 2] — each slot is (token_id, confidence).
-        let output_arena = Arena::new(num_candidates, 2, DataType::Float16)?;
+        let output_arena = Arena::new(num_candidates, 2, mlx_rs::Dtype::Float16)?;
 
         Ok(Self {
             model,

@@ -37,9 +37,8 @@ impl ProgramSerializer {
         format: ProgramFormat,
     ) -> Result<Vec<u8>, String> {
         match format {
-            ProgramFormat::Json => {
-                serde_json::to_vec(program).map_err(|e| format!("serialize program (json): {}", e))
-            }
+            ProgramFormat::Json => serde_json::to_vec(program)
+                .map_err(|e| format!("serialize program (json): {}", e)),
             #[cfg(feature = "msgpack")]
             ProgramFormat::MessagePack => rmp_serde::to_vec(program)
                 .map_err(|e| format!("serialize program (msgpack): {}", e)),
@@ -96,10 +95,11 @@ mod tests {
     fn test_serialization_roundtrip_json() {
         let program = sample_program();
 
-        let bytes =
-            ProgramSerializer::serialize(&program, ProgramFormat::Json).expect("serialize to json");
-        let deserialized = ProgramSerializer::deserialize(&bytes, ProgramFormat::Json)
-            .expect("deserialize from json");
+        let bytes = ProgramSerializer::serialize(&program, ProgramFormat::Json)
+            .expect("serialize to json");
+        let deserialized =
+            ProgramSerializer::deserialize(&bytes, ProgramFormat::Json)
+                .expect("deserialize from json");
 
         assert_eq!(
             program, deserialized,
@@ -137,7 +137,8 @@ mod tests {
     fn test_serialization_pretty_json() {
         let program = sample_program();
 
-        let pretty = ProgramSerializer::serialize_to_string(&program).expect("pretty-print json");
+        let pretty = ProgramSerializer::serialize_to_string(&program)
+            .expect("pretty-print json");
 
         assert!(
             pretty.contains('\n'),
@@ -163,8 +164,9 @@ mod tests {
 
         let bytes = ProgramSerializer::serialize(&empty_program, ProgramFormat::Json)
             .expect("serialize empty program");
-        let deserialized = ProgramSerializer::deserialize(&bytes, ProgramFormat::Json)
-            .expect("deserialize empty program");
+        let deserialized =
+            ProgramSerializer::deserialize(&bytes, ProgramFormat::Json)
+                .expect("deserialize empty program");
 
         assert_eq!(empty_program, deserialized);
         assert!(deserialized.program_bytes.is_empty());
@@ -183,8 +185,9 @@ mod tests {
 
         let bytes = ProgramSerializer::serialize(&program, ProgramFormat::Json)
             .expect("serialize diffusion program");
-        let deserialized = ProgramSerializer::deserialize(&bytes, ProgramFormat::Json)
-            .expect("deserialize diffusion program");
+        let deserialized =
+            ProgramSerializer::deserialize(&bytes, ProgramFormat::Json)
+                .expect("deserialize diffusion program");
 
         assert_eq!(program, deserialized);
     }
@@ -196,13 +199,11 @@ mod tests {
 
         let bytes = ProgramSerializer::serialize(&program, ProgramFormat::MessagePack)
             .expect("serialize to msgpack");
-        let deserialized = ProgramSerializer::deserialize(&bytes, ProgramFormat::MessagePack)
-            .expect("deserialize from msgpack");
+        let deserialized =
+            ProgramSerializer::deserialize(&bytes, ProgramFormat::MessagePack)
+                .expect("deserialize from msgpack");
 
-        assert_eq!(
-            program, deserialized,
-            "msgpack round-trip must preserve all fields"
-        );
+        assert_eq!(program, deserialized, "msgpack round-trip must preserve all fields");
     }
 
     #[cfg(feature = "msgpack")]
@@ -215,10 +216,11 @@ mod tests {
             (0..64).map(|i| i as u8).collect(),
         );
 
-        let json_bytes =
-            ProgramSerializer::serialize(&program, ProgramFormat::Json).expect("serialize to json");
-        let msgpack_bytes = ProgramSerializer::serialize(&program, ProgramFormat::MessagePack)
-            .expect("serialize to msgpack");
+        let json_bytes = ProgramSerializer::serialize(&program, ProgramFormat::Json)
+            .expect("serialize to json");
+        let msgpack_bytes =
+            ProgramSerializer::serialize(&program, ProgramFormat::MessagePack)
+                .expect("serialize to msgpack");
 
         assert!(
             msgpack_bytes.len() < json_bytes.len(),

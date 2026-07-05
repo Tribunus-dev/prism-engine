@@ -1,21 +1,10 @@
-//! Multimodal processing pipeline.
-//!
-//! # Architecture
-//!
-//! The Legacy path (`VisionEncoderConfig` -> `ProjectorConfig` -> `multimodal_forward()`)
-//! serves PaliGemma/LLaVA/Pixtral-class encoder-decoder models.
-//!
-//! Gemma 4 Unified uses a direct modality-to-decoder embedding adapter path defined
-//! in `tribunus_compute_core::compute_image::multimodal::adapter`:
-//! - `Gemma4DirectImageProjectionAdapter`: encoder-free image → decoder embedding
-//! - `Gemma4DirectAudioProjectionAdapter`: encoder-free audio → decoder embedding
-//!
-//! The model-family-specific adapters replace the need for a separate vision encoder
-//! artifact for encoder-free models.
-
-pub mod dynamic_tiling;
-pub mod projector;
 pub mod vision_encoder;
+pub mod projector;
+pub mod dynamic_tiling;
+pub mod llava;
+pub mod qwen_vl;
+pub mod pixtral;
+pub mod cogvlm;
 
 use crate::lut::engine::PrismEngine;
 use anyhow::Result;
@@ -41,9 +30,9 @@ pub enum ImageTokenStrategy {
 }
 
 pub fn build_embedding_sequence(
-    _text_tokens: &[u32],
+    text_tokens: &[u32],
     image_embeds: &[Vec<u16>],
-    _strategy: &ImageTokenStrategy,
+    strategy: &ImageTokenStrategy,
 ) -> Vec<u16> {
     // Dummy implementation for building embedding sequence
     // In a real implementation, we would interleave these based on the strategy
@@ -71,8 +60,7 @@ pub fn multimodal_forward(
         .map(|e| pipeline.projector.forward(&e))
         .collect();
 
-    let combined =
-        build_embedding_sequence(text_tokens, &projected, &pipeline.image_token_placement);
+    let combined = build_embedding_sequence(text_tokens, &projected, &pipeline.image_token_placement);
 
     // Using dummy dummy values for forward since the original forward in CImage has a different signature.
     // For this stub, we just return the combined embeddings.

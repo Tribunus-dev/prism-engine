@@ -6,8 +6,6 @@
 
 pub mod draft_model;
 pub mod hot_row_predictor;
-pub mod kv_decompress_program;
 pub mod moe_scheduler;
-pub mod page_migration_policy;
 pub mod sink_detector;
 pub mod weight_row_cache;

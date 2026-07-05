@@ -1,6 +1,8 @@
 //! System benchmark for backend routing decisions.
 //! Measures latency and throughput for each available backend.
 
+use std::time::Instant;
+
 /// Results from benchmarking a single operation
 #[derive(Debug, Clone)]
 pub struct OpBenchmark {
