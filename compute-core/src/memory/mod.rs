@@ -4,10 +4,13 @@
 //! `docs/unified-memory-island.md`.
 
 pub mod allocator;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod candle_bridge;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod compute_image_bridge;
 pub mod coreai_warmup;
 pub mod enforcer;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod iosurface_storage;
 pub mod monitor;
 pub mod plan;
