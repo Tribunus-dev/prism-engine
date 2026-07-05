@@ -22,6 +22,7 @@ pub mod executable_bindings;
 pub mod executable_lane;
 pub mod executable_profile;
 pub mod executable_seal;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod executable_session;
 
 pub use agent_slot::{
