@@ -157,9 +157,11 @@ impl TernaryProjectionDispatcher {
 ///   [[buffer(0)]]  packed_weights   — raw Tile640 packed u8 rows
 ///   [[buffer(1)]]  scales           — fp32 per-group scales
 ///   [[buffer(2)]]  biases           — fp32 per-group biases
-///   [[buffer(3)]]  input            — fp32 activation vector
+///   [[buffer(3)]]  input            — fp32 activation vector [in_dim]
 ///   [[buffer(4)]]  output           — fp32 result vector
-///   [[buffer(5)]]  num_macro_tiles  — constant uint
+///   [[buffer(5)]]  num_macro_tiles  — constant uint (ceil(in_dim / 640))
+///   [[buffer(6)]]  in_dim           — constant uint (real width; guards the
+///                                     partial-tile activation read)
 #[cfg(feature = "metal-dispatch")]
 pub struct Nf4Tile640ProjectionDispatcher {
     registry: RegistryRef,
@@ -243,6 +245,17 @@ impl Nf4Tile640ProjectionDispatcher {
             MTLResourceOptions::StorageModeShared,
         );
         encoder.set_buffer(5, Some(&num_macro_tiles_buf), 0);
+
+        // buffer(6): real (unpadded) input width. The kernel guards the
+        // activation read against this so a partial last tile (in_dim not a
+        // multiple of 640) never reads past `in_vector[in_dim]`.
+        let in_dim_val = params.in_dim;
+        let in_dim_buf = device.new_buffer_with_data(
+            &in_dim_val as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(6, Some(&in_dim_buf), 0);
 
         encoder.dispatch_thread_groups(
             MTLSize {
@@ -1984,8 +1997,22 @@ mod nf4_forward_exec_tests {
         b
     }
 
+    #[inline]
+    fn tiles_for(cols: usize) -> usize {
+        cols.div_ceil(TILE)
+    }
+
+    /// Row-major read with zero-pad past the real width — mirrors the packer's
+    /// partial-tile contract (col >= in_dim → 0.0).
+    #[inline]
+    fn wval(w: &[f32], r: usize, cols: usize, col: usize) -> f32 {
+        if col < cols { w[r * cols + col] } else { 0.0 }
+    }
+
+    // `cols` (== in_dim) need NOT be a multiple of 640: the last tile is
+    // zero-padded, exactly as `quantize_nf4_tile640_matrix_from_raw` does.
     fn pack(w: &[f32], rows: usize, cols: usize) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
-        let tiles = cols / TILE;
+        let tiles = tiles_for(cols);
         let mut packed = vec![0u8; rows * tiles * BYTES_TILE];
         let mut scales = vec![0f32; rows * tiles * GPT];
         for r in 0..rows {
@@ -1993,7 +2020,8 @@ mod nf4_forward_exec_tests {
                 for g in 0..GPT {
                     let mut absmax = 0f32;
                     for gl in 0..GROUP {
-                        absmax = absmax.max(w[r * cols + t * TILE + g * GROUP + gl].abs());
+                        let col = t * TILE + g * GROUP + gl;
+                        absmax = absmax.max(wval(w, r, cols, col).abs());
                     }
                     let scale = if absmax > 1e-12 { absmax } else { 1.0 };
                     scales[r * tiles * GPT + t * GPT + g] = scale;
@@ -2001,7 +2029,7 @@ mod nf4_forward_exec_tests {
                     for lane in 0..LANES {
                         for i in 0..VPL {
                             let col = t * TILE + g * GROUP + lane * VPL + i;
-                            let idx = nearest((w[r * cols + col] * inv).clamp(-1.0, 1.0));
+                            let idx = nearest((wval(w, r, cols, col) * inv).clamp(-1.0, 1.0));
                             let byte = r * tiles * BYTES_TILE
                                 + t * BYTES_TILE
                                 + g * BYTES_GROUP
@@ -2017,7 +2045,7 @@ mod nf4_forward_exec_tests {
     }
 
     fn cpu_gemv(packed: &[u8], scales: &[f32], x: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-        let tiles = cols / TILE;
+        let tiles = tiles_for(cols);
         let mut y = vec![0f32; rows];
         for r in 0..rows {
             let mut acc = 0f32;
@@ -2038,18 +2066,8 @@ mod nf4_forward_exec_tests {
         y
     }
 
-    #[test]
-    fn nf4_forward_exec_matches_cpu() {
-        let device = match Device::system_default() {
-            Some(d) => d,
-            None => {
-                eprintln!("no Metal device — skipping NF4 forward execution test");
-                return;
-            }
-        };
-        let registry: RegistryRef = Arc::new(Mutex::new(KernelRegistry::new(&device)));
-
-        let (rows, cols) = (32usize, 640usize);
+    fn run_case(device: &Device, registry: RegistryRef, rows: usize, cols: usize) {
+        let tiles = tiles_for(cols);
         let w: Vec<f32> = (0..rows * cols).map(|k| ((k as f32) * 0.017).sin() * 0.05).collect();
         let x: Vec<f32> = (0..cols).map(|k| ((k as f32) * 0.011).cos()).collect();
         let (packed, scales, biases) = pack(&w, rows, cols);
@@ -2070,9 +2088,9 @@ mod nf4_forward_exec_tests {
         let out = device.new_buffer((rows * 4) as u64, MTLResourceOptions::StorageModeShared);
 
         let params = ProjectionParams {
-            in_dim: cols as u32,
+            in_dim: cols as u32,          // real (unpadded) width → kernel buffer(6)
             out_dim: rows as u32,
-            page_count: (cols / TILE) as u32,
+            page_count: tiles as u32,     // ceil(in_dim/640) → num_macro_tiles
             page_width: TILE as u32,
             mode_flags: 0,
             probe_seed: 0,
@@ -2094,7 +2112,26 @@ mod nf4_forward_exec_tests {
         }
         assert!(
             maxd < 1e-3,
-            "GPU vs CPU NF4Tile640 GEMV mismatch: max abs err {maxd}"
+            "GPU vs CPU NF4Tile640 GEMV mismatch (rows={rows}, in_dim={cols}, tiles={tiles}): max abs err {maxd}"
         );
+    }
+
+    #[test]
+    fn nf4_forward_exec_matches_cpu() {
+        let device = match Device::system_default() {
+            Some(d) => d,
+            None => {
+                eprintln!("no Metal device — skipping NF4 forward execution test");
+                return;
+            }
+        };
+        let registry: RegistryRef = Arc::new(Mutex::new(KernelRegistry::new(&device)));
+
+        // Exact multiple of 640, plus two partial in_dims that exercise the
+        // kernel's `if col >= in_dim continue` guard (buffer 6). The GPU must
+        // match the CPU reference, which only sums the real columns.
+        for &(rows, cols) in &[(32usize, 640usize), (24, 650), (16, 1290)] {
+            run_case(&device, Arc::clone(&registry), rows, cols);
+        }
     }
 }
