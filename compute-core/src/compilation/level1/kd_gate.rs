@@ -477,6 +477,116 @@ impl ParityManifest {
     }
 }
 
+/// Map a STAGE0 tap slot index to its (TapKind, layer_idx) label.
+/// Slot map: 0 = post-embed; 2k+1 = layer k post-attention; 2k+2 = layer k
+/// post-layer; 2·layers+1 = final pre-logits hidden.
+pub fn tap_slot_label(slot: usize, layers: u32) -> (TapKind, u32) {
+    let last = 2 * layers as usize + 1;
+    if slot == 0 {
+        (TapKind::PostEmbed, 0)
+    } else if slot == last {
+        (TapKind::FinalHidden, 0)
+    } else if slot % 2 == 1 {
+        (TapKind::PostAttention, ((slot - 1) / 2) as u32)
+    } else {
+        (TapKind::PostLayer, ((slot - 2) / 2) as u32)
+    }
+}
+
+/// Validate one token's tap slots against golden slots (both in STAGE0 slot
+/// order, `2·layers + 2` entries each) into a sealed [`ParityManifest`].
+pub fn validate_token_taps(
+    token_index: u64,
+    layers: u32,
+    actual_slots: &[Vec<f32>],
+    golden_slots: &[Vec<f32>],
+    thresholds: ParityThresholds,
+) -> Result<ParityManifest, String> {
+    let expect = 2 * layers as usize + 2;
+    if actual_slots.len() != expect || golden_slots.len() != expect {
+        return Err(format!(
+            "tap slot count mismatch: actual {}, golden {}, expected {expect}",
+            actual_slots.len(),
+            golden_slots.len()
+        ));
+    }
+    let mut reports = Vec::with_capacity(expect);
+    for (slot, (a, g)) in actual_slots.iter().zip(golden_slots).enumerate() {
+        if a.len() != g.len() {
+            return Err(format!(
+                "slot {slot}: actual width {} != golden width {}",
+                a.len(),
+                g.len()
+            ));
+        }
+        let (tap, layer_idx) = tap_slot_label(slot, layers);
+        reports.push(drift_report(a, g, layer_idx, tap));
+    }
+    Ok(ParityManifest::evaluate(token_index, thresholds, reports))
+}
+
+/// Accumulates per-token manifests across an audit run and implements the
+/// between-token early-exit policy: on the first hard breach, `push` returns
+/// `false` (STOP — submit no further tokens; the caller dumps the taint) and
+/// the run records where it stopped. Warn-band manifests continue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParityRun {
+    pub thresholds: ParityThresholds,
+    pub manifests: Vec<ParityManifest>,
+    /// Token index of the hard breach that stopped the run, if any.
+    pub stopped_at_token: Option<u64>,
+    pub worst_rel_l2: f64,
+}
+
+impl ParityRun {
+    pub fn new(thresholds: ParityThresholds) -> Self {
+        ParityRun {
+            thresholds,
+            manifests: Vec::new(),
+            stopped_at_token: None,
+            worst_rel_l2: 0.0,
+        }
+    }
+
+    /// Record one token's manifest. Returns `true` to continue the run,
+    /// `false` on a hard breach (between-token early exit).
+    pub fn push(&mut self, manifest: ParityManifest) -> bool {
+        let cont = manifest.verdict.passed;
+        if manifest.verdict.worst_rel_l2 > self.worst_rel_l2 {
+            self.worst_rel_l2 = manifest.verdict.worst_rel_l2;
+        }
+        if !cont && self.stopped_at_token.is_none() {
+            self.stopped_at_token = Some(manifest.token_index);
+        }
+        self.manifests.push(manifest);
+        cont
+    }
+
+    pub fn all_passed(&self) -> bool {
+        self.stopped_at_token.is_none() && self.manifests.iter().all(|m| m.verdict.passed)
+    }
+
+    pub fn tokens_validated(&self) -> usize {
+        self.manifests.len()
+    }
+
+    /// Serialize the whole run — the `.parity` sidecar payload.
+    pub fn to_parity_json(&self) -> Result<String, String> {
+        serde_json::to_string_pretty(self).map_err(|e| format!("serialize .parity: {e}"))
+    }
+
+    /// SHA-256 digest of the sidecar payload — the value recorded into
+    /// `BlockReceipt`s / manifests so the artifact and its parity evidence
+    /// are cryptographically bound (never baked into a binary).
+    pub fn parity_digest(&self) -> Result<String, String> {
+        use sha2::Digest;
+        let json = self.to_parity_json()?;
+        let mut h = sha2::Sha256::new();
+        h.update(json.as_bytes());
+        Ok(format!("{:x}", h.finalize()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,5 +747,65 @@ mod tests {
         let r = drift_report(&golden, &golden, 0, TapKind::FinalHidden);
         let bad = ParityThresholds { hard: 0.1, warn: 0.5 };
         let _ = classify_drift(&r, &bad);
+    }
+
+    // ── pipelined validator run core ───────────────────────────────────
+
+    #[test]
+    fn tap_slot_labels_cover_the_map() {
+        let layers = 4u32; // 10 slots
+        assert_eq!(tap_slot_label(0, layers), (TapKind::PostEmbed, 0));
+        assert_eq!(tap_slot_label(1, layers), (TapKind::PostAttention, 0));
+        assert_eq!(tap_slot_label(2, layers), (TapKind::PostLayer, 0));
+        assert_eq!(tap_slot_label(7, layers), (TapKind::PostAttention, 3));
+        assert_eq!(tap_slot_label(8, layers), (TapKind::PostLayer, 3));
+        assert_eq!(tap_slot_label(9, layers), (TapKind::FinalHidden, 0));
+    }
+
+    #[test]
+    fn validate_token_taps_labels_and_gates() {
+        let layers = 2u32; // 6 slots
+        let golden: Vec<Vec<f32>> = (0..6).map(|s| vec![1.0f32 + s as f32; 8]).collect();
+        let mut actual = golden.clone();
+        // Corrupt layer 1's post-attention slot (slot 3) hard.
+        for v in actual[3].iter_mut() {
+            *v += 10.0;
+        }
+        let m = validate_token_taps(5, layers, &actual, &golden, ParityThresholds::default())
+            .unwrap();
+        assert!(!m.verdict.passed);
+        assert_eq!(m.verdict.first_hard_breach, Some(3));
+        assert_eq!(m.reports[3].tap, TapKind::PostAttention);
+        assert_eq!(m.reports[3].layer_idx, 1);
+        // Slot-count mismatch is a plumbing error, not drift.
+        assert!(validate_token_taps(5, layers, &actual[..5], &golden, Default::default()).is_err());
+    }
+
+    #[test]
+    fn parity_run_early_exits_between_tokens() {
+        let layers = 1u32; // 4 slots
+        let golden: Vec<Vec<f32>> = (0..4).map(|_| vec![2.0f32; 4]).collect();
+        let clean = golden.clone();
+        let mut broken = golden.clone();
+        for v in broken[2].iter_mut() {
+            *v = -2.0; // rel_l2 = 2.0 ≫ hard
+        }
+        let mut run = ParityRun::new(ParityThresholds::default());
+        assert!(run.push(
+            validate_token_taps(0, layers, &clean, &golden, run.thresholds).unwrap()
+        ));
+        assert!(!run.push(
+            validate_token_taps(1, layers, &broken, &golden, run.thresholds).unwrap()
+        ), "hard breach must signal STOP");
+        assert_eq!(run.stopped_at_token, Some(1));
+        assert!(!run.all_passed());
+        assert_eq!(run.tokens_validated(), 2);
+        // Digest is stable for identical runs and changes when content changes.
+        let d1 = run.parity_digest().unwrap();
+        let d2 = run.parity_digest().unwrap();
+        assert_eq!(d1, d2);
+        let mut run2 = ParityRun::new(ParityThresholds::default());
+        run2.push(validate_token_taps(0, layers, &clean, &golden, run2.thresholds).unwrap());
+        assert_ne!(d1, run2.parity_digest().unwrap());
     }
 }
