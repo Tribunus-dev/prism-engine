@@ -640,11 +640,16 @@ fn dequantize_mse(buf: &[u8], len: usize) -> Vec<f32> {
         return vec![0.0f32; len];
     }
 
+    // Metadata order MUST mirror quantize_mse's writes: [bits, state_bits,
+    // scale]. The previous read order ([scale, bits, state_bits]) put the f32
+    // bit-pattern of `scale` into `rstate_bits` (~1e9), which drove
+    // bits_per_elem past u32 width — a shift-overflow panic in debug and
+    // silent garbage dequantization in release.
     let off = buf.len() - 12;
-    let scale = f32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]);
-    let rbits = u32::from_le_bytes([buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]]);
+    let rbits = u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]);
     let rstate_bits =
-        u32::from_le_bytes([buf[off + 8], buf[off + 9], buf[off + 10], buf[off + 11]]);
+        u32::from_le_bytes([buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]]);
+    let scale = f32::from_le_bytes([buf[off + 8], buf[off + 9], buf[off + 10], buf[off + 11]]);
 
     let bits_per_elem = (rstate_bits + rbits) as usize + 1; // +1 for sign bit
     let mut result = Vec::with_capacity(len);
