@@ -280,12 +280,17 @@ mod tests {
     fn schema_drift_guard_matches_expected_shape() {
         let work_item = sample_runtime_work_item();
         let value = serde_json::to_value(&work_item).expect("serialize");
-        let keys = value
+        // Sort: the guard checks the FIELD SET, not serialization order —
+        // serde_json's map order flips between sorted and declaration order
+        // depending on whether any workspace dependency enables its
+        // `preserve_order` feature (deno_core does).
+        let mut keys = value
             .as_object()
             .expect("object")
             .keys()
             .cloned()
             .collect::<Vec<_>>();
+        keys.sort();
         assert_eq!(
             keys,
             vec![
@@ -310,12 +315,17 @@ mod tests {
 
         let scope = sample_phase_scope();
         let value = serde_json::to_value(&scope).expect("serialize");
-        let keys = value
+        // Sort: the guard checks the FIELD SET, not serialization order —
+        // serde_json's map order flips between sorted and declaration order
+        // depending on whether any workspace dependency enables its
+        // `preserve_order` feature (deno_core does).
+        let mut keys = value
             .as_object()
             .expect("object")
             .keys()
             .cloned()
             .collect::<Vec<_>>();
+        keys.sort();
         assert_eq!(
             keys,
             vec![
