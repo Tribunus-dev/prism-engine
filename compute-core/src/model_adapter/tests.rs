@@ -160,7 +160,11 @@ fn standard_names(map: &HashMap<String, (String, Vec<u32>, Vec<u8>)>) -> Vec<Str
 fn test_registry_selects_qwen2() {
     let registry = AdapterRegistry::new();
     let config = serde_json::json!({"model_type": "qwen2"});
-    let tensor_names = vec!["model.embed_tokens.weight".to_string()];
+    // detect() requires tensor-name evidence, not just the config claim.
+    let tensor_names = vec![
+        "model.embed_tokens.weight".to_string(),
+        "model.layers.0.self_attn.q_proj.weight".to_string(),
+    ];
     let adapter = registry.select(&config, &tensor_names).unwrap();
     assert_eq!(adapter.family_name(), "qwen2");
 }
@@ -169,7 +173,10 @@ fn test_registry_selects_qwen2() {
 fn test_registry_selects_llama() {
     let registry = AdapterRegistry::new();
     let config = serde_json::json!({"model_type": "llama"});
-    let tensor_names = vec!["model.embed_tokens.weight".to_string()];
+    let tensor_names = vec![
+        "model.embed_tokens.weight".to_string(),
+        "model.layers.0.self_attn.q_proj.weight".to_string(),
+    ];
     let adapter = registry.select(&config, &tensor_names).unwrap();
     assert_eq!(adapter.family_name(), "llama");
 }
@@ -177,7 +184,8 @@ fn test_registry_selects_llama() {
 #[test]
 fn test_registry_selects_mistral() {
     let registry = AdapterRegistry::new();
-    let config = serde_json::json!({"model_type": "mistral"});
+    // Mistral's detect() keys on the sliding_window config field.
+    let config = serde_json::json!({"model_type": "mistral", "sliding_window": 4096});
     let tensor_names = vec!["model.embed_tokens.weight".to_string()];
     let adapter = registry.select(&config, &tensor_names).unwrap();
     assert_eq!(adapter.family_name(), "mistral");
@@ -187,7 +195,10 @@ fn test_registry_selects_mistral() {
 fn test_registry_selects_gemma() {
     let registry = AdapterRegistry::new();
     let config = serde_json::json!({"model_type": "gemma"});
-    let tensor_names = vec!["model.embed_tokens.weight".to_string()];
+    let tensor_names = vec![
+        "model.embed_tokens.weight".to_string(),
+        "model.layers.0.self_attn.q_proj.weight".to_string(),
+    ];
     let adapter = registry.select(&config, &tensor_names).unwrap();
     assert_eq!(adapter.family_name(), "gemma");
 }
@@ -210,7 +221,10 @@ fn test_registry_selects_gemma4_unified() {
 fn test_registry_selects_phi() {
     let registry = AdapterRegistry::new();
     let config = serde_json::json!({"model_type": "phi3"});
-    let tensor_names = vec!["model.embed_tokens.weight".to_string()];
+    let tensor_names = vec![
+        "model.embed_tokens.weight".to_string(),
+        "model.layers.0.self_attn.q_proj.weight".to_string(),
+    ];
     let adapter = registry.select(&config, &tensor_names).unwrap();
     assert_eq!(adapter.family_name(), "phi");
 }
