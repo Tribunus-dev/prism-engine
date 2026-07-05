@@ -9,21 +9,10 @@
 use std::fmt;
 
 // ── RuntimeMode ───────────────────────────────────────────────────────────
-
-/// Current runtime mode affecting dispatch decisions.
-///
-/// Shared between MLX backend and Candle CPU backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeMode {
-    /// Safe mode: no fused int4 for FFN projections, no mapped no-copy
-    /// for quantized weights — use the authority (dequantize + matmul) path.
-    Safe,
-    /// Qualified mode: operations permitted only after a crash-free parity
-    /// probe has passed for this exact shape class.
-    Qualified,
-    /// Experimental mode: all paths enabled.
-    Experimental,
-}
+// Moved to `crate::projection_types` (always-on) so production readiness
+// gates can name it without the MLX stack; re-exported here so research
+// paths are unchanged.
+pub use crate::projection_types::RuntimeMode;
 
 // ── ProjectionFamily ───────────────────────────────────────────────────────
 
