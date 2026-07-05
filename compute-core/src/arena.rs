@@ -15,6 +15,7 @@ pub enum DataType {
 }
 
 pub use crate::arena_info::ArenaInfo;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 use crate::external_array::ExternalStorage;
 
 use std::os::raw::c_void as RawVoid;
@@ -70,6 +71,7 @@ pub struct Arena {
     pub externally_owned: bool,
 }
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 impl ExternalStorage for Arena {
     fn data_ptr(&self) -> *const u8 {
         self.info.base_address as *const u8
@@ -272,6 +274,7 @@ impl Arena {
     /// The arena must remain alive (not dropped) until the MLX evaluation
     /// completes and any Core ML or Accelerate reads finish.  The caller
     /// is responsible for lease-based access serialisation.
+    #[cfg(feature = "mlx-backend")] // research surface: MLX evaluation into the arena
     pub unsafe fn evaluate_into(&self, array: &mlx_rs::Array) -> crate::Result<()> {
         array
             .eval()
@@ -351,7 +354,7 @@ impl OutputBufferHint for Arena {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mlx-backend"))] // tests drive the arena through MLX arrays
 mod tests {
     use super::*;
     use crate::coreai_bridge::CoreAiModel;
