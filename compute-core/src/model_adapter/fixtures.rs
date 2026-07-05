@@ -80,7 +80,12 @@ pub fn write_tiny_shard(dir: &Path, filename: &str, tensors: &[(&str, &[u32])]) 
         named.push((name, shape));
     }
 
-    let base_offset: usize = 8; // header length field is 8 bytes
+    // Per the safetensors spec, data_offsets are relative to the START OF THE
+    // DATA SECTION (the byte immediately after the header) — the first tensor
+    // begins at 0. The previous value (8, the header-length field size) shifted
+    // every tensor and made the safetensors crate reject the shard with
+    // InvalidOffset on the first tensor.
+    let base_offset: usize = 0;
     let header = build_safetensors_header(&named, base_offset);
     let header_bytes = header.as_bytes();
     let header_len = header_bytes.len() as u64;
