@@ -105,7 +105,7 @@ fn main() {
     // Run one model: returns (metrics, per-position logits from the PPL pass, vocab).
     let run = |name: &str, path: &PathBuf| -> (ModelRunMetrics, Vec<Vec<f32>>, usize) {
         // ── Perplexity + logits via teacher forcing (fresh KV) ──
-        let mut orch = Orchestrator::from_cimage(path, 1)
+        let mut orch = Orchestrator::from_cimage(path, 1, false)
             .unwrap_or_else(|e| panic!("load {name} ({}): {e}", path.display()));
         let mut nlls: Vec<f32> = Vec::new();
         let mut logits_seq: Vec<Vec<f32>> = Vec::new();
@@ -124,7 +124,7 @@ fn main() {
         let ppl = perplexity(&nlls);
 
         // ── Throughput on a fresh orchestrator (clean KV) ──
-        let mut orch = Orchestrator::from_cimage(path, 1)
+        let mut orch = Orchestrator::from_cimage(path, 1, false)
             .unwrap_or_else(|e| panic!("reload {name}: {e}"));
         let t_prefill = Instant::now();
         orch.prefill_text(&prompt)
