@@ -292,6 +292,191 @@ pub fn compute_calibration_logits(
     Err("KD scoring requires macOS + the prism-backend feature (Metal megakernel)".into())
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Pipelined parity gate — the CPU-side validator math for the Stage 0 taps
+// (kernels/STAGE0_TAPS_SPEC.md). Std-only + serde; lands BEFORE the taps so
+// the validator's gate math is already tested when the Metal side arrives.
+//
+// Granularity: one LayerDriftReport per (layer, tap) comparison of a tapped
+// activation against its golden source (bf16 anchor / megakernel oracle);
+// one ParityManifest per decode token; hard breach ⇒ the pipelined validator
+// stops submitting work and dumps the manifest + raw taps (taint preserved).
+// All drift accumulation is f64 — the auditor must not add its own error.
+// ═══════════════════════════════════════════════════════════════════════════
+
+use serde::{Deserialize, Serialize};
+
+/// Which tap point a drift report measures (STAGE0_TAPS_SPEC slot map).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TapKind {
+    /// Slot 0 — embedding output, before layer 0.
+    PostEmbed,
+    /// Slot 2k+1 — layer k after the attention residual.
+    PostAttention,
+    /// Slot 2k+2 — layer k after the FFN residual (the layer boundary).
+    PostLayer,
+    /// Last slot — final pre-logits hidden state.
+    FinalHidden,
+}
+
+/// Drift of one tapped activation against its golden source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerDriftReport {
+    /// Transformer layer index. Ignored (0) for PostEmbed / FinalHidden.
+    pub layer_idx: u32,
+    pub tap: TapKind,
+    /// ‖actual − golden‖₂ / ‖golden‖₂, f64-accumulated.
+    pub rel_l2: f64,
+    /// max |actual − golden| (infinity norm), f64.
+    pub max_abs_error: f64,
+    /// Bitwise equality of the f32 payloads (true ⇒ rel_l2 == 0 exactly).
+    pub bitwise_identical: bool,
+}
+
+/// Compute the drift report for one tap. `actual` and `golden` must be the
+/// same length (a mismatch is a plumbing bug, not a drift — assert, like the
+/// distill_core scorers).
+pub fn drift_report(
+    actual: &[f32],
+    golden: &[f32],
+    layer_idx: u32,
+    tap: TapKind,
+) -> LayerDriftReport {
+    assert_eq!(
+        actual.len(),
+        golden.len(),
+        "tap length mismatch (layer {layer_idx}, {tap:?}) — wrong slot geometry, not drift"
+    );
+    let mut se = 0.0f64;
+    let mut den = 0.0f64;
+    let mut max_abs = 0.0f64;
+    let mut bitwise = true;
+    for (a, g) in actual.iter().zip(golden) {
+        let d = *a as f64 - *g as f64;
+        se += d * d;
+        den += (*g as f64) * (*g as f64);
+        let ad = d.abs();
+        if ad > max_abs {
+            max_abs = ad;
+        }
+        if a.to_bits() != g.to_bits() {
+            bitwise = false;
+        }
+    }
+    LayerDriftReport {
+        layer_idx,
+        tap,
+        rel_l2: (se / den.max(1e-300)).sqrt(),
+        max_abs_error: max_abs,
+        bitwise_identical: bitwise,
+    }
+}
+
+/// Gate thresholds. `warn < hard`; drift ≤ warn passes silently, drift in
+/// (warn, hard] logs telemetry (the 48-layer drift-curve signal), drift >
+/// hard is a breach that stops the run. Default hard = 0.35 matches the
+/// activation-error ceiling in JOINT_MTP_COMPILE.md §4.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ParityThresholds {
+    pub hard: f64,
+    pub warn: f64,
+}
+
+impl Default for ParityThresholds {
+    fn default() -> Self {
+        ParityThresholds { hard: 0.35, warn: 0.10 }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DriftStatus {
+    Pass,
+    Warn,
+    HardBreach,
+}
+
+/// Classify one report against the thresholds.
+pub fn classify_drift(report: &LayerDriftReport, t: &ParityThresholds) -> DriftStatus {
+    assert!(
+        t.warn <= t.hard,
+        "ParityThresholds inverted: warn {} > hard {}",
+        t.warn,
+        t.hard
+    );
+    if report.rel_l2 > t.hard {
+        DriftStatus::HardBreach
+    } else if report.rel_l2 > t.warn {
+        DriftStatus::Warn
+    } else {
+        DriftStatus::Pass
+    }
+}
+
+/// Verdict decomposition over one token's reports. Indices refer into the
+/// manifest's `reports` vec (which is in tap-slot order, so
+/// `first_hard_breach` is also the EARLIEST point in the forward where parity
+/// broke — the root-cause pointer).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParityVerdict {
+    /// No hard breaches (warns allowed — they are telemetry).
+    pub passed: bool,
+    pub hard_breaches: Vec<usize>,
+    pub warns: Vec<usize>,
+    pub worst_rel_l2: f64,
+    pub worst_index: Option<usize>,
+    /// Earliest hard breach in forward order — where to start root-causing.
+    pub first_hard_breach: Option<usize>,
+}
+
+/// One decode token's auditable parity record — the unit serialized into the
+/// `.parity` sidecar (digest recorded in receipts, never baked into a binary).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParityManifest {
+    pub token_index: u64,
+    pub thresholds: ParityThresholds,
+    pub reports: Vec<LayerDriftReport>,
+    pub verdict: ParityVerdict,
+}
+
+impl ParityManifest {
+    /// Evaluate reports (in tap-slot / forward order) into a sealed manifest.
+    pub fn evaluate(
+        token_index: u64,
+        thresholds: ParityThresholds,
+        reports: Vec<LayerDriftReport>,
+    ) -> Self {
+        let mut hard_breaches = Vec::new();
+        let mut warns = Vec::new();
+        let mut worst_rel_l2 = 0.0f64;
+        let mut worst_index = None;
+        for (i, r) in reports.iter().enumerate() {
+            match classify_drift(r, &thresholds) {
+                DriftStatus::HardBreach => hard_breaches.push(i),
+                DriftStatus::Warn => warns.push(i),
+                DriftStatus::Pass => {}
+            }
+            if r.rel_l2 > worst_rel_l2 {
+                worst_rel_l2 = r.rel_l2;
+                worst_index = Some(i);
+            }
+        }
+        let verdict = ParityVerdict {
+            passed: hard_breaches.is_empty(),
+            first_hard_breach: hard_breaches.first().copied(),
+            hard_breaches,
+            warns,
+            worst_rel_l2,
+            worst_index,
+        };
+        ParityManifest {
+            token_index,
+            thresholds,
+            reports,
+            verdict,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +563,79 @@ mod tests {
         assert!(a.iter().all(|&t| t >= 1 && t <= 1000));
         let c = builtin_calibration_tokens(64, 1000, 2);
         assert_ne!(a, c, "different seeds must differ");
+    }
+
+    // ── pipelined parity gate ──────────────────────────────────────────
+
+    #[test]
+    fn identical_taps_report_zero_and_pass() {
+        let x: Vec<f32> = (0..256).map(|i| (i as f32 * 0.37).sin()).collect();
+        let r = drift_report(&x, &x.clone(), 7, TapKind::PostLayer);
+        assert_eq!(r.rel_l2, 0.0);
+        assert_eq!(r.max_abs_error, 0.0);
+        assert!(r.bitwise_identical);
+        let m = ParityManifest::evaluate(0, ParityThresholds::default(), vec![r]);
+        assert!(m.verdict.passed);
+        assert!(m.verdict.hard_breaches.is_empty() && m.verdict.warns.is_empty());
+    }
+
+    #[test]
+    fn drift_matches_hand_math_in_f64() {
+        // golden = [3, 4] (‖g‖ = 5); actual adds (+0.3, −0.4) (‖d‖ = 0.5)
+        // ⇒ rel_l2 = 0.1 exactly; max_abs = 0.4.
+        let golden = vec![3.0f32, 4.0];
+        let actual = vec![3.3f32, 3.6];
+        let r = drift_report(&actual, &golden, 0, TapKind::PostEmbed);
+        // Tolerance is f32-input-quantization bound (3.3f32 != 3.3 exactly);
+        // the f64 accumulator adds nothing beyond it.
+        assert!((r.rel_l2 - 0.1).abs() < 1e-7, "rel_l2 {}", r.rel_l2);
+        assert!((r.max_abs_error - 0.4).abs() < 1e-6);
+        assert!(!r.bitwise_identical);
+    }
+
+    #[test]
+    fn verdict_decomposes_pass_warn_hard_with_earliest_breach() {
+        let golden = vec![1.0f32; 64];
+        let mk = |scale: f32, layer: u32| {
+            let actual: Vec<f32> = golden.iter().map(|g| g + scale).collect();
+            drift_report(&actual, &golden, layer, TapKind::PostLayer)
+        };
+        // rel_l2 == |scale| here (uniform delta over uniform golden).
+        let reports = vec![mk(0.01, 0), mk(0.2, 1), mk(0.5, 2), mk(0.9, 3)];
+        let m = ParityManifest::evaluate(42, ParityThresholds::default(), reports);
+        assert!(!m.verdict.passed);
+        assert_eq!(m.verdict.warns, vec![1]); // 0.2 ∈ (0.1, 0.35]
+        assert_eq!(m.verdict.hard_breaches, vec![2, 3]);
+        assert_eq!(m.verdict.first_hard_breach, Some(2), "earliest breach is the root-cause pointer");
+        assert_eq!(m.verdict.worst_index, Some(3));
+        assert!((m.verdict.worst_rel_l2 - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn manifest_round_trips_through_json() {
+        let golden = vec![1.0f32, 2.0, 3.0];
+        let actual = vec![1.0f32, 2.5, 3.0];
+        let m = ParityManifest::evaluate(
+            7,
+            ParityThresholds::default(),
+            vec![drift_report(&actual, &golden, 12, TapKind::PostAttention)],
+        );
+        let json = serde_json::to_string(&m).expect("serialize .parity");
+        let back: ParityManifest = serde_json::from_str(&json).expect("deserialize .parity");
+        assert_eq!(back.token_index, 7);
+        assert_eq!(back.reports.len(), 1);
+        assert_eq!(back.reports[0].tap, TapKind::PostAttention);
+        assert_eq!(back.reports[0].layer_idx, 12);
+        assert!((back.reports[0].rel_l2 - m.reports[0].rel_l2).abs() < 1e-15);
+        assert_eq!(back.verdict.passed, m.verdict.passed);
+    }
+
+    #[test]
+    #[should_panic(expected = "ParityThresholds inverted")]
+    fn inverted_thresholds_panic() {
+        let golden = vec![1.0f32; 8];
+        let r = drift_report(&golden, &golden, 0, TapKind::FinalHidden);
+        let bad = ParityThresholds { hard: 0.1, warn: 0.5 };
+        let _ = classify_drift(&r, &bad);
     }
 }
