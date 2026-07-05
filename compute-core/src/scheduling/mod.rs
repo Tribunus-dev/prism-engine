@@ -6,22 +6,29 @@
 //! and token budget allocation across concurrent requests.
 
 pub mod activation_arena;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod activation_binding;
 pub mod ane_artifact_cache;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod batch;
 pub mod benchmark_harness;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod execution_context;
 pub mod kv_transaction;
 pub mod lane_executors;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod legacy_adapter;
 pub mod memory_pool;
 #[cfg(feature = "metal-dispatch")]
 pub mod metal_decoder;
 pub mod phase_cancellation;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod phase_engine;
 pub mod phase_engine_state;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod phase_invocation;
 pub mod phase_readiness;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod phase_runner;
 pub mod phase_telemetry;
 pub mod prefill_orchestrator;
@@ -34,6 +41,7 @@ pub mod scheduler;
 pub mod slot;
 pub mod token_budget;
 pub mod tri_lane_orchestrator;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod weight_residency;
 pub use token_budget::*;
 
