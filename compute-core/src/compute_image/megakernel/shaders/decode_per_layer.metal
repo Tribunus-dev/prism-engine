@@ -771,3 +771,90 @@ kernel void fused_swa_pair_real(
                    ffn_scratch, layer_index_b, seq_position, tid, tg_sz);
     for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) hidden_out[i] = h_buf[i];
 }
+
+// 3 consecutive layers per dispatch — final intended implementation: thin
+// run_layer_full chain, 2 device round-trip(s) eliminated. Per-layer KV
+// buffers; shared ffn scratch used sequentially.
+kernel void fused_full_triple_real(
+    device const half*  hidden_in     [[buffer(0)]],
+    device half*        hidden_out    [[buffer(1)]],
+    device half*        kv_cache_k_a  [[buffer(2)]],
+    device half*        kv_cache_v_a  [[buffer(3)]],
+    device const uint*  ternary_w     [[buffer(4)]],
+    device const half*  norms         [[buffer(5)]],
+    device const half*  head_gates    [[buffer(6)]],
+    device half*        ffn_scratch   [[buffer(7)]],
+    constant uint&      layer_index_a [[buffer(8)]],
+    constant uint&      seq_position  [[buffer(9)]],
+    device half*        kv_cache_k_b  [[buffer(10)]],
+    device half*        kv_cache_v_b  [[buffer(11)]],
+    constant uint&      layer_index_b [[buffer(12)]],
+    device half*        kv_cache_k_c  [[buffer(13)]],
+    device half*        kv_cache_v_c  [[buffer(14)]],
+    constant uint&      layer_index_c [[buffer(15)]],
+    uint tid   [[thread_index_in_threadgroup]],
+    uint tg_sz [[threads_per_threadgroup]])
+{
+    PRISM_LAYER_LOCALS
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) h_buf[i] = hidden_in[i];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_a, kv_cache_v_a, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_a, seq_position, tid, tg_sz);
+    // Intermediate boundaries stay resident in threadgroup h_buf.
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_b, kv_cache_v_b, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_b, seq_position, tid, tg_sz);
+    // Intermediate boundaries stay resident in threadgroup h_buf.
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_c, kv_cache_v_c, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_c, seq_position, tid, tg_sz);
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) hidden_out[i] = h_buf[i];
+}
+
+// 4 consecutive layers per dispatch — final intended implementation: thin
+// run_layer_full chain, 3 device round-trip(s) eliminated. Per-layer KV
+// buffers; shared ffn scratch used sequentially.
+kernel void fused_full_quad_real(
+    device const half*  hidden_in     [[buffer(0)]],
+    device half*        hidden_out    [[buffer(1)]],
+    device half*        kv_cache_k_a  [[buffer(2)]],
+    device half*        kv_cache_v_a  [[buffer(3)]],
+    device const uint*  ternary_w     [[buffer(4)]],
+    device const half*  norms         [[buffer(5)]],
+    device const half*  head_gates    [[buffer(6)]],
+    device half*        ffn_scratch   [[buffer(7)]],
+    constant uint&      layer_index_a [[buffer(8)]],
+    constant uint&      seq_position  [[buffer(9)]],
+    device half*        kv_cache_k_b  [[buffer(10)]],
+    device half*        kv_cache_v_b  [[buffer(11)]],
+    constant uint&      layer_index_b [[buffer(12)]],
+    device half*        kv_cache_k_c  [[buffer(13)]],
+    device half*        kv_cache_v_c  [[buffer(14)]],
+    constant uint&      layer_index_c [[buffer(15)]],
+    device half*        kv_cache_k_d  [[buffer(16)]],
+    device half*        kv_cache_v_d  [[buffer(17)]],
+    constant uint&      layer_index_d [[buffer(18)]],
+    uint tid   [[thread_index_in_threadgroup]],
+    uint tg_sz [[threads_per_threadgroup]])
+{
+    PRISM_LAYER_LOCALS
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) h_buf[i] = hidden_in[i];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_a, kv_cache_v_a, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_a, seq_position, tid, tg_sz);
+    // Intermediate boundaries stay resident in threadgroup h_buf.
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_b, kv_cache_v_b, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_b, seq_position, tid, tg_sz);
+    // Intermediate boundaries stay resident in threadgroup h_buf.
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_c, kv_cache_v_c, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_c, seq_position, tid, tg_sz);
+    // Intermediate boundaries stay resident in threadgroup h_buf.
+    run_layer_full(h_buf, n_buf, q_chunk, shared_sums, scores, attn_out,
+                   kv_cache_k_d, kv_cache_v_d, ternary_w, norms, head_gates,
+                   ffn_scratch, layer_index_d, seq_position, tid, tg_sz);
+    for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) hidden_out[i] = h_buf[i];
+}
