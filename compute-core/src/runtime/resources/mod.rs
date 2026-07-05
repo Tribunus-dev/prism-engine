@@ -4,12 +4,15 @@
 //! in this module participates in schedule dependency resolution via its
 //! stable `SchedulableResource::RESOURCE_ID`.
 
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod audio;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod kv_cache_coordinator;
 pub mod legacy_worker_bridge;
 pub mod monotonic_clock;
 pub mod npu_completion_port;
 pub mod text_to_speech;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod vision;
 pub mod worker_diagnostics;
 pub mod worker_event_source;
