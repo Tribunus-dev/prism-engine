@@ -1,6 +1,29 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// ── Stage 0 activation taps (kernels/STAGE0_TAPS_SPEC.md, Transport A) ─────
+// Compiled in ONLY when the runtime passes -DPRISM_TAPS=1 (audit/compile
+// passes, via TRIBUNUS_TAPS=1). Without the define the preprocessed source is
+// byte-identical to the untapped kernel — zero branches, zero registers,
+// zero bandwidth on production PSOs. Slot map: 0 = post-embed; 2k+1 = layer k
+// post-attention-residual; 2k+2 = layer k post-layer; 2·LAYERS+1 = final
+// pre-logits hidden. tap_progress is a device-scope monotonic slot counter
+// for the pipelined CPU validator (same shared-buffer atomic convention as
+// the work ring).
+#ifdef PRISM_TAPS
+#define PRISM_TAP(taps, progress, slot, src)                                   \
+    threadgroup_barrier(mem_flags::mem_threadgroup);                           \
+    for (uint _ti = tid; _ti < HIDDEN_DIM; _ti += tg_sz) {                     \
+        (taps)[(uint)(slot) * HIDDEN_DIM + _ti] = (src)[_ti];                  \
+    }                                                                          \
+    threadgroup_barrier(mem_flags::mem_device);                                \
+    if (tid == 0) {                                                            \
+        atomic_store_explicit((progress), (uint)(slot), memory_order_relaxed); \
+    }
+#else
+#define PRISM_TAP(taps, progress, slot, src)
+#endif
+
 // ── KV Interleave ABI constants ─────────────────────────────────
 #define CLAIM_UNOWNED 0
 #define CLAIM_HELPER 1
@@ -332,6 +355,10 @@ kernel void gemma4_full_decode_persistent(
     device const half*    draft_norms       [[buffer(12)]],  // draft model RMSNorm weights
     device uint*          draft_output      [[buffer(28)]],  // draft output: [N, tok_id0..4, logprob0..4]
     device const half*    head_gates        [[buffer(29)]],  // per-head attention gates (NUM_Q_HEADS × f16)
+#ifdef PRISM_TAPS
+    device half*          layer_taps        [[buffer(31)]],  // [(2*LAYERS+2) x HIDDEN_DIM] f16 tap slots
+    device atomic_uint*   tap_progress      [[buffer(32)]],  // last completed tap slot (monotonic)
+#endif
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]])
 {
@@ -441,6 +468,8 @@ kernel void gemma4_full_decode_persistent(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
+    // Tap slot 0: post-embed residual stream.
+    PRISM_TAP(layer_taps, tap_progress, 0u, h_buf);
     if (kind == 0) {
     // --- 48-layer loop -------------------------------------------------
     for (uint layer = 0; layer < LAYERS; ++layer) {
@@ -774,6 +803,8 @@ kernel void gemma4_full_decode_persistent(
             threadgroup_barrier(mem_flags::mem_threadgroup);
         }
 
+        // Tap slot 2k+1: post-attention residual.
+        PRISM_TAP(layer_taps, tap_progress, 2u * layer + 1u, h_buf);
         // --- 8. Post-Attention RMSNorm ------------------------------
         for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) n_buf[i] = h_buf[i];
         threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -835,6 +866,8 @@ kernel void gemma4_full_decode_persistent(
             if (row < HIDDEN_DIM && (tid & 31u) == 0)
                 h_buf[row] += (half)dp_total;
         }
+        // Tap slot 2k+2: post-layer residual (the layer boundary).
+        PRISM_TAP(layer_taps, tap_progress, 2u * layer + 2u, h_buf);
     }
     // --- Entropy: normalize by total query heads and write to device buffer ---
     {
@@ -983,6 +1016,8 @@ kernel void gemma4_full_decode_persistent(
             for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) n_buf[i] = h_buf[i];
             threadgroup_barrier(mem_flags::mem_threadgroup);
             fast_rmsnorm(n_buf, norms + 0, tid, tg_sz, shared_sums);
+            // Tap slot 2*LAYERS+1: final pre-logits hidden (post final norm).
+            PRISM_TAP(layer_taps, tap_progress, 2u * LAYERS + 1u, n_buf);
             // Copy normalized result back to h_buf for centroid scout
             for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) h_buf[i] = n_buf[i];
             threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1481,6 +1516,10 @@ kernel void persistent_decode_worker(
     device uint*          draft_output      [[buffer(28)]],
     device const half*    head_gates        [[buffer(29)]],
     device uint*          kv_prefetch_queue [[buffer(30)]],
+#ifdef PRISM_TAPS
+    device half*          layer_taps        [[buffer(31)]],  // [(2*LAYERS+2) x HIDDEN_DIM] f16 tap slots
+    device atomic_uint*   tap_progress      [[buffer(32)]],  // last completed tap slot (monotonic)
+#endif
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]])
 {
@@ -1705,6 +1744,8 @@ kernel void persistent_decode_worker(
         &epoch_control->epoch_fatal_fault_generation, memory_order_relaxed);
     uint page_table_generation = kv_generation;
 
+    // Tap slot 0: post-embed residual stream.
+    PRISM_TAP(layer_taps, tap_progress, 0u, h_buf);
     if (kind == 0) {
     // --- 48-layer loop -------------------------------------------------
     for (uint layer = 0; layer < LAYERS; ++layer) {
@@ -2029,6 +2070,8 @@ kernel void persistent_decode_worker(
             threadgroup_barrier(mem_flags::mem_threadgroup);
         }
 
+        // Tap slot 2k+1: post-attention residual.
+        PRISM_TAP(layer_taps, tap_progress, 2u * layer + 1u, h_buf);
         // --- 8. Post-Attention RMSNorm ------------------------------
         for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) n_buf[i] = h_buf[i];
         threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -2090,6 +2133,8 @@ kernel void persistent_decode_worker(
             if (row < HIDDEN_DIM && (tid & 31u) == 0)
                 h_buf[row] += (half)dp_total;
         }
+        // Tap slot 2k+2: post-layer residual (the layer boundary).
+        PRISM_TAP(layer_taps, tap_progress, 2u * layer + 2u, h_buf);
 
     }
     // --- Entropy: normalize by total query heads and write to device buffer ---
@@ -2224,6 +2269,8 @@ kernel void persistent_decode_worker(
             for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) n_buf[i] = h_buf[i];
             threadgroup_barrier(mem_flags::mem_threadgroup);
             fast_rmsnorm(n_buf, norms + 0, tid, tg_sz, shared_sums);
+            // Tap slot 2*LAYERS+1: final pre-logits hidden (post final norm).
+            PRISM_TAP(layer_taps, tap_progress, 2u * LAYERS + 1u, n_buf);
             for (uint i = tid; i < HIDDEN_DIM; i += tg_sz) h_buf[i] = n_buf[i];
             threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -2689,6 +2736,10 @@ kernel void persistent_kv_prefetch_worker(
     constant uint&        max_positions [[buffer(9)]],
     constant uint&        max_tokens_per_epoch [[buffer(10)]],
     device EpochControl*  epoch_control [[buffer(11)]],
+#ifdef PRISM_TAPS
+    device half*          layer_taps        [[buffer(31)]],  // [(2*LAYERS+2) x HIDDEN_DIM] f16 tap slots
+    device atomic_uint*   tap_progress      [[buffer(32)]],  // last completed tap slot (monotonic)
+#endif
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]])
 {
