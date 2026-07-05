@@ -13,7 +13,7 @@ use crate::compilation::level1::checkpoint::validate_teacher_checkpoint_against_
 use crate::compilation::level1::gates::check_numerical;
 use crate::compilation::level1::kd_gate::{
     compute_calibration_logits, kd_available, kd_gate, load_calibration_tokens,
-    score_student_logits, KdGateConfig, KdGateResult, KdReport,
+    score_student_logits, KdGateConfig, KdGateResult, KdReport, ParityRun, ParityThresholds,
 };
 use crate::compilation::level1::scheduler::{Level1Config, Level1Scheduler};
 use crate::compilation::level2::bridge::CoreMLTeacher;
@@ -80,6 +80,25 @@ pub struct DistillationRequest {
     /// Gate: fail if top-1 agreement falls below this (default 0.55).
     #[serde(default)]
     pub kd_min_top1: Option<f32>,
+
+    // ── Pipelined parity validator (STAGE0_TAPS_SPEC.md) ────────────────
+    /// Directory of golden tap dumps: `token_{i:05}.bin`, each the
+    /// concatenated f32-LE tap slots (2·layers+2 slots × hidden) for
+    /// calibration token i, produced by the bf16 anchor oracle. When set
+    /// (and this build can run Metal with TRIBUNUS_TAPS=1), the loop runs
+    /// the pipelined parity audit over the calibration stream.
+    #[serde(default)]
+    pub parity_golden_dir: Option<String>,
+    /// Hard breach threshold (rel-L2; default 0.35). Breach ⇒ between-token
+    /// early exit + taint dump + job failure.
+    #[serde(default)]
+    pub parity_hard: Option<f64>,
+    /// Warn threshold (rel-L2; default 0.10) — telemetry only.
+    #[serde(default)]
+    pub parity_warn: Option<f64>,
+    /// `.parity` sidecar path (default `<teacher_checkpoint>.parity.json`).
+    #[serde(default)]
+    pub parity_output: Option<String>,
 }
 
 fn default_representation() -> String {
@@ -117,6 +136,11 @@ pub struct DistillationJobStatus {
     pub kd_gate_passed: Option<bool>,
     /// Why KD scoring was skipped, when it was (e.g. non-Metal build).
     pub kd_skipped_reason: Option<String>,
+    /// SHA-256 of the `.parity` sidecar (also stamped into each BlockReceipt).
+    pub parity_digest: Option<String>,
+    pub parity_passed: Option<bool>,
+    pub parity_tokens_validated: Option<usize>,
+    pub parity_skipped_reason: Option<String>,
     pub error: Option<String>,
 }
 
@@ -146,6 +170,9 @@ struct DistillationJob {
     kd_report: Option<KdReport>,
     kd_gate_result: Option<KdGateResult>,
     kd_skipped_reason: Option<String>,
+    parity_run: Option<ParityRun>,
+    parity_digest: Option<String>,
+    parity_skipped_reason: Option<String>,
     error: Option<String>,
 }
 
@@ -191,6 +218,9 @@ impl DistillationEngine {
             kd_report: None,
             kd_gate_result: None,
             kd_skipped_reason: None,
+            parity_run: None,
+            parity_digest: None,
+            parity_skipped_reason: None,
             error: None,
         };
         jobs.insert(job_id.clone(), job);
@@ -235,6 +265,10 @@ impl DistillationEngine {
             kd_worst_window: j.kd_report.as_ref().map(|r| r.worst_window_kd),
             kd_gate_passed: j.kd_gate_result.as_ref().map(|g| g.passed),
             kd_skipped_reason: j.kd_skipped_reason.clone(),
+            parity_digest: j.parity_digest.clone(),
+            parity_passed: j.parity_run.as_ref().map(|r| r.all_passed()),
+            parity_tokens_validated: j.parity_run.as_ref().map(|r| r.tokens_validated()),
+            parity_skipped_reason: j.parity_skipped_reason.clone(),
             error: j.error.clone(),
         })
     }
@@ -367,6 +401,178 @@ fn run_kd_stage(
     let report = score_student_logits(&teacher, &student, &cfg)?;
     let verdict = kd_gate(&report, &cfg);
     Ok(Some((report, verdict)))
+}
+
+/// Whether the pipelined parity audit can run in this build (needs the Metal
+/// megakernel with Stage 0 taps).
+const fn parity_available() -> bool {
+    cfg!(all(target_os = "macos", feature = "prism-backend"))
+}
+
+/// Load one token's golden tap slots: `<dir>/token_{i:05}.bin`, the
+/// concatenated f32-LE slots produced by the bf16 anchor oracle.
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
+fn load_golden_slots(
+    dir: &std::path::Path,
+    token_index: u64,
+    slots: usize,
+    hidden: usize,
+) -> Result<Vec<Vec<f32>>, String> {
+    let path = dir.join(format!("token_{token_index:05}.bin"));
+    let bytes = std::fs::read(&path).map_err(|e| format!("read golden {}: {e}", path.display()))?;
+    let expect = slots * hidden * 4;
+    if bytes.len() != expect {
+        return Err(format!(
+            "golden {} is {} bytes, expected {expect} ({slots} slots × {hidden} × f32) — \
+             wrong model geometry or truncated dump",
+            path.display(),
+            bytes.len()
+        ));
+    }
+    Ok((0..slots)
+        .map(|si| {
+            bytes[si * hidden * 4..(si + 1) * hidden * 4]
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect()
+        })
+        .collect())
+}
+
+/// Run the pipelined parity audit: decode the calibration stream through the
+/// taps-enabled teacher megakernel while a validator thread scores each
+/// token's taps against the bf16 anchor goldens (STAGE0_TAPS_SPEC.md).
+///
+/// Pipelining: the validator consumes token t−1 while the GPU decodes token
+/// t; a hard breach flips `stop` and the main loop exits BETWEEN tokens
+/// (no new submissions), preserving the taint. On breach the failing token's
+/// raw tap slots are dumped beside the sidecar.
+///
+/// Returns `(run, digest, sidecar_path)`; `Ok(None)` when not requested.
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
+fn run_parity_stage(
+    request: &DistillationRequest,
+    total_blocks: usize,
+) -> Result<Option<(ParityRun, String, PathBuf)>, String> {
+    use crate::compilation::level1::kd_gate::validate_token_taps;
+    use crate::compute_image::orchestrator::Orchestrator;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let Some(golden_dir) = request.parity_golden_dir.as_ref() else {
+        return Ok(None);
+    };
+    if std::env::var("TRIBUNUS_TAPS").as_deref() != Ok("1") {
+        return Err(
+            "parity audit requires TRIBUNUS_TAPS=1 in the environment BEFORE the worker \
+             constructs the teacher (taps compile into the persistent kernel at construction)"
+                .into(),
+        );
+    }
+    let layers = total_blocks as u32;
+    let slots = 2 * total_blocks + 2;
+    let thresholds = ParityThresholds {
+        hard: request.parity_hard.unwrap_or(0.35),
+        warn: request.parity_warn.unwrap_or(0.10),
+    };
+    let tokens = load_calibration_tokens(
+        request
+            .calibration_tokens_path
+            .as_deref()
+            .map(std::path::Path::new),
+        request.calibration_len.unwrap_or(128),
+        request.calibration_vocab_cap.unwrap_or(1000),
+    )?;
+    let golden_dir = PathBuf::from(golden_dir);
+    let sidecar = request
+        .parity_output
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(format!("{}.parity.json", request.teacher_checkpoint)));
+
+    let mut orch = Orchestrator::from_cimage(
+        std::path::Path::new(&request.teacher_checkpoint),
+        1,
+        false,
+    )
+    .map_err(|e| format!("load teacher for parity audit: {e}"))?;
+
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel::<(u64, Vec<Vec<f32>>)>();
+    let v_stop = std::sync::Arc::clone(&stop);
+    let v_dir = golden_dir.clone();
+    let validator = std::thread::spawn(
+        move || -> Result<(ParityRun, Option<(u64, Vec<Vec<f32>>)>), String> {
+            let mut run = ParityRun::new(thresholds);
+            let mut taint = None;
+            for (idx, actual) in rx {
+                let hidden = actual.first().map(Vec::len).unwrap_or(0);
+                let golden = load_golden_slots(&v_dir, idx, actual.len(), hidden)?;
+                let manifest = validate_token_taps(idx, layers, &actual, &golden, thresholds)?;
+                if !run.push(manifest) {
+                    taint = Some((idx, actual));
+                    v_stop.store(true, Ordering::Release);
+                    break;
+                }
+            }
+            Ok((run, taint))
+        },
+    );
+
+    for (i, &tok) in tokens.iter().enumerate() {
+        // Between-token early exit: a hard breach on token t−1 stops token
+        // t+1 from ever being submitted; token t (in flight) completes.
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
+        let (_next, _logits, taps) = orch
+            .decode_token_logits_with_taps(tok)
+            .map_err(|e| format!("tapped decode @ token {i}: {e}"))?;
+        let mut slot_vec = Vec::with_capacity(slots);
+        slot_vec.push(taps.post_embed());
+        for k in 0..total_blocks {
+            slot_vec.push(taps.post_attention(k));
+            slot_vec.push(taps.post_layer(k));
+        }
+        slot_vec.push(taps.final_hidden());
+        if tx.send((i as u64, slot_vec)).is_err() {
+            break; // validator ended (error path) — join below surfaces it
+        }
+    }
+    drop(tx);
+    let (run, taint) = validator
+        .join()
+        .map_err(|_| "parity validator thread panicked".to_string())??;
+
+    let json = run.to_parity_json()?;
+    std::fs::write(&sidecar, &json)
+        .map_err(|e| format!("write {}: {e}", sidecar.display()))?;
+    let digest = run.parity_digest()?;
+    if let Some((idx, slots_data)) = taint {
+        // Taint dump: the failing token's raw tap slots, full fidelity.
+        let taint_path = sidecar.with_extension("taint.bin");
+        let mut bytes = Vec::with_capacity(slots_data.iter().map(|v| v.len() * 4).sum());
+        for sv in &slots_data {
+            for v in sv {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        std::fs::write(&taint_path, &bytes)
+            .map_err(|e| format!("write taint {}: {e}", taint_path.display()))?;
+        eprintln!(
+            "[parity] HARD BREACH at token {idx}: taint → {}, manifests → {}",
+            taint_path.display(),
+            sidecar.display()
+        );
+    }
+    Ok(Some((run, digest, sidecar)))
+}
+
+#[cfg(not(all(target_os = "macos", feature = "prism-backend")))]
+fn run_parity_stage(
+    _request: &DistillationRequest,
+    _total_blocks: usize,
+) -> Result<Option<(ParityRun, String, PathBuf)>, String> {
+    Err("parity audit requires macOS + the prism-backend feature (Metal megakernel taps)".into())
 }
 
 /// Background loop driving a single distillation job block-by-block.
@@ -548,6 +754,68 @@ async fn run_distillation_loop(
         }
     };
 
+    // ── Pipelined parity audit (Stage 0 taps vs bf16 anchor goldens) ─────
+    let parity_metrics: Option<(f64, usize, bool)> = if request.parity_golden_dir.is_none() {
+        None
+    } else if !parity_available() {
+        let reason =
+            "parity audit skipped: requires macOS + prism-backend (Metal megakernel taps)"
+                .to_string();
+        let mut j = jobs.lock().await;
+        if let Some(job) = j.get_mut(&job_id) {
+            job.parity_skipped_reason = Some(reason);
+        }
+        None
+    } else {
+        broker.declare(ceiling);
+        let staged = tokio::task::spawn_blocking({
+            let request = request.clone();
+            move || run_parity_stage(&request, total_blocks)
+        })
+        .await;
+        broker.release(ceiling);
+        match staged {
+            Err(join_err) => {
+                let mut j = jobs.lock().await;
+                if let Some(job) = j.get_mut(&job_id) {
+                    job.state = DistillationState::Failed;
+                    job.error = Some(format!("parity stage task join error: {join_err}"));
+                }
+                broker.set_mode(ServerOperationalMode::Idle);
+                return;
+            }
+            Ok(Err(error)) => {
+                let mut j = jobs.lock().await;
+                if let Some(job) = j.get_mut(&job_id) {
+                    job.state = DistillationState::Failed;
+                    job.error = Some(format!("parity stage failed: {error}"));
+                }
+                broker.set_mode(ServerOperationalMode::Idle);
+                return;
+            }
+            Ok(Ok(None)) => None,
+            Ok(Ok(Some((run, digest, sidecar)))) => {
+                let summary = (run.worst_rel_l2, run.tokens_validated(), run.all_passed());
+                eprintln!(
+                    "[parity] {} tokens validated, worst rel-L2 {:.3e}, sidecar {}",
+                    summary.1,
+                    summary.0,
+                    sidecar.display()
+                );
+                let mut j = jobs.lock().await;
+                if let Some(job) = j.get_mut(&job_id) {
+                    job.parity_run = Some(run);
+                    job.parity_digest = Some(digest);
+                }
+                Some(summary)
+            }
+        }
+    };
+    let parity_digest_for_receipts: Option<String> = {
+        let j = jobs.lock().await;
+        j.get(&job_id).and_then(|job| job.parity_digest.clone())
+    };
+
     // ── Compiling (block-by-block) ───────────────────────────────────────
     for block_idx in 0..total_blocks {
         let block_started_at = Instant::now();
@@ -610,6 +878,13 @@ async fn run_distillation_loop(
                 if kd_passed { 1.0 } else { 0.0 },
             );
         }
+        // Parity audit summary (same values on every block — the audit is
+        // model-level per token; per-block isolation arrives with block-swap).
+        if let Some((worst_rel_l2, tokens, passed)) = parity_metrics {
+            numerical_drift.insert("parity_worst_rel_l2".into(), worst_rel_l2 as f32);
+            numerical_drift.insert("parity_tokens_validated".into(), tokens as f32);
+            numerical_drift.insert("parity_passed".into(), if passed { 1.0 } else { 0.0 });
+        }
 
         let receipt = BlockReceipt {
             block_index: block_idx,
@@ -634,6 +909,7 @@ async fn run_distillation_loop(
                 wall_time_ms: block_started_at.elapsed().as_secs_f64() * 1000.0,
                 peak_arena_bytes: l2_peak.max(l1_peak),
             },
+            parity_digest: parity_digest_for_receipts.clone(),
         };
 
         broker.release(ceiling);
@@ -672,7 +948,24 @@ async fn run_distillation_loop(
                 .as_ref()
                 .map(|g| g.passed)
                 .unwrap_or(true); // no KD stage requested → gate vacuously passes
-            if !kd_ok {
+            let parity_ok = job
+                .parity_run
+                .as_ref()
+                .map(|r| r.all_passed())
+                .unwrap_or(true); // no parity stage requested → vacuously ok
+            if !parity_ok {
+                job.state = DistillationState::Failed;
+                let stopped = job
+                    .parity_run
+                    .as_ref()
+                    .and_then(|r| r.stopped_at_token)
+                    .map(|t| format!(" (hard breach at token {t}; taint dumped)"))
+                    .unwrap_or_default();
+                job.error = Some(format!(
+                    "parity audit failed: teacher taps diverged from the bf16 anchor \
+                     beyond the hard threshold{stopped}"
+                ));
+            } else if !kd_ok {
                 // KD gate failed — the ternary student diverges from the real
                 // NF4 teacher beyond thresholds. Fail the job (all block
                 // receipts remain inspectable, each carries the KD numbers).
