@@ -50,7 +50,9 @@ pub mod ane_compile;
 pub mod arena;
 #[cfg(target_os = "macos")]
 pub mod arena_info;
-#[cfg(target_os = "macos")]
+// Pure Rust (atomics + uuid) — must stay unconditional: `errors.rs` (an
+// unconditional module) imports `arena_lifecycle::LifecycleState`, so gating
+// this to macOS broke every non-mac build.
 pub mod arena_lifecycle;
 #[cfg(all(
     target_os = "macos",
