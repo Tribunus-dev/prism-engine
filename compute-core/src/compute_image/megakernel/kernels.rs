@@ -72,6 +72,15 @@ pub const PERSISTENT_GEMV_SRC: &str = include_str!("shaders/persistent_gemv.meta
 // ====================================================================
 //  Compilation
 // ====================================================================
+/// Whether Stage 0 activation taps are requested for this process
+/// (`TRIBUNUS_TAPS=1`). Read at kernel-compile time: the persistent kernel is
+/// compiled and dispatched once per Orchestrator, so taps are a
+/// construction-time property, not a per-call toggle
+/// (kernels/STAGE0_TAPS_SPEC.md, Transport A).
+pub(crate) fn taps_requested() -> bool {
+    std::env::var("TRIBUNUS_TAPS").map(|v| v == "1").unwrap_or(false)
+}
+
 pub(crate) fn compile_kernel(device: &Device, int4: bool) -> Result<ComputePipelineState, String> {
     let shader_src = if int4 { SHADER_SRC_INT4 } else { SHADER_SRC };
     let tmp = std::env::temp_dir().join("tribunus-full-transformer");
@@ -87,6 +96,11 @@ pub(crate) fn compile_kernel(device: &Device, int4: bool) -> Result<ComputePipel
     // Step 1: Compile .metal → .air via metal compiler
     let mut cmd = std::process::Command::new("xcrun");
     cmd.args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"]);
+    if taps_requested() {
+        // Compiles the PRISM_TAP writes + tap buffer params in; without this
+        // the preprocessed source is byte-identical to the untapped kernel.
+        cmd.arg("-DPRISM_TAPS=1");
+    }
     cmd.arg(src_path.to_str().unwrap())
         .arg("-o")
         .arg(air_path.to_str().unwrap());
