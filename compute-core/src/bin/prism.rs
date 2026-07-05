@@ -729,16 +729,18 @@ fn compile_gguf(
         }
     }
 
-    // ── New GGUF pipeline requires prism-backend ───────────────────
-    #[cfg(not(feature = "prism-backend"))]
+    // ── New GGUF pipeline rides the MLX compile lane (research surface) ──
+    #[cfg(not(all(feature = "prism-backend", feature = "mlx-backend")))]
     {
         eprintln!(
-            "[prism:compile-gguf] New GGUF pipeline requires --features prism-backend. Use --legacy-lut to fall back."
+            "[prism:compile-gguf] The GGUF compile pipeline is part of the research \
+             surface: build with --features research (prism-backend + mlx-backend). \
+             Use --legacy-lut for the LUT fallback, which needs only prism-backend."
         );
         std::process::exit(1);
     }
 
-    #[cfg(feature = "prism-backend")]
+    #[cfg(all(feature = "prism-backend", feature = "mlx-backend"))]
     {
         use tribunus_compute_core::compute_image::manifest::CompilationAuthority;
         let authority: CompilationAuthority = match _authority {
