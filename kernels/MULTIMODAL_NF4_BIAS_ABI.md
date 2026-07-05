@@ -91,11 +91,31 @@ Three observations make a no-stride-change extension possible:
    `bias view length == scale view length` at load time (mirror the main
    ABI's triplet validation).
 
-## Status
+## Status — IMPLEMENTED (production-hardening pass, PR #8)
 
-- Runner's zero-bias allocation stays (correct for all current artifacts) but
-  is now documented as the v1-compat fallback of this spec rather than an
-  unexplained hack.
-- Implementation is deliberately deferred to a single clean pass — a
-  binary-format change should not ship half-done; this spec is written so that
-  pass is mechanical.
+The single clean pass this spec was written for has landed. Deltas from the
+spec text above, discovered during implementation:
+
+- **Segment kind is 28, not 26.** The enum tail grew between spec and
+  implementation (`Nf4Tile640Weights = 26`, `BlockBiases = 27` landed with the
+  NF4 teacher ABI); `MultimodalProjectionBiases = 28`.
+- The packer's bias capture rides the `{stem}.biases` safetensors sidecars in
+  **lockstep** with the `{stem}.scales` capture, with two structural checks at
+  pack time: per-record `bias_bytes.len() == scale_bytes.len()`, and
+  bias-cursor ≡ scale-cursor (a desync means a preceding scaled record lacked
+  its bias sidecar). All-or-none is enforced after the loop. The
+  directory-manifest packer variant (whose quant descriptor predates bias
+  tensor ids) stays zero-bias v1-compat.
+- The runner **refuses** a `FLAG_HAS_BIAS` record whose loaded artifact lacks
+  the bias segment (no silent zero fallback for declared residency) and logs
+  the residency decision (`RESIDENT` / `ZERO-FALLBACK`) for every projection.
+- Validation gates shipped: flagged-record view resolution, v1 flags==0
+  never binds, the zeroed `image_reserved` alias hazard is unreachable behind
+  the flag, out-of-bounds parallel views rejected at load, descriptor
+  size/offset + record stride pinned by test
+  (`descriptor_layout_is_stride_stable`: size 176, index at offset 30,
+  record stride 80).
+- Worker-level policy: `multimodal_bias_policy` = `auto` /
+  `require-resident` / `zero-only`, checked in Lane A against the sealed
+  segments; the decision lands in the operational receipt
+  (PRODUCTION_CONTRACT.md §5).
