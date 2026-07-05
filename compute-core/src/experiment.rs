@@ -409,7 +409,7 @@ impl SealedExperimentProfile {
     pub fn mlx_control(c: &F32MatmulContract) -> Self {
         let mut p = Self {
             profile_name: "F32-MATMUL-MLX-GPU-v1".into(),
-            backend: BackendId(0),
+            backend: BACKEND_MLX,
             requested_substrate: RequestedSubstrate::Gpu,
             contract_digest: c.digest(),
             sha256: EvidenceDigest("".into()),
@@ -420,7 +420,7 @@ impl SealedExperimentProfile {
     pub fn accelerate_cpu(c: &F32MatmulContract) -> Self {
         let mut p = Self {
             profile_name: "F32-MATMUL-ACCELERATE-CPU-v1".into(),
-            backend: BackendId(1),
+            backend: BACKEND_ACCELERATE,
             requested_substrate: RequestedSubstrate::Cpu,
             contract_digest: c.digest(),
             sha256: EvidenceDigest("".into()),
@@ -431,7 +431,7 @@ impl SealedExperimentProfile {
     pub fn coreai_ane(c: &F32MatmulContract) -> Self {
         let mut p = Self {
             profile_name: "F32-MATMUL-COREML-CPU-ANE-v1".into(),
-            backend: BackendId(2),
+            backend: BACKEND_ANE,
             requested_substrate: RequestedSubstrate::CpuAndNeuralEngine,
             contract_digest: c.digest(),
             sha256: EvidenceDigest("".into()),

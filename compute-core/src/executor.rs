@@ -6,7 +6,7 @@
 //! calling `eval()` on the result before dropping the weight leases.
 
 use crate::ane::moe_scheduler::{AneMoEScheduler, ExpertWeights};
-use crate::backend::routing::BackendId;
+use crate::backend::routing::{BackendId, BACKEND_ANE, BACKEND_MLX};
 use crate::config::operation_route::OperationRoute;
 use crate::config::{LayerPlan, ProloguePlan};
 use crate::kv_cache::KvCache;
@@ -184,9 +184,9 @@ pub fn prologue_hidden_scale(plan: &ProloguePlan) -> f32 {
 /// - full_attention → MLX / GPU (backend 0)
 pub fn resolve_attention_backend(layer_plan: &LayerPlan) -> BackendId {
     if layer_plan.attention_kind == "full_attention" {
-        BackendId(0) // MLX (GPU)
+        BACKEND_MLX // MLX (GPU)
     } else {
-        BackendId(2) // Core ML (ANE)
+        BACKEND_ANE // Core ML (ANE)
     }
 }
 

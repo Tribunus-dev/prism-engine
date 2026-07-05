@@ -7,8 +7,8 @@ use crate::compute_image::compile::execution_graph::{
     AttentionKind as GraphAttentionKind, CompactionEpoch, DeviceCapability, DraftSubGraph,
     ExecutionGraphDescriptor, LayerExecutionNode, NodeKind,
 };
-use crate::compute_image::compile::source::{source_tensor_byte_len, source_tensor_view};
 use crate::compute_image::compile::source::LoadedSource;
+use crate::compute_image::compile::source::{source_tensor_byte_len, source_tensor_view};
 use crate::compute_image::compile::ternary::model_artifact_tag;
 use crate::compute_image::compile::ternary::{
     CimageHeader, LayerDirectoryEntry, ModelArtifactEntry, SegmentEntry, SegmentKind,
@@ -74,6 +74,7 @@ fn quantized_triplet_lengths(loaded: &LoadedSource, include_draft: bool) -> (u64
     (weight_len, scale_len, bias_len)
 }
 
+#[allow(dead_code)]
 fn copy_quantized_triplets_into_slices(
     loaded: &LoadedSource,
     include_draft: bool,
@@ -104,6 +105,7 @@ fn copy_quantized_triplets_into_slices(
     }
 }
 
+#[allow(dead_code)]
 fn collect_quantized_triplet_bytes(
     loaded: &LoadedSource,
     include_draft: bool,
@@ -480,6 +482,7 @@ fn synthesize_execution_graph_for_loaded(loaded: &LoadedSource) -> Option<Vec<u8
     )
 }
 
+#[allow(dead_code)]
 fn copy_vocabulary_triplet(loaded: &LoadedSource, embed_key: &str, dst: &mut [u8]) {
     if embed_key.is_empty() {
         return;
@@ -727,7 +730,8 @@ pub(crate) fn compile_and_pack_god_binary(
     }
 
     let mut multimodal = synthesize_multimodal_segments_for_loaded(loaded)?;
-    let mut execution_graph_bytes = synthesize_execution_graph_for_loaded(loaded).unwrap_or_default();
+    let mut execution_graph_bytes =
+        synthesize_execution_graph_for_loaded(loaded).unwrap_or_default();
 
     let main_graph_len = predict_tar_size(main_mlmodelc_path)?;
     let mtp_graph_len = predict_tar_size(mtp_mlmodelc_path)?;
@@ -1200,20 +1204,34 @@ pub(crate) fn compile_and_pack_god_binary(
 
     if let Some(multimodal) = &multimodal {
         for (segment, bytes) in [
-            (plan.multimodal_projection_weights, &multimodal.projection_weights),
-            (plan.multimodal_projection_scales, &multimodal.projection_scales),
-            (plan.multimodal_projection_biases, &multimodal.projection_biases),
+            (
+                plan.multimodal_projection_weights,
+                &multimodal.projection_weights,
+            ),
+            (
+                plan.multimodal_projection_scales,
+                &multimodal.projection_scales,
+            ),
+            (
+                plan.multimodal_projection_biases,
+                &multimodal.projection_biases,
+            ),
             (plan.multimodal_input_descriptor, &multimodal.descriptor),
             (
                 plan.multimodal_position_embeddings,
                 &multimodal.position_embeddings,
             ),
-            (plan.multimodal_auxiliary_weights, &multimodal.auxiliary_weights),
+            (
+                plan.multimodal_auxiliary_weights,
+                &multimodal.auxiliary_weights,
+            ),
         ] {
             if let Some(segment) = segment {
                 if segment.length > 0 {
                     builder.align_cursor();
-                    builder.allocate_slice(segment.length as usize).copy_from_slice(bytes);
+                    builder
+                        .allocate_slice(segment.length as usize)
+                        .copy_from_slice(bytes);
                 }
             }
         }
@@ -2347,7 +2365,13 @@ fn logical_shape_for_tensor(loaded: &LoadedSource, name: &str) -> Vec<u32> {
         .spec
         .global_tensors
         .iter()
-        .chain(loaded.spec.layers.iter().flat_map(|layer| layer.tensors.iter()))
+        .chain(
+            loaded
+                .spec
+                .layers
+                .iter()
+                .flat_map(|layer| layer.tensors.iter()),
+        )
         .find(|binding| binding.name == name)
         .map(|binding| binding.logical_shape.clone())
         .unwrap_or_else(|| {

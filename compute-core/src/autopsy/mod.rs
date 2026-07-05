@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-use crate::backend::routing::BackendId;
+use crate::backend::routing::{BackendId, BACKEND_MLX};
 use crate::profiled_executor::LoadedProfiledModel;
 use crate::runtime_orchestration::{InMemoryCoordinationFabric, RuntimeReceipt};
 
@@ -208,7 +208,7 @@ impl ModelAutopsy {
             if has_nan(hidden) {
                 let anomaly = InferenceAnomaly::NanInLayer {
                     layer,
-                    backend: BackendId(0),
+                    backend: BACKEND_MLX,
                 };
                 self.handle_anomaly(anomaly, &mut patches)?;
             }
@@ -217,7 +217,7 @@ impl ModelAutopsy {
             if has_inf(hidden) {
                 let anomaly = InferenceAnomaly::InfInLayer {
                     layer,
-                    backend: BackendId(0),
+                    backend: BACKEND_MLX,
                 };
                 self.handle_anomaly(anomaly, &mut patches)?;
             }

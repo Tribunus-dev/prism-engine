@@ -230,14 +230,10 @@ impl DiffusionSampler {
         // Only a COMMITTED EOS collapses the tail (per the contract above) —
         // matching on any speculative EOS token would collapse the canvas on
         // an uncommitted draft.
-        let eos_pos = canvas
-            .tokens
-            .iter()
-            .enumerate()
-            .position(|(i, t)| {
-                canvas.committed.get(i).copied().unwrap_or(false)
-                    && t.as_ref().copied() == Some(self.eos_token_id)
-            });
+        let eos_pos = canvas.tokens.iter().enumerate().position(|(i, t)| {
+            canvas.committed.get(i).copied().unwrap_or(false)
+                && t.as_ref().copied() == Some(self.eos_token_id)
+        });
 
         let Some(eos_idx) = eos_pos else {
             return false;

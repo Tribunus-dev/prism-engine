@@ -20,8 +20,8 @@ use std::time::Instant;
 use coreml_proto::proto::mil_spec;
 use tribunus_compute_core::arena::Arena;
 use tribunus_compute_core::arena::DataType;
-use tribunus_compute_core::coreml_bridge::{CoreMlComputeUnits, CoreMlModel};
-use tribunus_compute_core::coreml_pipeline::compile_mlpackage;
+use tribunus_compute_core::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
+use tribunus_compute_core::coreai_pipeline::compile_mlpackage;
 use tribunus_compute_core::mil_builder::MilBuilder;
 use tribunus_compute_core::mlpackage::{write_mlpackage, ModelMeta};
 
@@ -115,13 +115,13 @@ fn compile_fused(tag: &str, prog: mil_spec::Program, meta: ModelMeta) -> Result<
 /// Returns (p50_ns, p95_ns, mean_ns).
 fn bench_one(
     path: &str,
-    cu: CoreMlComputeUnits,
+    cu: CoreAiComputeUnits,
     in_name: &str,
     in_arena: &Arena,
     out_name: &str,
     out_arena: &Arena,
 ) -> Result<(f64, f64, f64), String> {
-    let m = CoreMlModel::load_with_compute_units(path, cu)
+    let m = CoreAiModel::load_with_compute_units(path, cu)
         .map_err(|e| format!("load({:?}): {}", cu, e))?;
 
     for _ in 0..WARMUP {
@@ -208,7 +208,7 @@ fn ane_throughput_sweep() {
         // ── CPU-only benchmark (baseline) ──────────────────────────
         let cpu_result = match bench_one(
             path_str,
-            CoreMlComputeUnits::CpuOnly,
+            CoreAiComputeUnits::CpuOnly,
             "x",
             &in_arena,
             &out_name,
@@ -225,7 +225,7 @@ fn ane_throughput_sweep() {
         // ── ANE benchmark ──────────────────────────────────────────
         let ane_result = match bench_one(
             path_str,
-            CoreMlComputeUnits::CpuAndNeuralEngine,
+            CoreAiComputeUnits::CpuAndNeuralEngine,
             "x",
             &in_arena,
             &out_name,

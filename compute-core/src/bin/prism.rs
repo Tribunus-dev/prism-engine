@@ -690,7 +690,7 @@ fn compile_gguf(
             None
         }
     });
-    #[cfg(not(feature = "prism-backend"))]
+    #[cfg(not(all(feature = "prism-backend", feature = "mlx-backend")))]
     let _ = (&target, &quantize_mode);
 
     eprintln!(

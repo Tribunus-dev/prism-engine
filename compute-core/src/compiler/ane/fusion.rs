@@ -5,7 +5,7 @@
 //! dtype/shape validation, CVPixelBuffer wrapping).  Fusing N ops into one
 //! .mlmodelc reduces the overhead by (N−1) × overhead per call.
 //!
-//! The pass respects `OperationRoute` assignments (ANE = `BackendId(3)`)
+//! The pass respects `OperationRoute` assignments (ANE = `BACKEND_ANE`)
 //! and will only fuse regions that are:
 //!   a) Consecutive in execution order
 //!   b) Assigned to the ANE backend
@@ -16,12 +16,14 @@
 
 use std::time::Instant;
 
-use crate::backend::routing::{BackendId, EvidenceDigest, OperationFamily, OperationId};
+use crate::backend::routing::{
+    BackendId, EvidenceDigest, OperationFamily, OperationId, BACKEND_ANE,
+};
 use crate::compiler::pass::{PassIdentity, TransformPass, TransformReceipt};
 use crate::compiler::scheduled::{FusionBoundary, RegionId, ScheduledRegion};
 
 /// The ANE backend ID (must match `OperationRoute` conventions).
-const ANE_BACKEND_ID: u32 = 3;
+const ANE_BACKEND_ID: u32 = 2;
 
 /// Configuration for the ANE fusion pass.
 #[derive(Debug, Clone)]
@@ -349,7 +351,7 @@ pub fn build_fused_ane_regions(regions: &[ScheduledRegion]) -> Vec<AneFusedArtif
 
     fused
         .iter()
-        .filter(|r| r.selected_backend == BackendId(3) && r.operations.len() > 1)
+        .filter(|r| r.selected_backend == BACKEND_ANE && r.operations.len() > 1)
         .map(|r| AneFusedArtifact {
             region_name: r.name.clone(),
             operation_ids: r.operations.clone(),

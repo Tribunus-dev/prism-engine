@@ -105,7 +105,7 @@ pub struct VisionArchitecture {
     pub patch_size: u32,
     #[serde(default)]
     pub num_channels: u32,
-    #[serde(default, alias = "output_proj_dims", alias = "mm_embed_dim")]
+    #[serde(default, alias = "output_proj_dims")]
     pub projection_dim: u32,
     /// Cimage model family identifier (e.g. "clip-vit-b32").
     #[serde(default)]
@@ -145,7 +145,7 @@ pub struct AudioArchitecture {
     pub num_mel_bins: u32,       // e.g. 80
     pub hop_length: u32,         // e.g. 160
     pub max_audio_length_s: u32, // e.g. 30 (seconds)
-    #[serde(alias = "audio_embed_dim")]
+    #[serde(default)]
     pub projection_dim: u32, // audio_features -> text hidden dim
 }
 

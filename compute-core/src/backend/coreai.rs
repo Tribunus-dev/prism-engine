@@ -168,7 +168,7 @@ impl GraphBackend for CoreAiBackend {
     }
 
     fn graph_backend_id(&self) -> BackendId {
-        BackendId(2)
+        BACKEND_ANE
     }
 
     fn is_region_cached(&self, region: CompiledRegionHandle) -> bool {

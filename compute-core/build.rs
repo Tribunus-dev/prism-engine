@@ -34,8 +34,16 @@ fn main() {
                 template_dir.join(src).display()
             );
         }
+        // Track nf4tile640 compute kernel (compiled at runtime via include_str! in metal.rs).
+        println!(
+            "cargo:rerun-if-changed={}",
+            std::path::Path::new(&manifest_dir)
+                .join("shaders")
+                .join("nf4tile640.metal")
+                .display()
+        );
 
-        // Step 1: compile each .metal → .air
+        // Step 1: compile each .metal -> .air
         let mut air_files = Vec::new();
         for src in metal_sources {
             let src_path = template_dir.join(src);

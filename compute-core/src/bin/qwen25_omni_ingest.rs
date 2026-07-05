@@ -6,7 +6,6 @@
 //!     --model-dir ./qwen25-omni-7b --output ./qwen25-omni-7b.cimage
 
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
 
 use tribunus_compute_core::compute_image::compile::ternary::{
@@ -24,6 +23,7 @@ const VOCAB_SIZE: usize = 151936;
 
 // Vision encoder
 const VISION_HIDDEN: usize = 1152;
+#[allow(dead_code)]
 const VISION_LAYERS: usize = 27;
 
 // Decoder weight matrix list (Thinker LM)
@@ -87,12 +87,14 @@ const VISION_PROJECTOR: (&str, usize, usize) = (
 );
 
 // Text embeddings
+#[allow(dead_code)]
 const EMBED_TOKENS: (&str, usize, usize) = (
     "model.language_model.embed_tokens.weight",
     VOCAB_SIZE,
     HIDDEN_DIM,
 );
 
+#[allow(dead_code)]
 const FINAL_NORM: (&str, usize, usize) = ("model.language_model.norm.weight", HIDDEN_DIM, 1);
 
 fn get_opt(args: &[String], flag: &str) -> Option<String> {
@@ -156,7 +158,7 @@ fn main() {
 
     let mut all_weights = Vec::new();
     let mut all_scales = Vec::new();
-    let mut total_elements: u64 = 0;
+    let _total_elements: u64 = 0;
 
     for layer in 0..NUM_LAYERS {
         for (template, out_dim, in_dim) in DECODER_MATRICES.iter() {
@@ -165,7 +167,7 @@ fn main() {
 
             if let Some(info) = tensor_info {
                 let dtype = info.get("dtype").and_then(|v| v.as_str()).unwrap_or("F32");
-                let shape = info
+                let _shape = info
                     .get("shape")
                     .and_then(|v| v.as_array())
                     .map(|a| a.iter().filter_map(|x| x.as_u64()).collect::<Vec<_>>())
@@ -178,11 +180,10 @@ fn main() {
                     .get("data_offsets")
                     .and_then(|v| v[1].as_u64())
                     .unwrap_or(0);
-                let len = (end - start) as usize;
+                let _len = (end - start) as usize;
 
                 let rows = *out_dim as usize;
                 let cols = *in_dim as usize;
-                total_elements += (rows * cols) as u64;
 
                 // Extract and quantize
                 let raw = &st_bytes[8 + header_len + start as usize..8 + header_len + end as usize];
@@ -262,7 +263,7 @@ fn main() {
     // ── Step 3: Pack vision encoder + projector (FP16 for now) ────
     println!("\n  Step 3: Packing vision encoder (ViT) + projector...");
     let mut vision_weights = Vec::new();
-    let mut vision_scales: Vec<u8> = Vec::new();
+    let _vision_scales: Vec<u8> = Vec::new();
 
     for (name, _, _) in VISION_MATRICES.iter() {
         if let Some(info) = header_json.get(*name) {
@@ -274,7 +275,7 @@ fn main() {
                 .get("data_offsets")
                 .and_then(|v| v[1].as_u64())
                 .unwrap_or(0);
-            let len = (end - start) as usize;
+            let _len = (end - start) as usize;
             let raw = &st_bytes[8 + header_len + start as usize..8 + header_len + end as usize];
             vision_weights.extend_from_slice(raw);
         }
@@ -291,7 +292,7 @@ fn main() {
             .get("data_offsets")
             .and_then(|v| v[1].as_u64())
             .unwrap_or(0);
-        let len = (end - start) as usize;
+        let _len = (end - start) as usize;
         let raw = &st_bytes[8 + header_len + start as usize..8 + header_len + end as usize];
         vision_weights.extend_from_slice(raw);
     }
@@ -325,7 +326,7 @@ fn main() {
     let scales_off = page_align(&mut writer).unwrap();
     writer.write_all(&all_scales).unwrap();
 
-    let vision_off = if !vision_weights.is_empty() {
+    let _vision_off = if !vision_weights.is_empty() {
         let off = page_align(&mut writer).unwrap();
         writer.write_all(&vision_weights).unwrap();
         Some(off)

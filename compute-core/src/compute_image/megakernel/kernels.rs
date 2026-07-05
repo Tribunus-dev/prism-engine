@@ -132,7 +132,10 @@ impl TapMode {
     /// back-compat path used by [`Orchestrator::from_cimage`]. Prefer passing
     /// the mode explicitly via `from_cimage_with_mode`.
     pub fn from_env() -> Self {
-        if std::env::var("TRIBUNUS_TAPS").map(|v| v == "1").unwrap_or(false) {
+        if std::env::var("TRIBUNUS_TAPS")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
             TapMode::TappedAudit
         } else {
             TapMode::Untapped

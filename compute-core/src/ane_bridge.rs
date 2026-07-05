@@ -197,7 +197,12 @@ pub fn execute_ane_step(
     step: &AneInferenceStep,
     program_cache: &AneProgramCache,
 ) -> Result<crate::backend::routing::BoundaryExecutionReceipt, String> {
-    let AneInferenceStep { mil_text, inputs, outputs, tag } = step;
+    let AneInferenceStep {
+        mil_text,
+        inputs,
+        outputs,
+        tag,
+    } = step;
 
     let program = program_cache.get_or_compile(mil_text, tag)?;
 
@@ -212,7 +217,7 @@ pub fn execute_ane_step(
     Ok(crate::backend::routing::BoundaryExecutionReceipt {
         group_id: crate::backend::routing::EvaluationGroupId(0),
         planned_policy: crate::backend::routing::EvaluationPolicy::BackendLazy,
-        backend: crate::backend::routing::BackendId(2),
+        backend: crate::backend::routing::BACKEND_ANE,
         operation_count: 1,
         planned_materialized_outputs: outputs.len(),
         actual_eval_calls: 1,

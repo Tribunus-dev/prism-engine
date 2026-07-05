@@ -19,8 +19,8 @@ use crate::compute_image::compile::kernel_dispatch::{
 };
 use crate::compute_image::compile::kernel_registry::KernelRegistry;
 use crate::compute_image::compile::kernel_types::{KernelReceipt, ProjectionParams};
-use crate::compute_image::megakernel::{KernelBuffers, Megakernel};
 pub use crate::compute_image::megakernel::kernels::TapMode;
+use crate::compute_image::megakernel::{KernelBuffers, Megakernel};
 use crate::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
 use crate::compute_image::multimodal::binding::SealedMultimodalBindings;
 use crate::compute_image::multimodal::descriptor::ProjectionTensorRecord;
@@ -768,7 +768,9 @@ impl Orchestrator {
     /// contains the prefill positions and attention covers the full
     /// context.
     pub fn decode_slot(&mut self, slot_id: u32, token_id: u32) -> Result<u32, String> {
-        Ok(sample_argmax_f32(&self.decode_slot_logits(slot_id, token_id)?))
+        Ok(sample_argmax_f32(
+            &self.decode_slot_logits(slot_id, token_id)?,
+        ))
     }
 
     /// Like [`decode_slot`] but returns the full output logit vector instead of
@@ -947,7 +949,12 @@ impl Orchestrator {
         let stride = (NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
         let kv_bytes = audit_max_seq.max(1) as u64 * stride * 2;
         let kv: Vec<(metal::Buffer, metal::Buffer)> = (0..LAYERS)
-            .map(|_| (device.new_buffer(kv_bytes, opts), device.new_buffer(kv_bytes, opts)))
+            .map(|_| {
+                (
+                    device.new_buffer(kv_bytes, opts),
+                    device.new_buffer(kv_bytes, opts),
+                )
+            })
             .collect();
         let ffn_scratch = device.new_buffer(2 * 15360 * 2, opts);
 
@@ -966,14 +973,18 @@ impl Orchestrator {
             enc.set_buffer(7, Some(&ffn_scratch), 0);
             let li = layer as u32;
             enc.set_bytes(8, 4, &li as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(
-                9,
-                4,
-                &seq_position as *const u32 as *const std::ffi::c_void,
-            );
+            enc.set_bytes(9, 4, &seq_position as *const u32 as *const std::ffi::c_void);
             enc.dispatch_thread_groups(
-                metal::MTLSize { width: 1, height: 1, depth: 1 },
-                metal::MTLSize { width: 256, height: 1, depth: 1 },
+                metal::MTLSize {
+                    width: 1,
+                    height: 1,
+                    depth: 1,
+                },
+                metal::MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
             );
         }
         enc.end_encoding();
@@ -1259,11 +1270,7 @@ impl Orchestrator {
             enc.set_buffer(6, Some(&self.kernel_buffers.head_gates), 0);
             enc.set_buffer(7, Some(&ffn_scratch), 0);
             enc.set_bytes(8, 4, &layer as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(
-                9,
-                4,
-                &seq_position as *const u32 as *const std::ffi::c_void,
-            );
+            enc.set_bytes(9, 4, &seq_position as *const u32 as *const std::ffi::c_void);
             // Layers b/c/d: KV slices + indices at 10.. in steps of 3.
             for j in 1..n {
                 let l = layer + j;
@@ -1277,8 +1284,16 @@ impl Orchestrator {
                 );
             }
             enc.dispatch_thread_groups(
-                metal::MTLSize { width: 1, height: 1, depth: 1 },
-                metal::MTLSize { width: 256, height: 1, depth: 1 },
+                metal::MTLSize {
+                    width: 1,
+                    height: 1,
+                    depth: 1,
+                },
+                metal::MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
             );
             boundaries.push(out.clone());
             current = out;
@@ -1985,14 +2000,13 @@ mod stage0_tap_tests {
             let (next, _logits, taps) = orch
                 .decode_token_logits_with_taps(7)
                 .expect("explicit mode must not need TRIBUNUS_TAPS");
-            (next, finite_nonzero(taps.post_embed()))
+            (next, finite_nonzero(&taps.post_embed()))
         });
         assert!(taps_ok, "post-embed tap must be populated");
         // Explicit Untapped, env SET → the taps API refuses (mode wins).
         let argmax_b = with_taps_env(true, || {
-            let mut orch =
-                Orchestrator::from_cimage_with_mode(&path, 1, false, TapMode::Untapped)
-                    .expect("untapped orchestrator");
+            let mut orch = Orchestrator::from_cimage_with_mode(&path, 1, false, TapMode::Untapped)
+                .expect("untapped orchestrator");
             assert_eq!(orch.tap_mode, TapMode::Untapped);
             assert!(
                 orch.decode_token_logits_with_taps(7).is_err(),
@@ -2016,8 +2030,9 @@ mod stage0_tap_tests {
         };
         with_taps_env(true, || {
             let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
-            let (_tok, logits, taps) =
-                orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let (_tok, logits, taps) = orch
+                .decode_token_logits_with_taps(7)
+                .expect("tapped decode");
             assert!(!logits.is_empty());
             assert!(finite_nonzero(&taps.post_embed()), "embed tap empty");
             for k in [0usize, 5, 24, LAYERS as usize - 1] {
@@ -2045,8 +2060,7 @@ mod stage0_tap_tests {
                 let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
                 let mut all = Vec::new();
                 for t in [7u32, 42, 99] {
-                    let (_a, _l, taps) =
-                        orch.decode_token_logits_with_taps(t).expect("decode");
+                    let (_a, _l, taps) = orch.decode_token_logits_with_taps(t).expect("decode");
                     all.push(taps.raw.clone());
                 }
                 all
@@ -2072,7 +2086,9 @@ mod stage0_tap_tests {
 
             let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
             // Position 0: first decode on a fresh orchestrator.
-            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let (_t, _l, taps) = orch
+                .decode_token_logits_with_taps(7)
+                .expect("tapped decode");
             let input = taps.post_embed();
             let expect = taps.post_layer(0);
             let hidden = taps.hidden_dim();
@@ -2124,19 +2140,26 @@ mod stage0_tap_tests {
             enc.set_bytes(8, 4, &layer0 as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(9, 4, &pos0 as *const u32 as *const std::ffi::c_void);
             enc.dispatch_thread_groups(
-                metal::MTLSize { width: 1, height: 1, depth: 1 },
-                metal::MTLSize { width: 256, height: 1, depth: 1 },
+                metal::MTLSize {
+                    width: 1,
+                    height: 1,
+                    depth: 1,
+                },
+                metal::MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
             );
             enc.end_encoding();
             cb.commit();
             cb.wait_until_completed();
 
-            let got: Vec<f32> = unsafe {
-                std::slice::from_raw_parts(out_buf.contents() as *const u16, hidden)
-            }
-            .iter()
-            .map(|&b| f16::from_bits(b).to_f32())
-            .collect();
+            let got: Vec<f32> =
+                unsafe { std::slice::from_raw_parts(out_buf.contents() as *const u16, hidden) }
+                    .iter()
+                    .map(|&b| f16::from_bits(b).to_f32())
+                    .collect();
             let (mut se, mut den) = (0.0f64, 0.0f64);
             for (a, g) in got.iter().zip(&expect) {
                 se += (*a as f64 - *g as f64).powi(2);
@@ -2166,7 +2189,9 @@ mod stage0_tap_tests {
         };
         with_taps_env(true, || {
             let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
-            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let (_t, _l, taps) = orch
+                .decode_token_logits_with_taps(7)
+                .expect("tapped decode");
             let device = metal::Device::system_default().expect("metal device");
             let boundaries = orch
                 .decode_audit_group1(&device, &taps.post_embed(), 0, 4)
@@ -2221,7 +2246,9 @@ mod stage0_tap_tests {
             use metal::MTLResourceOptions;
 
             let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
-            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let (_t, _l, taps) = orch
+                .decode_token_logits_with_taps(7)
+                .expect("tapped decode");
             let input = taps.post_embed();
             let hidden = taps.hidden_dim();
 
@@ -2234,7 +2261,9 @@ mod stage0_tap_tests {
 
             // Fused pair (0, 1) in one dispatch.
             let lib = compile_layer_library(&device).expect("compile");
-            let f = lib.get_function("fused_full_pair_real", None).expect("entry");
+            let f = lib
+                .get_function("fused_full_pair_real", None)
+                .expect("entry");
             let pso = device
                 .new_compute_pipeline_state_with_function(&f)
                 .expect("pso");
@@ -2271,19 +2300,26 @@ mod stage0_tap_tests {
             enc.set_buffer(11, Some(&vb), 0);
             enc.set_bytes(12, 4, &lb as *const u32 as *const std::ffi::c_void);
             enc.dispatch_thread_groups(
-                metal::MTLSize { width: 1, height: 1, depth: 1 },
-                metal::MTLSize { width: 256, height: 1, depth: 1 },
+                metal::MTLSize {
+                    width: 1,
+                    height: 1,
+                    depth: 1,
+                },
+                metal::MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
             );
             enc.end_encoding();
             cb.commit();
             cb.wait_until_completed();
 
-            let got: Vec<f32> = unsafe {
-                std::slice::from_raw_parts(out_buf.contents() as *const u16, hidden)
-            }
-            .iter()
-            .map(|&b| f16::from_bits(b).to_f32())
-            .collect();
+            let got: Vec<f32> =
+                unsafe { std::slice::from_raw_parts(out_buf.contents() as *const u16, hidden) }
+                    .iter()
+                    .map(|&b| f16::from_bits(b).to_f32())
+                    .collect();
             let max_abs = got
                 .iter()
                 .zip(expect)
@@ -2312,7 +2348,9 @@ mod stage0_tap_tests {
         };
         with_taps_env(true, || {
             let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
-            let (_t, _l, taps) = orch.decode_token_logits_with_taps(7).expect("tapped decode");
+            let (_t, _l, taps) = orch
+                .decode_token_logits_with_taps(7)
+                .expect("tapped decode");
             let input = taps.post_embed();
             let device = metal::Device::system_default().expect("metal device");
             let singles = orch
@@ -2385,6 +2423,9 @@ mod stage0_tap_tests {
             .zip(&plain)
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
-        assert!(max_abs == 0.0, "expected bitwise-identical logits, max |Δ| = {max_abs}");
+        assert!(
+            max_abs == 0.0,
+            "expected bitwise-identical logits, max |Δ| = {max_abs}"
+        );
     }
 }

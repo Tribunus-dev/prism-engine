@@ -17,7 +17,9 @@
 //! - L3Disk:   2-bit packed (disk, no resident data)
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "mlx-backend")]
+use std::time::Instant;
 
 #[cfg(feature = "mlx-backend")]
 use crate::runtime::resources::kv_cache_coordinator::{

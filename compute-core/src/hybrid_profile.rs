@@ -315,7 +315,7 @@ impl HybridExecutor {
                     receipts.push(BoundaryExecutionReceipt {
                         group_id: EvaluationGroupId(0),
                         planned_policy: EvaluationPolicy::BackendLazy,
-                        backend: BackendId(0),
+                        backend: BACKEND_MLX,
                         operation_count: region.outputs.len().max(1),
                         planned_materialized_outputs: region.outputs.len(),
                         actual_eval_calls: eval_receipt.eval_calls,
@@ -327,10 +327,7 @@ impl HybridExecutor {
                         temporary_bytes: 0,
                         released_tensor_count: 0,
                         unaccounted_ns: 0,
-                        policy_support: policy_support(
-                            BackendId(0),
-                            &EvaluationPolicy::BackendLazy,
-                        ),
+                        policy_support: policy_support(BACKEND_MLX, &EvaluationPolicy::BackendLazy),
                     });
                 }
                 ExecutionStep::CoreAi { island_id } => {
@@ -348,7 +345,7 @@ impl HybridExecutor {
                     receipts.push(BoundaryExecutionReceipt {
                         group_id: EvaluationGroupId(0),
                         planned_policy: EvaluationPolicy::ExplicitOperation,
-                        backend: BackendId(2),
+                        backend: BACKEND_ANE,
                         operation_count: 1,
                         planned_materialized_outputs: _island.output_names.len(),
                         actual_eval_calls: 0,
@@ -380,7 +377,7 @@ impl HybridExecutor {
                     receipts.push(BoundaryExecutionReceipt {
                         group_id: EvaluationGroupId(0),
                         planned_policy: EvaluationPolicy::ExplicitOperation,
-                        backend: BackendId(3),
+                        backend: BACKEND_ANE,
                         operation_count: 1,
                         planned_materialized_outputs: compiled_output_count,
                         actual_eval_calls: 0,
@@ -402,7 +399,7 @@ impl HybridExecutor {
     }
     /// Execute a batch by dispatching each slot to its assigned backend.
     ///
-    /// backend_id mapping: 0=MLX, 1=Accelerate, 2=CoreML (stub), 3=ANE
+    /// backend_id mapping: deprecated — see canonical constants in routing::
     pub fn execute_batch(
         &mut self,
         batch: &crate::scheduling::Batch,
@@ -438,7 +435,7 @@ impl HybridExecutor {
                             release_inputs_after_use: true,
                             prohibit_deferred_nodes: false,
                         },
-                        backend: BackendId(0),
+                        backend: BACKEND_MLX,
                         operation_count: 1,
                         planned_materialized_outputs: 0,
                         actual_eval_calls: eval_receipt.eval_calls,
@@ -451,7 +448,7 @@ impl HybridExecutor {
                         released_tensor_count: 0,
                         unaccounted_ns: 0,
                         policy_support: policy_support(
-                            BackendId(0),
+                            BACKEND_MLX,
                             &EvaluationPolicy::Eager {
                                 release_inputs_after_use: true,
                                 prohibit_deferred_nodes: false,
@@ -471,7 +468,7 @@ impl HybridExecutor {
                             release_inputs_after_use: true,
                             prohibit_deferred_nodes: false,
                         },
-                        backend: BackendId(1),
+                        backend: BACKEND_ACCELERATE,
                         operation_count: 1,
                         planned_materialized_outputs: 0,
                         actual_eval_calls: eval_receipt.eval_calls,
@@ -484,7 +481,7 @@ impl HybridExecutor {
                         released_tensor_count: 0,
                         unaccounted_ns: 0,
                         policy_support: policy_support(
-                            BackendId(1),
+                            BACKEND_ACCELERATE,
                             &EvaluationPolicy::Eager {
                                 release_inputs_after_use: true,
                                 prohibit_deferred_nodes: false,
@@ -511,13 +508,13 @@ impl HybridExecutor {
                     // Since Core ML bridges are not runtime-qualified,
                     // emit a stub receipt with ExplicitOperation policy.
                     let support = crate::backend::routing::policy_support(
-                        BackendId(2),
+                        BACKEND_ANE,
                         &EvaluationPolicy::ExplicitOperation,
                     );
                     receipts.push(BoundaryExecutionReceipt {
                         group_id: EvaluationGroupId(slot.id as u64),
                         planned_policy: EvaluationPolicy::ExplicitOperation,
-                        backend: BackendId(2),
+                        backend: BACKEND_ANE,
                         operation_count: 1,
                         planned_materialized_outputs: 0,
                         actual_eval_calls: 0,
@@ -544,10 +541,10 @@ impl HybridExecutor {
                         &stub_step,
                         crate::ane_bridge::AneProgramCache::global(),
                     )?;
-                    ane_receipt.backend = BackendId(3);
+                    ane_receipt.backend = BACKEND_ANE;
                     ane_receipt.group_id = EvaluationGroupId(slot.id as u64);
                     ane_receipt.policy_support = crate::backend::routing::policy_support(
-                        BackendId(3),
+                        BACKEND_ANE,
                         &EvaluationPolicy::Eager {
                             release_inputs_after_use: true,
                             prohibit_deferred_nodes: false,

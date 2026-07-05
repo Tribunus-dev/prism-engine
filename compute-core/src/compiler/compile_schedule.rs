@@ -8,6 +8,7 @@
 
 use crate::backend::routing::{
     BackendId, EvidenceDigest, OperationId, PhysicalLayout, TensorId, TensorShape,
+    BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX,
 };
 use crate::backend::DType;
 use crate::compiler::scheduled::{
@@ -237,9 +238,9 @@ pub fn compile_model_to_scheduled_module(
         peak_bytes: peak_bytes.max(hidden_state_bytes),
         per_backend: {
             let mut m = HashMap::new();
-            m.insert(BackendId(0), peak_layer_bytes); // MLX
-            m.insert(BackendId(1), 0); // Accelerate
-            m.insert(BackendId(2), 0); // Core ML
+            m.insert(BACKEND_MLX, peak_layer_bytes);
+            m.insert(BACKEND_ACCELERATE, 0);
+            m.insert(BACKEND_ANE, 0);
             m
         },
         aliases: vec![],
@@ -254,8 +255,8 @@ pub fn compile_model_to_scheduled_module(
         module.transfers.push(TransferPlan {
             source: in_tensor_id,
             destination: in_tensor_id,
-            source_backend: BackendId(0),
-            dest_backend: BackendId(0),
+            source_backend: BACKEND_MLX,
+            dest_backend: BACKEND_MLX,
             source_storage: StorageClass::IoSurface,
             dest_storage: StorageClass::IoSurface,
             size_bytes: hidden_state_bytes,
@@ -266,8 +267,8 @@ pub fn compile_model_to_scheduled_module(
         module.transfers.push(TransferPlan {
             source: out_tensor_id,
             destination: out_tensor_id,
-            source_backend: BackendId(0),
-            dest_backend: BackendId(0),
+            source_backend: BACKEND_MLX,
+            dest_backend: BACKEND_MLX,
             source_storage: StorageClass::IoSurface,
             dest_storage: StorageClass::IoSurface,
             size_bytes: hidden_state_bytes,

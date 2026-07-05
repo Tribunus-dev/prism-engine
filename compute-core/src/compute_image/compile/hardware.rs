@@ -238,6 +238,7 @@ fn bench_accelerate_candidates(_candidates: &[KernelCandidate]) -> Vec<KernelBen
 // ── Real MLX benchmarks (behind mlx-backend feature gate) ──────────────────
 
 /// Shape pairs (M, K) used by the benchmark suite for matmul and rms_norm.
+#[allow(dead_code)]
 const BENCH_SHAPES: &[(u32, u32)] = &[(32, 4096), (64, 4096), (128, 4096), (256, 4096)];
 
 /// Benchmark matmul on the real MlxBackend (GPU/ANE on M1).

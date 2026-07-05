@@ -1,4 +1,5 @@
 //! E5E — Legacy/executable compatibility boundary.
+#![cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 
 #[cfg(test)]
 mod tests {

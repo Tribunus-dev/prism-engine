@@ -1,3 +1,4 @@
+#![cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 //! E5F — Receipt and benchmark provenance integration tests.
 
 #[cfg(test)]

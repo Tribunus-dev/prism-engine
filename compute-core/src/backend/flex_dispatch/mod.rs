@@ -28,12 +28,36 @@ pub mod selection;
 pub use profiling::*;
 pub use selection::*;
 
+/// Create a FlexDispatch controller and immediately sample system state.
+pub fn create_flex_dispatch() -> FlexDispatch {
+    let mut fd = FlexDispatch::new();
+    fd.sample_now();
+    fd
+}
+
+/// Run one dispatch cycle: sample system state, reroute all operations,
+/// and return the number of routes that changed.
+pub fn run_flex_dispatch_cycle(
+    flex: &mut FlexDispatch,
+    executor: &mut crate::backend::heterogeneous_executor::HeterogeneousExecutor,
+) -> Result<usize, String> {
+    let old_routes: Vec<_> = executor.routing_table.iter().map(|(k, v)| (*k, *v)).collect();
+    flex.reroute(executor)?;
+    let new_routes = &executor.routing_table;
+    let changed = old_routes
+        .iter()
+        .filter(|(k, v)| new_routes.get(k) != Some(v))
+        .count();
+    Ok(changed)
+}
+
 #[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
     use crate::backend::routing::*;
+    use crate::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX};
     use crate::backend::DType;
 
     fn make_matmul_op(id: u64) -> OperationDescriptor {
@@ -159,7 +183,7 @@ mod tests {
         let op = make_matmul_op(1);
         let backend = flex.dispatch(&op, 0);
         // Default state: GPU free, AC power, nominal temps → MLX (GPU).
-        assert_eq!(backend, BackendId(0));
+        assert_eq!(backend, BACKEND_MLX);
     }
 
     #[test]
@@ -174,7 +198,7 @@ mod tests {
         let op = make_matmul_op(1);
         let backend = flex.dispatch(&op, 0);
         // Throttling → ANE (Core ML).
-        assert_eq!(backend, BackendId(2));
+        assert_eq!(backend, BACKEND_ANE);
     }
 
     #[test]
@@ -189,7 +213,7 @@ mod tests {
         let op = make_attention_op(1);
         let backend = flex.dispatch(&op, 0);
         // GPU saturated → ANE.
-        assert_eq!(backend, BackendId(2));
+        assert_eq!(backend, BACKEND_ANE);
     }
 
     #[test]
@@ -205,7 +229,7 @@ mod tests {
         let op = make_attention_op(1);
         let backend = flex.dispatch(&op, 0);
         // Throttling (but GPU not saturated) → CPU (Accelerate).
-        assert_eq!(backend, BackendId(1));
+        assert_eq!(backend, BACKEND_ACCELERATE);
     }
 
     #[test]
@@ -223,7 +247,7 @@ mod tests {
         };
         let backend = flex.dispatch(&op, 0);
         // GPU utilization > 0.5 → CPU (Accelerate).
-        assert_eq!(backend, BackendId(1));
+        assert_eq!(backend, BACKEND_ACCELERATE);
     }
 
     #[test]
@@ -240,7 +264,7 @@ mod tests {
         };
         let backend = flex.dispatch(&op, 0);
         // Softmax always routes to CPU.
-        assert_eq!(backend, BackendId(1));
+        assert_eq!(backend, BACKEND_ACCELERATE);
     }
 
     #[test]
@@ -277,11 +301,11 @@ mod tests {
         flex.reroute(&mut executor).unwrap();
 
         // With default state (GPU free, nominal temps, AC power):
-        //   MatMul → MLX (BackendId(0))
-        //   Attention → MLX (BackendId(0))
+        //   MatMul → MLX (BACKEND_MLX)
+        //   Attention → MLX (BACKEND_MLX)
         let route1 = executor.get_route(&OperationId(1));
         let route2 = executor.get_route(&OperationId(2));
-        assert_eq!(route1, Some(BackendId(0)));
-        assert_eq!(route2, Some(BackendId(0)));
+        assert_eq!(route1, Some(BACKEND_MLX));
+        assert_eq!(route2, Some(BACKEND_MLX));
     }
 }

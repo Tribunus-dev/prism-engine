@@ -7,6 +7,10 @@
 use super::profiling::SystemState;
 use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
 use crate::backend::routing::*;
+use crate::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX};
+
+/// Default decode-step interval for sampling system state.
+pub const DEFAULT_SAMPLE_INTERVAL: u32 = 16;
 
 // ── Operation classification ──────────────────────────────────────────────
 
@@ -114,9 +118,9 @@ impl FlexDispatch {
             DispatchFamily::MatMul => {
                 // MatMul is GPU-bound — prefer MLX unless throttling.
                 if state.should_throttle() {
-                    BackendId(2) // Core ML (ANE — most efficient per watt)
+                    BACKEND_ANE // Core ML (ANE — most efficient per watt)
                 } else {
-                    BackendId(0) // MLX (GPU — fastest)
+                    BACKEND_MLX // MLX (GPU — fastest)
                 }
             }
             DispatchFamily::Attention => {
@@ -124,25 +128,25 @@ impl FlexDispatch {
                 // when the GPU is saturated, use CPU when throttling,
                 // GPU otherwise.
                 if state.gpu_saturated() {
-                    BackendId(2) // Core ML (ANE)
+                    BACKEND_ANE // Core ML (ANE)
                 } else if state.should_throttle() {
-                    BackendId(1) // Accelerate (CPU — most power efficient)
+                    BACKEND_ACCELERATE // Accelerate (CPU — most power efficient)
                 } else {
-                    BackendId(0) // MLX (GPU)
+                    BACKEND_MLX // MLX (GPU)
                 }
             }
             DispatchFamily::ElementWise => {
                 // Element-wise ops are cheap everywhere — use whichever
                 // backend does not compete with the GPU.
                 if state.gpu_saturated() || state.gpu_utilization > 0.5 {
-                    BackendId(1) // Accelerate (CPU — doesn't compete)
+                    BACKEND_ACCELERATE // Accelerate (CPU — doesn't compete)
                 } else {
-                    BackendId(0) // MLX (GPU — fast and available)
+                    BACKEND_MLX // MLX (GPU — fast and available)
                 }
             }
             DispatchFamily::Softmax | DispatchFamily::LayerNorm => {
                 // These run fine on any backend; prefer CPU to keep GPU free.
-                BackendId(1) // Accelerate (CPU NEON)
+                BACKEND_ACCELERATE // Accelerate (CPU NEON)
             }
         }
     }
@@ -171,28 +175,28 @@ impl FlexDispatch {
             let backend_id = match family {
                 DispatchFamily::MatMul => {
                     if state.should_throttle() {
-                        BackendId(2)
+                        BACKEND_ANE
                     } else {
-                        BackendId(0)
+                        BACKEND_MLX
                     }
                 }
                 DispatchFamily::Attention => {
                     if state.gpu_saturated() {
-                        BackendId(2)
+                        BACKEND_ANE
                     } else if state.should_throttle() {
-                        BackendId(1)
+                        BACKEND_ACCELERATE
                     } else {
-                        BackendId(0)
+                        BACKEND_MLX
                     }
                 }
                 DispatchFamily::ElementWise => {
                     if state.gpu_saturated() || state.gpu_utilization > 0.5 {
-                        BackendId(1)
+                        BACKEND_ACCELERATE
                     } else {
-                        BackendId(0)
+                        BACKEND_MLX
                     }
                 }
-                DispatchFamily::Softmax | DispatchFamily::LayerNorm => BackendId(1),
+                DispatchFamily::Softmax | DispatchFamily::LayerNorm => BACKEND_ACCELERATE,
             };
 
             executor.set_route(op_id, backend_id);

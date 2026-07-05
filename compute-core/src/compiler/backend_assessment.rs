@@ -8,7 +8,7 @@ use std::time::Instant;
 use crate::backend::routing::{
     BackendId, ConversionKind, EvaluationGroupId, EvaluationPolicy, EvidenceDigest,
     ExecutionBoundaryPlan, OperationFamily, OperationId, PhysicalLayout,
-    SealedExecutionBoundaryPlan, SynchronizationPolicy, TensorId, TensorTransferPlan,
+    SealedExecutionBoundaryPlan, SynchronizationPolicy, TensorId, TensorTransferPlan, BACKEND_MLX,
 };
 use crate::compiler::pass::{PassIdentity, TransformPass, TransformReceipt};
 
@@ -151,7 +151,7 @@ impl TransformPass<ModelOperationGraph> for BackendAssessmentPass {
                 .iter()
                 .copied()
                 .max_by_key(|&b| score_backend(op, b))
-                .unwrap_or(BackendId(0));
+                .unwrap_or(BACKEND_MLX);
             assignments.push((op.id, best));
         }
 
@@ -213,7 +213,7 @@ pub fn assess_and_route(
             .iter()
             .copied()
             .max_by_key(|&b| score_backend(op, b))
-            .unwrap_or(BackendId(0));
+            .unwrap_or(BACKEND_MLX);
         assignments.push((op.id, best));
     }
 

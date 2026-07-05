@@ -283,7 +283,11 @@ mod tests {
                 override_dirty_tree: true,
             },
         );
-        assert!(r.is_ok(), "Should pass with override; errors: {:?}", r.err());
+        assert!(
+            r.is_ok(),
+            "Should pass with override; errors: {:?}",
+            r.err()
+        );
     }
 
     #[test]

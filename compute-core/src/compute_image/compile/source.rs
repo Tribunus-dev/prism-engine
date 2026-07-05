@@ -17,7 +17,9 @@ pub(crate) struct SourceTensor {
     pub shape: Vec<u32>,
     pub data: Vec<u8>,
     pub mmap_index: Option<usize>,
+    #[allow(dead_code)]
     pub source_filename: String,
+    #[allow(dead_code)]
     pub source_sha256: String,
     pub source_offset: u64,
     /// For GGML-quantized tensors (q8_0, q4_0, etc.) the byte size of the
@@ -41,9 +43,13 @@ pub(crate) struct LoadedSource {
     pub spec: crate::config::ExecutionSpec,
     pub source_tensors: HashMap<String, SourceTensor>,
     pub mmap_bytes: Vec<Mmap>,
+    #[allow(dead_code)]
     pub shard_hashes: Vec<ShardHash>,
+    #[allow(dead_code)]
     pub tokenizer_hashes: Vec<ShardHash>,
+    #[allow(dead_code)]
     pub auxiliary_hashes: Vec<ShardHash>,
+    #[allow(dead_code)]
     pub validation: crate::validator::ValidationReport,
 }
 
@@ -543,6 +549,7 @@ pub(crate) fn load_source(source_dir: &Path, skip_validation: bool) -> crate::Re
 /// Tensors are stored lazily (data = Vec::new()) with source_offset pointing
 /// into the GGUF mmap.  `ensure_tensor_loaded` reads raw Q8_0 bytes using
 /// source_byte_size and stores them in tensor.data for the emit step.
+#[allow(dead_code)]
 pub(crate) fn load_gguf_source(
     gguf_path: &Path,
     skip_validation: bool,

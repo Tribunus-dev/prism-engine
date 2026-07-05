@@ -2006,7 +2006,11 @@ mod nf4_forward_exec_tests {
     /// partial-tile contract (col >= in_dim → 0.0).
     #[inline]
     fn wval(w: &[f32], r: usize, cols: usize, col: usize) -> f32 {
-        if col < cols { w[r * cols + col] } else { 0.0 }
+        if col < cols {
+            w[r * cols + col]
+        } else {
+            0.0
+        }
     }
 
     // `cols` (== in_dim) need NOT be a multiple of 640: the last tile is
@@ -2058,7 +2062,11 @@ mod nf4_forward_exec_tests {
                     + g * BYTES_GROUP
                     + lane * 2
                     + (i / 2)];
-                let idx = if i % 2 == 0 { byte & 0x0F } else { (byte >> 4) & 0x0F };
+                let idx = if i % 2 == 0 {
+                    byte & 0x0F
+                } else {
+                    (byte >> 4) & 0x0F
+                };
                 acc += NF4[idx as usize] * scales[r * tiles * GPT + t * GPT + g] * x[col];
             }
             y[r] = acc;
@@ -2068,7 +2076,9 @@ mod nf4_forward_exec_tests {
 
     fn run_case(device: &Device, registry: RegistryRef, rows: usize, cols: usize) {
         let tiles = tiles_for(cols);
-        let w: Vec<f32> = (0..rows * cols).map(|k| ((k as f32) * 0.017).sin() * 0.05).collect();
+        let w: Vec<f32> = (0..rows * cols)
+            .map(|k| ((k as f32) * 0.017).sin() * 0.05)
+            .collect();
         let x: Vec<f32> = (0..cols).map(|k| ((k as f32) * 0.011).cos()).collect();
         let (packed, scales, biases) = pack(&w, rows, cols);
         let cpu = cpu_gemv(&packed, &scales, &x, rows, cols);
@@ -2088,9 +2098,9 @@ mod nf4_forward_exec_tests {
         let out = device.new_buffer((rows * 4) as u64, MTLResourceOptions::StorageModeShared);
 
         let params = ProjectionParams {
-            in_dim: cols as u32,          // real (unpadded) width → kernel buffer(6)
+            in_dim: cols as u32, // real (unpadded) width → kernel buffer(6)
             out_dim: rows as u32,
-            page_count: tiles as u32,     // ceil(in_dim/640) → num_macro_tiles
+            page_count: tiles as u32, // ceil(in_dim/640) → num_macro_tiles
             page_width: TILE as u32,
             mode_flags: 0,
             probe_seed: 0,

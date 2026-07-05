@@ -647,8 +647,7 @@ fn dequantize_mse(buf: &[u8], len: usize) -> Vec<f32> {
     // silent garbage dequantization in release.
     let off = buf.len() - 12;
     let rbits = u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]);
-    let rstate_bits =
-        u32::from_le_bytes([buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]]);
+    let rstate_bits = u32::from_le_bytes([buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]]);
     let scale = f32::from_le_bytes([buf[off + 8], buf[off + 9], buf[off + 10], buf[off + 11]]);
 
     let bits_per_elem = (rstate_bits + rbits) as usize + 1; // +1 for sign bit

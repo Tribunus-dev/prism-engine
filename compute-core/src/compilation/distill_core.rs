@@ -28,31 +28,56 @@ fn softmax(logits: &[f32], temperature: f32) -> Vec<f32> {
 /// the (temperature-scaled) distributions match. This is the signal the student
 /// is trained to minimize, and the metric the loop logs per block.
 pub fn kd_divergence(teacher_logits: &[f32], student_logits: &[f32], temperature: f32) -> f32 {
-    assert_eq!(teacher_logits.len(), student_logits.len(), "logit length mismatch");
+    assert_eq!(
+        teacher_logits.len(),
+        student_logits.len(),
+        "logit length mismatch"
+    );
     let p = softmax(teacher_logits, temperature);
     let q = softmax(student_logits, temperature);
     let kl: f32 = p
         .iter()
         .zip(&q)
-        .map(|(&pi, &qi)| if pi > 0.0 { pi * (pi / qi.max(1e-12)).ln() } else { 0.0 })
+        .map(|(&pi, &qi)| {
+            if pi > 0.0 {
+                pi * (pi / qi.max(1e-12)).ln()
+            } else {
+                0.0
+            }
+        })
         .sum();
     temperature * temperature * kl.max(0.0)
 }
 
 /// Mean KD loss over a batch of `[rows × vocab]` logits (row-major).
-pub fn kd_divergence_batch(teacher: &[f32], student: &[f32], vocab: usize, temperature: f32) -> f32 {
+pub fn kd_divergence_batch(
+    teacher: &[f32],
+    student: &[f32],
+    vocab: usize,
+    temperature: f32,
+) -> f32 {
     assert_eq!(teacher.len(), student.len(), "batch length mismatch");
     assert!(vocab > 0 && teacher.len() % vocab == 0, "ragged batch");
     let rows = teacher.len() / vocab;
     let mut acc = 0.0f32;
     for r in 0..rows {
-        acc += kd_divergence(&teacher[r * vocab..(r + 1) * vocab], &student[r * vocab..(r + 1) * vocab], temperature);
+        acc += kd_divergence(
+            &teacher[r * vocab..(r + 1) * vocab],
+            &student[r * vocab..(r + 1) * vocab],
+            temperature,
+        );
     }
     acc / rows as f32
 }
 
 fn argmax(v: &[f32]) -> usize {
-    v.iter().enumerate().fold((0, f32::MIN), |(bi, bv), (i, &x)| if x > bv { (i, x) } else { (bi, bv) }).0
+    v.iter()
+        .enumerate()
+        .fold(
+            (0, f32::MIN),
+            |(bi, bv), (i, &x)| if x > bv { (i, x) } else { (bi, bv) },
+        )
+        .0
 }
 
 /// Fraction of rows where the student's top-1 token matches the teacher's — the
@@ -60,10 +85,14 @@ fn argmax(v: &[f32]) -> usize {
 pub fn top1_agreement(teacher: &[f32], student: &[f32], vocab: usize) -> f32 {
     assert!(vocab > 0 && teacher.len() % vocab == 0, "ragged batch");
     let rows = teacher.len() / vocab;
-    if rows == 0 { return 1.0; }
+    if rows == 0 {
+        return 1.0;
+    }
     let mut agree = 0usize;
     for r in 0..rows {
-        if argmax(&teacher[r * vocab..(r + 1) * vocab]) == argmax(&student[r * vocab..(r + 1) * vocab]) {
+        if argmax(&teacher[r * vocab..(r + 1) * vocab])
+            == argmax(&student[r * vocab..(r + 1) * vocab])
+        {
             agree += 1;
         }
     }
@@ -138,12 +167,7 @@ pub fn joint_kd_divergence(
         .zip(&student_heads[1..])
         .map(|(t, s)| kd_divergence_batch(t, s, vocab, temperature))
         .collect();
-    let total = primary
-        + mtp
-            .iter()
-            .zip(lambdas)
-            .map(|(&kd, &l)| l * kd)
-            .sum::<f32>();
+    let total = primary + mtp.iter().zip(lambdas).map(|(&kd, &l)| l * kd).sum::<f32>();
 
     JointKd {
         total,
@@ -166,14 +190,21 @@ pub struct BlockAcceptance {
 /// ternary block is good enough to keep or must be re-distilled with a richer
 /// config (more outliers, lower τ, AWQ). Ties into the loop's joint-acceptance.
 pub fn block_accept(teacher_act: &[f32], student_act: &[f32], rel_tol: f32) -> BlockAcceptance {
-    assert_eq!(teacher_act.len(), student_act.len(), "activation length mismatch");
+    assert_eq!(
+        teacher_act.len(),
+        student_act.len(),
+        "activation length mismatch"
+    );
     let (mut se, mut den) = (0.0f64, 0.0f64);
     for (a, b) in teacher_act.iter().zip(student_act) {
         se += ((a - b) as f64).powi(2);
         den += (*a as f64).powi(2);
     }
     let rel_error = (se / den.max(1e-30)).sqrt() as f32;
-    BlockAcceptance { rel_error, accepted: rel_error <= rel_tol }
+    BlockAcceptance {
+        rel_error,
+        accepted: rel_error <= rel_tol,
+    }
 }
 
 #[cfg(test)]
@@ -230,7 +261,18 @@ mod tests {
     #[test]
     fn joint_kd_perfect_student_is_zero_everywhere() {
         let heads: Vec<Vec<f32>> = (0..3)
-            .map(|h| vec![2.0 + h as f32, 1.0, 0.0, -1.0, /* row1 */ 0.5, 2.0, 1.0, 0.0])
+            .map(|h| {
+                vec![
+                    2.0 + h as f32,
+                    1.0,
+                    0.0,
+                    -1.0,
+                    /* row1 */ 0.5,
+                    2.0,
+                    1.0,
+                    0.0,
+                ]
+            })
             .collect();
         let j = joint_kd_divergence(&heads, &heads.clone(), 4, 2.0, &[0.3, 0.15]);
         assert!(j.total.abs() < 1e-6);
@@ -268,7 +310,11 @@ mod tests {
         let mut student = teacher.clone();
         student[0] = base.iter().map(|&x| -x).collect(); // wreck the primary
         let j = joint_kd_divergence(&teacher, &student, vocab, 2.0, &[1e-6]);
-        assert!(j.primary > 0.05, "primary regression invisible: {}", j.primary);
+        assert!(
+            j.primary > 0.05,
+            "primary regression invisible: {}",
+            j.primary
+        );
         assert!((j.total - j.primary - 1e-6 * j.mtp[0]).abs() < 1e-6);
     }
 }

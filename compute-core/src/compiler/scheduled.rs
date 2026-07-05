@@ -12,6 +12,9 @@ use std::collections::HashMap;
 use crate::backend::routing::{
     BackendId, EvidenceDigest, OperationFamily, OperationId, PhysicalLayout, TensorId, TensorShape,
 };
+
+#[cfg(test)]
+use crate::backend::routing::BACKEND_ACCELERATE;
 use crate::backend::DType;
 use crate::config::FusedOperation;
 
@@ -306,7 +309,7 @@ mod tests {
             region_id: RegionId(1),
             name: "matmul_region".into(),
             operations: vec![OperationId(1)],
-            selected_backend: BackendId(1),
+            selected_backend: BACKEND_ACCELERATE,
             physical_tensors: vec![],
             inputs: vec![TensorId(1), TensorId(2)],
             outputs: vec![TensorId(3)],

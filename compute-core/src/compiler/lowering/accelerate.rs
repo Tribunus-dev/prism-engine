@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use super::dataset::F32MatmulDataset;
 use crate::backend::accelerate::AccelerateBackend;
-use crate::backend::routing::{BackendArtifactId, BackendId, EvidenceDigest};
+use crate::backend::routing::{BackendArtifactId, EvidenceDigest, BACKEND_ACCELERATE};
 use crate::backend::{MatmulOp, TensorBackend};
 use crate::compiler::LoweringReceipt;
 
@@ -54,7 +54,7 @@ pub fn lower_matmul_accelerate(
 
     Ok(AccelerateLoweringReceipt {
         lowering: LoweringReceipt {
-            backend_id: BackendId(2),
+            backend_id: BACKEND_ACCELERATE,
             source_schedule_digest: EvidenceDigest(String::new()),
             legality: crate::compiler::LegalityReceipt {
                 legal: true,

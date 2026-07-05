@@ -34,7 +34,7 @@ fn make_slots() -> Vec<IOSurfaceSlotManifest> {
             strides_bytes: vec![128],
             layout: "NHWC".into(),
             producer: ExecutionLane::AccelerateCpu,
-            consumer: ExecutionLane::CoreMlAne,
+            consumer: ExecutionLane::CoreAiAne,
             reuse_class: "ring_reuse".into(),
             required_alignment: 16384,
         },
@@ -48,7 +48,7 @@ fn make_slots() -> Vec<IOSurfaceSlotManifest> {
             physical_shape: vec![1, 64],
             strides_bytes: vec![128],
             layout: "NHWC".into(),
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
             consumer: ExecutionLane::MlxGpu,
             reuse_class: "ring_reuse".into(),
             required_alignment: 16384,
@@ -170,12 +170,12 @@ fn test_ane_failure_triggers_fallback_continuity() {
     }
 
     // Phase 2: Simulate ANE lane failure at epoch 10 — poison slot 1
-    // (the hidden tensor produced by CoreMlAne).
+    // (the hidden tensor produced by CoreAiAne).
     {
         let slot = arena.slot_mut(1).unwrap();
         slot.poison(
             10,
-            SlotFailureReason::CoreMlPredictionFailed(
+            SlotFailureReason::CoreAiPredictionFailed(
                 "ANE inference diverged from reference".into(),
             ),
         );
@@ -195,7 +195,7 @@ fn test_ane_failure_triggers_fallback_continuity() {
     // input_slots are [0, 1] and output_slots are [2].
     //
     // After failure, the fallback lane takes over production for slot 1
-    // (output of CoreMlAne → now produced by cpu).
+    // (output of CoreAiAne → now produced by cpu).
     //
     // Simulate completing the epoch on slot 0 (which is still healthy)
     // via its normal consumer, and for slot 1 route through the
@@ -265,7 +265,7 @@ fn test_slot_poison_rejects_further_normal_transition() {
     let result = arena
         .slot_mut(0)
         .unwrap()
-        .mark_reading(1, ExecutionLane::CoreMlAne);
+        .mark_reading(1, ExecutionLane::CoreAiAne);
     assert!(
         result.is_err(),
         "transition from Poisoned should be rejected"

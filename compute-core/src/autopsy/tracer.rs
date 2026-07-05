@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use crate::autopsy::{replay::ReplayResult, AnomalyTrace, InferenceAnomaly};
-use crate::backend::routing::BackendId;
+use crate::backend::routing::{BackendId, BACKEND_MLX};
 use crate::profiled_executor::LoadedProfiledModel;
 use crate::runtime_orchestration::InMemoryCoordinationFabric;
 
@@ -38,7 +38,7 @@ impl AnomalyTracer {
     /// 5. Return the full trace
     pub fn trace(&self, anomaly: &InferenceAnomaly) -> Result<AnomalyTrace, String> {
         let layer = anomaly_layer(anomaly)?;
-        let backend = anomaly_backend(anomaly).unwrap_or(BackendId(0));
+        let backend = anomaly_backend(anomaly).unwrap_or(BACKEND_MLX);
 
         // Find work receipt from the coordination fabric
         let work_id = format!("layer_{}", layer);

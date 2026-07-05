@@ -26,6 +26,7 @@ struct XorShift32 {
 }
 
 impl XorShift32 {
+    #[allow(dead_code)]
     fn new() -> Self {
         // Use a fixed seed derived from the instruction counter; deterministic
         // across runs but varies per process.
@@ -1054,6 +1055,7 @@ pub struct SpecHubVerification {
 /// For each draft, extracts the top-K token indices and their probabilities
 /// from `draft_data`. Returns a map `(draft_index, token) -> probability`.
 /// Tokens with probability below 1e-10 are excluded.
+#[allow(dead_code)]
 fn sparse_joint_distribution_at_pos(
     draft_data: &[f32],
     num_drafts: usize,
@@ -1084,6 +1086,7 @@ fn sparse_joint_distribution_at_pos(
 }
 
 /// Compute softmax-normalized probabilities from logits at a single position.
+#[allow(dead_code)]
 fn softmax_at_pos(
     data: &[f32],
     _seq_len: usize,
@@ -1124,6 +1127,7 @@ fn softmax_at_pos(
 /// two drafts are compatible when their top-K sets overlap by at least 30%.
 /// Returns the indices of drafts that are pairwise-compatible with at least
 /// one other peer (singletons with no overlap are excluded).
+#[allow(dead_code)]
 fn compatible_subset_at_pos(
     draft_data: &[f32],
     num_drafts: usize,
@@ -1178,6 +1182,7 @@ fn compatible_subset_at_pos(
 
 /// Find the consensus token — the one with the most total probability mass
 /// across all drafts in the sparse joint distribution.
+#[allow(dead_code)]
 fn find_consensus_token(joint: &HashMap<(usize, u32), f64>) -> Option<(u32, f64)> {
     let mut token_mass: HashMap<u32, f64> = HashMap::new();
     for (&(_, token), &prob) in joint {
@@ -1191,6 +1196,7 @@ fn find_consensus_token(joint: &HashMap<(usize, u32), f64>) -> Option<(u32, f64)
 /// Re-weigh candidate tokens within a compatible subset.
 /// Multiplies each draft's probability for a token by that token's
 /// target probability, then selects the highest-scoring token.
+#[allow(dead_code)]
 fn reweigh_with_subset(
     joint: &HashMap<(usize, u32), f64>,
     compat_set: &[usize],

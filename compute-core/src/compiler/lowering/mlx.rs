@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use super::dataset::F32MatmulDataset;
-use crate::backend::routing::{BackendArtifactId, BackendId, EvidenceDigest};
+use crate::backend::routing::{BackendArtifactId, EvidenceDigest, BACKEND_MLX};
 use crate::backend::{MatmulOp, MlxBackend, TensorBackend};
 use crate::compiler::LoweringReceipt;
 
@@ -53,7 +53,7 @@ pub fn lower_matmul_mlx(
 
     Ok(MlxLoweringReceipt {
         lowering: LoweringReceipt {
-            backend_id: BackendId(1),
+            backend_id: BACKEND_MLX,
             source_schedule_digest: EvidenceDigest(String::new()),
             legality: crate::compiler::LegalityReceipt {
                 legal: true,

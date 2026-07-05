@@ -29,7 +29,7 @@ pub mod analysis;
 pub mod ane;
 #[cfg(all(
     target_os = "macos",
-    feature = "mlx-backend"
+    any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod ane_bridge;
 #[cfg(feature = "prism-backend")]
@@ -302,6 +302,9 @@ pub mod logging;
 pub mod editing;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod exo;
+/// Pure-data types for KV cache, usable without mlx dependency.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod kv_cache_types;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
@@ -320,13 +323,7 @@ pub mod mapped_image;
     feature = "prism-backend"
 ))]
 pub mod memory;
-#[cfg(all(
-    target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
-))]
+#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
 pub mod metal_capture;
 #[cfg(feature = "metal-dispatch")]
 pub mod metal_launcher;
@@ -386,6 +383,7 @@ pub mod model_store;
 ))]
 pub mod models;
 pub mod native_kernel;
+pub mod nf4tile640;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
     feature = "prism-backend"
@@ -417,11 +415,16 @@ pub mod profiled_executor;
 ))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod profiled_model;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "candle-cpu"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "candle-cpu"))]
 pub mod projection_executor;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+pub mod projection_identity;
+#[cfg(any(
+    any(feature = "mlx-backend", feature = "prism-backend"),
+    feature = "prism-backend"
+))]
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+pub mod projection_tests;
 #[cfg(any(
     any(
         any(feature = "mlx-backend", feature = "prism-backend"),
@@ -433,14 +436,6 @@ pub mod projection_executor;
 ))]
 /// Always-available projection data types (see module docs).
 pub mod projection_types;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod projection_identity;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod projection_tests;
 pub mod quantization;
 #[cfg(any(
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -503,9 +498,6 @@ pub mod scheduling;
 pub mod server;
 #[cfg(feature = "mlx-backend")]
 pub mod session;
-/// Pure-data types for KV cache, usable without mlx dependency.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod kv_cache_types;
 
 #[cfg(feature = "mlx-backend")]
 pub mod sidecar;

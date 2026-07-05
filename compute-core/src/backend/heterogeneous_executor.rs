@@ -1,7 +1,8 @@
 //! Heterogeneous executor — dispatches operations across backends.
 //!
-//! Implements [`BoundaryExecutor`] by iterating over sealed boundary plans,
-//! finding the correct backend for each, and emitting observed
+//! Production-neutral orchestration layer. Implements [`BoundaryExecutor`] by
+//! iterating over sealed boundary plans, finding the correct backend for each,
+//! and emitting observed
 //! [`BoundaryExecutionReceipt`]s. Cross-backend tensor transfers go through
 //! the IOSurface unified memory island (zero-copy via
 //! [`IosurfaceAllocator`] / [`TensorBackend::bind_external`]).
@@ -12,8 +13,10 @@ use std::sync::Arc;
 use crate::arena::Arena;
 use crate::backend::flex_dispatch::FlexDispatch;
 use crate::backend::routing::*;
+use crate::backend::CompiledRegionBackend;
 use crate::backend::TensorBackend;
 use crate::backend::TensorHandle;
+use crate::backend::DType;
 use crate::memory::allocator::IosurfaceAllocator;
 
 // ── BackendInstance trait ──────────────────────────────────────────────────
@@ -39,16 +42,22 @@ pub trait BackendInstance: TensorBackend {
     /// Evaluate output tensors and materialize them directly into a
     /// pre-allocated IOSurface arena, avoiding any copy between backends.
     ///
-    /// The default implementation falls back to `self.evaluate()`. Backends
-    /// that support zero-copy IOSurface materialization (MLX via
-    /// `evaluate_into()`) should override this.
+    /// The default implementation delegates to [`TensorBackend::evaluate_into`].
+    /// Backends that support zero-copy IOSurface materialization should
+    /// override that trait method instead.
     fn evaluate_into_arena(
         &mut self,
         _group_id: u64,
         _outputs: &[TensorHandle],
         _arena: &Arena,
     ) -> Result<crate::backend::EvaluationReceipt, String> {
-        self.evaluate(_group_id, _outputs)
+        self.evaluate_into(_group_id, _outputs, _arena)
+    }
+
+    /// If this backend supports compiled region execution, return the
+    /// [`CompiledRegionBackend`] interface. Default returns `None`.
+    fn as_compiled_region_backend(&mut self) -> Option<&mut dyn CompiledRegionBackend> {
+        None
     }
 }
 
@@ -92,6 +101,26 @@ impl HeterogeneousExecutor {
     /// Set the IOSurface allocator (for cross-backend tensor transfers).
     pub fn set_allocator(&mut self, allocator: Arc<IosurfaceAllocator>) {
         self.allocator = Some(allocator);
+    }
+
+    /// Allocate an IOSurface-backed buffer and bind it as a tensor on all
+    /// registered backends, returning the handle on the authoritative backend.
+    ///
+    /// For now, this allocates on the authority backend and returns the handle.
+    /// Cross-backend mirroring (creating `bind_external` handles on other
+    /// backends) is deferred to a follow-up when the IOSurface allocator is
+    /// fully operational.
+    pub fn allocate_shared_tensor(
+        &mut self,
+        data: &[u8],
+        shape: &[i32],
+        dtype: DType,
+        authority: BackendId,
+    ) -> Result<TensorHandle, String> {
+        let backend = self
+            .find_backend(authority)
+            .ok_or_else(|| format!("authority backend {:?} not registered", authority))?;
+        backend.create_owned_from_bytes(data, shape, dtype)
     }
 
     /// Set the operation descriptor registry.
@@ -280,6 +309,37 @@ impl BoundaryExecutor for HeterogeneousExecutor {
                 });
             } else {
                 for op_desc in &ops {
+                    let region_families = [
+                        OperationFamily::AttentionBlock,
+                        OperationFamily::MlpBlock,
+                        OperationFamily::DecoderLayer,
+                        OperationFamily::PrefillFragment,
+                    ];
+
+                    let is_compiled_region = region_families.contains(&op_desc.family);
+
+                    if is_compiled_region {
+                        if let Some(compiled_backend) = _backend.as_compiled_region_backend() {
+                            // Build a GraphRegion from the operation descriptor
+                            // For now, construct a minimal GraphRegion; the cimage plan
+                            // will provide full region data in a later phase.
+                            let region = crate::backend::routing::GraphRegion {
+                                region_id: op_desc.operation_id.0,
+                                family: op_desc.family,
+                                operations: vec![op_desc.operation_id],
+                                input_tensors: Vec::new(),
+                                output_tensors: Vec::new(),
+                                shape_constraints: vec![op_desc.expected_output_shape.clone()],
+                            };
+                            // Phase: cross-backend tensor binding will be added here.
+                            let receipt =
+                                compiled_backend.execute_compiled_region(&region, &[], &[])?;
+                            _op_receipts.push(receipt);
+                            continue;
+                        }
+                        // Fall through to regular execute if no compiled-region backend
+                    }
+
                     let receipt = _backend.execute(op_desc, &[])?;
                     _op_receipts.push(receipt);
                 }

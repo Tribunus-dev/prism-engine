@@ -296,7 +296,11 @@ impl SealedMultimodalBindings {
                 record: *record,
                 weights: weight_segment,
                 scales: scale_segment,
-                biases: if record.has_bias() { bias_segment } else { None },
+                biases: if record.has_bias() {
+                    bias_segment
+                } else {
+                    None
+                },
             };
             if is_image_role(role) {
                 image_projection_bindings.push(binding);
@@ -514,7 +518,11 @@ mod tests {
             text: true,
             image: true,
             audio: false,
-            video: false,
+            image_projection_backend: crate::compute_image::multimodal::ProjectionBackend::None,
+            audio_projection_backend: crate::compute_image::multimodal::ProjectionBackend::None,
+            max_images_per_prompt: 0,
+            max_soft_tokens_per_image: 0,
+            supports_mixed_embedding_prefill: false,
         }
     }
 
@@ -626,7 +634,10 @@ mod tests {
         let d = MultimodalInputDescriptorV1::default();
         let base = &d as *const _ as usize;
         let off = (&d.projection_bias_segment_index as *const _ as usize) - base;
-        assert_eq!(off, 30, "bias index must occupy the old image_reserved slot");
+        assert_eq!(
+            off, 30,
+            "bias index must occupy the old image_reserved slot"
+        );
         // Record stride unchanged too (the loader walks with size_of stride).
         assert_eq!(std::mem::size_of::<ProjectionTensorRecord>(), 80);
     }

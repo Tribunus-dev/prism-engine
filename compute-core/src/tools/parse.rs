@@ -450,6 +450,7 @@ pub fn extract_tools(body: &serde_json::Value) -> Result<Vec<ToolDefinition>, St
 
 /// Build a chat prompt string from a messages array (serde_json::Value).
 /// Each message should have `role` and `content` fields.
+#[allow(dead_code)]
 fn build_chat_prompt(messages: &[serde_json::Value]) -> String {
     let mut prompt = String::new();
     for msg in messages {

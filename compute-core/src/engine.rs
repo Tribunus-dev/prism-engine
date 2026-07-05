@@ -22,6 +22,7 @@ use crate::backend::accelerate::AccelerateBackend;
 use crate::backend::heterogeneous_executor::BackendInstance;
 use crate::backend::routing::{
     BackendExecutionReceipt, BackendId, ComputeRouteProfile, OperationDescriptor, OperationFamily,
+    BACKEND_ACCELERATE, BACKEND_MLX,
 };
 use crate::backend::{MlxBackend, TensorHandle};
 use crate::compute_image::{
@@ -775,7 +776,7 @@ impl ComputeEngine {
 
 impl BackendInstance for MlxBackend {
     fn backend_kind(&self) -> BackendId {
-        BackendId(0)
+        BACKEND_MLX
     }
 
     fn supports(&self, _family: OperationFamily) -> bool {
@@ -805,7 +806,7 @@ unsafe impl Send for AccelerateBackend {}
 
 impl BackendInstance for AccelerateBackend {
     fn backend_kind(&self) -> BackendId {
-        BackendId(1)
+        BACKEND_ACCELERATE
     }
 
     fn supports(&self, _family: OperationFamily) -> bool {

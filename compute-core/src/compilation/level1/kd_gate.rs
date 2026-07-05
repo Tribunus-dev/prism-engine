@@ -152,7 +152,11 @@ pub fn score_student_logits(
     let mut windows = Vec::with_capacity(n_win);
     let mut start = 0usize;
     for w in 0..n_win {
-        let end = if w == n_win - 1 { positions } else { start + base };
+        let end = if w == n_win - 1 {
+            positions
+        } else {
+            start + base
+        };
         let t = &teacher.logits[start * vocab..end * vocab];
         let s = &student.logits[start * vocab..end * vocab];
         windows.push(KdWindow {
@@ -163,9 +167,9 @@ pub fn score_student_logits(
         });
         start = end;
     }
-    let worst = windows
-        .iter()
-        .fold((0.0f32, 1.0f32), |(wk, wt), w| (wk.max(w.kd), wt.min(w.top1)));
+    let worst = windows.iter().fold((0.0f32, 1.0f32), |(wk, wt), w| {
+        (wk.max(w.kd), wt.min(w.top1))
+    });
 
     Ok(KdReport {
         kd,
@@ -213,7 +217,9 @@ pub fn builtin_calibration_tokens(n: usize, vocab_cap: u32, seed: u64) -> Vec<u3
     let mut s = seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(1);
     (0..n)
         .map(|_| {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             1 + ((s >> 40) as u32) % vocab_cap.max(2)
         })
         .collect()
@@ -254,9 +260,11 @@ pub fn load_calibration_stream(
         // Zero would either mean "no verification" (a policy the caller must
         // express by skipping the stage, not by a degenerate budget) or invite
         // the "0 = unlimited" misreading. Reject it.
-        return Err("calibration token budget is zero — declare a positive budget \
+        return Err(
+            "calibration token budget is zero — declare a positive budget \
                     or skip the verification stage explicitly"
-            .into());
+                .into(),
+        );
     }
     match path {
         Some(p) => {
@@ -332,8 +340,8 @@ pub fn compute_calibration_logits(
     if tokens.is_empty() {
         return Err("empty calibration token stream".into());
     }
-    let mut runner = Gemma4Teacher::load(cimage)
-        .map_err(|e| format!("load {}: {e}", cimage.display()))?;
+    let mut runner =
+        Gemma4Teacher::load(cimage).map_err(|e| format!("load {}: {e}", cimage.display()))?;
     // Streaming: rows land directly in ONE flat buffer (row-length checked as
     // they arrive). No nested Vec<Vec<f32>>, no flatten copy — the resident
     // peak is exactly positions × vocab × 4 bytes plus one transient row.
@@ -451,7 +459,10 @@ pub struct ParityThresholds {
 
 impl Default for ParityThresholds {
     fn default() -> Self {
-        ParityThresholds { hard: 0.35, warn: 0.10 }
+        ParityThresholds {
+            hard: 0.35,
+            warn: 0.10,
+        }
     }
 }
 
@@ -771,7 +782,12 @@ mod tests {
         };
         let g = kd_gate(&r, &strict);
         assert!(!g.passed);
-        assert_eq!(g.reasons.len(), 3, "all three criteria should trip: {:?}", g.reasons);
+        assert_eq!(
+            g.reasons.len(),
+            3,
+            "all three criteria should trip: {:?}",
+            g.reasons
+        );
     }
 
     #[test]
@@ -851,7 +867,11 @@ mod tests {
         assert!(!m.verdict.passed);
         assert_eq!(m.verdict.warns, vec![1]); // 0.2 ∈ (0.1, 0.35]
         assert_eq!(m.verdict.hard_breaches, vec![2, 3]);
-        assert_eq!(m.verdict.first_hard_breach, Some(2), "earliest breach is the root-cause pointer");
+        assert_eq!(
+            m.verdict.first_hard_breach,
+            Some(2),
+            "earliest breach is the root-cause pointer"
+        );
         assert_eq!(m.verdict.worst_index, Some(3));
         assert!((m.verdict.worst_rel_l2 - 0.9).abs() < 1e-6);
     }
@@ -880,7 +900,10 @@ mod tests {
     fn inverted_thresholds_panic() {
         let golden = vec![1.0f32; 8];
         let r = drift_report(&golden, &golden, 0, TapKind::FinalHidden);
-        let bad = ParityThresholds { hard: 0.1, warn: 0.5 };
+        let bad = ParityThresholds {
+            hard: 0.1,
+            warn: 0.5,
+        };
         let _ = classify_drift(&r, &bad);
     }
 
@@ -906,8 +929,8 @@ mod tests {
         for v in actual[3].iter_mut() {
             *v += 10.0;
         }
-        let m = validate_token_taps(5, layers, &actual, &golden, ParityThresholds::default())
-            .unwrap();
+        let m =
+            validate_token_taps(5, layers, &actual, &golden, ParityThresholds::default()).unwrap();
         assert!(!m.verdict.passed);
         assert_eq!(m.verdict.first_hard_breach, Some(3));
         assert_eq!(m.reports[3].tap, TapKind::PostAttention);
@@ -926,12 +949,11 @@ mod tests {
             *v = -2.0; // rel_l2 = 2.0 ≫ hard
         }
         let mut run = ParityRun::new(ParityThresholds::default());
-        assert!(run.push(
-            validate_token_taps(0, layers, &clean, &golden, run.thresholds).unwrap()
-        ));
-        assert!(!run.push(
-            validate_token_taps(1, layers, &broken, &golden, run.thresholds).unwrap()
-        ), "hard breach must signal STOP");
+        assert!(run.push(validate_token_taps(0, layers, &clean, &golden, run.thresholds).unwrap()));
+        assert!(
+            !run.push(validate_token_taps(1, layers, &broken, &golden, run.thresholds).unwrap()),
+            "hard breach must signal STOP"
+        );
         assert_eq!(run.stopped_at_token, Some(1));
         assert!(!run.all_passed());
         assert_eq!(run.tokens_validated(), 2);

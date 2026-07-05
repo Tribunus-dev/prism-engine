@@ -992,6 +992,73 @@ fn projection_precision_from_descriptor(
     }
 }
 
+#[cfg(target_os = "macos")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub fn load_heterogeneous_executor(
+    mmap_data: &[u8],
+    header: &PrismCimageHeader,
+) -> Result<
+    Option<(
+        crate::backend::heterogeneous_executor::HeterogeneousExecutor,
+        crate::compute_image::heterogeneous::types::HeterogeneousExecutionImage,
+    )>,
+    String,
+> {
+    use crate::backend::routing::{
+        CorrectnessCheckpointPolicy, LogicalShape, OperationDescriptor, OperationFamily,
+        OperationId, Phase, TensorShape,
+    };
+    use crate::backend::DType;
+    use crate::compute_image::heterogeneous::types::HeterogeneousExecutionImage;
+
+    let Some(segment) = header.segment(SegmentKind::HeterogeneousImage) else {
+        return Ok(None);
+    };
+
+    let start = segment.offset as usize;
+    let end = start
+        .checked_add(segment.length as usize)
+        .ok_or_else(|| "segment offset/length overflow".to_string())?;
+    if end > mmap_data.len() {
+        return Err(format!(
+            "HeterogeneousImage segment at offset {} length {} exceeds mmap size {}",
+            segment.offset, segment.length, mmap_data.len()
+        ));
+    }
+    let blob = &mmap_data[start..end];
+
+    let image: HeterogeneousExecutionImage = serde_json::from_slice(blob)
+        .map_err(|e| format!("failed to deserialize HeterogeneousExecutionImage: {e}"))?;
+
+    let mut executor = crate::backend::create_heterogeneous_executor()?;
+
+    // Walk compiled phase graph, building operation descriptors.
+    // The CompiledPhaseNode carries only phase_id; PhaseKind is in the
+    // canonical PhaseIR (not embedded in the runtime artifact). Use
+    // OperationFamily::Matmul as the scaffolding default; the compiler
+    // populates precise families at image construction time.
+    let mut operation_registry = std::collections::HashMap::new();
+    for node in &image.phase_graph.nodes {
+        let op_id = OperationId(node.phase_id);
+        let descriptor = OperationDescriptor {
+            operation_id: op_id,
+            family: OperationFamily::Matmul,
+            layer_index: None,
+            phase: Phase::Decode,
+            logical_shape: LogicalShape { dims: Vec::new() },
+            physical_layout: crate::backend::routing::PhysicalLayout::RowMajor,
+            input_dtypes: Vec::new(),
+            output_dtype: DType::F32,
+            quantization: None,
+            expected_output_shape: TensorShape { dims: Vec::new() },
+            correctness_checkpoint: CorrectnessCheckpointPolicy::None,
+        };
+        operation_registry.insert(op_id, descriptor);
+    }
+    executor.set_operation_registry(operation_registry);
+    Ok(Some((executor, image)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

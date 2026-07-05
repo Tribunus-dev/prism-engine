@@ -14,7 +14,12 @@ pub mod accelerate_ffi;
 /// memory (zero-copy, no FFI). Pure Rust fallback with no OS dependency.
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod accelerate_lane;
+#[cfg(target_os = "macos")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[path = "ane.rs"]
+pub mod ane_backend;
 pub mod authority;
+pub mod completion;
 #[cfg(target_os = "macos")]
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod coreai;
@@ -38,13 +43,16 @@ pub mod evaluation;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod flex_dispatch;
 pub mod graph;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))] // research surface: MLX executor/model stack
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+// production-neutral heterogeneous orchestration
 pub mod heterogeneous_executor;
 #[cfg(feature = "intel")]
 pub mod intel_level_zero;
 /// Intel USM zero-copy buffer abstraction for iGPU (Level Zero / oneAPI).
 #[cfg(feature = "intel")]
 pub mod intel_usm;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod metal;
 /// Metal consumer — validates Core ML output slots against CPU references.
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod metal_consumer;
@@ -76,6 +84,7 @@ pub mod tensor_registry;
 ))]
 pub mod unified_arena;
 
+use crate::backend::routing::{BackendExecutionReceipt, GraphRegion, OperationFamily};
 #[cfg(feature = "mlx-backend")]
 use mlx_rs::ops;
 #[cfg(feature = "mlx-backend")]
@@ -357,11 +366,49 @@ pub trait TensorBackend {
 
     /// Describe the capabilities of this backend.
     fn backend_capabilities(&self) -> BackendCapabilities;
+    // ── Async submission ────────────────────────────────────────────
+
+    /// Submit pending compute work to the backend, returning a
+    /// [`ComellationToken`] the caller can use to block until GPU work
+    /// completes. The default implementation evaluates synchronously
+    /// and immediately completes the token.
+    ///
+    /// Backends that support async dispatch (e.g. Metal via
+    /// `MTLCommandBuffer` completion handlers) should override this to
+    /// return a token that completes only when GPU work finishes.
+    fn submit_compute(
+        &mut self,
+        group_id: u64,
+        outputs: &[TensorHandle],
+    ) -> Result<(completion::ComellationToken, EvaluationReceipt), String> {
+        let (token, completer) = completion::ComellationToken::new();
+        let receipt = self.evaluate(group_id, outputs)?;
+        completer.complete();
+        Ok((token, receipt))
+    }
+
+    /// Evaluate outputs and materialize directly into a pre-allocated
+    /// arena (IOSurface-backed), avoiding copies between backends.
+    /// Default falls back to `evaluate`.
+    #[cfg(all(
+        target_os = "macos",
+        any(feature = "mlx-backend", feature = "prism-backend")
+    ))]
+    fn evaluate_into(
+        &mut self,
+        group_id: u64,
+        outputs: &[TensorHandle],
+        _arena: &crate::arena::Arena,
+    ) -> Result<EvaluationReceipt, String> {
+        self.evaluate(group_id, outputs)
+    }
+
     // ── Residency (auditable tensor tracking) ────────────────────────
 
     /// Return the residency record for the tensor identified by `handle`.
     #[cfg(any(
         feature = "mlx-backend",
+        feature = "prism-backend",
         feature = "candle-cpu",
         feature = "intel",
         feature = "tensix"
@@ -373,6 +420,7 @@ pub trait TensorBackend {
     /// Record a transfer event for the tensor identified by `handle`.
     #[cfg(any(
         feature = "mlx-backend",
+        feature = "prism-backend",
         feature = "candle-cpu",
         feature = "intel",
         feature = "tensix"
@@ -384,6 +432,33 @@ pub trait TensorBackend {
     ) -> Result<(), String> {
         Err("residency tracking not yet implemented".into())
     }
+}
+
+// ── Compiled region backend trait ─────────────────────────────────────────
+
+/// A backend that executes pre-compiled subgraph regions.
+///
+/// Unlike [`TensorBackend`] which dispatches individual primitive ops,
+/// a compiled-region backend takes whole subgraphs (attention blocks,
+/// MLP blocks, decoder layers, prefill fragments) compiled as a unit.
+///
+/// The canonical compiled-region families are:
+/// - [`OperationFamily::AttentionBlock`]
+/// - [`OperationFamily::MlpBlock`]
+/// - [`OperationFamily::DecoderLayer`]
+/// - [`OperationFamily::PrefillFragment`]
+pub trait CompiledRegionBackend: TensorBackend {
+    /// Execute a compiled region with pre-bound I/O tensors.
+    fn execute_compiled_region(
+        &mut self,
+        region: &GraphRegion,
+        inputs: &[TensorHandle],
+        outputs: &[TensorHandle],
+    ) -> Result<BackendExecutionReceipt, String>;
+
+    /// Whether this backend can execute the given region family as a
+    /// compiled unit rather than decomposing into primitive ops.
+    fn supports_region(&self, family: OperationFamily) -> bool;
 }
 
 // ── Transfer check helper ──────────────────────────────────────────────────
@@ -1022,4 +1097,33 @@ impl TraceRingBuffer {
     pub fn drain(&self) -> Vec<TraceEvent> {
         Vec::new()
     }
+}
+
+/// Create a `HeterogeneousExecutor` with all available backends registered.
+///
+/// Registers:
+/// - MetalBackend (BackendId(0) = BACKEND_METAL)
+/// - AneBackend (BackendId(2) = BACKEND_ANE)
+///
+/// Returns the executor with an empty operation registry (populated
+/// from the cimage plan).
+#[cfg(target_os = "macos")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub fn create_heterogeneous_executor() -> Result<
+    crate::backend::heterogeneous_executor::HeterogeneousExecutor,
+    String,
+> {
+    use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
+    use crate::backend::metal::MetalBackend;
+    use crate::backend::ane_backend::AneBackend;
+
+    let mut executor = HeterogeneousExecutor::new();
+
+    let metal = MetalBackend::new()?;
+    executor.register(Box::new(metal));
+
+    let ane = AneBackend::new();
+    executor.register(Box::new(ane));
+
+    Ok(executor)
 }

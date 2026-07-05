@@ -271,16 +271,14 @@ impl ValidationMode {
         };
         // Declared intent must be satisfiable by the provided inputs.
         match declared {
-            ValidationMode::Kd if request.student_checkpoint.is_none() => Err(
-                "validation_mode \"kd\" declared but no student_checkpoint provided".into(),
-            ),
+            ValidationMode::Kd if request.student_checkpoint.is_none() => {
+                Err("validation_mode \"kd\" declared but no student_checkpoint provided".into())
+            }
             ValidationMode::KdAndParity if request.parity_golden_dir.is_none() => Err(
-                "validation_mode \"kd+parity\" declared but no parity_golden_dir provided"
-                    .into(),
+                "validation_mode \"kd+parity\" declared but no parity_golden_dir provided".into(),
             ),
             ValidationMode::KdAndParity if request.student_checkpoint.is_none() => Err(
-                "validation_mode \"kd+parity\" declared but no student_checkpoint provided"
-                    .into(),
+                "validation_mode \"kd+parity\" declared but no student_checkpoint provided".into(),
             ),
             _ => Ok(declared),
         }
@@ -707,8 +705,7 @@ fn run_parity_stage(
         .map_err(|_| "parity validator thread panicked".to_string())??;
 
     let json = run.to_parity_json()?;
-    std::fs::write(&sidecar, &json)
-        .map_err(|e| format!("write {}: {e}", sidecar.display()))?;
+    std::fs::write(&sidecar, &json).map_err(|e| format!("write {}: {e}", sidecar.display()))?;
     let digest = run.parity_digest()?;
     if let Some((idx, slots_data)) = taint {
         // Taint dump: the failing token's raw tap slots, full fidelity.
@@ -932,9 +929,7 @@ async fn run_distillation_loop(
         None | Some("tapped-audit") | Some("untapped") => {}
         Some(other) => fail_operationally!(
             FailureClass::Operational,
-            format!(
-                "unknown teacher_mode {other:?} — expected \"untapped\" or \"tapped-audit\""
-            )
+            format!("unknown teacher_mode {other:?} — expected \"untapped\" or \"tapped-audit\"")
         ),
     }
     if request.teacher_mode.as_deref() == Some("untapped") && parity_requested {
@@ -946,7 +941,12 @@ async fn run_distillation_loop(
         );
     }
     ops.teacher_tap_mode = Some(
-        if parity_requested { "tapped-audit" } else { "untapped" }.to_string(),
+        if parity_requested {
+            "tapped-audit"
+        } else {
+            "untapped"
+        }
+        .to_string(),
     );
 
     // Lane B budget preconditions: predict the held-buffer footprint from the
@@ -957,7 +957,8 @@ async fn run_distillation_loop(
     let kd_budget_tokens = request.calibration_len.unwrap_or(128) as u64;
     let parity_budget_tokens = request
         .max_parity_tokens
-        .unwrap_or_else(|| request.calibration_len.unwrap_or(128)) as u64;
+        .unwrap_or_else(|| request.calibration_len.unwrap_or(128))
+        as u64;
     let predicted: u64 = match validation_mode {
         ValidationMode::Structural => 0,
         // Both flat logit buffers are held simultaneously during scoring.
@@ -969,9 +970,7 @@ async fn run_distillation_loop(
                 + (2 * total_blocks as u64 + 2) * 3840 * 4 * 2
         }
     };
-    let lane_b_ceiling = request
-        .validation_memory_ceiling_bytes
-        .unwrap_or(1 << 30);
+    let lane_b_ceiling = request.validation_memory_ceiling_bytes.unwrap_or(1 << 30);
     ops.predicted_validation_bytes = Some(predicted);
     ops.validation_memory_ceiling_bytes = Some(lane_b_ceiling);
     if predicted > lane_b_ceiling {
@@ -1083,7 +1082,10 @@ async fn run_distillation_loop(
             Ok(Err(error)) => {
                 // Stage EXECUTION errors (load/decode/geometry) are
                 // operational — the scientific verdict is the gate below.
-                fail_operationally!(FailureClass::Operational, format!("KD stage failed: {error}"))
+                fail_operationally!(
+                    FailureClass::Operational,
+                    format!("KD stage failed: {error}")
+                )
             }
             Ok(Ok(None)) => None,
             Ok(Ok(Some((report, verdict, stream)))) => {
@@ -1116,9 +1118,8 @@ async fn run_distillation_loop(
     let parity_metrics: Option<(f64, usize, bool)> = if request.parity_golden_dir.is_none() {
         None
     } else if !parity_available() {
-        let reason =
-            "parity audit skipped: requires macOS + prism-backend (Metal megakernel taps)"
-                .to_string();
+        let reason = "parity audit skipped: requires macOS + prism-backend (Metal megakernel taps)"
+            .to_string();
         let mut j = jobs.lock().await;
         if let Some(job) = j.get_mut(&job_id) {
             job.parity_skipped_reason = Some(reason);
@@ -1224,10 +1225,7 @@ async fn run_distillation_loop(
             numerical_drift.insert("kd_divergence".into(), kd);
             numerical_drift.insert("kd_top1_agreement".into(), top1);
             numerical_drift.insert("kd_worst_window".into(), worst);
-            numerical_drift.insert(
-                "kd_gate_passed".into(),
-                if kd_passed { 1.0 } else { 0.0 },
-            );
+            numerical_drift.insert("kd_gate_passed".into(), if kd_passed { 1.0 } else { 0.0 });
         }
         // Parity audit summary (same values on every block — the audit is
         // model-level per token; per-block isolation arrives with block-swap).

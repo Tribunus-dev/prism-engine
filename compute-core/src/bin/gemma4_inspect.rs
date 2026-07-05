@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tribunus_compute_core::compute_image::model_family::{
     classify_tensor_name, Gemma4UnifiedSchema, TensorClassification,

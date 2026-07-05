@@ -7,6 +7,7 @@ use crate::compiler::semantic::{SemanticModule, SemanticOp, ToleranceClass};
 use super::accelerate::lower_matmul_accelerate;
 use super::coreai::lower_matmul_coreml;
 use super::dataset::F32MatmulDataset;
+#[cfg(feature = "mlx-backend")]
 use super::mlx::lower_matmul_mlx;
 
 fn build_semantic_matmul() -> (SemanticModule, F32MatmulDataset) {
@@ -55,6 +56,7 @@ fn build_semantic_matmul() -> (SemanticModule, F32MatmulDataset) {
 }
 
 #[test]
+#[cfg(feature = "mlx-backend")]
 fn mlx_preserves_matmul_route() {
     let (sem, dataset) = build_semantic_matmul();
     let digest = sem.digest.clone();

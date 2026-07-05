@@ -281,7 +281,9 @@ fn derive_nf4_tile640_arena_abi(
     arena_capacity: u64,
 ) -> Result<Nf4Tile640ArenaAbi, String> {
     let layout = Nf4Tile640Layout::canonical();
-    if weight.logical_shape.len() != 2 || scale.logical_shape.len() != 2 || bias.logical_shape.len() != 2
+    if weight.logical_shape.len() != 2
+        || scale.logical_shape.len() != 2
+        || bias.logical_shape.len() != 2
     {
         return Err(format!(
             "NF4Tile640 triplet requires rank-2 logical shapes, got weight={:?} scale={:?} bias={:?}",
@@ -363,12 +365,15 @@ fn derive_nf4_tile640_arena_abi(
                 name, slot.slot_id, slot.byte_offset, elem_align, slot.dtype
             ));
         }
-        let end = slot.byte_offset.checked_add(slot.byte_length).ok_or_else(|| {
-            format!(
-                "NF4Tile640 {} slot {} byte_offset+byte_length overflows u64",
-                name, slot.slot_id
-            )
-        })?;
+        let end = slot
+            .byte_offset
+            .checked_add(slot.byte_length)
+            .ok_or_else(|| {
+                format!(
+                    "NF4Tile640 {} slot {} byte_offset+byte_length overflows u64",
+                    name, slot.slot_id
+                )
+            })?;
         if end > arena_capacity {
             return Err(format!(
                 "NF4Tile640 {} slot {} runs past arena end: {} + {} = {} > capacity {}",
@@ -1070,13 +1075,9 @@ mod tests {
         let output_slot_ids = parse_slot_ids(&coreai_artifact.output_slots).expect("slot ids");
         let (weights, scales, biases) =
             nf4_triplet_slots(&manifest.arena.slots, &input_slot_ids).expect("nf4 triplet");
-        let abi = derive_nf4_tile640_arena_abi(
-            weights,
-            scales,
-            biases,
-            manifest.arena.allocation_bytes,
-        )
-        .expect("nf4 abi");
+        let abi =
+            derive_nf4_tile640_arena_abi(weights, scales, biases, manifest.arena.allocation_bytes)
+                .expect("nf4 abi");
 
         let mut coreai = CoreAiIOSurfaceExecutable::new(
             &coreai_artifact.artifact_id,
@@ -1199,8 +1200,8 @@ mod tests {
         };
 
         let arena_capacity = bias.byte_offset + bias.byte_length;
-        let abi = derive_nf4_tile640_arena_abi(&weight, &scale, &bias, arena_capacity)
-            .expect("nf4 abi");
+        let abi =
+            derive_nf4_tile640_arena_abi(&weight, &scale, &bias, arena_capacity).expect("nf4 abi");
         assert_eq!(abi.weight_byte_length, weight.byte_length);
         assert_eq!(abi.metadata_byte_length, scale.byte_length);
     }

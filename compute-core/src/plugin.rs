@@ -21,7 +21,7 @@
 //!             name: "efficient_attention_v2".into(),
 //!             description: "An experimental fused attention kernel".into(),
 //!             kernel_name: "plugin_efficient_attn_v2".into(),
-//!             backend: BackendId(0),
+//!             backend: BACKEND_MLX,
 //!         }]
 //!     }
 //! }
@@ -130,6 +130,7 @@ pub fn lookup_operation(kernel_name: &str) -> Option<PluginOperation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_METAL, BACKEND_MLX};
 
     struct TestPlugin;
 
@@ -146,13 +147,13 @@ mod tests {
                     name: "test_op_a".into(),
                     description: "First test operation".into(),
                     kernel_name: "test_kernel_a".into(),
-                    backend: BackendId(0),
+                    backend: BACKEND_MLX,
                 },
                 PluginOperation {
                     name: "test_op_b".into(),
                     description: "Second test operation".into(),
                     kernel_name: "test_kernel_b".into(),
-                    backend: BackendId(1),
+                    backend: BACKEND_ACCELERATE,
                 },
             ]
         }
@@ -197,7 +198,7 @@ mod tests {
                     name: "second_op".into(),
                     description: "Operation from second plugin".into(),
                     kernel_name: "second_kernel".into(),
-                    backend: BackendId(2),
+                    backend: BACKEND_ANE,
                 }]
             }
         }
@@ -234,7 +235,7 @@ mod tests {
                     name: "overwrite_op".into(),
                     description: "Replaces earlier plugin".into(),
                     kernel_name: "overwrite_kernel".into(),
-                    backend: BackendId(1),
+                    backend: BACKEND_ACCELERATE,
                 }]
             }
         }

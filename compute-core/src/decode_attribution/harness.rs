@@ -455,23 +455,23 @@ pub fn run_backend(
             steady_iters,
             tolerance,
         ),
-"mlx" => {
+        "mlx" => {
             #[cfg(feature = "mlx-backend")]
             {
                 run_backend_mlx(
-            &mut r,
-            family,
-            profile,
-            warmup_iters,
-            steady_iters,
-            tolerance,
+                    &mut r,
+                    family,
+                    profile,
+                    warmup_iters,
+                    steady_iters,
+                    tolerance,
                 )
             }
             #[cfg(not(feature = "mlx-backend"))]
             {
                 r.mark_skipped_by_support("MLX backend not available".to_string());
             }
-        },
+        }
         "reference" => run_backend_reference(&mut r, family, profile),
         other => {
             r.mark_predict_blocked("predict", format!("unknown backend: {other}"));

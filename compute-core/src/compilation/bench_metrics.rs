@@ -11,7 +11,11 @@
 /// Numerically-stable log-softmax of one logit row.
 pub fn log_softmax(logits: &[f32]) -> Vec<f32> {
     let m = logits.iter().cloned().fold(f32::MIN, f32::max);
-    let sum: f32 = logits.iter().map(|&x| (x - m).exp()).sum::<f32>().max(1e-30);
+    let sum: f32 = logits
+        .iter()
+        .map(|&x| (x - m).exp())
+        .sum::<f32>()
+        .max(1e-30);
     let lse = m + sum.ln();
     logits.iter().map(|&x| x - lse).collect()
 }
@@ -61,7 +65,11 @@ pub fn throughput_stats(samples: &[f64]) -> ThroughputStats {
     let mut s: Vec<f64> = samples.to_vec();
     s.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let n = s.len();
-    let mean = if n > 0 { s.iter().sum::<f64>() / n as f64 } else { f64::NAN };
+    let mean = if n > 0 {
+        s.iter().sum::<f64>() / n as f64
+    } else {
+        f64::NAN
+    };
     ThroughputStats {
         n,
         median: percentile_sorted(&s, 0.50),
@@ -138,7 +146,10 @@ pub fn compare(teacher: &ModelRunMetrics, student: &ModelRunMetrics) -> Comparis
 fn argmax_row(row: &[f32]) -> usize {
     row.iter()
         .enumerate()
-        .fold((0usize, f32::MIN), |(bi, bv), (i, &x)| if x > bv { (i, x) } else { (bi, bv) })
+        .fold(
+            (0usize, f32::MIN),
+            |(bi, bv), (i, &x)| if x > bv { (i, x) } else { (bi, bv) },
+        )
         .0
 }
 
@@ -153,7 +164,11 @@ pub fn greedy_acceptance(teacher: &[f32], student: &[f32], vocab: usize) -> Vec<
         .map(|r| {
             let t = &teacher[r * vocab..(r + 1) * vocab];
             let s = &student[r * vocab..(r + 1) * vocab];
-            if argmax_row(t) == argmax_row(s) { 1.0 } else { 0.0 }
+            if argmax_row(t) == argmax_row(s) {
+                1.0
+            } else {
+                0.0
+            }
         })
         .collect()
 }
@@ -274,8 +289,7 @@ pub fn spec_decode_projection(
 ) -> SpecProjection {
     let greedy = greedy_acceptance(teacher, student, vocab);
     let sampling = sampling_acceptance(teacher, student, vocab);
-    let alpha_greedy =
-        greedy.iter().map(|&a| a as f64).sum::<f64>() / greedy.len().max(1) as f64;
+    let alpha_greedy = greedy.iter().map(|&a| a as f64).sum::<f64>() / greedy.len().max(1) as f64;
     let alpha_sampling =
         sampling.iter().map(|&a| a as f64).sum::<f64>() / sampling.len().max(1) as f64;
 
@@ -403,7 +417,11 @@ mod tests {
         assert_eq!(proj.alpha_greedy, 0.0);
         for row in &proj.rows {
             assert!((row.tokens_greedy - 1.0).abs() < 1e-12); // bonus token only
-            assert!(row.speedup_greedy < 1.0, "k={} shouldn't beat teacher", row.k);
+            assert!(
+                row.speedup_greedy < 1.0,
+                "k={} shouldn't beat teacher",
+                row.k
+            );
         }
     }
 

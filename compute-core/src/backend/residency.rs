@@ -41,6 +41,25 @@ pub enum BackendId {
     Unknown,
 }
 
+impl BackendId {
+    /// Map this residency [`BackendId`] to its canonical [`routing::BackendId`]
+    /// value. Returns `None` for host-only or unknown backends.
+    pub fn to_routing_id(self) -> Option<crate::backend::routing::BackendId> {
+        use crate::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX};
+        match self {
+            BackendId::MlxMetal => Some(BACKEND_MLX),
+            BackendId::Accelerate => Some(BACKEND_ACCELERATE),
+            BackendId::CoreAi | BackendId::Ane => Some(BACKEND_ANE),
+            BackendId::CandleCpu
+            | BackendId::TensixTensix
+            | BackendId::IntelLevelZero
+            | BackendId::IntelOpenCl
+            | BackendId::HostCpu
+            | BackendId::Unknown => None,
+        }
+    }
+}
+
 // ── Memory domain ──────────────────────────────────────────────────────────
 
 /// Physical memory domain of a tensor.

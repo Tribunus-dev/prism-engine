@@ -24,7 +24,6 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
 use tribunus_compute_core::compute_image::orchestrator::Orchestrator;
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
 

@@ -208,17 +208,13 @@ impl CImageLayoutPlan {
         let layer_directory = next(layer_dir_len);
         let execution_graph = next(execution_graph_len);
 
-        let multimodal_input_descriptor =
-            multimodal_input_descriptor_len.map(|len| next(len));
+        let multimodal_input_descriptor = multimodal_input_descriptor_len.map(|len| next(len));
 
-        let multimodal_projection_weights =
-            multimodal_projection_weights_len.map(|len| next(len));
+        let multimodal_projection_weights = multimodal_projection_weights_len.map(|len| next(len));
 
-        let multimodal_projection_scales =
-            multimodal_projection_scales_len.map(|len| next(len));
+        let multimodal_projection_scales = multimodal_projection_scales_len.map(|len| next(len));
 
-        let multimodal_projection_biases =
-            multimodal_projection_biases_len.map(|len| next(len));
+        let multimodal_projection_biases = multimodal_projection_biases_len.map(|len| next(len));
 
         let multimodal_position_embeddings =
             multimodal_position_embeddings_len.map(|len| next(len));
@@ -271,6 +267,7 @@ mod tests {
             320,
             2,
             256,
+            None,
             None,
             None,
             None,

@@ -741,6 +741,7 @@ fn gemma4_kv_decompress_mil() -> Vec<u8> {
         .into_bytes()
 }
 
+#[allow(dead_code)]
 fn tar_mlmodelc_dirs(mlmodelc_paths: &[String]) -> Vec<u8> {
     let mut tar_bytes = Vec::new();
     {
@@ -1078,7 +1079,7 @@ fn main() {
 
     // ── MULTIMODAL_WEIGHTS (projection matrices → ternary; 1D → aux FP16) ──
     println!("  ── Multimodal weights ────────────────────────────");
-    for (name, rows, cols) in MULTIMODAL_WEIGHTS {
+    for (name, _rows, cols) in MULTIMODAL_WEIGHTS {
         let is_1d = *cols == 1;
         if let Some((data, shape)) = load_tensor(name, &shard_paths) {
             let n_blocks = (data.len() + 255) / 256;
@@ -1735,6 +1736,7 @@ fn get_opt<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
 }
 
 /// Read all values for a repeatable `--key <value>` flag.
+#[allow(dead_code)]
 fn get_opts<'a>(args: &'a [String], key: &str) -> Vec<&'a str> {
     args.windows(2)
         .filter(|w| w[0] == key)

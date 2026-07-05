@@ -91,7 +91,9 @@ fn load_tokens(path: &Option<PathBuf>, n: usize, vocab_cap: u32, seed: u64) -> V
     let mut s = seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(1);
     (0..n)
         .map(|_| {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             1 + ((s >> 40) as u32) % vocab_cap.max(2)
         })
         .collect()
@@ -143,13 +145,17 @@ fn main() {
 
         let mut cur = *prompt.last().unwrap_or(&1);
         for _ in 0..args.warmup {
-            cur = orch.decode_token(cur).unwrap_or_else(|e| panic!("{name} warmup: {e}"));
+            cur = orch
+                .decode_token(cur)
+                .unwrap_or_else(|e| panic!("{name} warmup: {e}"));
         }
         let mut ttft_ms = prefill_secs * 1000.0; // prompt→first token
         let mut per_step: Vec<f64> = Vec::with_capacity(args.max_tokens as usize);
         for step in 0..args.max_tokens {
             let s = Instant::now();
-            cur = orch.decode_token(cur).unwrap_or_else(|e| panic!("{name} decode: {e}"));
+            cur = orch
+                .decode_token(cur)
+                .unwrap_or_else(|e| panic!("{name} decode: {e}"));
             let dt = s.elapsed().as_secs_f64().max(1e-9);
             if step == 0 {
                 ttft_ms += dt * 1000.0;
@@ -179,7 +185,10 @@ fn main() {
 
     let print_metrics = |m: &ModelRunMetrics| {
         println!("── {} ──", m.name);
-        println!("  prefill  : {:>8.1} tok/s (median)", m.prefill_tok_s.median);
+        println!(
+            "  prefill  : {:>8.1} tok/s (median)",
+            m.prefill_tok_s.median
+        );
         println!(
             "  decode   : {:>8.1} tok/s  (median; p90 {:.1}, p99 {:.1})",
             m.decode_tok_s.median, m.decode_tok_s.p90, m.decode_tok_s.p99
@@ -221,7 +230,11 @@ fn main() {
         println!(
             "  perplexity ratio   : {:>6.3}  ({})",
             cmp.perplexity_ratio,
-            if cmp.perplexity_ratio > 1.0 { "student worse" } else { "student better" }
+            if cmp.perplexity_ratio > 1.0 {
+                "student worse"
+            } else {
+                "student better"
+            }
         );
         if cmp.bpw_ratio.is_finite() {
             println!("  bpw ratio          : {:>6.3}", cmp.bpw_ratio);

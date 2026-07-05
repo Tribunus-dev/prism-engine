@@ -632,7 +632,7 @@ mod ledger_tests {
             region_id: crate::compiler::scheduled::RegionId(1),
             name: "test".into(),
             operations: vec![],
-            selected_backend: crate::backend::routing::BackendId(4),
+            selected_backend: crate::backend::routing::BACKEND_MLX,
             physical_tensors: vec![],
             inputs: vec![],
             outputs: vec![],

@@ -11,9 +11,10 @@ name = "tribunus_compute_core"
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-metal = { version = "0.29", optional = true }
+metal = { version = "0.32", optional = true }
 objc = { version = "0.2", optional = true }
 block = { version = "0.1", optional = true }
+mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"
 tribunus-evidence-schema = { path = "../evidence-schema" }
 # MLX is the RESEARCH surface, not the production runtime. Both crates are
@@ -71,7 +72,7 @@ default = []
 # 1. PRODUCTION RUNTIME — Metal dispatch, CoreML, orchestrator, distill
 #    worker, taps, fused decode. Hermetic: compiles from a clean checkout
 #    with Xcode CLT + Rust only. Does NOT imply mlx-backend.
-prism-backend = ["dep:coreml-proto", "server", "metal-dispatch"]
+prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal"]
 # 2. RESEARCH — the MLX executor/model stack and everything built on it.
 #    Requires the MLX source tree (see mlx-rs-fork/mlx-sys/build.rs).
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
@@ -105,6 +106,7 @@ msgpack = []
 coreai-backend = []
 
 flux-klein-mlx = []
+backend-metal = ["dep:mpsgraph"]
 
 # Positive capability gates — independent of execution path.
 # Each gates a generation module. Enable with the backend of your choice.

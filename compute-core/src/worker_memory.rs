@@ -7,11 +7,13 @@ use std::ffi::CString;
 use std::os::raw::c_char;
 use std::os::raw::c_int;
 use std::os::raw::c_void;
-use std::time::Instant;
 
+#[cfg(feature = "mlx-backend")]
+use std::time::Instant;
+#[cfg(feature = "mlx-backend")]
 use crate::compute_image;
 
-// ── Machine profile ────────────────────────────────────────────────────────
+// ── Machine profile ───────────────────────────────────────────────-
 
 /// Describes the physical machine's memory configuration and GPU family.
 #[derive(Debug, Clone)]
@@ -459,7 +461,7 @@ mod tests {
         let _ = rss;
     }
 
-#[cfg(all(test, feature = "mlx-backend"))]
+    #[cfg(all(test, feature = "mlx-backend"))]
     #[test]
     fn test_mlx_snapshot_does_not_panic() {
         // MLX may not be initialised, so the snapshot may be all-zero.
@@ -471,7 +473,7 @@ mod tests {
         let _ = snap.peak_bytes;
     }
 
-#[cfg(all(test, feature = "mlx-backend"))]
+    #[cfg(all(test, feature = "mlx-backend"))]
     #[test]
     fn test_mlx_snapshot_struct() {
         let snap = sample_mlx_memory();
@@ -486,7 +488,7 @@ mod tests {
         );
     }
 
-#[cfg(all(test, feature = "mlx-backend"))]
+    #[cfg(all(test, feature = "mlx-backend"))]
     #[test]
     fn test_memory_telemetry() {
         let t = sample_memory_telemetry(0);
@@ -524,7 +526,7 @@ mod tests {
         assert_eq!(usable_after_system_reserve(0), 0);
     }
 
-#[cfg(all(test, feature = "mlx-backend"))]
+    #[cfg(all(test, feature = "mlx-backend"))]
     #[test]
     fn test_configure_mlx_limits_does_not_panic() {
         // No crash when setting limits, regardless of MLX init state.

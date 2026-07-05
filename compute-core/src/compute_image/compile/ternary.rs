@@ -89,6 +89,8 @@ pub enum SegmentKind {
     /// `ProjectionTensorRecord::FLAG_HAS_BIAS`; v1 artifacts (flags == 0)
     /// never take the bias path (kernels/MULTIMODAL_NF4_BIAS_ABI.md).
     MultimodalProjectionBiases = 28,
+    /// JSON-serialized HeterogeneousExecutionImage for tri-lane execution.
+    HeterogeneousImage = 29,
 }
 
 /// One entry in the cimage segment directory.

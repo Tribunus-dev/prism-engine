@@ -37,15 +37,12 @@ fn probe_macos_ane() -> Vec<DeviceInfo> {
 
     // Optionally verify ANE is functional via AneProgram::init().
     let functional = {
-        #[cfg(feature = "mlx-backend")]
+        #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
         {
             crate::ane_bridge::AneProgram::init().is_ok()
         }
-        #[cfg(not(feature = "mlx-backend"))]
+        #[cfg(not(any(feature = "mlx-backend", feature = "prism-backend")))]
         {
-            // Without the ANE bridge, can't verify functionality.
-            // Under prism-backend (no mlx), ane_bridge is not available,
-            // so report not-functional to match capability.rs.
             false
         }
     };

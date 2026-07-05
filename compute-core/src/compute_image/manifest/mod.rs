@@ -155,11 +155,13 @@ pub fn set_mlx_memory_limit(limit_bytes: u64) -> u64 {
 }
 
 /// Returns the process memory in bytes, or 0 if unavailable.
+#[allow(dead_code)]
 fn system_memory_bytes() -> u64 {
     #[cfg(target_os = "macos")]
     {
         unsafe {
             extern "C" {
+            #[allow(dead_code)]
                 fn sysctlbyname(
                     name: *const c_char,
                     oldp: *mut c_void,
@@ -187,6 +189,7 @@ fn system_memory_bytes() -> u64 {
     0
 }
 
+#[allow(dead_code)]
 fn memory_override_enabled() -> bool {
     matches!(
         std::env::var("TRIBUNUS_COMPUTE_ALLOW_HIGH_MEMORY")
@@ -196,6 +199,7 @@ fn memory_override_enabled() -> bool {
     )
 }
 
+#[allow(dead_code)]
 fn estimate_open_runtime_peak_bytes(manifest: &Manifest) -> u64 {
     let persistent_bytes = manifest
         .residency_plan

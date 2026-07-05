@@ -9,11 +9,11 @@
 //!
 //! Commit/rollback: append() writes to a staging region tracked by total_appended;
 
-use std::sync::Arc;
 pub use crate::kv_cache_types::{
-    CompressedKvSlot, KVCacheTier, PageBacking, PageMigrationPolicy,
-    PageMigrationService, TiersPage, evict_page_to_disk, load_page_from_disk,
+    evict_page_to_disk, load_page_from_disk, CompressedKvSlot, KVCacheTier, PageBacking,
+    PageMigrationPolicy, PageMigrationService, TiersPage,
 };
+use std::sync::Arc;
 
 use std::time::Duration;
 
@@ -23,11 +23,9 @@ use mlx_rs::ops::indexing::IndexOp;
 use mlx_rs::{ops, Array};
 use parking_lot::Mutex;
 
-use crate::cache::evolkv::{CalibrationSet, EvolKV, LayerBudget};
+use crate::cache::evolkv::{CalibrationSet, EvolKV};
 use crate::memory::allocator::BlockHandle;
-use crate::quantization::turboquant_kv::{
-    AsymmetricQuantMode, KvQuantMode, TurboQuantKvCache,
-};
+use crate::quantization::turboquant_kv::{AsymmetricQuantMode, KvQuantMode, TurboQuantKvCache};
 use crate::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 
 /// Resource ID for KVCacheCoordinator.
@@ -860,7 +858,6 @@ impl KvCache {
         self.copy_bytes = 0;
     }
 }
-
 
 /// Run EvolKV search and apply the optimal per-layer budget.
 ///

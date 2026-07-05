@@ -12,7 +12,7 @@ use prost::Message;
 use sha2::{Digest, Sha256};
 
 use crate::backend::routing::{
-    BackendArtifactId, BackendId, EvidenceDigest, OperationId, TensorId,
+    BackendArtifactId, EvidenceDigest, OperationId, TensorId, BACKEND_ANE,
 };
 use crate::compiler::{
     scheduled::{RegionId, ScheduledRegion},
@@ -1233,7 +1233,7 @@ impl CoreAiLowering {
         };
 
         let receipt = LoweringReceipt {
-            backend_id: BackendId(3),
+            backend_id: BACKEND_ANE,
             source_schedule_digest: EvidenceDigest(format!("sched_{}", region.region_id.0)),
             legality,
             artifact_id: BackendArtifactId(
@@ -1368,7 +1368,7 @@ impl BackendLowering for CoreAiLowering {
         };
 
         let receipt = LoweringReceipt {
-            backend_id: BackendId(3),
+            backend_id: BACKEND_ANE,
             source_schedule_digest: EvidenceDigest(format!("sched_{}", region.region_id.0)),
             legality,
             artifact_id: BackendArtifactId(
@@ -1446,7 +1446,7 @@ pub fn lower_matmul_coreml(
         region_id: RegionId(1),
         name: "matmul-test".into(),
         operations: vec![OperationId(0), OperationId(1)],
-        selected_backend: BackendId(3),
+        selected_backend: BACKEND_ANE,
         physical_tensors: vec![],
         inputs: vec![TensorId(1)],
         outputs: vec![TensorId(3)],
