@@ -18,6 +18,7 @@
 //!
 //! Output: out[n] = sum_k(x[k] * w_deq[k][n])
 
+#[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -129,6 +130,7 @@ pub fn qmatvec_auto(
 ///
 /// The outer loop over K, inner over N in blocks of 4, gives good cache
 /// behaviour on Apple Silicon with its 128-byte cache lines.
+#[cfg(target_arch = "aarch64")]
 pub fn qmatvec_neon(
     x: &[f32],      // [K]
     weight: &[u8],  // [K][N], row-major
@@ -205,6 +207,22 @@ pub fn qmatvec_neon(
         output: out,
         elapsed_us: t0.elapsed().as_micros() as u64,
     }
+}
+
+/// Non-aarch64 fallback for NEON v1: forwards to the scalar oracle (same
+/// contract), mirroring the existing `qmatvec_neon_v2` fallback below — keeps
+/// x86 Linux builds and the native-bench bin compiling.
+#[cfg(not(target_arch = "aarch64"))]
+pub fn qmatvec_neon(
+    x: &[f32],
+    weight: &[u8],
+    scales: &[f32],
+    biases: &[f32],
+    k: usize,
+    n: usize,
+    group_size: usize,
+) -> QMatvecResult {
+    qmatvec_scalar(x, weight, scales, biases, k, n, group_size)
 }
 
 /// NEON v2: true SIMD inner loop.
