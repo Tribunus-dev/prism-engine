@@ -1,9 +1,16 @@
 //! AMD ROCm GPU device probe — discovers AMD GPUs via the HIP runtime API.
 //!
-//! Available on Linux with the ROCm toolkit installed.
+//! Requires the `rocm-probe` feature (default OFF): the FFI block links
+//! `libamdhip64`, which only exists on Linux boxes with the ROCm toolkit.
+//! An unconditional `#[link]` here made EVERY Linux build of the crate fail
+//! at link time on machines without ROCm (CI included) — the probe must be
+//! opt-in. Without the feature, `probe()` compiles to an empty result.
 
 use super::DeviceProbe;
-#[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
+#[cfg_attr(
+    not(all(target_os = "linux", feature = "rocm-probe")),
+    allow(unused_imports)
+)]
 use crate::device::{BackendKind, DeviceInfo, DeviceKind, DeviceMemoryInfo, PcieLinkInfo};
 
 /// Probes AMD GPUs accessible through the ROCm (HIP) runtime.
@@ -19,7 +26,7 @@ impl DeviceProbe for RocmProbe {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "rocm-probe"))]
 mod platform {
     use super::*;
     use std::ffi::CStr;
@@ -71,6 +78,10 @@ mod platform {
                 unified_with_cpu: false,
             };
 
+            // Compute before the struct literal: `name` moves into the `name:`
+            // field (fields evaluate in source order), so borrowing it in the
+            // later `pcie_link` initializer was a borrow-after-move.
+            let pcie_bandwidth = estimate_pcie_bandwidth(&name);
             devices.push(DeviceInfo {
                 id: crate::device::DeviceId(0), // placeholder — registry reassigns
                 kind: DeviceKind::GpuDiscrete,
@@ -89,7 +100,7 @@ mod platform {
                 pcie_link: Some(PcieLinkInfo {
                     generation: 4,
                     lanes: 16,
-                    max_speed_gb_per_sec: estimate_pcie_bandwidth(&name),
+                    max_speed_gb_per_sec: pcie_bandwidth,
                 }),
             });
         }
@@ -134,7 +145,7 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(target_os = "linux", feature = "rocm-probe")))]
 mod platform {
     use super::*;
 
