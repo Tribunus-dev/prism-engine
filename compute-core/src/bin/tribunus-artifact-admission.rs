@@ -15,10 +15,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use tribunus_compute_core::compute_image::manifest::CompiledImageReader;
 
-// ── NF4 codebook (matches MLX and the sealed kernel) ────────────────────────
+// ── NF4 codebook (symmetric [-1,1] NF4; must match compile/quantize.rs) ──────
 const NF4_CODEBOOK: [f32; 16] = [
-    -1.0, -0.8480, -0.5698, -0.3940, -0.2419, -0.1057, 0.0, 0.1057, 0.2419, 0.3940, 0.5698, 0.8480,
-    1.0, 1.2588, 1.5862, 2.0,
+    -1.0, -0.6961928, -0.5250731, -0.3949175, -0.2844414, -0.1847734, -0.09105, 0.0, 0.0795803,
+    0.1609302, 0.2461123, 0.3379152, 0.4407099, 0.562617, 0.7229568, 1.0,
 ];
 
 // ── Receipt ─────────────────────────────────────────────────────────────────
