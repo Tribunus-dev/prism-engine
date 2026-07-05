@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::projection_identity::RuntimeMode;
+use crate::projection_types::RuntimeMode;
 use crate::tokenizer::TribunusTokenizer;
 
 /// Status of a single readiness gate.
