@@ -33,6 +33,11 @@ use tribunus_compute_core::quantization::embed_cluster::*;
 use tribunus_compute_core::nf4tile640::{pack_nf4_weights, dequant_matmul_reference};
 use tribunus_compute_core::compute_image::compile::tts_compile::pack_tts_weights;
 use tribunus_compute_core::compute_image::TensorEntry;
+use tribunus_compute_core::nf4tile640::learn::{
+    select_profile_for_matrix, LearnedProfile, ProfileSelectionReceipt, SelectionReason,
+};
+use tribunus_compute_core::nf4tile640::roles::{classify_matrix_role, MatrixRole};
+use tribunus_compute_core::nf4tile640::profile::QuantizerProfile;
 
 // ── Gemma 4 12B architecture constants ──────────────────────────────
 const NUM_LAYERS: usize = 48;
@@ -1225,9 +1230,29 @@ fn main() {
         }
 
         println!("  ▶ nf4tile640 mode: packing {} weight matrices", all_matrices.len());
+        // ── Adaptive codebook: load or train learned profiles ──────────────
+        let learned_profiles: HashMap<MatrixRole, LearnedProfile> = HashMap::new();
+        let mut selection_receipts: Vec<ProfileSelectionReceipt> = Vec::new();
+
         let nf4_start = Instant::now();
         for (serialized_name, rows, cols, data) in &all_matrices {
             let name_key = serialized_name.replace('{', "").replace('}', "");
+            // ── Per-matrix profile selection ─────────────────────────────
+            let role = classify_matrix_role(serialized_name);
+            let groups: Vec<Vec<f32>> = data.chunks(128).map(|c| c.to_vec()).collect();
+            let importances: Vec<f32> = groups.iter().map(|_| 1.0).collect();
+            let (_selected_profile, receipt) = select_profile_for_matrix(
+                serialized_name,
+                role,
+                &groups,
+                &importances,
+                tribunus_compute_core::nf4tile640::NF4_CODEBOOK,
+                &learned_profiles,
+            );
+            selection_receipts.push(receipt);
+
+            // Pack using canonical codebook (learned profiles will supply
+            // their own codebook in a future change).
             let (codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(data, *rows, *cols);
             let safe_name = sanitize_filename(name_key);
             // Write codes
@@ -1890,6 +1915,9 @@ fn cmd_verify_only(args: &[String]) {
     eprintln!("  Quality policy: {}", quality_policy);
     eprintln!("  Quantizer profile: {}", quantizer);
 
+    let learned_profiles: HashMap<MatrixRole, LearnedProfile> = HashMap::new();
+    let mut selection_receipts: Vec<ProfileSelectionReceipt> = Vec::new();
+
     for (idx, desc) in all_descs.iter().enumerate() {
         eprint!("\r  [{}/{}] verifying {}", idx + 1, all_descs.len(), desc.key);
         let _ = std::io::stdout().flush();
@@ -1897,6 +1925,20 @@ fn cmd_verify_only(args: &[String]) {
         if let Some((data, shape)) = load_tensor(&desc.key, &shard_paths) {
             let rows = if shape.len() >= 2 { shape[0] } else { data.len() };
             let cols = if shape.len() >= 2 { shape[1] } else { 1 };
+            // ── Per-matrix profile selection ─────────────────────────
+            let role = classify_matrix_role(&desc.key);
+            let groups: Vec<Vec<f32>> = data.chunks(128).map(|c| c.to_vec()).collect();
+            let importances: Vec<f32> = groups.iter().map(|_| 1.0).collect();
+            let (_selected_profile, _receipt) = select_profile_for_matrix(
+                &desc.display,
+                role,
+                &groups,
+                &importances,
+                tribunus_compute_core::nf4tile640::NF4_CODEBOOK,
+                &learned_profiles,
+            );
+            selection_receipts.push(_receipt);
+
             let (codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&data, rows, cols);
             let result = verify_one_matrix(&desc.display, &data, &codes, &scales, &biases, rows, cols, quality_policy);
             all_pass &= result.pass;
@@ -1922,6 +1964,7 @@ fn cmd_verify_only(args: &[String]) {
         "all_pass": all_pass,
         "duration_secs": elapsed.as_secs_f64(),
         "results": results,
+        "selection_receipts": selection_receipts,
     });
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
 

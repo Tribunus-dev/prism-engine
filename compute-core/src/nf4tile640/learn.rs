@@ -11,6 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use std::collections::HashMap;
+
 use crate::nf4tile640::calibration::CalibrationResult;
 use crate::nf4tile640::profile::{BiasPolicy, ClippingPolicy, SidecarPolicy};
 use crate::nf4tile640::roles::MatrixRole;
@@ -117,9 +119,168 @@ pub struct LearnedProfile {
     pub learning_receipt: LearningReceipt,
 }
 
+
 // ────────────────────────────────────────────────────────────────────────────
-// Utility
+// Per-matrix profile selection
 // ────────────────────────────────────────────────────────────────────────────
+
+/// Why a particular profile was selected for a matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SelectionReason {
+    /// Learned candidate beat canonical NF4 under the objective.
+    LearnedImproved,
+    /// Canonical NF4 beat all learned candidates (no improvement).
+    CanonicalWon,
+    /// No calibration samples available for this role — default to canonical.
+    InsufficientSamples,
+    /// Learned candidate would regress a protected policy gate.
+    QualityRegression,
+    /// This matrix role is not eligible for learned profiles.
+    UnsupportedRole,
+    /// The learned profile could not be bound at runtime (ABI mismatch).
+    ProfileBindingFailed,
+}
+
+/// Record of the selection decision for one matrix.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileSelectionReceipt {
+    /// Source tensor name (e.g. "model.layers.0.self_attn.q_proj.weight").
+    pub tensor_name: String,
+    /// Classified matrix role.
+    pub role: String,
+    /// Profile IDs that were evaluated as candidates (canonical + learned).
+    pub candidate_profile_ids: Vec<u32>,
+    /// The profile ID that was selected.
+    pub selected_profile_id: u32,
+    /// Baseline importance-weighted MSE against canonical NF4.
+    pub baseline_objective: f64,
+    /// Selected profile importance-weighted MSE.
+    pub selected_objective: f64,
+    /// Why this profile won.
+    pub selection_reason: SelectionReason,
+    /// Clipping policy used by the selected profile.
+    pub clipping_policy: String,
+    /// Sidecar policy used by the selected profile.
+    pub sidecar_policy: String,
+    /// Effective bits per weight (4.0 + sidecar overhead).
+    pub effective_bpw: f32,
+    /// Source BF16 digest prefix (shortened).
+    pub source_digest: String,
+}
+
+/// Evaluate canonical NF4 against learned candidates for a single matrix,
+/// produce a selection receipt and the winning profile.
+///
+/// The `learned_profiles` map is keyed by role. If no profile exists for this
+/// matrix's role, canonical NF4 is selected with `UnsupportedRole`.
+///
+/// Returns `(selected_profile, receipt)` — the caller uses the profile for
+/// quantization and embeds the receipt in the CImage quality report.
+pub fn select_profile_for_matrix(
+    tensor_name: &str,
+    role: MatrixRole,
+    matrix_groups: &[Vec<f32>],
+    group_importances: &[f32],
+    canonical_codebook: [f32; 16],
+    learned_profiles: &HashMap<MatrixRole, LearnedProfile>,
+) -> (LearnedProfile, ProfileSelectionReceipt) {
+    let role_str = role.to_string();
+    let baseline_mse = compute_baseline_mse(matrix_groups, group_importances, &canonical_codebook);
+
+    match learned_profiles.get(&role) {
+        Some(learned) => {
+            let learned_mse = compute_learned_mse(matrix_groups, group_importances, learned);
+            let learned_profile_id = role.default_profile_id().0;
+
+            if learned_mse < baseline_mse {
+                // Learned profile wins — improved reconstruction accuracy.
+                let receipt = ProfileSelectionReceipt {
+                    tensor_name: tensor_name.into(),
+                    role: role_str,
+                    candidate_profile_ids: vec![0, learned_profile_id],
+                    selected_profile_id: learned_profile_id,
+                    baseline_objective: baseline_mse,
+                    selected_objective: learned_mse,
+                    selection_reason: SelectionReason::LearnedImproved,
+                    clipping_policy: format!("{:?}", learned.clipping_policy),
+                    sidecar_policy: format!("{:?}", learned.sidecar_policy),
+                    effective_bpw: 4.0,
+                    source_digest: String::new(),
+                };
+                (learned.clone(), receipt)
+            } else {
+                // Canonical NF4 wins — no improvement from learned.
+                let receipt = ProfileSelectionReceipt {
+                    tensor_name: tensor_name.into(),
+                    role: role_str,
+                    candidate_profile_ids: vec![0, learned_profile_id],
+                    selected_profile_id: 0,
+                    baseline_objective: baseline_mse,
+                    selected_objective: baseline_mse,
+                    selection_reason: SelectionReason::CanonicalWon,
+                    clipping_policy: "none".into(),
+                    sidecar_policy: "none".into(),
+                    effective_bpw: 4.0,
+                    source_digest: String::new(),
+                };
+                (fallback_profile(canonical_codebook, "canonical_won", baseline_mse), receipt)
+            }
+        }
+        None => {
+            // No learned profile for this role — default to canonical NF4.
+            let receipt = ProfileSelectionReceipt {
+                tensor_name: tensor_name.into(),
+                role: role_str,
+                candidate_profile_ids: vec![0],
+                selected_profile_id: 0,
+                baseline_objective: baseline_mse,
+                selected_objective: baseline_mse,
+                selection_reason: SelectionReason::UnsupportedRole,
+                clipping_policy: "none".into(),
+                sidecar_policy: "none".into(),
+                effective_bpw: 4.0,
+                source_digest: String::new(),
+            };
+            (fallback_profile(canonical_codebook, "unsupported_role", baseline_mse), receipt)
+        }
+    }
+}
+
+/// Compute importance-weighted MSE of canonical NF4 codebook against groups.
+///
+/// Each element's squared quantization error is weighted by its group's
+/// importance value, producing an importance-weighted MSE that reflects
+/// activation-channel significance.
+fn compute_baseline_mse(groups: &[Vec<f32>], importances: &[f32], codebook: &[f32; 16]) -> f64 {
+    let mut total_weighted_err = 0.0f64;
+    let mut total_weight = 0.0f64;
+    for (group, &importance) in groups.iter().zip(importances.iter()) {
+        let mut group_err = 0.0f64;
+        for &v in group {
+            // Find nearest codebook value
+            let mut best_dist = f32::MAX;
+            for &cb in codebook {
+                let d = (v - cb).abs();
+                if d < best_dist {
+                    best_dist = d;
+                }
+            }
+            group_err += (best_dist as f64).powi(2);
+        }
+        total_weighted_err += group_err * importance as f64;
+        total_weight += importance as f64 * group.len() as f64;
+    }
+    if total_weight == 0.0 {
+        0.0
+    } else {
+        total_weighted_err / total_weight
+    }
+}
+
+/// Compute importance-weighted MSE of a learned profile's codebook against groups.
+fn compute_learned_mse(groups: &[Vec<f32>], importances: &[f32], profile: &LearnedProfile) -> f64 {
+    compute_baseline_mse(groups, importances, &profile.codebook)
+}
 
 /// Compute importance weight from activation second moment.
 ///
@@ -873,6 +1034,7 @@ mod tests {
     fn test_select_best_profile_fallback() {
         use std::collections::HashMap;
         use crate::nf4tile640::calibration::{CalibrationConfig, CalibrationReceipt};
+        use crate::nf4tile640::calibration::CoverageReceipt;
         // Empty samples_by_role → fallback path.
         let cal = CalibrationResult {
             receipt: CalibrationReceipt {
@@ -885,11 +1047,27 @@ mod tests {
                 per_role: vec![],
                 hardware_peak_mb: 0,
                 compiler_revision: String::new(),
+                coverage: CoverageReceipt {
+                    config: Default::default(),
+                    entries: vec![],
+                    all_roles_covered: vec![],
+                    all_buckets_covered: false,
+                    total_groups_seen: 0,
+                    total_samples_retained: 0,
+                },
             },
             baseline_mse: 0.01,
             samples_by_role: HashMap::new(),
             importance_by_role: HashMap::new(),
             role_stats: HashMap::new(),
+            coverage: CoverageReceipt {
+                config: Default::default(),
+                entries: vec![],
+                all_roles_covered: vec![],
+                all_buckets_covered: false,
+                total_groups_seen: 0,
+                total_samples_retained: 0,
+            },
         };
         let candidates = vec![];
         let best = select_best_profile(NF4_CODEBOOK, &candidates, &cal, &MatrixRole::AttentionQ);

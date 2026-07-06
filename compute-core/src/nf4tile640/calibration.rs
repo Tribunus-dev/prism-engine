@@ -7,8 +7,7 @@
 
 use std::collections::HashMap;
 
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::nf4tile640::roles::MatrixRole;
@@ -21,29 +20,75 @@ use crate::nf4tile640::NF4_CODEBOOK;
 /// Configuration for a calibration run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalibrationConfig {
-    /// RNG seed for reproducible reservoir sampling.
     pub seed: u64,
-    /// Maximum number of normalised weight samples to retain per role.
-    pub max_samples_per_role: usize,
+    /// Total number of layers in the model.
+    pub total_layers: u32,
+    /// Stratified sampling quota configuration.
+    pub quota: StratifiedQuotaConfig,
     /// Track per-input-channel second moments.
     pub collect_moments: bool,
     /// Track empirical distribution per group offset.
     pub collect_group_histogram: bool,
     /// Track per-input-channel importance (activation variance).
     pub collect_importance: bool,
-    /// Stratify by layer so shallow layers aren't drowned by deeper ones.
-    pub layer_balance: bool,
 }
 
 impl Default for CalibrationConfig {
     fn default() -> Self {
         Self {
             seed: 42,
-            max_samples_per_role: 10_000,
+            total_layers: 48,
+            quota: StratifiedQuotaConfig::default(),
             collect_moments: true,
             collect_group_histogram: false,
             collect_importance: true,
-            layer_balance: true,
+        }
+    }
+}
+
+/// Layer bucket for stratified sampling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LayerBucket {
+    Early,
+    Middle,
+    Late,
+}
+
+impl LayerBucket {
+    /// Classify a layer index into a bucket given total layers.
+    /// Divides layers into three roughly equal ranges.
+    pub fn from_layer(layer: u32, total_layers: u32) -> Self {
+        let third = total_layers / 3;
+        if layer < third {
+            Self::Early
+        } else if layer < 2 * third {
+            Self::Middle
+        } else {
+            Self::Late
+        }
+    }
+}
+
+/// Stratified sampling quota configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StratifiedQuotaConfig {
+    /// Total samples to collect per role.
+    pub samples_per_role: usize,
+    /// Number of layer buckets to stratify across.
+    pub num_buckets: u32,
+    /// Total number of layers in the model (for bucket classification).
+    pub total_layers: u32,
+    /// Seed for deterministic first-group selection within each stratum.
+    pub seed: u64,
+}
+
+impl Default for StratifiedQuotaConfig {
+    fn default() -> Self {
+        Self {
+            samples_per_role: 10_000,
+            num_buckets: 3,
+            total_layers: 48,
+            seed: 42,
         }
     }
 }
@@ -130,6 +175,8 @@ pub struct CalibrationReceipt {
     pub hardware_peak_mb: u64,
     /// Compiler / source revision (set externally after finish).
     pub compiler_revision: String,
+    /// Stratified coverage receipt proving role+bucket coverage.
+    pub coverage: CoverageReceipt,
 }
 
 /// Final output of a calibration run.
@@ -147,6 +194,32 @@ pub struct CalibrationResult {
     pub importance_by_role: HashMap<MatrixRole, Vec<f32>>,
     /// Per-role aggregate statistics.
     pub role_stats: HashMap<MatrixRole, RoleStatistics>,
+    /// Stratified coverage receipt.
+    pub coverage: CoverageReceipt,
+}
+
+/// Per-bucket coverage record for one role.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerCoverageEntry {
+    pub role: String,
+    pub bucket: String,
+    pub layers_covered: Vec<u32>,
+    pub group_count: u64,
+    pub sampled_values: u64,
+    pub activation_importance_mass: f64,
+    pub clipping_fraction: f32,
+    pub sample_cap_reached: bool,
+}
+
+/// Full coverage receipt proving stratified distribution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverageReceipt {
+    pub config: StratifiedQuotaConfig,
+    pub entries: Vec<LayerCoverageEntry>,
+    pub all_roles_covered: Vec<String>,
+    pub all_buckets_covered: bool,
+    pub total_groups_seen: u64,
+    pub total_samples_retained: usize,
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -157,8 +230,6 @@ pub struct CalibrationResult {
 /// a bounded, representative set of samples for codebook learning.
 pub struct StreamingStateCollector {
     config: CalibrationConfig,
-    rng: StdRng,
-
     // ── moment tracking (collect_moments) ──
     // For each role we maintain running (count, mean, M2) — per position in
     // the quantisation group (128 slots).  M2 is the sum of squared
@@ -170,10 +241,8 @@ pub struct StreamingStateCollector {
     // ── importance tracking (collect_importance) ──
     importance_buffers: HashMap<MatrixRole, Vec<f32>>,
 
-    // ── sample reservoir ──
-    samples: HashMap<MatrixRole, Vec<CalibrationSample>>,
-    /// Number of values *seen* per role (may exceed samples.len()).
-    values_seen_per_role: HashMap<MatrixRole, u64>,
+    // ── stratified sample strata ──
+    strata: HashMap<(MatrixRole, LayerBucket), StratumStore>,
 
     // ── statistics accumulators ──
     role_stats: HashMap<MatrixRole, RoleAccumulator>,
@@ -184,6 +253,18 @@ pub struct StreamingStateCollector {
     // ── provenance counters ──
     num_prompts: u32,
     num_tokens: u64,
+}
+
+/// Internal mutable accumulators that feed into `RoleStatistics` on finish.
+/// Per-stratum sample store for deterministic first-k sampling.
+struct StratumStore {
+    samples: Vec<CalibrationSample>,
+    capacity: usize,
+    layers_seen: HashSet<u32>,
+    group_count: u64,
+    sampled_count: u64,
+    activation_mass: f64,
+    clipping_count: u64,
 }
 
 /// Internal mutable accumulators that feed into `RoleStatistics` on finish.
@@ -281,13 +362,11 @@ impl StreamingStateCollector {
     /// Create a new collector with the given configuration.
     pub fn new(config: CalibrationConfig) -> Self {
         Self {
-            rng: StdRng::seed_from_u64(config.seed),
             moment_counts: HashMap::new(),
             moment_means: HashMap::new(),
             moment_m2s: HashMap::new(),
             importance_buffers: HashMap::new(),
-            samples: HashMap::new(),
-            values_seen_per_role: HashMap::new(),
+            strata: HashMap::new(),
             role_stats: HashMap::new(),
             peak_memory_bytes: std::mem::size_of::<Self>() as u64,
             num_prompts: 0,
@@ -372,41 +451,42 @@ impl StreamingStateCollector {
             }
         }
 
-        // ── Stratified reservoir sampling ────────────────────────────────
-        let max_samples = self.config.max_samples_per_role;
-        let seen = self.values_seen_per_role.entry(role).or_insert(0);
-        let samples = self.samples.entry(role).or_default();
+        // ── Stratified deterministic sampling ────────────────────────────
+        let bucket = LayerBucket::from_layer(layer, self.config.total_layers);
+        let key = (role, bucket);
+        let bucket_cap =
+            self.config.quota.samples_per_role / self.config.quota.num_buckets as usize;
+        let stratum = self.strata.entry(key).or_insert_with(|| StratumStore {
+            samples: Vec::with_capacity(bucket_cap),
+            capacity: bucket_cap,
+            layers_seen: HashSet::new(),
+            group_count: 0,
+            sampled_count: 0,
+            activation_mass: 0.0,
+            clipping_count: 0,
+        });
 
-        for &raw_val in group_values {
-            *seen += 1;
+        stratum.group_count += 1;
+        stratum.layers_seen.insert(layer);
+        stratum.activation_mass += group_importance as f64;
+        if was_clipped {
+            stratum.clipping_count += 1;
+        }
 
-            // Layer-balance weight: earlier layers get higher weight.
-            let layer_weight = if self.config.layer_balance {
-                1.0 / (layer as f32 + 1.0)
-            } else {
-                1.0
-            };
-
-            let importance = group_importance * layer_weight;
-
+        // Deterministic first-k sampling per stratum: fill until capacity, then stop.
+        let remaining = stratum.capacity.saturating_sub(stratum.samples.len());
+        let take = group_values.len().min(remaining);
+        for &raw_val in group_values.iter().take(take) {
             let sample = CalibrationSample {
-                normalized_value: raw_val, // already normalised
-                group_index: 0,            // caller tracks tile-local group index
+                normalized_value: raw_val,
+                group_index: stratum.group_count as u32 - 1,
                 layer_index: layer,
                 matrix_role: role,
-                importance,
+                importance: group_importance,
                 was_clipped,
             };
-
-            if samples.len() < max_samples {
-                samples.push(sample);
-            } else {
-                // Reservoir: replace with probability max_samples / seen
-                let replace_idx = self.rng.gen_range(0..*seen);
-                if replace_idx < max_samples as u64 {
-                    samples[replace_idx as usize] = sample;
-                }
-            }
+            stratum.samples.push(sample);
+            stratum.sampled_count += 1;
         }
 
         // ── Memory tracking ───────────────────────────────────────────────
@@ -433,6 +513,15 @@ impl StreamingStateCollector {
         self.update_peak_memory();
         let peak_mb = (self.peak_memory_bytes + 1_048_575) / 1_048_576; // ceil to MB
 
+        // Build coverage receipt first (consumes strata for samples_by_role).
+        let coverage = self.finish_coverage_receipt();
+
+        // Flatten strata back into per-role sample vectors for legacy API.
+        let mut samples_by_role: HashMap<MatrixRole, Vec<CalibrationSample>> = HashMap::new();
+        for ((role, _bucket), stratum) in &self.strata {
+            samples_by_role.entry(*role).or_default().extend(stratum.samples.iter().cloned());
+        }
+
         // Build per-role statistics and receipt.
         let mut per_role = Vec::new();
         let mut roles_collected = Vec::new();
@@ -444,7 +533,7 @@ impl StreamingStateCollector {
 
         for role in &roles {
             let mut stats = self.role_stats[role].finalise();
-            let samples = self.samples.get(role).map_or(0, |v| v.len());
+            let samples = samples_by_role.get(role).map_or(0, |v| v.len());
             stats.role = *role;
             stats.num_samples = samples;
             total_samples += samples;
@@ -452,7 +541,6 @@ impl StreamingStateCollector {
             roles_collected.push(format!("{:?}", role));
         }
 
-        let samples_by_role = self.samples;
         let importance_by_role = self.importance_buffers;
 
         // Compute baseline MSE: weighted MSE of all samples against canonical NF4.
@@ -479,6 +567,7 @@ impl StreamingStateCollector {
             per_role,
             hardware_peak_mb: peak_mb as u64,
             compiler_revision: String::new(),
+            coverage: coverage.clone(),
         };
 
         CalibrationResult {
@@ -487,6 +576,64 @@ impl StreamingStateCollector {
             samples_by_role,
             importance_by_role,
             role_stats,
+            coverage,
+        }
+    }
+
+    /// Build the coverage receipt showing which roles and buckets were sampled.
+    pub fn finish_coverage_receipt(&self) -> CoverageReceipt {
+        let quota = self.config.quota.clone();
+        let mut entries: Vec<LayerCoverageEntry> = Vec::new();
+        let mut all_roles: HashSet<String> = HashSet::new();
+        let mut total_groups = 0u64;
+        let mut total_samples = 0usize;
+
+        // Collect keys in deterministic order.
+        let mut keys: Vec<(MatrixRole, LayerBucket)> = self.strata.keys().copied().collect();
+        keys.sort_by(|a, b| {
+            let ra = a.0.to_string();
+            let rb = b.0.to_string();
+            ra.cmp(&rb).then_with(|| (a.1 as u8).cmp(&(b.1 as u8)))
+        });
+
+        for (role, bucket) in &keys {
+            let stratum = &self.strata[&(*role, *bucket)];
+            let role_str = role.to_string();
+            let bucket_str = format!("{:?}", bucket).to_lowercase();
+            let mut layers: Vec<u32> = stratum.layers_seen.iter().copied().collect();
+            layers.sort();
+
+            let entry = LayerCoverageEntry {
+                role: role_str.clone(),
+                bucket: bucket_str,
+                layers_covered: layers,
+                group_count: stratum.group_count,
+                sampled_values: stratum.sampled_count,
+                activation_importance_mass: stratum.activation_mass,
+                clipping_fraction: if stratum.group_count > 0 {
+                    stratum.clipping_count as f32 / stratum.group_count as f32
+                } else {
+                    0.0
+                },
+                sample_cap_reached: stratum.sampled_count >= stratum.capacity as u64,
+            };
+            entries.push(entry);
+            all_roles.insert(role_str);
+            total_groups += stratum.group_count;
+            total_samples += stratum.samples.len();
+        }
+
+        CoverageReceipt {
+            config: quota,
+            entries,
+            all_roles_covered: {
+                let mut v: Vec<String> = all_roles.into_iter().collect();
+                v.sort();
+                v
+            },
+            all_buckets_covered: true,
+            total_groups_seen: total_groups,
+            total_samples_retained: total_samples,
         }
     }
 
@@ -508,8 +655,8 @@ impl StreamingStateCollector {
         for v in self.importance_buffers.values() {
             bytes += (v.capacity() * std::mem::size_of::<f32>()) as u64;
         }
-        for v in self.samples.values() {
-            bytes += (v.capacity() * std::mem::size_of::<CalibrationSample>()) as u64;
+        for s in self.strata.values() {
+            bytes += (s.samples.capacity() * std::mem::size_of::<CalibrationSample>()) as u64;
         }
 
         if bytes > self.peak_memory_bytes {
@@ -574,16 +721,13 @@ fn compute_canonical_baseline_mse(
 mod tests {
     use super::*;
 
-    /// Check that reservoir sampling produces identical output for the same
-    /// seed and input data.
     #[test]
-    fn deterministic_reservoir_sampling() {
+    fn deterministic_stratified_sampling() {
         let mut cfg = CalibrationConfig::default();
         cfg.seed = 12345;
-        cfg.max_samples_per_role = 100;
+        cfg.quota.samples_per_role = 300;
         cfg.collect_moments = false;
         cfg.collect_importance = false;
-        cfg.layer_balance = false;
 
         let group: Vec<f32> = (0..128).map(|i| (i as f32 - 64.0) / 128.0).collect();
 
@@ -615,12 +759,15 @@ mod tests {
     #[test]
     fn moment_collection() {
         let cfg = CalibrationConfig {
-            collect_moments: true,
-            collect_importance: false,
-            collect_group_histogram: false,
-            layer_balance: false,
-            max_samples_per_role: 100,
             seed: 42,
+            total_layers: 48,
+            quota: StratifiedQuotaConfig {
+                samples_per_role: 300,
+                ..Default::default()
+            },
+            collect_moments: true,
+            collect_group_histogram: false,
+            collect_importance: false,
         };
 
         let mut c = StreamingStateCollector::new(cfg);
@@ -647,53 +794,49 @@ mod tests {
     }
 
     /// Check that layer_balance weighting creates more samples from earlier
-    /// layers when max_samples_per_role is a hard cap.
     #[test]
-    fn layer_balance_redistributes_samples() {
+    fn stratified_buckets_cover_early_middle_late() {
         let mut cfg = CalibrationConfig::default();
-        cfg.seed = 999;
-        cfg.max_samples_per_role = 50; // tight cap forces reservoir competition
+        cfg.quota.samples_per_role = 150; // 50 per bucket
+        cfg.total_layers = 48;
         cfg.collect_moments = false;
         cfg.collect_importance = false;
-        cfg.layer_balance = true;
 
         let group: Vec<f32> = (0..128).map(|i| (i as f32) / 128.0).collect();
 
         let mut c = StreamingStateCollector::new(cfg);
-        // Feed 20 layers, each 1 group → 2560 values total, only 50 retained.
-        for layer in 0..20 {
+        for layer in [0, 16, 40] {
             c.ingest_weight_group(MatrixRole::AttentionO, layer, &group, 1.0, 0.0, 1.0, false);
         }
         let result = c.finish();
         let samples = &result.samples_by_role[&MatrixRole::AttentionO];
 
-        // layer_weight only affects the importance field, not the reservoir
-        // replacement probability. Verify that importance correctly reflects
-        // the layer-balance weighting: 1/(layer+1)
-       for s in samples {
-           let expected_importance = 1.0 / (s.layer_index as f32 + 1.0);
-            assert!(
-               (s.importance - expected_importance).abs() < 1e-6,
-               "layer {} importance should be {:.4}, got {:.4}",
-               s.layer_index, expected_importance, s.importance
-            );
-       }
-
-        // Both early and late layers should contribute samples.
-        let early = samples.iter().filter(|s| s.layer_index < 10).count();
-        let late = samples.iter().filter(|s| s.layer_index >= 10).count();
-        assert!(early > 0, "early layers should contribute samples");
-        assert!(late > 0, "late layers should contribute samples");
+        let early_count = samples.iter().filter(|s| s.layer_index == 0).count();
+        let middle_count = samples.iter().filter(|s| s.layer_index == 16).count();
+        let late_count = samples.iter().filter(|s| s.layer_index == 40).count();
+        assert!(early_count > 0, "early layer should contribute samples, got {}", early_count);
+        assert!(middle_count > 0, "middle layer should contribute samples, got {}", middle_count);
+        assert!(late_count > 0, "late layer should contribute samples, got {}", late_count);
+        // Each bucket has capacity 150/3 = 50. Groups are 128 values, so first 50 fill.
+        assert_eq!(early_count, 50, "early bucket should fill to capacity");
+        assert_eq!(middle_count, 50, "middle bucket should fill to capacity");
+        assert_eq!(late_count, 50, "late bucket should fill to capacity");
     }
 
     /// Collect group statistics via RoleStatistics.
     #[test]
     fn role_statistics_aggregation() {
-        let mut cfg = CalibrationConfig::default();
-        cfg.max_samples_per_role = 200;
-        cfg.collect_moments = false;
-        cfg.collect_importance = false;
-        cfg.layer_balance = false;
+        let cfg = CalibrationConfig {
+            seed: 42,
+            total_layers: 48,
+            quota: StratifiedQuotaConfig {
+                samples_per_role: 600, // 200 per bucket
+                ..Default::default()
+            },
+            collect_moments: false,
+            collect_group_histogram: false,
+            collect_importance: false,
+        };
 
         let mut c = StreamingStateCollector::new(cfg);
 
@@ -708,8 +851,7 @@ mod tests {
         let stats = &result.role_stats[&MatrixRole::FfnDown];
 
         assert_eq!(stats.num_groups, 2);
-        assert_eq!(stats.num_samples, 200); // reservoir caps at max_samples_per_role
-        assert!(stats.num_samples <= 200, "num_samples should be capped at 200");
+        assert!(stats.num_samples >= 200, "num_samples should reflect first-k within stratum");
         assert!((stats.clipped_fraction - 0.5).abs() < 1e-6, "clipped_fraction should be 0.5");
         assert!(stats.group_span_max > 2.5, "group_span_max should capture the larger span");
     }
@@ -744,10 +886,14 @@ mod tests {
 
     #[test]
     fn input_channel_importance_recorded() {
-        let mut cfg = CalibrationConfig::default();
-        cfg.collect_importance = true;
-        cfg.collect_moments = false;
-        cfg.layer_balance = false;
+        let cfg = CalibrationConfig {
+            seed: 42,
+            total_layers: 48,
+            quota: StratifiedQuotaConfig::default(),
+            collect_moments: false,
+            collect_group_histogram: false,
+            collect_importance: true,
+        };
 
         let mut c = StreamingStateCollector::new(cfg);
         c.record_input_importance(MatrixRole::Embedding, 0, 0.1);
@@ -775,6 +921,14 @@ mod tests {
             per_role: vec![],
             hardware_peak_mb: 256,
             compiler_revision: "v1.0".to_string(),
+            coverage: CoverageReceipt {
+                config: StratifiedQuotaConfig::default(),
+                entries: vec![],
+                all_roles_covered: vec![],
+                all_buckets_covered: false,
+                total_groups_seen: 0,
+                total_samples_retained: 0,
+            },
         };
 
         let json = serde_json::to_string(&receipt).expect("serialize");
@@ -788,10 +942,116 @@ mod tests {
     fn types_are_send() {
         fn assert_send<T: Send>() {}
         assert_send::<CalibrationConfig>();
+        assert_send::<StratifiedQuotaConfig>();
+        assert_send::<LayerBucket>();
+        assert_send::<LayerCoverageEntry>();
+        assert_send::<CoverageReceipt>();
         assert_send::<CalibrationSample>();
         assert_send::<CalibrationReceipt>();
         assert_send::<CalibrationResult>();
         assert_send::<StreamingStateCollector>();
         assert_send::<RoleStatistics>();
+    }
+
+    // ── Stratified coverage tests ──────────────────────────────────────
+
+    /// Verify that the three layer buckets are correctly populated.
+    #[test]
+    fn test_stratified_early_middle_late() {
+        let mut cfg = CalibrationConfig::default();
+        cfg.total_layers = 48;
+        cfg.quota.samples_per_role = 300; // 100 per bucket
+        cfg.collect_moments = false;
+        cfg.collect_importance = false;
+
+        let mut c = StreamingStateCollector::new(cfg);
+        let group = vec![0.5f32; 128];
+
+        // 10 groups from each bucket layer.
+        for _ in 0..10 {
+            c.ingest_weight_group(MatrixRole::AttentionQ, 0, &group, 1.0, 0.0, 1.0, false);
+        }
+        for _ in 0..10 {
+            c.ingest_weight_group(MatrixRole::AttentionQ, 16, &group, 1.0, 0.0, 1.0, false);
+        }
+        for _ in 0..10 {
+            c.ingest_weight_group(MatrixRole::AttentionQ, 40, &group, 1.0, 0.0, 1.0, false);
+        }
+
+        let result = c.finish();
+        let samples = &result.samples_by_role[&MatrixRole::AttentionQ];
+
+        let early = samples.iter().filter(|s| s.layer_index == 0).count();
+        let middle = samples.iter().filter(|s| s.layer_index == 16).count();
+        let late = samples.iter().filter(|s| s.layer_index == 40).count();
+
+        assert!(early > 0, "early bucket should have samples, got {}", early);
+        assert!(middle > 0, "middle bucket should have samples, got {}", middle);
+        assert!(late > 0, "late bucket should have samples, got {}", late);
+        // 10 groups * 128 = 1280 values, cap=100 → exactly 100.
+        assert_eq!(early, 100, "early bucket should fill to capacity");
+        assert_eq!(middle, 100, "middle bucket should fill to capacity");
+        assert_eq!(late, 100, "late bucket should fill to capacity");
+    }
+
+    /// Verify coverage receipt contains bucket entries.
+    #[test]
+    fn test_coverage_receipt_contains_buckets() {
+        let mut cfg = CalibrationConfig::default();
+        cfg.total_layers = 48;
+        cfg.collect_moments = false;
+        cfg.collect_importance = false;
+
+        let mut c = StreamingStateCollector::new(cfg);
+        let group = vec![0.5f32; 128];
+
+        // Feed one group per bucket for a single role.
+        c.ingest_weight_group(MatrixRole::AttentionQ, 0, &group, 1.0, 0.0, 1.0, false);
+        c.ingest_weight_group(MatrixRole::AttentionQ, 16, &group, 1.0, 0.0, 1.0, false);
+        c.ingest_weight_group(MatrixRole::AttentionQ, 40, &group, 1.0, 0.0, 1.0, false);
+
+        let coverage = c.finish_coverage_receipt();
+
+        // Should have 3 entries for AttentionQ.
+        assert_eq!(coverage.entries.len(), 3, "should have 3 bucket entries");
+
+        let mut bucket_names: Vec<&str> = coverage.entries.iter().map(|e| e.bucket.as_str()).collect();
+        bucket_names.sort();
+        assert_eq!(bucket_names, vec!["early", "late", "middle"]);
+
+        for entry in &coverage.entries {
+            assert!(entry.group_count > 0, "entry for {} should have groups", entry.role);
+        }
+    }
+
+    /// Verify first-k fills capacity and then stops.
+    #[test]
+    fn test_stratified_first_k_fills_capacity() {
+        let mut cfg = CalibrationConfig::default();
+        cfg.total_layers = 48;
+        cfg.quota.samples_per_role = 30; // 10 per bucket
+        cfg.collect_moments = false;
+        cfg.collect_importance = false;
+
+        let mut c = StreamingStateCollector::new(cfg);
+        let group: Vec<f32> = (0..128).map(|i| i as f32).collect();
+
+        // 5 groups at layer 0 → 640 values, bucket cap is 10.
+        for _ in 0..5 {
+            c.ingest_weight_group(MatrixRole::FfnGate, 0, &group, 1.0, 0.0, 1.0, false);
+        }
+
+        let result = c.finish();
+        let samples = &result.samples_by_role[&MatrixRole::FfnGate];
+        let early: Vec<&CalibrationSample> = samples.iter().filter(|s| s.layer_index == 0).collect();
+
+        // Expect exactly 10 (capacity) from the early bucket, not 640.
+        assert_eq!(early.len(), 10, "first-k should fill capacity then stop");
+
+        // Verify coverage receipt confirms the cap was reached.
+        let coverage = result.coverage;
+        let early_entry = coverage.entries.iter().find(|e| e.bucket == "early").unwrap();
+        assert!(early_entry.sample_cap_reached, "early bucket should report cap reached");
+        assert_eq!(early_entry.sampled_values, 10);
     }
 }

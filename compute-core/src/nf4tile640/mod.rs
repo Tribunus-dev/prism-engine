@@ -1337,14 +1337,7 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
     fn test_streaming_collector_basic() {
         use super::calibration::{StreamingStateCollector, CalibrationConfig};
         use super::roles::MatrixRole;
-        let config = CalibrationConfig {
-            seed: 42,
-            max_samples_per_role: 100,
-            collect_moments: true,
-            collect_group_histogram: false,
-            collect_importance: true,
-            layer_balance: true,
-        };
+        let config = CalibrationConfig::default();
         let mut collector = StreamingStateCollector::new(config);
         let group: Vec<f32> = vec![0.5; 128];
         collector.ingest_weight_group(MatrixRole::AttentionQ, 0, &group, 1.0, 0.0, 1.0, false);
