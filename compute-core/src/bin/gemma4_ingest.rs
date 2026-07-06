@@ -960,6 +960,7 @@ fn main() {
     let mil_program = get_opt(&args, "--mil");
     let nf4 = has_flag(&args, "--nf4");
     let tts_repo = get_opt(&args, "--tts-repo").map(|s| s.to_string());
+    let tts_local_dir = get_opt(&args, "--tts-local-dir").map(|s| s.to_string());
 
     // Validate args
     if has_flag(&args, "--help") || has_flag(&args, "-h") {
@@ -971,9 +972,11 @@ fn main() {
         eprintln!("Flags:");
         eprintln!("  --nf4                        Use nf4tile640 quantization instead of ternary");
         eprintln!("  --tts-repo <HF_REPO_ID>      HF repo ID for Qwen3-TTS model to bake into cimage");
+        eprintln!("  --tts-local-dir <PATH>       Local directory containing TTS model.safetensors");
         eprintln!("  --verify-only                Re-download source and verify nf4tile640 packing quality");
         std::process::exit(0);
     }
+
 
     if has_flag(&args, "--verify-only") {
         cmd_verify_only(&args);
@@ -989,8 +992,10 @@ fn main() {
         eprintln!("Flags:");
         eprintln!("  --nf4                        Use nf4tile640 quantization instead of ternary");
         eprintln!("  --tts-repo <HF_REPO_ID>      HF repo ID for Qwen3-TTS model to bake into cimage");
+        eprintln!("  --tts-local-dir <PATH>       Local directory containing TTS model.safetensors");
         eprintln!("  --verify-only                Re-download source and verify nf4tile640 packing quality");
         std::process::exit(1);
+
     }
 
     let total_start = Instant::now();
@@ -1210,7 +1215,7 @@ fn main() {
         let nf4_start = Instant::now();
         for (serialized_name, rows, cols, data) in &all_matrices {
             let name_key = serialized_name.replace('{', "").replace('}', "");
-            let (codes, scales, biases) = pack_nf4_weights(data, *rows, *cols);
+            let (codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(data, *rows, *cols);
             let safe_name = sanitize_filename(name_key);
             // Write codes
             std::fs::write(
@@ -1297,7 +1302,6 @@ fn main() {
     }
 
     // ── MTP Draft Model (optional external draft decoder) ──────────
-    let mut draft_segment_count: u32 = 0;
     if let Some(ref draft_dir) = draft_model_dir {
         println!(
             "
@@ -1351,16 +1355,30 @@ fn main() {
                     );
                 }
             }
-            draft_segment_count = 1;
             draft_layer_count = 4; // MTP draft has 4 transformer layers
         }
     }
 
+    let mut extra_tensor_entries: Vec<TensorEntry> = Vec::new();
+    let mut tts_tmp_dir_opt: Option<PathBuf> = None;
+
     // ── TTS model packing ─────────────────────────────────────
-    if let Some(tts_repo) = &tts_repo {
-        println!("  ▶ Downloading TTS model from {}", tts_repo);
-        let tts_file = download_tts_safetensors(tts_repo)
-            .expect("download TTS safetensors");
+    if tts_repo.is_some() || tts_local_dir.is_some() {
+        let tts_file = if let Some(local) = &tts_local_dir {
+            let path = Path::new(local).join("model.safetensors");
+            println!("  ▶ Loading TTS model from local: {}", path.display());
+            if !path.exists() {
+                eprintln!("  ERROR: TTS model.safetensors not found at {}", path.display());
+                std::process::exit(1);
+            }
+            path
+        } else if let Some(tts_repo) = &tts_repo {
+            println!("  ▶ Downloading TTS model from {}", tts_repo);
+            download_tts_safetensors(tts_repo)
+                .expect("download TTS safetensors")
+        } else {
+            unreachable!()
+        };
 
         let tts_tmp_dir = std::env::temp_dir().join("gemma4_tts_pack");
         let _ = std::fs::create_dir_all(&tts_tmp_dir);
@@ -1376,8 +1394,8 @@ fn main() {
             .collect();
         println!("  ✓ Packed {} TTS weight segments", tts_entries.len());
 
-        let mut all_manifest: Vec<TensorEntry> = Vec::new();
-        all_manifest.extend(tts_entries);
+        extra_tensor_entries.extend(tts_entries);
+        tts_tmp_dir_opt = Some(tts_tmp_dir);
     }
 
     // ── Write output ───────────────────────────────────────────────
@@ -1680,6 +1698,35 @@ fn main() {
         model_artifacts.len() as u64,
     );
 
+    // ── Write TTS segments ────────────────────────────────────────
+    let mut segment_idx: u32 = 8;
+    if let Some(tts_tmp_dir) = &tts_tmp_dir_opt {
+        println!("  ▶ Writing TTS segments into cimage...");
+        for entry in &extra_tensor_entries {
+            let Some(kind) = tts_segment_kind(&entry.segment) else {
+                continue;
+            };
+            let file_path = tts_tmp_dir.join(&entry.segment);
+            let data = match std::fs::read(&file_path) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("  WARNING: TTS segment '{}' not found: {e}", entry.segment);
+                    continue;
+                }
+            };
+
+            let offset = page_align(&mut writer).unwrap();
+            writer.write_all(&data).unwrap();
+
+            segments[segment_idx as usize] = SegmentEntry {
+                kind: kind as u32,
+                offset,
+                length: data.len() as u64,
+            };
+            segment_idx += 1;
+        }
+    }
+
     let mut hasher = Sha256::new();
     hasher.update(&all_weights);
     hasher.update(&all_scales);
@@ -1689,13 +1736,22 @@ fn main() {
     hasher.update(&ane_island_tar);
     hasher.update(&exec_graph_bytes);
     hasher.update(&model_artifacts);
+    if let Some(tts_tmp_dir) = &tts_tmp_dir_opt {
+        for entry in &extra_tensor_entries {
+            if tts_segment_kind(&entry.segment).is_some() {
+                if let Ok(data) = std::fs::read(tts_tmp_dir.join(&entry.segment)) {
+                    hasher.update(&data);
+                }
+            }
+        }
+    }
     let payload_hash: [u8; 32] = hasher.finalize().into();
 
     // Write header at position 0
     let header = CimageHeader {
         magic: *b"PRISM\0\0\0",
         version: 6, // v6 adds auxiliary data (embedding, centroids, cluster map, norms) in ModelArtifacts
-        segment_count: 8 + draft_segment_count,
+        segment_count: segment_idx,
         payload_hash,
         num_layers: NUM_LAYERS as u32,
         num_heads: NUM_HEADS as u32,
@@ -1820,7 +1876,7 @@ fn cmd_verify_only(args: &[String]) {
         if let Some((data, shape)) = load_tensor(&desc.key, &shard_paths) {
             let rows = if shape.len() >= 2 { shape[0] } else { data.len() };
             let cols = if shape.len() >= 2 { shape[1] } else { 1 };
-            let (codes, scales, biases) = pack_nf4_weights(&data, rows, cols);
+            let (codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&data, rows, cols);
             let result = verify_one_matrix(&desc.display, &data, &codes, &scales, &biases, rows, cols);
             all_pass &= result.pass;
             results.push(serde_json::json!({
@@ -2061,4 +2117,21 @@ fn download_tts_safetensors(repo_id: &str) -> Result<PathBuf, Box<dyn std::error
     let repo = api.model(repo_id.to_string());
     let main_file = repo.get("model.safetensors")?;
     Ok(main_file)
+}
+
+/// Map a TTS segment filename to its cimage SegmentKind.
+/// Returns None for entries that don't have a corresponding segment kind
+/// (e.g. codec scale/bias — no SegmentKind variants exist for them).
+fn tts_segment_kind(segment: &str) -> Option<SegmentKind> {
+    match segment {
+        "tts_talker_weight.bin" => Some(SegmentKind::TtsTalkerWeight),
+        "tts_talker_scale.bin" => Some(SegmentKind::TtsTalkerScale),
+        "tts_talker_bias.bin" => Some(SegmentKind::TtsTalkerBias),
+        "tts_code_predictor_weight.bin" => Some(SegmentKind::TtsCodePredictorWeight),
+        "tts_code_predictor_scale.bin" => Some(SegmentKind::TtsCodePredictorScale),
+        "tts_code_predictor_bias.bin" => Some(SegmentKind::TtsCodePredictorBias),
+        "tts_codec_weight.bin" => Some(SegmentKind::TtsCodecWeight),
+        "tts_codebook.bin" => Some(SegmentKind::TtsCodebook),
+        _ => None,
+    }
 }

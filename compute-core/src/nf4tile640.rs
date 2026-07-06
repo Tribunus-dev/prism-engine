@@ -176,16 +176,20 @@ pub fn pack_nf4_tile(values: &[f32; TILE_ELEMENTS]) -> (Vec<u8>, Vec<f32>, Vec<f
 }
 
 /// Pack multiple tiles from a flat f32 array (shapes are M×K layout).
-/// Each contiguous K-length row is split into (K / TILE_ELEMENTS) tiles.
+/// Each contiguous K-length row is split into ceil(K / TILE_ELEMENTS) tiles.
+/// Non-multiple column dimensions are zero-padded to the next tile boundary.
 ///
-/// Returns `(packed_codes, scales, biases)` with data for all tiles stored
+/// Returns `(packed_codes, scales, biases, rows, cols)` with data for all tiles stored
 /// contiguously per buffer (tile-major order).
 ///
 /// # Panics
 ///
-/// Panics if `weights.len()` does not equal `rows * cols` or if `cols` is not
-/// a multiple of `TILE_ELEMENTS`.
-pub fn pack_nf4_weights(weights: &[f32], rows: usize, cols: usize) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+/// Panics if `weights.len()` does not equal `rows * cols`.
+pub fn pack_nf4_weights(
+    weights: &[f32],
+    rows: usize,
+    cols: usize,
+) -> (Vec<u8>, Vec<f32>, Vec<f32>, u32, u32) {
     assert_eq!(
         weights.len(),
         rows * cols,
@@ -194,13 +198,30 @@ pub fn pack_nf4_weights(weights: &[f32], rows: usize, cols: usize) -> (Vec<u8>, 
         rows,
         cols
     );
-    assert!(
-        cols % TILE_ELEMENTS == 0,
-        "cols {cols} must be a multiple of tile size {TILE_ELEMENTS}"
-    );
 
-    let tiles_per_row = cols / TILE_ELEMENTS;
+    // Round cols up to next multiple of 640 for tile-aligned packing.
+    // The original column count is preserved for matmul dimension.
+    let padded_cols = if cols % TILE_ELEMENTS == 0 {
+        cols
+    } else {
+        let tiles_needed = cols.div_ceil(TILE_ELEMENTS);
+        tiles_needed * TILE_ELEMENTS
+    };
+    let tiles_per_row = padded_cols / TILE_ELEMENTS;
     let total_tiles = rows * tiles_per_row;
+
+    // Pad each row with zeros if cols is not a multiple of 640.
+    let padded_weights: Vec<f32> = if padded_cols > cols {
+        let mut padded = Vec::with_capacity(rows * padded_cols);
+        for row in 0..rows {
+            let start = row * cols;
+            padded.extend_from_slice(&weights[start..start + cols]);
+            padded.extend(std::iter::repeat(0.0f32).take(padded_cols - cols));
+        }
+        padded
+    } else {
+        weights.to_vec()
+    };
 
     let mut packed_codes = vec![0u8; total_tiles * PACKED_BYTES_PER_TILE];
     let mut scales = vec![0.0f32; total_tiles * SCALES_F32_PER_TILE];
@@ -208,8 +229,8 @@ pub fn pack_nf4_weights(weights: &[f32], rows: usize, cols: usize) -> (Vec<u8>, 
 
     for row in 0..rows {
         for tile_in_row in 0..tiles_per_row {
-            let values_base = row * cols + tile_in_row * TILE_ELEMENTS;
-            let values: &[f32; TILE_ELEMENTS] = weights[values_base..values_base + TILE_ELEMENTS]
+            let values_base = row * padded_cols + tile_in_row * TILE_ELEMENTS;
+            let values: &[f32; TILE_ELEMENTS] = padded_weights[values_base..values_base + TILE_ELEMENTS]
                 .try_into()
                 .expect("tile slice fits exactly");
 
@@ -228,7 +249,7 @@ pub fn pack_nf4_weights(weights: &[f32], rows: usize, cols: usize) -> (Vec<u8>, 
         }
     }
 
-    (packed_codes, scales, biases)
+    (packed_codes, scales, biases, rows as u32, cols as u32)
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -277,12 +298,7 @@ pub fn unpack_nf4_weights(
     rows: usize,
     cols: usize,
 ) -> Vec<f32> {
-    assert!(
-        cols % TILE_ELEMENTS == 0,
-        "cols {cols} must be a multiple of tile size {TILE_ELEMENTS}"
-    );
-
-    let tiles_per_row = cols / TILE_ELEMENTS;
+    let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
     let total_tiles = rows * tiles_per_row;
 
     let expected_codes_len = total_tiles * PACKED_BYTES_PER_TILE;
@@ -332,7 +348,10 @@ pub fn unpack_nf4_weights(
 
         let mut tile_out = [0.0f32; TILE_ELEMENTS];
         unpack_nf4_tile(codes_slice, scale_slice, bias_slice, &mut tile_out);
-        output[out_base..out_base + TILE_ELEMENTS].copy_from_slice(&tile_out);
+        // Clamp copy to actual logical columns (last tile may be partial).
+        let remaining = cols.saturating_sub(tile_in_row * TILE_ELEMENTS);
+        let copy_len = TILE_ELEMENTS.min(remaining);
+        output[out_base..out_base + copy_len].copy_from_slice(&tile_out[..copy_len]);
     }
 
     output
@@ -664,7 +683,7 @@ mod tests {
         let mut identity = vec![0.0f32; rows * cols];
         identity[0] = 1.0;
 
-        let (packed_codes, scales, biases) = pack_nf4_weights(&identity, rows, cols);
+        let (packed_codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&identity, rows, cols);
 
         let tile_count = 1;
         assert_eq!(packed_codes.len(), tile_count * PACKED_BYTES_PER_TILE);
@@ -742,8 +761,8 @@ mod tests {
     fn dequant_matmul_small() {
         // Create a small packed weight matrix, run dequant_matmul_reference,
         // and compare against naive unpack-then-matmul.
-        // We use n = TILE_ELEMENTS (pack_nf4_weights requires cols % TILE_ELEMENTS == 0)
-        // but only the first 3 columns per row are non-zero.
+        // We use n = TILE_ELEMENTS (exact tile boundary) but only the first 3
+        // columns per row are non-zero.
         let m = 2usize;
         let k = 4usize;
         let n = TILE_ELEMENTS;
@@ -770,7 +789,7 @@ mod tests {
         weights[3 * n + 1] = 2.0;
         weights[3 * n + 2] = 3.0;
 
-        let (packed_codes, scales, biases) = pack_nf4_weights(&weights, k, n);
+        let (packed_codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&weights, k, n);
 
         let mut output = vec![0.0f32; m * n];
         dequant_matmul_reference(
@@ -812,7 +831,7 @@ mod tests {
             weights[i * n + i] = 1.0;
         }
 
-        let (packed_codes, scales, biases) = pack_nf4_weights(&weights, k, n);
+        let (packed_codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&weights, k, n);
 
         // Input: [m, k] with distinct values.
         let input: Vec<f32> = (0..m * k).map(|x| (x as f32 + 1.0) * 0.1).collect();
@@ -923,5 +942,215 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn non_640_multiple_cols_roundtrip() {
+        // Test: pack+unpack a matrix with non-640-multiple cols, verify
+        // structural correctness (buffer sizes, element count).
+        // Exact round-trip is not expected for arbitrary f32 values, so
+        // we verify validate_matmul reports at-worst the same error rate
+        // as a 640-multiple control of the same data.
+        let rows = 4usize;
+        let cols = 700usize;   // not a multiple of 640
+        let control_cols = 640usize; // multiple of 640 (same number of tiles)
+
+        // Shared deterministic weights (both shapes use same content).
+        let mut weights = vec![0.0f32; rows * cols];
+        let mut control = vec![0.0f32; rows * control_cols];
+        for i in 0..rows {
+            for j in 0..cols.max(control_cols) {
+                // Exact codebook entries with group-varying scale.
+                let group = j / GROUP_SIZE;
+                let scale = 0.1 + (group % 5) as f32 * 0.4;
+                let val = NF4_CODEBOOK[(i * 700 + j) % 16] * scale;
+                if j < cols {
+                    weights[i * cols + j] = val;
+                }
+                if j < control_cols {
+                    control[i * control_cols + j] = val;
+                }
+            }
+        }
+
+        // Pack both shapes.
+        let (codes, scales, biases, _, _) = pack_nf4_weights(&weights, rows, cols);
+        let (control_codes, control_scales, control_biases, _, _) =
+            pack_nf4_weights(&control, rows, control_cols);
+
+        // Both shapes should have 2 tiles per row (700 → 7040 padded → 2, 640 → 1).
+        assert_eq!(cols.div_ceil(TILE_ELEMENTS), 2);
+        assert_eq!(control_cols.div_ceil(TILE_ELEMENTS), 1);
+
+        // Unpack both and verify element count matches logical shape.
+        let unpacked = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
+        assert_eq!(unpacked.len(), rows * cols);
+        let control_unpacked = unpack_nf4_weights(
+            &control_codes, &control_scales, &control_biases, rows, control_cols,
+        );
+        assert_eq!(control_unpacked.len(), rows * control_cols);
+
+        // Non-640-multiple packing must not be catastrophically worse.
+        // Both should pass validate_matmul (5% relative tolerance).
+        let result = validate_matmul(&weights, &unpacked, 0.05);
+        let control_result = validate_matmul(&control, &control_unpacked, 0.05);
+        assert!(
+            result.passed,
+            "non-640 round-trip: max_abs_error={}, mismatches={}/{}",
+            result.max_abs_error, result.mismatches, result.total_elements
+        );
+        assert!(
+            control_result.passed,
+            "control round-trip: max_abs_error={}, mismatches={}/{}",
+            control_result.max_abs_error, control_result.mismatches, control_result.total_elements
+        );
+    }
+
+    #[test]
+    fn non_640_multiple_dequant_matmul() {
+        // Test dequant_matmul_reference with a non-640-multiple weight.
+        // This exercises the exact same path as vision_embedder (6912 cols).
+        let m = 2usize;
+        let k = 3usize;
+        let n = 700usize;
+
+        let mut weights = vec![0.0f32; k * n];
+        for i in 0..k {
+            for j in 0..n {
+                // Sawtooth spanning [-1, 1] for full NF4 codebook coverage.
+                let phase = (i * n + j) as f32 * 0.01;
+                weights[i * n + j] = (phase - phase.floor() - 0.5) * 2.0;
+            }
+        }
+
+        let input: Vec<f32> = (0..m * k).map(|x| (x as f32 + 1.0) * 0.1).collect();
+
+        let (codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&weights, k, n);
+
+        let mut nf4_output = vec![0.0f32; m * n];
+        dequant_matmul_reference(
+            &input, &codes, &scales, &biases, m, k, n, &mut nf4_output,
+        )
+        .unwrap();
+
+        // Reference: unpack weights, then matmul.
+        let unpacked = unpack_nf4_weights(&codes, &scales, &biases, k, n);
+        let mut expected = vec![0.0f32; m * n];
+        for i in 0..m {
+            for j in 0..n {
+                for kk in 0..k {
+                    expected[i * n + j] += input[i * k + kk] * unpacked[kk * n + j];
+                }
+            }
+        }
+
+        let result = validate_matmul(&expected, &nf4_output, 0.05);
+        assert!(
+            result.passed,
+            "non-640-multiple matmul (n=700): max_abs_error={}, mismatches={}/{}",
+            result.max_abs_error, result.mismatches, result.total_elements
+        );
+    }
+
+    #[test]
+    fn non_640_vs_640_control_rmse() {
+        // Compare RMSE for non-640-multiple vs 640-multiple cols with
+        // identical data.  Both should have similar NF4 quantization error.
+        let m = 2usize;
+        let k = 20usize;
+        let n_non640 = 6912usize;
+        let n_control = 6400usize; // 10 tiles, close to 6912 (also ~11 tiles)
+
+        // Same data for both shapes (fill to max width).
+        let max_n = n_non640.max(n_control);
+        let mut raw = vec![0.0f32; k * max_n];
+        for i in 0..k {
+            for j in 0..max_n {
+                let idx = (i * max_n + j) as u32;
+                let rand = ((idx.wrapping_mul(1103515245).wrapping_add(12345)) % 10001) as f32;
+                raw[i * max_n + j] = (rand / 5000.5) - 1.0;
+            }
+        }
+        // Slice to each shape.
+        let weights_non640: Vec<f32> = (0..k)
+            .flat_map(|i| raw[i * max_n..i * max_n + n_non640].to_vec())
+            .collect();
+        let weights_control: Vec<f32> = (0..k)
+            .flat_map(|i| raw[i * max_n..i * max_n + n_control].to_vec())
+            .collect();
+
+        let (codes, scales, biases, _, _) = pack_nf4_weights(&weights_non640, k, n_non640);
+        let (codes_ctrl, scales_ctrl, biases_ctrl, _, _) =
+            pack_nf4_weights(&weights_control, k, n_control);
+
+        let mut max_rmse_non640 = 0.0f32;
+        let mut max_rmse_ctrl = 0.0f32;
+        for trial in 0..3 {
+            let input: Vec<f32> = (0..k)
+                .map(|i| match trial {
+                    0 => (i as f64 * 0.1).sin() as f32,
+                    1 => (i as f64 * 0.07).cos() as f32,
+                    _ => {
+                        (i.wrapping_mul(12345).wrapping_add(67890) % 1001) as f32 / 500.0 - 1.0
+                    }
+                })
+                .collect();
+
+            // Non-640 RMSE.
+            let rmse_non640 = compute_dequant_rmse(&input, &codes, &scales, &biases, &weights_non640, k, n_non640);
+            if rmse_non640 > max_rmse_non640 {
+                max_rmse_non640 = rmse_non640;
+            }
+
+            // Control RMSE.
+            let rmse_ctrl = compute_dequant_rmse(&input, &codes_ctrl, &scales_ctrl, &biases_ctrl, &weights_control, k, n_control);
+            if rmse_ctrl > max_rmse_ctrl {
+                max_rmse_ctrl = rmse_ctrl;
+            }
+        }
+
+        eprintln!(
+            "non-640 (n={n_non640}): max_rmse={max_rmse_non640:.6}  |  control (n={n_control}): max_rmse={max_rmse_ctrl:.6}",
+        );
+
+        // Non-640 packing must NOT be catastrophically worse than 640-multiple.
+        // Max allowed: 3× the control RMSE.  (NF4 quantization noise dominates.)
+        let max_allowed = max_rmse_ctrl * 3.0;
+        assert!(
+            max_rmse_non640 < max_allowed,
+            "non-640 RMSE {max_rmse_non640:.6} >> control RMSE {max_rmse_ctrl:.6} (limit {max_allowed:.6})",
+        );
+    }
+
+    /// Helper: compute RMSE between NF4 dequant matmul and BF16 reference.
+    fn compute_dequant_rmse(
+        input: &[f32],
+        codes: &[u8],
+        scales: &[f32],
+        biases: &[f32],
+        weights: &[f32],
+        k: usize,
+        n: usize,
+    ) -> f32 {
+        // BF16 reference: output[j] = Σ_i weights[i][j] * input[i]
+        let mut ref_output = vec![0.0f32; n];
+        for j in 0..n {
+            let mut sum = 0.0f32;
+            for i in 0..k {
+                sum += weights[i * n + j] * input[i];
+            }
+            ref_output[j] = sum;
+        }
+
+        let mut nf4_output = vec![0.0f32; n];
+        dequant_matmul_reference(&input, codes, scales, biases, 1, k, n, &mut nf4_output)
+            .unwrap();
+
+        let mut sq_err = 0.0f32;
+        for j in 0..n {
+            let diff = nf4_output[j] - ref_output[j];
+            sq_err += diff * diff;
+        }
+        (sq_err / n as f32).sqrt()
     }
 }

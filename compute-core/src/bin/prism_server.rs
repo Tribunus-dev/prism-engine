@@ -12,22 +12,35 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
+use std::time::Duration;
 
 use axum::{
     extract::State,
+    extract::Request,
     http::StatusCode,
+    middleware::{self, Next},
     response::sse::{Event, Sse},
     response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
 use clap::Parser;
+use sha2::{Digest, Sha256};
+use base64::Engine;
 use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
-use base64::Engine;
 use futures::stream::Stream;
 use std::convert::Infallible;
+use std::pin::Pin;
+use std::task::Poll;
+use std::task::Context;
 use uuid::Uuid;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+use tokio_stream::wrappers::ReceiverStream;
 use metal;
 
 use tribunus_compute_core::backend::create_inference_executor;
@@ -52,9 +65,214 @@ struct Args {
     #[arg(long)]
     model_dir: PathBuf,
 
+    /// Path to server config file (TOML). Optional — uses defaults if absent.
+    #[arg(long)]
+    config: Option<PathBuf>,
+
     /// Server port.
     #[arg(long, default_value = "8080")]
     port: u16,
+}
+
+// ── Config ────────────────────────────────────────────────────────────────
+
+/// Top-level server configuration loaded from a TOML file.
+#[derive(Deserialize, Clone)]
+#[allow(dead_code)]
+struct ServerConfig {
+    server: ServerSection,
+    auth: AuthSection,
+    limits: LimitSection,
+    models: Vec<ModelEntry>,
+}
+
+#[derive(Deserialize, Clone)]
+#[allow(dead_code)]
+struct ServerSection {
+    #[serde(default = "default_mode")]
+    mode: String,
+    #[serde(default = "default_host")]
+    host: String,
+    #[serde(default = "default_port")]
+    port: u16,
+    #[serde(default)]
+    unix_socket: Option<String>,
+    #[serde(default)]
+    tls: Option<TlsConfig>,
+}
+
+#[derive(Deserialize, Clone)]
+#[allow(dead_code)]
+struct TlsConfig {
+    cert_path: PathBuf,
+    key_path: PathBuf,
+}
+
+#[derive(Deserialize, Clone)]
+struct AuthSection {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    tokens: Vec<TokenDef>,
+    #[serde(default)]
+    admin_token: Option<String>,
+}
+
+#[derive(Deserialize, Clone)]
+#[allow(dead_code)]
+struct TokenDef {
+    id: String,
+    #[serde(rename = "token")]
+    raw_token: Option<String>,
+    #[serde(default)]
+    verifier: Option<String>,
+    #[serde(default = "default_scopes")]
+    scopes: Vec<String>,
+}
+
+#[derive(Deserialize, Clone)]
+#[allow(dead_code)]
+struct LimitSection {
+    #[serde(default = "default_body_bytes")]
+    max_body_bytes: u64,
+    #[serde(default = "default_prompt_tokens")]
+    max_prompt_tokens: u32,
+    #[serde(default = "default_output_tokens")]
+    max_output_tokens: u32,
+    #[serde(default = "default_images")]
+    max_images: u32,
+    #[serde(default = "default_audio_seconds")]
+    max_audio_seconds: u32,
+    #[serde(default = "default_stream_timeout")]
+    stream_idle_timeout_secs: u32,
+    #[serde(default = "default_deadline")]
+    total_request_deadline_secs: u32,
+}
+
+#[derive(Deserialize, Clone)]
+#[allow(dead_code)]
+struct ModelEntry {
+    name: String,
+    cimage_path: PathBuf,
+}
+
+// ── Config default values ────────────────────────────────────────────────
+
+fn default_mode() -> String {
+    "embedded".into()
+}
+fn default_host() -> String {
+    "127.0.0.1".into()
+}
+fn default_port() -> u16 {
+    8080
+}
+fn default_body_bytes() -> u64 {
+    10 * 1024 * 1024
+}
+fn default_prompt_tokens() -> u32 {
+    128_000
+}
+fn default_output_tokens() -> u32 {
+    4096
+}
+fn default_images() -> u32 {
+    4
+}
+fn default_audio_seconds() -> u32 {
+    30
+}
+fn default_stream_timeout() -> u32 {
+    60
+}
+fn default_deadline() -> u32 {
+    300
+}
+fn default_scopes() -> Vec<String> {
+    vec!["generation.text".into()]
+}
+
+// ── Request lifecycle types ─────────────────────────────────────────────
+
+#[derive(Clone, Serialize)]
+struct RequestReceipt {
+    request_id: String,
+    model_digest: Option<String>,
+    client_id: Option<String>,
+    terminal_state: String,
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    audio_duration_ms: u32,
+    queue_time_us: u64,
+    execution_time_us: u64,
+    error_code: Option<String>,
+    error_message: Option<String>,
+}
+
+struct StreamState {
+    request_id: String,
+    cancel: CancellationToken,
+    slot_id: u32,
+    start_time: Instant,
+    last_activity: Instant,
+    terminal_sent: AtomicBool,
+    receipt: parking_lot::Mutex<Option<RequestReceipt>>,
+}
+
+struct StreamTracker {
+    streams: HashMap<String, Arc<StreamState>>,
+}
+
+impl StreamTracker {
+    fn new() -> Self {
+        Self { streams: HashMap::new() }
+    }
+
+    fn register(&mut self, request_id: String, state: Arc<StreamState>) {
+        self.streams.insert(request_id, state);
+    }
+
+    fn cancel(&mut self, request_id: &str) {
+        if let Some(state) = self.streams.remove(request_id) {
+            state.cancel.cancel();
+        }
+    }
+
+    fn cancel_all(&mut self) {
+        for (_, state) in self.streams.drain() {
+            state.cancel.cancel();
+        }
+    }
+    fn active_count(&self) -> usize {
+        self.streams.len()
+    }
+}
+
+/// Stream wrapper that cancels the token when the stream is dropped.
+struct CancelOnDropStream<S> {
+    inner: S,
+    token: CancellationToken,
+}
+
+impl<S, I> Stream for CancelOnDropStream<S>
+where
+    S: Stream<Item = I> + Unpin,
+{
+    type Item = I;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.inner).poll_next(cx)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<S> Drop for CancelOnDropStream<S> {
+    fn drop(&mut self) {
+        self.token.cancel();
+    }
 }
 
 // ── State ───────────────────────────────────────────────────────────────
@@ -66,9 +284,98 @@ struct AppState {
     decode_count: std::sync::atomic::AtomicU64,
     #[allow(dead_code)]
     cimage_path: PathBuf,
+    /// Server configuration (from TOML or defaults).
+    config: ServerConfig,
+    /// Token authentication verifier derived from config.
+    auth_verifier: AuthVerifier,
     /// Optional TTS pipeline loaded when the cimage contains TTS segments.
     #[allow(dead_code)]
     tts_pipeline: Option<TtsPipeline>,
+    /// Model content digest for receipt tracking.
+    model_digest: Option<String>,
+    stream_tracker: ParkingMutex<StreamTracker>,
+}
+
+
+struct SlotGuard {
+    slot_id: u32,
+    state: Arc<AppState>,
+}
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        self.state.executor.lock().free_slot(self.slot_id);
+    }
+}
+
+// ── Auth verifier ─────────────────────────────────────────────────────
+
+/// Token authentication verifier. Stores SHA-256 hashes for constant-time
+/// comparison against incoming Bearer tokens.
+struct AuthVerifier {
+    entries: Vec<([u8; 32], Vec<String>)>,
+    admin_token_hash: Option<[u8; 32]>,
+}
+
+impl AuthVerifier {
+    fn new(config: &AuthSection) -> Self {
+        let mut entries = Vec::new();
+        for def in &config.tokens {
+            let hash: [u8; 32] = if let Some(raw) = &def.raw_token {
+                let mut h = Sha256::new();
+                h.update(raw.as_bytes());
+                h.finalize().into()
+            } else if let Some(ver) = &def.verifier {
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(ver)
+                    .unwrap_or_default();
+                let mut out = [0u8; 32];
+                let len = decoded.len().min(32);
+                out[..len].copy_from_slice(&decoded[..len]);
+                out
+            } else {
+                continue;
+            };
+            entries.push((hash, def.scopes.clone()));
+        }
+        let admin_token_hash = config.admin_token.as_ref().map(|t| {
+            let mut h = Sha256::new();
+            h.update(t.as_bytes());
+            h.finalize().into()
+        });
+        Self { entries, admin_token_hash }
+    }
+
+    fn verify(&self, token: &str, required_scope: &str) -> bool {
+        let mut h = Sha256::new();
+        h.update(token.as_bytes());
+        let token_hash: [u8; 32] = h.finalize().into();
+
+        // Admin token has all scopes.
+        if let Some(admin) = &self.admin_token_hash {
+            if constant_time_eq(&token_hash, admin) {
+                return true;
+            }
+        }
+        // Regular tokens must match hash and scope.
+        for (stored_hash, scopes) in &self.entries {
+            if constant_time_eq(&token_hash, stored_hash)
+                && scopes.iter().any(|s| s == required_scope)
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// Simple constant-time comparison for fixed-size byte arrays.
+fn constant_time_eq(a: &[u8; 32], b: &[u8; 32]) -> bool {
+    let mut diff = 0u8;
+    for i in 0..32 {
+        diff |= a[i] ^ b[i];
+    }
+    diff == 0
 }
 
 // ── OpenAI API types ────────────────────────────────────────────────────
@@ -303,6 +610,72 @@ fn extract_multimodal_parts(msg: &MessageContent) -> Vec<MultimodalPart> {
     parts
 }
 
+// ── API error envelope ────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct ApiError {
+    code: String,
+    message: String,
+    request_id: String,
+    retryable: bool,
+}
+
+impl ApiError {
+    fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            request_id: Uuid::new_v4().to_string(),
+            retryable: false,
+        }
+    }
+
+    fn with_request_id(mut self, id: String) -> Self {
+        self.request_id = id;
+        self
+    }
+
+    fn with_retryable(mut self, val: bool) -> Self {
+        self.retryable = val;
+        self
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let status = match self.code.as_str() {
+            "unauthorized" => StatusCode::UNAUTHORIZED,
+            "forbidden" => StatusCode::FORBIDDEN,
+            "rate_limited" => StatusCode::TOO_MANY_REQUESTS,
+            "capacity_exhausted" => StatusCode::SERVICE_UNAVAILABLE,
+            "invalid_request" => StatusCode::BAD_REQUEST,
+            "timeout" => StatusCode::REQUEST_TIMEOUT,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        (status, Json(self)).into_response()
+    }
+}
+
+impl From<StatusCode> for ApiError {
+    fn from(status: StatusCode) -> Self {
+        let (code, message) = match status {
+            StatusCode::BAD_REQUEST => ("invalid_request", "Bad request"),
+            StatusCode::SERVICE_UNAVAILABLE => ("capacity_exhausted", "Service unavailable"),
+            StatusCode::INTERNAL_SERVER_ERROR => ("internal_error", "Internal server error"),
+            StatusCode::NOT_IMPLEMENTED => ("not_implemented", "Not implemented"),
+            StatusCode::REQUEST_TIMEOUT => ("timeout", "Request timed out"),
+            _ => ("error", "Unknown error"),
+        };
+        Self {
+            code: code.into(),
+            message: message.into(),
+            request_id: Uuid::new_v4().to_string(),
+            retryable: false,
+        }
+    }
+}
+
+
 // ── Handlers ────────────────────────────────────────────────────────────
 
 async fn list_models(State(_state): State<Arc<AppState>>) -> Json<ModelList> {
@@ -319,17 +692,30 @@ async fn list_models(State(_state): State<Arc<AppState>>) -> Json<ModelList> {
 async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatRequest>,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, ApiError> {
+    let request_id = Uuid::new_v4().to_string();
+    let start_time = Instant::now();
+
     // Audio output via SSE streaming when response_format contains "audio"
     if req.response_format.as_ref().map_or(false, |f| f.contains("audio")) {
 
-        let sse = chat_completions_audio_stream(state, req).await?;
+        let sse = chat_completions_audio_stream(state, req).await.map_err(|e| ApiError::new("internal_error", e.to_string()))?;
         return Ok(sse.into_response());
     }
 
     if req.stream.unwrap_or(false) {
-        let stream_response = chat_completions_stream(state, req).await;
+        let stream_response = chat_completions_stream(state, req, request_id).await?;
         return Ok(stream_response.into_response());
+    }
+
+    // Stage 1: Validate request properties (no resource reservation)
+    if req.max_tokens.unwrap_or(0) > state.config.limits.max_output_tokens {
+        return Err(ApiError {
+            code: "invalid_request".into(),
+            message: format!("max_tokens exceeds limit of {}", state.config.limits.max_output_tokens),
+            request_id: request_id.clone(),
+            retryable: false,
+        });
     }
 
     // Extract prompt from last user message
@@ -433,7 +819,7 @@ async fn chat_completions(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if input_ids.is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(StatusCode::BAD_REQUEST.into());
     }
 
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
@@ -441,9 +827,17 @@ async fn chat_completions(
     let prompt_len = input_ids.len() + multimodal_embeddings.len() + audio_embeddings_len;
 
     // Allocate decode slot (brief executor lock)
+    // Stage 2: Reserve runtime resources
     let slot_id = state.executor.lock()
         .allocate_slot()
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        .map_err(|_| ApiError {
+            code: "capacity_exhausted".into(),
+            message: "All slots busy, retry later".into(),
+            request_id: request_id.clone(),
+            retryable: true,
+        })?;
+
+    let _slot_guard = SlotGuard { slot_id, state: state.clone() };
 
     // Run decode in blocking task (Metal is synchronous: commit + wait_until_completed)
     let state_clone = state.clone();
@@ -494,9 +888,45 @@ async fn chat_completions(
             }
         }
 
-        exec.free_slot(slot_id);
         generated_tokens
-    }).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }).await;
+
+    let generated_tokens = match generated_tokens {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            let receipt = RequestReceipt {
+                request_id: request_id.clone(),
+                model_digest: state.model_digest.clone(),
+                client_id: None,
+                terminal_state: "failed".into(),
+                prompt_tokens: prompt_len as u32,
+                completion_tokens: 0,
+                audio_duration_ms: 0,
+                queue_time_us: 0,
+                execution_time_us: start_time.elapsed().as_micros() as u64,
+                error_code: Some("internal_error".into()),
+                error_message: Some(format!("Decode task panicked: {e}")),
+            };
+            eprintln!("[prism-server] receipt: {}", serde_json::to_string(&receipt).unwrap());
+            return Err(ApiError::new("internal_error", "Decode task panicked"));
+        }
+    };
+
+    // Terminal receipt
+    let receipt = RequestReceipt {
+        request_id: request_id.clone(),
+        model_digest: state.model_digest.clone(),
+        client_id: None,
+        terminal_state: "completed".into(),
+        prompt_tokens: prompt_len as u32,
+        completion_tokens: generated_tokens.len() as u32,
+        audio_duration_ms: 0,
+        queue_time_us: 0,
+        execution_time_us: start_time.elapsed().as_micros() as u64,
+        error_code: None,
+        error_message: None,
+    };
+    eprintln!("[prism-server] receipt: {}", serde_json::to_string(&receipt).unwrap());
 
     let output_text = state
         .tokenizer
@@ -786,18 +1216,43 @@ fn decode_token_text(tokenizer: &TribunusTokenizer, token: u32) -> Option<String
 
 /// SSE streaming handler for /v1/chat/completions.
 ///
-/// Uses `futures::stream::unfold` to emit one SSE event per decode step,
-/// then a final `[DONE]` event.
+/// Uses channel-based streaming with CancellationToken for:
+/// - Client disconnect cancellation (via CancelOnDropStream)
+/// - Stream idle timeout
+/// - Graceful shutdown (via StreamTracker)
 async fn chat_completions_stream(
     state: Arc<AppState>,
     req: ChatRequest,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    use futures::stream;
+    request_id: String,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let start_time = Instant::now();
+
+    // Stage 1: Validate request properties
+    if req.max_tokens.unwrap_or(0) > state.config.limits.max_output_tokens {
+        return Err(ApiError {
+            code: "invalid_request".into(),
+            message: format!("max_tokens exceeds limit of {}", state.config.limits.max_output_tokens),
+            request_id: request_id.clone(),
+            retryable: false,
+        });
+    }
+
+    // Stage 2: Reserve runtime resources
+    let slot_id = state.executor.lock()
+        .allocate_slot()
+        .map_err(|_| ApiError {
+            code: "capacity_exhausted".into(),
+            message: "All slots busy, retry later".into(),
+            request_id: request_id.clone(),
+            retryable: true,
+        })?;
+
+    let _slot_guard = SlotGuard { slot_id, state: state.clone() };
 
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
 
     // Tokenize (no executor lock needed — tokenizer is &self)
-    let user_msg = req.messages.last().expect("at least one message");
+    let user_msg = req.messages.last().ok_or_else(|| ApiError::new("invalid_request", "No messages"))?;
     let prompt_text = match &user_msg.content {
         MessageContent::Text(t) => t.clone(),
         MessageContent::Parts(parts) => parts
@@ -809,56 +1264,121 @@ async fn chat_completions_stream(
             .collect::<Vec<_>>()
             .join(" "),
     };
-    let input_ids = state.tokenizer.encode(&prompt_text).unwrap_or_default();
+    let input_ids = state.tokenizer.encode(&prompt_text)
+        .map_err(|_| ApiError::new("internal_error", "Tokenization failed"))?;
     let prompt_len = input_ids.len();
 
-    let stream = stream::unfold(
-        (state, input_ids, 0usize, 0u64, prompt_len),
-        move |(state, ids, step, mut last_tok, prompt_len)| async move {
-            if step >= max_tokens {
-                // Emit final [DONE] event
-                return Some((
-                    Ok(Event::default().data("[DONE]")),
-                    (state, ids, step, last_tok, prompt_len),
-                ));
-            }
+    let cancel = CancellationToken::new();
+    let idle_timeout = Duration::from_secs(state.config.limits.stream_idle_timeout_secs as u64);
 
-            // Scope the executor lock so it drops before the state move below.
-            let (next, text) = {
-                let mut exec = state.executor.lock();
+    // Register with StreamTracker for graceful shutdown
+    let stream_state = Arc::new(StreamState {
+        request_id: request_id.clone(),
+        cancel: cancel.clone(),
+        slot_id,
+        start_time,
+        last_activity: Instant::now(),
+        terminal_sent: AtomicBool::new(false),
+        receipt: parking_lot::Mutex::new(None),
+    });
+    {
+        let mut tracker = state.stream_tracker.lock();
+        tracker.register(request_id.clone(), stream_state.clone());
+    }
 
-                if step == 0 {
-                    // Prefill all tokens except the last one
-                    for (i, &tok) in ids[..ids.len().saturating_sub(1)].iter().enumerate() {
-                        let op = make_prefill_op(tok as u64);
-                        exec.operation_registry.insert(op.operation_id, op);
-                        let plan = make_boundary_plan(
-                            i as u64,
-                            BACKEND_MEGAKERNEL,
-                            vec![OperationId(tok as u64)],
-                        );
-                        if let Err(e) = exec.execute_boundaries(&[plan]) {
-                            eprintln!("[prism-server] streaming prefill error: {e}");
-                        }
-                    }
-                    last_tok = *ids.last().unwrap_or(&0) as u64;
+    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+
+    // Spawn decode work: runs until max_tokens, EOS, cancel, or idle timeout
+    let state_clone = state.clone();
+    let cancel_clone = cancel.clone();
+    let tx_clone = tx.clone();
+    let stream_state_clone = stream_state.clone();
+    let idle_timeout = idle_timeout;
+    let request_id_clone = request_id.clone();
+    let prompt_len = prompt_len;
+
+    tokio::spawn(async move {
+        let state = state_clone;
+        let cancel = cancel_clone;
+        let tx = tx_clone;
+        let stream_state = stream_state_clone;
+        let idle_timeout = idle_timeout;
+        let request_id = request_id_clone;
+        let prompt_len = prompt_len;
+
+        // Clone before prefill closure to keep originals for while loop
+        let cancel_prefill = cancel.clone();
+        let state_prefill = state.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut exec = state_prefill.executor.lock();
+            let last_tok = *input_ids.last().unwrap_or(&0) as u64;
+
+            // Prefill all tokens except the last one
+            for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)].iter().enumerate() {
+                if cancel_prefill.is_cancelled() {
+                    return None;
                 }
-
-                // Decode one step
-                let dec = make_decode_op(last_tok);
-                exec.operation_registry.insert(dec.operation_id, dec);
+                let op = make_prefill_op(tok as u64);
+                exec.operation_registry.insert(op.operation_id, op);
                 let plan = make_boundary_plan(
-                    (prompt_len + step) as u64,
+                    i as u64,
                     BACKEND_MEGAKERNEL,
-                    vec![OperationId(last_tok)],
+                    vec![OperationId(tok as u64)],
                 );
                 if let Err(e) = exec.execute_boundaries(&[plan]) {
-                    eprintln!("[prism-server] streaming decode error: {e}");
+                    eprintln!("[prism-server] streaming prefill error: {e}");
                 }
-                let next = exec.last_decoded_token().ok().unwrap_or(0);
-                let text = decode_token_text(&state.tokenizer, next as u32);
-                (next, text)
-            }; // exec dropped here — state is no longer borrowed
+            }
+            Some(last_tok)
+        }).await;
+
+        let mut last_tok = match result {
+            Ok(Some(t)) => t,
+            Err(_) => return,
+            _ => return,
+        };
+
+        let mut step = 0;
+        let mut last_activity = Instant::now();
+
+        while step < max_tokens && !cancel.is_cancelled() {
+            // Check idle timeout
+            if last_activity.elapsed() > idle_timeout {
+                let _ = tx.send(Ok(Event::default()
+                    .data("[TIMED_OUT]")
+                    .event("timed_out"))).await;
+                break;
+            }
+
+            let step_result = tokio::task::spawn_blocking({
+                let state = state.clone();
+                move || -> Option<(u64, Option<String>)> {
+                    let mut exec = state.executor.lock();
+
+                    let dec = make_decode_op(last_tok);
+                    exec.operation_registry.insert(dec.operation_id, dec);
+                    let plan = make_boundary_plan(
+                        (prompt_len + step) as u64,
+                        BACKEND_MEGAKERNEL,
+                        vec![OperationId(last_tok)],
+                    );
+                    if let Err(e) = exec.execute_boundaries(&[plan]) {
+                        eprintln!("[prism-server] streaming decode error: {e}");
+                    }
+
+                    let next = exec.last_decoded_token().ok().unwrap_or(0);
+                    let text = decode_token_text(&state.tokenizer, next as u32);
+
+                    Some((next, text))
+                }
+            }).await;
+
+            let (next, text) = match step_result {
+                Ok(Some(r)) => r,
+                _ => break,
+            };
+
+            last_activity = Instant::now();
 
             let event = Event::default().data(
                 serde_json::json!({
@@ -870,11 +1390,54 @@ async fn chat_completions_stream(
                 .to_string(),
             );
 
-            Some((Ok(event), (state, ids, step + 1, next, prompt_len)))
-        },
-    );
+            if tx.send(Ok(event)).await.is_err() {
+                // Client disconnected (rx dropped)
+                cancel.cancel();
+                return;
+            }
 
-    Sse::new(stream)
+            last_tok = next;
+            step += 1;
+
+            if last_tok == 1 {
+                // EOS token
+                break;
+            }
+        }
+
+        // Emit [DONE] event
+        let _ = tx.send(Ok(Event::default().data("[DONE]"))).await;
+
+        // Terminal receipt
+        let terminal_state = if cancel.is_cancelled() {
+            if last_activity.elapsed() > idle_timeout { "timed_out" } else { "cancelled" }
+        } else {
+            "completed"
+        };
+        let receipt = RequestReceipt {
+            request_id,
+            model_digest: state.model_digest.clone(),
+            client_id: None,
+            terminal_state: terminal_state.into(),
+            prompt_tokens: prompt_len as u32,
+            completion_tokens: step as u32,
+            audio_duration_ms: 0,
+            queue_time_us: 0,
+            execution_time_us: start_time.elapsed().as_micros() as u64,
+            error_code: None,
+            error_message: None,
+        };
+        stream_state.receipt.lock().replace(receipt.clone());
+        eprintln!("[prism-server] receipt: {}", serde_json::to_string(&receipt).unwrap());
+    });
+
+    let stream = ReceiverStream::new(rx);
+    let stream = CancelOnDropStream {
+        inner: stream,
+        token: cancel,
+    };
+
+    Ok(Sse::new(stream))
 }
 
 /// SSE streaming handler for /v1/chat/completions audio output.
@@ -950,11 +1513,137 @@ async fn chat_completions_audio_stream(
     Ok(Sse::new(stream))
 }
 
+// ── Auth middleware ──────────────────────────────────────────────────
+
+async fn auth_middleware(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> impl IntoResponse {
+    if !state.config.auth.enabled {
+        return next.run(req).await;
+    }
+
+    let path = req.uri().path();
+
+    let required_scope = if path.starts_with("/v1/models") {
+        "model.read"
+    } else if path.starts_with("/v1/chat/completions") || path.starts_with("/v1/completions") {
+        "generation.text"
+    } else if path.contains("admin") || path.contains("diagnostics") {
+        "admin.manage"
+    } else {
+        return next.run(req).await;
+    };
+
+    let auth_header = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let token = match auth_header {
+        Some(t) => t,
+        None => {
+            return ApiError::new("unauthorized", "Missing or invalid authentication token").into_response();
+        }
+    };
+
+    if !state.auth_verifier.verify(token, required_scope) {
+        return ApiError::new("unauthorized", "Token lacks required scope").into_response();
+    }
+
+    next.run(req).await
+}
+
+// ── Request-size middleware ───────────────────────────────────────────
+
+async fn size_limit_middleware(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> impl IntoResponse {
+    let limit = state.config.limits.max_body_bytes;
+
+    if let Some(cl) = req.headers().get("content-length") {
+        if let Ok(len) = cl.to_str().unwrap_or("0").parse::<u64>() {
+            if len > limit {
+                return ApiError::new(
+                    "invalid_request",
+                    format!("Request body exceeds {} byte limit", limit),
+                ).into_response();
+            }
+        }
+    }
+
+    next.run(req).await
+}
+
+// ── Config validation ─────────────────────────────────────────────────
+
+fn validate_config(config: &ServerConfig) -> Result<(), String> {
+    match config.server.mode.as_str() {
+        "network" => {
+            if !config.auth.enabled {
+                return Err("Network mode requires authentication".into());
+            }
+            if config.server.tls.is_none() && config.server.host != "127.0.0.1" {
+                return Err("Network mode on non-loopback requires TLS".into());
+            }
+        }
+        "local_api" => {
+            if !config.auth.enabled {
+                return Err("Local API mode requires authentication".into());
+            }
+        }
+        "embedded" => {} // loopback is the auth boundary
+        _ => return Err(format!("Unknown mode: {}", config.server.mode)),
+    }
+    Ok(())
+}
+
 // ── Main
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let args = Args::parse();
+
+    // Load config: if --config given, parse TOML; otherwise use defaults.
+    let config: ServerConfig = match &args.config {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("Failed to read config {}: {e}", path.display()))?;
+            toml::from_str(&text)
+                .map_err(|e| format!("Config parse error: {e}"))?
+        }
+        None => ServerConfig {
+            server: ServerSection {
+                mode: default_mode(),
+                host: default_host(),
+                port: default_port(),
+                unix_socket: None,
+                tls: None,
+            },
+            auth: AuthSection {
+                enabled: false,
+                tokens: vec![],
+                admin_token: None,
+            },
+            limits: LimitSection {
+                max_body_bytes: default_body_bytes(),
+                max_prompt_tokens: default_prompt_tokens(),
+                max_output_tokens: default_output_tokens(),
+                max_images: default_images(),
+                max_audio_seconds: default_audio_seconds(),
+                stream_idle_timeout_secs: default_stream_timeout(),
+                total_request_deadline_secs: default_deadline(),
+            },
+            models: vec![],
+        },
+    };
+
+    validate_config(&config)?;
+
+    let auth_verifier = AuthVerifier::new(&config.auth);
 
     println!(
         "[prism-server] Loading cimage from {}...",
@@ -998,23 +1687,57 @@ async fn main() -> Result<(), String> {
         tokenizer,
         decode_count: std::sync::atomic::AtomicU64::new(0),
         cimage_path: args.cimage.clone(),
+        config,
+        auth_verifier,
         tts_pipeline,
+        model_digest: Some(blake3::hash(&std::fs::read(&args.cimage).unwrap_or_default()).to_hex()[..16].to_string()),
+        stream_tracker: ParkingMutex::new(StreamTracker::new()),
     });
 
+    let host = state.config.server.host.clone();
+    let addr = format!("{}:{}", host, args.port);
+
+    let drain_state = state.clone();
     let app = Router::new()
         .route("/v1/models", get(list_models))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/completions", post(completions))
+        .layer(middleware::from_fn_with_state(state.clone(), size_limit_middleware))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{}", args.port);
     println!("[prism-server] Listening on http://{}", addr);
+    println!("  [prism-server] Ready (press Ctrl+C to stop)");
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("bind: {e}"))?;
 
+    // Graceful shutdown: Ctrl+C triggers drain
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        println!("  ▶ Shutdown requested: draining in-flight requests...");
+        let _ = shutdown_tx.send(());
+    });
+
     axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown_rx.await.ok();
+            // Cancel all active streams (releases slots + KV) — scoped so MutexGuard drops before await
+            let count = {
+                let mut tracker = drain_state.stream_tracker.lock();
+                let c = tracker.active_count();
+                tracker.cancel_all();
+                c
+            };
+            if count > 0 {
+                println!("  ▶ Cancelled {} active stream(s)", count);
+            }
+            // Brief drain deadline: wait for work to settle
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            println!("  ▶ Drain complete, exiting.");
+        })
         .await
         .map_err(|e| format!("serve: {e}"))?;
 
