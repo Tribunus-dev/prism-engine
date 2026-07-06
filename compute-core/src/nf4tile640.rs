@@ -283,72 +283,6 @@ pub fn unpack_nf4_tile(
             output[out_base + 2 * i] = nf4_dequantize(code0) * scale + bias;
             output[out_base + 2 * i + 1] = nf4_dequantize(code1) * scale + bias;
     }
-        let rows = 64usize;
-        let cols = 1280usize;
-        let n = rows * cols;
-        let original: Vec<f32> = (0..n).map(|i| {
-            let row = i / cols;
-            let col = i % cols;
-            ((col as f32) * 0.01).sin() * (1.0 - (row as f32) / rows as f32 * 0.5)
-        }).collect();
-        let orig_min = original.iter().cloned().fold(f32::INFINITY, f32::min);
-        let orig_max = original.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        println!("=== DIAGNOSTIC: {rows}x{cols} ===");
-        println!("Original: range [{orig_min:.4}, {orig_max:.4}]");
-        let (codes, scales, biases, _prows, pcols) =
-            pack_nf4_weights(&original, rows, cols);
-        println!("Packed: {}B, padded_cols={pcols}", codes.len());
-        let u32_codes: &[u32] = bytemuck::cast_slice(&codes);
-        println!("First tile words:");
-        for (i, &w) in u32_codes.iter().take(4).enumerate() {
-            let nib: Vec<u8> = (0..8).map(|n| ((w >> (n*4)) & 0xF) as u8).collect();
-            println!("  word[{i}]=0x{w:08x} nibbles={nib:?}");
-        }
-        println!("Scales (first 5): ");
-        for (i, &s) in scales.iter().take(5).enumerate() {
-            let gs = i * 128;
-            let gmax = original[gs..gs+128].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let gmin = original[gs..gs+128].iter().cloned().fold(f32::INFINITY, f32::min);
-            println!("  scale[{i}]={s:.6} group_range=[{gmin:.4},{gmax:.4}]");
-        }
-        println!("Biases (first 5): {:.6?}", &biases[..5]);
-        let recon = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
-        let full_rmse = (original.iter().zip(recon.iter())
-            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / n as f32).sqrt();
-        println!("Full RMSE: {full_rmse:.6}");
-        println!("Orig[..8]: {:.6?}", &original[..8]);
-        println!("Deq[..8]:  {:.6?}", &recon[..8]);
-        for g in 0..10 {
-            let start = g * 128;
-            let rmse = (original[start..start+128].iter().zip(recon[start..start+128].iter())
-                .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / 128.0).sqrt();
-            let gmax = original[start..start+128].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let gmin = original[start..start+128].iter().cloned().fold(f32::INFINITY, f32::min);
-            let nrmse = rmse / ((gmax - gmin).max(1e-8));
-            println!("  group[{g}] RMSE={rmse:.6} range=[{gmin:.4},{gmax:.4}] nrmse={nrmse:.4}");
-        }
-        let input: Vec<f32> = (0..cols).map(|i| (i as f32) / cols as f32 * 2.0 - 1.0).collect();
-        let mut ref_out = vec![0.0f32; rows];
-        for j in 0..rows {
-            let mut sum = 0.0f32;
-            for i in 0..cols {
-                sum += original[i * cols + j] * input[i];
-        }
-            ref_out[j] = sum;
-        }
-        let mut nf4_out = vec![0.0f32; rows];
-        dequant_matmul_reference(&input, &codes, &scales, &biases, 1, rows, cols, &mut nf4_out).ok();
-        let mrmse = (ref_out.iter().zip(nf4_out.iter())
-            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / rows as f32).sqrt();
-        let onorm = ref_out.iter().map(|v| v.powi(2)).sum::<f32>().sqrt();
-        let enorm = ref_out.iter().zip(nf4_out.iter())
-            .map(|(a,b)| (a-b).powi(2)).sum::<f32>().sqrt();
-        println!("MatMul RMSE: {mrmse:.6}");
-        println!("Ref[..8]: {:.6?}", &ref_out[..8]);
-        println!("NF4[..8]: {:.6?}", &nf4_out[..8]);
-        println!("SQNR: {:.1} dB", 20.0*(onorm/enorm.max(1e-10)).log10());
-        assert!(full_rmse < 0.05, "Full RMSE {full_rmse:.6} >= 0.05");
-        assert!(mrmse < 0.05, "MatMul RMSE {mrmse:.6} >= 0.05");
     }
 }
 
@@ -957,12 +891,12 @@ mod tests {
 
         // Wrong input length: m=3 needs 3*1=3, got 4.
         assert!(
-            dequant_matmul_reference(&input, &codes, &scales, &biases, 3, 1, TILE_ELEMENTS, &mut output)
+dequant_matmul_reference(&input, &codes, &scales, &biases, 3, 1, TILE_ELEMENTS, &mut output)
                 .is_err()
         );
         // Wrong output length: m=2, n=TILE_ELEMENTS needs 1280, got 6.
         assert!(
-            dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, &mut output)
+dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, &mut output)
                 .is_err()
         );
         // Wrong packed codes size: need 1 tile = 320 codes bytes, got 100.
@@ -1222,5 +1156,76 @@ mod tests {
 
     #[test]
     fn diagnostic_nf4_one_matrix() {
+        let rows = 64usize;
+        let cols = 1280usize;
+        let n = rows * cols;
+
+        // Distribution 1: Gaussian N(0, 0.02^2) — attention projection weights
+        let mut seed: u64 = 42;
+        let mut rng = || -> f64 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((seed >> 33) as f64) / 8589934592.0
+        };
+        let w_gauss: Vec<f32> = (0..n).map(|_| {
+            let u = rng(); let v = rng();
+            ((-2.0 * u.ln()).sqrt() * (2.0 * std::f64::consts::PI * v).cos() * 0.02) as f32
+        }).collect();
+        let (codes, scales, biases, _, _) = pack_nf4_weights(&w_gauss, rows, cols);
+        let recon = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
+        let full_rmse = (w_gauss.iter().zip(recon.iter())
+            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / n as f32).sqrt();
+        println!("Gaussian {rows}x{cols}: codes={}B, weight RMSE={full_rmse:.8}", codes.len());
+
+        for g in 0..(cols / 128) {
+            let start = g * 128;
+            let rmse = (w_gauss[start..start+128].iter().zip(recon[start..start+128].iter())
+                .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / 128.0).sqrt();
+            let gmax = w_gauss[start..start+128].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let gmin = w_gauss[start..start+128].iter().cloned().fold(f32::INFINITY, f32::min);
+            let span = (gmax - gmin).max(1e-8);
+            let nrmse = rmse / span;
+            println!("  g[{g}] RMSE={rmse:.8} range=[{gmin:.6},{gmax:.6}] scale={:.6} nrmse={nrmse:.4}", scales[g]);
+        }
+
+        // Matmul: dequant function uses [k x n] orientation where weight = [rows x cols]
+        // output[col] += input[row] * weight[row][col]
+        let inp: Vec<f32> = (0..rows).map(|r| (r as f32) / rows as f32 * 2.0 - 1.0).collect();
+        let mut ref_out = vec![0.0f32; cols];
+        for col in 0..cols {
+            let mut s = 0.0f32;
+            for row in 0..rows { s += w_gauss[row * cols + col] * inp[row]; }
+            ref_out[col] = s;
+        }
+        let mut nf4_out = vec![0.0f32; cols];
+        dequant_matmul_reference(&inp, &codes, &scales, &biases, 1, rows, cols, &mut nf4_out).ok();
+        let mrmse = (ref_out.iter().zip(nf4_out.iter())
+            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / cols as f32).sqrt();
+        println!("  MatMul RMSE={mrmse:.8}");
+        println!("  Ref[..6]={:.6?}", &ref_out[..6]);
+        println!("  NF4[..6]={:.6?}", &nf4_out[..6]);
+
+        // Distribution 2: FFN-like with outliers
+        let mut seed2: u64 = 42;
+        let mut rng2 = || -> f64 {
+            seed2 = seed2.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((seed2 >> 33) as f64) / 8589934592.0
+        };
+        let mut w_ffn: Vec<f32> = (0..n).map(|_| {
+            let u = rng2(); let v = rng2();
+            ((-2.0 * u.ln()).sqrt() * (2.0 * std::f64::consts::PI * v).cos() * 0.01) as f32
+        }).collect();
+        for &idx in &[0, 15, 127, 640, 1155] {
+            if idx + 1 < w_ffn.len() { w_ffn[idx] = 0.5; w_ffn[idx+1] = -0.5; }
+        }
+        let (cf, sf, bf, _, _) = pack_nf4_weights(&w_ffn, rows, cols);
+        let recon_f = unpack_nf4_weights(&cf, &sf, &bf, rows, cols);
+        let ffn_rmse = (w_ffn.iter().zip(recon_f.iter())
+            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / n as f32).sqrt();
+        let max_scale = sf.iter().cloned().fold(0.0f32, f32::max);
+        println!("  FFN RMSE={ffn_rmse:.8} max_scale={max_scale:.6}");
+
+        assert!(full_rmse < 0.05, "Gauss RMSE {full_rmse:.8} >= 0.05");
+        assert!(mrmse < 0.05, "MatMul RMSE {mrmse:.8} >= 0.05");
+        assert!(ffn_rmse < 0.05, "FFN RMSE {ffn_rmse:.8} >= 0.05");
     }
 }
