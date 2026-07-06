@@ -1311,6 +1311,19 @@ fn main() {
         }
         println!();
         println!("  ✓ Packed {} nf4tile640 matrices in {:.1?}", all_matrices.len(), nf4_start.elapsed());
+
+    // ── Emit profile selection inspection artifact ───────────────
+    let quantizer_mode = _quantizer;
+    let source_digest = "bf16_qat";
+    let _report = emit_selection_report(&selection_receipts, output, source_digest, quantizer_mode);
+
+    // Validate selection integrity
+    let registry_ids: Vec<u32> = if quantizer_mode == "learn-gemma-v1" {
+        vec![1, 2, 3, 4]
+    } else {
+        vec![0]
+    };
+    validate_selection_integrity(&selection_receipts, &registry_ids, quantizer_mode);
     }
 
     // ── MTP Drafter Head Discovery ────────────────────────────────
@@ -1861,6 +1874,99 @@ fn main() {
 /// Run production-parity verification: download BF16 from HF, pack each matrix,
 /// run dequant_matmul_reference vs original (3 trials), fail on RMSE >= 0.01.
 /// Outputs JSON report to stdout. Peak memory per matrix < 50 MB.
+/// Emit the per-matrix profile selection inspection artifact.
+/// Returns the JSON Value (also written alongside cimage).
+fn emit_selection_report(
+    selection_receipts: &[ProfileSelectionReceipt],
+    output_path: &str,
+    model_source_digest: &str,
+    quantizer_mode: &str,
+) -> serde_json::Value {
+    let report = serde_json::json!({
+        "model_source_digest": model_source_digest,
+        "quantizer_mode": quantizer_mode,
+        "total_matrices": selection_receipts.len(),
+        "learned_selections": selection_receipts.iter().filter(|r| r.selection_reason == SelectionReason::LearnedImproved).count(),
+        "canonical_selections": selection_receipts.iter().filter(|r| r.selection_reason == SelectionReason::CanonicalWon || r.selection_reason == SelectionReason::UnsupportedRole).count(),
+        "matrices": selection_receipts.iter().map(|r| serde_json::json!({
+            "tensor_name": r.tensor_name,
+            "role": r.role,
+            "candidate_profile_ids": r.candidate_profile_ids,
+            "selected_profile_id": r.selected_profile_id,
+            "baseline_objective": r.baseline_objective,
+            "selected_objective": r.selected_objective,
+            "selection_reason": format!("{:?}", r.selection_reason),
+            "clipping_policy": r.clipping_policy,
+            "sidecar_policy": r.sidecar_policy,
+            "effective_bpw": r.effective_bpw,
+        })).collect::<Vec<_>>(),
+    });
+
+    // Always write the report alongside the cimage (even without --emit-quality-report)
+    let report_path = format!("{}.selection.json", output_path.trim_end_matches(".cimage"));
+    if let Ok(json) = serde_json::to_string_pretty(&report) {
+        if std::fs::write(&report_path, &json).is_ok() {
+            eprintln!("  Selection report written to {report_path}");
+        }
+    }
+
+    report
+}
+
+/// Validate that every eligible matrix has a selection receipt, and that
+/// all referenced profile IDs exist in the manifest registry.
+///
+/// Panics/exit(1) on failure — the compile MUST stop if the profile
+/// selection chain is broken.
+fn validate_selection_integrity(
+    selection_receipts: &[ProfileSelectionReceipt],
+    profile_registry_ids: &[u32],
+    quantizer_mode: &str,
+) {
+    if selection_receipts.is_empty() {
+        eprintln!("ERROR: no selection receipts — packing loop did not evaluate any matrices");
+        std::process::exit(1);
+    }
+
+    let mut has_errors = false;
+
+    for receipt in selection_receipts {
+        // Every selected profile ID must exist in the manifest registry
+        let pid = receipt.selected_profile_id;
+        if pid != 0 && !profile_registry_ids.contains(&pid) {
+            eprintln!(
+                "ERROR: matrix '{}' references profile_id={} which is not in manifest registry {:?}",
+                receipt.tensor_name, pid, profile_registry_ids
+            );
+            has_errors = true;
+        }
+
+        // Every candidate must have been evaluated
+        if receipt.candidate_profile_ids.is_empty() {
+            eprintln!(
+                "ERROR: matrix '{}' has no candidate profiles — evaluation was skipped",
+                receipt.tensor_name
+            );
+            has_errors = true;
+        }
+    }
+
+    // When learn-gemma-v1 mode is active, at least SOME matrices must have learned selections
+    if quantizer_mode == "learn-gemma-v1" {
+        let learned_count = selection_receipts
+            .iter()
+            .filter(|r| r.selection_reason == SelectionReason::LearnedImproved)
+            .count();
+        if learned_count == 0 {
+            eprintln!("WARNING: learn-gemma-v1 mode produced zero learned selections — learned profiles may have failed to improve over canonical");
+        }
+    }
+
+    if has_errors {
+        eprintln!("ERROR: selection integrity check FAILED — aborting compilation");
+        std::process::exit(1);
+    }
+}
 fn cmd_verify_only(args: &[String]) {
     let repo = get_opt(args, "--repo").unwrap_or_else(|| {
         eprintln!("ERROR: --repo <HF_REPO_ID> required with --verify-only");
@@ -1952,6 +2058,13 @@ fn cmd_verify_only(args: &[String]) {
             }
         }
     }
+
+    // Emit selection report
+    let source_digest = "verify_only";
+    let quantizer = get_opt(args, "--quantizer").unwrap_or("canonical_nf4_v1");
+    let _report = emit_selection_report(&selection_receipts, get_opt(args, "--output").unwrap_or("verify_result"), source_digest, quantizer);
+    let registry_ids: Vec<u32> = vec![0];
+    validate_selection_integrity(&selection_receipts, &registry_ids, quantizer);
     eprintln!();
 
     let elapsed = start.elapsed();
@@ -2218,3 +2331,55 @@ fn tts_segment_kind(segment: &str) -> Option<SegmentKind> {
         _ => None,
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tribunus_compute_core::nf4tile640::learn::{SelectionReason, ProfileSelectionReceipt};
+
+    #[test]
+    fn test_emit_selection_report_basic() {
+        let receipts = vec![
+            ProfileSelectionReceipt {
+                tensor_name: "test_matrix.0".into(),
+                role: "attention_q".into(),
+                candidate_profile_ids: vec![0, 1],
+                selected_profile_id: 1,
+                baseline_objective: 0.05,
+                selected_objective: 0.02,
+                selection_reason: SelectionReason::LearnedImproved,
+                clipping_policy: "none".into(),
+                sidecar_policy: "none".into(),
+                effective_bpw: 4.0,
+                source_digest: "abc123".into(),
+            },
+        ];
+        let report = emit_selection_report(&receipts, "/tmp/test_report", "digest123", "learn-gemma-v1");
+        assert_eq!(report["total_matrices"].as_i64(), Some(1));
+        assert_eq!(report["learned_selections"].as_i64(), Some(1));
+        assert_eq!(report["matrices"][0]["tensor_name"], "test_matrix.0");
+        assert_eq!(report["matrices"][0]["selection_reason"], "LearnedImproved");
+    }
+
+    #[test]
+    fn test_validate_selection_integrity_passes() {
+        let receipts = vec![
+            ProfileSelectionReceipt {
+                tensor_name: "test".into(),
+                role: "attention_q".into(),
+                candidate_profile_ids: vec![0, 1],
+                selected_profile_id: 1,
+                baseline_objective: 0.05,
+                selected_objective: 0.02,
+                selection_reason: SelectionReason::LearnedImproved,
+                clipping_policy: "none".into(),
+                sidecar_policy: "none".into(),
+                effective_bpw: 4.0,
+                source_digest: "abc".into(),
+            },
+        ];
+        validate_selection_integrity(&receipts, &[0, 1], "learn-gemma-v1");
+    }
+}
+

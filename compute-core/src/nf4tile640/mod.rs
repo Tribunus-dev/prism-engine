@@ -1473,3 +1473,7 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
 #[cfg(test)]
 #[path = "metal_tests.rs"]
 pub(crate) mod metal_test_module;
+
+#[cfg(test)]
+#[path = "hw_proof.rs"]
+pub(crate) mod hw_proof_module;
