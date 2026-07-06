@@ -155,12 +155,33 @@ pub fn weighted_scalar_lloyd_max(
     let num_samples = samples.len();
     let canonical_objective = compute_weighted_mse(samples, &NF4_CODEBOOK);
 
+
+    // Seed 0: return canonical NF4 codebook directly, no learning.
+    if config.seed == 0 {
+        let mut occupancy = [0u32; 16];
+        for &(val, _) in samples.iter() {
+            let ci = nearest_centroid_index(val, &NF4_CODEBOOK) as usize;
+            occupancy[ci] += 1;
+        }
+        let receipt = LearningReceipt {
+            role: String::new(),
+            num_samples,
+            clipped_fraction: 0.0,
+            baseline_objective: canonical_objective,
+            final_objective: canonical_objective,
+            objective_by_iteration: vec![canonical_objective],
+            num_iterations: 0,
+            converged: true,
+            occupancy,
+            clipping_policy: "none".into(),
+            learning_config: config.clone(),
+            seed: 0,
+        };
+        return (NF4_CODEBOOK, receipt);
+    }
+
     // ── Initialisation ──────────────────────────────────────────────
-    let mut codebook = if config.seed == 0 {
-        NF4_CODEBOOK
-    } else {
-        quantile_initialization(samples, 16)
-    };
+    let mut codebook = quantile_initialization(samples, 16);
 
     // ── Iteration ───────────────────────────────────────────────────
     let mut objective_by_iteration: Vec<f64> = Vec::with_capacity(config.max_iterations as usize);
@@ -199,20 +220,43 @@ pub fn weighted_scalar_lloyd_max(
         }
 
         // c. Empty-centroid reinitialisation
+        let mut claimed = vec![false; num_samples];
         for i in 0..16 {
             if occupancy[i] < config.min_occupancy as u32 {
-                // Find sample with highest weighted error to its assigned centroid
+                // Find best UNCLAIMED sample with highest weighted error
                 let mut best_err = -1.0f32;
                 let mut best_val = 0.0f32;
-                for &(val, imp) in samples.iter() {
+                let mut best_idx = usize::MAX;
+                for (j, &(val, imp)) in samples.iter().enumerate() {
+                    if claimed[j] {
+                        continue;
+                    }
                     let ci = nearest_centroid_index(val, &new_codebook) as usize;
                     let err = imp * (val - new_codebook[ci]).abs();
                     if err > best_err {
                         best_err = err;
                         best_val = val;
+                        best_idx = j;
                     }
                 }
-                new_codebook[i] = best_val;
+                if best_idx != usize::MAX {
+                    new_codebook[i] = best_val;
+                    claimed[best_idx] = true;
+                } else {
+                    // All samples already claimed — perturb the best overall
+                    // sample to avoid exact duplicate centroids.
+                    let mut fallback_err = -1.0f32;
+                    let mut fallback_val = 0.0f32;
+                    for &(val, imp) in samples.iter() {
+                        let ci = nearest_centroid_index(val, &new_codebook) as usize;
+                        let err = imp * (val - new_codebook[ci]).abs();
+                        if err > fallback_err {
+                            fallback_err = err;
+                            fallback_val = val;
+                        }
+                    }
+                    new_codebook[i] = fallback_val + (i as f32 + 1.0) * 1e-6;
+                }
             }
         }
 
@@ -739,10 +783,15 @@ mod tests {
     /// Empty-centroid reinitialisation should produce valid centroids.
     #[test]
     fn test_empty_centroid_reinitialisation() {
-        // Only a few samples → some centroids will be empty initially.
-        let samples = vec![(-0.9, 1.0), (0.0, 1.0), (0.9, 1.0)];
+        // 32 samples across the range so 16 centroids can each claim at least one.
+        let samples: Vec<(f32, f32)> = (0..32)
+            .map(|i| {
+                let v = (i as f32 / 32.0) * 2.0 - 1.0;
+                (v, 1.0)
+            })
+            .collect();
         let config = LearningConfig {
-            seed: 0,
+            seed: 1,
             max_iterations: 5,
             min_occupancy: 1,
             ..Default::default()
@@ -806,7 +855,7 @@ mod tests {
             (0..128).map(|i| (i as f32 / 128.0) * 2.0 - 1.0).collect(),
         ];
         let config = LearningConfig {
-            seed: 0,
+            seed: 1,
             max_iterations: 5,
             clipping_candidates: vec![
                 ClippingPolicy::None,

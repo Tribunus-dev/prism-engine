@@ -1234,4 +1234,249 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
         assert!(mrmse < 0.05, "MatMul RMSE {mrmse:.8} >= 0.05");
         assert!(ffn_rmse < 0.05, "FFN RMSE {ffn_rmse:.8} >= 0.05");
     }
+    // ── Profile serialization tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_profile_id_constants() {
+        use super::profile::{PROFILE_ID_CANONICAL_NF4_V1, PROFILE_ID_GEMMA_ATTENTION_V1, PROFILE_ID_GEMMA_FFN_V1, PROFILE_ID_GEMMA_BOUNDARY_V1, PROFILE_ID_TTS_CODEC_V1, ProfileId};
+        assert_eq!(PROFILE_ID_CANONICAL_NF4_V1, ProfileId(0));
+        assert_eq!(PROFILE_ID_GEMMA_ATTENTION_V1, ProfileId(1));
+        assert_eq!(PROFILE_ID_GEMMA_FFN_V1, ProfileId(2));
+        assert_eq!(PROFILE_ID_GEMMA_BOUNDARY_V1, ProfileId(3));
+        assert_eq!(PROFILE_ID_TTS_CODEC_V1, ProfileId(4));
+    }
+
+    #[test]
+    fn test_codebook_descriptor_canonical() {
+        use super::profile::{CodebookDescriptor, PROFILE_ID_CANONICAL_NF4_V1};
+        let desc = CodebookDescriptor::canonical_nf4();
+        assert!(desc.validate().is_ok());
+        assert_eq!(desc.values.len(), 16);
+        assert!((desc.values[0] + 1.0).abs() < 1e-6);
+        assert!((desc.values[15] - 1.0).abs() < 1e-6);
+        assert_eq!(desc.profile_id, PROFILE_ID_CANONICAL_NF4_V1);
+        assert_eq!(desc.name, "canonical_nf4_v1");
+    }
+
+    #[test]
+    fn test_codebook_validate_wrong_size() {
+        use super::profile::CodebookDescriptor;
+        let mut desc = CodebookDescriptor::canonical_nf4();
+        desc.values = vec![0.0; 15];
+        assert!(desc.validate().is_err());
+    }
+
+    #[test]
+    fn test_codebook_validate_unsorted() {
+        use super::profile::CodebookDescriptor;
+        let mut desc = CodebookDescriptor::canonical_nf4();
+        desc.values.swap(5, 10);
+        assert!(desc.validate().is_err());
+    }
+
+    #[test]
+    fn test_quantizer_profile_canonical() {
+        use super::profile::QuantizerProfile;
+        let p = QuantizerProfile::canonical_nf4();
+        assert_eq!(p.group_size, 128);
+        assert_eq!(p.tile_elements, 640);
+    }
+
+    // ── Matrix roles tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_classify_matrix_role() {
+        use super::roles::{MatrixRole, classify_matrix_role};
+        assert_eq!(classify_matrix_role("model.language_model.embed_tokens.weight"), MatrixRole::Embedding);
+        assert_eq!(classify_matrix_role("model.language_model.lm_head.weight"), MatrixRole::LmHead);
+        assert_eq!(classify_matrix_role("model.language_model.layers.0.self_attn.q_proj.weight"), MatrixRole::AttentionQ);
+        assert_eq!(classify_matrix_role("model.language_model.layers.0.self_attn.k_proj.weight"), MatrixRole::AttentionK);
+        assert_eq!(classify_matrix_role("model.language_model.layers.0.self_attn.v_proj.weight"), MatrixRole::AttentionV);
+        assert_eq!(classify_matrix_role("model.language_model.layers.0.self_attn.o_proj.weight"), MatrixRole::AttentionO);
+        assert_eq!(classify_matrix_role("model.language_model.layers.0.mlp.gate_proj.weight"), MatrixRole::FfnGate);
+        assert_eq!(classify_matrix_role("model.language_model.layers.0.mlp.up_proj.weight"), MatrixRole::FfnUp);
+        assert_eq!(classify_matrix_role("model.language_model.layers.0.mlp.down_proj.weight"), MatrixRole::FfnDown);
+        assert_eq!(classify_matrix_role("model.vision_embedder.patch_dense.weight"), MatrixRole::MultimodalProjection);
+        assert_eq!(classify_matrix_role("tts_talker.weight"), MatrixRole::TtsTalker);
+        assert_eq!(classify_matrix_role("code_predictor.0.weight"), MatrixRole::TtsCodePredictor);
+        assert_eq!(classify_matrix_role("codec.encoder.0.weight"), MatrixRole::TtsCodec);
+        assert_eq!(classify_matrix_role("unrecognized_tensor_name"), MatrixRole::UnknownLinear);
+    }
+
+    #[test]
+    fn test_matrix_role_families() {
+        use super::roles::MatrixRole;
+        assert!(MatrixRole::AttentionQ.is_attention());
+        assert!(!MatrixRole::AttentionQ.is_ffn());
+        assert!(MatrixRole::FfnGate.is_ffn());
+        assert!(!MatrixRole::FfnGate.is_attention());
+        assert!(MatrixRole::Embedding.is_boundary());
+        assert!(MatrixRole::LmHead.is_boundary());
+        assert!(MatrixRole::TtsTalker.is_tts());
+        assert!(MatrixRole::TtsCodec.is_tts());
+        assert!(!MatrixRole::UnknownLinear.is_attention());
+        assert!(!MatrixRole::UnknownLinear.is_ffn());
+        assert!(!MatrixRole::UnknownLinear.is_boundary());
+        assert!(!MatrixRole::UnknownLinear.is_tts());
+    }
+
+    // ── Calibration tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_normalize_group() {
+        use super::calibration::normalize_group;
+        let group: Vec<f32> = vec![1.0; 128];
+        let norm = normalize_group(&group, 2.0, 0.0);
+        assert_eq!(norm.len(), 128);
+        for v in &norm {
+            assert!((v - 0.5).abs() < 1e-6);
+    }
+    }
+
+    #[test]
+    fn test_streaming_collector_basic() {
+        use super::calibration::{StreamingStateCollector, CalibrationConfig};
+        use super::roles::MatrixRole;
+        let config = CalibrationConfig {
+            seed: 42,
+            max_samples_per_role: 100,
+            collect_moments: true,
+            collect_group_histogram: false,
+            collect_importance: true,
+            layer_balance: true,
+        };
+        let mut collector = StreamingStateCollector::new(config);
+        let group: Vec<f32> = vec![0.5; 128];
+        collector.ingest_weight_group(MatrixRole::AttentionQ, 0, &group, 1.0, 0.0, 1.0, false);
+        let result = collector.finish();
+        assert!(result.receipt.total_samples > 0);
+        assert!(result.role_stats.contains_key(&MatrixRole::AttentionQ));
+    }
+
+    // ── Learning tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_importance_from_variance() {
+        use super::learn::importance_from_variance;
+        assert!((importance_from_variance(0.0) - 1e-8).abs() < 1e-6);
+        assert!((importance_from_variance(1.0) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_lloyd_max_determinism() {
+        use super::learn::{weighted_scalar_lloyd_max, LearningConfig};
+        let samples: Vec<(f32, f32)> = (0..200).map(|i| {
+            let x = (i as f64 / 100.0 * std::f64::consts::PI).sin() as f32;
+            (x, 1.0)
+        }).collect();
+        let config = LearningConfig::default();
+        let (cb1, _) = weighted_scalar_lloyd_max(&samples, &config);
+        let (cb2, _) = weighted_scalar_lloyd_max(&samples, &config);
+        for i in 0..16 {
+            assert!((cb1[i] - cb2[i]).abs() < 1e-6, "Centroid {} differs", i);
+    }
+    }
+
+    #[test]
+    fn test_select_best_profile() {
+        use super::learn::{LearningReceipt, LearningConfig};
+        let receipt = LearningReceipt {
+            role: "attention_q".into(),
+            num_samples: 100,
+            clipped_fraction: 0.0,
+            baseline_objective: 0.1,
+            final_objective: 0.02,
+            objective_by_iteration: vec![0.1, 0.02],
+            num_iterations: 2,
+            converged: true,
+            occupancy: [6u32; 16],
+            clipping_policy: "none".into(),
+            learning_config: LearningConfig::default(),
+            seed: 42,
+        };
+        assert_eq!(receipt.final_objective, 0.02);
+        assert!(receipt.converged);
+    }
+
+    // ── Verify tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_structural_verify_valid() {
+        use super::verify::structural_verify;
+        let codes = vec![0u8; 640];
+        let scales = vec![1.0f32; 10];
+        let biases = vec![0.0f32; 10];
+        let result = structural_verify(&codes, &scales, &biases, 2, 640);
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    #[test]
+    fn test_structural_verify_invalid_codes() {
+        use super::verify::structural_verify;
+        let codes = vec![255u8; 640];
+        let scales = vec![1.0f32; 10];
+        let biases = vec![0.0f32; 10];
+        let result = structural_verify(&codes, &scales, &biases, 2, 640);
+        assert!(result.is_ok(), "0xFF should be valid codes (15 in each nibble)");
+    }
+
+    #[test]
+    fn test_apply_quality_policy_default() {
+        use super::verify::{apply_quality_policy, MatrixQualityMetrics, QualityStatus};
+        let metrics = vec![
+            MatrixQualityMetrics {
+                matrix_name: "test".into(),
+                role: "attention_q".into(),
+                profile_id: 0,
+                weight_rmse: 0.02,
+                weight_nrmse: 0.01,
+                max_abs_error: 0.1,
+                sqnr_db: 25.0,
+                effective_bpw: 4.0,
+                quality_status: QualityStatus::Passed,
+            },
+        ];
+        let result = apply_quality_policy(&metrics, "default");
+        assert_eq!(result[0].quality_status, QualityStatus::Passed,
+            "0.02 RMSE should pass default policy (0.05 threshold)");
+    }
+
+    #[test]
+    fn test_apply_quality_policy_strict() {
+        use super::verify::{apply_quality_policy, MatrixQualityMetrics, QualityStatus};
+        let metrics = vec![
+            MatrixQualityMetrics {
+                matrix_name: "test".into(),
+                role: "attention_q".into(),
+                profile_id: 0,
+                weight_rmse: 0.02,
+                weight_nrmse: 0.01,
+                max_abs_error: 0.1,
+                sqnr_db: 25.0,
+                effective_bpw: 4.0,
+                quality_status: QualityStatus::Passed,
+            },
+        ];
+        let result = apply_quality_policy(&metrics, "strict");
+        assert_eq!(result[0].quality_status, QualityStatus::Failed,
+            "0.02 RMSE should FAIL strict policy (0.01 threshold)");
+    }
+
+    // ── Pack/unpack round-trip test ───────────────────────────────────────
+
+    #[test]
+    fn test_pack_unpack_roundtrip_small() {
+        let rows = 1;
+        let cols = 640;
+        let original: Vec<f32> = (0..640).map(|i| (i as f32) / 640.0 * 2.0 - 1.0).collect();
+        let (codes, scales, biases, _, _) = super::pack_nf4_weights(&original, rows, cols);
+        let reconstructed = super::unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
+        let rmse = (original.iter().zip(reconstructed.iter())
+            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / original.len() as f32).sqrt();
+        assert!(rmse < 0.1, "pack→unpack RMSE too high: {rmse:.6}");
+    }
 }
+
+#[cfg(test)]
+#[path = "metal_tests.rs"]
+pub(crate) mod metal_test_module;

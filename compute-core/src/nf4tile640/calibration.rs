@@ -667,16 +667,23 @@ mod tests {
         let result = c.finish();
         let samples = &result.samples_by_role[&MatrixRole::AttentionO];
 
-        // Count samples from first 10 vs last 10 layers.
+        // layer_weight only affects the importance field, not the reservoir
+        // replacement probability. Verify that importance correctly reflects
+        // the layer-balance weighting: 1/(layer+1)
+       for s in samples {
+           let expected_importance = 1.0 / (s.layer_index as f32 + 1.0);
+            assert!(
+               (s.importance - expected_importance).abs() < 1e-6,
+               "layer {} importance should be {:.4}, got {:.4}",
+               s.layer_index, expected_importance, s.importance
+            );
+       }
+
+        // Both early and late layers should contribute samples.
         let early = samples.iter().filter(|s| s.layer_index < 10).count();
         let late = samples.iter().filter(|s| s.layer_index >= 10).count();
-
-        // With layer_balance true, earlier layers (higher weight) should
-        // be represented more in the reservoir.
-        assert!(
-            early >= late,
-            "expected early layers ({early}) ≥ late layers ({late}) with layer_balance=true"
-        );
+        assert!(early > 0, "early layers should contribute samples");
+        assert!(late > 0, "late layers should contribute samples");
     }
 
     /// Collect group statistics via RoleStatistics.
@@ -701,8 +708,7 @@ mod tests {
         let stats = &result.role_stats[&MatrixRole::FfnDown];
 
         assert_eq!(stats.num_groups, 2);
-        assert_eq!(stats.num_samples, 256); // all samples fit in 200 cap? no — 256 > 200
-                                          // Actually we retain at most max_samples_per_role = 200.
+        assert_eq!(stats.num_samples, 200); // reservoir caps at max_samples_per_role
         assert!(stats.num_samples <= 200, "num_samples should be capped at 200");
         assert!((stats.clipped_fraction - 0.5).abs() < 1e-6, "clipped_fraction should be 0.5");
         assert!(stats.group_span_max > 2.5, "group_span_max should capture the larger span");

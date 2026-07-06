@@ -192,7 +192,8 @@ fn median(sorted: &[f32]) -> f32 {
     if len == 0 {
         return 0.0;
     }
-    sorted[len / 2]
+    // Use nearest-rank P50 (lower median for even-length arrays)
+    percentile(sorted, 50.0)
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -238,8 +239,10 @@ pub fn detect_outlier_group(
     let p50 = median(&sorted);
     let p90 = percentile(&sorted, 90.0);
 
-    let robust_spread = (p90 - p10).max(1e-8);
-    let outlier_ratio = max_abs / robust_spread;
+    let raw_spread = p90 - p10;
+    let robust_spread = raw_spread.max(1e-8);
+    let is_uniform = raw_spread < 1e-8;
+    let outlier_ratio = if is_uniform { 0.0 } else { max_abs / robust_spread };
 
     let threshold = policy.outlier_threshold * robust_spread;
     let num_outliers = group_values
@@ -712,8 +715,9 @@ mod tests {
 
         // Reconstruct element in tile 0, group 0, position 0
         let recon = reconstruct_nf4_value(&codes, &scales, &biases, 0, 0, 0);
-        // Should be close to the quantized-reconstructed value of 0.5
-        let code = nf4_quantize(0.5);
+        // Should be close to the quantized-reconstructed value.
+        // Note: pack_nf4_tile normalizes by scale before quantizing, so we must too.
+        let code = nf4_quantize(0.5 / scales[0]);
         let expected = nf4_dequantize(code) * scales[0] + biases[0];
         assert!((recon - expected).abs() < 1e-6, "recon={} expected={}", recon, expected);
     }

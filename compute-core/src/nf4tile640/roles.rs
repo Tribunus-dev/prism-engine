@@ -61,7 +61,11 @@ impl MatrixRole {
 /// Classify a tensor name (from source checkpoint) into a MatrixRole.
 pub fn classify_matrix_role(tensor_name: &str) -> MatrixRole {
     let lower = tensor_name.to_lowercase();
-    if lower.contains("embed_tokens") || lower.contains("embedding") || lower.contains("embed") && !lower.contains("rotary") {
+    // Check multimodal/vision BEFORE generic "embed" so vision_embedder is not
+    // misclassified as a language model Embedding.
+    if lower.contains("multimodal") || lower.contains("vision") || lower.contains("audio_") || lower.contains("mm_") {
+        MatrixRole::MultimodalProjection
+    } else if lower.contains("embed_tokens") || lower.contains("embedding") || lower.contains("embed") && !lower.contains("rotary") {
         MatrixRole::Embedding
     } else if lower.contains("lm_head") || lower.contains("output") {
         MatrixRole::LmHead
@@ -79,8 +83,6 @@ pub fn classify_matrix_role(tensor_name: &str) -> MatrixRole {
         MatrixRole::FfnUp
     } else if lower.contains("down_proj") || lower.contains("w2") {
         MatrixRole::FfnDown
-    } else if lower.contains("multimodal") || lower.contains("vision") || lower.contains("audio_") || lower.contains("mm_") {
-        MatrixRole::MultimodalProjection
     } else if lower.contains("tts_talker") || lower.contains("talker") {
         MatrixRole::TtsTalker
     } else if lower.contains("tts_code_predictor") || lower.contains("code_predictor") || lower.contains("cp_") {
