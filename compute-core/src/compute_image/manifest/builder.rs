@@ -329,6 +329,14 @@ impl ImageBuilder {
         self.manifest.execution_plan = plan;
     }
 
+    /// Set quantization profiles on the manifest.
+    pub fn set_quantization_profiles(
+        &mut self,
+        profiles: Vec<super::types::QuantizationProfileEntry>,
+    ) {
+        self.manifest.quantization_profiles = profiles;
+    }
+
     /// Set the audio encoder configuration on the manifest.
     pub fn set_audio_config(&mut self, audio_config: crate::config::AudioArchitecture) {
         self.manifest.audio_config = Some(audio_config);

@@ -1540,6 +1540,13 @@ pub(crate) fn compile_sequential(
     }
     builder.set_phase_graph(dag);
 
+    // ── Quantization profile registry & quality evidence ───────────
+    builder.set_quantization_profiles(
+        super::emit::build_default_quantization_profiles(),
+    );
+    // Quality status stays at default Unknown (no learning run yet).
+    // Full qualification will override with per-tensor evidence.
+
     let t_finalize = Instant::now();
     let manifest = builder.finalize(output_dir)?;
     let finalize_ms = t_finalize.elapsed().as_millis() as u64;

@@ -32,6 +32,7 @@ pub mod roles;
 pub mod calibration;
 pub mod learn;
 pub mod outliers;
+pub mod verify;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Section 1: Format Constants
