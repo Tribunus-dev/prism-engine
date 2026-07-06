@@ -29,6 +29,9 @@
 
 pub mod profile;
 pub mod roles;
+pub mod calibration;
+pub mod learn;
+pub mod outliers;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Section 1: Format Constants
@@ -1059,7 +1062,6 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
     fn non_640_vs_640_control_rmse() {
         // Compare RMSE for non-640-multiple vs 640-multiple cols with
         // identical data.  Both should have similar NF4 quantization error.
-        let m = 2usize;
         let k = 20usize;
         let n_non640 = 6912usize;
         let n_control = 6400usize; // 10 tiles, close to 6912 (also ~11 tiles)

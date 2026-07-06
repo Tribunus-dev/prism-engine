@@ -130,7 +130,7 @@ pub fn lookup_operation(kernel_name: &str) -> Option<PluginOperation> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_METAL, BACKEND_MLX};
+    use crate::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX};
 
     struct TestPlugin;
 

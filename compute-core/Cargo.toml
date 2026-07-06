@@ -34,6 +34,7 @@ base64 = "0.22"
 toml = "0.8"
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 parking_lot = "0.12"
+rand = { workspace = true }
 notify = "6"
 libc = "0.2"
 lol_html = "2"

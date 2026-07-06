@@ -2978,7 +2978,7 @@ mod tests {
     use crate::compute_image::manifest::{
         CompileReadiness, Nf4Tile640Layout, QuantizationDesc, ResidencyPlan, Segment,
         SegmentKind as ManifestSegmentKind, ShardHash, SharedWeightLayout, SourceIdentity,
-        TensorEntry,
+        TensorEntry, QuantizationQualityStatus,
     };
     use crate::config::{
         AudioArchitecture, GenerationRegime, LayerPlan, ModelExecutionPlan, RopeSpec,
@@ -3123,6 +3123,9 @@ mod tests {
             },
             phase_dag: None,
             compatibility_receipt: None,
+            quantization_profiles: Vec::new(),
+            quantization_quality: Vec::new(),
+            quantization_quality_status: QuantizationQualityStatus::Unknown,
         }
     }
 

@@ -3019,8 +3019,8 @@ mod tests {
 
     #[test]
     fn test_error_partial_cpu_reference() {
-        let teacher: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
-        let student: Vec<f32> = vec![1.1, 1.9, 3.2, 3.8];
+        let _teacher: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+        let _student: Vec<f32> = vec![1.1, 1.9, 3.2, 3.8];
         let partials = vec![
             ErrorPartialCpu {
                 sum_sq_error: (1.0f32 - 1.1f32).powi(2),
