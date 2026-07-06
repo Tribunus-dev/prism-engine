@@ -4707,6 +4707,7 @@ dependencies = [
  "serde_json",
  "serde_json_canonicalizer",
  "sha2",
+ "strum",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_parser",

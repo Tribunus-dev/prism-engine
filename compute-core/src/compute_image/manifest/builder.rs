@@ -6,7 +6,8 @@
 use super::types::{
     compute_manifest_hash, default_alignment_bytes, default_layout_version,
     default_tensor_alignment_bytes, AliasEntry, Manifest, MetalKernelArtifact, QuantizationDesc,
-    ResidencyPlan, Segment, SegmentKind, SourceIdentity, TensorEntry,
+    QuantizationQualityStatus, ResidencyPlan, Segment, SegmentKind, SourceIdentity,
+    TensorEntry,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -75,6 +76,9 @@ impl ImageBuilder {
                 readiness: None,
                 phase_dag: None,
                 compatibility_receipt: None,
+                quantization_profiles: Vec::new(),
+                quantization_quality: Vec::new(),
+                quantization_quality_status: QuantizationQualityStatus::Unknown,
             },
             next_tensor_id: 0,
             current_segment: None,

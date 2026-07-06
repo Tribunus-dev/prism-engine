@@ -163,6 +163,15 @@ pub struct Manifest {
     /// Contains model family, fallback chain, and any warnings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compatibility_receipt: Option<serde_json::Value>,
+    /// Quantization profile registry — profiles used by this image.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quantization_profiles: Vec<QuantizationProfileEntry>,
+    /// Per-tensor quantization quality evidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quantization_quality: Vec<QuantizationQualityEntry>,
+    /// Overall quantization quality status.
+    #[serde(default)]
+    pub quantization_quality_status: QuantizationQualityStatus,
 }
 
 /// Compilation readiness verdict after artifact audit.
@@ -519,6 +528,11 @@ pub struct Nf4Tile640Layout {
     pub packed_weight_dtype: String,
     pub metadata_dtype: String,
     pub weight_lane_read_bytes: u32,
+    /// Profile ID for adaptive codebook (None = canonical NF4).
+    /// When set, the Metal kernel reads codebook from profile descriptor,
+    /// not from the built-in NF4 constant array.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<u32>,
 }
 
 impl Nf4Tile640Layout {
@@ -541,6 +555,7 @@ impl Nf4Tile640Layout {
             packed_weight_dtype: "U8".into(),
             metadata_dtype: "F32".into(),
             weight_lane_read_bytes: Self::WEIGHT_LANE_READ_BYTES,
+            profile_id: None,
         }
     }
 
@@ -555,6 +570,94 @@ impl Nf4Tile640Layout {
     pub fn metadata_row_values(&self, cols: u32) -> u32 {
         self.tiles_for_cols(cols) * self.groups_per_tile
     }
+}
+
+/// Qualification status for a quantized CImage.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuantizationQualityStatus {
+    /// Passed all gates — safe for production.
+    Qualified,
+    /// Experimental — requires explicit opt-in at runtime.
+    Experimental,
+    /// Failed gates — must not load.
+    Rejected,
+    /// Not yet evaluated.
+    #[default]
+    Unknown,
+}
+
+/// One profile entry serialized into the manifest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuantizationProfileEntry {
+    /// Profile ID (matches ProfileId in the codebook crate).
+    pub profile_id: u32,
+    /// Profile name (e.g. "canonical_nf4_v1").
+    pub name: String,
+    /// ABI version.
+    pub abi_version: u32,
+    /// Codebook values (16 f32 values).
+    pub codebook: Vec<f32>,
+    /// Group size.
+    pub group_size: u32,
+    /// Tile elements.
+    pub tile_elements: u32,
+    /// Clipping policy string.
+    #[serde(default)]
+    pub clipping_policy: String,
+    /// Bias policy string.
+    #[serde(default)]
+    pub bias_policy: String,
+    /// Sidecar policy string ("none", "sparse_fp16_residual", "protected_channel").
+    #[serde(default)]
+    pub sidecar_policy: String,
+    /// Training objective.
+    #[serde(default)]
+    pub training_objective: String,
+    /// Training iterations.
+    #[serde(default)]
+    pub training_iterations: u32,
+    /// Calibration corpus digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration_digest: Option<String>,
+    /// Source model digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_model_digest: Option<String>,
+    /// Compiler revision.
+    #[serde(default)]
+    pub compiler_revision: String,
+}
+
+/// Per-tensor quality evidence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuantizationQualityEntry {
+    /// Tensor name.
+    pub tensor_name: String,
+    /// Matrix role.
+    pub matrix_role: String,
+    /// Profile ID used.
+    pub profile_id: u32,
+    /// Raw weight RMSE.
+    pub weight_rmse: f32,
+    /// Raw weight NRMSE.
+    pub weight_nrmse: f32,
+    /// Maximum absolute error.
+    pub max_abs_error: f32,
+    /// Activation-weighted output RMSE (0.0 if not calibrated).
+    #[serde(default)]
+    pub output_rmse: f32,
+    /// SQNR in dB.
+    #[serde(default)]
+    pub sqnr_db: f32,
+    /// Fraction of values clipped.
+    #[serde(default)]
+    pub clipped_fraction: f32,
+    /// Effective bits per weight.
+    #[serde(default)]
+    pub effective_bpw: f32,
+    /// Sidecar bytes.
+    #[serde(default)]
+    pub sidecar_bytes: u64,
 }
 
 /// An alias mapping — resolves a logical tensor name to physical storage.

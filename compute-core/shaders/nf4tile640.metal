@@ -1,12 +1,27 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Symmetric [-1,1] NF4 codebook — MUST match nf4tile640.rs::NF4_CODEBOOK.
-constant float nf4_table_fp32[16] = {
+// Default fallback NF4 codebook (canonical NF4 quantiles of N(0,1)).
+// The runtime may override this via buffer[9] (ProfileDescriptor).
+constant float fallback_nf4_table_fp32[16] = {
     -1.0f, -0.6961928f, -0.5250731f, -0.3949175f,
     -0.2844414f, -0.1847734f, -0.09105f, 0.0f,
     0.0795803f, 0.1609302f, 0.2461123f, 0.3379152f,
     0.4407099f, 0.562617f, 0.7229568f, 1.0f
+};
+
+// Profile descriptor for adaptive codebook.
+// When profile_id != 0, codebook values override the fallback table.
+struct ProfileDescriptor {
+    uint  profile_id;         // 0 = use fallback (compat)
+    uint  abi_version;        // must match PROFILE_ABI_VERSION
+    uint  group_size;         // must be 128
+    uint  tile_elements;      // must be 640
+    float codebook[16];       // 16 reconstruction centroids
+    uint  clipping_policy;    // 0=none, 1=percentile, 2=mse_optimal
+    uint  bias_policy;        // 0=none, 1=affine
+    uint  sidecar_policy;     // 0=none, 1=sparse_fp16, 2=protected
+    uint  pad;                // align to 16 bytes
 };
 
 // Fused dequantize + matrix multiply for nf4tile640 packed weights.
@@ -38,11 +53,21 @@ kernel void dequant_mul_nf4tile640(
     constant uint&       K_dim          [[buffer(6)]],
     constant uint&       N              [[buffer(7)]],
     constant ushort&     group_size     [[buffer(8)]],
+    constant const void*   profile_buffer   [[buffer(9)]],
     uint2                pos            [[thread_position_in_grid]]
 ) {
     uint m_idx = pos.y;
     uint n_idx = pos.x;
     if (m_idx >= M || n_idx >= N) { return; }
+
+    // Select codebook: profile descriptor or fallback
+    constant float* codebook = fallback_nf4_table_fp32;
+    if (profile_buffer) {
+        constant const ProfileDescriptor* desc = (constant const ProfileDescriptor*)profile_buffer;
+        if (desc->profile_id > 0 && desc->abi_version == 1) {
+            codebook = desc->codebook;
+        }
+    }
 
     constexpr uint TILE            = 640;
     constexpr uint GROUPS_PER_TILE = 5;      // 640 / 128
@@ -74,7 +99,7 @@ kernel void dequant_mul_nf4tile640(
         float scale = scale_buffer[tile_meta_base + group];
         float bias  = bias_buffer[tile_meta_base + group];
 
-        float weight = nf4_table_fp32[code] * scale + bias;
+        float weight = codebook[code] * scale + bias;
         accum += weight * input[m_idx * K_dim + kr];
     }
 

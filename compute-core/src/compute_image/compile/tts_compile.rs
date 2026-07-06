@@ -303,6 +303,7 @@ pub fn pack_tts_weights(
                         packed_weight_dtype: "U8".to_string(),
                         metadata_dtype: "F32".to_string(),
                         weight_lane_read_bytes: 32,
+                        profile_id: None,
                     },
                 )),
             }),

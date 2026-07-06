@@ -27,6 +27,9 @@
 //!
 //! reconstructed[i] = nf4_codebook[code_index[i]] * scale[group] + bias[group]
 
+pub mod profile;
+pub mod roles;
+
 // ════════════════════════════════════════════════════════════════════════════
 // Section 1: Format Constants
 // ════════════════════════════════════════════════════════════════════════════
