@@ -282,7 +282,73 @@ pub fn unpack_nf4_tile(
             let code1 = (packed >> 4) & 0x0F;
             output[out_base + 2 * i] = nf4_dequantize(code0) * scale + bias;
             output[out_base + 2 * i + 1] = nf4_dequantize(code1) * scale + bias;
+    }
+        let rows = 64usize;
+        let cols = 1280usize;
+        let n = rows * cols;
+        let original: Vec<f32> = (0..n).map(|i| {
+            let row = i / cols;
+            let col = i % cols;
+            ((col as f32) * 0.01).sin() * (1.0 - (row as f32) / rows as f32 * 0.5)
+        }).collect();
+        let orig_min = original.iter().cloned().fold(f32::INFINITY, f32::min);
+        let orig_max = original.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        println!("=== DIAGNOSTIC: {rows}x{cols} ===");
+        println!("Original: range [{orig_min:.4}, {orig_max:.4}]");
+        let (codes, scales, biases, _prows, pcols) =
+            pack_nf4_weights(&original, rows, cols);
+        println!("Packed: {}B, padded_cols={pcols}", codes.len());
+        let u32_codes: &[u32] = bytemuck::cast_slice(&codes);
+        println!("First tile words:");
+        for (i, &w) in u32_codes.iter().take(4).enumerate() {
+            let nib: Vec<u8> = (0..8).map(|n| ((w >> (n*4)) & 0xF) as u8).collect();
+            println!("  word[{i}]=0x{w:08x} nibbles={nib:?}");
         }
+        println!("Scales (first 5): ");
+        for (i, &s) in scales.iter().take(5).enumerate() {
+            let gs = i * 128;
+            let gmax = original[gs..gs+128].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let gmin = original[gs..gs+128].iter().cloned().fold(f32::INFINITY, f32::min);
+            println!("  scale[{i}]={s:.6} group_range=[{gmin:.4},{gmax:.4}]");
+        }
+        println!("Biases (first 5): {:.6?}", &biases[..5]);
+        let recon = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
+        let full_rmse = (original.iter().zip(recon.iter())
+            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / n as f32).sqrt();
+        println!("Full RMSE: {full_rmse:.6}");
+        println!("Orig[..8]: {:.6?}", &original[..8]);
+        println!("Deq[..8]:  {:.6?}", &recon[..8]);
+        for g in 0..10 {
+            let start = g * 128;
+            let rmse = (original[start..start+128].iter().zip(recon[start..start+128].iter())
+                .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / 128.0).sqrt();
+            let gmax = original[start..start+128].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let gmin = original[start..start+128].iter().cloned().fold(f32::INFINITY, f32::min);
+            let nrmse = rmse / ((gmax - gmin).max(1e-8));
+            println!("  group[{g}] RMSE={rmse:.6} range=[{gmin:.4},{gmax:.4}] nrmse={nrmse:.4}");
+        }
+        let input: Vec<f32> = (0..cols).map(|i| (i as f32) / cols as f32 * 2.0 - 1.0).collect();
+        let mut ref_out = vec![0.0f32; rows];
+        for j in 0..rows {
+            let mut sum = 0.0f32;
+            for i in 0..cols {
+                sum += original[i * cols + j] * input[i];
+        }
+            ref_out[j] = sum;
+        }
+        let mut nf4_out = vec![0.0f32; rows];
+        dequant_matmul_reference(&input, &codes, &scales, &biases, 1, rows, cols, &mut nf4_out).ok();
+        let mrmse = (ref_out.iter().zip(nf4_out.iter())
+            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / rows as f32).sqrt();
+        let onorm = ref_out.iter().map(|v| v.powi(2)).sum::<f32>().sqrt();
+        let enorm = ref_out.iter().zip(nf4_out.iter())
+            .map(|(a,b)| (a-b).powi(2)).sum::<f32>().sqrt();
+        println!("MatMul RMSE: {mrmse:.6}");
+        println!("Ref[..8]: {:.6?}", &ref_out[..8]);
+        println!("NF4[..8]: {:.6?}", &nf4_out[..8]);
+        println!("SQNR: {:.1} dB", 20.0*(onorm/enorm.max(1e-10)).log10());
+        assert!(full_rmse < 0.05, "Full RMSE {full_rmse:.6} >= 0.05");
+        assert!(mrmse < 0.05, "MatMul RMSE {mrmse:.6} >= 0.05");
     }
 }
 
@@ -1152,5 +1218,9 @@ mod tests {
             sq_err += diff * diff;
         }
         (sq_err / n as f32).sqrt()
+    }
+
+    #[test]
+    fn diagnostic_nf4_one_matrix() {
     }
 }
