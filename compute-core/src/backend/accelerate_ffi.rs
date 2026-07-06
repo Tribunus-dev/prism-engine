@@ -3,6 +3,19 @@
 //! Accelerate is a system framework on all Apple platforms.
 //! #[link] attribute is sufficient — no third-party crate required.
 
+// ── vDSP FFT types ───────────────────────────────────────────────────────────
+
+/// Split-complex data structure for vDSP FFT operations.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DSPSplitComplex {
+    pub realp: *mut f32,
+    pub imagp: *mut f32,
+}
+
+/// Opaque FFT setup object created by `vDSP_create_fftsetup`.
+pub type FFTSetup = *mut std::ffi::c_void;
+
 #[link(name = "Accelerate", kind = "framework")]
 extern "C" {
     /// Single-precision general matrix multiply: C = alpha * op(A) * op(B) + beta * C.
@@ -138,9 +151,46 @@ extern "C" {
         c_stride: i32,
         n: i32,
     );
+
+    // ── vDSP FFT ────────────────────────────────────────────────────────────
+
+    /// Create an FFT setup object. log2n = log2 of FFT size.
+    /// Returns null on failure.
+    pub fn vDSP_create_fftsetup(log2n: u32) -> FFTSetup;
+
+    /// Destroy an FFT setup object.
+    pub fn vDSP_destroy_fftsetup(setup: FFTSetup);
+
+    /// In-place real FFT.
+    pub fn vDSP_fft_zrip(
+        setup: FFTSetup,
+        io_data: *mut DSPSplitComplex,
+        stride: i32,
+        log2n: u32,
+        direction: i32,
+    );
+
+    /// Magnitude squared for split-complex data.
+    pub fn vDSP_zvmags(
+        a: *const DSPSplitComplex,
+        stride: i32,
+        c: *mut f32,
+        c_stride: i32,
+        n: u32,
+    );
+
+    /// Generate a Hann window.
+    pub fn vDSP_hann_window(c: *mut f32, n: u32, flag: i32);
 }
 
 // BLAS constants
 pub const CBLAS_ROW_MAJOR: i32 = 101;
 pub const CBLAS_NO_TRANS: i32 = 111;
 pub const CBLAS_TRANS: i32 = 112;
+
+// ── vDSP FFT constants ────────────────────────────────────────────────────
+
+/// Forward FFT direction.
+pub const FFT_FORWARD: i32 = 1;
+/// Inverse FFT direction.
+pub const FFT_INVERSE: i32 = -1;

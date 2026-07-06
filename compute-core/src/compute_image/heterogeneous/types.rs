@@ -714,6 +714,7 @@ pub struct CompiledPhaseGraph {
 pub struct CompiledPhaseNode {
     pub phase_id: PhaseId,
     pub variant_set_id: VariantSetId,
+    pub operation_family: crate::backend::routing::OperationFamily,
     pub ready_condition: ReadyCondition,
     pub parallel_group: Option<ParallelGroupId>,
     pub priority_class: PriorityClass,
@@ -1312,6 +1313,7 @@ mod tests {
                 CompiledPhaseNode {
                     phase_id: 0,
                     variant_set_id: 0,
+                    operation_family: crate::backend::routing::OperationFamily::Matmul,
                     ready_condition: ReadyCondition::AlwaysReady,
                     parallel_group: Some(0),
                     priority_class: PriorityClass::Critical,
@@ -1319,6 +1321,7 @@ mod tests {
                 CompiledPhaseNode {
                     phase_id: 1,
                     variant_set_id: 1,
+                    operation_family: crate::backend::routing::OperationFamily::Matmul,
                     ready_condition: ReadyCondition::AllDependenciesSatisfied,
                     parallel_group: Some(0),
                     priority_class: PriorityClass::Critical,
@@ -1326,6 +1329,7 @@ mod tests {
                 CompiledPhaseNode {
                     phase_id: 2,
                     variant_set_id: 2,
+                    operation_family: crate::backend::routing::OperationFamily::Matmul,
                     ready_condition: ReadyCondition::AllDependenciesSatisfied,
                     parallel_group: None,
                     priority_class: PriorityClass::Interactive,

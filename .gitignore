@@ -3,3 +3,4 @@ target/
 *.metallib
 *.air
 /local/
+qwen3-tts-model/

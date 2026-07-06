@@ -822,7 +822,7 @@ fn quantize_nf4_matrix_from_raw(
 /// the zero weight would otherwise still trigger an out-of-bounds `in_vector`
 /// load. Keep these two in lockstep: this packer and that kernel are the two
 /// halves of the same partial-tile contract (verified by `tools/nf4_forward_ref.rs`).
-fn quantize_nf4_tile640_matrix_from_raw(
+pub(crate) fn quantize_nf4_tile640_matrix_from_raw(
     raw: &[u8],
     dtype: &str,
     out_dim: u32,

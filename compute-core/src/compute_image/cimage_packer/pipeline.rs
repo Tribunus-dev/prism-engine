@@ -19,6 +19,7 @@ use crate::compute_image::compile::ternary::{
 };
 use crate::compute_image::manifest::Manifest;
 use crate::compute_image::manifest::SharedWeightLayout;
+use crate::compute_image::compile::tts_compile::pack_tts_weights;
 use crate::compute_image::multimodal::descriptor::{
     MultimodalInputDescriptorV1, ProjectionRole, ProjectionTensorRecord,
     MULTIMODAL_DESCRIPTOR_MAGIC,
@@ -1566,6 +1567,24 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         ("npu_huawei.bin", SegmentKind::HuaweiAscendBlob),
         ("npu_hailo.hef", SegmentKind::HailoBlob),
     ];
+    let tts_patterns: &[(&str, SegmentKind)] = &[
+        ("tts_talker_weight.bin", SegmentKind::TtsTalkerWeight),
+        ("tts_talker_scale.bin", SegmentKind::TtsTalkerScale),
+        ("tts_talker_bias.bin", SegmentKind::TtsTalkerBias),
+        ("tts_code_predictor_weight.bin", SegmentKind::TtsCodePredictorWeight),
+        ("tts_code_predictor_scale.bin", SegmentKind::TtsCodePredictorScale),
+        ("tts_code_predictor_bias.bin", SegmentKind::TtsCodePredictorBias),
+        ("tts_codec_weight.bin", SegmentKind::TtsCodecWeight),
+        ("tts_codebook.bin", SegmentKind::TtsCodebook),
+    ];
+
+    // ── TTS model segment pre-packing ────────────────────────
+    let tts_safetensors_path = input_dir.join("tts_model.safetensors");
+    if tts_safetensors_path.exists() {
+        if let Ok(_tts_entries) = pack_tts_weights(&tts_safetensors_path, input_dir) {
+            eprintln!("[cimage] TTS weights pre-packed from '{}'", tts_safetensors_path.display());
+        }
+    }
 
     let mut weight_segments: Vec<Vec<u8>> = Vec::new();
     let mut extra_segments: Vec<(SegmentKind, Vec<u8>)> = Vec::new();
@@ -1593,16 +1612,35 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
                 || (kind == &SegmentKind::AneArchive && name_str.ends_with(".ane.tar"))
             {
                 extra_segments.push((*kind, std::fs::read(entry.path())?));
+                matched = true;
+                break;
+            }
+        }
+        if matched {
+            continue;
+        }
+        for (pat, kind) in tts_patterns {
+            if name_str == *pat {
+                extra_segments.push((*kind, std::fs::read(entry.path())?));
                 break;
             }
         }
     }
+
     let mut multimodal = synthesize_multimodal_segments(input_dir, manifest.as_ref())?;
     if let Some(bytes) = load_or_synthesize_execution_graph(input_dir, manifest.as_ref())? {
         extra_segments.push((SegmentKind::ExecutionGraph, bytes));
     }
     if let Some(bytes) = load_or_synthesize_model_artifacts(input_dir, manifest.as_ref())? {
         extra_segments.push((SegmentKind::ModelArtifacts, bytes));
+    }
+
+    // ── Heterogeneous execution image ──────────────────────────
+    let heterogeneous_path = input_dir.join("heterogeneous_image.json");
+    if heterogeneous_path.exists() {
+        if let Ok(bytes) = std::fs::read(&heterogeneous_path) {
+            extra_segments.push((SegmentKind::HeterogeneousImage, bytes));
+        }
     }
 
     // 2. Compute layout

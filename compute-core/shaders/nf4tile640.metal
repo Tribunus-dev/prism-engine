@@ -12,23 +12,32 @@ constant float nf4_table_fp32[16] = {
 // Fused dequantize + matrix multiply for nf4tile640 packed weights.
 //
 // Each thread computes one element of output[row, col] = Σ_k input[row,k] * W_deq[k,col].
-// Weights are packed in nf4tile640 format: cache-line-aligned 512-byte tiles,
-// each tile holding 640 values (10 groups × 64 elements, 10 FP16 scales).
+// Weights are packed in the compiler nf4tile640 format:
+//   - group_size = 128 elements per quantization group
+//   - groups_per_tile = 5 (640/128)
+//   - Codes: 8×4-bit NF4 indices packed per u32 word, stored as LE bytes
+//   - Scales and biases stored in separate buffers (one f32 per group)
 //
 // Buffer layout:
-//   [0] packed_weights — nf4tile640-packed bytes, shape [K, ceil(N/640), 512]
-//   [1] input          — activation matrix, row-major f32, shape [M, K]
-//   [2] output         — result matrix, row-major f32, shape [M, N]
-//   [3] M              — number of activation rows (constant uint)
-//   [4] K              — inner dimension (constant uint)
-//   [5] N              — output columns (constant uint)
+//   [0] packed_codes — nf4tile640-packed code bytes, shape [K, ceil(N/640), 320]
+//   [1] scale_buffer — f32 scales, shape [K, ceil(N/640), 5]
+//   [2] bias_buffer  — f32 biases, shape [K, ceil(N/640), 5]
+//   [3] input        — activation matrix, row-major f32, shape [M, K]
+//   [4] output       — result matrix, row-major f32, shape [M, N]
+//   [5] M            — number of activation rows (constant uint)
+//   [6] K_dim        — inner dimension (constant uint)
+//   [7] N            — output columns (constant uint)
+//   [8] group_size   — quantization group size (constant ushort, always 128)
 kernel void dequant_mul_nf4tile640(
-    device const uchar*  packed_weights [[buffer(0)]],
-    device const float*  input          [[buffer(1)]],
-    device float*        output         [[buffer(2)]],
-    constant uint&       M              [[buffer(3)]],
-    constant uint&       K              [[buffer(4)]],
-    constant uint&       N              [[buffer(5)]],
+    device const uchar*  packed_codes   [[buffer(0)]],
+    device const float*  scale_buffer   [[buffer(1)]],
+    device const float*  bias_buffer    [[buffer(2)]],
+    device const float*  input          [[buffer(3)]],
+    device float*        output         [[buffer(4)]],
+    constant uint&       M              [[buffer(5)]],
+    constant uint&       K_dim          [[buffer(6)]],
+    constant uint&       N              [[buffer(7)]],
+    constant ushort&     group_size     [[buffer(8)]],
     uint2                pos            [[thread_position_in_grid]]
 ) {
     uint m_idx = pos.y;
@@ -36,37 +45,37 @@ kernel void dequant_mul_nf4tile640(
     if (m_idx >= M || n_idx >= N) { return; }
 
     constexpr uint TILE            = 640;
-    constexpr uint GROUP           = 64;
-    constexpr uint GROUPS_PER_TILE = 10;
-    constexpr uint TILE_RECORD     = 512;
-    constexpr uint SCALES_BYTES    = 20;  // 10 × 2-byte FP16 scales
-    constexpr uint CODES_BYTES     = 320; // 640 values × 4 bits ÷ 8
+    constexpr uint GROUPS_PER_TILE = 5;      // 640 / 128
+    constexpr uint CODES_PER_U32   = 8;
+    constexpr uint U32S_PER_GROUP  = 16;     // 128 / 8
+    constexpr uint CODES_BYTES     = 320;    // 640 / 2
 
-    uint tile_in_row   = n_idx / TILE;
-    uint tiles_per_row = (N + TILE - 1) / TILE;
+    uint tile_in_col   = n_idx / TILE;
+    uint tiles_per_col = (N + TILE - 1) / TILE;
     uint elem_in_tile  = n_idx % TILE;
-    uint group         = elem_in_tile / GROUP;
-    uint elem_in_group = elem_in_tile % GROUP;
-    uint byte_in_group = elem_in_group / 2;
-    uint nibble_shift  = (elem_in_group & 1) << 2; // 0 for low, 4 for high
+    uint group         = elem_in_tile / group_size;
+    uint elem_in_group = elem_in_tile % group_size;
+    uint u32_index     = elem_in_group / CODES_PER_U32;
+    uint nibble_shift  = (elem_in_group % CODES_PER_U32) << 2;  // * 4
 
     float accum = 0.0f;
 
-    for (uint kr = 0; kr < K; ++kr) {
-        uint tile_idx  = kr * tiles_per_row + tile_in_row;
-        uint tile_base = tile_idx * TILE_RECORD;
+    for (uint kr = 0; kr < K_dim; ++kr) {
+        uint tile_idx        = kr * tiles_per_col + tile_in_col;
+        uint tile_codes_base = tile_idx * CODES_BYTES;
+        uint tile_meta_base  = tile_idx * GROUPS_PER_TILE;
+        uint group_codes_ofs = group * U32S_PER_GROUP * 4;  // 16 u32s × 4 bytes per group
 
-        // Read FP16 scale for this group (embedded in tile).
-        device const half* scales = (device const half*)(packed_weights + tile_base);
-        float scale = float(scales[group]);
+        // Read the u32 word containing the NF4 code from the packed codes buffer.
+        device const uint* word_ptr = (device const uint*)(packed_codes + tile_codes_base + group_codes_ofs);
+        uint word = word_ptr[u32_index];
+        uint code = (word >> nibble_shift) & 0xFu;
 
-        // Extract the 4-bit NF4 code index.
-        uint code_byte_offset = SCALES_BYTES + group * (GROUP / 2) + byte_in_group;
-        uchar code_byte = packed_weights[tile_base + code_byte_offset];
-        uint code = (code_byte >> nibble_shift) & 0xFu;
+        float scale = scale_buffer[tile_meta_base + group];
+        float bias  = bias_buffer[tile_meta_base + group];
 
-        float weight = scale * nf4_table_fp32[code];
-        accum += weight * input[m_idx * K + kr];
+        float weight = nf4_table_fp32[code] * scale + bias;
+        accum += weight * input[m_idx * K_dim + kr];
     }
 
     output[m_idx * N + n_idx] = accum;

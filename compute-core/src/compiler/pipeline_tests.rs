@@ -210,6 +210,9 @@ mod tests {
             input_tensors: vec![a, w],
             output_tensors: vec![c],
             shape_constraints: vec![],
+            inputs: std::collections::HashMap::new(),
+            outputs: std::collections::HashMap::new(),
+            tensor_bindings: std::collections::HashMap::new(),
         };
 
         let mut backend = StubBackend;
@@ -233,6 +236,9 @@ mod tests {
             input_tensors: vec![],
             output_tensors: vec![],
             shape_constraints: vec![],
+            inputs: std::collections::HashMap::new(),
+            outputs: std::collections::HashMap::new(),
+            tensor_bindings: std::collections::HashMap::new(),
         };
         let legality = backend.validate_region(&empty).expect("validation");
         assert!(!legality.legal, "empty region must be rejected");

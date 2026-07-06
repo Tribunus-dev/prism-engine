@@ -18,6 +18,7 @@ use crate::compute_image::kv_interleave::*;
 use block::ConcreteBlock;
 use metal::*;
 use std::sync::mpsc;
+use crate::tts::talker::{TtsMegakernel, TtsWeightBindings};
 /// Logits per slot: 1 main head + N MTP heads, each VOCAB_SIZE half values.
 pub const LOGITS_PER_SLOT: u64 = (1 + NUM_MTP_HEADS as u64) * VOCAB_SIZE as u64 * 2;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -30,17 +31,14 @@ pub const RING_SIZE: usize = 512;
 fn compute_num_slots(device: &Device) -> u64 {
     let working_set = device.recommended_max_working_set_size();
 
-    // Per-slot KV cache cost in bytes (ternary32 K+V + outlier bypass + FP16 scratch + logits)
-    let blocks_per_head = ((GLOBAL_HEAD_DIM + 31) / 32) as u64; // 16 for 512-dim
-    let blocks_per_slot =
-        (LAYERS as u64) * (MAX_CONTEXT as u64) * (NUM_KV_HEADS as u64) * blocks_per_head;
-    let ternary_kv_per_slot = blocks_per_slot * 9 * 2; // K+V TernaryBlock32: 7 packed + 2 scale = 9
-    let outlier_per_slot = blocks_per_slot * 2 * 2; // K+V FP16 outlier bypass: 2 bytes/block
+    // Per-slot KV cache cost in bytes (nf4tile640 K+V + FP16 scratch + logits)
+    let nf4_kv_per_slot =
+        (LAYERS as u64) * (MAX_CONTEXT as u64) * KV_NF4_PER_POSITION;
     let scratch_per_slot =
         (MAX_CONTEXT as u64) * (NUM_KV_HEADS as u64) * (GLOBAL_HEAD_DIM as u64) * 2 * 2; // K+V FP16
     let logits_per_slot = LOGITS_PER_SLOT;
     let per_slot_total =
-        ternary_kv_per_slot + outlier_per_slot + scratch_per_slot + logits_per_slot;
+        nf4_kv_per_slot + scratch_per_slot + logits_per_slot;
 
     // Reserve ~1.5 GB for model weights, scales, embed table, centroids, norms
     let kv_budget = working_set.saturating_sub(1_500_000_000);
@@ -178,91 +176,25 @@ impl Megakernel {
     ) -> Result<KernelBuffers, String> {
         let num_slots = compute_num_slots(&self.device);
 
-        // ── KV cache buffers (per slot) ─────────────────────────────
-        // Ternary: TernaryBlock32 = 7 packed trits + 2 FP16 scale = 9 bytes/block
-        // + outlier bypass: 1 FP16 per block = 2 bytes/block
-        // Non-INT4 path: 256-elem blocks = 54 bytes/block + separate FP16 scales
-        let (kv_k_nibbles, kv_v_nibbles, kv_k_scales, kv_v_scales, kv_k_outliers, kv_v_outliers) =
-            if self.int4_mode {
-                // Ternary 5-per-byte blocks with outlier isolation (TernaryBlock32)
-                let int4_blocks_per_head = (GLOBAL_HEAD_DIM + 31) / 32; // 16 for 512-dim
-                let total_blocks_per_slot =
-                    (LAYERS * MAX_CONTEXT * NUM_KV_HEADS * int4_blocks_per_head) as u64;
-                // TernaryBlock32: 7 bytes packed trits + 2 bytes FP16 scale = 9 bytes/block
-                let ternary_bytes = total_blocks_per_slot * 9;
-                let ternary_total = ternary_bytes * num_slots;
-                // Outlier bypass: 1 FP16 value per block worst case = 2 bytes/block
-                let outlier_bytes = total_blocks_per_slot * 2;
-                let outlier_total = outlier_bytes * num_slots;
+        // ── KV cache buffers (nf4tile640) ────────────────────────────
+        // nf4tile640 per position: 8 heads × 2 (K+V) × 360 bytes = 5,760 bytes
+        let nf4_per_slot = (LAYERS * MAX_CONTEXT * KV_NF4_PER_POSITION as u32) as u64;
+        let nf4_total = nf4_per_slot * num_slots;
 
-                let k_ternary = self
-                    .device
-                    .new_buffer(ternary_total, MTLResourceOptions::StorageModeShared);
-                let v_ternary = self
-                    .device
-                    .new_buffer(ternary_total, MTLResourceOptions::StorageModeShared);
-                let k_outliers = self
-                    .device
-                    .new_buffer(outlier_total, MTLResourceOptions::StorageModeShared);
-                let v_outliers = self
-                    .device
-                    .new_buffer(outlier_total, MTLResourceOptions::StorageModeShared);
-                unsafe {
-                    std::ptr::write_bytes(k_ternary.contents(), 0, ternary_total as usize);
-                    std::ptr::write_bytes(v_ternary.contents(), 0, ternary_total as usize);
-                    std::ptr::write_bytes(k_outliers.contents(), 0, outlier_total as usize);
-                    std::ptr::write_bytes(v_outliers.contents(), 0, outlier_total as usize);
-                }
-                (
-                    k_ternary,
-                    v_ternary,
-                    None,
-                    None,
-                    Some(k_outliers),
-                    Some(v_outliers),
-                )
-            } else {
-                // Ternary: 256 values per block, 54 bytes/block + separate FP16 scales
-                let total_blocks_per_slot =
-                    (LAYERS * MAX_CONTEXT * NUM_KV_HEADS * (GLOBAL_HEAD_DIM + 255) / 256) as u64;
-                let ternary_kv_bytes_per_slot = total_blocks_per_slot * KV_BLOCK_BYTES;
-                let ternary_kv_total = ternary_kv_bytes_per_slot * num_slots;
+        // Packed codes (u32 × 80 per tile, one K+V pair per head per position)
+        let kv_codes = self.device.new_buffer(
+            nf4_total * 320 / 360, MTLResourceOptions::StorageModeShared);
+        // Block scales (f32 × 5 per tile)
+        let kv_scales = self.device.new_buffer(
+            nf4_total * 20 / 360, MTLResourceOptions::StorageModeShared);
+        // Block biases (f32 × 5 per tile)
+        let kv_biases = self.device.new_buffer(
+            nf4_total * 20 / 360, MTLResourceOptions::StorageModeShared);
 
-                let k_buf = self
-                    .device
-                    .new_buffer(ternary_kv_total, MTLResourceOptions::StorageModeShared);
-                let v_buf = self
-                    .device
-                    .new_buffer(ternary_kv_total, MTLResourceOptions::StorageModeShared);
-
-                let total_blocks = total_blocks_per_slot * num_slots;
-                let scales_bytes = total_blocks * 2;
-                let k_scales = self
-                    .device
-                    .new_buffer(scales_bytes, MTLResourceOptions::StorageModeShared);
-                let v_scales = self
-                    .device
-                    .new_buffer(scales_bytes, MTLResourceOptions::StorageModeShared);
-
-                unsafe {
-                    std::ptr::write_bytes(k_buf.contents(), 0, ternary_kv_total as usize);
-                    std::ptr::write_bytes(v_buf.contents(), 0, ternary_kv_total as usize);
-                    std::ptr::write_bytes(k_scales.contents(), 0, scales_bytes as usize);
-                    std::ptr::write_bytes(v_scales.contents(), 0, scales_bytes as usize);
-                }
-                (k_buf, v_buf, Some(k_scales), Some(v_scales), None, None)
-            };
-
-        // ── Outlier bitmask LUT (static, shared across slots) ────────
-        // One u32 per 32-element block, zero-initialized (all inlier by default).
-        let blocks_per_head = (GLOBAL_HEAD_DIM + 31) / 32; // 16 for 512-dim
-        let total_masks = (LAYERS * NUM_KV_HEADS * blocks_per_head) as u64;
-        let mask_bytes = total_masks * 4;
-        let outlier_masks = self
-            .device
-            .new_buffer(mask_bytes, MTLResourceOptions::StorageModeShared);
         unsafe {
-            std::ptr::write_bytes(outlier_masks.contents(), 0, mask_bytes as usize);
+            std::ptr::write_bytes(kv_codes.contents(), 0, nf4_total as usize * 320 / 360);
+            std::ptr::write_bytes(kv_scales.contents(), 0, nf4_total as usize * 20 / 360);
+            std::ptr::write_bytes(kv_biases.contents(), 0, nf4_total as usize * 20 / 360);
         }
 
         // ── FP16 scratch buffers (1 layer per slot) ──────────────────
@@ -471,17 +403,9 @@ impl Megakernel {
         if let Some(b) = &deployment.cluster_map_buffer {
             enc.set_buffer(5, Some(b), 0);
         }
-        enc.set_buffer(6, Some(&*kv_k_nibbles), 0);
-        enc.set_buffer(7, Some(&*kv_v_nibbles), 0);
-        if self.int4_mode {
-            // Ternary+outlier: buffer(8)=kv_k_outliers, buffer(9)=kv_v_outliers, buffer(10)=outlier_masks
-            enc.set_buffer(8, kv_k_outliers.as_deref(), 0);
-            enc.set_buffer(9, kv_v_outliers.as_deref(), 0);
-            enc.set_buffer(10, Some(&*outlier_masks), 0);
-        } else {
-            enc.set_buffer(8, kv_k_scales.as_deref(), 0);
-            enc.set_buffer(9, kv_v_scales.as_deref(), 0);
-        }
+        enc.set_buffer(6, Some(&*kv_codes), 0);
+        enc.set_buffer(7, Some(&*kv_scales), 0);
+        enc.set_buffer(8, Some(&*kv_biases), 0);
         enc.set_buffer(14, deployment.embed_scales_buffer.as_ref().map(|b| &**b), 0);
         enc.set_buffer(15, Some(&*centroid_scales), 0);
         enc.set_buffer(16, Some(&*centroid_scratch), 0);
@@ -548,10 +472,9 @@ impl Megakernel {
             );
 
             // Bind prefetch worker buffers (override slots 1-11)
-            enc.set_buffer(1, Some(&*kv_k_nibbles), 0);
-            enc.set_buffer(2, Some(&*kv_v_nibbles), 0);
-            enc.set_buffer(3, kv_k_scales.as_deref(), 0);
-            enc.set_buffer(4, kv_v_scales.as_deref(), 0);
+            enc.set_buffer(1, Some(&*kv_codes), 0);
+            enc.set_buffer(2, Some(&*kv_scales), 0);
+            enc.set_buffer(3, Some(&*kv_biases), 0);
             enc.set_buffer(5, Some(&*kv_scratch_k), 0);
             enc.set_buffer(6, Some(&*kv_scratch_v), 0);
             // Headers pointer into arena buffer at set[0].header_offset
@@ -618,13 +541,9 @@ impl Megakernel {
         // Do NOT wait -- the persistent kernel runs forever
 
         Ok(KernelBuffers {
-            kv_k_nibbles,
-            kv_v_nibbles,
-            kv_k_scales,
-            kv_v_scales,
-            kv_k_outliers,
-            kv_v_outliers,
-            outlier_masks,
+            kv_codes,
+            kv_scales,
+            kv_biases,
             kv_scratch_k,
             kv_scratch_v,
             ring_entries,
@@ -707,10 +626,9 @@ impl Megakernel {
             // Dispatch prefetch worker
             encoder.set_compute_pipeline_state(pso_p);
             // Prefetch worker: bind KV cache scratch at correct slots
-            encoder.set_buffer(1, Some(&buffers.kv_k_nibbles), 0);
-            encoder.set_buffer(2, Some(&buffers.kv_v_nibbles), 0);
-            encoder.set_buffer(3, buffers.kv_k_scales.as_deref(), 0);
-            encoder.set_buffer(4, buffers.kv_v_scales.as_deref(), 0);
+            encoder.set_buffer(1, Some(&buffers.kv_codes), 0);
+            encoder.set_buffer(2, Some(&buffers.kv_scales), 0);
+            encoder.set_buffer(3, Some(&buffers.kv_biases), 0);
             encoder.set_buffer(5, Some(&buffers.kv_scratch_k), 0);
             encoder.set_buffer(6, Some(&buffers.kv_scratch_v), 0);
             if let Some(layout) = &buffers.arena_layout {
@@ -842,10 +760,9 @@ impl Megakernel {
 
         // Standard decode buffers (slots 0-5 for weights/scales/norms/embed/centroid/cluster_map
         // and slot 14 for embed_scales are model-level — bound from deployment elsewhere).
-        enc.set_buffer(6, Some(&buffers.kv_k_nibbles), 0);
-        enc.set_buffer(7, Some(&buffers.kv_v_nibbles), 0);
-        enc.set_buffer(8, buffers.kv_k_scales.as_deref(), 0);
-        enc.set_buffer(9, buffers.kv_v_scales.as_deref(), 0);
+        enc.set_buffer(6, Some(&buffers.kv_codes), 0);
+        enc.set_buffer(7, Some(&buffers.kv_scales), 0);
+        enc.set_buffer(8, Some(&buffers.kv_biases), 0);
         enc.set_buffer(11, Some(&buffers.active_mask), 0);
         // Slot 13: epoch_control
         enc.set_buffer(13, Some(&epoch_ctrl), 0);
@@ -895,10 +812,9 @@ impl Megakernel {
         enc.set_compute_pipeline_state(&pso_p);
 
         // Bind prefetch-specific buffers
-        enc.set_buffer(1, Some(&buffers.kv_k_nibbles), 0);
-        enc.set_buffer(2, Some(&buffers.kv_v_nibbles), 0);
-        enc.set_buffer(3, buffers.kv_k_scales.as_deref(), 0);
-        enc.set_buffer(4, buffers.kv_v_scales.as_deref(), 0);
+        enc.set_buffer(1, Some(&buffers.kv_codes), 0);
+        enc.set_buffer(2, Some(&buffers.kv_scales), 0);
+        enc.set_buffer(3, Some(&buffers.kv_biases), 0);
         enc.set_buffer(5, Some(&buffers.kv_scratch_k), 0);
         enc.set_buffer(6, Some(&buffers.kv_scratch_v), 0);
         // Slot 7: headers pointer from arena (active set header)
@@ -1124,13 +1040,9 @@ impl Megakernel {
 
 /// Per-decode buffers returned by [`Megakernel::launch`].
 pub struct KernelBuffers {
-    pub kv_k_nibbles: metal::Buffer,
-    pub kv_v_nibbles: metal::Buffer,
-    pub kv_k_scales: Option<metal::Buffer>,
-    pub kv_v_scales: Option<metal::Buffer>,
-    pub kv_k_outliers: Option<metal::Buffer>, // FP16 outlier bypass (INT4 path)
-    pub kv_v_outliers: Option<metal::Buffer>,
-    pub outlier_masks: metal::Buffer, // static u32 bitmask LUT per block
+    pub kv_codes: metal::Buffer,   // nf4tile640 packed codes (u32 × 80 per tile)
+    pub kv_scales: metal::Buffer,  // nf4tile640 block scales (f32 × 5 per tile)
+    pub kv_biases: metal::Buffer,  // nf4tile640 block biases (f32 × 5 per tile)
     pub kv_scratch_k: metal::Buffer,
     pub kv_scratch_v: metal::Buffer,
     pub ring_entries: metal::Buffer, // RING_SIZE * 5 * 4 bytes (WorkEntry[512])
@@ -1190,4 +1102,15 @@ pub fn dispatch_persistent_gemv(
             depth: 1,
         },
     );
+}
+
+/// Create a TTS Talker megakernel with the given weights.
+///
+/// Delegates to [`TtsMegakernel::new`] for pipeline compilation and
+/// KV cache allocation.
+pub fn create_tts_pipeline(
+    device: &metal::Device,
+    weights: TtsWeightBindings,
+) -> Result<TtsMegakernel, String> {
+    TtsMegakernel::new(device, weights)
 }

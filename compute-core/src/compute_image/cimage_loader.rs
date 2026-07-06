@@ -997,6 +997,7 @@ fn projection_precision_from_descriptor(
 pub fn load_heterogeneous_executor(
     mmap_data: &[u8],
     header: &PrismCimageHeader,
+    cimage_path: Option<&std::path::Path>,
 ) -> Result<
     Option<(
         crate::backend::heterogeneous_executor::HeterogeneousExecutor,
@@ -1005,7 +1006,7 @@ pub fn load_heterogeneous_executor(
     String,
 > {
     use crate::backend::routing::{
-        CorrectnessCheckpointPolicy, LogicalShape, OperationDescriptor, OperationFamily,
+        CorrectnessCheckpointPolicy, LogicalShape, OperationDescriptor,
         OperationId, Phase, TensorShape,
     };
     use crate::backend::DType;
@@ -1030,20 +1031,22 @@ pub fn load_heterogeneous_executor(
     let image: HeterogeneousExecutionImage = serde_json::from_slice(blob)
         .map_err(|e| format!("failed to deserialize HeterogeneousExecutionImage: {e}"))?;
 
-    let mut executor = crate::backend::create_heterogeneous_executor()?;
+    let batch_size = 1;
+    let int4_mode = false;
+    let mut executor = match cimage_path {
+        Some(path) => crate::backend::create_inference_executor(path, batch_size, int4_mode)?,
+        None => crate::backend::create_heterogeneous_executor()?,
+    };
 
-    // Walk compiled phase graph, building operation descriptors.
-    // The CompiledPhaseNode carries only phase_id; PhaseKind is in the
-    // canonical PhaseIR (not embedded in the runtime artifact). Use
-    // OperationFamily::Matmul as the scaffolding default; the compiler
-    // populates precise families at image construction time.
+    // Walk compiled phase graph, building operation descriptors from the
+    // image's stored operation families (populated at compile time).
     let mut operation_registry = std::collections::HashMap::new();
     for node in &image.phase_graph.nodes {
         let op_id = OperationId(node.phase_id);
         let descriptor = OperationDescriptor {
             operation_id: op_id,
-            family: OperationFamily::Matmul,
-            layer_index: None,
+            family: node.operation_family,
+            layer_index: Some(node.phase_id as u32),
             phase: Phase::Decode,
             logical_shape: LogicalShape { dims: Vec::new() },
             physical_layout: crate::backend::routing::PhysicalLayout::RowMajor,

@@ -120,6 +120,9 @@ pub fn sublibrary_for(family: OperationFamily) -> Option<AccelerateSubLibrary> {
         | OperationFamily::AttentionBlock
         | OperationFamily::DecoderLayer
         | OperationFamily::PrefillFragment
+        | OperationFamily::VisionEncode
+        | OperationFamily::AudioEncode
+        | OperationFamily::MultimodalProject
         | OperationFamily::IndexSelect => None,
     }
 }

@@ -91,6 +91,22 @@ pub enum SegmentKind {
     MultimodalProjectionBiases = 28,
     /// JSON-serialized HeterogeneousExecutionImage for tri-lane execution.
     HeterogeneousImage = 29,
+    /// TTS Talker (28-layer decoder) nf4tile640 packed weights
+    TtsTalkerWeight = 30,
+    /// TTS Talker nf4tile640 scales
+    TtsTalkerScale = 31,
+    /// TTS Talker nf4tile640 biases
+    TtsTalkerBias = 32,
+    /// TTS Code Predictor weights
+    TtsCodePredictorWeight = 33,
+    /// TTS Code Predictor scales
+    TtsCodePredictorScale = 34,
+    /// TTS Code Predictor biases
+    TtsCodePredictorBias = 35,
+    /// TTS Mimi Codec weights
+    TtsCodecWeight = 36,
+    /// TTS codebook embeddings (16 codebooks × 2048 entries × 128 dim)
+    TtsCodebook = 37,
 }
 
 /// One entry in the cimage segment directory.

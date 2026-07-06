@@ -39,7 +39,20 @@ pub(crate) fn classify_family(family: OperationFamily) -> DispatchFamily {
         }
         Softmax => DispatchFamily::Softmax,
         RmsNorm | RoPE | LayoutTransform | Checksum => DispatchFamily::LayerNorm,
+        VisionEncode | AudioEncode | MultimodalProject => DispatchFamily::ElementWise,
     }
+}
+
+/// Check if ANE offload is beneficial given current system state.
+pub fn prefer_ane(state: &SystemState, family: OperationFamily) -> bool {
+    state.should_offload_to_ane()
+        && state.ane_active
+        && matches!(
+            family,
+            OperationFamily::AttentionBlock
+                | OperationFamily::MlpBlock
+                | OperationFamily::DecoderLayer
+        )
 }
 
 // ── FlexDispatch ──────────────────────────────────────────────────────────
@@ -114,6 +127,17 @@ impl FlexDispatch {
         let state = &self.last_state;
         let family = classify_family(op.family);
 
+        // When GPU is saturated but the system shouldn't throttle,
+        // offload attention and MLP blocks to ANE.
+        if state.should_offload_to_ane()
+            && matches!(
+                op.family,
+                OperationFamily::AttentionBlock | OperationFamily::MlpBlock
+            )
+        {
+            return BACKEND_ANE;
+        }
+
         match family {
             DispatchFamily::MatMul => {
                 // MatMul is GPU-bound — prefer MLX unless throttling.
@@ -172,6 +196,19 @@ impl FlexDispatch {
         for op_id in op_ids {
             let op_desc = &executor.operation_registry[&op_id];
             let family = classify_family(op_desc.family);
+
+            // When GPU is saturated but the system shouldn't throttle,
+            // offload attention and MLP blocks to ANE.
+            if state.should_offload_to_ane()
+                && matches!(
+                    op_desc.family,
+                    OperationFamily::AttentionBlock | OperationFamily::MlpBlock
+                )
+            {
+                executor.set_route(op_id, BACKEND_ANE);
+                continue;
+            }
+
             let backend_id = match family {
                 DispatchFamily::MatMul => {
                     if state.should_throttle() {

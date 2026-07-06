@@ -28,6 +28,30 @@ pub const MTP_TILES_FFN: u32 = (MTP_FFN_INTER + 640) / 640; // 13
 pub const MAX_DRAFT_CANDIDATES: u32 = 5;
 pub const DRAFT_HIDDEN: u32 = 768;
 pub const TILE: u32 = 640;
+// ── Qwen3-TTS Talker architecture constants ────────────────────
+#[allow(dead_code)]
+pub const TTS_LAYERS: u32 = 28;
+#[allow(dead_code)]
+pub const TTS_HIDDEN: u32 = 2048;
+#[allow(dead_code)]
+pub const TTS_FFN_INTERMEDIATE: u32 = 8192;
+#[allow(dead_code)]
+pub const TTS_NUM_KV_HEADS: u32 = 8;
+#[allow(dead_code)]
+pub const TTS_HEAD_DIM: u32 = 256;
+#[allow(dead_code)]
+pub const TTS_TILES: u32 = (TTS_HIDDEN + 639) / 640;  // ~4 tiles
+#[allow(dead_code)]
+pub const TTS_TILES_FFN: u32 = (TTS_FFN_INTERMEDIATE + 639) / 640;  // ~13
+#[allow(dead_code)]
+pub const TTS_VOCAB: u32 = 2048;
+#[allow(dead_code)]
+pub const TTS_MAX_CONTEXT: u32 = 4096;
+#[allow(dead_code)]
+pub const TTS_NUM_CODEPRED_LAYERS: u32 = 5;
+#[allow(dead_code)]
+pub const TTS_NUM_CODEBOOKS: u32 = 16;
+
 #[allow(dead_code)]
 const MAGIC_DIV3: u32 = 2863311531;
 
@@ -36,7 +60,21 @@ pub const NUM_SLOTS: u32 = 256;
 pub const SLOT_U32_COUNT: u32 = 4 + VOCAB_SIZE; // 262148
 pub const SLOT_BYTE_COUNT: u64 = SLOT_U32_COUNT as u64 * 4; // 1,048,592
 
-// ── Ternary KV block constants ────────────────────────────────────
+// ── L1 compaction capacity (entropy-driven eviction window) ────────
+pub const L1_CAPACITY: u32 = 20480;
+
+// ── nf4tile640 KV cache layout constants ──────────────────────────
+#[allow(dead_code)]
+pub const NF4TILE_GROUPS_PER_TILE: u32 = 5;  // 640/128
+pub const NF4TILE_CODES_PER_TILE: u32 = 80;  // 80 × u32 = 320 bytes
+pub const NF4TILE_SCALES_PER_TILE: u32 = 5;  // 5 × f32 = 20 bytes
+pub const NF4TILE_BIASES_PER_TILE: u32 = 5;  // 5 × f32 = 20 bytes
+pub const NF4TILE_BYTE_PER_TILE: u32 = 360;  // 320 + 20 + 20
+pub const KV_TILES_PER_HEAD: u32 = 1;         // 512 dim → 1 tile
+pub const KV_NF4_PER_HEAD: u64 = 720;         // K+V: 2 × 360
+pub const KV_NF4_PER_POSITION: u64 = 5760;    // 8 heads × 720
+pub const KV_NF4_PER_LAYER_POSITION: u64 = 5760;
+pub const KV_NF4_PER_SLOT: u64 = KV_NF4_PER_POSITION * L1_CAPACITY as u64 * LAYERS as u64;
 
 // ── Weight-offset constants for the per-layer matrix layout ────────
 // Each matrix's flat element count BEFORE Base-3 nibble packing.

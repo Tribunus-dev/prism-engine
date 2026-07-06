@@ -18,6 +18,10 @@ pub mod accelerate_lane;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 #[path = "ane.rs"]
 pub mod ane_backend;
+/// Megakernel fused Metal GPU decode — wraps Orchestrator as a BackendInstance.
+#[cfg(target_os = "macos")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod megakernel_backend;
 pub mod authority;
 pub mod completion;
 #[cfg(target_os = "macos")]
@@ -380,11 +384,11 @@ pub trait TensorBackend {
         &mut self,
         group_id: u64,
         outputs: &[TensorHandle],
-    ) -> Result<(completion::ComellationToken, EvaluationReceipt), String> {
+    ) -> Result<completion::ComputationToken, String> {
         let (token, completer) = completion::ComellationToken::new();
-        let receipt = self.evaluate(group_id, outputs)?;
+        self.evaluate(group_id, outputs)?;
         completer.complete();
-        Ok((token, receipt))
+        Ok(completion::ComputationToken::Generic(token))
     }
 
     /// Evaluate outputs and materialize directly into a pre-allocated
@@ -1124,6 +1128,40 @@ pub fn create_heterogeneous_executor() -> Result<
 
     let ane = AneBackend::new();
     executor.register(Box::new(ane));
+
+    Ok(executor)
+}
+
+/// Create a HeterogeneousExecutor with all backends for inference.
+/// Loads the cimage and registers MegakernelBackend as the primary decode path.
+#[cfg(target_os = "macos")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub fn create_inference_executor(
+    cimage_path: impl AsRef<std::path::Path>,
+    batch_size: u32,
+    int4_mode: bool,
+) -> Result<
+    crate::backend::heterogeneous_executor::HeterogeneousExecutor,
+    String,
+> {
+    use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
+    use crate::backend::metal::MetalBackend;
+    use crate::backend::ane_backend::AneBackend;
+    use crate::backend::megakernel_backend::MegakernelBackend;
+
+    let mut executor = HeterogeneousExecutor::new();
+
+    // Register Megakernel fused decode backend (primary inference path)
+    let megakernel = MegakernelBackend::from_cimage(cimage_path, batch_size, int4_mode)?;
+    executor.register(Box::new(megakernel));
+
+    // Register ANE backend (prefill, attention offload)
+    let ane = AneBackend::new();
+    executor.register(Box::new(ane));
+
+    // Register Metal per-op backend (auxiliary ops)
+    let metal = MetalBackend::new()?;
+    executor.register(Box::new(metal));
 
     Ok(executor)
 }

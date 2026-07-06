@@ -40,6 +40,13 @@ pub struct SystemState {
     pub battery_remaining: f64,
     /// Whether the device is on AC power (vs battery).
     pub ac_power: bool,
+    /// Estimated ANE queue depth (number of pending inferences).
+    /// 0 means idle, higher values mean the ANE is busy.
+    pub ane_queue_depth: u32,
+    /// Whether the ANE is currently active (has been used recently).
+    pub ane_active: bool,
+    /// Timestamp of the last ANE inference (nanoseconds).
+    pub last_ane_inference_ns: u64,
 }
 
 impl Default for SystemState {
@@ -52,6 +59,9 @@ impl Default for SystemState {
             thermal_state: ThermalState::Nominal,
             battery_remaining: 1.0,
             ac_power: true,
+            ane_queue_depth: 0,
+            ane_active: false,
+            last_ane_inference_ns: 0,
         }
     }
 }
@@ -76,6 +86,9 @@ impl SystemState {
             thermal_state: thermal,
             battery_remaining: bat,
             ac_power: ac,
+            ane_queue_depth: 0,
+            ane_active: false,
+            last_ane_inference_ns: 0,
         })
     }
 
@@ -387,6 +400,31 @@ impl SystemState {
             || self.thermal_state == ThermalState::Critical
             || (!self.ac_power && self.battery_remaining < 0.2)
     }
+
+    /// Report an ANE inference has been submitted.
+    pub fn report_ane_activity(&mut self) {
+        self.last_ane_inference_ns = now_ns();
+        self.ane_active = true;
+        self.ane_queue_depth = self.ane_queue_depth.saturating_add(1);
+    }
+
+    /// Report an ANE inference has completed.
+    pub fn report_ane_completion(&mut self) {
+        self.ane_queue_depth = self.ane_queue_depth.saturating_sub(1);
+    }
+
+    /// Whether the Metal GPU is saturated enough to consider ANE offload.
+    pub fn should_offload_to_ane(&self) -> bool {
+        self.gpu_saturated() && !self.should_throttle()
+    }
+}
+
+/// Get the current time in nanoseconds since the Unix epoch.
+fn now_ns() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64
 }
 
 // ── CoreFoundation / IOKit FFI (macOS only) ──────────────────────────────

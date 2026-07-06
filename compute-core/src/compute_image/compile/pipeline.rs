@@ -711,7 +711,7 @@ pub(crate) fn compile_unchecked(
         let namespace = crate::config::resolve_namespace(&[]).unwrap_or_default();
         let mut ane_plan = crate::config::build_execution_plan(&arch, &namespace, &empty_ids);
         ane_plan.build_ane_fusion_plan();
-        super::coreai::compile_ane_islands(&ane_plan, &arch, output_dir, false)
+        super::coreai::compile_ane_islands(&ane_plan, &arch, output_dir, true)
             .map_err(|e| crate::Error::from_reason(format!("ANE pre-compilation failed: {e}")))?;
     }
 
@@ -834,7 +834,7 @@ pub fn compile_gguf_unchecked(
             let mut ane_plan =
                 crate::config::build_execution_plan(&arch_ane, &namespace, &empty_ids);
             ane_plan.build_ane_fusion_plan();
-            super::coreai::compile_ane_islands(&ane_plan, &arch_ane, output_dir, false).map_err(
+            super::coreai::compile_ane_islands(&ane_plan, &arch_ane, output_dir, true).map_err(
                 |e| crate::Error::from_reason(format!("ANE pre-compilation failed: {e}")),
             )?;
         }
@@ -1596,6 +1596,12 @@ pub(crate) fn compile_sequential(
     std::fs::write(&receipt_path, receipt_json)
         .map_err(|e| crate::Error::from_reason(format!("write receipt: {}", e)))?;
 
+    // ── Emit heterogeneous execution image ──────────────────────
+    #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+    if let Err(e) = emit_heterogeneous_image(&loaded, output_dir) {
+        eprintln!("[compile] warning: heterogeneous image emission failed (non-fatal): {e}");
+    }
+
     Ok(CompiledImage { manifest, receipt })
 }
 
@@ -1753,7 +1759,7 @@ pub fn compile_differential(
     plan_with_fusion.build_ane_fusion_plan();
     plan_with_fusion.apply_fusion_pass();
     // ── Compile ANE subgraphs (new 3-param signature) ────────────────
-    super::coreai::compile_ane_islands(&plan_with_fusion, &loaded.arch, output_dir_path, false)
+    super::coreai::compile_ane_islands(&plan_with_fusion, &loaded.arch, output_dir_path, true)
         .map_err(crate::Error::from_reason)?;
     builder.set_execution_plan(plan_with_fusion);
 
@@ -2101,4 +2107,106 @@ pub fn publish_image(staging: &Path, destination: &Path) -> crate::Result<()> {
             )))
         }
     }
+}
+
+/// Build and write the HeterogeneousExecutionImage JSON segment
+/// to the output directory.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub(crate) fn emit_heterogeneous_image(
+    loaded: &LoadedSource,
+    output_dir: &Path,
+) -> Result<(), String> {
+    use crate::compute_image::heterogeneous::types::*;
+    use crate::compute_image::heterogeneous::builder::HeterogeneousImageBuilder;
+
+    // Build model identity
+    let identity = ModelIdentity {
+        model_name: String::new(),
+        model_family: loaded.arch.model_type.clone(),
+        model_variant: String::new(),
+        canonical_graph_hash: ContentHash(0),
+        compile_timestamp: String::new(),
+        compiler_version: env!("CARGO_PKG_VERSION").into(),
+    };
+
+    let graph_digest = ContentHash(0); // placeholder; real hash from manifest
+
+    let mut builder = HeterogeneousImageBuilder::new(identity, graph_digest);
+
+    // Map transformer layers to phase graph nodes.
+    // Each layer becomes a DecoderLayer phase (which encompasses attention + MLP).
+    for layer_idx in 0..loaded.arch.num_hidden_layers {
+        let phase_id = layer_idx as u64 + 10; // offset to avoid id 0/1 reserved for embed/lm
+
+        let node = CompiledPhaseNode {
+            phase_id,
+            variant_set_id: 0,
+            operation_family: crate::backend::routing::OperationFamily::DecoderLayer,
+            ready_condition: ReadyCondition::AllDependenciesSatisfied,
+            parallel_group: None,
+            priority_class: PriorityClass::Batch,
+        };
+        builder.add_phase_node(node);
+    }
+
+    // Add embedding phase (first)
+    let embed_node = CompiledPhaseNode {
+        phase_id: 1,
+        variant_set_id: 0,
+        operation_family: crate::backend::routing::OperationFamily::Matmul,
+        ready_condition: ReadyCondition::AlwaysReady,
+        parallel_group: None,
+        priority_class: PriorityClass::Critical,
+    };
+    builder.add_phase_node(embed_node);
+
+    // Add LM head phase (last)
+    let lm_head_node = CompiledPhaseNode {
+        phase_id: loaded.arch.num_hidden_layers as u64 + 10 + 1,
+        variant_set_id: 0,
+        operation_family: crate::backend::routing::OperationFamily::Matmul,
+        ready_condition: ReadyCondition::AllDependenciesSatisfied,
+        parallel_group: None,
+        priority_class: PriorityClass::Batch,
+    };
+    builder.add_phase_node(lm_head_node);
+
+    // ── Multimodal phases ────────────────────────────────────────────
+    let next_id = loaded.arch.num_hidden_layers as u64 + 10 + 2;
+    if loaded.manifest.vision_config.is_some() || loaded.manifest.audio_config.is_some() {
+        // Vision encoder phase (runs first on image inputs)
+        let vision_node = CompiledPhaseNode {
+            phase_id: next_id,
+            variant_set_id: 0,
+            operation_family: crate::backend::routing::OperationFamily::Matmul,
+            ready_condition: ReadyCondition::AllDependenciesSatisfied,
+            parallel_group: None,
+            priority_class: PriorityClass::Critical,
+        };
+        builder.add_phase_node(vision_node);
+
+        // Audio encoder phase (parallel to vision)
+        if loaded.manifest.audio_config.is_some() {
+            let audio_node = CompiledPhaseNode {
+                phase_id: next_id + 1,
+                variant_set_id: 0,
+                operation_family: crate::backend::routing::OperationFamily::Matmul,
+                ready_condition: ReadyCondition::AllDependenciesSatisfied,
+                parallel_group: Some(0),
+                priority_class: PriorityClass::Critical,
+            };
+            builder.add_phase_node(audio_node);
+        }
+    }
+
+    // Build and serialize
+    let image = builder.build();
+    let json = serde_json::to_string_pretty(&image)
+        .map_err(|e| format!("serialize heterogeneous image: {e}"))?;
+
+    let path = output_dir.join("heterogeneous_image.json");
+    std::fs::write(&path, &json)
+        .map_err(|e| format!("write heterogeneous_image.json: {e}"))?;
+
+    Ok(())
 }

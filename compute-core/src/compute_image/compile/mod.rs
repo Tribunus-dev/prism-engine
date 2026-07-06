@@ -31,6 +31,7 @@ pub mod ternary;
 pub mod ternary_pipeline;
 #[cfg(feature = "prism-backend")]
 pub mod validation_matrix;
+pub mod tts_compile;
 
 pub use download::*;
 #[cfg(feature = "mlx-backend")] // research surface: MLX compile lane

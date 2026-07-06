@@ -34,6 +34,8 @@ pub mod ane;
 pub mod ane_bridge;
 #[cfg(feature = "prism-backend")]
 pub mod ane_compile;
+#[cfg(feature = "prism-backend")]
+pub mod tts;
 #[cfg(all(
     target_os = "macos",
     any(
@@ -64,6 +66,8 @@ pub mod arena_pool;
 pub mod attention;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod audio;
+#[cfg(any(feature = "prism-backend", feature = "mlx-backend"))]
+pub mod audio_preprocess_accelerate;
 #[cfg(feature = "generation-tts")]
 pub mod audio_provider;
 #[cfg(any(

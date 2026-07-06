@@ -29,6 +29,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 toml = "0.8"
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 parking_lot = "0.12"
@@ -39,6 +40,7 @@ lazy_static = "1.5"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "signal"] }
 tokio-stream = "0.1"
 axum = { version = "0.8", optional = true }
+ futures = "0.3"
 tower-http = { version = "0.6", optional = true, features = ["cors"] }
 async-trait = "0.1"
 thiserror = "2"
@@ -65,6 +67,7 @@ encoding_rs = "0.8"
 deno_core = "0.405"
 deno_core_icudata = "0.77"
 anyhow = "1.0.102"
+image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 
 [features]
 default = []
@@ -72,7 +75,7 @@ default = []
 # 1. PRODUCTION RUNTIME — Metal dispatch, CoreML, orchestrator, distill
 #    worker, taps, fused decode. Hermetic: compiles from a clean checkout
 #    with Xcode CLT + Rust only. Does NOT imply mlx-backend.
-prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal"]
+prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal", "dep:image"]
 # 2. RESEARCH — the MLX executor/model stack and everything built on it.
 #    Requires the MLX source tree (see mlx-rs-fork/mlx-sys/build.rs).
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]

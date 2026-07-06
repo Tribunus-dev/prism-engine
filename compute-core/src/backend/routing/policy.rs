@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 
 use super::lanes::TensorTransferPlan;
 use super::*;
+use crate::backend::completion::ComputationToken;
 
 // ── Evaluation policy ────────────────────────────────────────────────────
 
@@ -94,6 +95,9 @@ pub enum SynchronizationPolicy {
     Barrier,
     Stream,
     Device,
+    /// Explicit token-based synchronization — the next backend waits
+    /// on this token before reading the boundary's outputs.
+    Token(ComputationToken),
 }
 
 impl SynchronizationPolicy {
@@ -371,6 +375,7 @@ pub fn compute_boundary_digest(plan: &ExecutionBoundaryPlan) -> EvidenceDigest {
         SynchronizationPolicy::Barrier => 1,
         SynchronizationPolicy::Stream => 2,
         SynchronizationPolicy::Device => 3,
+        SynchronizationPolicy::Token(_) => 4,
     };
     buf.push(sync_disc);
 

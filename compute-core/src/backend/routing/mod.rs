@@ -7,8 +7,9 @@ pub use lanes::*;
 pub use policy::*;
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-pub use super::DType;
+pub use super::{DType, TensorHandle};
 
 // ── Identity types ────────────────────────────────────────────────────────
 
@@ -17,7 +18,7 @@ pub use super::DType;
 pub struct TensorId(pub u64);
 
 /// Identifies a logical operation in the Tribunus-owned execution graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OperationId(pub u64);
 
 /// Identifies a specific backend implementation.
@@ -29,6 +30,8 @@ pub const BACKEND_METAL: BackendId = BackendId(0);
 pub const BACKEND_ACCELERATE: BackendId = BackendId(1);
 pub const BACKEND_ANE: BackendId = BackendId(2);
 pub const BACKEND_MLX: BackendId = BackendId(3);
+/// Megakernel fused Metal GPU decode — the production autoregressive decode path.
+pub const BACKEND_MEGAKERNEL: BackendId = BackendId(4);
 
 /// Identifies a sealed route profile (deterministic backend assignment).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -78,7 +81,7 @@ pub enum RequestedSubstrate {
 
 /// Observed compute substrate — `Unknown` until native instrumentation
 /// provides defensible placement evidence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Substrate {
     Cpu,
     Gpu,
@@ -127,7 +130,7 @@ pub enum Phase {
 }
 
 /// Operation family for classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperationFamily {
     QuantizedMatmul,
     Matmul,
@@ -148,6 +151,12 @@ pub enum OperationFamily {
     AttentionBlock,
     DecoderLayer,
     PrefillFragment,
+    /// Vision encoder (image → embeddings)
+    VisionEncode,
+    /// Audio encoder (audio → embeddings)
+    AudioEncode,
+    /// Multimodal projection (encoder embeddings → hidden space)
+    MultimodalProject,
 }
 
 pub type OperationContractDigest = EvidenceDigest;
@@ -241,6 +250,17 @@ pub struct GraphRegion {
     pub input_tensors: Vec<TensorId>,
     pub output_tensors: Vec<TensorId>,
     pub shape_constraints: Vec<TensorShape>,
+    /// Named input bindings (name → TensorHandle) for ANE/Metal compiled
+    /// regions. Populated by the executor at dispatch time from the tensor
+    /// registry. The ANE backend reads these to bind IOSurface-backed
+    /// activation tensors as MIL graph inputs.
+    pub inputs: HashMap<String, TensorHandle>,
+    /// Named output bindings (name → TensorHandle). Allocated by the
+    /// executor and registered in the tensor registry for future lookups.
+    pub outputs: HashMap<String, TensorHandle>,
+    /// Named tensor bindings for weights, KV cache buffers, etc.
+    /// Populated by the executor from registered weight bindings.
+    pub tensor_bindings: HashMap<String, TensorHandle>,
 }
 
 #[cfg(test)]

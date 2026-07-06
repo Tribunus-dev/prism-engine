@@ -19,6 +19,58 @@ use crate::backend::TensorHandle;
 use crate::backend::DType;
 use crate::memory::allocator::IosurfaceAllocator;
 
+/// Number of slots in the decode slot pool.
+const NUM_SLOTS: u32 = 32;
+
+/// Dynamic slot pool for concurrent request management.
+pub struct SlotPool {
+    /// Bitmask of free slot indices (bit i = 1 means slot i is free).
+    free_mask: u64,
+    /// Unique token generation for stale-slot detection.
+    generation: Vec<u64>,
+    /// Global generation counter.
+    next_generation: u64,
+}
+
+impl SlotPool {
+    pub fn new(capacity: u32) -> Self {
+        assert!(capacity <= 64, "SlotPool capacity must be <= 64");
+        Self {
+            free_mask: (1u64 << capacity) - 1,
+            generation: vec![0; capacity as usize],
+            next_generation: 0,
+        }
+    }
+
+    /// Acquire a free slot. Returns None if all slots busy.
+    pub fn acquire(&mut self) -> Option<(u32, u64)> {
+        if self.free_mask == 0 {
+            return None;
+        }
+        let slot_id = self.free_mask.trailing_zeros();
+        self.free_mask &= !(1u64 << slot_id);
+        let gen = self.next_generation;
+        self.next_generation += 1;
+        self.generation[slot_id as usize] = gen;
+        Some((slot_id, gen))
+    }
+
+    /// Release a slot back to the pool.
+    pub fn release(&mut self, slot_id: u32) {
+        self.free_mask |= 1u64 << slot_id;
+    }
+
+    /// Number of slots currently in use.
+    pub fn used(&self) -> u32 {
+        self.generation.len() as u32 - self.free_mask.count_ones()
+    }
+
+    /// Number of free slots available.
+    pub fn available(&self) -> u32 {
+        self.free_mask.count_ones()
+    }
+}
+
 // ── BackendInstance trait ──────────────────────────────────────────────────
 
 /// A backend instance that can execute operations.
@@ -59,6 +111,30 @@ pub trait BackendInstance: TensorBackend {
     fn as_compiled_region_backend(&mut self) -> Option<&mut dyn CompiledRegionBackend> {
         None
     }
+
+    /// If this backend stores the most recently decoded token, return it.
+    /// Default returns `None`.
+    fn last_decoded_token(&self) -> Option<u64> {
+        None
+}
+}
+
+// ── TensorRegistry ──────────────────────────────────────────────────────────
+
+/// Track which output tensors are associated with which operations.
+///
+/// The executor builds this registry incrementally as operations execute.
+/// When a compiled region needs input tensors, it looks up the outputs of
+/// predecessor operations from this registry.
+struct TensorRegistry {
+    /// operation_id → output tensor handles
+    op_outputs: HashMap<u64, Vec<TensorHandle>>,
+}
+
+impl TensorRegistry {
+    fn new() -> Self {
+        Self { op_outputs: HashMap::new() }
+    }
 }
 
 // ── HeterogeneousExecutor ──────────────────────────────────────────────────
@@ -73,9 +149,18 @@ pub struct HeterogeneousExecutor {
     backends: Vec<Box<dyn BackendInstance + Send>>,
     allocator: Option<Arc<IosurfaceAllocator>>,
     execution_count: u64,
-    pub(crate) operation_registry: HashMap<OperationId, OperationDescriptor>,
+    pub operation_registry: HashMap<OperationId, OperationDescriptor>,
     /// Per-operation runtime routing table (populated by FlexDispatch).
-    pub(crate) routing_table: HashMap<OperationId, BackendId>,
+    pub routing_table: HashMap<OperationId, BackendId>,
+    /// Dynamic slot pool for concurrent request management.
+    slot_pool: SlotPool,
+    /// Current slot assignment per active request (request_id → (slot_id, generation)).
+    #[allow(dead_code)] // Reserved for slot-based dispatch (megakernel wiring, future work).
+    slot_assignments: HashMap<u64, (u32, u64)>,
+    /// Current decode position per slot.
+    slot_positions: Vec<u32>,
+    /// Tracks output tensor handles per operation for compiled-region dispatch.
+    tensor_registry: TensorRegistry,
 }
 
 impl HeterogeneousExecutor {
@@ -87,6 +172,10 @@ impl HeterogeneousExecutor {
             execution_count: 0,
             operation_registry: HashMap::new(),
             routing_table: HashMap::new(),
+            slot_pool: SlotPool::new(NUM_SLOTS),
+            slot_assignments: HashMap::new(),
+            slot_positions: vec![0; NUM_SLOTS as usize],
+            tensor_registry: TensorRegistry::new(),
         }
     }
 
@@ -144,9 +233,53 @@ impl HeterogeneousExecutor {
         self.routing_table.insert(op_id, backend);
     }
 
+    /// Retrieve the most recently decoded token from the megakernel backend.
+    /// Returns an error if the megakernel backend is not registered.
+    pub fn last_decoded_token(&mut self) -> Result<u64, String> {
+        let backend = self
+            .backends
+            .iter()
+            .find(|b| b.backend_kind() == BACKEND_MEGAKERNEL)
+            .ok_or_else(|| "MegakernelBackend not registered".to_string())?;
+        backend.last_decoded_token().ok_or_else(|| "MegakernelBackend did not provide a decoded token".to_string())
+    }
+
     /// Get the current route for an operation, if one has been set.
     pub fn get_route(&self, op_id: &OperationId) -> Option<BackendId> {
         self.routing_table.get(op_id).copied()
+    }
+
+    /// Allocate a slot for a new decode session.
+    pub fn allocate_slot(&mut self) -> Result<u32, String> {
+        self.slot_pool
+            .acquire()
+            .map(|(id, _)| id)
+            .ok_or_else(|| "no available slots".to_string())
+    }
+
+    /// Free a slot when the decode session ends.
+    pub fn free_slot(&mut self, slot_id: u32) {
+        self.slot_pool.release(slot_id);
+    }
+
+    /// Get the current decode position for a slot.
+    pub fn slot_position(&self, slot_id: u32) -> u32 {
+        self.slot_positions.get(slot_id as usize).copied().unwrap_or(0)
+    }
+
+    /// Advance the decode position for a slot.
+    pub fn advance_slot_position(&mut self, slot_id: u32) {
+        if let Some(p) = self.slot_positions.get_mut(slot_id as usize) { *p += 1; }
+    }
+
+    /// Number of active slots.
+    pub fn active_slots(&self) -> u32 {
+        self.slot_pool.used()
+    }
+
+    /// Number of remaining available slots.
+    pub fn available_slots(&self) -> u32 {
+        self.slot_pool.available()
     }
 
     /// Execute a sealed boundary plan using per-operation flex dispatch.
@@ -203,7 +336,7 @@ impl HeterogeneousExecutor {
         let elapsed_ns = boundary_start.elapsed().as_nanos() as u64;
         let support = policy_support(plan.backend_id, &plan.policy);
 
-        let actual_sync_count = if matches!(plan.synchronization, SynchronizationPolicy::Barrier) {
+        let actual_sync_count = if matches!(&plan.synchronization, SynchronizationPolicy::Barrier | SynchronizationPolicy::Token(_)) {
             1
         } else {
             0
@@ -230,6 +363,59 @@ impl HeterogeneousExecutor {
         self.execution_count += 1;
         Ok(receipts)
     }
+
+    /// Allocate a zeroed output tensor on the given backend, sized to match
+    /// the operation's expected output shape and dtype.
+    ///
+    /// Returns a [`TensorHandle`] the caller registers in the tensor registry.
+    #[allow(dead_code)] // Reserved API: used by future tensor pre-allocation paths
+    fn allocate_tensor_for_op(
+        &mut self,
+        backend_id: BackendId,
+        op_desc: &OperationDescriptor,
+    ) -> Result<TensorHandle, String> {
+        let backend = self
+            .find_backend(backend_id)
+            .ok_or_else(|| format!("no backend registered for allocation on {}", backend_id.0))?;
+
+        // Compute buffer size from expected output shape
+        let num_elements: usize = op_desc
+            .expected_output_shape
+            .dims
+            .iter()
+            .map(|&d| d as usize)
+            .product();
+        let element_size = match op_desc.output_dtype {
+            DType::F32 | DType::I32 | DType::U32 => 4,
+            DType::F16 | DType::BF16 => 2,
+            DType::I8 | DType::U8 => 1,
+        };
+        let size = num_elements * element_size;
+        let shape: Vec<i32> = op_desc
+            .expected_output_shape
+            .dims
+            .iter()
+            .map(|&d| d as i32)
+            .collect();
+
+        backend.create_owned_from_bytes(&vec![0u8; size], &shape, op_desc.output_dtype)
+    }
+
+    /// Register output tensor handles for an operation in the tensor registry.
+    ///
+    /// Future operations within the same or subsequent boundary can look up
+    /// these handles as their inputs.
+    #[allow(dead_code)] // Reserved API: public interface for tensor registry
+    fn register_op_outputs(&mut self, op_id: u64, handles: Vec<TensorHandle>) {
+        self.tensor_registry.op_outputs.insert(op_id, handles);
+    }
+
+    /// Look up output tensor handles previously registered for an operation.
+    #[allow(dead_code)] // Reserved API: for future cross-boundary input resolution
+    fn op_outputs(&self, op_id: u64) -> Option<&Vec<TensorHandle>> {
+        self.tensor_registry.op_outputs.get(&op_id)
+    }
+
 }
 
 // ── BoundaryExecutor implementation ────────────────────────────────────────
@@ -269,10 +455,10 @@ impl BoundaryExecutor for HeterogeneousExecutor {
             let mut _op_receipts: Vec<BackendExecutionReceipt> =
                 Vec::with_capacity(plan.operations.len());
 
-            // 4. Find the backend for this boundary (mutable borrow)
-            let _backend = self
-                .find_backend(backend_id)
-                .ok_or_else(|| format!("no backend registered for id {}", backend_id.0))?;
+
+            // Collect newly allocated output handles for batch registration
+            // after the else branch's backend borrow is dropped.
+            let mut _new_outputs: HashMap<u64, Vec<TensorHandle>> = HashMap::new();
 
             if let Some(_ane_prog) = boundary_type {
                 // ANE dispatch: run the compiled Orion program.
@@ -308,6 +494,12 @@ impl BoundaryExecutor for HeterogeneousExecutor {
                     fallback_occurred: false,
                 });
             } else {
+                // Move backend lookup inside the else branch so the borrow
+                // drops before accessing `self.tensor_registry`.
+                let _backend = self
+                    .find_backend(backend_id)
+                    .ok_or_else(|| format!("no backend registered for id {}", backend_id.0))?;
+
                 for op_desc in &ops {
                     let region_families = [
                         OperationFamily::AttentionBlock,
@@ -321,16 +513,60 @@ impl BoundaryExecutor for HeterogeneousExecutor {
                     if is_compiled_region {
                         if let Some(compiled_backend) = _backend.as_compiled_region_backend() {
                             // Build a GraphRegion from the operation descriptor
-                            // For now, construct a minimal GraphRegion; the cimage plan
-                            // will provide full region data in a later phase.
-                            let region = crate::backend::routing::GraphRegion {
+                            // Allocate the output tensor on this backend
+                            let num_elements: usize = op_desc
+                                .expected_output_shape
+                                .dims
+                                .iter()
+                                .map(|&d| d as usize)
+                                .product();
+                            let element_size = match op_desc.output_dtype {
+                                DType::F32 | DType::I32 | DType::U32 => 4,
+                                DType::F16 | DType::BF16 => 2,
+                                DType::I8 | DType::U8 => 1,
+                            };
+                            let size = num_elements * element_size;
+                            let shape: Vec<i32> = op_desc
+                                .expected_output_shape
+                                .dims
+                                .iter()
+                                .map(|&d| d as i32)
+                                .collect();
+
+                            let output_handle = compiled_backend
+                                .create_owned_from_bytes(
+                                    &vec![0u8; size],
+                                    &shape,
+                                    op_desc.output_dtype,
+                                )?;
+
+                            // Collect for registration after backend borrow drops
+                            _new_outputs
+                                .entry(op_desc.operation_id.0)
+                                .or_default()
+                                .push(output_handle);
+
+                            // Build a GraphRegion from the operation descriptor
+                            let mut region = crate::backend::routing::GraphRegion {
                                 region_id: op_desc.operation_id.0,
                                 family: op_desc.family,
                                 operations: vec![op_desc.operation_id],
                                 input_tensors: Vec::new(),
                                 output_tensors: Vec::new(),
                                 shape_constraints: vec![op_desc.expected_output_shape.clone()],
+                                inputs: HashMap::new(),
+                                outputs: HashMap::new(),
+                                tensor_bindings: HashMap::new(),
                             };
+
+                            // Populate the region's output bindings.
+                            // The ANE backend reads these to bind IOSurface-backed
+                            // output tensors from the compiled program.
+                            region.outputs.insert(
+                                format!("output_{}", op_desc.operation_id.0),
+                                output_handle,
+                            );
+
                             // Phase: cross-backend tensor binding will be added here.
                             let receipt =
                                 compiled_backend.execute_compiled_region(&region, &[], &[])?;
@@ -345,12 +581,22 @@ impl BoundaryExecutor for HeterogeneousExecutor {
                 }
             }
 
+            // Register newly allocated output handles in the tensor registry.
+            // The _backend borrow from the else branch has been dropped, so
+            // we can access self.tensor_registry here.
+            for (op_id, handles) in _new_outputs {
+                self.tensor_registry
+                    .op_outputs
+                    .entry(op_id)
+                    .or_default()
+                    .extend(handles);
+            }
+
             // 5. Release tensors specified in release_after
             //    Phase 2: iterate plan.release_after and call _backend.release().
 
             // 6. Handle synchronization
-            let actual_sync_count =
-                if matches!(plan.synchronization, SynchronizationPolicy::Barrier) {
+            let actual_sync_count = if matches!(&plan.synchronization, SynchronizationPolicy::Barrier | SynchronizationPolicy::Token(_)) {
                     1
                 } else {
                     0
@@ -543,7 +789,6 @@ mod tests {
             })
         }
     }
-
     /// Create a stub operation descriptor for testing.
     fn make_op(id: u64) -> OperationDescriptor {
         use crate::backend::DType;
