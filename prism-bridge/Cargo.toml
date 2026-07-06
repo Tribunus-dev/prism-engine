@@ -9,12 +9,14 @@ crate-type = ["cdylib"]
 name = "prism_bridge"
 
 [dependencies]
-tribunus-compute-core = { path = "../compute-core", features = ["prism-backend"] }
+tribunus-compute-core = { path = "../compute-core", features = ["research"] }
 prism-ffi = { path = "../prism-ffi", features = ["compute-core"] }
 uniffi = { version = "0.27", features = ["cli"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+parking_lot = { workspace = true }
+metal = "0.32"
 
 [build-dependencies]
 uniffi = { version = "0.27", features = ["build"] }

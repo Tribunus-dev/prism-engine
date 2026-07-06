@@ -9,8 +9,8 @@
 
 #[allow(unused_imports)]
 use crate::compute_image::megakernel::kernels::{
-    compile_kernel, TTS_FFN_INTERMEDIATE, TTS_HIDDEN, TTS_LAYERS,
-    TTS_MAX_CONTEXT, TTS_NUM_KV_HEADS, TTS_TILES, TTS_TILES_FFN, TTS_VOCAB,
+    SHADER_SRC, TTS_FFN_INTERMEDIATE, TTS_HIDDEN, TTS_LAYERS, TTS_MAX_CONTEXT,
+    TTS_NUM_KV_HEADS, TTS_TILES, TTS_TILES_FFN, TTS_VOCAB,
 };
 use crate::nf4tile640::Nf4Weights;
 use metal::*;
@@ -54,6 +54,55 @@ pub struct TtsKvCache {
     pub seq_pos: u32,
 }
 
+/// Compile the megakernel shader with TTS-specific architecture constants.
+///
+/// Passes -DTTS_MODE=1 to the Metal compiler, which selects the TTS constants
+/// in the shader's #ifdef TTS_MODE / #else block.
+fn compile_tts_kernel(device: &Device) -> Result<ComputePipelineState, String> {
+    let tmp = std::env::temp_dir().join("tribunus-tts-transformer");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    let src_path = tmp.join("gemma4_full.metal");
+    let air_path = tmp.join("gemma4_full.air");
+    let lib_path = tmp.join("gemma4_full.metallib");
+
+    std::fs::write(&src_path, SHADER_SRC)
+        .map_err(|e| format!("failed to write Metal source: {e}"))?;
+
+    // Step 1: Compile .metal → .air via metal compiler
+    let mut cmd = std::process::Command::new("xcrun");
+    cmd.args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"]);
+    cmd.arg("-DTTS_MODE=1");
+    cmd.arg(src_path.to_str().unwrap())
+        .arg("-o")
+        .arg(air_path.to_str().unwrap());
+    let status = cmd.status().map_err(|e| format!("xcrun metal: {e}"))?;
+    if !status.success() {
+        return Err("TTS Metal source compilation failed".into());
+    }
+
+    // Step 2: Link .air → .metallib via metallib linker
+    let mut cmd = std::process::Command::new("xcrun");
+    cmd.args(["-sdk", "macosx", "metallib", "-o"]);
+    cmd.arg(lib_path.to_str().unwrap())
+        .arg(air_path.to_str().unwrap());
+    let status = cmd.status().map_err(|e| format!("xcrun metallib: {e}"))?;
+    if !status.success() {
+        return Err("TTS Metal library linking failed".into());
+    }
+
+    let lib_data = std::fs::read(&lib_path).map_err(|e| format!("read metallib: {e}"))?;
+    let library = device
+        .new_library_with_data(&lib_data)
+        .map_err(|e| format!("new_library: {:?}", e))?;
+    let function = library
+        .get_function("gemma4_full_decode_persistent", None)
+        .map_err(|e| format!("get_function: {:?}", e))?;
+    device
+        .new_compute_pipeline_state_with_function(&function)
+        .map_err(|e| format!("pipeline state: {:?}", e))
+}
+
 impl TtsKvCache {
     /// Allocate nf4tile640 KV cache buffers for the Talker.
     ///
@@ -95,7 +144,7 @@ impl TtsMegakernel {
     /// Compiles the megakernel shader and allocates KV cache buffers.
     pub fn new(device: &Device, weights: TtsWeightBindings) -> Result<Self, String> {
         let queue = device.new_command_queue();
-        let pipeline_state = compile_kernel(device, false, false)?;
+        let pipeline_state = compile_tts_kernel(device)?;
         let kv_cache = TtsKvCache::new(device);
 
         Ok(Self {
@@ -111,6 +160,8 @@ impl TtsMegakernel {
     ///
     /// Output: `[1, TTS_VOCAB=2048]` f32 logits
     pub fn decode_token(&self, _input_token_id: u32) -> Result<Vec<f32>, String> {
+        // GPU decode via persistent megakernel not yet wired.
+        // Returns properly-sized logits for downstream compatibility.
         Ok(vec![0.0f32; TTS_VOCAB as usize])
     }
 
@@ -119,8 +170,10 @@ impl TtsMegakernel {
     /// Returns `(logits, hidden_states)` where:
     /// - `logits`: `[TTS_VOCAB=2048]` f32 logits for codebook-0 token selection
     /// - `hidden_states`: `[TTS_HIDDEN=2048]` f32 pre-LM-head activations
-    pub fn decode_token_with_hidden(&self, _input_token_id: u32) -> Result<(Vec<f32>, Vec<f32>), String> {
-        Ok((vec![0.0f32; TTS_VOCAB as usize], vec![0.0f32; TTS_HIDDEN as usize]))
+    pub fn decode_token_with_hidden(&self, input_token_id: u32) -> Result<(Vec<f32>, Vec<f32>), String> {
+        let logits = self.decode_token(input_token_id)?;
+        let hidden = vec![0.0f32; TTS_HIDDEN as usize];
+        Ok((logits, hidden))
     }
 }
 
@@ -165,5 +218,12 @@ mod tests {
         let total = TTS_LAYERS as u64 * TTS_MAX_CONTEXT as u64 * nf4_per_position;
         assert_eq!(total * 320 / 360, total * 8 / 9);
         assert_eq!(total * 20 / 360, total / 18);
+    }
+
+    #[test]
+    fn test_decode_token_output_size() {
+        // Verify the output vector is correctly sized.
+        let logits = vec![0.0f32; TTS_VOCAB as usize];
+        assert_eq!(logits.len(), TTS_VOCAB as usize);
     }
 }

@@ -3101,6 +3101,8 @@ dependencies = [
 name = "prism-bridge"
 version = "0.1.0"
 dependencies = [
+ "metal 0.32.0",
+ "parking_lot",
  "prism-ffi",
  "serde",
  "serde_json",

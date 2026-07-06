@@ -16,11 +16,12 @@
 //! ```
 //!
 //! Drag the generated `.swift` and `.h` files into your Xcode project.
-
-use std::path::Path;
 use std::sync::Arc;
 use tribunus_compute_core::agent;
-use tribunus_compute_core::compute_image::cimage_loader::load_cimage_mmap;
+use tribunus_compute_core::backend::create_inference_executor;
+use tribunus_compute_core::backend::heterogeneous_executor::HeterogeneousExecutor;
+use tribunus_compute_core::backend::routing::*;
+use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
 use tribunus_compute_core::config::operation_route::OperationRoute;
 use tribunus_compute_core::config::{
     self, CompileQuantMode, GenerationRegime, HardwareTarget, KvCacheMode, ServerConfig,
@@ -28,7 +29,7 @@ use tribunus_compute_core::config::{
 use tribunus_compute_core::device::{
     self, BackendKind, DeviceKind, DeviceMemoryInfo, PcieLinkInfo,
 };
-use tribunus_compute_core::runtime::agent_slot::MultiplexerState;
+use tribunus_compute_core::tts::pipeline::TtsPipeline;
 use tribunus_compute_core::tools;
 
 /// Errors that can cross the UniFFI boundary.
@@ -346,6 +347,26 @@ pub fn prism_compile_gguf(
     }
 }
 
+/// Compile nf4-tile-640 weights into a .cimage using the CLI binary.
+///
+/// For now this defers to the CLI; the direct bridge path will be wired
+/// once the nf4 cimage path is stabilised.
+#[uniffi::export]
+pub fn prism_compile_nf4(
+    safetensors_dir: String,
+    output_cimage_path: String,
+    tts_repo: Option<String>,
+    callback: Option<Box<dyn CompilerProgressCallback>>,
+) -> Result<String, CompilerError> {
+    let _ = safetensors_dir;
+    let _ = output_cimage_path;
+    let _ = tts_repo;
+    if let Some(cb) = &callback {
+        cb.on_log("nf4tile640 compilation not yet wired through bridge".into());
+    }
+    Err(CompilerError::InvalidFormat { message: "use CLI: gemma4_ingest --nf4".into() })
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // Streaming inference
 // ═══════════════════════════════════════════════════════════════════════
@@ -356,22 +377,40 @@ pub fn prism_compile_gguf(
 #[derive(uniffi::Object)]
 pub struct BridgeMultiplexer {
     #[allow(dead_code)]
-    pub(crate) inner: Arc<MultiplexerState>,
+    pub(crate) executor: parking_lot::Mutex<Option<HeterogeneousExecutor>>,
+    pub(crate) tts: Option<TtsPipeline>,
+    pub(crate) tokenizer: Option<tribunus_compute_core::tokenizer::TribunusTokenizer>,
+    #[allow(dead_code)]
+    pub(crate) cimage_path: Option<std::path::PathBuf>,
 }
 
 #[uniffi::export]
 impl BridgeMultiplexer {
     /// Load a compiled .cimage and initialise the runtime multiplexer.
     #[uniffi::constructor]
-    pub fn load(cimage_path: String, _model_dir: String) -> Result<Arc<Self>, BridgeError> {
-        let path = Path::new(&cimage_path);
-        let (mmap, header) = load_cimage_mmap(path)
-            .map_err(|e| BridgeError::CimageLoadFailed(format!("load cimage: {e}")))?;
-        let mmap_arc = Arc::new(mmap);
-        let mut state = MultiplexerState::new();
-        state.init_from_cimage(mmap_arc, &header, 3840, 18432);
-        Ok(Arc::new(BridgeMultiplexer {
-            inner: Arc::new(state),
+    pub fn load(cimage_path: String, model_dir: String) -> Result<Arc<Self>, BridgeError> {
+        let cpath = std::path::Path::new(&cimage_path);
+        // Try new heterogeneous executor first
+        let executor = create_inference_executor(cpath, 1, false)
+            .map_err(|e| BridgeError::CimageLoadFailed(e.to_string()))?;
+
+        // Try loading TTS if available
+        let device = metal::Device::system_default()
+            .ok_or_else(|| BridgeError::CimageLoadFailed("no Metal device".into()))?;
+        let deployment = CimageDeployment::load(cpath, &device)
+            .map_err(|e| BridgeError::CimageLoadFailed(e.to_string()))?;
+        let tts = TtsPipeline::from_cimage(&deployment, &device).ok();
+
+        // Load tokenizer
+        let tokenizer = tribunus_compute_core::tokenizer::TribunusTokenizer::from_dir(
+            std::path::Path::new(&model_dir),
+        ).ok();
+
+        Ok(Arc::new(Self {
+            executor: parking_lot::Mutex::new(Some(executor)),
+            tts,
+            tokenizer,
+            cimage_path: Some(cpath.to_path_buf()),
         }))
     }
 }
@@ -546,64 +585,174 @@ pub fn prism_infer_multimodal_stream(
     prompt: String,
     callback: Box<dyn MultimodalStreamCallback>,
 ) {
-    // ── Load model ────────────────────────────────────────────────
-    let config_path = std::path::Path::new(&model_dir).join("config.json");
-    let config = match tribunus_compute_core::lut::graph::UnifiedConfig::from_file(&config_path) {
-        Ok(c) => c,
-        Err(e) => {
-            callback.on_error(format!("load config: {e}"));
-            return;
-        }
-    };
-    let graph = tribunus_compute_core::lut::graph::ModelGraph::build(&config);
-    let mut engine = match tribunus_compute_core::lut::engine::PrismEngine::load(
-        std::path::Path::new(&cimage_path),
-        graph,
-    ) {
-        Ok(e) => e,
-        Err(e) => {
-            callback.on_error(format!("load engine: {e}"));
-            return;
-        }
-    };
-    let tokenizer = match tribunus_compute_core::tokenizer::TribunusTokenizer::from_dir(
-        std::path::Path::new(&model_dir),
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            callback.on_error(format!("load tokenizer: {e}"));
-            return;
-        }
-    };
-
-    // ── Tokenise prompt ──────────────────────────────────────────
-    let prompt_tokens = match tokenizer.encode(&prompt) {
-        Ok(t) => t,
-        Err(e) => {
-            callback.on_error(format!("tokenize: {e}"));
-            return;
-        }
-    };
-
-    // ── Run inference on background thread ───────────────────────
     let callback = std::sync::Arc::new(callback);
+
+    // Load multiplexer
+    let multiplexer = match BridgeMultiplexer::load(cimage_path, model_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            callback.on_error(format!("load: {e}"));
+            return;
+        }
+    };
+
     std::thread::spawn(move || {
+        let mut exec_guard = multiplexer.executor.lock();
+        let exec = match &mut *exec_guard {
+            Some(e) => e,
+            None => {
+                callback.on_error("executor not initialized".into());
+                return;
+            }
+        };
+
+        // Tokenize
+        let tokenizer = match &multiplexer.tokenizer {
+            Some(t) => t,
+            None => {
+                callback.on_error("no tokenizer".into());
+                return;
+            }
+        };
+        let input_ids = match tokenizer.encode(&prompt) {
+            Ok(t) => t,
+            Err(e) => {
+                callback.on_error(format!("tokenize: {e}"));
+                return;
+            }
+        };
+
+        // Build operation descriptor
+        let decode_op = OperationDescriptor {
+            operation_id: OperationId(0),
+            family: OperationFamily::DecoderLayer,
+            layer_index: None,
+            phase: Phase::Decode,
+            logical_shape: LogicalShape { dims: vec![1] },
+            physical_layout: PhysicalLayout::RowMajor,
+            input_dtypes: vec![],
+            output_dtype: DType::F32,
+            quantization: None,
+            expected_output_shape: TensorShape { dims: vec![] },
+            correctness_checkpoint: CorrectnessCheckpointPolicy::None,
+        };
+
+        // Prefill
+        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)].iter().enumerate() {
+            let mut op = decode_op.clone();
+            op.operation_id = OperationId(tok as u64);
+            exec.operation_registry.insert(op.operation_id, op);
+            let plan = ExecutionBoundaryPlan {
+                group_id: EvaluationGroupId(i as u64),
+                backend_id: BACKEND_MEGAKERNEL,
+                operations: vec![OperationId(tok as u64)],
+                materialized_outputs: vec![],
+                policy: EvaluationPolicy::BackendLazy,
+                synchronization: SynchronizationPolicy::None,
+                release_after: vec![],
+                content_digest: None,
+            };
+            let _ = exec.execute_boundaries(&[plan]);
+        }
+
+        // Decode
         let max_tokens = 512;
-        match engine.generate(&prompt_tokens, max_tokens) {
-            Ok(stats) => {
-                for &token_id in &stats.generated_tokens {
-                    match tokenizer.decode(&[token_id]) {
-                        Ok(text) => {
-                            callback.on_event(StreamEvent::Text { token: text });
-                        }
-                        Err(_) => {}
-                    }
+        let mut last_token = *input_ids.last().unwrap_or(&0) as u64;
+        for step in 0..max_tokens {
+            let mut op = decode_op.clone();
+            op.operation_id = OperationId(last_token);
+            exec.operation_registry.insert(op.operation_id, op);
+            let plan = ExecutionBoundaryPlan {
+                group_id: EvaluationGroupId((input_ids.len() + step) as u64),
+                backend_id: BACKEND_MEGAKERNEL,
+                operations: vec![OperationId(last_token)],
+                materialized_outputs: vec![],
+                policy: EvaluationPolicy::BackendLazy,
+                synchronization: SynchronizationPolicy::None,
+                release_after: vec![],
+                content_digest: None,
+            };
+            let _ = exec.execute_boundaries(&[plan]);
+
+            last_token = match exec.last_decoded_token() {
+                Ok(t) => t,
+                Err(_) => break,
+            };
+
+            if let Ok(text) = tokenizer.decode(&[last_token as u32]) {
+                callback.on_event(StreamEvent::Text { token: text });
+            }
+        }
+
+        callback.on_done();
+    });
+}
+
+/// Generate streaming audio (TTS) from text.
+#[uniffi::export]
+pub fn prism_generate_audio(
+    cimage_path: String,
+    model_dir: String,
+    text: String,
+    callback: Box<dyn MultimodalStreamCallback>,
+) {
+    let callback = std::sync::Arc::new(callback);
+
+    let multiplexer = match BridgeMultiplexer::load(cimage_path, model_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            callback.on_error(format!("load: {e}"));
+            return;
+        }
+    };
+
+    std::thread::spawn(move || {
+        // TTS pipeline reference lives inside the Arc<BridgeMultiplexer>
+        let tts = match &multiplexer.tts {
+            Some(t) => t,
+            None => {
+                callback.on_error("TTS not available in cimage".into());
+                return;
+            }
+        };
+
+        // Tokenize text for TTS
+        let tokenizer = match &multiplexer.tokenizer {
+            Some(t) => t,
+            None => {
+                callback.on_error("no tokenizer".into());
+                return;
+            }
+        };
+        let tokens = match tokenizer.encode(&text) {
+            Ok(t) => t,
+            Err(e) => {
+                callback.on_error(format!("tokenize: {e}"));
+                return;
+            }
+        };
+
+        // Generate streaming audio
+        match tts.generate_streaming(&tokens, 256, 20) {
+            Ok(chunks) => {
+                for chunk in chunks {
+                    // Convert f32 PCM to 16-bit PCM bytes
+                    let pcm_bytes: Vec<u8> = chunk.iter()
+                        .flat_map(|&s| {
+                            let clamped = (s.max(-1.0).min(1.0) * 32767.0) as i16;
+                            clamped.to_le_bytes().to_vec()
+                        })
+                        .collect();
+
+                    callback.on_event(StreamEvent::AudioChunk {
+                        pcm_bytes: pcm_bytes.into(),
+                        sample_rate: 24000,
+                        channels: 1,
+                    });
                 }
                 callback.on_done();
             }
-            Err(e) => {
-                callback.on_error(format!("generate: {e}"));
-            }
+            Err(e) => callback.on_error(format!("TTS: {e}")),
         }
     });
 }
@@ -658,7 +807,7 @@ impl From<BackendKind> for BridgeBackendKind {
             BackendKind::Cuda => Self::Cuda,
             BackendKind::Rocm => Self::Rocm,
             BackendKind::LevelZero => Self::LevelZero,
-            BackendKind::CoreMl => Self::CoreMl,
+            BackendKind::CoreAi => Self::CoreMl,
             BackendKind::Ane => Self::Ane,
             BackendKind::Accelerate => Self::Accelerate,
             BackendKind::CandleCpu => Self::CandleCpu,
@@ -834,6 +983,7 @@ impl From<CompileQuantMode> for BridgeCompileQuantMode {
             CompileQuantMode::Af8 { group_size } => Self::Af8 { group_size },
             CompileQuantMode::Ternary { group_size } => Self::Ternary { group_size },
             CompileQuantMode::TernaryTile640 { group_size } => Self::TernaryTile640 { group_size },
+            CompileQuantMode::Nf4Tile640 { group_size } => Self::Nf4 { group_size },
         }
     }
 }

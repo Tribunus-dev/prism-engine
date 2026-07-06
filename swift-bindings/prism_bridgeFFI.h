@@ -364,7 +364,7 @@ void uniffi_prism_bridge_fn_free_bridgemultiplexer(void*_Nonnull ptr, RustCallSt
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_CONSTRUCTOR_BRIDGEMULTIPLEXER_LOAD
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_CONSTRUCTOR_BRIDGEMULTIPLEXER_LOAD
-void*_Nonnull uniffi_prism_bridge_fn_constructor_bridgemultiplexer_load(RustBuffer cimage_path, RustBuffer _model_dir, RustCallStatus *_Nonnull out_status
+void*_Nonnull uniffi_prism_bridge_fn_constructor_bridgemultiplexer_load(RustBuffer cimage_path, RustBuffer model_dir, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_INIT_CALLBACK_VTABLE_BROWSERRUNTIMEDRIVER
@@ -392,15 +392,60 @@ RustBuffer uniffi_prism_bridge_fn_func_prism_agent_step(RustBuffer state_json, R
 RustBuffer uniffi_prism_bridge_fn_func_prism_compile_gguf(RustBuffer gguf_path, RustBuffer output_dir, RustBuffer callback, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_COMPILE_NF4
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_COMPILE_NF4
+RustBuffer uniffi_prism_bridge_fn_func_prism_compile_nf4(RustBuffer safetensors_dir, RustBuffer output_cimage_path, RustBuffer tts_repo, RustBuffer callback, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_CONFIG_JSON
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_CONFIG_JSON
+RustBuffer uniffi_prism_bridge_fn_func_prism_config_json(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_DEFAULT_TOOLS
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_DEFAULT_TOOLS
 RustBuffer uniffi_prism_bridge_fn_func_prism_default_tools(RustCallStatus *_Nonnull out_status
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_DEVICE_COUNT
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_DEVICE_COUNT
+uint32_t uniffi_prism_bridge_fn_func_prism_device_count(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_DEVICE_JSON
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_DEVICE_JSON
+RustBuffer uniffi_prism_bridge_fn_func_prism_device_json(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_GENERATE_AUDIO
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_GENERATE_AUDIO
+void uniffi_prism_bridge_fn_func_prism_generate_audio(RustBuffer cimage_path, RustBuffer model_dir, RustBuffer text, uint64_t callback, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_INFER_MULTIMODAL_STREAM
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_INFER_MULTIMODAL_STREAM
 void uniffi_prism_bridge_fn_func_prism_infer_multimodal_stream(RustBuffer cimage_path, RustBuffer model_dir, RustBuffer prompt, uint64_t callback, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_LIST_DEVICES
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_LIST_DEVICES
+RustBuffer uniffi_prism_bridge_fn_func_prism_list_devices(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_LOAD_CONFIG
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_LOAD_CONFIG
+RustBuffer uniffi_prism_bridge_fn_func_prism_load_config(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_LOAD_CONFIG_FROM
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_LOAD_CONFIG_FROM
+RustBuffer uniffi_prism_bridge_fn_func_prism_load_config_from(RustBuffer path, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_FN_FUNC_PRISM_RUN_JS
@@ -705,15 +750,63 @@ uint16_t uniffi_prism_bridge_checksum_func_prism_compile_gguf(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_COMPILE_NF4
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_COMPILE_NF4
+uint16_t uniffi_prism_bridge_checksum_func_prism_compile_nf4(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_CONFIG_JSON
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_CONFIG_JSON
+uint16_t uniffi_prism_bridge_checksum_func_prism_config_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_DEFAULT_TOOLS
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_DEFAULT_TOOLS
 uint16_t uniffi_prism_bridge_checksum_func_prism_default_tools(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_DEVICE_COUNT
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_DEVICE_COUNT
+uint16_t uniffi_prism_bridge_checksum_func_prism_device_count(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_DEVICE_JSON
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_DEVICE_JSON
+uint16_t uniffi_prism_bridge_checksum_func_prism_device_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_GENERATE_AUDIO
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_GENERATE_AUDIO
+uint16_t uniffi_prism_bridge_checksum_func_prism_generate_audio(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_INFER_MULTIMODAL_STREAM
 #define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_INFER_MULTIMODAL_STREAM
 uint16_t uniffi_prism_bridge_checksum_func_prism_infer_multimodal_stream(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_LIST_DEVICES
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_LIST_DEVICES
+uint16_t uniffi_prism_bridge_checksum_func_prism_list_devices(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_LOAD_CONFIG
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_LOAD_CONFIG
+uint16_t uniffi_prism_bridge_checksum_func_prism_load_config(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_LOAD_CONFIG_FROM
+#define UNIFFI_FFIDEF_UNIFFI_PRISM_BRIDGE_CHECKSUM_FUNC_PRISM_LOAD_CONFIG_FROM
+uint16_t uniffi_prism_bridge_checksum_func_prism_load_config_from(void
     
 );
 #endif

@@ -393,6 +393,19 @@ private struct FfiConverterUInt8: FfiConverterPrimitive {
     }
 }
 
+private struct FfiConverterUInt16: FfiConverterPrimitive {
+    typealias FfiType = UInt16
+    typealias SwiftType = UInt16
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
+        return try lift(readInt(&buf))
+    }
+
+    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
 private struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -429,6 +442,40 @@ private struct FfiConverterFloat: FfiConverterPrimitive {
 
     static func write(_ value: Float, into buf: inout [UInt8]) {
         writeFloat(&buf, lower(value))
+    }
+}
+
+private struct FfiConverterDouble: FfiConverterPrimitive {
+    typealias FfiType = Double
+    typealias SwiftType = Double
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+        return try lift(readDouble(&buf))
+    }
+
+    static func write(_ value: Double, into buf: inout [UInt8]) {
+        writeDouble(&buf, lower(value))
+    }
+}
+
+private struct FfiConverterBool: FfiConverter {
+    typealias FfiType = Int8
+    typealias SwiftType = Bool
+
+    static func lift(_ value: Int8) throws -> Bool {
+        return value != 0
+    }
+
+    static func lower(_ value: Bool) -> Int8 {
+        return value ? 1 : 0
+    }
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
+        return try lift(readInt(&buf))
+    }
+
+    static func write(_ value: Bool, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
     }
 }
 
@@ -649,6 +696,918 @@ public func FfiConverterTypeBridgeAgentState_lift(_ buf: RustBuffer) throws -> B
 
 public func FfiConverterTypeBridgeAgentState_lower(_ value: BridgeAgentState) -> RustBuffer {
     return FfiConverterTypeBridgeAgentState.lower(value)
+}
+
+public struct BridgeCacheConfigSection {
+    public var kvCacheTiers: UInt32
+    public var compressionRatio: Double
+    public var evolkvEnabled: Bool
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(kvCacheTiers: UInt32, compressionRatio: Double, evolkvEnabled: Bool) {
+        self.kvCacheTiers = kvCacheTiers
+        self.compressionRatio = compressionRatio
+        self.evolkvEnabled = evolkvEnabled
+    }
+}
+
+extension BridgeCacheConfigSection: Equatable, Hashable {
+    public static func == (lhs: BridgeCacheConfigSection, rhs: BridgeCacheConfigSection) -> Bool {
+        if lhs.kvCacheTiers != rhs.kvCacheTiers {
+            return false
+        }
+        if lhs.compressionRatio != rhs.compressionRatio {
+            return false
+        }
+        if lhs.evolkvEnabled != rhs.evolkvEnabled {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(kvCacheTiers)
+        hasher.combine(compressionRatio)
+        hasher.combine(evolkvEnabled)
+    }
+}
+
+public struct FfiConverterTypeBridgeCacheConfigSection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeCacheConfigSection {
+        return
+            try BridgeCacheConfigSection(
+                kvCacheTiers: FfiConverterUInt32.read(from: &buf),
+                compressionRatio: FfiConverterDouble.read(from: &buf),
+                evolkvEnabled: FfiConverterBool.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeCacheConfigSection, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.kvCacheTiers, into: &buf)
+        FfiConverterDouble.write(value.compressionRatio, into: &buf)
+        FfiConverterBool.write(value.evolkvEnabled, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeCacheConfigSection_lift(_ buf: RustBuffer) throws -> BridgeCacheConfigSection {
+    return try FfiConverterTypeBridgeCacheConfigSection.lift(buf)
+}
+
+public func FfiConverterTypeBridgeCacheConfigSection_lower(_ value: BridgeCacheConfigSection) -> RustBuffer {
+    return FfiConverterTypeBridgeCacheConfigSection.lower(value)
+}
+
+public struct BridgeClusterConfigSection {
+    public var exoEnabled: Bool
+    public var exoPort: UInt16
+    public var autoscaleMin: UInt32
+    public var autoscaleMax: UInt32
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(exoEnabled: Bool, exoPort: UInt16, autoscaleMin: UInt32, autoscaleMax: UInt32) {
+        self.exoEnabled = exoEnabled
+        self.exoPort = exoPort
+        self.autoscaleMin = autoscaleMin
+        self.autoscaleMax = autoscaleMax
+    }
+}
+
+extension BridgeClusterConfigSection: Equatable, Hashable {
+    public static func == (lhs: BridgeClusterConfigSection, rhs: BridgeClusterConfigSection) -> Bool {
+        if lhs.exoEnabled != rhs.exoEnabled {
+            return false
+        }
+        if lhs.exoPort != rhs.exoPort {
+            return false
+        }
+        if lhs.autoscaleMin != rhs.autoscaleMin {
+            return false
+        }
+        if lhs.autoscaleMax != rhs.autoscaleMax {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(exoEnabled)
+        hasher.combine(exoPort)
+        hasher.combine(autoscaleMin)
+        hasher.combine(autoscaleMax)
+    }
+}
+
+public struct FfiConverterTypeBridgeClusterConfigSection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeClusterConfigSection {
+        return
+            try BridgeClusterConfigSection(
+                exoEnabled: FfiConverterBool.read(from: &buf),
+                exoPort: FfiConverterUInt16.read(from: &buf),
+                autoscaleMin: FfiConverterUInt32.read(from: &buf),
+                autoscaleMax: FfiConverterUInt32.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeClusterConfigSection, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.exoEnabled, into: &buf)
+        FfiConverterUInt16.write(value.exoPort, into: &buf)
+        FfiConverterUInt32.write(value.autoscaleMin, into: &buf)
+        FfiConverterUInt32.write(value.autoscaleMax, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeClusterConfigSection_lift(_ buf: RustBuffer) throws -> BridgeClusterConfigSection {
+    return try FfiConverterTypeBridgeClusterConfigSection.lift(buf)
+}
+
+public func FfiConverterTypeBridgeClusterConfigSection_lower(_ value: BridgeClusterConfigSection) -> RustBuffer {
+    return FfiConverterTypeBridgeClusterConfigSection.lower(value)
+}
+
+/**
+ * Device information for host-app consumption across the FFI bridge.
+ */
+public struct BridgeDeviceInfo {
+    /**
+     * Numeric device id.
+     */
+    public var id: UInt32
+    /**
+     * Broad device category.
+     */
+    public var kind: BridgeDeviceKind
+    /**
+     * Specific compute backend.
+     */
+    public var backend: BridgeBackendKind
+    /**
+     * Human-readable name.
+     */
+    public var name: String
+    /**
+     * Vendor string.
+     */
+    public var vendor: String
+    /**
+     * Driver version.
+     */
+    public var driverVersion: String
+    /**
+     * Memory properties.
+     */
+    public var memory: BridgeDeviceMemoryInfo
+    /**
+     * Compute units / cores.
+     */
+    public var computeUnits: UInt32
+    /**
+     * Core clock in MHz.
+     */
+    public var clockMhz: UInt32
+    /**
+     * NPU/ANE core count.
+     */
+    public var aneCores: UInt32
+    /**
+     * Supported data formats.
+     */
+    public var supportsF16: Bool
+    public var supportsBf16: Bool
+    public var supportsInt8: Bool
+    public var supportsTernary: Bool
+    /**
+     * PCIe link for discrete devices.
+     */
+    public var pcieLink: BridgePcieLinkInfo?
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(
+        /* 
+         * Numeric device id.
+         */ id: UInt32,
+        /* 
+            * Broad device category.
+            */ kind: BridgeDeviceKind,
+        /* 
+            * Specific compute backend.
+            */ backend: BridgeBackendKind,
+        /* 
+            * Human-readable name.
+            */ name: String,
+        /* 
+            * Vendor string.
+            */ vendor: String,
+        /* 
+            * Driver version.
+            */ driverVersion: String,
+        /* 
+            * Memory properties.
+            */ memory: BridgeDeviceMemoryInfo,
+        /* 
+            * Compute units / cores.
+            */ computeUnits: UInt32,
+        /* 
+            * Core clock in MHz.
+            */ clockMhz: UInt32,
+        /* 
+            * NPU/ANE core count.
+            */ aneCores: UInt32,
+        /* 
+            * Supported data formats.
+            */ supportsF16: Bool, supportsBf16: Bool, supportsInt8: Bool, supportsTernary: Bool,
+        /* 
+            * PCIe link for discrete devices.
+            */ pcieLink: BridgePcieLinkInfo?
+    ) {
+        self.id = id
+        self.kind = kind
+        self.backend = backend
+        self.name = name
+        self.vendor = vendor
+        self.driverVersion = driverVersion
+        self.memory = memory
+        self.computeUnits = computeUnits
+        self.clockMhz = clockMhz
+        self.aneCores = aneCores
+        self.supportsF16 = supportsF16
+        self.supportsBf16 = supportsBf16
+        self.supportsInt8 = supportsInt8
+        self.supportsTernary = supportsTernary
+        self.pcieLink = pcieLink
+    }
+}
+
+extension BridgeDeviceInfo: Equatable, Hashable {
+    public static func == (lhs: BridgeDeviceInfo, rhs: BridgeDeviceInfo) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.backend != rhs.backend {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.vendor != rhs.vendor {
+            return false
+        }
+        if lhs.driverVersion != rhs.driverVersion {
+            return false
+        }
+        if lhs.memory != rhs.memory {
+            return false
+        }
+        if lhs.computeUnits != rhs.computeUnits {
+            return false
+        }
+        if lhs.clockMhz != rhs.clockMhz {
+            return false
+        }
+        if lhs.aneCores != rhs.aneCores {
+            return false
+        }
+        if lhs.supportsF16 != rhs.supportsF16 {
+            return false
+        }
+        if lhs.supportsBf16 != rhs.supportsBf16 {
+            return false
+        }
+        if lhs.supportsInt8 != rhs.supportsInt8 {
+            return false
+        }
+        if lhs.supportsTernary != rhs.supportsTernary {
+            return false
+        }
+        if lhs.pcieLink != rhs.pcieLink {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(kind)
+        hasher.combine(backend)
+        hasher.combine(name)
+        hasher.combine(vendor)
+        hasher.combine(driverVersion)
+        hasher.combine(memory)
+        hasher.combine(computeUnits)
+        hasher.combine(clockMhz)
+        hasher.combine(aneCores)
+        hasher.combine(supportsF16)
+        hasher.combine(supportsBf16)
+        hasher.combine(supportsInt8)
+        hasher.combine(supportsTernary)
+        hasher.combine(pcieLink)
+    }
+}
+
+public struct FfiConverterTypeBridgeDeviceInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeDeviceInfo {
+        return
+            try BridgeDeviceInfo(
+                id: FfiConverterUInt32.read(from: &buf),
+                kind: FfiConverterTypeBridgeDeviceKind.read(from: &buf),
+                backend: FfiConverterTypeBridgeBackendKind.read(from: &buf),
+                name: FfiConverterString.read(from: &buf),
+                vendor: FfiConverterString.read(from: &buf),
+                driverVersion: FfiConverterString.read(from: &buf),
+                memory: FfiConverterTypeBridgeDeviceMemoryInfo.read(from: &buf),
+                computeUnits: FfiConverterUInt32.read(from: &buf),
+                clockMhz: FfiConverterUInt32.read(from: &buf),
+                aneCores: FfiConverterUInt32.read(from: &buf),
+                supportsF16: FfiConverterBool.read(from: &buf),
+                supportsBf16: FfiConverterBool.read(from: &buf),
+                supportsInt8: FfiConverterBool.read(from: &buf),
+                supportsTernary: FfiConverterBool.read(from: &buf),
+                pcieLink: FfiConverterOptionTypeBridgePcieLinkInfo.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeDeviceInfo, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.id, into: &buf)
+        FfiConverterTypeBridgeDeviceKind.write(value.kind, into: &buf)
+        FfiConverterTypeBridgeBackendKind.write(value.backend, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.vendor, into: &buf)
+        FfiConverterString.write(value.driverVersion, into: &buf)
+        FfiConverterTypeBridgeDeviceMemoryInfo.write(value.memory, into: &buf)
+        FfiConverterUInt32.write(value.computeUnits, into: &buf)
+        FfiConverterUInt32.write(value.clockMhz, into: &buf)
+        FfiConverterUInt32.write(value.aneCores, into: &buf)
+        FfiConverterBool.write(value.supportsF16, into: &buf)
+        FfiConverterBool.write(value.supportsBf16, into: &buf)
+        FfiConverterBool.write(value.supportsInt8, into: &buf)
+        FfiConverterBool.write(value.supportsTernary, into: &buf)
+        FfiConverterOptionTypeBridgePcieLinkInfo.write(value.pcieLink, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeDeviceInfo_lift(_ buf: RustBuffer) throws -> BridgeDeviceInfo {
+    return try FfiConverterTypeBridgeDeviceInfo.lift(buf)
+}
+
+public func FfiConverterTypeBridgeDeviceInfo_lower(_ value: BridgeDeviceInfo) -> RustBuffer {
+    return FfiConverterTypeBridgeDeviceInfo.lower(value)
+}
+
+/**
+ * Bridge version of DeviceInfo for UniFFI export.
+ */
+public struct BridgeDeviceMemoryInfo {
+    public var totalBytes: UInt64
+    public var freeBytes: UInt64
+    public var bandwidthGbPerSec: Double
+    public var unifiedWithCpu: Bool
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(totalBytes: UInt64, freeBytes: UInt64, bandwidthGbPerSec: Double, unifiedWithCpu: Bool) {
+        self.totalBytes = totalBytes
+        self.freeBytes = freeBytes
+        self.bandwidthGbPerSec = bandwidthGbPerSec
+        self.unifiedWithCpu = unifiedWithCpu
+    }
+}
+
+extension BridgeDeviceMemoryInfo: Equatable, Hashable {
+    public static func == (lhs: BridgeDeviceMemoryInfo, rhs: BridgeDeviceMemoryInfo) -> Bool {
+        if lhs.totalBytes != rhs.totalBytes {
+            return false
+        }
+        if lhs.freeBytes != rhs.freeBytes {
+            return false
+        }
+        if lhs.bandwidthGbPerSec != rhs.bandwidthGbPerSec {
+            return false
+        }
+        if lhs.unifiedWithCpu != rhs.unifiedWithCpu {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(totalBytes)
+        hasher.combine(freeBytes)
+        hasher.combine(bandwidthGbPerSec)
+        hasher.combine(unifiedWithCpu)
+    }
+}
+
+public struct FfiConverterTypeBridgeDeviceMemoryInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeDeviceMemoryInfo {
+        return
+            try BridgeDeviceMemoryInfo(
+                totalBytes: FfiConverterUInt64.read(from: &buf),
+                freeBytes: FfiConverterUInt64.read(from: &buf),
+                bandwidthGbPerSec: FfiConverterDouble.read(from: &buf),
+                unifiedWithCpu: FfiConverterBool.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeDeviceMemoryInfo, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.totalBytes, into: &buf)
+        FfiConverterUInt64.write(value.freeBytes, into: &buf)
+        FfiConverterDouble.write(value.bandwidthGbPerSec, into: &buf)
+        FfiConverterBool.write(value.unifiedWithCpu, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeDeviceMemoryInfo_lift(_ buf: RustBuffer) throws -> BridgeDeviceMemoryInfo {
+    return try FfiConverterTypeBridgeDeviceMemoryInfo.lift(buf)
+}
+
+public func FfiConverterTypeBridgeDeviceMemoryInfo_lower(_ value: BridgeDeviceMemoryInfo) -> RustBuffer {
+    return FfiConverterTypeBridgeDeviceMemoryInfo.lower(value)
+}
+
+public struct BridgeModelConfigSection {
+    public var modelPath: String?
+    public var autoDownload: Bool
+    public var maxModelCacheGb: Double
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(modelPath: String?, autoDownload: Bool, maxModelCacheGb: Double) {
+        self.modelPath = modelPath
+        self.autoDownload = autoDownload
+        self.maxModelCacheGb = maxModelCacheGb
+    }
+}
+
+extension BridgeModelConfigSection: Equatable, Hashable {
+    public static func == (lhs: BridgeModelConfigSection, rhs: BridgeModelConfigSection) -> Bool {
+        if lhs.modelPath != rhs.modelPath {
+            return false
+        }
+        if lhs.autoDownload != rhs.autoDownload {
+            return false
+        }
+        if lhs.maxModelCacheGb != rhs.maxModelCacheGb {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(modelPath)
+        hasher.combine(autoDownload)
+        hasher.combine(maxModelCacheGb)
+    }
+}
+
+public struct FfiConverterTypeBridgeModelConfigSection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeModelConfigSection {
+        return
+            try BridgeModelConfigSection(
+                modelPath: FfiConverterOptionString.read(from: &buf),
+                autoDownload: FfiConverterBool.read(from: &buf),
+                maxModelCacheGb: FfiConverterDouble.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeModelConfigSection, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.modelPath, into: &buf)
+        FfiConverterBool.write(value.autoDownload, into: &buf)
+        FfiConverterDouble.write(value.maxModelCacheGb, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeModelConfigSection_lift(_ buf: RustBuffer) throws -> BridgeModelConfigSection {
+    return try FfiConverterTypeBridgeModelConfigSection.lift(buf)
+}
+
+public func FfiConverterTypeBridgeModelConfigSection_lower(_ value: BridgeModelConfigSection) -> RustBuffer {
+    return FfiConverterTypeBridgeModelConfigSection.lower(value)
+}
+
+/**
+ * Per-operation backend routing for decoder layers.
+ */
+public struct BridgeOperationRoute {
+    public var rmsNorm: UInt32
+    public var silu: UInt32
+    public var matmul: UInt32
+    public var attention: UInt32
+    public var softmax: UInt32
+    public var rope: UInt32
+    public var add: UInt32
+    public var multiply: UInt32
+    public var transpose: UInt32
+    public var reshape: UInt32
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(rmsNorm: UInt32, silu: UInt32, matmul: UInt32, attention: UInt32, softmax: UInt32, rope: UInt32, add: UInt32, multiply: UInt32, transpose: UInt32, reshape: UInt32) {
+        self.rmsNorm = rmsNorm
+        self.silu = silu
+        self.matmul = matmul
+        self.attention = attention
+        self.softmax = softmax
+        self.rope = rope
+        self.add = add
+        self.multiply = multiply
+        self.transpose = transpose
+        self.reshape = reshape
+    }
+}
+
+extension BridgeOperationRoute: Equatable, Hashable {
+    public static func == (lhs: BridgeOperationRoute, rhs: BridgeOperationRoute) -> Bool {
+        if lhs.rmsNorm != rhs.rmsNorm {
+            return false
+        }
+        if lhs.silu != rhs.silu {
+            return false
+        }
+        if lhs.matmul != rhs.matmul {
+            return false
+        }
+        if lhs.attention != rhs.attention {
+            return false
+        }
+        if lhs.softmax != rhs.softmax {
+            return false
+        }
+        if lhs.rope != rhs.rope {
+            return false
+        }
+        if lhs.add != rhs.add {
+            return false
+        }
+        if lhs.multiply != rhs.multiply {
+            return false
+        }
+        if lhs.transpose != rhs.transpose {
+            return false
+        }
+        if lhs.reshape != rhs.reshape {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(rmsNorm)
+        hasher.combine(silu)
+        hasher.combine(matmul)
+        hasher.combine(attention)
+        hasher.combine(softmax)
+        hasher.combine(rope)
+        hasher.combine(add)
+        hasher.combine(multiply)
+        hasher.combine(transpose)
+        hasher.combine(reshape)
+    }
+}
+
+public struct FfiConverterTypeBridgeOperationRoute: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeOperationRoute {
+        return
+            try BridgeOperationRoute(
+                rmsNorm: FfiConverterUInt32.read(from: &buf),
+                silu: FfiConverterUInt32.read(from: &buf),
+                matmul: FfiConverterUInt32.read(from: &buf),
+                attention: FfiConverterUInt32.read(from: &buf),
+                softmax: FfiConverterUInt32.read(from: &buf),
+                rope: FfiConverterUInt32.read(from: &buf),
+                add: FfiConverterUInt32.read(from: &buf),
+                multiply: FfiConverterUInt32.read(from: &buf),
+                transpose: FfiConverterUInt32.read(from: &buf),
+                reshape: FfiConverterUInt32.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeOperationRoute, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.rmsNorm, into: &buf)
+        FfiConverterUInt32.write(value.silu, into: &buf)
+        FfiConverterUInt32.write(value.matmul, into: &buf)
+        FfiConverterUInt32.write(value.attention, into: &buf)
+        FfiConverterUInt32.write(value.softmax, into: &buf)
+        FfiConverterUInt32.write(value.rope, into: &buf)
+        FfiConverterUInt32.write(value.add, into: &buf)
+        FfiConverterUInt32.write(value.multiply, into: &buf)
+        FfiConverterUInt32.write(value.transpose, into: &buf)
+        FfiConverterUInt32.write(value.reshape, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeOperationRoute_lift(_ buf: RustBuffer) throws -> BridgeOperationRoute {
+    return try FfiConverterTypeBridgeOperationRoute.lift(buf)
+}
+
+public func FfiConverterTypeBridgeOperationRoute_lower(_ value: BridgeOperationRoute) -> RustBuffer {
+    return FfiConverterTypeBridgeOperationRoute.lower(value)
+}
+
+/**
+ * Bridge version of PcieLinkInfo for UniFFI export.
+ */
+public struct BridgePcieLinkInfo {
+    public var generation: UInt32
+    public var lanes: UInt32
+    public var maxSpeedGbPerSec: Double
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(generation: UInt32, lanes: UInt32, maxSpeedGbPerSec: Double) {
+        self.generation = generation
+        self.lanes = lanes
+        self.maxSpeedGbPerSec = maxSpeedGbPerSec
+    }
+}
+
+extension BridgePcieLinkInfo: Equatable, Hashable {
+    public static func == (lhs: BridgePcieLinkInfo, rhs: BridgePcieLinkInfo) -> Bool {
+        if lhs.generation != rhs.generation {
+            return false
+        }
+        if lhs.lanes != rhs.lanes {
+            return false
+        }
+        if lhs.maxSpeedGbPerSec != rhs.maxSpeedGbPerSec {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(generation)
+        hasher.combine(lanes)
+        hasher.combine(maxSpeedGbPerSec)
+    }
+}
+
+public struct FfiConverterTypeBridgePcieLinkInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgePcieLinkInfo {
+        return
+            try BridgePcieLinkInfo(
+                generation: FfiConverterUInt32.read(from: &buf),
+                lanes: FfiConverterUInt32.read(from: &buf),
+                maxSpeedGbPerSec: FfiConverterDouble.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgePcieLinkInfo, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.generation, into: &buf)
+        FfiConverterUInt32.write(value.lanes, into: &buf)
+        FfiConverterDouble.write(value.maxSpeedGbPerSec, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgePcieLinkInfo_lift(_ buf: RustBuffer) throws -> BridgePcieLinkInfo {
+    return try FfiConverterTypeBridgePcieLinkInfo.lift(buf)
+}
+
+public func FfiConverterTypeBridgePcieLinkInfo_lower(_ value: BridgePcieLinkInfo) -> RustBuffer {
+    return FfiConverterTypeBridgePcieLinkInfo.lower(value)
+}
+
+/**
+ * Full server configuration for the Swift host app.
+ */
+public struct BridgeServerConfig {
+    public var server: BridgeServerConfigSection
+    public var model: BridgeModelConfigSection
+    public var cache: BridgeCacheConfigSection
+    public var speculation: BridgeSpecConfigSection
+    public var cluster: BridgeClusterConfigSection
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(server: BridgeServerConfigSection, model: BridgeModelConfigSection, cache: BridgeCacheConfigSection, speculation: BridgeSpecConfigSection, cluster: BridgeClusterConfigSection) {
+        self.server = server
+        self.model = model
+        self.cache = cache
+        self.speculation = speculation
+        self.cluster = cluster
+    }
+}
+
+extension BridgeServerConfig: Equatable, Hashable {
+    public static func == (lhs: BridgeServerConfig, rhs: BridgeServerConfig) -> Bool {
+        if lhs.server != rhs.server {
+            return false
+        }
+        if lhs.model != rhs.model {
+            return false
+        }
+        if lhs.cache != rhs.cache {
+            return false
+        }
+        if lhs.speculation != rhs.speculation {
+            return false
+        }
+        if lhs.cluster != rhs.cluster {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(server)
+        hasher.combine(model)
+        hasher.combine(cache)
+        hasher.combine(speculation)
+        hasher.combine(cluster)
+    }
+}
+
+public struct FfiConverterTypeBridgeServerConfig: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeServerConfig {
+        return
+            try BridgeServerConfig(
+                server: FfiConverterTypeBridgeServerConfigSection.read(from: &buf),
+                model: FfiConverterTypeBridgeModelConfigSection.read(from: &buf),
+                cache: FfiConverterTypeBridgeCacheConfigSection.read(from: &buf),
+                speculation: FfiConverterTypeBridgeSpecConfigSection.read(from: &buf),
+                cluster: FfiConverterTypeBridgeClusterConfigSection.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeServerConfig, into buf: inout [UInt8]) {
+        FfiConverterTypeBridgeServerConfigSection.write(value.server, into: &buf)
+        FfiConverterTypeBridgeModelConfigSection.write(value.model, into: &buf)
+        FfiConverterTypeBridgeCacheConfigSection.write(value.cache, into: &buf)
+        FfiConverterTypeBridgeSpecConfigSection.write(value.speculation, into: &buf)
+        FfiConverterTypeBridgeClusterConfigSection.write(value.cluster, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeServerConfig_lift(_ buf: RustBuffer) throws -> BridgeServerConfig {
+    return try FfiConverterTypeBridgeServerConfig.lift(buf)
+}
+
+public func FfiConverterTypeBridgeServerConfig_lower(_ value: BridgeServerConfig) -> RustBuffer {
+    return FfiConverterTypeBridgeServerConfig.lower(value)
+}
+
+public struct BridgeServerConfigSection {
+    public var port: UInt16
+    public var host: String
+    public var maxConcurrent: UInt32
+    public var rateLimitPerMin: UInt32
+    public var rateLimitTokensPerSec: Double
+    public var rateLimitBurst: UInt64
+    public var logLevel: String
+    public var runtimeMode: String
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(port: UInt16, host: String, maxConcurrent: UInt32, rateLimitPerMin: UInt32, rateLimitTokensPerSec: Double, rateLimitBurst: UInt64, logLevel: String, runtimeMode: String) {
+        self.port = port
+        self.host = host
+        self.maxConcurrent = maxConcurrent
+        self.rateLimitPerMin = rateLimitPerMin
+        self.rateLimitTokensPerSec = rateLimitTokensPerSec
+        self.rateLimitBurst = rateLimitBurst
+        self.logLevel = logLevel
+        self.runtimeMode = runtimeMode
+    }
+}
+
+extension BridgeServerConfigSection: Equatable, Hashable {
+    public static func == (lhs: BridgeServerConfigSection, rhs: BridgeServerConfigSection) -> Bool {
+        if lhs.port != rhs.port {
+            return false
+        }
+        if lhs.host != rhs.host {
+            return false
+        }
+        if lhs.maxConcurrent != rhs.maxConcurrent {
+            return false
+        }
+        if lhs.rateLimitPerMin != rhs.rateLimitPerMin {
+            return false
+        }
+        if lhs.rateLimitTokensPerSec != rhs.rateLimitTokensPerSec {
+            return false
+        }
+        if lhs.rateLimitBurst != rhs.rateLimitBurst {
+            return false
+        }
+        if lhs.logLevel != rhs.logLevel {
+            return false
+        }
+        if lhs.runtimeMode != rhs.runtimeMode {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(port)
+        hasher.combine(host)
+        hasher.combine(maxConcurrent)
+        hasher.combine(rateLimitPerMin)
+        hasher.combine(rateLimitTokensPerSec)
+        hasher.combine(rateLimitBurst)
+        hasher.combine(logLevel)
+        hasher.combine(runtimeMode)
+    }
+}
+
+public struct FfiConverterTypeBridgeServerConfigSection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeServerConfigSection {
+        return
+            try BridgeServerConfigSection(
+                port: FfiConverterUInt16.read(from: &buf),
+                host: FfiConverterString.read(from: &buf),
+                maxConcurrent: FfiConverterUInt32.read(from: &buf),
+                rateLimitPerMin: FfiConverterUInt32.read(from: &buf),
+                rateLimitTokensPerSec: FfiConverterDouble.read(from: &buf),
+                rateLimitBurst: FfiConverterUInt64.read(from: &buf),
+                logLevel: FfiConverterString.read(from: &buf),
+                runtimeMode: FfiConverterString.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeServerConfigSection, into buf: inout [UInt8]) {
+        FfiConverterUInt16.write(value.port, into: &buf)
+        FfiConverterString.write(value.host, into: &buf)
+        FfiConverterUInt32.write(value.maxConcurrent, into: &buf)
+        FfiConverterUInt32.write(value.rateLimitPerMin, into: &buf)
+        FfiConverterDouble.write(value.rateLimitTokensPerSec, into: &buf)
+        FfiConverterUInt64.write(value.rateLimitBurst, into: &buf)
+        FfiConverterString.write(value.logLevel, into: &buf)
+        FfiConverterString.write(value.runtimeMode, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeServerConfigSection_lift(_ buf: RustBuffer) throws -> BridgeServerConfigSection {
+    return try FfiConverterTypeBridgeServerConfigSection.lift(buf)
+}
+
+public func FfiConverterTypeBridgeServerConfigSection_lower(_ value: BridgeServerConfigSection) -> RustBuffer {
+    return FfiConverterTypeBridgeServerConfigSection.lower(value)
+}
+
+public struct BridgeSpecConfigSection {
+    public var draftCount: UInt32
+    public var draftLength: UInt32
+    public var spechubEnabled: Bool
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(draftCount: UInt32, draftLength: UInt32, spechubEnabled: Bool) {
+        self.draftCount = draftCount
+        self.draftLength = draftLength
+        self.spechubEnabled = spechubEnabled
+    }
+}
+
+extension BridgeSpecConfigSection: Equatable, Hashable {
+    public static func == (lhs: BridgeSpecConfigSection, rhs: BridgeSpecConfigSection) -> Bool {
+        if lhs.draftCount != rhs.draftCount {
+            return false
+        }
+        if lhs.draftLength != rhs.draftLength {
+            return false
+        }
+        if lhs.spechubEnabled != rhs.spechubEnabled {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(draftCount)
+        hasher.combine(draftLength)
+        hasher.combine(spechubEnabled)
+    }
+}
+
+public struct FfiConverterTypeBridgeSpecConfigSection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeSpecConfigSection {
+        return
+            try BridgeSpecConfigSection(
+                draftCount: FfiConverterUInt32.read(from: &buf),
+                draftLength: FfiConverterUInt32.read(from: &buf),
+                spechubEnabled: FfiConverterBool.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: BridgeSpecConfigSection, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.draftCount, into: &buf)
+        FfiConverterUInt32.write(value.draftLength, into: &buf)
+        FfiConverterBool.write(value.spechubEnabled, into: &buf)
+    }
+}
+
+public func FfiConverterTypeBridgeSpecConfigSection_lift(_ buf: RustBuffer) throws -> BridgeSpecConfigSection {
+    return try FfiConverterTypeBridgeSpecConfigSection.lift(buf)
+}
+
+public func FfiConverterTypeBridgeSpecConfigSection_lower(_ value: BridgeSpecConfigSection) -> RustBuffer {
+    return FfiConverterTypeBridgeSpecConfigSection.lower(value)
 }
 
 /**
@@ -911,6 +1870,238 @@ public func FfiConverterTypeBridgeToolDefinition_lower(_ value: BridgeToolDefini
     return FfiConverterTypeBridgeToolDefinition.lower(value)
 }
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/* 
+ * Bridge version of BackendKind for UniFFI export.
+ */
+
+public enum BridgeBackendKind {
+    case metal
+    case cuda
+    case rocm
+    case levelZero
+    case coreMl
+    case ane
+    case accelerate
+    case candleCpu
+    case cpu
+    case tensix
+}
+
+public struct FfiConverterTypeBridgeBackendKind: FfiConverterRustBuffer {
+    typealias SwiftType = BridgeBackendKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeBackendKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        case 1: return .metal
+
+        case 2: return .cuda
+
+        case 3: return .rocm
+
+        case 4: return .levelZero
+
+        case 5: return .coreMl
+
+        case 6: return .ane
+
+        case 7: return .accelerate
+
+        case 8: return .candleCpu
+
+        case 9: return .cpu
+
+        case 10: return .tensix
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BridgeBackendKind, into buf: inout [UInt8]) {
+        switch value {
+        case .metal:
+            writeInt(&buf, Int32(1))
+
+        case .cuda:
+            writeInt(&buf, Int32(2))
+
+        case .rocm:
+            writeInt(&buf, Int32(3))
+
+        case .levelZero:
+            writeInt(&buf, Int32(4))
+
+        case .coreMl:
+            writeInt(&buf, Int32(5))
+
+        case .ane:
+            writeInt(&buf, Int32(6))
+
+        case .accelerate:
+            writeInt(&buf, Int32(7))
+
+        case .candleCpu:
+            writeInt(&buf, Int32(8))
+
+        case .cpu:
+            writeInt(&buf, Int32(9))
+
+        case .tensix:
+            writeInt(&buf, Int32(10))
+        }
+    }
+}
+
+public func FfiConverterTypeBridgeBackendKind_lift(_ buf: RustBuffer) throws -> BridgeBackendKind {
+    return try FfiConverterTypeBridgeBackendKind.lift(buf)
+}
+
+public func FfiConverterTypeBridgeBackendKind_lower(_ value: BridgeBackendKind) -> RustBuffer {
+    return FfiConverterTypeBridgeBackendKind.lower(value)
+}
+
+extension BridgeBackendKind: Equatable, Hashable {}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/* 
+ * Bridge version of CompileQuantMode for UniFFI export.
+ */
+
+public enum BridgeCompileQuantMode {
+    case nf4(groupSize: UInt32)
+    case af8(groupSize: UInt32)
+    case ternary(groupSize: UInt32)
+    case ternaryTile640(groupSize: UInt32)
+    case autoDetect
+}
+
+public struct FfiConverterTypeBridgeCompileQuantMode: FfiConverterRustBuffer {
+    typealias SwiftType = BridgeCompileQuantMode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeCompileQuantMode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        case 1: return try .nf4(groupSize: FfiConverterUInt32.read(from: &buf))
+
+        case 2: return try .af8(groupSize: FfiConverterUInt32.read(from: &buf))
+
+        case 3: return try .ternary(groupSize: FfiConverterUInt32.read(from: &buf))
+
+        case 4: return try .ternaryTile640(groupSize: FfiConverterUInt32.read(from: &buf))
+
+        case 5: return .autoDetect
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BridgeCompileQuantMode, into buf: inout [UInt8]) {
+        switch value {
+        case let .nf4(groupSize):
+            writeInt(&buf, Int32(1))
+            FfiConverterUInt32.write(groupSize, into: &buf)
+
+        case let .af8(groupSize):
+            writeInt(&buf, Int32(2))
+            FfiConverterUInt32.write(groupSize, into: &buf)
+
+        case let .ternary(groupSize):
+            writeInt(&buf, Int32(3))
+            FfiConverterUInt32.write(groupSize, into: &buf)
+
+        case let .ternaryTile640(groupSize):
+            writeInt(&buf, Int32(4))
+            FfiConverterUInt32.write(groupSize, into: &buf)
+
+        case .autoDetect:
+            writeInt(&buf, Int32(5))
+        }
+    }
+}
+
+public func FfiConverterTypeBridgeCompileQuantMode_lift(_ buf: RustBuffer) throws -> BridgeCompileQuantMode {
+    return try FfiConverterTypeBridgeCompileQuantMode.lift(buf)
+}
+
+public func FfiConverterTypeBridgeCompileQuantMode_lower(_ value: BridgeCompileQuantMode) -> RustBuffer {
+    return FfiConverterTypeBridgeCompileQuantMode.lower(value)
+}
+
+extension BridgeCompileQuantMode: Equatable, Hashable {}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/* 
+ * Bridge version of DeviceKind for UniFFI export.
+ */
+
+public enum BridgeDeviceKind {
+    case cpu
+    case gpuDiscrete
+    case gpuIntegrated
+    case gpuUnified
+    case npu
+    case accelerator
+}
+
+public struct FfiConverterTypeBridgeDeviceKind: FfiConverterRustBuffer {
+    typealias SwiftType = BridgeDeviceKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeDeviceKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        case 1: return .cpu
+
+        case 2: return .gpuDiscrete
+
+        case 3: return .gpuIntegrated
+
+        case 4: return .gpuUnified
+
+        case 5: return .npu
+
+        case 6: return .accelerator
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BridgeDeviceKind, into buf: inout [UInt8]) {
+        switch value {
+        case .cpu:
+            writeInt(&buf, Int32(1))
+
+        case .gpuDiscrete:
+            writeInt(&buf, Int32(2))
+
+        case .gpuIntegrated:
+            writeInt(&buf, Int32(3))
+
+        case .gpuUnified:
+            writeInt(&buf, Int32(4))
+
+        case .npu:
+            writeInt(&buf, Int32(5))
+
+        case .accelerator:
+            writeInt(&buf, Int32(6))
+        }
+    }
+}
+
+public func FfiConverterTypeBridgeDeviceKind_lift(_ buf: RustBuffer) throws -> BridgeDeviceKind {
+    return try FfiConverterTypeBridgeDeviceKind.lift(buf)
+}
+
+public func FfiConverterTypeBridgeDeviceKind_lower(_ value: BridgeDeviceKind) -> RustBuffer {
+    return FfiConverterTypeBridgeDeviceKind.lower(value)
+}
+
+extension BridgeDeviceKind: Equatable, Hashable {}
+
 /**
  * Errors that can cross the UniFFI boundary.
  */
@@ -943,6 +2134,168 @@ public struct FfiConverterTypeBridgeError: FfiConverterRustBuffer {
 extension BridgeError: Equatable, Hashable {}
 
 extension BridgeError: Error {}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/* 
+ * Bridge version of GenerationRegime for UniFFI export.
+ */
+
+public enum BridgeGenerationRegime {
+    case autoregressive
+    case discreteDiffusion
+}
+
+public struct FfiConverterTypeBridgeGenerationRegime: FfiConverterRustBuffer {
+    typealias SwiftType = BridgeGenerationRegime
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeGenerationRegime {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        case 1: return .autoregressive
+
+        case 2: return .discreteDiffusion
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BridgeGenerationRegime, into buf: inout [UInt8]) {
+        switch value {
+        case .autoregressive:
+            writeInt(&buf, Int32(1))
+
+        case .discreteDiffusion:
+            writeInt(&buf, Int32(2))
+        }
+    }
+}
+
+public func FfiConverterTypeBridgeGenerationRegime_lift(_ buf: RustBuffer) throws -> BridgeGenerationRegime {
+    return try FfiConverterTypeBridgeGenerationRegime.lift(buf)
+}
+
+public func FfiConverterTypeBridgeGenerationRegime_lower(_ value: BridgeGenerationRegime) -> RustBuffer {
+    return FfiConverterTypeBridgeGenerationRegime.lower(value)
+}
+
+extension BridgeGenerationRegime: Equatable, Hashable {}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/* 
+ * Bridge version of HardwareTarget for UniFFI export.
+ */
+
+public enum BridgeHardwareTarget {
+    case m1
+    case m1Pro
+    case m2
+    case m2Ultra
+    case m3Ultra
+}
+
+public struct FfiConverterTypeBridgeHardwareTarget: FfiConverterRustBuffer {
+    typealias SwiftType = BridgeHardwareTarget
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeHardwareTarget {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        case 1: return .m1
+
+        case 2: return .m1Pro
+
+        case 3: return .m2
+
+        case 4: return .m2Ultra
+
+        case 5: return .m3Ultra
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BridgeHardwareTarget, into buf: inout [UInt8]) {
+        switch value {
+        case .m1:
+            writeInt(&buf, Int32(1))
+
+        case .m1Pro:
+            writeInt(&buf, Int32(2))
+
+        case .m2:
+            writeInt(&buf, Int32(3))
+
+        case .m2Ultra:
+            writeInt(&buf, Int32(4))
+
+        case .m3Ultra:
+            writeInt(&buf, Int32(5))
+        }
+    }
+}
+
+public func FfiConverterTypeBridgeHardwareTarget_lift(_ buf: RustBuffer) throws -> BridgeHardwareTarget {
+    return try FfiConverterTypeBridgeHardwareTarget.lift(buf)
+}
+
+public func FfiConverterTypeBridgeHardwareTarget_lower(_ value: BridgeHardwareTarget) -> RustBuffer {
+    return FfiConverterTypeBridgeHardwareTarget.lower(value)
+}
+
+extension BridgeHardwareTarget: Equatable, Hashable {}
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/* 
+ * Bridge version of KvCacheMode for UniFFI export.
+ */
+
+public enum BridgeKvCacheMode {
+    case appendOnly
+    case fullRecompute
+    case blockCache
+}
+
+public struct FfiConverterTypeBridgeKvCacheMode: FfiConverterRustBuffer {
+    typealias SwiftType = BridgeKvCacheMode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeKvCacheMode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        case 1: return .appendOnly
+
+        case 2: return .fullRecompute
+
+        case 3: return .blockCache
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: BridgeKvCacheMode, into buf: inout [UInt8]) {
+        switch value {
+        case .appendOnly:
+            writeInt(&buf, Int32(1))
+
+        case .fullRecompute:
+            writeInt(&buf, Int32(2))
+
+        case .blockCache:
+            writeInt(&buf, Int32(3))
+        }
+    }
+}
+
+public func FfiConverterTypeBridgeKvCacheMode_lift(_ buf: RustBuffer) throws -> BridgeKvCacheMode {
+    return try FfiConverterTypeBridgeKvCacheMode.lift(buf)
+}
+
+public func FfiConverterTypeBridgeKvCacheMode_lower(_ value: BridgeKvCacheMode) -> RustBuffer {
+    return FfiConverterTypeBridgeKvCacheMode.lower(value)
+}
+
+extension BridgeKvCacheMode: Equatable, Hashable {}
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -1676,6 +3029,27 @@ private struct FfiConverterOptionString: FfiConverterRustBuffer {
     }
 }
 
+private struct FfiConverterOptionTypeBridgePcieLinkInfo: FfiConverterRustBuffer {
+    typealias SwiftType = BridgePcieLinkInfo?
+
+    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBridgePcieLinkInfo.write(value, into: &buf)
+    }
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBridgePcieLinkInfo.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
 private struct FfiConverterOptionCallbackInterfaceBrowserRuntimeDriver: FfiConverterRustBuffer {
     typealias SwiftType = BrowserRuntimeDriver?
 
@@ -1757,6 +3131,28 @@ private struct FfiConverterSequenceString: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             try seq.append(FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+private struct FfiConverterSequenceTypeBridgeDeviceInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [BridgeDeviceInfo]
+
+    static func write(_ value: [BridgeDeviceInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBridgeDeviceInfo.write(item, into: &buf)
+        }
+    }
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BridgeDeviceInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BridgeDeviceInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            try seq.append(FfiConverterTypeBridgeDeviceInfo.read(from: &buf))
         }
         return seq
     }
@@ -1909,6 +3305,32 @@ public func prismCompileGguf(ggufPath: String, outputDir: String, callback: Comp
 }
 
 /**
+ * Compile nf4-tile-640 weights into a .cimage using the CLI binary.
+ *
+ * For now this defers to the CLI; the direct bridge path will be wired
+ * once the nf4 cimage path is stabilised.
+ */
+public func prismCompileNf4(safetensorsDir: String, outputCimagePath: String, ttsRepo: String?, callback: CompilerProgressCallback?) throws -> String {
+    return try FfiConverterString.lift(rustCallWithError(FfiConverterTypeCompilerError.lift) {
+        uniffi_prism_bridge_fn_func_prism_compile_nf4(
+            FfiConverterString.lower(safetensorsDir),
+            FfiConverterString.lower(outputCimagePath),
+            FfiConverterOptionString.lower(ttsRepo),
+            FfiConverterOptionCallbackInterfaceCompilerProgressCallback.lower(callback), $0
+        )
+    })
+}
+
+/**
+ * Return the current server configuration as a JSON string.
+ */
+public func prismConfigJson() -> String {
+    return try! FfiConverterString.lift(try! rustCall {
+        uniffi_prism_bridge_fn_func_prism_config_json($0)
+    })
+}
+
+/**
  * Return the default set of sandbox file tools (read_file, write_file, etc.)
  * as JSON strings that the model can consume.
  */
@@ -1916,6 +3338,38 @@ public func prismDefaultTools() -> [BridgeToolDefinition] {
     return try! FfiConverterSequenceTypeBridgeToolDefinition.lift(try! rustCall {
         uniffi_prism_bridge_fn_func_prism_default_tools($0)
     })
+}
+
+/**
+ * Return the number of device slots (for Swift-side table sizing).
+ */
+public func prismDeviceCount() -> UInt32 {
+    return try! FfiConverterUInt32.lift(try! rustCall {
+        uniffi_prism_bridge_fn_func_prism_device_count($0)
+    })
+}
+
+/**
+ * Return a JSON string of all devices (for agent serialization).
+ */
+public func prismDeviceJson() -> String {
+    return try! FfiConverterString.lift(try! rustCall {
+        uniffi_prism_bridge_fn_func_prism_device_json($0)
+    })
+}
+
+/**
+ * Generate streaming audio (TTS) from text.
+ */
+public func prismGenerateAudio(cimagePath: String, modelDir: String, text: String, callback: MultimodalStreamCallback) {
+    try! rustCall {
+        uniffi_prism_bridge_fn_func_prism_generate_audio(
+            FfiConverterString.lower(cimagePath),
+            FfiConverterString.lower(modelDir),
+            FfiConverterString.lower(text),
+            FfiConverterCallbackInterfaceMultimodalStreamCallback.lower(callback), $0
+        )
+    }
 }
 
 /**
@@ -1933,6 +3387,37 @@ public func prismInferMultimodalStream(cimagePath: String, modelDir: String, pro
             FfiConverterCallbackInterfaceMultimodalStreamCallback.lower(callback), $0
         )
     }
+}
+
+/**
+ * List all compute devices available on this host.
+ */
+public func prismListDevices() -> [BridgeDeviceInfo] {
+    return try! FfiConverterSequenceTypeBridgeDeviceInfo.lift(try! rustCall {
+        uniffi_prism_bridge_fn_func_prism_list_devices($0)
+    })
+}
+
+/**
+ * Load the server configuration from the default config file path
+ * ($HOME/.tribunus/config.toml), environment variables, and defaults.
+ */
+public func prismLoadConfig() -> BridgeServerConfig {
+    return try! FfiConverterTypeBridgeServerConfig.lift(try! rustCall {
+        uniffi_prism_bridge_fn_func_prism_load_config($0)
+    })
+}
+
+/**
+ * Load the server configuration from a specific TOML config file path.
+ * Falls back to defaults if the file cannot be read.
+ */
+public func prismLoadConfigFrom(path: String) -> BridgeServerConfig {
+    return try! FfiConverterTypeBridgeServerConfig.lift(try! rustCall {
+        uniffi_prism_bridge_fn_func_prism_load_config_from(
+            FfiConverterString.lower(path), $0
+        )
+    })
 }
 
 /**
@@ -1990,10 +3475,34 @@ private var initializationResult: InitializationResult {
     if uniffi_prism_bridge_checksum_func_prism_compile_gguf() != 38930 {
         return InitializationResult.apiChecksumMismatch
     }
+    if uniffi_prism_bridge_checksum_func_prism_compile_nf4() != 7056 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_func_prism_config_json() != 47943 {
+        return InitializationResult.apiChecksumMismatch
+    }
     if uniffi_prism_bridge_checksum_func_prism_default_tools() != 31886 {
         return InitializationResult.apiChecksumMismatch
     }
+    if uniffi_prism_bridge_checksum_func_prism_device_count() != 60696 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_func_prism_device_json() != 56459 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_func_prism_generate_audio() != 54144 {
+        return InitializationResult.apiChecksumMismatch
+    }
     if uniffi_prism_bridge_checksum_func_prism_infer_multimodal_stream() != 510 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_func_prism_list_devices() != 45904 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_func_prism_load_config() != 878 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_prism_bridge_checksum_func_prism_load_config_from() != 25938 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_prism_bridge_checksum_func_prism_run_js() != 17689 {
@@ -2002,7 +3511,7 @@ private var initializationResult: InitializationResult {
     if uniffi_prism_bridge_checksum_func_prism_xray_navigate() != 53699 {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_prism_bridge_checksum_constructor_bridgemultiplexer_load() != 59071 {
+    if uniffi_prism_bridge_checksum_constructor_bridgemultiplexer_load() != 29188 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_prism_bridge_checksum_method_browserruntimedriver_navigate() != 25514 {

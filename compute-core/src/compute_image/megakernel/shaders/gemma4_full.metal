@@ -94,6 +94,17 @@ struct EpochReceiptData {
 };
 
 
+#ifdef TTS_MODE
+constant uint HIDDEN_DIM      = 2048;
+constant uint LAYERS          = 28;
+constant uint NUM_Q_HEADS     = 8;
+constant uint NUM_KV_HEADS    = 8;
+constant uint HEAD_DIM        = 256;
+constant uint GLOBAL_HEAD_DIM = 256;
+constant uint FFN_INTER      = 8192;
+constant uint VOCAB_SIZE      = 2048;
+constant uint MAX_CTX         = 4096;
+#else
 constant uint HIDDEN_DIM      = 3840;
 constant uint LAYERS          = 48;
 constant uint NUM_Q_HEADS     = 16;
@@ -103,10 +114,13 @@ constant uint GLOBAL_HEAD_DIM = 512;
 constant uint FFN_INTER      = 15360;
 constant uint VOCAB_SIZE      = 262144;
 constant uint MAX_CTX         = 2048;
+#endif
 constant uint MAGIC_DIV3      = 2863311531u;
-constant uint O_ROWS          = 4096;
-constant uint DOWN_ROWS       = 15360;
+constant uint O_ROWS          = NUM_Q_HEADS * HEAD_DIM;
+constant uint DOWN_ROWS       = FFN_INTER;
 constant uint NUM_CENTROIDS   = 256;
+
+constant uint Q_HEADS_PER_KV = NUM_Q_HEADS / NUM_KV_HEADS;
 
 constant uint NUM_SINKS = 4;     // first 4 positions are permanent attention sinks (StreamingLLM)
 constant uint KV_BLOCK           = 256;
@@ -608,8 +622,8 @@ kernel void gemma4_full_decode_persistent(
             threadgroup_barrier(mem_flags::mem_device);
 
             // --- Process 2 Q heads in this KV group ---
-            for (uint q_pair = 0; q_pair < 2; ++q_pair) {
-                uint qh = 2 * kv_h + q_pair;
+            for (uint q_pair = 0; q_pair < Q_HEADS_PER_KV; ++q_pair) {
+                uint qh = Q_HEADS_PER_KV * kv_h + q_pair;
 
                 // --- Q proj -> q_chunk[0..h_dim] ---
                 for (uint o = 0; o < h_dim; o += 32) {
@@ -1881,8 +1895,8 @@ kernel void persistent_decode_worker(
             threadgroup_barrier(mem_flags::mem_device);
 
             // --- Process 2 Q heads in this KV group ---
-            for (uint q_pair = 0; q_pair < 2; ++q_pair) {
-                uint qh = 2 * kv_h + q_pair;
+            for (uint q_pair = 0; q_pair < Q_HEADS_PER_KV; ++q_pair) {
+                uint qh = Q_HEADS_PER_KV * kv_h + q_pair;
 
                 // --- Q proj -> q_chunk[0..h_dim] ---
                 for (uint o = 0; o < h_dim; o += 32) {

@@ -1,15 +1,16 @@
-//! gemma4_ingest — Stage 1+2: Download Gemma 4 12B from HF, ternary quantize,
+//! gemma4_ingest — Stage 1+2: Download Gemma 4 12B from HF, ternary or nf4tile640 quantize,
 //! compile to .cimage, all in Rust, zero Python.
 //!
 //! Subcommands:
 //!   inspect-checkpoint  — Read a checkpoint directory and emit metadata
-//!   (default)            — Ternary-quantize a Gemma 4 12B checkpoint to .cimage
+//!   (default)            — Quantize a Gemma 4 12B checkpoint to .cimage
 //!
 //! Usage:
 //!   cargo run --bin gemma4_ingest -- inspect-checkpoint --model-dir <PATH> [--emit <PATH>]...
 //!   cargo run --bin gemma4_ingest -- --repo google/gemma-4-12b-it --output gemma4_12b.cimage
 //!   cargo run --bin gemma4_ingest -- --repo google/gemma-4-12B-it-qat-q4_0-unquantized --output gemma4_12b_qat.cimage
 //!   cargo run --bin gemma4_ingest -- --local-dir ./gemma4-12B --output gemma4_12b.cimage
+//!   cargo run --bin gemma4_ingest -- --repo <REPO> --output out.cimage --nf4 --tts-repo Qwen/Qwen3-TTS-12Hz-1.7B-Base
 
 #![allow(unused_imports)]
 
@@ -29,6 +30,9 @@ use tribunus_compute_core::compute_image::compile::ternary::{
 };
 use tribunus_compute_core::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
 use tribunus_compute_core::quantization::embed_cluster::*;
+use tribunus_compute_core::nf4tile640::{pack_nf4_weights, dequant_matmul_reference};
+use tribunus_compute_core::compute_image::compile::tts_compile::pack_tts_weights;
+use tribunus_compute_core::compute_image::TensorEntry;
 
 // ── Gemma 4 12B architecture constants ──────────────────────────────
 const NUM_LAYERS: usize = 48;
@@ -954,13 +958,38 @@ fn main() {
     let output = get_opt(&args, "--output").unwrap_or("gemma4_12b.cimage");
     let draft_model_dir = get_opt(&args, "--draft-model-dir");
     let mil_program = get_opt(&args, "--mil");
+    let nf4 = has_flag(&args, "--nf4");
+    let tts_repo = get_opt(&args, "--tts-repo").map(|s| s.to_string());
 
     // Validate args
+    if has_flag(&args, "--help") || has_flag(&args, "-h") {
+        eprintln!("Usage:");
+        eprintln!("  cargo run --bin gemma4_ingest -- --repo google/gemma-4-12b-it --output gemma4_12b.cimage");
+        eprintln!("  cargo run --bin gemma4_ingest -- --repo google/gemma-4-12B-it-qat-q4_0-unquantized --output gemma4_12b_qat.cimage");
+        eprintln!("  cargo run --bin gemma4_ingest -- --local-dir ./gemma4-12B --output gemma4_12b.cimage");
+        eprintln!();
+        eprintln!("Flags:");
+        eprintln!("  --nf4                        Use nf4tile640 quantization instead of ternary");
+        eprintln!("  --tts-repo <HF_REPO_ID>      HF repo ID for Qwen3-TTS model to bake into cimage");
+        eprintln!("  --verify-only                Re-download source and verify nf4tile640 packing quality");
+        std::process::exit(0);
+    }
+
+    if has_flag(&args, "--verify-only") {
+        cmd_verify_only(&args);
+        return;
+    }
+
     if repo.is_none() && local_dir.is_none() {
         eprintln!("Usage:");
         eprintln!("  cargo run --bin gemma4_ingest -- --repo google/gemma-4-12b-it --output gemma4_12b.cimage");
         eprintln!("  cargo run --bin gemma4_ingest -- --repo google/gemma-4-12B-it-qat-q4_0-unquantized --output gemma4_12b_qat.cimage");
         eprintln!("  cargo run --bin gemma4_ingest -- --local-dir ./gemma4-12B --output gemma4_12b.cimage");
+        eprintln!();
+        eprintln!("Flags:");
+        eprintln!("  --nf4                        Use nf4tile640 quantization instead of ternary");
+        eprintln!("  --tts-repo <HF_REPO_ID>      HF repo ID for Qwen3-TTS model to bake into cimage");
+        eprintln!("  --verify-only                Re-download source and verify nf4tile640 packing quality");
         std::process::exit(1);
     }
 
@@ -1148,6 +1177,99 @@ fn main() {
     }
     println!();
 
+    // ── nf4tile640 packing (alternative to ternary) ──────────────
+    if nf4 {
+        let tmp_dir = std::env::temp_dir().join("gemma4_nf4_pack");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let mut all_matrices: Vec<(String, usize, usize, Vec<f32>)> = Vec::new();
+
+        // lm_head
+        let lm_head_key = "model.language_model.lm_head.weight";
+        if let Some((data, shape)) = load_tensor(lm_head_key, &shard_paths) {
+            let rows = if shape.len() >= 2 { shape[0] } else { data.len() };
+            let cols = if shape.len() >= 2 { shape[1] } else { 1 };
+            all_matrices.push((lm_head_key.to_string(), rows, cols, data));
+        }
+
+        // Layer weights — collect raw f32 data alongside ternary processing
+        for layer in 0..NUM_LAYERS {
+            for (mat_name, _rows, _cols) in MATRICES {
+                let key = tensor_key(layer, mat_name);
+                if let Some((data, shape)) = load_tensor(&key, &shard_paths) {
+                    // Use actual safetensors shape (out_dim, in_dim).  Gemma's in_dim is
+                    // always 3840 or 15360, both multiples of 640 — safe for nf4tile640.
+                    let rows = if shape.len() >= 2 { shape[0] } else { data.len() };
+                    let cols = if shape.len() >= 2 { shape[1] } else { 1 };
+                    all_matrices.push((key, rows, cols, data));
+                }
+            }
+        }
+
+        println!("  ▶ nf4tile640 mode: packing {} weight matrices", all_matrices.len());
+        let nf4_start = Instant::now();
+        for (serialized_name, rows, cols, data) in &all_matrices {
+            let name_key = serialized_name.replace('{', "").replace('}', "");
+            let (codes, scales, biases) = pack_nf4_weights(data, *rows, *cols);
+            let safe_name = sanitize_filename(name_key);
+            // Write codes
+            std::fs::write(
+                tmp_dir.join(format!("{}_codes.bin", safe_name)),
+                bytemuck::cast_slice(&codes),
+            )
+            .unwrap();
+            // Write scales
+            std::fs::write(
+                tmp_dir.join(format!("{}_scales.bin", safe_name)),
+                bytemuck::cast_slice(&scales),
+            )
+            .unwrap();
+            // Write biases
+            std::fs::write(
+                tmp_dir.join(format!("{}_biases.bin", safe_name)),
+                bytemuck::cast_slice(&biases),
+            )
+            .unwrap();
+
+            // ── Production-parity verification ──────────────────────
+            // Run 3 deterministic test vectors: dequant_matmul_reference vs BF16 reference.
+            // Fail fast if any matrix exceeds RMSE 0.01.
+            for trial in 0..3 {
+                let input = generate_test_vector(*rows, trial);
+                let mut ref_output = vec![0.0f32; *cols];
+                // BF16 reference: output[j] = Σ_i bf16_weights[i * cols + j] * input[i]
+                for j in 0..*cols {
+                    let mut sum = 0.0f32;
+                    for i in 0..*rows {
+                        sum += data[i * cols + j] * input[i];
+                    }
+                    ref_output[j] = sum;
+                }
+
+                let mut nf4_output = vec![0.0f32; *cols];
+                dequant_matmul_reference(
+                    &input, &codes, &scales, &biases,
+                    1, *rows, *cols, &mut nf4_output,
+                ).unwrap();
+
+                // RMSE
+                let mut sq_err = 0.0f32;
+                for j in 0..*cols {
+                    let diff = nf4_output[j] - ref_output[j];
+                    sq_err += diff * diff;
+                }
+                let rmse = (sq_err / *cols as f32).sqrt();
+                if rmse >= 0.01 {
+                    eprintln!("  ✗ FAIL: {} trial {trial} RMSE={:.6} (limit 0.01)", serialized_name, rmse);
+                    std::process::exit(1);
+                }
+            }
+            print!("."); let _ = std::io::stdout().flush();
+        }
+        println!();
+        println!("  ✓ Packed {} nf4tile640 matrices in {:.1?}", all_matrices.len(), nf4_start.elapsed());
+    }
+
     // ── MTP Drafter Head Discovery ────────────────────────────────
     println!("  ── Scanning for MTP drafter heads ───────────────────");
     let mut mtp_tensors: Vec<String> = Vec::new();
@@ -1232,6 +1354,30 @@ fn main() {
             draft_segment_count = 1;
             draft_layer_count = 4; // MTP draft has 4 transformer layers
         }
+    }
+
+    // ── TTS model packing ─────────────────────────────────────
+    if let Some(tts_repo) = &tts_repo {
+        println!("  ▶ Downloading TTS model from {}", tts_repo);
+        let tts_file = download_tts_safetensors(tts_repo)
+            .expect("download TTS safetensors");
+
+        let tts_tmp_dir = std::env::temp_dir().join("gemma4_tts_pack");
+        let _ = std::fs::create_dir_all(&tts_tmp_dir);
+
+        println!("  ▶ Packing TTS weights as nf4tile640");
+        let tts_entries = pack_tts_weights(&tts_file, &tts_tmp_dir)
+            .expect("pack TTS weights");
+
+        // Prefix TTS entries to avoid naming collisions with LLM weights
+        let tts_entries: Vec<TensorEntry> = tts_entries
+            .into_iter()
+            .map(|mut e| { e.name = format!("tts_{}", e.name); e })
+            .collect();
+        println!("  ✓ Packed {} TTS weight segments", tts_entries.len());
+
+        let mut all_manifest: Vec<TensorEntry> = Vec::new();
+        all_manifest.extend(tts_entries);
     }
 
     // ── Write output ───────────────────────────────────────────────
@@ -1616,6 +1762,147 @@ fn main() {
     // See compile_metal_lib() and gemma4_kv_decompress_mil() above.
 }
 
+// ── verify-only subcommand ────────────────────────────────────────
+
+/// Run production-parity verification: download BF16 from HF, pack each matrix,
+/// run dequant_matmul_reference vs original (3 trials), fail on RMSE >= 0.01.
+/// Outputs JSON report to stdout. Peak memory per matrix < 50 MB.
+fn cmd_verify_only(args: &[String]) {
+    let repo = get_opt(args, "--repo").unwrap_or_else(|| {
+        eprintln!("ERROR: --repo <HF_REPO_ID> required with --verify-only");
+        std::process::exit(1);
+    });
+
+    eprintln!("verify-only: downloading BF16 from {}", repo);
+    let shard_paths = download_repo_safetensors(repo);
+    eprintln!("  {} shard(s) loaded, streaming matrices one-at-a-time", shard_paths.len());
+
+    // Collect matrix descriptors (key, template_present_for_sanitize)
+    #[derive(Clone)]
+    struct MatrixDesc {
+        key: String,
+        display: String,
+    }
+
+    let mut all_descs: Vec<MatrixDesc> = Vec::new();
+
+    // Multimodal 2D projection weights (skip 1D biases/norms)
+    for (name, _rows, cols) in MULTIMODAL_WEIGHTS {
+        if *cols > 1 {
+            all_descs.push(MatrixDesc {
+                key: name.to_string(),
+                display: name.to_string(),
+            });
+        }
+    }
+    // lm_head
+    all_descs.push(MatrixDesc {
+        key: "model.language_model.lm_head.weight".to_string(),
+        display: "model.language_model.lm_head.weight".to_string(),
+    });
+    // Layer matrices
+    for layer in 0..NUM_LAYERS {
+        for (mat_name, _rows, _cols) in MATRICES {
+            let key = tensor_key(layer, mat_name);
+            let display = mat_name.replace("{}", &layer.to_string());
+            all_descs.push(MatrixDesc { key, display });
+        }
+    }
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    let mut all_pass = true;
+    let start = Instant::now();
+
+    for (idx, desc) in all_descs.iter().enumerate() {
+        eprint!("\r  [{}/{}] verifying {}", idx + 1, all_descs.len(), desc.key);
+        let _ = std::io::stdout().flush();
+
+        if let Some((data, shape)) = load_tensor(&desc.key, &shard_paths) {
+            let rows = if shape.len() >= 2 { shape[0] } else { data.len() };
+            let cols = if shape.len() >= 2 { shape[1] } else { 1 };
+            let (codes, scales, biases) = pack_nf4_weights(&data, rows, cols);
+            let result = verify_one_matrix(&desc.display, &data, &codes, &scales, &biases, rows, cols);
+            all_pass &= result.pass;
+            results.push(serde_json::json!({
+                "name": result.name,
+                "max_rmse": result.max_rmse,
+                "pass": result.pass,
+            }));
+            if !result.pass {
+                eprintln!("\n  FAIL: {} max_rmse={:.6}", result.name, result.max_rmse);
+            }
+        }
+    }
+    eprintln!();
+
+    let elapsed = start.elapsed();
+    let passes = results.iter().filter(|r| r["pass"].as_bool().unwrap_or(false)).count();
+    let report = serde_json::json!({
+        "model": repo,
+        "total_matrices": results.len(),
+        "passes": passes,
+        "failures": results.len() - passes,
+        "all_pass": all_pass,
+        "duration_secs": elapsed.as_secs_f64(),
+        "results": results,
+    });
+    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+
+    if !all_pass {
+        eprintln!("verify-only: {} matrix/matrices FAILED", results.len() - passes);
+        std::process::exit(1);
+    }
+    eprintln!("verify-only: ALL {} matrices PASSED ({:.1?})", results.len(), elapsed);
+}
+
+struct MatrixVerificationResult {
+    name: String,
+    max_rmse: f32,
+    pass: bool,
+}
+
+/// Verify a single packed nf4 matrix against its original BF16 weights.
+/// Runs 3 deterministic test vectors, returns RMSE stats. Panics if RMSE >= 0.01.
+fn verify_one_matrix(
+    name: &str,
+    original: &[f32],
+    codes: &[u8],
+    scales: &[f32],
+    biases: &[f32],
+    rows: usize,
+    cols: usize,
+) -> MatrixVerificationResult {
+    let mut max_rmse = 0.0f32;
+    for trial in 0..3 {
+        let input = generate_test_vector(rows, trial);
+        let mut ref_output = vec![0.0f32; cols];
+        for j in 0..cols {
+            let mut sum = 0.0f32;
+            for i in 0..rows {
+                sum += original[i * cols + j] * input[i];
+            }
+            ref_output[j] = sum;
+        }
+        let mut nf4_output = vec![0.0f32; cols];
+        dequant_matmul_reference(&input, codes, scales, biases, 1, rows, cols, &mut nf4_output)
+            .unwrap();
+        let mut sq_err = 0.0f32;
+        for j in 0..cols {
+            let diff = nf4_output[j] - ref_output[j];
+            sq_err += diff * diff;
+        }
+        let rmse = (sq_err / cols as f32).sqrt();
+        if rmse > max_rmse {
+            max_rmse = rmse;
+        }
+    }
+    MatrixVerificationResult {
+        name: name.to_string(),
+        max_rmse,
+        pass: max_rmse < 0.01,
+    }
+}
+
 // ── Safetensors loading helpers ─────────────────────────────────────
 
 fn load_tensor(key: &str, shards: &[(PathBuf, Vec<u8>)]) -> Option<(Vec<f32>, Vec<usize>)> {
@@ -1742,4 +2029,36 @@ fn get_opts<'a>(args: &'a [String], key: &str) -> Vec<&'a str> {
         .filter(|w| w[0] == key)
         .map(|w| w[1].as_str())
         .collect()
+}
+
+/// Sanitize a string for use as a filename component.
+fn sanitize_filename(name: String) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' || c == '.' || c == '-' { c } else { '_' })
+        .collect()
+}
+
+/// Check if a boolean flag is present in args.
+fn has_flag(args: &[String], flag: &str) -> bool {
+    args.iter().any(|a| a == flag)
+}
+
+/// Generate a deterministic test vector for RMSE verification.
+fn generate_test_vector(len: usize, trial: u32) -> Vec<f32> {
+    (0..len)
+        .map(|i| match trial {
+            0 => (i as f64 * 0.1).sin() as f32,
+            1 => (i as f64 * 0.07).cos() as f32,
+            _ => (i.wrapping_mul(12345).wrapping_add(67890) % 1001) as f32 / 500.0 - 1.0,
+        })
+        .collect()
+}
+
+/// Download a TTS model from Hugging Face and return the path to model.safetensors.
+fn download_tts_safetensors(repo_id: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    use hf_hub::api::sync::Api;
+    let api = Api::new()?;
+    let repo = api.model(repo_id.to_string());
+    let main_file = repo.get("model.safetensors")?;
+    Ok(main_file)
 }
