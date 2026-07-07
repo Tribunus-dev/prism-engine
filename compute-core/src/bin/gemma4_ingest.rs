@@ -1472,6 +1472,49 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
     bindings
 }
 
+/// Validate that every binding's ranges fit within their referenced segment sizes.
+/// Returns a Vec of error messages — empty means all pass.
+fn validate_binding_ranges(
+    bindings: &[MatrixWeightBinding],
+    segment_sizes: &std::collections::HashMap<u8, u64>,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    for b in bindings {
+        let mid = b.matrix_id;
+        if let Some(&sz) = segment_sizes.get(&b.weights_segment) {
+            let end = b.weights_offset.checked_add(b.weights_bytes).unwrap_or(u64::MAX);
+            if end > sz {
+                errors.push(format!(
+                    "binding[{}]: weights range [{}..{}) exceeds segment {} size {}",
+                    mid, b.weights_offset, end, b.weights_segment, sz
+                ));
+            }
+        }
+        if let Some(&sz) = segment_sizes.get(&b.tile_metadata_segment) {
+            let end = b.tile_metadata_offset.checked_add(b.tile_metadata_bytes).unwrap_or(u64::MAX);
+            if end > sz {
+                errors.push(format!(
+                    "binding[{}]: tile_metadata range [{}..{}) exceeds segment {} size {}",
+                    mid, b.tile_metadata_offset, end, b.tile_metadata_segment, sz
+                ));
+            }
+        }
+        if b.sidecar_count > 0 && b.sidecar_segment != 0xFF {
+            if let Some(&sz) = segment_sizes.get(&b.sidecar_segment) {
+                let sc_bytes = (b.sidecar_count as u64).checked_mul(4).unwrap_or(u64::MAX);
+                let end = b.sidecar_offset.checked_add(sc_bytes).unwrap_or(u64::MAX);
+                if end > sz {
+                    errors.push(format!(
+                        "binding[{}]: sidecar range [{}..{}) exceeds segment {} size {}",
+                        mid, b.sidecar_offset, end, b.sidecar_segment, sz
+                    ));
+                }
+            }
+        }
+    }
+    errors
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -3948,3 +3991,76 @@ fn test_read_contract_invalid_reserved_nonzero() {
             assert!(cos > 0.98, "{label}: cosine {:.8} <= 0.98", cos);
 }
 }
+
+    #[test]
+    fn test_bounds_weights_exceeds_segment() {
+        let mut map = std::collections::HashMap::new();
+        map.insert(26u8, 40960u64);
+        map.insert(27u8, 5120u64);
+        let b = MatrixWeightBinding {
+            weights_offset: 0, weights_bytes: 50000, weights_segment: 26, format: 0,
+            ..MatrixWeightBinding::default()
+        };
+        let errs = validate_binding_ranges(&[b], &map);
+        assert!(!errs.is_empty());
+        assert!(errs[0].contains("weights"), "err: {}", errs[0]);
+}
+
+    #[test]
+    fn test_bounds_tile_metadata_exceeds_segment() {
+        let mut map = std::collections::HashMap::new();
+        map.insert(26u8, 40960u64);
+        map.insert(27u8, 5120u64);
+        let b = MatrixWeightBinding {
+            tile_metadata_offset: 0, tile_metadata_bytes: 6000, format: 0,
+            tile_metadata_segment: 27,
+            ..MatrixWeightBinding::default()
+        };
+        let errs = validate_binding_ranges(&[b], &map);
+        assert!(!errs.is_empty());
+        assert!(errs[0].contains("tile_metadata"), "err: {}", errs[0]);
+}
+
+    #[test]
+    fn test_bounds_sidecar_exceeds_segment() {
+        let mut map = std::collections::HashMap::new();
+        map.insert(26u8, 40960u64);
+        map.insert(27u8, 5120u64);
+        map.insert(40u8, 2560u64);
+        let b = MatrixWeightBinding {
+            sidecar_offset: 2000, sidecar_count: 640,
+            sidecar_segment: 40, format: 1,
+            weights_segment: 26,
+            ..MatrixWeightBinding::default()
+        };
+        let errs = validate_binding_ranges(&[b], &map);
+        assert!(!errs.is_empty());
+        assert!(errs[0].contains("sidecar"), "err: {}", errs[0]);
+    }
+
+    #[test]
+    fn test_bounds_valid_passes() {
+        let mut map = std::collections::HashMap::new();
+        map.insert(26u8, 40960u64);
+        map.insert(27u8, 5120u64);
+        let b = MatrixWeightBinding {
+            weights_offset: 0, weights_bytes: 40960,
+            tile_metadata_offset: 0, tile_metadata_bytes: 5120,
+            weights_segment: 26, tile_metadata_segment: 27,
+            format: 0,
+            ..MatrixWeightBinding::default()
+        };
+        assert!(validate_binding_ranges(&[b], &map).is_empty());
+    }
+
+    #[test]
+    fn test_bounds_exact_edge_passes() {
+        let mut map = std::collections::HashMap::new();
+        map.insert(26u8, 40960u64);
+        let b = MatrixWeightBinding {
+            weights_offset: 0, weights_bytes: 40960,
+            weights_segment: 26,
+            ..MatrixWeightBinding::default()
+        };
+        assert!(validate_binding_ranges(&[b], &map).is_empty());
+    }
