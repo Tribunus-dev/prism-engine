@@ -12,18 +12,17 @@ pub const EXECUTION_GRAPH_MAGIC: [u8; 8] = *b"PRMEXEC1";
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuantizedWeightFormat {
-    /// NF4 Tile640: 320-byte codes per tile, f32 scale + bias per tile.
+    /// NF4 Tile640: 320-byte codes per tile, f32 scale + bias per tile (alpha/beta).
+    /// Supports multiple packing policies (MaxAbs, AWLS, OutputScaledFolded).
+    /// OutputScaledFolded folds per-output-channel scales into tile alpha/beta
+    /// at pack time \u2014 no runtime sidecar needed.
     Nf4Tile640Base = 0,
-    /// NF4 Tile640 with per-column FP16 reduction-axis scale sidecar.
-    Nf4Tile640OutputChannelScale = 1,
     /// INT8 Tile640: 640-byte codes per tile, f32 scale per tile, no bias.
-    Int8Tile640Base = 2,
-    /// INT8 Tile640 with per-column FP16 reduction-axis scale sidecar.
-    Int8Tile640ScaledReductionAxis = 3,
+    Int8Tile640Base = 1,
     /// Ternary Tile640: 64-byte nibble codes per 256-element block, FP16 scale per block.
-    TernaryTile640Base = 4,
-    /// Ternary Tile640 with per-column FP16 reduction-axis scale sidecar.
-    TernaryTile640ScaledReductionAxis = 5,
+    TernaryTile640Base = 2,
+    /// Raw F16 passthrough.
+    RawF16 = 3,
 }
 
 /// Declares the per-element encoding of sidecar data payloads.

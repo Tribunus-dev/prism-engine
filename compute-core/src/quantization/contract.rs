@@ -10,16 +10,38 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum QuantizedMatrixFormat {
-    /// Standard NF4 tile640 with tile-local reconstruction.
+    /// NF4 tile640 with tile-local reconstruction.
+    /// Supports multiple packing policies: MaxAbsV1, AwlsV1, OutputScaledFoldedV1.
+    /// Output-scaled folding emits standard Nf4Tile640Base \u2014 no runtime sidecar.
     Nf4Tile640Base = 1,
-    /// NF4 tile640 with an FP16 per-output-channel scale sidecar.
-    Nf4Tile640OutputChannelScale = 2,
     /// INT8 tile640 with per-tile symmetric quantization.
-    Int8Tile640Base = 3,
+    Int8Tile640Base = 2,
     /// Ternary tile640: 256-element blocks, 2-bit codes, FP16 scale per block.
-    TernaryTile640Base = 4,
-    /// Ternary tile640 with FP16 reduction-axis scale sidecar.
-    TernaryTile640ScaledReductionAxis = 5,
+    TernaryTile640Base = 3,
+    /// Raw F16 passthrough for tensors that cannot meet compressed parity.
+    RawF16 = 4,
+}
+
+/// Packing policy for Nf4Tile640Base \u2014 determines how tile alpha/beta are derived.
+/// All policies produce the same runtime format; the policy is recorded in receipts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nf4PackPolicy {
+    MaxAbsV1,
+    AwlsV1,
+    OutputScaledFoldedV1,
+}
+
+/// Macro-layout of tile payload bytes, determined by kernel ABI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileMacroLayout {
+    OutputChannelContiguous,
+    ReductionTileInterleaved,
+}
+
+/// Contract for partial final tiles where in_features % 640 != 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TailHandlingContract {
+    ActivationZeroPredicationV1,
 }
 
 /// NF4 codebook version.
@@ -101,8 +123,8 @@ pub enum ProfilePhase {
 pub enum ReconstructionContract {
     /// Tile-local NF4 reconstruction with no sidecar.
     BaseNf4Tile640,
-    /// NF4 reconstruction with a reduction-axis FP16 scale sidecar.
-    ScaledReductionAxis {
+    /// NF4 output scale folded into tile alpha/beta at pack time.
+    OutputScaledFolded {
         policy: ReductionScalePolicy,
         scale_storage: ChannelScaleStorage,
         scale_axis: ScaleAxis,
@@ -353,8 +375,6 @@ pub struct QualifiedTensor {
 #[derive(Debug, Clone)]
 pub struct QuantizationHint {
     pub tensor_class: TensorClass,
-    /// Whether the compiler may attempt ScaledReductionAxis candidates.
-    pub permit_scale_candidate: bool,
     /// Whether the compiler may attempt Int8Tile640Base candidates.
     pub permit_int8_candidate: bool,
 }

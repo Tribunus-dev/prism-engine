@@ -467,7 +467,7 @@ impl Nf4ScaledReductionTile640Dispatcher {
 ///                                         sidecar (null buffer = none)
 ///
 /// ANE: Not yet implemented for INT8. The `QuantizedWeightFormat::Int8Tile640Base`
-/// and `Int8Tile640ScaledReductionAxis` variants are defined in `execution_graph.rs`,
+/// variant is defined in `execution_graph.rs`,
 /// and `MatrixWeightBinding` carries the `format` discriminant.  ANE lowering is
 /// deferred — the Metal kernel handles INT8 GEMV until an ANE-compatible lowering
 /// path is separately qualified.

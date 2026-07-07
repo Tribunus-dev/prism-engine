@@ -1037,12 +1037,9 @@ fn physical_dims_from_shape(shape: &[usize]) -> (usize, usize) {
 fn admission_format_to_binding_format(f: QuantizedMatrixFormat) -> u8 {
     match f {
         QuantizedMatrixFormat::Nf4Tile640Base => 0,
-        QuantizedMatrixFormat::Nf4Tile640OutputChannelScale => 1,
-        QuantizedMatrixFormat::Int8Tile640Base => 2,
-        QuantizedMatrixFormat::TernaryTile640Base
-        | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis => {
-            todo!("ternary ingest not wired")
-        }
+        QuantizedMatrixFormat::Int8Tile640Base => 1,
+        QuantizedMatrixFormat::TernaryTile640Base => todo!("ternary ingest not wired"),
+        QuantizedMatrixFormat::RawF16 => 3,
     }
 }
 
@@ -1167,10 +1164,9 @@ fn pack_matrix_nf4_inline(
     };
 
     // Vision embedder weights that structurally resist base NF4 may use
-    // the ScaledReductionAxis candidate.
+    // Output-scaled NF4 packing is folded into Nf4Tile640Base at pack time.
     let hint = QuantizationHint {
         tensor_class,
-        permit_scale_candidate: true,
         permit_int8_candidate: true,
     };
 
@@ -1305,13 +1301,11 @@ fn pack_matrix_nf4_inline(
         let tiles_per_row = (cols + 639) / 640;
         let total_tiles = rows * tiles_per_row;
         let (weights_seg, meta_seg, sidecar_seg) = match qmf {
-            QuantizedMatrixFormat::Nf4Tile640Base
-            | QuantizedMatrixFormat::Nf4Tile640OutputChannelScale => (26u8, 27u8, 40u8),
+            QuantizedMatrixFormat::Nf4Tile640Base => (26u8, 27u8, 40u8),
             QuantizedMatrixFormat::Int8Tile640Base => (39u8, 27u8, 0xFF),
             QuantizedMatrixFormat::TernaryTile640Base
-            | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis => {
-                todo!("ternary ingest not wired")
-            }
+            => todo!("ternary ingest not wired"),
+            QuantizedMatrixFormat::RawF16 => todo!("raw f16 ingest not wired"),
         };
         bindings.push(WeightBindingData {
             key: key.to_string(),
@@ -1412,7 +1406,7 @@ fn collect_triplet_segments(
         let scales_raw = std::fs::read(tmp_dir.join(format!("{}_scales.bin", safe_name)))
             .unwrap_or_else(|e| panic!("Missing scales for {}: {}", b.key, e));
         // Biases (NF4 only: f32 biases per tile)
-        if matches!(b.format, Nf4Tile640Base | Nf4Tile640OutputChannelScale) {
+        if matches!(b.format, QuantizedMatrixFormat::Nf4Tile640Base) {
             let biases_raw = std::fs::read(tmp_dir.join(format!("{}_biases.bin", safe_name)))
                 .unwrap_or_else(|e| panic!("Missing biases for {}: {}", b.key, e));
             // Interleave: per tile [f32_scale][f32_bias] = 8 bytes
@@ -1514,7 +1508,7 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
         let sidecar_count = u32::from_le_bytes(data[c1 + 40..c1 + 44].try_into().unwrap());
 
         // ── Field-validity checks (fail closed) ──────────────────────
-        // Format must be 0 (Nf4Tile640Base), 1 (ScaledReductionAxis), or 2 (Int8Tile640Base).
+        // Format: 0=Nf4Tile640Base, 1=Int8Tile640Base, 2=TernaryTile640Base, 3=RawF16.
         if format > 2 {
             return Vec::new();
         }
@@ -2412,7 +2406,7 @@ fn main() {
                     Int8Tile640Base => 640u64,
                     _ => 320u64,
                 };
-            let has_bias = matches!(wb.format, Nf4Tile640Base | Nf4Tile640OutputChannelScale);
+            let has_bias = matches!(wb.format, Nf4Tile640Base);
             let meta_bytes_per_tile: u64 = if has_bias { 8 } else { 4 };
             let meta_bytes = wb.total_tiles as u64 * meta_bytes_per_tile;
 
@@ -4052,14 +4046,15 @@ fn test_mixed_artifact_e2e() {
     let scaled_src: Vec<f32> = (0..ROWS * COLS).map(|_| rng.gen_range(-0.5..0.5)).collect();
     let (n4c, n4s, n4b, ..) = pack_nf4_weights(&nf4_src, ROWS, COLS);
     let (i8c, i8s, i8b) = pack_int8_weights(&int8_src, ROWS, COLS);
-    let (scc, scs, scb, scv) = pack_candidate(
+    let (scc, scs, scb, _scv) = pack_candidate(
         &scaled_src,
         ROWS,
         COLS,
-        QuantizedMatrixFormat::Nf4Tile640OutputChannelScale,
+        QuantizedMatrixFormat::Nf4Tile640Base,
         None,
     );
-    let scv = scv.unwrap();
+    // Output-scaled NF4 is now folded into Nf4Tile640Base tile metadata.
+    // The scale_vector is None since no runtime sidecar is emitted.
 
     // 2. Build segments
     let wseg: Vec<u8> = [&i8c[..], &n4c[..], &scc[..]].concat();
@@ -4075,7 +4070,6 @@ fn test_mixed_artifact_e2e() {
         f32v(&scb),
     ]
     .concat();
-    let sseg: Vec<u8> = f32v(&scv);
 
     // 3. Build MatrixContract bindings
     let mr = ROWS as u64;
@@ -4084,6 +4078,7 @@ fn test_mixed_artifact_e2e() {
     let sc_wo = nf4_wo + n4c.len() as u64;
     let nf4_meta = (ROWS as u64) * 5 * 2 * 4;
     let int8_meta = (ROWS as u64) * 2 * 4;
+    let sseg: Vec<u8> = Vec::new(); // no sidecar for output-scaled-folded NF4
     let bindings = vec![
         MatrixWeightBinding {
             weights_offset: nf4_wo,
@@ -4129,17 +4124,17 @@ fn test_mixed_artifact_e2e() {
             tile_metadata_offset: int8_meta + nf4_meta,
             tile_metadata_bytes: nf4_meta,
             sidecar_offset: 0,
-            sidecar_count: COLS as u32,
-            sidecar_segment: 40,
+            sidecar_count: 0,
+            sidecar_segment: 0xFF,
             matrix_id: 2,
-            format: 1,
+            format: 0, // Nf4Tile640Base (output-scaled-folded, no sidecar)
             rows: ROWS as u32,
             cols: COLS as u32,
             tiles_per_row: TILES_PER_ROW,
             weights_segment: 26,
             tile_metadata_segment: 27,
-            sidecar_kind: 1,
-            sidecar_element_format: 1,
+            sidecar_kind: 0,
+            sidecar_element_format: 0,
             _pad: [0u8; 3],
         },
     ];

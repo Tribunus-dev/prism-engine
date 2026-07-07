@@ -42,9 +42,6 @@ pub fn candidate_plan(
         QuantizedMatrixFormat::TernaryTile640Base,
         QuantizedMatrixFormat::Nf4Tile640Base,
     ];
-    if hint.permit_scale_candidate {
-        candidates.push(QuantizedMatrixFormat::Nf4Tile640OutputChannelScale);
-    }
     if hint.permit_int8_candidate {
         candidates.push(QuantizedMatrixFormat::Int8Tile640Base);
     }
@@ -63,48 +60,28 @@ pub fn pack_candidate(
     channel_sq: Option<&[f32]>,
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, Option<Vec<f32>>) {
     match format {
-        QuantizedMatrixFormat::TernaryTile640Base
-        | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis => {
+        QuantizedMatrixFormat::TernaryTile640Base => {
             let (codes, scales, biases) = pack_ternary_weights(source, in_features, out_features);
             (codes, scales, biases, None)
         }
         QuantizedMatrixFormat::Nf4Tile640Base => {
-            // AW-LS with activation weighting, falling back to max-abs
-            // semantics inside the packer.
+            // Packing uses the active Nf4PackPolicy (MaxAbsV1, AwlsV1, or OutputScaledFoldedV1).
+            // OutputScaledFoldedV1 folds per-output-channel scales into tile alpha/beta
+            // at pack time \u2014 the emitted format is standard Nf4Tile640Base with no sidecar.
             let (codes, scales, biases, _, _) =
                 pack_nf4_weights_awls(source, in_features, out_features, channel_sq, 8);
             (codes, scales, biases, None)
         }
-        QuantizedMatrixFormat::Nf4Tile640OutputChannelScale => {
-            // 1. Compute column-wise MaxAbs scale vector.
-            let eps = (2.0f32).powi(-14);
-            let mut col_scales = vec![0.0f32; out_features];
-            for j in 0..out_features {
-                let mut max_abs = 0.0f32;
-                for i in 0..in_features {
-                    let v = source[i * out_features + j].abs();
-                    if v > max_abs {
-                        max_abs = v;
-                    }
-                }
-                col_scales[j] = if max_abs > eps { max_abs } else { 1.0 };
-            }
-
-            // 2. Normalize source by column scales.
-            let normalized: Vec<f32> = source
-                .iter()
-                .enumerate()
-                .map(|(idx, &v)| v / col_scales[idx % out_features])
-                .collect();
-
-            // 3. Pack normalized matrix through standard max-abs NF4 packer.
-            let (codes, scales, biases, _, _) =
-                pack_nf4_weights(&normalized, in_features, out_features);
-            (codes, scales, biases, Some(col_scales))
-        }
         QuantizedMatrixFormat::Int8Tile640Base => {
             let (codes, scales, biases) = pack_int8_weights(source, in_features, out_features);
             (codes, scales, biases, None)
+        }
+        QuantizedMatrixFormat::RawF16 => {
+            // RawF16 passthrough: convert f32 source to F16 bytes.
+            let codes: Vec<u8> = source.iter()
+                .flat_map(|x| (half::f16::from_f32(*x)).to_le_bytes())
+                .collect();
+            (codes, vec![], vec![], None)
         }
     }
 }
@@ -123,16 +100,21 @@ pub fn reconstruct_candidate(
     scale_vector: Option<&[f32]>,
 ) -> Vec<f32> {
     let unpacked = match format {
-        QuantizedMatrixFormat::TernaryTile640Base
-        | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis => {
+        QuantizedMatrixFormat::TernaryTile640Base => {
             unpack_ternary_weights(codes, scales, biases, in_features, out_features)
         }
-        QuantizedMatrixFormat::Nf4Tile640Base
-        | QuantizedMatrixFormat::Nf4Tile640OutputChannelScale => {
+        QuantizedMatrixFormat::Nf4Tile640Base => {
             unpack_nf4_weights(codes, scales, biases, in_features, out_features)
         }
         QuantizedMatrixFormat::Int8Tile640Base => {
             unpack_int8_weights(codes, scales, biases, in_features, out_features)
+        }
+        QuantizedMatrixFormat::RawF16 => {
+            // RawF16 passthrough: decode F16 bytes directly to f32.
+            let f16s: Vec<half::f16> = codes.chunks_exact(2)
+                .map(|b| half::f16::from_le_bytes([b[0], b[1]]))
+                .collect();
+            f16s.iter().map(|x| x.to_f32()).collect()
         }
     };
     match scale_vector {
@@ -363,7 +345,6 @@ pub fn quantize_tensor(
         let is_ternary = matches!(
             format,
             QuantizedMatrixFormat::TernaryTile640Base
-                | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis
         );
         match weight_report.admission_status(&promo_profile, is_ternary) {
             WeightAdmission::Passed => {}
@@ -541,7 +522,7 @@ pub fn quantize_tensor(
         }
 
         let reconstruction_contract = match &scale_vector {
-            Some(_) => ReconstructionContract::ScaledReductionAxis {
+            Some(_) => ReconstructionContract::OutputScaledFolded {
                 policy: ReductionScalePolicy::MaxAbs,
                 scale_storage: ChannelScaleStorage::F16,
                 scale_axis: ScaleAxis::ReductionInputColumn,
@@ -633,7 +614,6 @@ fn evidence_is_better(a: &CandidateEvidence, b: &CandidateEvidence) -> bool {
 fn format_payload_bytes(f: QuantizedMatrixFormat) -> u64 {
     match f {
         QuantizedMatrixFormat::Nf4Tile640Base => 320,
-        QuantizedMatrixFormat::Nf4Tile640OutputChannelScale => 384,
         QuantizedMatrixFormat::Int8Tile640Base => 640,
         QuantizedMatrixFormat::TernaryTile640Base => 80,
         _ => 640,
