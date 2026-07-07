@@ -9,3 +9,9 @@
 
 mod suite;
 pub use suite::*;
+pub use suite::{
+    stratified_sample, StratifiedSample,
+    DEFAULT_SAMPLE_SEED,
+    STRATIFY_NUM_STRATA_PROBE, STRATIFY_NUM_STRATA_PROMO,
+    STRATIFY_NUM_STRATA_HOLDOUT,
+};

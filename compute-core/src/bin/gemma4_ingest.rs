@@ -1213,6 +1213,7 @@ fn pack_matrix_nf4_inline(
                     last_operator_nrmse,
                     last_cosine_similarity,
                     last_ref_output_rms,
+                    ..
                 } => {
                     output_lines.push(format!("  NO CANDIDATE PASSED for {key}: candidates={candidates_attempted:?} wNRMSE={last_weight_nrmse:.4} zCollapse={last_zero_collapse_ratio:.4} oRMSE={last_operator_rmse:.2} oNRMSE={last_operator_nrmse:.4} cos={last_cosine_similarity:.4} refRMS={last_ref_output_rms:.2}"));
                 }
@@ -1224,6 +1225,7 @@ fn pack_matrix_nf4_inline(
                     best_candidate,
                     vectors_processed,
                     expired_phase,
+                    ..
                 } => {
                     output_lines.push(format!(
                         "  TIMEOUT for {key}: candidates={candidates_attempted:?} phase={expired_phase} vectors={vectors_processed} wNRMSE={:.4} oNRMSE={:.4} cos={:.4} hgates={}",

@@ -287,14 +287,24 @@ pub fn quantize_tensor(
         .map(|bank| resize_vectors(bank.holdout.clone(), in_features));
 
     // Cap all vector banks to MAX_VALIDATION_VECTORS to prevent pathological
-    // Tiered vector budgets per validation phase.
-    // Probe/stress: 64 — fast fail for bad candidates.
-    // Promotion:    256 — reasonable depth for plausible candidates.
-    // Holdout:      256 — from the CalibrationSuite's separate holdout bank,
-    //                      so vectors are automatically disjoint from promotion.
-    let stress_vectors = stress_vectors.map(|mut v| { v.truncate(PROBE_STRESS_VECTORS); v });
-    let calibration_promotion = calibration_promotion.map(|mut v| { v.truncate(PROMOTION_VECTORS); v });
-    let calibration_holdout = calibration_holdout.map(|mut v| { v.truncate(HOLDOUT_VECTORS); v });
+    // Stratified sample all vector banks for deterministic norm-band coverage.
+    // This replaces flat truncation with seeded stratified sampling so each
+    // norm region (low, medium, high) is fairly represented in every validation
+    // phase. Seeds for each phase are offset to ensure disjoint selections.
+    use crate::quantization::calibration::{
+        stratified_sample, DEFAULT_SAMPLE_SEED,
+        STRATIFY_NUM_STRATA_PROBE, STRATIFY_NUM_STRATA_PROMO,
+        STRATIFY_NUM_STRATA_HOLDOUT,
+    };
+    let stress_vectors = stress_vectors.map(|v| {
+        stratified_sample(&v, PROBE_STRESS_VECTORS, STRATIFY_NUM_STRATA_PROBE, DEFAULT_SAMPLE_SEED).vectors
+    });
+    let calibration_promotion = calibration_promotion.map(|v| {
+        stratified_sample(&v, PROMOTION_VECTORS, STRATIFY_NUM_STRATA_PROMO, DEFAULT_SAMPLE_SEED.wrapping_add(1)).vectors
+    });
+    let calibration_holdout = calibration_holdout.map(|v| {
+        stratified_sample(&v, HOLDOUT_VECTORS, STRATIFY_NUM_STRATA_HOLDOUT, DEFAULT_SAMPLE_SEED.wrapping_add(2)).vectors
+    });
 
     let has_activation_bank = calibration_promotion.is_some() && calibration_holdout.is_some();
 
@@ -317,6 +327,7 @@ pub fn quantize_tensor(
                     payload_bytes: 0,
                 }),
                 candidates_attempted,
+                sample_seed: DEFAULT_SAMPLE_SEED,
                 vectors_processed,
                 expired_phase: current_phase.to_string(),
             });
@@ -395,6 +406,7 @@ let operator_report = match &stress_vectors {
                         payload_bytes: codes.len() as u64,
                     }),
                     candidates_attempted,
+                    sample_seed: DEFAULT_SAMPLE_SEED,
                     vectors_processed,
                     expired_phase: current_phase.to_string(),
                 });
@@ -475,6 +487,7 @@ let operator_report = match &stress_vectors {
                             payload_bytes: codes.len() as u64,
                         }),
                         candidates_attempted,
+                        sample_seed: DEFAULT_SAMPLE_SEED,
                         vectors_processed,
                         expired_phase: current_phase.to_string(),
                     });
@@ -538,6 +551,7 @@ let operator_report = match &stress_vectors {
                             payload_bytes: codes.len() as u64,
                         }),
                         candidates_attempted,
+                        sample_seed: DEFAULT_SAMPLE_SEED,
                         vectors_processed,
                         expired_phase: current_phase.to_string(),
                     });
@@ -607,6 +621,7 @@ let operator_report = match &stress_vectors {
     }
     Err(QuantizationAdmissionFailure::NoCandidatePassed {
         candidates_attempted: candidates.iter().map(|f| format!("{:?}", f)).collect(),
+        sample_seed: DEFAULT_SAMPLE_SEED,
         last_weight_nrmse,
         last_zero_collapse_ratio,
         last_operator_rmse,

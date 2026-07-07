@@ -310,6 +310,9 @@ pub struct QuantizationHint {
 pub enum QuantizationAdmissionFailure {
     NoCandidatePassed {
         candidates_attempted: Vec<String>,
+        /// Seed used for stratified sampling of activation vectors.
+        /// Default: DEFAULT_SAMPLE_SEED from calibration suite.
+        sample_seed: u64,
         last_weight_nrmse: f64,
         last_zero_collapse_ratio: f64,
         last_operator_rmse: f32,
@@ -328,6 +331,9 @@ pub enum QuantizationAdmissionFailure {
     TimeoutDeadline {
         candidates_attempted: Vec<String>,
         best_candidate: BestCandidateSnapshot,
+        /// Seed used for stratified sampling of activation vectors.
+        /// Default: DEFAULT_SAMPLE_SEED from calibration suite.
+        sample_seed: u64,
         /// Number of validation vectors processed before timeout.
         vectors_processed: u32,
         /// Name of the phase where the deadline expired (e.g. "probe",

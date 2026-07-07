@@ -226,6 +226,15 @@ const DEFAULT_SEED: u64 = 0xDEAD_BEEF_CAFE_F00D;
 const PROMOTION_COUNT: usize = 50;
 const HOLDOUT_COUNT: usize = 20;
 
+/// Number of norm-band strata for probe/stress sampling.
+pub const STRATIFY_NUM_STRATA_PROBE: usize = 4;
+/// Number of norm-band strata for promotion sampling.
+pub const STRATIFY_NUM_STRATA_PROMO: usize = 8;
+/// Number of norm-band strata for holdout sampling.
+pub const STRATIFY_NUM_STRATA_HOLDOUT: usize = 8;
+/// Default seed for stratified sampling.
+pub const DEFAULT_SAMPLE_SEED: u64 = 0xDEAD_BEEF_CAFE_F00D;
+
 /// Generate an activation bank for a specific tensor class.
 ///
 /// Returns `None` for classes that have no generator yet.
@@ -503,12 +512,12 @@ fn sparse_one_hot(rng: &mut XorShift64, dim: usize, density: f64) -> ActivationV
 
 // ── Deterministic RNG ─────────────────────────────────────────────
 
-struct XorShift64 {
+pub(crate) struct XorShift64 {
     state: u64,
 }
 
 impl XorShift64 {
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         let state = if seed == 0 {
             0xDEAD_BEEF_CAFE_F00D
         } else {
@@ -517,19 +526,111 @@ impl XorShift64 {
         Self { state }
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(crate) fn next_u64(&mut self) -> u64 {
         self.state ^= self.state << 13;
         self.state ^= self.state >> 7;
         self.state ^= self.state << 17;
         self.state
     }
 
-    fn f64(&mut self) -> f64 {
+    pub(crate) fn f64(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 * (1.0f64 / ((1u64 << 53) as f64))
     }
 
-    fn f32(&mut self) -> f32 {
+    pub(crate) fn f32(&mut self) -> f32 {
         (self.next_u64() >> 40) as f32 * (1.0f32 / ((1u64 << 24) as f32))
+    }
+}
+
+/// Result of stratified sampling from an activation bank.
+///
+/// Contains the selected vectors, their original indices, and metadata
+/// about the stratifiction configuration used.
+pub struct StratifiedSample {
+    pub vectors: Vec<ActivationVector>,
+    pub selected_indices: Vec<usize>,
+    pub seed: u64,
+    pub num_strata: usize,
+    pub strata_sizes: Vec<usize>,
+}
+
+/// Deterministic stratified sample from a vector bank.
+///
+/// Vectors are divided into `num_strata` equal bands by L2 norm. Per band,
+/// `ceil(count / num_strata)` vectors are selected using XorShift64 seeded
+/// with `seed + band_index`. The final selection is shuffled using
+/// XorShift64 with `seed + 0xFF` and returned in a StratifiedSample.
+pub fn stratified_sample(
+    vectors: &[ActivationVector],
+    count: usize,
+    num_strata: usize,
+    seed: u64,
+) -> StratifiedSample {
+    if vectors.len() <= count || num_strata == 0 {
+        let take = vectors.len().min(count);
+        return StratifiedSample {
+            vectors: vectors[..take].to_vec(),
+            selected_indices: (0..take).collect(),
+            seed,
+            num_strata,
+            strata_sizes: vec![take],
+        };
+    }
+
+    // 1. Compute L2 norms and create index array
+    let mut indexed: Vec<(usize, f32)> = vectors.iter().enumerate()
+        .map(|(i, v)| (i, v.iter().map(|x| x * x).sum::<f32>().sqrt()))
+        .collect();
+
+    // 2. Sort by L2 norm
+    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // 3. Divide into num_strata bands
+    let band_size = indexed.len() / num_strata;
+    let remainder = indexed.len() % num_strata;
+    let per_band = (count + num_strata - 1) / num_strata;
+
+    let mut selected_indices = Vec::with_capacity(count);
+    let mut strata_sizes = Vec::with_capacity(num_strata);
+    let mut band_start = 0usize;
+
+    for band in 0..num_strata {
+        let this_band_size = band_size + if band < remainder { 1 } else { 0 };
+        let band_indices = &indexed[band_start..band_start + this_band_size];
+        let take_from_band = per_band.min(this_band_size);
+
+        // 4. Deterministic selection within band
+        let mut rng = XorShift64::new(seed.wrapping_add(band as u64));
+        let selected: Vec<usize> = (0..take_from_band)
+            .map(|_| {
+                let idx = (rng.f32() * this_band_size as f32) as usize;
+                band_indices[idx.min(this_band_size - 1)].0
+            })
+            .collect();
+
+        selected_indices.extend(selected);
+        strata_sizes.push(take_from_band);
+        band_start += this_band_size;
+    }
+
+    // 5. Shuffle final selection
+    let mut rng = XorShift64::new(seed.wrapping_add(0xFF));
+    for i in (1..selected_indices.len()).rev() {
+        let j = (rng.f32() * (i + 1) as f32) as usize;
+        selected_indices.swap(i, j.min(i));
+    }
+
+    // 6. Collect selected vectors in original bank order (actually shuffled order)
+    let vectors: Vec<ActivationVector> = selected_indices.iter()
+        .map(|&idx| vectors[idx].clone())
+        .collect();
+
+    StratifiedSample {
+        vectors,
+        selected_indices,
+        seed,
+        num_strata,
+        strata_sizes,
     }
 }
 
@@ -602,5 +703,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_stratified_sample_covers_all_bands() {
+        // Create 1000 vectors with increasing L2 norms from 0.1 to 100.0
+        let mut vectors = Vec::new();
+        for i in 0..1000 {
+            let norm = 0.1 + (i as f32) * 0.1;
+            let v: Vec<f32> = (0..64).map(|_| norm / 8.0).collect();
+            vectors.push(v);
+        }
+
+        let sample = stratified_sample(&vectors, 100, 4, 42);
+        assert_eq!(sample.vectors.len(), 100);
+        assert_eq!(sample.num_strata, 4);
+        assert_eq!(sample.seed, 42);
+
+        // Verify each stratum contributes (25 plusmn wiggle room)
+        assert!(sample.strata_sizes.iter().all(|&s| s >= 20 && s <= 30));
+
+        // Deterministic: same seed => same sample
+        let sample2 = stratified_sample(&vectors, 100, 4, 42);
+        assert_eq!(sample.selected_indices, sample2.selected_indices);
     }
 }
