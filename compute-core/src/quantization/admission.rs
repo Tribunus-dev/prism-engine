@@ -8,6 +8,12 @@
 //! This replaces ad-hoc per-matrix packing loops with a structured,
 //! fail-closed qualification system.
 
+/// Maximum number of validation vectors used per operator-space validation pass.
+/// Prevents pathological runs where large activation banks (12k+ samples) cause
+/// hours-per-tensor validation. A single candidate may run up to three validation
+/// passes (stress, promotion, holdout), each capped at this depth.
+pub const MAX_VALIDATION_VECTORS: usize = 256;
+
 use super::calibration::*;
 use super::contract::*;
 use super::validation::*;
@@ -268,9 +274,36 @@ pub fn quantize_tensor(
         .and_then(|s| s.get(&hint.tensor_class))
         .map(|bank| resize_vectors(bank.holdout.clone(), rows));
 
+    // Cap all vector banks to MAX_VALIDATION_VECTORS to prevent pathological
+    // runs on large activation banks (12k+ samples). Truncation applies per
+    // validation pass (stress, promotion, holdout); a single candidate may
+    // run up to three capped passes.
+    let cap_bank = |mut vectors: Vec<Vec<f32>>| -> Vec<Vec<f32>> {
+        vectors.truncate(MAX_VALIDATION_VECTORS);
+        vectors
+    };
+    let stress_vectors = stress_vectors.map(|v| cap_bank(v));
+    let calibration_promotion = calibration_promotion.map(|v| cap_bank(v));
+    let calibration_holdout = calibration_holdout.map(|v| cap_bank(v));
+
     let has_activation_bank = calibration_promotion.is_some() && calibration_holdout.is_some();
 
+    // Per-tensor wall-clock deadline. If exceeded, the current candidate times
+    // out and the tensor fails closed. Default: 60 seconds per tensor.
+    let tensor_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+
     for &format in &candidates {
+        if std::time::Instant::now() >= tensor_deadline {
+            return Err(QuantizationAdmissionFailure::NoCandidatePassed {
+                candidates_attempted: candidates.iter().map(|f| format!("{:?}", f)).collect(),
+                last_weight_nrmse,
+                last_zero_collapse_ratio,
+                last_operator_rmse,
+                last_operator_nrmse,
+                last_cosine_similarity,
+                last_ref_output_rms,
+            });
+        }
         let (codes, scales, biases, scale_vector) =
             pack_candidate(source, rows, cols, format, channel_sq);
 

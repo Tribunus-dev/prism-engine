@@ -1149,6 +1149,10 @@ fn pack_matrix_nf4_inline(
     };
 
     let act_weights = Some(channel_sq.as_slice());
+    let q_start = std::time::Instant::now();
+    eprintln!(
+        "  [QUALIFY] tensor={key} candidate-start formats=ternary,nf4,scaled,int8"
+    );
     let (codes, scales, biases, scale_vector, qmf) = match quantize_tensor(
         data,
         rows,
@@ -1198,7 +1202,12 @@ fn pack_matrix_nf4_inline(
             std::process::exit(1);
         }
     };
-    // ── Write temp files (after successful verification) ───────────
+    let q_elapsed = q_start.elapsed();
+    eprintln!(
+        "  [QUALIFY] tensor={key} result=accepted format={:?} elapsed={:.1}s",
+        qmf, q_elapsed.as_secs_f64()
+    );
+    // Write temp files (after successful verification)
     // Start SHA-256 digest on a rayon worker thread, overlapping with file
     // writes and binding setup.  rayon::scope lets the spawned task borrow
     // `data` (a &[f32] param) without cloning the entire weight matrix.
@@ -2344,7 +2353,9 @@ fn main() {
                 weights_segment: w_seg,
                 tile_metadata_segment: 27u8, // BlockBiases
                 sidecar_segment: sidecar_seg_id,
-                sidecar_kind: 0, sidecar_element_format: 0, _pad: [0u8; 3],
+                sidecar_kind: if sidecar_count > 0 { 1 } else { 0 },
+                sidecar_element_format: if sidecar_count > 0 { 1 } else { 0 },
+                _pad: [0u8; 3],
                 rows: wb.rows as u32,
                 cols: wb.cols as u32,
                 tiles_per_row: wb.tiles_per_row as u32,
