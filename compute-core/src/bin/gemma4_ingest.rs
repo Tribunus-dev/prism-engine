@@ -62,7 +62,8 @@ use tribunus_compute_core::compute_image::compile::execution_graph::MatrixWeight
 use tribunus_compute_core::compute_image::compile::execution_graph::{SidecarElementFormat, sidecar_byte_len};
 use tribunus_compute_core::compute_image::compile::ternary::{
     model_artifact_tag, CimageHeader, ModelArtifactEntry, SegmentEntry, SegmentKind,
-    CIMAGE_SEGMENT_CAPACITY, QUANT_SCHEMA_NF4_TILE640,
+    CIMAGE_HEADER_WIRE_SIZE, CIMAGE_SEGMENT_CAPACITY, QUANT_SCHEMA_NF4_TILE640,
+    write_cimage_header_le,
 };
 use tribunus_compute_core::compute_image::compile::tts_compile::pack_tts_weights;
 use tribunus_compute_core::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
@@ -2500,8 +2501,9 @@ fn main() {
     let mut writer = BufWriter::new(file);
 
     // Reserve header space (will overwrite at end)
-    let header_size = std::mem::size_of::<CimageHeader>() as u64;
-    writer.write_all(&vec![0u8; header_size as usize]).unwrap();
+    let header_size = CIMAGE_HEADER_WIRE_SIZE as u64;
+    // Seek past header \u2014 no need to write 728 zero bytes, the file is sparse.
+    writer.seek(SeekFrom::Start(header_size)).unwrap();
 
     // Compile Metal shaders to .metallib
     println!(
@@ -2988,18 +2990,22 @@ fn main() {
         "  [ASSEMBLY] segment writes done ({:.1}s), writing header",
         assembly_start.elapsed().as_secs_f32()
     );
+
+    // Use mmap for verification \u2014 avoids loading the entire multi-GB cimage into RAM.
+    // \u2500\u2500 Step 5: Rewind & write header (canonical LE) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     writer.seek(SeekFrom::Start(0)).unwrap();
-    let header_bytes = unsafe {
-        std::slice::from_raw_parts(
-            &header as *const CimageHeader as *const u8,
-            header_size as usize,
-        )
-    };
-    writer.write_all(header_bytes).unwrap();
+    write_cimage_header_le(&mut writer, &header).unwrap_or_else(|e| {
+        eprintln!("  ERROR: header write failed: {e}");
+        std::process::exit(1);
+    });
     writer.flush().unwrap();
+    writer.get_ref().sync_all().unwrap_or_else(|e| {
+        eprintln!("  ERROR: fsync failed: {e}");
+        std::process::exit(1);
+    });
     drop(writer);
 
-    // Use mmap for verification — avoids loading the entire multi-GB cimage into RAM.
+    // Use mmap for verification \u2014 avoids loading the entire multi-GB cimage into RAM.
     let cimage_file = std::fs::File::open(output).unwrap_or_else(|e| {
         eprintln!("  ERROR: cannot open {output} for verification: {e}");
         std::process::exit(1);

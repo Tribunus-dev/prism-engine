@@ -231,3 +231,146 @@ Engram support is a future multiplier. It becomes especially powerful when a mod
 - **The ANE teacher-target lane** is optional. If ANE placement cannot be proven or measured, work routes to Metal GPU. Correctness never depends on ANE availability.
 
 - **Memory budget enforcement** requires active monitoring and pre-emptive pass scheduling. A calibration bank that exceeds the configured budget must be processed in chunks rather than rejected. The streaming architecture handles this, but the chunk scheduler must be correct.
+
+### 14. Architectural Hardening from Production Review
+
+An adversarial review of the initial mixed-precision cimage pipeline identified five systemic weaknesses that must be resolved before the compiler is seal-safe for production. Each is stated as a requirement below.
+
+#### 14.1. Compiler Phase Extraction
+
+The ingestion binary must not act as downloader, model adapter, tensor classifier, quantization planner, calibration runner, packer, execution-graph compiler, Metal/ANE build coordinator, artifact assembler, verifier, and report generator in a single control path. Every new feature — ternary refinement, resumability, progressive tensor updates, new model families, Engram modules, or a Linux backend — risks touching one very large file.
+
+The compiler must be decomposed into explicit phases with durable interfaces:
+
+```
+source ingestion
+→ canonical tensor inventory
+→ qualification plan
+→ per-tensor compilation
+→ segment materialization
+→ artifact assembly
+→ replay verification
+→ sealing
+```
+
+Each phase writes a small manifest and immutable outputs. A failed final assembly never requires rerunning tensor work. A new ternary policy can reuse source inventory, teacher targets, and already-qualified NF4/INT8 tensors.
+
+The binary remains a thin CLI front end over the reusable library API.
+
+#### 14.2. Canonical Binary Representation
+
+Every artifact structure that crosses the cimage file boundary must use explicit little-endian field serialization with strict bounds checking, version checks, and parse-time validation. The top-level `CimageHeader`, segment directory entries, layer directory entries, ANE descriptors, model artifact records, execution graph, and all future contract types (Engram contracts, progressive-update records) are in scope.
+
+`repr(C)` + `std::slice::from_raw_parts` is forbidden for all file-format structures. Each type must define a dedicated write function (producing canonical LE bytes) and a dedicated read function (producing the validated Rust type). The `SegmentEntry`, `TensorRecord`, and `ModelArtifactEntry` types already use this pattern: `kind`, `offset`, `length`, `tag`, and `data length` are emitted as `to_le_bytes()` and parsed with `from_le_bytes()`. `CimageHeader`, `CimageLayoutMeta`, `LayerDirectoryEntry`, and `AneModelDescriptor` must be migrated to the same discipline.
+
+Wire format versions must be explicit (e.g. `CimageHeaderWireV1`). A parser that encounters an unrecognized version rejects the artifact rather than interpreting bytes with an incompatible layout.
+
+#### 14.3. Streaming Segment Materialization with CompilationMemoryBudget
+
+The compiler must not allocate and retain large per-segment payloads in memory. Each qualified tensor writes directly into an append-only content-addressed segment file with an incremental digest, rather than accumulating `Vec<u8>` payloads for post-hoc assembly.
+
+Final assembly splices or copies the per-segment object files into a temporary cimage without recreating giant aggregate vectors. The incremental digest eliminates the need for an expensive post-hoc read-and-hash pass.
+
+The system enforces an explicit `CompilationMemoryBudget` with reservations for:
+
+| Reserve | Purpose |
+|---------|---------|
+| Source tensor band | Inflight source weight bytes (one tensor at a time, Tile640 row bands) |
+| Packed payload band | Candidate representation bytes (the candidate format, not the source) |
+| Validation activations | Teacher and candidate activation banks (stress and optionally prerendered) |
+| Metal buffers | GPU dispatch resources (command buffers, intermediate buffers) |
+| OS headroom | Safety margin — macOS and system daemons continue to page |
+
+On a 16 GB M1, the budget is 10–12 GB for the distiller and 3–4 GB for safety reserve. The compiler refuses to schedule a task whose reservation cannot fit. It does not trust the allocator or macOS swap as a scheduler.
+
+#### 14.4. Strict Coverage Enforcement
+
+Before any quantization or packing begins, the compiler produces a coverage report enumerating every tensor in the source model as one of:
+
+| Classification | Behavior |
+|---------------|----------|
+| Required | Must compile. Missing or unsupported format → compilation fails |
+| Optional | Included if resources permit, otherwise omitted with reason |
+| IntentionallyIgnored | Listed with policy rationale code |
+| Unsupported | Must not be silently dropped — fail with diagnostic |
+
+The coverage report is digest-stamped and stored in the cimage provenance segment. An artifact that reaches seal time with any tensor still mapped to `Unsupported` is rejected. This prevents the compiler from producing a cimage that looks complete but silently omits a required multimodal, MTP, normalization, or output component.
+
+#### 14.5. RepresentationPlanner: Separation of Planning from Assembly
+
+The mixed-precision planner must emit a complete, immutable `TensorRepresentationPlan` for each matrix before any segment bytes are written. The plan defines:
+
+```
+format (Ternary | NF4 | INT8 | RawF16)
+payload geometry (rows, cols, tiles,
+    tile stride,
+    alignment)
+metadata layout (block size,
+    scale stride,
+    offset stride)
+sidecar kind (None | ReductionAxis |
+    Residual | Dynamic)
+sidecar element type
+segment class (Nf4Tile640Weights |
+    Int8Tile640Weights | TernaryWeights |
+    QuantizationSidecars)
+byte length
+alignment requirement
+expected kernel ABI tag
+qualification receipt digest
+```
+
+Assembly materializes the plan; it does not infer representation semantics. The current code path that initializes sidecar kind and element format as zero when sidecars exist is an example of a semantic mismatch that a dedicated planner prevents.
+
+#### 14.6. Producer-Consumer Pipeline
+
+The CPU reads and canonicalizes the next tensor band while the GPU validates the current candidate and the writer persists the previously accepted candidate. Three concurrent lanes:
+
+| Lane | Work |
+|------|------|
+| CPU | Read source tensor, compute histograms, hash, candidate pruning, manifests |
+| GPU | Batched operator validation, local refinement |
+| Disk | Persist immutable tensor payloads immediately after qualification |
+
+This fits the heterogeneous architecture (Metal, ANE, CPU) and avoids holding all results until the end.
+
+#### 14.7. Four Verification Gates at Seal Time
+
+The current single `verify_cimage` function is replaced by four named gates:
+
+| Gate | Scope |
+|------|-------|
+| Structural | File format, segments in-bounds, directory consistency, digests match per-segment incremental hashes, ABI tags valid, no truncated segment, version support |
+| Reconstruction | Packed payloads decode back to their planned representation within tolerance. CPU-only, no operator comparison |
+| Operator | Matrix outputs against the teacher activation bank (stress or prerendered). The existing operator-space gate |
+| Runtime conformance | The actual Metal dispatch path against the CPU reference. Requires model metadata for runtime-traceable dispatch |
+
+The final verification step is not the first time the full artifact layout is exercised. Each gate can be run independently; structural and reconstruction are fast and always run; operator and runtime conformance are configurable by artifact tier (always for release, sampled for development).
+
+#### 14.8. Transactional Write Protocol
+
+Artifact writing follows a transactional protocol that prevents partial files from appearing complete:
+
+1. Write to `output.cimage.partial`
+2. Write header last
+3. Call `File::sync_all()` to persist file content and metadata to stable storage
+4. Close writer, reopen in read-only mode via mmap
+5. Verify (structural gate at minimum)
+6. Atomically rename `output.cimage.partial` → `output.cimage`
+
+A failed compiler leaves a recoverable workspace and a clearly invalid partial artifact, never a file that appears complete but has an unsealed header.
+
+#### 14.9. Execution Graph from Canonical Inventory
+
+The model-specific execution graph must be generated from the canonical tensor inventory, not reconstructed from hard-coded dimension constants and key-string patterns. The graph compiler consumes stable tensor IDs and representation contracts, then emits graph nodes that point to those IDs.
+
+This eliminates brittleness when adding MTP variants, Qwen TTS, vision paths, or tensor updates. It also makes progressive tensor updates possible without rebuilding the entire graph — only the affected node's representation pointer needs updating.
+
+#### 14.10. Merkle-Hash Primitive Separation
+
+The current `parallel_sha256()` computes SHA-256 of concatenated SHA-256 chunk digests. This is a valid Merkle-like digest but must not be called or compared as ordinary SHA-256. Two explicit primitives are required:
+
+- `sha256(bytes)` — standard payload integrity (SHA-256 of the literal input bytes)
+- `merkle_root(chunk_hashes, chunk_size, algorithm_version)` — Merkle-tree root for resumable segment verification
+
+The chunk size and tree scheme are recorded in the manifest. Without this, different chunk counts or Rayon configurations can produce incompatible roots for identical bytes across different compilations or hardware configurations.

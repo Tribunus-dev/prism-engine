@@ -15,6 +15,98 @@ pub const QUANT_SCHEMA_NF4_TILE640: u32 = 1;
 pub const PRISM_PAGE_SIZE: u64 = CIMAGE_PAGE_SIZE;
 pub const CIMAGE_SEGMENT_CAPACITY: usize = 32;
 
+/// Wire size of the canonical little-endian CimageHeader: 728 bytes.
+pub const CIMAGE_HEADER_WIRE_SIZE: usize = 8       // magic
+    + 4   // version
+    + 4   // segment_count
+    + 32  // payload_hash
+    + 4   // num_layers
+    + 4   // num_heads
+    + 4   // head_dim
+    + 4   // hidden_dim
+    + 4   // intermediate_dim
+    + 4   // vocab_size
+    + 4   // quantization_schema
+    + 4   // draft_num_layers
+    + CIMAGE_SEGMENT_CAPACITY * (4 + 8 + 8)  // segments
+    + 8;  // _pad
+
+/// Serialize a CimageHeader to a writer in canonical little-endian format.
+pub fn write_cimage_header_le<W: std::io::Write>(
+    writer: &mut W,
+    header: &CimageHeader,
+) -> std::io::Result<()> {
+    writer.write_all(&header.magic)?;
+    writer.write_all(&header.version.to_le_bytes())?;
+    writer.write_all(&header.segment_count.to_le_bytes())?;
+    writer.write_all(&header.payload_hash)?;
+    writer.write_all(&header.num_layers.to_le_bytes())?;
+    writer.write_all(&header.num_heads.to_le_bytes())?;
+    writer.write_all(&header.head_dim.to_le_bytes())?;
+    writer.write_all(&header.hidden_dim.to_le_bytes())?;
+    writer.write_all(&header.intermediate_dim.to_le_bytes())?;
+    writer.write_all(&header.vocab_size.to_le_bytes())?;
+    writer.write_all(&header.quantization_schema.to_le_bytes())?;
+    writer.write_all(&header.draft_num_layers.to_le_bytes())?;
+    for seg in &header.segments {
+        writer.write_all(&seg.kind.to_le_bytes())?;
+        writer.write_all(&seg.offset.to_le_bytes())?;
+        writer.write_all(&seg.length.to_le_bytes())?;
+    }
+    writer.write_all(&[0u8; 8])?; // _pad
+    Ok(())
+}
+
+/// Parse a CimageHeader from a byte slice (canonical little-endian format).
+pub fn read_cimage_header_le(data: &[u8]) -> Result<CimageHeader, String> {
+    if data.len() < CIMAGE_HEADER_WIRE_SIZE {
+        return Err(format!(
+            "cimage header too small: {} < {}",
+            data.len(),
+            CIMAGE_HEADER_WIRE_SIZE
+        ));
+    }
+    let mut off = 0usize;
+    let mut read = |n: usize| -> &[u8] {
+        let slice = &data[off..off + n];
+        off += n;
+        slice
+    };
+    let magic: [u8; 8] = read(8).try_into().unwrap();
+    if &magic != &PRISM_MAGIC {
+        return Err(format!("bad magic: {:?}", &magic));
+    }
+    let header = CimageHeader {
+        magic,
+        version: u32::from_le_bytes(read(4).try_into().unwrap()),
+        segment_count: u32::from_le_bytes(read(4).try_into().unwrap()),
+        payload_hash: read(32).try_into().unwrap(),
+        num_layers: u32::from_le_bytes(read(4).try_into().unwrap()),
+        num_heads: u32::from_le_bytes(read(4).try_into().unwrap()),
+        head_dim: u32::from_le_bytes(read(4).try_into().unwrap()),
+        hidden_dim: u32::from_le_bytes(read(4).try_into().unwrap()),
+        intermediate_dim: u32::from_le_bytes(read(4).try_into().unwrap()),
+        vocab_size: u32::from_le_bytes(read(4).try_into().unwrap()),
+        quantization_schema: u32::from_le_bytes(read(4).try_into().unwrap()),
+        draft_num_layers: u32::from_le_bytes(read(4).try_into().unwrap()),
+        segments: {
+            let mut arr = [SegmentEntry {
+                kind: 0,
+                offset: 0,
+                length: 0,
+            }; CIMAGE_SEGMENT_CAPACITY];
+            for entry in arr.iter_mut() {
+                entry.kind = u32::from_le_bytes(read(4).try_into().unwrap());
+                entry.offset = u64::from_le_bytes(read(8).try_into().unwrap());
+                entry.length = u64::from_le_bytes(read(8).try_into().unwrap());
+            }
+            arr
+        },
+        _pad: [0u8; 8],
+    };
+    Ok(header)
+}
+
 /// Encodes the type of content in a cimage segment.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,14 +459,7 @@ pub fn verify_prism_cimage(
 }
 
 pub fn verify_cimage(bytes: &[u8]) -> Result<(CimageHeader, CimageLayoutMeta), String> {
-    if bytes.len() < core::mem::size_of::<CimageHeader>() {
-        return Err("too small".into());
-    }
-    let header: CimageHeader =
-        unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const CimageHeader) };
-    if &header.magic != &PRISM_MAGIC {
-        return Err("bad magic".into());
-    }
+    let header = read_cimage_header_le(bytes)?;
     // Try to find LayoutMeta segment in directory; return default if absent
     let layout = header
         .segment(SegmentKind::LayoutMeta)

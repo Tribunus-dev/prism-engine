@@ -290,3 +290,68 @@ The minimum viable progressive ternarization path is: qualified NF4 base cimage 
 - **Schedule evolution complexity.** If tensor updates change the optimal fused-kernel schedule, the runtime must handle schedule entries that reference specific generation digests. A schedule update without matching payload generations must be rejected.
 
 - **The first vertical slice is deliberately narrow.** If decoder MLP tensors are the only target, the system works but the benefit is limited. Expanding to attention projections, vision bridges, and TTS heads requires broader validation pipelines and more calibration data.
+### 4b. Architectural Hardening from Production Review
+
+The monolithic ingestion pipeline underlying progressive updates must be hardened before the update protocol can operate reliably. The following requirements transfer from ADR-001 section 14 to the progressive-update context.
+
+#### 4b.1. Canonical Binary Representation for Progressive Contracts
+
+Every progressive-update structure that crosses the file boundary — generation records, update manifests, verification receipts, compaction manifests, rollback records — must use explicit little-endian field serialization with strict bounds checking, version checks, and parse-time validation. `repr(C)`+`read_unaligned` is forbidden for all file-format structures.
+
+Wire format versions must be explicit and version-gated. A runtime loader that encounters an unrecognized update format version rejects the update rather than interpreting bytes with an incompatible layout.
+
+#### 4b.2. Segment-Level Materialization from Tensor Plans
+
+Each tensor update is independently materializable: a signed update contains the new segment payload, updated MatrixContract entry, qualification receipt, and provenance record. The runtime does not need to introspect the entire cimage to apply a single-tensor update — it splices the affected bytes into the appropriate segment offset using the MatrixContract map.
+
+The `TensorRepresentationPlan` (ADR-001 Section 14.5) for each tensor is the atomic update unit. An update replacing tensor T must supply a complete plan, not a binary diff against the prior plan.
+
+#### 4b.3. Transactional Update Application
+
+Each tensor update is applied transactionally:
+
+1. Download update package and verify signature
+2. Verify payload digests against signed receipt
+3. Take a runtime checkpoints (known-good segment state, running inference paused)
+4. Splice the new payload bytes into the cimage segment (overwrite-only, no append)
+5. Update the MatrixContract entry
+6. Sync the file (fsync)
+7. Verify structural and reconstruction gates on the modified range
+8. Run compact runtime conformance probe (one forward pass on stress input)
+9. Mark the update active; release checkpoint
+
+Failure at any step restores the checkpoint and marks the update as rejected. The runtime never runs in a partially applied state.
+
+#### 4b.4. Producer-Consumer Pipeline for Distributed Qualification
+
+The distributed ternarization system uses the same producer-consumer architecture as the local compiler (ADR-001 Section 14.6). The contributor device runs CPU and GPU lanes while streaming results to persistent local storage; the verifier replays the candidate at policy-defined depth.
+
+Each distributed job must fit within the contributor's `CompilationMemoryBudget` (ADR-001 Section 14.3). The job manifest declares its maximum memory reservation. The local scheduler rejects jobs whose reservation exceeds available headroom.
+
+#### 4b.5. Minimal Structural Gate Before Activation
+
+An update candidate must pass at least the structural gate (ADR-001 Section 14.7) before it is considered for activation. The operator gate and runtime conformance gate are required for release-tier updates but may be replaced by the verifier's replay for user-contributed candidates.
+
+#### 4b.6. Storage of Coverage Reports Across Updates
+
+Every tensor update carries an incremental coverage report (ADR-001 Section 14.4) showing only the affected tensors and their classification. The runtime aggregates this into a cumulative coverage view that includes all base tensors plus every applied update. An update that would leave any required tensor in `Unsupported` state is rejected at install time.
+
+#### 4b.7. Update Transaction Log
+
+The runtime maintains a write-ahead log of applied updates serialized in canonical LE format. The log is read at startup to reconstruct the active tensor map. A corrupted or truncated log is a recoverable error — the runtime falls back to the base cimage and refuses progressive updates until the log is repaired.
+
+The log entry format for each applied update:
+
+```rust
+struct UpdateLogEntry {
+    update_id: [u8; 32],          // SHA-256 of signed update package
+    tensor_id: [u8; 16],          // 128-bit stable tensor ID
+    applied_at_nanos: u64,        // timestamp
+    base_digest: [u8; 32],        // base cimage digest at time of application
+    replacement_segment_kinds: [u32; 4],  // segment kinds affected by this update
+    merkle_chunk_size: u32,       // chunk size for segment-level Merkle verification
+    merkle_root: [u8; 32],        // Merkle root after update
+}
+```
+
+This log is stored alongside the cimage, not inside it, so that updates do not require rewriting the sealed header.
