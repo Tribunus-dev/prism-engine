@@ -47,10 +47,11 @@ pub fn optimize_scale_bias(
     cancel_token: &CancelToken,
 ) -> GroupScaleBias {
     let codebook = NF4_CODEBOOK;
+    let max_codebook = codebook.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
 
-    // Initial s: max-abs / max codebook value
+    // Initial s: max-abs / actual codebook max, not a hardcoded constant.
     let max_abs = weights.iter().map(|w| w.abs()).fold(0.0f32, f32::max);
-    let mut s = if max_abs > 0.0 { max_abs / 6.0 } else { 1.0f32 }; // NF4 max = ~6.0
+    let mut s = if max_abs > 0.0 && max_codebook > 0.0 { max_abs / max_codebook } else { 1.0f32 };
     let mut b = 0.0f32; // Start symmetric for NF4
 
     let sum_a: f32 = activation_weights.iter().sum();
@@ -63,14 +64,20 @@ pub fn optimize_scale_bias(
         };
     }
 
-    let mut prev_mse = f64::MAX;
+    // Track the best full state (codes, s, b) seen so far.
+    let mut best_s = s;
+    let mut best_b = b;
+    let mut best_codes = *code_indices;
+    let mut best_mse = compute_weighted_mse(weights, &best_codes, best_s, best_b, activation_weights);
+    let mut prev_mse = best_mse;
+    let mut code_stable = false;
 
     for iter in 0..max_iters {
         cancel_token.heartbeat().ok();
-        // Step 1: Fix b, solve for s
+        // Step 1: Fix current codes and b, solve for s
         let (num_s, den_s) = weights
             .iter()
-            .zip(code_indices.iter())
+            .zip(best_codes.iter())
             .zip(activation_weights.iter())
             .fold((0.0f32, 0.0f32), |(num, den), ((w, &ci), &a)| {
                 let c = codebook[ci as usize];
@@ -80,35 +87,57 @@ pub fn optimize_scale_bias(
             s = num_s / den_s;
         }
 
-        // Step 2: Fix s, solve for b
+        // Step 2: Fix new s, solve for b
         let num_b = weights
             .iter()
-            .zip(code_indices.iter())
+            .zip(best_codes.iter())
             .zip(activation_weights.iter())
             .fold(0.0f32, |acc, ((w, &ci), &a)| {
                 acc + a * (w - s * codebook[ci as usize])
             });
         b = num_b / sum_a;
 
-        // Compute weighted MSE
-        let mse = compute_weighted_mse(weights, code_indices, s, b, activation_weights);
+        // Step 3: Reassign every code using the new (s, b)
+        let mut new_codes = [0u8; 128];
+        for (i, &w) in weights.iter().enumerate() {
+            let normalized = (w - b) / s;
+            new_codes[i] = crate::nf4tile640::nf4_quantize(if s > 0.0 { normalized } else { w });
+        }
 
-        if mse >= prev_mse - 1e-10 {
-            // Converged (or diverging — keep previous values)
-            return GroupScaleBias {
-                scale: s,
-                bias: b,
-                aw_mse: mse,
-                iterations: iter + 1,
-            };
+        // Step 4: Re-solve (s, b) with the new code assignments (full joint step)
+        let (num_s2, den_s2) = weights.iter().zip(new_codes.iter()).zip(activation_weights.iter())
+            .fold((0.0f32, 0.0f32), |(num, den), ((w, &ci), &a)| {
+                let c = codebook[ci as usize];
+                (num + a * c * w, den + a * c * c)
+            });
+        if den_s2 > 1e-10 { s = num_s2 / den_s2; }
+        let num_b2 = weights.iter().zip(new_codes.iter()).zip(activation_weights.iter())
+            .fold(0.0f32, |acc, ((w, &ci), &a)| acc + a * (w - s * codebook[ci as usize]));
+        b = num_b2 / sum_a;
+
+        // Step 5: Check if codes stabilized
+        code_stable = new_codes == best_codes;
+        best_codes = new_codes;
+
+        let mse = compute_weighted_mse(weights, &best_codes, s, b, activation_weights);
+
+        // Keep the best full state (codes, s, b) if this iteration improved.
+        if mse < best_mse {
+            best_mse = mse;
+            best_s = s;
+            best_b = b;
+        }
+
+        if code_stable || (mse >= prev_mse - 1e-10) {
+            break;
         }
         prev_mse = mse;
     }
 
     GroupScaleBias {
-        scale: s,
-        bias: b,
-        aw_mse: prev_mse,
+        scale: best_s,
+        bias: best_b,
+        aw_mse: best_mse,
         iterations: max_iters,
     }
 }

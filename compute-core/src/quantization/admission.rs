@@ -117,7 +117,7 @@ use super::contract::{CandidateEvidence, CandidateResult, PhaseVectorCounts, Val
 use super::embed_cluster::{pack_ternary_weights, unpack_ternary_weights};
 use super::validation::*;
 use crate::nf4tile640::{
-    pack_int8_weights, pack_nf4_weights_awls, unpack_int8_weights, unpack_nf4_weights,
+    pack_int8_weights, pack_nf4_weights, unpack_int8_weights, unpack_nf4_weights,
 };
 
 /// Generate the ordered candidate plan for a tensor.
@@ -156,11 +156,10 @@ pub fn pack_candidate(
             (codes, scales, biases, None)
         }
         RuntimeRepresentationClass::Nf4Tile640Base => {
-            // Packing uses the active Nf4PackPolicy (MaxAbsV1, AwlsV1, or OutputScaledFoldedV1).
-            // OutputScaledFoldedV1 folds per-output-channel scales into tile alpha/beta
-            // at pack time — the emitted format is standard Nf4Tile640Base with no sidecar.
+            // Use plain max-abs NF4 as the baseline candidate.
+            // AW-LS is disabled pending verified correctness of the optimizer.
             let (codes, scales, biases, _, _) =
-                pack_nf4_weights_awls(source, in_features, out_features, channel_sq, 8);
+                pack_nf4_weights(source, in_features, out_features);
             (codes, scales, biases, None)
         }
         RuntimeRepresentationClass::Int8Tile640Base => {
