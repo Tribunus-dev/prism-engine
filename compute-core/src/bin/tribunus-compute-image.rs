@@ -501,7 +501,8 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
             || n.contains("adam_") || n.contains("rmsprop") { return TensorGroup::Other; }
         // MTP draft
         if n.contains("mtp") || n.contains("draft") || n.contains("speculative")
-            || n.contains("proposal") { return TensorGroup::MtpDraft; }
+            || n.contains("proposal") || n.contains("dspark") || n.contains("confidence_head")
+            || n.contains("dflash") || n.contains("eagle") { return TensorGroup::MtpDraft; }
         // Vision encoder
         if n.contains("multimodal_image") || n.contains("mm_image")
             || n.contains("vision_") || n.contains("vision.")
@@ -571,6 +572,10 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         vocab_size: vocab_size.max(32000),
         quantization_schema: 1,
         draft_num_layers: 0,
+        num_experts: 0,
+        num_shared_experts: 0,
+        top_k: 0,
+        expert_intermediate_dim: 0,
     };
 
     // —— Compile each group as a stage ——

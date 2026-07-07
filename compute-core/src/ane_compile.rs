@@ -141,3 +141,160 @@ pub fn compile_ane_artifacts(model_dir: &Path) -> Result<Vec<String>, String> {
 
     Ok(mlmodelc_paths)
 }
+
+// ── Batch scheduler ──────────────────────────────────────────────────────
+
+/// A group of same-shaped tensors compiled into a single batch-N MIL program.
+///
+/// Groups are formed by identical `(in_features, out_features)` pairs.
+/// The `batch_size` field (1, 2, or 4) determines how many tensors are fused.
+/// `tensor_indices` identifies the original tensor positions within the stage.
+#[derive(Debug, Clone)]
+pub struct BatchGroup {
+    /// Number of input features (columns of the weight matrix viewed as [K, N] → K).
+    pub in_features: u32,
+    /// Number of output features (rows of the weight matrix viewed as [K, N] → N).
+    pub out_features: u32,
+    /// Batch size for this group: 1, 2, or 4 (power of 2).
+    pub batch_size: u32,
+    /// Indices of the original tensors in this group.
+    pub tensor_indices: Vec<usize>,
+}
+
+/// Schedule tensors by `(in_features, out_features)` shape into batch groups.
+///
+/// Groups of 4+ same-shaped tensors get batch-4 programs. Smaller groups are
+/// padded to the next power of 2 (1 → 1, 2 → 2, 3 → 4). Batches larger than 4
+/// are split into multiple batch-4 groups plus a remainder.
+///
+/// This reduces ANE program count (and thus compilation + memory overhead)
+/// while respecting the ANE's static-batching constraint of power-of-2 sizes.
+///
+/// # Example
+///
+/// ```ignore
+/// let tensors = vec![(3840, 18432), (3840, 18432), (3840, 18432), (3840, 18432)];
+/// let groups = schedule_batches(&tensors);
+/// assert_eq!(groups.len(), 1);
+/// assert_eq!(groups[0].batch_size, 4);
+/// ```
+pub fn schedule_batches(tensors: &[(u32, u32)]) -> Vec<BatchGroup> {
+    // Group tensor indices by shape key
+    let mut shape_groups: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+    for (i, &(in_f, out_f)) in tensors.iter().enumerate() {
+        shape_groups.entry((in_f, out_f)).or_default().push(i);
+    }
+
+    let mut groups = Vec::new();
+
+    for ((in_features, out_features), indices) in shape_groups {
+        let n = indices.len();
+        let mut offset = 0;
+
+        while offset < n {
+            let remaining = n - offset;
+            // Choose batch size: groups >= 4 get 4, 2-3 pad to next power of 2
+            let batch_size = if remaining >= 4 {
+                4
+            } else if remaining >= 2 {
+                // remaining = 3 → pad to 4; remaining = 2 → use 2
+                if remaining == 3 {
+                    4
+                } else {
+                    2
+                }
+            } else {
+                1
+            };
+
+            let count = remaining.min(batch_size as usize);
+            let slice = indices[offset..offset + count].to_vec();
+
+            groups.push(BatchGroup {
+                in_features,
+                out_features,
+                batch_size,
+                tensor_indices: slice,
+            });
+
+            offset += count;
+        }
+    }
+
+    groups
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schedule_batches_groups_four_same_shaped() {
+        let tensors = vec![
+            (3840, 18432),
+            (3840, 18432),
+            (3840, 18432),
+            (3840, 18432),
+        ];
+        let groups = schedule_batches(&tensors);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].batch_size, 4);
+        assert_eq!(groups[0].tensor_indices, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn schedule_batches_single_tensor() {
+        let tensors = vec![(4096, 4096)];
+        let groups = schedule_batches(&tensors);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].batch_size, 1);
+        assert_eq!(groups[0].tensor_indices, vec![0]);
+    }
+
+    #[test]
+    fn schedule_batches_five_into_two_groups() {
+        let tensors = vec![
+            (3840, 18432),
+            (3840, 18432),
+            (3840, 18432),
+            (3840, 18432),
+            (3840, 18432),
+        ];
+        let groups = schedule_batches(&tensors);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].batch_size, 4);
+        assert_eq!(groups[0].tensor_indices.len(), 4);
+        assert_eq!(groups[1].batch_size, 1);
+        assert_eq!(groups[1].tensor_indices.len(), 1);
+    }
+
+    #[test]
+    fn schedule_batches_three_pads_to_four() {
+        let tensors = vec![(768, 3072), (768, 3072), (768, 3072)];
+        let groups = schedule_batches(&tensors);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].batch_size, 4);
+    }
+
+    #[test]
+    fn schedule_batches_different_shapes_separate() {
+        let tensors = vec![
+            (3840, 18432),
+            (768, 3072),
+            (3840, 18432),
+            (768, 3072),
+        ];
+        let groups = schedule_batches(&tensors);
+        assert_eq!(groups.len(), 2);
+        // Both groups should have batch_size 2 (two tensors each)
+        assert_eq!(groups[0].batch_size, 2);
+        assert_eq!(groups[1].batch_size, 2);
+    }
+
+    #[test]
+    fn schedule_batches_empty_input() {
+        let tensors: Vec<(u32, u32)> = vec![];
+        let groups = schedule_batches(&tensors);
+        assert!(groups.is_empty());
+    }
+}

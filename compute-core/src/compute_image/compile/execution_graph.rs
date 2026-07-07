@@ -118,6 +118,18 @@ pub enum NodeKind {
     DraftPreProjection = 7,
     /// MTP post-projection: main hidden to draft hidden
     DraftPostProjection = 8,
+    /// MoE router: hidden → expert routing scores
+    MoERouter = 9,
+    /// Single MoE expert MLP layer (gate+up+down proj)
+    MoEExpertLayer = 10,
+    /// MoE combine: weighted merge of top-K expert outputs
+    MoECombine = 11,
+    /// DSpark semi-AR draft layer (confidence-scheduled)
+    DSparkDraftLayer = 12,
+    /// DSpark semi-AR draft pre-projection
+    DSparkDraftPreProjection = 13,
+    /// DSpark semi-AR draft post-projection
+    DSparkDraftPostProjection = 14,
 }
 
 /// Per-layer execution node in the decoder DAG.

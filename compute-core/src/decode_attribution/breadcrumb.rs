@@ -59,11 +59,22 @@ pub fn last_breadcrumb(path: &Path) -> Option<String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn breadcrumb_write_and_read() {
-        let dir = std::env::temp_dir().join("breadcrumb_test");
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static TEST_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    /// Return a unique temp directory for this test invocation.
+    /// Avoids filesystem collisions when tests run in parallel via `--lib`.
+    fn unique_test_dir() -> std::path::PathBuf {
+        let id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("breadcrumb_test_{id}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn breadcrumb_write_and_read() {
+        let dir = unique_test_dir();
         let path = dir.join("crumbs.txt");
 
         set_breadcrumb_path(&path);
@@ -90,8 +101,7 @@ mod tests {
 
     #[test]
     fn read_nonexistent_returns_empty() {
-        let dir = std::env::temp_dir().join("breadcrumb_nonexist");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = unique_test_dir();
         let crumbs = read_breadcrumbs(&dir.join("nope.txt"));
         assert!(crumbs.is_empty());
     }

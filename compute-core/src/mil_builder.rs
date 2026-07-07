@@ -84,6 +84,10 @@ pub struct MilBuilder {
     value_types: HashMap<String, mil_spec::ValueType>,
     /// Weights stored for mlpackage serialization.
     weights: HashMap<String, Vec<u8>>,
+    /// Batch size for fused MIL programs (1, 2, or 4).
+    /// When > 1, inputs are shaped [batch_size, dim] and the matmul broadcasts
+    /// the weight across the batch dimension, processing all items in one ANE invocation.
+    pub batch_size: u32,
 }
 
 impl Default for MilBuilder {
@@ -143,6 +147,7 @@ impl MilBuilder {
     }
     /// Mark an SSA value as a block output.
     pub fn new(function_name: &str) -> Self {
+        // batch_size defaults to 1 (no batching)
         Self {
             function_name: function_name.to_string(),
             opset: "CoreML9".to_string(),
@@ -152,7 +157,18 @@ impl MilBuilder {
             counter: 0,
             value_types: HashMap::new(),
             weights: HashMap::new(),
+            batch_size: 1,
         }
+    }
+
+    /// Set the batch size for this MIL program.
+    ///
+    /// When > 1 (power of 2: 1, 2, 4), the first dimension of inputs is
+    /// scaled accordingly and matmul broadcasts the weight across the
+    /// batch dimension, processing all items in a single ANE invocation.
+    pub fn batch_size(mut self, n: u32) -> Self {
+        self.batch_size = n;
+        self
     }
 
     /// Register a named input tensor.
@@ -1612,6 +1628,48 @@ pub fn build_full_ane_layer_program(
             Vec::new()
         }
     }
+}
+
+/// Build a batch-fused matmul MIL program.
+///
+/// When `batch_size` > 1, the weight matrix is shared (broadcast) across
+/// all batch items via MIL matmul broadcasting, producing a single program
+/// that processes all batch items in one ANE invocation.
+///
+/// Input:  `[batch_size, in_features]` at SSA name "x"
+/// Weight: `[in_features, out_features]` at SSA name "weight_0"
+/// Output: `[batch_size, out_features]` at SSA name "matmul_1"
+pub fn build_batched_matmul_program(
+    in_features: u32,
+    out_features: u32,
+    batch_size: u32,
+) -> Vec<u8> {
+    use coreml_proto::proto::mil_spec::DataType;
+    use prost::Message;
+
+    let prog = MilBuilder::new("batched_matmul")
+        .batch_size(batch_size)
+        .input("x", DataType::Float32, &[batch_size as i64, in_features as i64])
+        .const_f32("weight", &[], &[in_features as i64, out_features as i64])
+        .matmul("x", "weight_0")
+        .output("matmul_1")
+        .build();
+
+    match prog {
+        Ok(p) => {
+            let mut bytes = Vec::new();
+            p.encode(&mut bytes).ok();
+            eprintln!(
+                "[mil] batched matmul program batch={batch_size} [{in_features}x{out_features}]: {} bytes",
+                bytes.len()
+            );
+            bytes
+}
+        Err(e) => {
+            eprintln!("[mil] batched matmul build failed: {e}");
+            Vec::new()
+}
+}
 }
 
 fn make_operation(

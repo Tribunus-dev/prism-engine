@@ -725,6 +725,10 @@ mod tests {
             vocab_size: 32000,
             quantization_schema: 1,
             draft_num_layers: 0,
+            num_experts: 0,
+            num_shared_experts: 0,
+            top_k: 0,
+            expert_intermediate_dim: 0,
         };
         seal_cimage(&mut world, model_config);
 

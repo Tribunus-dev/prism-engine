@@ -19,6 +19,98 @@ pub const PROBE_STRESS_VECTORS: usize = 64;
 pub const PROMOTION_VECTORS: usize = 256;
 pub const HOLDOUT_VECTORS: usize = 256;
 
+// ── Accelerate vDSP acceleration (Apple Silicon) ───────────────────────────
+//
+// Direct FFI to Accelerate framework for vector operations on macOS.
+// Falls back to pure-Rust loops on other platforms.
+//
+#[cfg(target_os = "macos")]
+mod accelerate_vdsp {
+    // ── Accelerate framework linkage ────────────────────────────────────
+    // Declared here so admission.rs is self-contained; duplicate #[link]
+    // annotations on the same framework are harmless.
+    #[link(name = "Accelerate", kind = "framework")]
+    extern "C" {
+        /// Vector-scalar multiply: C[i] = A[i] * scalar
+        /// vDSP_vsmul(A, A_stride, B, C, C_stride, N)
+        fn vDSP_vsmul(
+            a: *const f32,
+            a_stride: i32,
+            b: *const f32,
+            c: *mut f32,
+            c_stride: i32,
+            n: i32,
+        );
+
+        /// Element-wise multiply: C[i] = A[i] * B[i]
+        /// vDSP_vmul(A, A_stride, B, B_stride, C, C_stride, N)
+        fn vDSP_vmul(
+            a: *const f32,
+            a_stride: i32,
+            b: *const f32,
+            b_stride: i32,
+            c: *mut f32,
+            c_stride: i32,
+            n: i32,
+        );
+
+        /// Vector sum: *result = sum(A[i]) over i in [0, N)
+        /// vDSP_sve(A, A_stride, result, N)
+        fn vDSP_sve(a: *const f32, a_stride: i32, result: *mut f32, n: i32);
+    }
+
+    /// Column-wise scaling: result[i,j] = unpacked[i,j] * sv[j]
+    /// Uses vDSP_vsmul once per output column for SIMD-accelerated scaling.
+    pub fn scale_columns(unpacked: &[f32], out_features: usize, sv: &[f32]) -> Vec<f32> {
+        let total = unpacked.len();
+        let in_features = total / out_features;
+        let mut result = vec![0.0f32; total];
+        for j in 0..out_features {
+            unsafe {
+                vDSP_vsmul(
+                    &unpacked[j],
+                    out_features as i32,
+                    &sv[j],
+                    &mut result[j],
+                    out_features as i32,
+                    in_features as i32,
+                );
+            }
+        }
+        result
+    }
+
+    /// Sum of squared differences as f64.
+    /// vDSP_vmul requires distinct input and output buffers, so squaring
+    /// is done into a separate allocation.  The two Vecs (n f32 each) are
+    /// temporary and freed on return; gated to macOS-only so non-macOS
+    /// retains the allocation-free iterator path.
+    pub fn sum_sq_diff(reference: &[f32], reconstructed: &[f32]) -> f64 {
+        let n = reference.len();
+        let mut diff = vec![0.0f32; n];
+        for i in 0..n {
+            diff[i] = reference[i] - reconstructed[i];
+        }
+        unsafe {
+            // Square into separate buffer (vDSP requires distinct I/O pointers)
+            let mut sq = vec![0.0f32; n];
+            vDSP_vmul(
+                diff.as_ptr(),
+                1,
+                diff.as_ptr(),
+                1,
+                sq.as_mut_ptr(),
+                1,
+                n as i32,
+            );
+            // Sum: result = sum(diff[i])
+            let mut sum: f32 = 0.0;
+            vDSP_sve(sq.as_ptr(), 1, &mut sum, n as i32);
+            sum as f64
+        }
+    }
+}
+
 use super::calibration::*;
 use super::contract::*;
 use super::contract::{CandidateEvidence, CandidateResult, PhaseVectorCounts, ValidationOutcome};
@@ -83,6 +175,31 @@ pub fn pack_candidate(
     }
 }
 
+// ── cfg-gated Accelerate wrappers ───────────────────────────────────────────
+//
+// Each hot kernel has two versions: Accelerate vDSP on macOS, pure-Rust fallback
+// elsewhere.  The cfg-based dispatch is simpler than a trait object and avoids
+// any runtime overhead.
+
+/// Column-wise scaling: result[i,j] = unpacked[i,j] * sv[j]
+#[cfg(target_os = "macos")]
+fn scale_columns_vdsp(unpacked: &[f32], out_features: usize, sv: &[f32]) -> Vec<f32> {
+    accelerate_vdsp::scale_columns(unpacked, out_features, sv)
+}
+
+/// Equivalent column scaling using pure Rust loops (non-macOS fallback).
+#[cfg(not(target_os = "macos"))]
+fn scale_columns_vdsp(unpacked: &[f32], out_features: usize, sv: &[f32]) -> Vec<f32> {
+    let in_features = unpacked.len() / out_features;
+    let mut result = vec![0.0f32; unpacked.len()];
+    for i in 0..in_features {
+        for j in 0..out_features {
+            result[i * out_features + j] = unpacked[i * out_features + j] * sv[j];
+        }
+    }
+    result
+}
+
 /// Reconstruct a packed candidate back to a weight matrix.
 ///
 /// For scaled-reduction candidates, applies the column scale vector after
@@ -117,13 +234,7 @@ pub fn reconstruct_candidate(
     };
     match scale_vector {
         Some(sv) => {
-            let mut result = vec![0.0f32; in_features * out_features];
-            for i in 0..in_features {
-                for j in 0..out_features {
-                    result[i * out_features + j] = unpacked[i * out_features + j] * sv[j];
-                }
-            }
-            result
+            scale_columns_vdsp(&unpacked, out_features, sv)
         }
         None => unpacked,
     }
@@ -618,6 +729,11 @@ pub fn compute_weight_nrmse(reference: &[f32], reconstructed: &[f32]) -> f64 {
         return f64::MAX;
     }
     let n = reference.len() as f64;
+    // On macOS use Accelerate vDSP_vmul + vDSP_sve for SIMD sum-of-squares
+    // reduction; on other platforms fall back to the iterator.
+    #[cfg(target_os = "macos")]
+    let sum_sq_err: f64 = accelerate_vdsp::sum_sq_diff(reference, reconstructed);
+    #[cfg(not(target_os = "macos"))]
     let sum_sq_err: f64 = reference
         .iter()
         .zip(reconstructed.iter())

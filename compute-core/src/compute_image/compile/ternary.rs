@@ -212,6 +212,10 @@ pub enum SegmentKind {
     /// between the compiler's packing pass and every runtime dispatch path.
     /// Binary: count (u32) followed by `count` MatrixWeightBinding structs.
     MatrixContract = 41,
+    /// Per-expert weight offset directory for MoE models.
+    /// Array of ExpertDirectoryEntry structs, one per expert tensor,
+    /// enabling runtime dispatch to individual expert weight matrices.
+    ExpertDirectory = 42,
 }
 
 /// One entry in the cimage segment directory.
@@ -1115,6 +1119,14 @@ pub struct ModelConfig {
     pub vocab_size: u32,
     pub quantization_schema: u32,
     pub draft_num_layers: u32,
+    /// Number of experts in MoE layers (0 = dense model).
+    pub num_experts: u32,
+    /// Number of shared experts (DeepSeek-style, unused = 0).
+    pub num_shared_experts: u32,
+    /// Top-K active experts per token.
+    pub top_k: u32,
+    /// Hidden dimension of the expert MLP intermediate.
+    pub expert_intermediate_dim: u32,
 }
 
 /// Input: one compiled tensor ready for sealing into a cimage.
@@ -1383,6 +1395,10 @@ mod build_cimage_tests {
                 vocab_size: 32000,
                 quantization_schema: 1,
                 draft_num_layers: 0,
+                num_experts: 0,
+                num_shared_experts: 0,
+                top_k: 0,
+                expert_intermediate_dim: 0,
             },
         );
         assert!(result.is_ok(), "build_cimage failed: {:?}", result.err());

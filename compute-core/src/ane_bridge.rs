@@ -232,3 +232,27 @@ pub fn execute_ane_step(
         policy_support: crate::backend::routing::EvaluationPolicySupport::Native,
     })
 }
+
+/// Execute a batched ANE inference step.
+///
+/// Batched programs fuse the batch dimension into the MIL input shapes
+/// (e.g., `[batch_size, in_features]` instead of `[1, in_features]`).
+/// The ANE processes all batch items in a single invocation via MIL
+/// matmul broadcasting — no per-item serial dispatch is needed.
+///
+/// `batch_index` identifies which logical tensor slice within the batch
+/// the caller should read/write. The actual ANE evaluation is identical
+/// to [`execute_ane_step`] because the batch dimension is baked into the
+/// compiled MIL program's tensor shapes at compile time.
+pub fn execute_batched_ane_step(
+    step: &AneInferenceStep,
+    program_cache: &AneProgramCache,
+    batch_index: u32,
+) -> Result<crate::backend::routing::BoundaryExecutionReceipt, String> {
+    // The MIL program already encodes the batch dimension in its input
+    // shapes — `[batch_size, in_features]`. The ANE processes all items
+    // at once; batch_index is metadata for the caller to identify which
+    // slice of the batch is "theirs".
+    let _ = batch_index;
+    execute_ane_step(step, program_cache)
+}
