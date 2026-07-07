@@ -10,7 +10,11 @@
 //!
 //! Run: cargo test --test asymmetric_coprocessing --features prism-backend -- --nocapture
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};

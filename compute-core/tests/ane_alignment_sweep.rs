@@ -10,7 +10,11 @@
 //!
 //! Run: cargo test --test ane_alignment_sweep --features prism-backend -- --nocapture
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

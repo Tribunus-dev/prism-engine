@@ -5,7 +5,11 @@
 //! Run:  cargo test --test cross_lane_ops_benchmark --features prism-backend -- --nocapture
 //! Requires: macOS 14.0+ on Apple Silicon
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use coreml_proto::proto::mil_spec;
 use mlx_rs::Dtype;

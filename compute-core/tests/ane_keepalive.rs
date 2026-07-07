@@ -17,7 +17,11 @@
 //! Run: cargo test --test ane_keepalive --features prism-backend -- --nocapture
 //! Requires: macOS 14.0+ on Apple Silicon
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};

@@ -21,7 +21,11 @@
 //! Run: cargo test --test slc_bypass_orchestrator --features prism-backend -- --nocapture
 //! Requires: macOS 14.0+ on Apple Silicon
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use std::os::raw::c_uint;
 use std::path::{Path, PathBuf};

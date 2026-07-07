@@ -552,6 +552,7 @@ pub struct StratifiedSample {
     pub seed: u64,
     pub num_strata: usize,
     pub strata_sizes: Vec<usize>,
+    pub algorithm_version: u32,
 }
 
 /// Deterministic stratified sample from a vector bank.
@@ -565,20 +566,29 @@ pub fn stratified_sample(
     count: usize,
     num_strata: usize,
     seed: u64,
+    exclude_indices: Option<&[usize]>,
 ) -> StratifiedSample {
-    if vectors.len() <= count || num_strata == 0 {
-        let take = vectors.len().min(count);
+    if vectors.len() <= count || count == 0 {
+        let mut indices: Vec<usize> = (0..vectors.len()).collect();
+        let mut rng = XorShift64::new(seed.wrapping_add(0xFF));
+        for i in (1..indices.len()).rev() {
+            let j = (rng.f32() * (i + 1) as f32) as usize;
+            indices.swap(i, j.min(i));
+        }
         return StratifiedSample {
-            vectors: vectors[..take].to_vec(),
-            selected_indices: (0..take).collect(),
+            vectors: indices.iter().map(|&i| vectors[i].clone()).collect(),
+            selected_indices: indices,
             seed,
             num_strata,
-            strata_sizes: vec![take],
+            strata_sizes: vec![vectors.len()],
+            algorithm_version: 1,
         };
     }
 
     // 1. Compute L2 norms and create index array
-    let mut indexed: Vec<(usize, f32)> = vectors.iter().enumerate()
+    let mut indexed: Vec<(usize, f32)> = vectors
+        .iter()
+        .enumerate()
         .map(|(i, v)| (i, v.iter().map(|x| x * x).sum::<f32>().sqrt()))
         .collect();
 
@@ -586,6 +596,7 @@ pub fn stratified_sample(
     indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // 3. Divide into num_strata bands
+    let num_strata = num_strata.max(1).min(indexed.len());
     let band_size = indexed.len() / num_strata;
     let remainder = indexed.len() % num_strata;
     let per_band = (count + num_strata - 1) / num_strata;
@@ -601,12 +612,21 @@ pub fn stratified_sample(
 
         // 4. Deterministic selection within band
         let mut rng = XorShift64::new(seed.wrapping_add(band as u64));
-        let selected: Vec<usize> = (0..take_from_band)
-            .map(|_| {
-                let idx = (rng.f32() * this_band_size as f32) as usize;
-                band_indices[idx.min(this_band_size - 1)].0
-            })
-            .collect();
+        // Build a mutable index list for this band and apply exclusion filter
+        let mut band_indices: Vec<usize> = band_indices.iter().map(|pair| pair.0).collect();
+        if let Some(exclude) = exclude_indices {
+            band_indices.retain(|i| !exclude.contains(i));
+        }
+
+        // Partial Fisher-Yates shuffle to pick without replacement
+        let n_take = take_from_band.min(band_indices.len());
+        for pos in 0..n_take {
+            let remaining = band_indices.len() - pos;
+            let pick = pos + (rng.f32() * remaining as f32) as usize;
+            let swap_idx = pick.min(band_indices.len() - 1);
+            band_indices.swap(pos, swap_idx);
+        }
+        let selected: Vec<usize> = band_indices[..n_take].to_vec();
 
         selected_indices.extend(selected);
         strata_sizes.push(take_from_band);
@@ -620,8 +640,9 @@ pub fn stratified_sample(
         selected_indices.swap(i, j.min(i));
     }
 
-    // 6. Collect selected vectors in original bank order (actually shuffled order)
-    let vectors: Vec<ActivationVector> = selected_indices.iter()
+    // 6. Collect selected vectors
+    let vectors: Vec<ActivationVector> = selected_indices
+        .iter()
         .map(|&idx| vectors[idx].clone())
         .collect();
 
@@ -631,6 +652,7 @@ pub fn stratified_sample(
         seed,
         num_strata,
         strata_sizes,
+        algorithm_version: 1,
     }
 }
 
@@ -715,7 +737,7 @@ mod tests {
             vectors.push(v);
         }
 
-        let sample = stratified_sample(&vectors, 100, 4, 42);
+        let sample = stratified_sample(&vectors, 100, 4, 42, None);
         assert_eq!(sample.vectors.len(), 100);
         assert_eq!(sample.num_strata, 4);
         assert_eq!(sample.seed, 42);
@@ -724,7 +746,41 @@ mod tests {
         assert!(sample.strata_sizes.iter().all(|&s| s >= 20 && s <= 30));
 
         // Deterministic: same seed => same sample
-        let sample2 = stratified_sample(&vectors, 100, 4, 42);
+        let sample2 = stratified_sample(&vectors, 100, 4, 42, None);
         assert_eq!(sample.selected_indices, sample2.selected_indices);
+    }
+
+    #[test]
+    fn test_stratified_sample_no_replacement() {
+        let vectors: Vec<ActivationVector> = (0..100).map(|i| vec![i as f32; 4]).collect();
+        let sample = stratified_sample(&vectors, 50, 4, 42, None);
+        let mut sorted = sample.selected_indices.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            sample.selected_indices.len(),
+            "Must not have duplicates"
+        );
+    }
+
+    #[test]
+    fn test_stratified_sample_exclusion() {
+        let vectors: Vec<ActivationVector> = (0..100).map(|i| vec![i as f32; 4]).collect();
+        let exclude: Vec<usize> = (0..10).collect();
+        let sample = stratified_sample(&vectors, 50, 4, 42, Some(&exclude));
+        // Verify none of the excluded indices are in the sample
+        for idx in &sample.selected_indices {
+            assert!(
+                !exclude.contains(idx),
+                "Excluded index {} found in sample",
+                idx
+            );
+        }
+        // Verify all indices are unique (no replacement)
+        let mut sorted = sample.selected_indices.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), sample.selected_indices.len());
     }
 }

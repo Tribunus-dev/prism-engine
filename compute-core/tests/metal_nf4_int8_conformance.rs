@@ -12,15 +12,15 @@
 
 #![cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 
-use metal::*;
 use half::f16;
+use metal::*;
 use parking_lot::Mutex;
 use rand::Rng;
 use std::sync::Arc;
 use tribunus_compute_core::compute_image::compile::kernel_dispatch::{
-    Int8Tile640GEMVDispatcher, Int8Tile640Offsets, Nf4Tile640ProjectionDispatcher,
-    Nf4Tile640Offsets, Nf4ScaledReductionTile640Dispatcher,
-    Nf4ScaledReductionTile640Offsets, RegistryRef,
+    Int8Tile640GEMVDispatcher, Int8Tile640Offsets, Nf4ScaledReductionTile640Dispatcher,
+    Nf4ScaledReductionTile640Offsets, Nf4Tile640Offsets, Nf4Tile640ProjectionDispatcher,
+    RegistryRef,
 };
 use tribunus_compute_core::compute_image::compile::kernel_registry::KernelRegistry;
 use tribunus_compute_core::compute_image::compile::kernel_types::{
@@ -192,8 +192,7 @@ fn dispatch_nf4_scaled_gemv(
     receipt.output_elements = params.out_dim;
     receipt.flags = 0;
     receipt.logical_weight_bytes = (params.out_dim as u64) * (num_macro_tiles as u64) * 320;
-    receipt.logical_sidecar_bytes =
-        (params.out_dim as u64) * (num_macro_tiles as u64) * 5 * 2 * 4;
+    receipt.logical_sidecar_bytes = (params.out_dim as u64) * (num_macro_tiles as u64) * 5 * 2 * 4;
     receipt.logical_activation_bytes = (params.in_dim as u64) * 4 + (params.out_dim as u64) * 4;
 }
 
@@ -205,7 +204,9 @@ fn dispatch_nf4_scaled_gemv(
 fn test_metal_nf4_gemv() {
     let mut rng = rand::thread_rng();
     let src: Vec<f32> = (0..ROWS * COLS).map(|_| rng.gen_range(-1.0..1.0)).collect();
-    let input: Vec<f32> = (0..BATCH * COLS).map(|_| rng.gen_range(-1.0..1.0)).collect();
+    let input: Vec<f32> = (0..BATCH * COLS)
+        .map(|_| rng.gen_range(-1.0..1.0))
+        .collect();
     let (codes, scales, biases, ..) = pack_nf4_weights(&src, ROWS, COLS);
     let ref_out = ref_matmul(&src, &input, ROWS, COLS, BATCH);
 
@@ -238,18 +239,21 @@ fn test_metal_nf4_gemv() {
             (COLS * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (ROWS * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf = device.new_buffer((ROWS * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
         dispatcher.dispatch_with_offsets(
-            &cmd_buf, &codes_buf, &scales_buf, &biases_buf,
-            &in_buf, &out_buf, &params,
-            Nf4Tile640Offsets::default(), &mut receipt,
+            &cmd_buf,
+            &codes_buf,
+            &scales_buf,
+            &biases_buf,
+            &in_buf,
+            &out_buf,
+            &params,
+            Nf4Tile640Offsets::default(),
+            &mut receipt,
         );
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -269,7 +273,9 @@ fn test_metal_nf4_gemv() {
 fn test_metal_int8_gemv() {
     let mut rng = rand::thread_rng();
     let src: Vec<f32> = (0..ROWS * COLS).map(|_| rng.gen_range(-1.0..1.0)).collect();
-    let input: Vec<f32> = (0..BATCH * COLS).map(|_| rng.gen_range(-1.0..1.0)).collect();
+    let input: Vec<f32> = (0..BATCH * COLS)
+        .map(|_| rng.gen_range(-1.0..1.0))
+        .collect();
     let (codes, scales, biases) = pack_int8_weights(&src, ROWS, COLS);
     let ref_out = ref_matmul(&src, &input, ROWS, COLS, BATCH);
 
@@ -302,18 +308,22 @@ fn test_metal_int8_gemv() {
             (COLS * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (ROWS * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf = device.new_buffer((ROWS * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
         dispatcher.dispatch_with_offsets(
-            &cmd_buf, &codes_buf, &scales_buf, &biases_buf,
-            &in_buf, &out_buf, None, &params,
-            Int8Tile640Offsets::default(), &mut receipt,
+            &cmd_buf,
+            &codes_buf,
+            &scales_buf,
+            &biases_buf,
+            &in_buf,
+            &out_buf,
+            None,
+            &params,
+            Int8Tile640Offsets::default(),
+            &mut receipt,
         );
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -337,12 +347,12 @@ fn test_metal_int8_gemv() {
 fn test_metal_nf4_scaled_reduction_gemv() {
     let mut rng = rand::thread_rng();
     let src: Vec<f32> = (0..ROWS * COLS).map(|_| rng.gen_range(-1.0..1.0)).collect();
-    let input: Vec<f32> = (0..BATCH * COLS).map(|_| rng.gen_range(-0.5..0.5)).collect();
+    let input: Vec<f32> = (0..BATCH * COLS)
+        .map(|_| rng.gen_range(-0.5..0.5))
+        .collect();
 
     // Random reduction-axis scales in [0.1, 2.0].
-    let reduction_scales: Vec<f32> = (0..COLS)
-        .map(|_| rng.gen_range(0.1f32..2.0))
-        .collect();
+    let reduction_scales: Vec<f32> = (0..COLS).map(|_| rng.gen_range(0.1f32..2.0)).collect();
 
     // Pack NF4 weights for CPU reference.
     let (codes, scales, biases, ..) = pack_nf4_weights(&src, ROWS, COLS);
@@ -394,10 +404,7 @@ fn test_metal_nf4_scaled_reduction_gemv() {
             (COLS * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (ROWS * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf = device.new_buffer((ROWS * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
@@ -425,7 +432,11 @@ fn test_metal_nf4_scaled_reduction_gemv() {
     let cos = cosine_similarity(&ref_out, &all_gpu);
     let nrms = nrmse(&ref_out, &all_gpu);
     assert!(cos > 0.99, "NF4 scaled reduction cosine {:.8} <= 0.99", cos);
-    assert!(nrms < 0.15, "NF4 scaled reduction NRMSE {:.6} >= 0.15", nrms);
+    assert!(
+        nrms < 0.15,
+        "NF4 scaled reduction NRMSE {:.6} >= 0.15",
+        nrms
+    );
 }
 
 /// INT8 scaled reduction-axis GEMV via Int8Tile640GEMVDispatcher with
@@ -435,11 +446,11 @@ fn test_metal_nf4_scaled_reduction_gemv() {
 fn test_metal_int8_scaled_reduction_gemv() {
     let mut rng = rand::thread_rng();
     let src: Vec<f32> = (0..ROWS * COLS).map(|_| rng.gen_range(-1.0..1.0)).collect();
-    let input: Vec<f32> = (0..BATCH * COLS).map(|_| rng.gen_range(-0.5..0.5)).collect();
-
-    let reduction_scales: Vec<f32> = (0..COLS)
-        .map(|_| rng.gen_range(0.1f32..2.0))
+    let input: Vec<f32> = (0..BATCH * COLS)
+        .map(|_| rng.gen_range(-0.5..0.5))
         .collect();
+
+    let reduction_scales: Vec<f32> = (0..COLS).map(|_| rng.gen_range(0.1f32..2.0)).collect();
 
     let (codes, scales, biases) = pack_int8_weights(&src, ROWS, COLS);
 
@@ -488,18 +499,22 @@ fn test_metal_int8_scaled_reduction_gemv() {
             (COLS * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (ROWS * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf = device.new_buffer((ROWS * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
         dispatcher.dispatch_with_offsets(
-            &cmd_buf, &codes_buf, &scales_buf, &biases_buf,
-            &in_buf, &out_buf, Some(&rs_buf), &params,
-            Int8Tile640Offsets::default(), &mut receipt,
+            &cmd_buf,
+            &codes_buf,
+            &scales_buf,
+            &biases_buf,
+            &in_buf,
+            &out_buf,
+            Some(&rs_buf),
+            &params,
+            Int8Tile640Offsets::default(),
+            &mut receipt,
         );
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -511,8 +526,16 @@ fn test_metal_int8_scaled_reduction_gemv() {
 
     let cos = cosine_similarity(&ref_out, &all_gpu);
     let nrms = nrmse(&ref_out, &all_gpu);
-    assert!(cos > 0.99, "INT8 scaled reduction cosine {:.8} <= 0.99", cos);
-    assert!(nrms < 0.02, "INT8 scaled reduction NRMSE {:.6} >= 0.02", nrms);
+    assert!(
+        cos > 0.99,
+        "INT8 scaled reduction cosine {:.8} <= 0.99",
+        cos
+    );
+    assert!(
+        nrms < 0.02,
+        "INT8 scaled reduction NRMSE {:.6} >= 0.02",
+        nrms
+    );
 }
 
 /// NF4 GEMV with non-multiple-of-640 input width (700 columns).
@@ -572,18 +595,22 @@ fn test_metal_nf4_non_multiple_of_640() {
             (COLS_700 * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (ROWS_64 * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf =
+            device.new_buffer((ROWS_64 * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
         dispatcher.dispatch_with_offsets(
-            &cmd_buf, &codes_buf, &scales_buf, &biases_buf,
-            &in_buf, &out_buf, &params,
-            Nf4Tile640Offsets::default(), &mut receipt,
+            &cmd_buf,
+            &codes_buf,
+            &scales_buf,
+            &biases_buf,
+            &in_buf,
+            &out_buf,
+            &params,
+            Nf4Tile640Offsets::default(),
+            &mut receipt,
         );
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -595,11 +622,7 @@ fn test_metal_nf4_non_multiple_of_640() {
 
     let cos = cosine_similarity(&ref_out, &all_gpu);
     let nrms = nrmse(&ref_out, &all_gpu);
-    assert!(
-        cos > 0.99,
-        "NF4 non-mult-of-640 cosine {:.8} <= 0.99",
-        cos
-    );
+    assert!(cos > 0.99, "NF4 non-mult-of-640 cosine {:.8} <= 0.99", cos);
     assert!(nrms < 0.15, "NF4 non-mult-of-640 NRMSE {:.6} >= 0.15", nrms);
 }
 
@@ -658,18 +681,23 @@ fn test_metal_int8_non_multiple_of_640() {
             (COLS_700 * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (ROWS_64 * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf =
+            device.new_buffer((ROWS_64 * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
         dispatcher.dispatch_with_offsets(
-            &cmd_buf, &codes_buf, &scales_buf, &biases_buf,
-            &in_buf, &out_buf, None, &params,
-            Int8Tile640Offsets::default(), &mut receipt,
+            &cmd_buf,
+            &codes_buf,
+            &scales_buf,
+            &biases_buf,
+            &in_buf,
+            &out_buf,
+            None,
+            &params,
+            Int8Tile640Offsets::default(),
+            &mut receipt,
         );
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -681,11 +709,7 @@ fn test_metal_int8_non_multiple_of_640() {
 
     let cos = cosine_similarity(&ref_out, &all_gpu);
     let nrms = nrmse(&ref_out, &all_gpu);
-    assert!(
-        cos > 0.99,
-        "INT8 non-mult-of-640 cosine {:.8} <= 0.99",
-        cos
-    );
+    assert!(cos > 0.99, "INT8 non-mult-of-640 cosine {:.8} <= 0.99", cos);
     assert!(
         nrms < 0.02,
         "INT8 non-mult-of-640 NRMSE {:.6} >= 0.02",
@@ -748,18 +772,22 @@ fn test_metal_nf4_multi_tile() {
             (COLS_1280 * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (ROWS_64 * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf =
+            device.new_buffer((ROWS_64 * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
         dispatcher.dispatch_with_offsets(
-            &cmd_buf, &codes_buf, &scales_buf, &biases_buf,
-            &in_buf, &out_buf, &params,
-            Nf4Tile640Offsets::default(), &mut receipt,
+            &cmd_buf,
+            &codes_buf,
+            &scales_buf,
+            &biases_buf,
+            &in_buf,
+            &out_buf,
+            &params,
+            Nf4Tile640Offsets::default(),
+            &mut receipt,
         );
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -830,18 +858,23 @@ fn test_metal_int8_multi_tile() {
             (COLS_1280 * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (ROWS_64 * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf =
+            device.new_buffer((ROWS_64 * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
         dispatcher.dispatch_with_offsets(
-            &cmd_buf, &codes_buf, &scales_buf, &biases_buf,
-            &in_buf, &out_buf, None, &params,
-            Int8Tile640Offsets::default(), &mut receipt,
+            &cmd_buf,
+            &codes_buf,
+            &scales_buf,
+            &biases_buf,
+            &in_buf,
+            &out_buf,
+            None,
+            &params,
+            Int8Tile640Offsets::default(),
+            &mut receipt,
         );
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -867,14 +900,17 @@ fn test_metal_nf4_scaled_reduction_nonzero_offsets() {
     let rows = 64usize;
 
     let src: Vec<f32> = (0..rows * cols).map(|_| rng.gen_range(-1.0..1.0)).collect();
-    let input: Vec<f32> = (0..BATCH * cols).map(|_| rng.gen_range(-0.5..0.5)).collect();
+    let input: Vec<f32> = (0..BATCH * cols)
+        .map(|_| rng.gen_range(-0.5..0.5))
+        .collect();
     let reduction_scales: Vec<f32> = (0..cols).map(|_| rng.gen_range(0.1f32..2.0)).collect();
 
     let (codes, scales, biases, ..) = pack_nf4_weights(&src, rows, cols);
     let dequant_src = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
     let ref_out = ref_scaled_matmul(&dequant_src, &input, &reduction_scales, rows, cols, BATCH);
 
-    let rs_bytes: Vec<u8> = reduction_scales.iter()
+    let rs_bytes: Vec<u8> = reduction_scales
+        .iter()
         .copied()
         .flat_map(|v| f16::from_f32(v).to_bits().to_le_bytes())
         .collect();
@@ -884,13 +920,15 @@ fn test_metal_nf4_scaled_reduction_nonzero_offsets() {
     let rs_off = bias_off + (biases.len() * 4) as u64;
     let total = (rs_off + rs_bytes.len() as u64) as usize;
     let mut shared = vec![0u8; total];
-    for (i, b) in shared.iter_mut().enumerate() { *b = (i & 0xFF) as u8; }
+    for (i, b) in shared.iter_mut().enumerate() {
+        *b = (i & 0xFF) as u8;
+    }
     shared[code_off as usize..][..codes.len()].copy_from_slice(&codes);
     for (i, &v) in scales.iter().enumerate() {
-        shared[scale_off as usize + i*4..][..4].copy_from_slice(&v.to_le_bytes());
+        shared[scale_off as usize + i * 4..][..4].copy_from_slice(&v.to_le_bytes());
     }
     for (i, &v) in biases.iter().enumerate() {
-        shared[bias_off as usize + i*4..][..4].copy_from_slice(&v.to_le_bytes());
+        shared[bias_off as usize + i * 4..][..4].copy_from_slice(&v.to_le_bytes());
     }
     shared[rs_off as usize..][..rs_bytes.len()].copy_from_slice(&rs_bytes);
 
@@ -920,18 +958,22 @@ fn test_metal_nf4_scaled_reduction_nonzero_offsets() {
             (cols * 4) as u64,
             MTLResourceOptions::StorageModeShared,
         );
-        let out_buf = device.new_buffer(
-            (rows * 4) as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let out_buf = device.new_buffer((rows * 4) as u64, MTLResourceOptions::StorageModeShared);
         let cmd_queue = device.new_command_queue();
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
         dispatcher.dispatch_with_offsets(
-            &cmd_buf, &shared_buf, &shared_buf, &shared_buf,
-            &in_buf, &out_buf, &shared_buf, &params,
-            offsets, &mut receipt,
+            &cmd_buf,
+            &shared_buf,
+            &shared_buf,
+            &shared_buf,
+            &in_buf,
+            &out_buf,
+            &shared_buf,
+            &params,
+            offsets,
+            &mut receipt,
         );
         cmd_buf.commit();
         cmd_buf.wait_until_completed();
@@ -943,6 +985,14 @@ fn test_metal_nf4_scaled_reduction_nonzero_offsets() {
 
     let cos = cosine_similarity(&ref_out, &all_gpu);
     let nrms = nrmse(&ref_out, &all_gpu);
-    assert!(cos > 0.99, "NF4 scaled nonzero-offset cosine {:.8} <= 0.99", cos);
-    assert!(nrms < 0.15, "NF4 scaled nonzero-offset NRMSE {:.6} >= 0.15", nrms);
+    assert!(
+        cos > 0.99,
+        "NF4 scaled nonzero-offset cosine {:.8} <= 0.99",
+        cos
+    );
+    assert!(
+        nrms < 0.15,
+        "NF4 scaled nonzero-offset NRMSE {:.6} >= 0.15",
+        nrms
+    );
 }

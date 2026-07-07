@@ -23,7 +23,11 @@
 //! Run: cargo test --test ane_combined_techniques --features prism-backend -- --nocapture
 //! Requires: macOS 14.0+ on Apple Silicon
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

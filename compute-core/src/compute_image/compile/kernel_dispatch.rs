@@ -410,7 +410,11 @@ impl Nf4ScaledReductionTile640Dispatcher {
         // buffer(7): FP16 reduction-axis scale sidecar.  The kernel loads
         // this inside the innermost loop and multiplies it against the
         // activation before the NF4 weight apply.
-        encoder.set_buffer(7, Some(reduction_scales_buffer), offsets.reduction_scale_offset);
+        encoder.set_buffer(
+            7,
+            Some(reduction_scales_buffer),
+            offsets.reduction_scale_offset,
+        );
 
         encoder.dispatch_thread_groups(
             MTLSize {
@@ -439,7 +443,7 @@ impl Nf4ScaledReductionTile640Dispatcher {
         // NF4 scales+biases (40 bytes/tile) plus FP16 reduction scales (2 bytes/input element).
         receipt.logical_sidecar_bytes =
             (params.out_dim as u64) * (num_macro_tiles as u64) * 5 * 2 * 4
-            + (params.in_dim as u64) * 2;
+                + (params.in_dim as u64) * 2;
         receipt.logical_activation_bytes = (params.in_dim as u64) * 4 + (params.out_dim as u64) * 4;
     }
 }
@@ -596,11 +600,11 @@ impl Int8Tile640GEMVDispatcher {
         receipt.output_elements = params.out_dim;
         receipt.flags = 0;
         let tile_bytes: u64 = 640;
-        receipt.logical_weight_bytes = (params.out_dim as u64) * (num_macro_tiles as u64) * tile_bytes;
+        receipt.logical_weight_bytes =
+            (params.out_dim as u64) * (num_macro_tiles as u64) * tile_bytes;
         // INT8: one f32 scale + one f32 bias_padding (always zero) per tile =
         // 8 bytes per tile of tile_metadata.
-        receipt.logical_sidecar_bytes =
-            (params.out_dim as u64) * (num_macro_tiles as u64) * 2 * 4;
+        receipt.logical_sidecar_bytes = (params.out_dim as u64) * (num_macro_tiles as u64) * 2 * 4;
         receipt.logical_activation_bytes = (params.in_dim as u64) * 4 + (params.out_dim as u64) * 4;
     }
 }
@@ -671,10 +675,8 @@ impl GpuBatchMatmulDispatcher {
             total_input_bytes,
             MTLResourceOptions::StorageModeShared,
         );
-        let output_buf = device.new_buffer(
-            total_output_bytes,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let output_buf =
+            device.new_buffer(total_output_bytes, MTLResourceOptions::StorageModeShared);
 
         // Create command buffer and encoder.
         let cmd_queue = device.new_command_queue();
@@ -707,8 +709,16 @@ impl GpuBatchMatmulDispatcher {
         let thread_group_size = 256u64;
         let num_groups = (total_threads + thread_group_size - 1) / thread_group_size;
         encoder.dispatch_thread_groups(
-            MTLSize { width: num_groups, height: 1, depth: 1 },
-            MTLSize { width: thread_group_size, height: 1, depth: 1 },
+            MTLSize {
+                width: num_groups,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: thread_group_size,
+                height: 1,
+                depth: 1,
+            },
         );
 
         encoder.end_encoding();
@@ -717,9 +727,7 @@ impl GpuBatchMatmulDispatcher {
 
         // Read back.
         let ptr = output_buf.contents() as *const f32;
-        let result = unsafe {
-            std::slice::from_raw_parts(ptr, num_vectors * cols).to_vec()
-        };
+        let result = unsafe { std::slice::from_raw_parts(ptr, num_vectors * cols).to_vec() };
 
         result
     }

@@ -16,7 +16,11 @@
 //!
 //! Run: cargo test --test svd_latent_prefill --features prism-backend -- --nocapture
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use coreml_proto::proto::mil_spec;
 use std::path::{Path, PathBuf};

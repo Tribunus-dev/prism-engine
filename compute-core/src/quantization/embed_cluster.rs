@@ -101,7 +101,11 @@ pub fn process_weights(weights_f32: &[f32], scales_out: &mut Vec<u8>, weights_ou
 }
 /// Pack weights into ternary 256-block format.
 /// Returns (codes, scales_f32, biases_empty).
-pub fn pack_ternary_weights(weights: &[f32], in_features: usize, out_features: usize) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+pub fn pack_ternary_weights(
+    weights: &[f32],
+    in_features: usize,
+    out_features: usize,
+) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
     assert_eq!(weights.len(), in_features * out_features);
     let block_size = 256;
     let blocks_per_row = out_features.div_ceil(block_size);
@@ -114,7 +118,11 @@ pub fn pack_ternary_weights(weights: &[f32], in_features: usize, out_features: u
             let mut block = [0.0f32; 256];
             for j in 0..block_size {
                 let src_col = col_start + j;
-                block[j] = if src_col < out_features { weights[i * out_features + src_col] } else { 0.0 };
+                block[j] = if src_col < out_features {
+                    weights[i * out_features + src_col]
+                } else {
+                    0.0
+                };
             }
             let (scale_fp16, nibbles) = quantize_block(&block);
             codes.extend_from_slice(&nibbles);
@@ -126,7 +134,13 @@ pub fn pack_ternary_weights(weights: &[f32], in_features: usize, out_features: u
 }
 
 /// Unpack ternary 256-block weights back to f32.
-pub fn unpack_ternary_weights(codes: &[u8], scales: &[f32], _biases: &[f32], in_features: usize, out_features: usize) -> Vec<f32> {
+pub fn unpack_ternary_weights(
+    codes: &[u8],
+    scales: &[f32],
+    _biases: &[f32],
+    in_features: usize,
+    out_features: usize,
+) -> Vec<f32> {
     let block_size = 256;
     let blocks_per_row = out_features.div_ceil(block_size);
     let mut result = vec![0.0f32; in_features * out_features];

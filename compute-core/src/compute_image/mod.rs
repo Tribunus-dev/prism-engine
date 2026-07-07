@@ -71,7 +71,10 @@ pub mod metal_pipeline;
 pub mod model_family;
 pub mod multimodal;
 #[cfg(target_os = "macos")]
-#[cfg(any(target_os = "macos", all(feature = "prism-backend-ios", target_os = "ios")))]
+#[cfg(any(
+    target_os = "macos",
+    all(feature = "prism-backend-ios", target_os = "ios")
+))]
 pub mod orchestrator;
 pub mod phase_dag;
 pub mod phase_fallback;

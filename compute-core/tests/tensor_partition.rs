@@ -9,7 +9,11 @@
 //!
 //! Run: cargo test --test tensor_partition --features prism-backend -- --nocapture
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use std::path::Path;
 use std::time::Instant;

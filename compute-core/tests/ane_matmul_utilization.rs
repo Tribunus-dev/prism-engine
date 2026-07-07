@@ -13,7 +13,11 @@
 //! Run: cargo test --test ane_matmul_utilization --features prism-backend -- --nocapture
 //! Requires: macOS 14.0+ on Apple Silicon
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

@@ -5,8 +5,15 @@
 //! `mlx_rs::Array` operations behind a generational slot-map registry.
 
 #[cfg(target_os = "macos")]
-#[cfg(any(target_os = "macos", all(feature = "prism-backend-ios", target_os = "ios")))]
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#[cfg(any(
+    target_os = "macos",
+    all(feature = "prism-backend-ios", target_os = "ios")
+))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 pub mod accelerate;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 #[cfg(any(
@@ -24,7 +31,11 @@ pub mod accelerate_ffi;
 ))]
 pub mod accelerate_lane;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 #[path = "ane.rs"]
 pub mod ane_backend;
 pub mod authority;

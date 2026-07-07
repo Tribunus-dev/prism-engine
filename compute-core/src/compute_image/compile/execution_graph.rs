@@ -15,7 +15,7 @@ pub enum QuantizedWeightFormat {
     /// NF4 Tile640: 320-byte codes per tile, f32 scale + bias per tile.
     Nf4Tile640Base = 0,
     /// NF4 Tile640 with per-column FP16 reduction-axis scale sidecar.
-    Nf4Tile640ScaledReductionAxis = 1,
+    Nf4Tile640OutputChannelScale = 1,
     /// INT8 Tile640: 640-byte codes per tile, f32 scale per tile, no bias.
     Int8Tile640Base = 2,
     /// INT8 Tile640 with per-column FP16 reduction-axis scale sidecar.

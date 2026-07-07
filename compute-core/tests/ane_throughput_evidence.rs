@@ -12,7 +12,11 @@
 //!
 //! Run:  cargo test --features prism-backend --test ane_throughput_evidence
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
+#![cfg(all(
+    target_os = "macos",
+    feature = "prism-backend",
+    feature = "apple-coreml"
+))]
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};

@@ -29,7 +29,7 @@ pub const CIMAGE_HEADER_WIRE_SIZE: usize = 8       // magic
     + 4   // quantization_schema
     + 4   // draft_num_layers
     + CIMAGE_SEGMENT_CAPACITY * (4 + 8 + 8)  // segments
-    + 8;  // _pad
+    + 8; // _pad
 
 /// Serialize a CimageHeader to a writer in canonical little-endian format.
 pub fn write_cimage_header_le<W: std::io::Write>(

@@ -4,11 +4,17 @@
 //! bind buffers from the unified arena, and dispatch compute work.
 
 #[cfg(any(
-    feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 use crate::worker_dispatch::LoadedMetalKernel;
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 /// Dispatch a fused Metal kernel and return execution time in microseconds.
 pub fn dispatch_fused_kernel(
     kernel: &LoadedMetalKernel,

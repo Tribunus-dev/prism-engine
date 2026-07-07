@@ -12,8 +12,8 @@
 pub enum QuantizedMatrixFormat {
     /// Standard NF4 tile640 with tile-local reconstruction.
     Nf4Tile640Base = 1,
-    /// NF4 tile640 with an FP16 reduction-axis scale sidecar.
-    Nf4Tile640ScaledReductionAxis = 2,
+    /// NF4 tile640 with an FP16 per-output-channel scale sidecar.
+    Nf4Tile640OutputChannelScale = 2,
     /// INT8 tile640 with per-tile symmetric quantization.
     Int8Tile640Base = 3,
     /// Ternary tile640: 256-element blocks, 2-bit codes, FP16 scale per block.
@@ -152,7 +152,11 @@ impl WeightValidationReport {
             && self.zero_collapse_ratio <= profile.max_zero_collapse_ratio
     }
     /// Three-tier admission status for weight-space validation.
-    pub fn admission_status(&self, profile: &QuantizationValidationProfile, is_ternary: bool) -> WeightAdmission {
+    pub fn admission_status(
+        &self,
+        profile: &QuantizationValidationProfile,
+        is_ternary: bool,
+    ) -> WeightAdmission {
         // Ternary intentionally produces ~70% zero values — that is the expected
         // sparsity of the format, not a packer pathology.  Skip the zero-collapse
         // gate for ternary candidates; operator-space validation is the real check.
@@ -165,7 +169,7 @@ impl WeightValidationReport {
                     ),
                 };
             }
-}
+        }
         if self.nrmse > profile.investigation_nrmse_ceiling {
             return WeightAdmission::Rejected {
                 reason: format!(
@@ -224,6 +228,56 @@ impl OperatorValidationReport {
             && self.worst_cosine >= profile.min_worst_cosine
             && self.norm_ratio_drift <= profile.max_norm_ratio_drift
     }
+}
+
+/// Evidence collected for a candidate during admission.
+#[derive(Debug, Clone)]
+pub struct CandidateEvidence {
+    pub format: QuantizedMatrixFormat,
+    pub weight_nrmse: f64,
+    pub zero_collapse_ratio: f64,
+    pub probe: Option<OperatorValidationReport>,
+    pub promotion: Option<OperatorValidationReport>,
+    pub holdout: Option<OperatorValidationReport>,
+    pub completed_vectors: PhaseVectorCounts,
+}
+
+/// Counts of validation vectors completed in each phase.
+#[derive(Debug, Clone, Default)]
+pub struct PhaseVectorCounts {
+    pub probe: u32,
+    pub promotion: u32,
+    pub holdout: u32,
+    pub total: u32,
+}
+
+/// Qualification level of a candidate for production.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProductionQuality {
+    /// Validated with synthetic stress vectors only (no activation bank).
+    SyntheticStressOnly,
+    /// Validated with a real activation bank and passed all gates.
+    ProductionQualified,
+}
+
+/// Receipt for a stratified-selection round of activation vectors.
+#[derive(Debug, Clone)]
+pub struct ActivationBankSelectionReceipt {
+    pub bank_digest: [u8; 32],
+    pub original_bank_size: usize,
+    pub selected_indices: Vec<usize>,
+    pub selected_count: usize,
+    pub seed: u64,
+    pub num_strata: usize,
+    pub algorithm_version: u32,
+    pub exclusion_from_parent: bool,
+}
+
+/// Classification of a cimage artifact by its provenance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CimageArtifactClass {
+    ExperimentalCimage,
+    ProductionCimage,
 }
 
 /// Batch size for deadline-checking inside validation loops.
@@ -310,18 +364,9 @@ pub struct QuantizationHint {
 pub enum QuantizationAdmissionFailure {
     NoCandidatePassed {
         candidates_attempted: Vec<String>,
-        /// Seed used for stratified sampling of activation vectors.
-        /// Default: DEFAULT_SAMPLE_SEED from calibration suite.
-        sample_seed: u64,
-        last_weight_nrmse: f64,
-        last_zero_collapse_ratio: f64,
-        last_operator_rmse: f32,
-        /// Operator NRMSE of the last failing candidate (if available).
-        last_operator_nrmse: f32,
-        /// Cosine similarity of the last failing candidate (if available).
-        last_cosine_similarity: f32,
-        /// Average reference output RMS.
-        last_ref_output_rms: f32,
+        best_evidence: Option<CandidateEvidence>,
+        completed_vectors: PhaseVectorCounts,
+        bank_selections: Vec<ActivationBankSelectionReceipt>,
     },
     PackerFailure(String),
     /// The per-tensor wall-clock deadline expired during validation.
@@ -330,14 +375,9 @@ pub enum QuantizationAdmissionFailure {
     /// fundamentally failed" from "this tensor needs a larger budget."
     TimeoutDeadline {
         candidates_attempted: Vec<String>,
-        best_candidate: BestCandidateSnapshot,
-        /// Seed used for stratified sampling of activation vectors.
-        /// Default: DEFAULT_SAMPLE_SEED from calibration suite.
-        sample_seed: u64,
-        /// Number of validation vectors processed before timeout.
-        vectors_processed: u32,
-        /// Name of the phase where the deadline expired (e.g. "probe",
-        /// "promotion", "holdout").
+        best_evidence: Option<CandidateEvidence>,
+        completed_vectors: PhaseVectorCounts,
         expired_phase: String,
+        bank_selections: Vec<ActivationBankSelectionReceipt>,
     },
 }

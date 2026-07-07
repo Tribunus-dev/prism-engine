@@ -21,7 +21,7 @@ pub const HOLDOUT_VECTORS: usize = 256;
 
 use super::calibration::*;
 use super::contract::*;
-use super::contract::BestCandidateSnapshot;
+use super::contract::{CandidateEvidence, PhaseVectorCounts, ProductionQuality, ValidationOutcome};
 use super::embed_cluster::{pack_ternary_weights, unpack_ternary_weights};
 use super::validation::*;
 use crate::nf4tile640::{
@@ -43,8 +43,7 @@ pub fn candidate_plan(
         QuantizedMatrixFormat::Nf4Tile640Base,
     ];
     if hint.permit_scale_candidate {
-        candidates.push(QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis);
-        candidates.push(QuantizedMatrixFormat::Nf4Tile640ScaledReductionAxis);
+        candidates.push(QuantizedMatrixFormat::Nf4Tile640OutputChannelScale);
     }
     if hint.permit_int8_candidate {
         candidates.push(QuantizedMatrixFormat::Int8Tile640Base);
@@ -76,7 +75,7 @@ pub fn pack_candidate(
                 pack_nf4_weights_awls(source, in_features, out_features, channel_sq, 8);
             (codes, scales, biases, None)
         }
-        QuantizedMatrixFormat::Nf4Tile640ScaledReductionAxis => {
+        QuantizedMatrixFormat::Nf4Tile640OutputChannelScale => {
             // 1. Compute column-wise MaxAbs scale vector.
             let eps = (2.0f32).powi(-14);
             let mut col_scales = vec![0.0f32; out_features];
@@ -129,7 +128,7 @@ pub fn reconstruct_candidate(
             unpack_ternary_weights(codes, scales, biases, in_features, out_features)
         }
         QuantizedMatrixFormat::Nf4Tile640Base
-        | QuantizedMatrixFormat::Nf4Tile640ScaledReductionAxis => {
+        | QuantizedMatrixFormat::Nf4Tile640OutputChannelScale => {
             unpack_nf4_weights(codes, scales, biases, in_features, out_features)
         }
         QuantizedMatrixFormat::Int8Tile640Base => {
@@ -235,7 +234,7 @@ fn holdout_profile(tensor_class: TensorClass) -> QuantizationValidationProfile {
 /// - `stress`: deterministic stress suite (always provided). Validates codec
 ///    correctness with diverse synthetic patterns.
 /// - `calibration`: optional prerendered activation bank suite from reference
-///    model execution. When provided, enables `ProductionQualified` admission.
+#[allow(unused_assignments)]
 pub fn quantize_tensor(
     source: &[f32],
     in_features: usize,
@@ -249,94 +248,106 @@ pub fn quantize_tensor(
     let hold_profile = holdout_profile(hint.tensor_class);
     let candidates = candidate_plan(in_features, out_features, hint);
 
-    let mut last_weight_nrmse = 0.0f64;
-    let mut last_zero_collapse_ratio = 0.0f64;
-    let mut last_operator_rmse = 0.0f32;
-    let mut last_operator_nrmse = 0.0f32;
-    let mut last_cosine_similarity = 0.0f32;
-    let mut last_ref_output_rms = 0.0f32;
-    let mut vectors_processed: u32 = 0;
+    let mut best_evidence: Option<CandidateEvidence> = None;
+    let mut completed_vectors = PhaseVectorCounts::default();
     let mut candidates_attempted: Vec<String> = Vec::new();
-    let mut best_candidate: Option<BestCandidateSnapshot> = None;
     let mut current_phase: &str = "init";
 
     // Resolve stress and activation vectors from the respective suites.
-    // Resize vectors to match in_features (activation vector length).
-    // The stress bank dim may differ from the actual matrix, e.g. o_proj has
-    // 4096 in_features vs stress input_dim=3840.
-    let resize_vectors = |vecs: Vec<Vec<f32>>, target_len: usize| -> Vec<Vec<f32>> {
-        vecs.into_iter()
-            .map(|mut v| {
-                if v.len() > target_len {
-                    v.truncate(target_len);
-                } else if v.len() < target_len {
-                    v.resize(target_len, 0.0f32);
-                }
-                v
-            })
-            .collect()
-    };
+    // Vectors are NOT resized: width mismatches are caught by the
+    // ProductionQuality gate below (SyntheticStressOnly).
     let stress_vectors: Option<Vec<Vec<f32>>> = stress
         .and_then(|s| s.get(&hint.tensor_class))
-        .map(|bank| resize_vectors(bank.promotion.clone(), in_features));
+        .map(|bank| bank.promotion.clone());
     let calibration_promotion: Option<Vec<Vec<f32>>> = calibration
         .and_then(|s| s.get(&hint.tensor_class))
-        .map(|bank| resize_vectors(bank.promotion.clone(), in_features));
+        .map(|bank| bank.promotion.clone());
     let calibration_holdout: Option<Vec<Vec<f32>>> = calibration
         .and_then(|s| s.get(&hint.tensor_class))
-        .map(|bank| resize_vectors(bank.holdout.clone(), in_features));
+        .map(|bank| bank.holdout.clone());
 
-    // Cap all vector banks to MAX_VALIDATION_VECTORS to prevent pathological
     // Stratified sample all vector banks for deterministic norm-band coverage.
-    // This replaces flat truncation with seeded stratified sampling so each
-    // norm region (low, medium, high) is fairly represented in every validation
-    // phase. Seeds for each phase are offset to ensure disjoint selections.
     use crate::quantization::calibration::{
-        stratified_sample, DEFAULT_SAMPLE_SEED,
+        stratified_sample, DEFAULT_SAMPLE_SEED, STRATIFY_NUM_STRATA_HOLDOUT,
         STRATIFY_NUM_STRATA_PROBE, STRATIFY_NUM_STRATA_PROMO,
-        STRATIFY_NUM_STRATA_HOLDOUT,
     };
     let stress_vectors = stress_vectors.map(|v| {
-        stratified_sample(&v, PROBE_STRESS_VECTORS, STRATIFY_NUM_STRATA_PROBE, DEFAULT_SAMPLE_SEED).vectors
+        stratified_sample(
+            &v,
+            PROBE_STRESS_VECTORS,
+            STRATIFY_NUM_STRATA_PROBE,
+            DEFAULT_SAMPLE_SEED,
+            None,
+        )
+        .vectors
     });
     let calibration_promotion = calibration_promotion.map(|v| {
-        stratified_sample(&v, PROMOTION_VECTORS, STRATIFY_NUM_STRATA_PROMO, DEFAULT_SAMPLE_SEED.wrapping_add(1)).vectors
+        stratified_sample(
+            &v,
+            PROMOTION_VECTORS,
+            STRATIFY_NUM_STRATA_PROMO,
+            DEFAULT_SAMPLE_SEED.wrapping_add(1),
+            None,
+        )
+        .vectors
     });
     let calibration_holdout = calibration_holdout.map(|v| {
-        stratified_sample(&v, HOLDOUT_VECTORS, STRATIFY_NUM_STRATA_HOLDOUT, DEFAULT_SAMPLE_SEED.wrapping_add(2)).vectors
+        stratified_sample(
+            &v,
+            HOLDOUT_VECTORS,
+            STRATIFY_NUM_STRATA_HOLDOUT,
+            DEFAULT_SAMPLE_SEED.wrapping_add(2),
+            None,
+        )
+        .vectors
     });
 
     let has_activation_bank = calibration_promotion.is_some() && calibration_holdout.is_some();
 
-    // Per-tensor wall-clock deadline. If exceeded, the current candidate times
-    // out and the tensor fails closed. Default: 60 seconds per tensor.
+    // Check bank vector widths against in_features.
+    let mut production_quality = ProductionQuality::ProductionQualified;
+    if let Some(v) = &stress_vectors {
+        if v.iter().any(|vec| vec.len() != in_features as usize) {
+            production_quality = ProductionQuality::SyntheticStressOnly;
+        }
+    }
+    if let Some(v) = &calibration_promotion {
+        if v.iter().any(|v| v.len() != in_features as usize) {
+            production_quality = ProductionQuality::SyntheticStressOnly;
+        }
+    }
+    if let Some(v) = &calibration_holdout {
+        if v.iter().any(|v| v.len() != in_features as usize) {
+            production_quality = ProductionQuality::SyntheticStressOnly;
+        }
+    }
+
     let tensor_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+
+    // Reject source tensors whose length doesn't match the declared dimensions.
+    if source.len() != (in_features as usize) * (out_features as usize) {
+        return Err(QuantizationAdmissionFailure::PackerFailure(format!(
+            "source shape mismatch: len={} expected in*out={}*{}={}",
+            source.len(),
+            in_features,
+            out_features,
+            in_features * out_features
+        )));
+    }
 
     for &format in &candidates {
         if std::time::Instant::now() >= tensor_deadline {
             return Err(QuantizationAdmissionFailure::TimeoutDeadline {
-                best_candidate: best_candidate.unwrap_or(BestCandidateSnapshot {
-                    format,
-                    weight_nrmse: last_weight_nrmse,
-                    zero_collapse_ratio: last_zero_collapse_ratio,
-                    operator_rmse: last_operator_rmse,
-                    operator_nrmse: last_operator_nrmse,
-                    cosine_similarity: last_cosine_similarity,
-                    ref_output_rms: last_ref_output_rms,
-                    hard_gates_passed: 0,
-                    payload_bytes: 0,
-                }),
+                best_evidence: best_evidence.clone(),
+                completed_vectors: completed_vectors.clone(),
                 candidates_attempted,
-                sample_seed: DEFAULT_SAMPLE_SEED,
-                vectors_processed,
                 expired_phase: current_phase.to_string(),
+                bank_selections: vec![],
             });
         }
         let (codes, scales, biases, scale_vector) =
             pack_candidate(source, in_features, out_features, format, channel_sq);
-
         candidates_attempted.push(format!("{:?}", format));
-
         let reconstructed = reconstruct_candidate(
             format,
             &codes,
@@ -348,13 +359,12 @@ pub fn quantize_tensor(
         );
 
         let weight_report = validate_weight_space(source, &reconstructed, &promo_profile);
-        last_weight_nrmse = weight_report.nrmse;
-        last_zero_collapse_ratio = weight_report.zero_collapse_ratio;
 
-        // Three-tier weight-space check: Passed → continue normally.
-        // InvestigationBand → warn and continue to operator validation.
-        // Rejected → skip this candidate.
-        let is_ternary = matches!(format, QuantizedMatrixFormat::TernaryTile640Base | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis);
+        let is_ternary = matches!(
+            format,
+            QuantizedMatrixFormat::TernaryTile640Base
+                | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis
+        );
         match weight_report.admission_status(&promo_profile, is_ternary) {
             WeightAdmission::Passed => {}
             WeightAdmission::InvestigationBand { warning } => {
@@ -368,85 +378,68 @@ pub fn quantize_tensor(
 
         // ── Layer 1: Stress bank validation (always run) ───────────
         current_phase = "probe";
-let operator_report = match &stress_vectors {
-    Some(vectors) => {
-        let pre_unpacked = Some(reconstructed.as_slice());
-        match validate_operator_space_with_bank(
-            source,
-            in_features,
-            out_features,
-            &codes,
-            &scales,
-            &biases,
-            scale_vector.as_deref(),
-            vectors,
-            pre_unpacked,
-            Some(tensor_deadline),
-        ) {
-            ValidationOutcome::Completed(r) => {
-                vectors_processed += vectors.len() as u32;
-                r
+        let operator_report = match &stress_vectors {
+            Some(vectors) => {
+                let pre_unpacked = Some(reconstructed.as_slice());
+                match validate_operator_space_with_bank(
+                    source,
+                    in_features,
+                    out_features,
+                    &codes,
+                    &scales,
+                    &biases,
+                    scale_vector.as_deref(),
+                    vectors,
+                    pre_unpacked,
+                    Some(tensor_deadline),
+                ) {
+                    ValidationOutcome::Completed(r) => r,
+                    ValidationOutcome::Interrupted(_) => {
+                        return Err(QuantizationAdmissionFailure::TimeoutDeadline {
+                            best_evidence: best_evidence.clone(),
+                            completed_vectors: completed_vectors.clone(),
+                            candidates_attempted,
+                            expired_phase: current_phase.to_string(),
+                            bank_selections: Vec::new(),
+                        });
+                    }
+                }
             }
-            ValidationOutcome::Interrupted(ir) => {
-                last_operator_rmse = ir.partial_rmse;
-                last_operator_nrmse = ir.partial_nrmse;
-                last_cosine_similarity = ir.partial_cosine;
-                last_ref_output_rms = ir.partial_ref_rms;
-                vectors_processed = ir.processed_vectors;
-                return Err(QuantizationAdmissionFailure::TimeoutDeadline {
-                    best_candidate: best_candidate.unwrap_or(BestCandidateSnapshot {
-                        format,
-                        weight_nrmse: last_weight_nrmse,
-                        zero_collapse_ratio: last_zero_collapse_ratio,
-                        operator_rmse: last_operator_rmse,
-                        operator_nrmse: last_operator_nrmse,
-                        cosine_similarity: last_cosine_similarity,
-                        ref_output_rms: last_ref_output_rms,
-                        hard_gates_passed: 0,
-                        payload_bytes: codes.len() as u64,
-                    }),
-                    candidates_attempted,
-                    sample_seed: DEFAULT_SAMPLE_SEED,
-                    vectors_processed,
-                    expired_phase: current_phase.to_string(),
-                });
-            }
-        }
-    }
-    None => validate_operator_space(
-        source,
-        in_features,
-        out_features,
-        &codes,
-        &scales,
-        &biases,
-        scale_vector.as_deref(),
-        &promo_profile,
-    ),
-};
-        last_operator_rmse = operator_report.rmse;
-        last_operator_nrmse = operator_report.operator_nrmse;
-        last_cosine_similarity = operator_report.cosine_similarity;
-        last_ref_output_rms = operator_report.ref_output_rms;
+            None => validate_operator_space(
+                source,
+                in_features,
+                out_features,
+                &codes,
+                &scales,
+                &biases,
+                scale_vector.as_deref(),
+                &promo_profile,
+            ),
+        };
 
         if !operator_report.passes(&promo_profile) {
             continue;
         }
 
-        // Snapshot after stress+probe completes
-        let snapshot = BestCandidateSnapshot {
+        // Evidence after probe completes
+        let evidence = CandidateEvidence {
             format,
-            weight_nrmse: last_weight_nrmse,
-            zero_collapse_ratio: last_zero_collapse_ratio,
-            operator_rmse: last_operator_rmse,
-            operator_nrmse: last_operator_nrmse,
-            cosine_similarity: last_cosine_similarity,
-            ref_output_rms: last_ref_output_rms,
-            hard_gates_passed: 1,
-            payload_bytes: codes.len() as u64,
+            weight_nrmse: weight_report.nrmse,
+            zero_collapse_ratio: weight_report.zero_collapse_ratio,
+            probe: Some(operator_report.clone()),
+            promotion: None,
+            holdout: None,
+            completed_vectors: completed_vectors.clone(),
         };
-        if best_candidate.as_ref().map_or(true, |b| snapshot.better_than(b)) {
-            best_candidate = Some(snapshot);
+        if let Some(ref stress_vecs) = stress_vectors {
+            completed_vectors.probe += stress_vecs.len() as u32;
+            completed_vectors.total += stress_vecs.len() as u32;
+        }
+        if best_evidence
+            .as_ref()
+            .map_or(true, |b| evidence_is_better(&evidence, b))
+        {
+            best_evidence = Some(evidence);
         }
 
         // ── Layer 2: Activation bank validation (prerendered, optional) ──
@@ -464,54 +457,38 @@ let operator_report = match &stress_vectors {
                 Some(reconstructed.as_slice()),
                 Some(tensor_deadline),
             ) {
-                ValidationOutcome::Completed(r) => {
-                    vectors_processed += promo_vecs.len() as u32;
-                    r
-                }
-                ValidationOutcome::Interrupted(ir) => {
-                    last_operator_rmse = ir.partial_rmse;
-                    last_operator_nrmse = ir.partial_nrmse;
-                    last_cosine_similarity = ir.partial_cosine;
-                    last_ref_output_rms = ir.partial_ref_rms;
-                    vectors_processed = ir.processed_vectors;
+                ValidationOutcome::Completed(r) => r,
+                ValidationOutcome::Interrupted(_) => {
                     return Err(QuantizationAdmissionFailure::TimeoutDeadline {
-                        best_candidate: best_candidate.unwrap_or(BestCandidateSnapshot {
-                            format,
-                            weight_nrmse: last_weight_nrmse,
-                            zero_collapse_ratio: last_zero_collapse_ratio,
-                            operator_rmse: last_operator_rmse,
-                            operator_nrmse: last_operator_nrmse,
-                            cosine_similarity: last_cosine_similarity,
-                            ref_output_rms: last_ref_output_rms,
-                            hard_gates_passed: 1,
-                            payload_bytes: codes.len() as u64,
-                        }),
+                        best_evidence: best_evidence.clone(),
+                        completed_vectors: completed_vectors.clone(),
                         candidates_attempted,
-                        sample_seed: DEFAULT_SAMPLE_SEED,
-                        vectors_processed,
                         expired_phase: current_phase.to_string(),
+                        bank_selections: Vec::new(),
                     });
                 }
             };
             if !promo_report.passes(&promo_profile) {
-                last_operator_rmse = promo_report.rmse;
                 continue;
             }
 
-            // Snapshot after promotion completes
-            let snapshot = BestCandidateSnapshot {
+            // Evidence after promotion
+            let evidence = CandidateEvidence {
                 format,
-                weight_nrmse: last_weight_nrmse,
-                zero_collapse_ratio: last_zero_collapse_ratio,
-                operator_rmse: last_operator_rmse,
-                operator_nrmse: last_operator_nrmse,
-                cosine_similarity: last_cosine_similarity,
-                ref_output_rms: last_ref_output_rms,
-                hard_gates_passed: 2,
-                payload_bytes: codes.len() as u64,
+                weight_nrmse: weight_report.nrmse,
+                zero_collapse_ratio: weight_report.zero_collapse_ratio,
+                probe: best_evidence.as_ref().and_then(|e| e.probe.clone()),
+                promotion: Some(promo_report.clone()),
+                holdout: None,
+                completed_vectors: completed_vectors.clone(),
             };
-            if best_candidate.as_ref().map_or(true, |b| snapshot.better_than(b)) {
-                best_candidate = Some(snapshot);
+            completed_vectors.promotion += promo_vecs.len() as u32;
+            completed_vectors.total += promo_vecs.len() as u32;
+            if best_evidence
+                .as_ref()
+                .map_or(true, |b| evidence_is_better(&evidence, b))
+            {
+                best_evidence = Some(evidence);
             }
         }
         if let Some(hold_vecs) = &calibration_holdout {
@@ -528,54 +505,38 @@ let operator_report = match &stress_vectors {
                 Some(reconstructed.as_slice()),
                 Some(tensor_deadline),
             ) {
-                ValidationOutcome::Completed(r) => {
-                    vectors_processed += hold_vecs.len() as u32;
-                    r
-                }
-                ValidationOutcome::Interrupted(ir) => {
-                    last_operator_rmse = ir.partial_rmse;
-                    last_operator_nrmse = ir.partial_nrmse;
-                    last_cosine_similarity = ir.partial_cosine;
-                    last_ref_output_rms = ir.partial_ref_rms;
-                    vectors_processed = ir.processed_vectors;
+                ValidationOutcome::Completed(r) => r,
+                ValidationOutcome::Interrupted(_) => {
                     return Err(QuantizationAdmissionFailure::TimeoutDeadline {
-                        best_candidate: best_candidate.unwrap_or(BestCandidateSnapshot {
-                            format,
-                            weight_nrmse: last_weight_nrmse,
-                            zero_collapse_ratio: last_zero_collapse_ratio,
-                            operator_rmse: last_operator_rmse,
-                            operator_nrmse: last_operator_nrmse,
-                            cosine_similarity: last_cosine_similarity,
-                            ref_output_rms: last_ref_output_rms,
-                            hard_gates_passed: 1,
-                            payload_bytes: codes.len() as u64,
-                        }),
+                        best_evidence: best_evidence.clone(),
+                        completed_vectors: completed_vectors.clone(),
                         candidates_attempted,
-                        sample_seed: DEFAULT_SAMPLE_SEED,
-                        vectors_processed,
                         expired_phase: current_phase.to_string(),
+                        bank_selections: Vec::new(),
                     });
                 }
             };
             if !holdout_report.passes(&hold_profile) {
-                last_operator_rmse = holdout_report.rmse;
                 continue;
             }
 
-            // Snapshot after holdout completes
-            let snapshot = BestCandidateSnapshot {
+            // Evidence after holdout
+            let evidence = CandidateEvidence {
                 format,
-                weight_nrmse: last_weight_nrmse,
-                zero_collapse_ratio: last_zero_collapse_ratio,
-                operator_rmse: last_operator_rmse,
-                operator_nrmse: last_operator_nrmse,
-                cosine_similarity: last_cosine_similarity,
-                ref_output_rms: last_ref_output_rms,
-                hard_gates_passed: 3,
-                payload_bytes: codes.len() as u64,
+                weight_nrmse: weight_report.nrmse,
+                zero_collapse_ratio: weight_report.zero_collapse_ratio,
+                probe: best_evidence.as_ref().and_then(|e| e.probe.clone()),
+                promotion: best_evidence.as_ref().and_then(|e| e.promotion.clone()),
+                holdout: Some(holdout_report.clone()),
+                completed_vectors: completed_vectors.clone(),
             };
-            if best_candidate.as_ref().map_or(true, |b| snapshot.better_than(b)) {
-                best_candidate = Some(snapshot);
+            completed_vectors.holdout += hold_vecs.len() as u32;
+            completed_vectors.total += hold_vecs.len() as u32;
+            if best_evidence
+                .as_ref()
+                .map_or(true, |b| evidence_is_better(&evidence, b))
+            {
+                best_evidence = Some(evidence);
             }
         }
 
@@ -593,7 +554,11 @@ let operator_report = match &stress_vectors {
         let (evidence_level, admission_class) = if has_activation_bank {
             (
                 EvidenceLevel::PrerenderedReference,
-                ArtifactAdmissionClass::ProductionQualified,
+                if production_quality == ProductionQuality::ProductionQualified {
+                    ArtifactAdmissionClass::ProductionQualified
+                } else {
+                    ArtifactAdmissionClass::DiagnosticOnly
+                },
             )
         } else {
             (
@@ -601,10 +566,6 @@ let operator_report = match &stress_vectors {
                 ArtifactAdmissionClass::DiagnosticOnly,
             )
         };
-
-        // Touch best_candidate to suppress unused-assignment warning:
-        // it's tracked for TimeoutDeadline returns, not read in the happy path.
-        let _ = &best_candidate;
 
         return Ok(QualifiedTensor {
             format,
@@ -621,14 +582,62 @@ let operator_report = match &stress_vectors {
     }
     Err(QuantizationAdmissionFailure::NoCandidatePassed {
         candidates_attempted: candidates.iter().map(|f| format!("{:?}", f)).collect(),
-        sample_seed: DEFAULT_SAMPLE_SEED,
-        last_weight_nrmse,
-        last_zero_collapse_ratio,
-        last_operator_rmse,
-        last_operator_nrmse,
-        last_cosine_similarity,
-        last_ref_output_rms,
+        best_evidence: best_evidence.clone(),
+        completed_vectors: completed_vectors.clone(),
+        bank_selections: vec![],
     })
+}
+
+#[inline]
+fn evidence_is_better(a: &CandidateEvidence, b: &CandidateEvidence) -> bool {
+    let a_gates = [
+        a.probe.is_some(),
+        a.promotion.is_some(),
+        a.holdout.is_some(),
+    ]
+    .iter()
+    .filter(|&&x| x)
+    .count() as u32;
+    let b_gates = [
+        b.probe.is_some(),
+        b.promotion.is_some(),
+        b.holdout.is_some(),
+    ]
+    .iter()
+    .filter(|&&x| x)
+    .count() as u32;
+    if a_gates != b_gates {
+        return a_gates > b_gates;
+    }
+    if let (Some(a_repo), Some(b_repo)) = (&a.holdout, &b.holdout) {
+        if (a_repo.cosine_similarity - b_repo.cosine_similarity).abs() > 1e-6 {
+            return a_repo.cosine_similarity > b_repo.cosine_similarity;
+        }
+        if (a_repo.operator_nrmse - b_repo.operator_nrmse).abs() > 1e-6 {
+            return a_repo.operator_nrmse < b_repo.operator_nrmse;
+        }
+    } else if a.holdout.is_some() {
+        return true;
+    } else if b.holdout.is_some() {
+        return false;
+    }
+    if let (Some(a_repo), Some(b_repo)) = (&a.promotion, &b.promotion) {
+        if (a_repo.operator_nrmse - b_repo.operator_nrmse).abs() > 1e-6 {
+            return a_repo.operator_nrmse < b_repo.operator_nrmse;
+        }
+    }
+    format_payload_bytes(a.format) < format_payload_bytes(b.format)
+}
+
+#[inline]
+fn format_payload_bytes(f: QuantizedMatrixFormat) -> u64 {
+    match f {
+        QuantizedMatrixFormat::Nf4Tile640Base => 320,
+        QuantizedMatrixFormat::Nf4Tile640OutputChannelScale => 384,
+        QuantizedMatrixFormat::Int8Tile640Base => 640,
+        QuantizedMatrixFormat::TernaryTile640Base => 80,
+        _ => 640,
+    }
 }
 
 #[cfg(test)]
@@ -686,10 +695,8 @@ mod tests {
         );
 
         // Step 4-5: Pack, unpack, verify weight-space.
-        let (codes, scales, biases, _, _) =
-            pack_nf4_weights(&data_code, IN_F, OUT_F);
-        let unpacked =
-            unpack_nf4_weights(&codes, &scales, &biases, IN_F, OUT_F);
+        let (codes, scales, biases, _, _) = pack_nf4_weights(&data_code, IN_F, OUT_F);
+        let unpacked = unpack_nf4_weights(&codes, &scales, &biases, IN_F, OUT_F);
         assert_eq!(unpacked.len(), data_code.len());
 
         // Since data uses exact NF4 codebook entries, pack/unpack is lossless.
@@ -700,16 +707,11 @@ mod tests {
             .sum::<f64>()
             / data_code.len() as f64;
         let weight_rmse = weight_mse.sqrt();
-        assert!(
-            weight_rmse < 1e-6,
-            "weight RMSE too high: {weight_rmse}"
-        );
+        assert!(weight_rmse < 1e-6, "weight RMSE too high: {weight_rmse}");
 
         // Step 6: Activation vector (positive-only, non-zero sum to avoid
         // pathological NRMSE from near-zero reference range).
-        let x: Vec<f32> = (0..IN_F)
-            .map(|i| (i as f32 + 1.0) * 0.1)
-            .collect();
+        let x: Vec<f32> = (0..IN_F).map(|i| (i as f32 + 1.0) * 0.1).collect();
 
         // Step 7: Reference and quantized matmul.
         let y_ref = matmul(&x, &data_code, IN_F, OUT_F);
@@ -733,10 +735,8 @@ mod tests {
             .zip(y_quant.iter())
             .map(|(a, b)| (*a as f64) * (*b as f64))
             .sum();
-        let norm_ref =
-            (y_ref.iter().map(|v| (*v as f64).powi(2)).sum::<f64>()).sqrt();
-        let norm_quant =
-            (y_quant.iter().map(|v| (*v as f64).powi(2)).sum::<f64>()).sqrt();
+        let norm_ref = (y_ref.iter().map(|v| (*v as f64).powi(2)).sum::<f64>()).sqrt();
+        let norm_quant = (y_quant.iter().map(|v| (*v as f64).powi(2)).sum::<f64>()).sqrt();
         let cosine = (dot / (norm_ref * norm_quant).max(1e-12)) as f32;
 
         let max_abs_err = y_ref
@@ -755,8 +755,7 @@ mod tests {
         // Step 9: Buggy path (no transpose) must produce clearly wrong weights.
         let (codes_bug, scales_bug, biases_bug, _, _) =
             pack_nf4_weights(&data_physical, IN_F, OUT_F);
-        let unpacked_bug =
-            unpack_nf4_weights(&codes_bug, &scales_bug, &biases_bug, IN_F, OUT_F);
+        let unpacked_bug = unpack_nf4_weights(&codes_bug, &scales_bug, &biases_bug, IN_F, OUT_F);
 
         // Values are exact NF4 codebook entries in [-1, 1]. When packed with the
         // wrong orientation, tile/group assignment scrambles positions, producing
@@ -781,10 +780,8 @@ mod tests {
 
         // data_physical is [out=31, in=17] but rows=17, cols=31.
         // Packing in the wrong orientation should produce garbage matmul.
-        let (codes, scales, biases, _, _) =
-            pack_nf4_weights(&data_physical, IN_F, OUT_F);
-        let unpacked =
-            unpack_nf4_weights(&codes, &scales, &biases, IN_F, OUT_F);
+        let (codes, scales, biases, _, _) = pack_nf4_weights(&data_physical, IN_F, OUT_F);
+        let unpacked = unpack_nf4_weights(&codes, &scales, &biases, IN_F, OUT_F);
 
         // Build the correct data_physical -> data_code transpose as reference.
         let mut data_code = vec![0.0f32; IN_F * OUT_F];
@@ -794,9 +791,7 @@ mod tests {
             }
         }
 
-        let x: Vec<f32> = (0..IN_F)
-            .map(|i| (i as f32 + 1.0) * 0.1)
-            .collect();
+        let x: Vec<f32> = (0..IN_F).map(|i| (i as f32 + 1.0) * 0.1).collect();
         let y_ref = matmul(&x, &data_code, IN_F, OUT_F);
         let y_quant = matmul(&x, &unpacked, IN_F, OUT_F);
 
@@ -810,10 +805,8 @@ mod tests {
             .zip(y_quant.iter())
             .map(|(a, b)| (*a as f64) * (*b as f64))
             .sum();
-        let norm_ref =
-            (y_ref.iter().map(|v| (*v as f64).powi(2)).sum::<f64>()).sqrt();
-        let norm_quant =
-            (y_quant.iter().map(|v| (*v as f64).powi(2)).sum::<f64>()).sqrt();
+        let norm_ref = (y_ref.iter().map(|v| (*v as f64).powi(2)).sum::<f64>()).sqrt();
+        let norm_quant = (y_quant.iter().map(|v| (*v as f64).powi(2)).sum::<f64>()).sqrt();
         let cosine = (dot / (norm_ref * norm_quant).max(1e-12)) as f32;
         let max_abs_err = y_ref
             .iter()
@@ -833,7 +826,10 @@ mod tests {
         // produces garbage output.  #[should_panic] catches the panic,
         // proving the test suite correctly detects the transpose bug.
         assert!(nrmse < 0.05, "BUGGY PATH MUST FAIL: NRMSE {nrmse} >= 0.05");
-        assert!(cosine > 0.99, "BUGGY PATH MUST FAIL: cosine {cosine} <= 0.99");
+        assert!(
+            cosine > 0.99,
+            "BUGGY PATH MUST FAIL: cosine {cosine} <= 0.99"
+        );
         assert!(
             max_abs_err < y_range * 0.15,
             "BUGGY PATH MUST FAIL: max_abs_err {max_abs_err} >= 15% of range {y_range}"
