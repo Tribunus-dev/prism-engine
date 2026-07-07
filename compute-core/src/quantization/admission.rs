@@ -21,6 +21,7 @@ pub const HOLDOUT_VECTORS: usize = 256;
 
 use super::calibration::*;
 use super::contract::*;
+use super::contract::BestCandidateSnapshot;
 use super::embed_cluster::{pack_ternary_weights, unpack_ternary_weights};
 use super::validation::*;
 use crate::nf4tile640::{
@@ -255,6 +256,8 @@ pub fn quantize_tensor(
     let mut last_cosine_similarity = 0.0f32;
     let mut last_ref_output_rms = 0.0f32;
     let mut vectors_processed: u32 = 0;
+    let mut candidates_attempted: Vec<String> = Vec::new();
+    let mut best_candidate: Option<BestCandidateSnapshot> = None;
     let mut current_phase: &str = "init";
 
     // Resolve stress and activation vectors from the respective suites.
@@ -302,19 +305,26 @@ pub fn quantize_tensor(
     for &format in &candidates {
         if std::time::Instant::now() >= tensor_deadline {
             return Err(QuantizationAdmissionFailure::TimeoutDeadline {
-                candidates_attempted: candidates.iter().map(|f| format!("{:?}", f)).collect(),
-                last_weight_nrmse,
-                last_zero_collapse_ratio,
-                last_operator_rmse,
-                last_operator_nrmse,
-                last_cosine_similarity,
-                last_ref_output_rms,
+                best_candidate: best_candidate.unwrap_or(BestCandidateSnapshot {
+                    format,
+                    weight_nrmse: last_weight_nrmse,
+                    zero_collapse_ratio: last_zero_collapse_ratio,
+                    operator_rmse: last_operator_rmse,
+                    operator_nrmse: last_operator_nrmse,
+                    cosine_similarity: last_cosine_similarity,
+                    ref_output_rms: last_ref_output_rms,
+                    hard_gates_passed: 0,
+                    payload_bytes: 0,
+                }),
+                candidates_attempted,
                 vectors_processed,
                 expired_phase: current_phase.to_string(),
             });
         }
         let (codes, scales, biases, scale_vector) =
             pack_candidate(source, in_features, out_features, format, channel_sq);
+
+        candidates_attempted.push(format!("{:?}", format));
 
         let reconstructed = reconstruct_candidate(
             format,
@@ -347,35 +357,61 @@ pub fn quantize_tensor(
 
         // ── Layer 1: Stress bank validation (always run) ───────────
         current_phase = "probe";
-        if let Some(ref v) = stress_vectors {
-            vectors_processed += v.len() as u32;
-        }
-        let operator_report = match &stress_vectors {
-            Some(vectors) => {
-                let pre_unpacked = Some(reconstructed.as_slice());
-                validate_operator_space_with_bank(
-                    source,
-                    in_features,
-                    out_features,
-                    &codes,
-                    &scales,
-                    &biases,
-                    scale_vector.as_deref(),
-                    vectors,
-                    pre_unpacked,
-                )
+let operator_report = match &stress_vectors {
+    Some(vectors) => {
+        let pre_unpacked = Some(reconstructed.as_slice());
+        match validate_operator_space_with_bank(
+            source,
+            in_features,
+            out_features,
+            &codes,
+            &scales,
+            &biases,
+            scale_vector.as_deref(),
+            vectors,
+            pre_unpacked,
+            Some(tensor_deadline),
+        ) {
+            ValidationOutcome::Completed(r) => {
+                vectors_processed += vectors.len() as u32;
+                r
             }
-            None => validate_operator_space(
-                source,
-                in_features,
-                out_features,
-                &codes,
-                &scales,
-                &biases,
-                scale_vector.as_deref(),
-                &promo_profile,
-            ),
-        };
+            ValidationOutcome::Interrupted(ir) => {
+                last_operator_rmse = ir.partial_rmse;
+                last_operator_nrmse = ir.partial_nrmse;
+                last_cosine_similarity = ir.partial_cosine;
+                last_ref_output_rms = ir.partial_ref_rms;
+                vectors_processed = ir.processed_vectors;
+                return Err(QuantizationAdmissionFailure::TimeoutDeadline {
+                    best_candidate: best_candidate.unwrap_or(BestCandidateSnapshot {
+                        format,
+                        weight_nrmse: last_weight_nrmse,
+                        zero_collapse_ratio: last_zero_collapse_ratio,
+                        operator_rmse: last_operator_rmse,
+                        operator_nrmse: last_operator_nrmse,
+                        cosine_similarity: last_cosine_similarity,
+                        ref_output_rms: last_ref_output_rms,
+                        hard_gates_passed: 0,
+                        payload_bytes: codes.len() as u64,
+                    }),
+                    candidates_attempted,
+                    vectors_processed,
+                    expired_phase: current_phase.to_string(),
+                });
+            }
+        }
+    }
+    None => validate_operator_space(
+        source,
+        in_features,
+        out_features,
+        &codes,
+        &scales,
+        &biases,
+        scale_vector.as_deref(),
+        &promo_profile,
+    ),
+};
         last_operator_rmse = operator_report.rmse;
         last_operator_nrmse = operator_report.operator_nrmse;
         last_cosine_similarity = operator_report.cosine_similarity;
@@ -385,11 +421,26 @@ pub fn quantize_tensor(
             continue;
         }
 
+        // Snapshot after stress+probe completes
+        let snapshot = BestCandidateSnapshot {
+            format,
+            weight_nrmse: last_weight_nrmse,
+            zero_collapse_ratio: last_zero_collapse_ratio,
+            operator_rmse: last_operator_rmse,
+            operator_nrmse: last_operator_nrmse,
+            cosine_similarity: last_cosine_similarity,
+            ref_output_rms: last_ref_output_rms,
+            hard_gates_passed: 1,
+            payload_bytes: codes.len() as u64,
+        };
+        if best_candidate.as_ref().map_or(true, |b| snapshot.better_than(b)) {
+            best_candidate = Some(snapshot);
+        }
+
         // ── Layer 2: Activation bank validation (prerendered, optional) ──
         if let Some(promo_vecs) = &calibration_promotion {
             current_phase = "promotion";
-            vectors_processed += promo_vecs.len() as u32;
-            let promo_report = validate_operator_space_with_bank(
+            let promo_report = match validate_operator_space_with_bank(
                 source,
                 in_features,
                 out_features,
@@ -399,16 +450,60 @@ pub fn quantize_tensor(
                 scale_vector.as_deref(),
                 promo_vecs,
                 Some(reconstructed.as_slice()),
-            );
+                Some(tensor_deadline),
+            ) {
+                ValidationOutcome::Completed(r) => {
+                    vectors_processed += promo_vecs.len() as u32;
+                    r
+                }
+                ValidationOutcome::Interrupted(ir) => {
+                    last_operator_rmse = ir.partial_rmse;
+                    last_operator_nrmse = ir.partial_nrmse;
+                    last_cosine_similarity = ir.partial_cosine;
+                    last_ref_output_rms = ir.partial_ref_rms;
+                    vectors_processed = ir.processed_vectors;
+                    return Err(QuantizationAdmissionFailure::TimeoutDeadline {
+                        best_candidate: best_candidate.unwrap_or(BestCandidateSnapshot {
+                            format,
+                            weight_nrmse: last_weight_nrmse,
+                            zero_collapse_ratio: last_zero_collapse_ratio,
+                            operator_rmse: last_operator_rmse,
+                            operator_nrmse: last_operator_nrmse,
+                            cosine_similarity: last_cosine_similarity,
+                            ref_output_rms: last_ref_output_rms,
+                            hard_gates_passed: 1,
+                            payload_bytes: codes.len() as u64,
+                        }),
+                        candidates_attempted,
+                        vectors_processed,
+                        expired_phase: current_phase.to_string(),
+                    });
+                }
+            };
             if !promo_report.passes(&promo_profile) {
                 last_operator_rmse = promo_report.rmse;
                 continue;
             }
+
+            // Snapshot after promotion completes
+            let snapshot = BestCandidateSnapshot {
+                format,
+                weight_nrmse: last_weight_nrmse,
+                zero_collapse_ratio: last_zero_collapse_ratio,
+                operator_rmse: last_operator_rmse,
+                operator_nrmse: last_operator_nrmse,
+                cosine_similarity: last_cosine_similarity,
+                ref_output_rms: last_ref_output_rms,
+                hard_gates_passed: 2,
+                payload_bytes: codes.len() as u64,
+            };
+            if best_candidate.as_ref().map_or(true, |b| snapshot.better_than(b)) {
+                best_candidate = Some(snapshot);
+            }
         }
         if let Some(hold_vecs) = &calibration_holdout {
             current_phase = "holdout";
-            vectors_processed += hold_vecs.len() as u32;
-            let holdout_report = validate_operator_space_with_bank(
+            let holdout_report = match validate_operator_space_with_bank(
                 source,
                 in_features,
                 out_features,
@@ -418,10 +513,55 @@ pub fn quantize_tensor(
                 scale_vector.as_deref(),
                 hold_vecs,
                 Some(reconstructed.as_slice()),
-            );
+                Some(tensor_deadline),
+            ) {
+                ValidationOutcome::Completed(r) => {
+                    vectors_processed += hold_vecs.len() as u32;
+                    r
+                }
+                ValidationOutcome::Interrupted(ir) => {
+                    last_operator_rmse = ir.partial_rmse;
+                    last_operator_nrmse = ir.partial_nrmse;
+                    last_cosine_similarity = ir.partial_cosine;
+                    last_ref_output_rms = ir.partial_ref_rms;
+                    vectors_processed = ir.processed_vectors;
+                    return Err(QuantizationAdmissionFailure::TimeoutDeadline {
+                        best_candidate: best_candidate.unwrap_or(BestCandidateSnapshot {
+                            format,
+                            weight_nrmse: last_weight_nrmse,
+                            zero_collapse_ratio: last_zero_collapse_ratio,
+                            operator_rmse: last_operator_rmse,
+                            operator_nrmse: last_operator_nrmse,
+                            cosine_similarity: last_cosine_similarity,
+                            ref_output_rms: last_ref_output_rms,
+                            hard_gates_passed: 1,
+                            payload_bytes: codes.len() as u64,
+                        }),
+                        candidates_attempted,
+                        vectors_processed,
+                        expired_phase: current_phase.to_string(),
+                    });
+                }
+            };
             if !holdout_report.passes(&hold_profile) {
                 last_operator_rmse = holdout_report.rmse;
                 continue;
+            }
+
+            // Snapshot after holdout completes
+            let snapshot = BestCandidateSnapshot {
+                format,
+                weight_nrmse: last_weight_nrmse,
+                zero_collapse_ratio: last_zero_collapse_ratio,
+                operator_rmse: last_operator_rmse,
+                operator_nrmse: last_operator_nrmse,
+                cosine_similarity: last_cosine_similarity,
+                ref_output_rms: last_ref_output_rms,
+                hard_gates_passed: 3,
+                payload_bytes: codes.len() as u64,
+            };
+            if best_candidate.as_ref().map_or(true, |b| snapshot.better_than(b)) {
+                best_candidate = Some(snapshot);
             }
         }
 
@@ -447,6 +587,10 @@ pub fn quantize_tensor(
                 ArtifactAdmissionClass::DiagnosticOnly,
             )
         };
+
+        // Touch best_candidate to suppress unused-assignment warning:
+        // it's tracked for TimeoutDeadline returns, not read in the happy path.
+        let _ = &best_candidate;
 
         return Ok(QualifiedTensor {
             format,

@@ -226,6 +226,57 @@ impl OperatorValidationReport {
     }
 }
 
+/// Batch size for deadline-checking inside validation loops.
+/// Check deadline after every VALIDATION_BATCH_SIZE vectors.
+pub const VALIDATION_BATCH_SIZE: usize = 8;
+
+/// Outcome of a cancellation-aware validation pass.
+pub enum ValidationOutcome {
+    Completed(OperatorValidationReport),
+    Interrupted(InterruptedValidationReport),
+}
+
+/// Partial metrics from an interrupted validation pass.
+pub struct InterruptedValidationReport {
+    pub phase: String,
+    pub processed_vectors: u32,
+    pub partial_rmse: f32,
+    pub partial_nrmse: f32,
+    pub partial_cosine: f32,
+    pub partial_ref_rms: f32,
+}
+
+/// The best candidate seen so far.
+#[derive(Debug, Clone)]
+pub struct BestCandidateSnapshot {
+    pub format: QuantizedMatrixFormat,
+    pub weight_nrmse: f64,
+    pub zero_collapse_ratio: f64,
+    pub operator_rmse: f32,
+    pub operator_nrmse: f32,
+    pub cosine_similarity: f32,
+    pub ref_output_rms: f32,
+    pub hard_gates_passed: u32,
+    pub payload_bytes: u64,
+}
+
+impl BestCandidateSnapshot {
+    /// Policy-defined comparator. Higher-return value means `self` is better.
+    /// Tiebreak: hard_gates_passed > cosine_similarity > operator_nrmse > payload_bytes.
+    pub fn better_than(&self, other: &Self) -> bool {
+        if self.hard_gates_passed != other.hard_gates_passed {
+            return self.hard_gates_passed > other.hard_gates_passed;
+        }
+        if (self.cosine_similarity - other.cosine_similarity).abs() > 1e-6 {
+            return self.cosine_similarity > other.cosine_similarity;
+        }
+        if (self.operator_nrmse - other.operator_nrmse).abs() > 1e-6 {
+            return self.operator_nrmse < other.operator_nrmse;
+        }
+        self.payload_bytes < other.payload_bytes
+    }
+}
+
 /// A matrix that passed admission for a specific representation.
 #[derive(Debug, Clone)]
 pub struct QualifiedTensor {
@@ -276,12 +327,7 @@ pub enum QuantizationAdmissionFailure {
     /// fundamentally failed" from "this tensor needs a larger budget."
     TimeoutDeadline {
         candidates_attempted: Vec<String>,
-        last_weight_nrmse: f64,
-        last_zero_collapse_ratio: f64,
-        last_operator_rmse: f32,
-        last_operator_nrmse: f32,
-        last_cosine_similarity: f32,
-        last_ref_output_rms: f32,
+        best_candidate: BestCandidateSnapshot,
         /// Number of validation vectors processed before timeout.
         vectors_processed: u32,
         /// Name of the phase where the deadline expired (e.g. "probe",

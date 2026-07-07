@@ -83,7 +83,8 @@ pub fn validate_operator_space_with_vectors(
     // Pre-unpacked quantized weights. If `Some`, used directly instead of
     // unpacking from packed_codes. Required for non-NF4 formats (INT8, etc.).
     pre_unpacked: Option<&[f32]>,
-) -> OperatorValidationReport {
+    deadline: Option<std::time::Instant>,
+) -> ValidationOutcome {
     let num_vectors = vectors.len();
     if num_vectors < ACCELERATE_BATCH_THRESHOLD {
         return validate_operator_space_single(
@@ -96,7 +97,8 @@ pub fn validate_operator_space_with_vectors(
             scale_vector,
             vectors,
             pre_unpacked,
-        );
+            deadline,
+        )
     }
 
     // ── Batched Accelerate path ──────────────────────────────────
@@ -104,6 +106,20 @@ pub fn validate_operator_space_with_vectors(
     let mut inputs_flat = Vec::with_capacity(num_vectors * in_features);
     for v in vectors {
         inputs_flat.extend_from_slice(v);
+    }
+
+    // Check deadline before the batched matmul (can't be interrupted mid-kernel).
+    if let Some(dl) = deadline {
+        if std::time::Instant::now() >= dl {
+            return ValidationOutcome::Interrupted(InterruptedValidationReport {
+                phase: "batched".to_string(),
+                processed_vectors: 0,
+                partial_rmse: 0.0,
+                partial_nrmse: 0.0,
+                partial_cosine: 0.0,
+                partial_ref_rms: 0.0,
+            });
+    }
     }
 
     // Unpack NF4 weights to f32 once for the quantized path.
@@ -150,7 +166,7 @@ pub fn validate_operator_space_with_vectors(
             }
         }
 
-        return compute_operator_metrics(&ref_results, &quant_results, num_vectors, out_features);
+        return ValidationOutcome::Completed(compute_operator_metrics(&ref_results, &quant_results, num_vectors, out_features));
     }
 
     // CPU fallback (also reachable when metal-dispatch is not enabled).
@@ -265,7 +281,7 @@ pub fn validate_operator_space_with_vectors(
         total_sign_agreement += sign_match as f32 / out_features as f32;
     }
 
-    OperatorValidationReport {
+    ValidationOutcome::Completed(OperatorValidationReport {
         rmse: worst_rmse,
         operator_nrmse: worst_nrmse,
         cosine_similarity: total_cosine / nf,
@@ -273,7 +289,7 @@ pub fn validate_operator_space_with_vectors(
         ref_output_rms: accumulated_ref_rms / nf,
         norm_ratio_drift: worst_norm_drift,
         sign_agreement: total_sign_agreement / nf,
-    }
+    })
     } // #[cfg(not(feature = "metal-dispatch"))]
 
     // Pure-Rust fallback when neither Metal nor Accelerate is available.
@@ -294,7 +310,8 @@ pub fn validate_operator_space_with_vectors(
             scale_vector,
             vectors,
             pre_unpacked,
-        );
+            deadline,
+        )
     }
 }
 
@@ -385,7 +402,8 @@ fn validate_operator_space_single(
     scale_vector: Option<&[f32]>,
     vectors: &[Vec<f32>],
     pre_unpacked: Option<&[f32]>,
-) -> OperatorValidationReport {
+    deadline: Option<std::time::Instant>,
+) -> ValidationOutcome {
     let mut worst_rmse = 0.0f32;
     let mut worst_nrmse = 0.0f32;
     let mut worst_norm_drift = 0.0f32;
@@ -393,9 +411,19 @@ fn validate_operator_space_single(
     let mut worst_cos = 1.0f32;
     let mut accumulated_ref_rms = 0.0f32;
     let mut total_sign_agreement = 0.0f32;
+
+    // Running accumulators for interrupted reporting.
+    let mut sum_sq_error: f64 = 0.0;
+    let mut sum_dot_product: f64 = 0.0;
+    let mut sum_ref_sq: f64 = 0.0;
+    let mut sum_quant_sq: f64 = 0.0;
+    let mut max_abs_err: f32 = 0.0;
+    let mut processed: u32 = 0;
+
     let num_vectors = vectors.len().max(1) as f32;
 
-    for input in vectors {
+    for chunk in vectors.chunks(VALIDATION_BATCH_SIZE) {
+    for input in chunk {
         // Reference: Y = X @ W^T (original source weights, no scaling).
         let mut ref_out = vec![0.0f32; out_features];
         for j in 0..out_features {
@@ -446,6 +474,10 @@ fn validate_operator_space_single(
         let mut sign_match = 0u32;
         for j in 0..out_features {
             let diff = nf4_out[j] - ref_out[j];
+            let diff_abs = diff.abs();
+            if diff_abs > max_abs_err {
+                max_abs_err = diff_abs;
+            }
             sq += diff * diff;
             ref_sq += ref_out[j] * ref_out[j];
             quant_sq += nf4_out[j] * nf4_out[j];
@@ -476,9 +508,40 @@ fn validate_operator_space_single(
         total_cosine += trial_cosine;
         accumulated_ref_rms += ref_rms;
         total_sign_agreement += sign_match as f32 / out_features as f32;
+
+        // Update running accumulators for interrupted reporting.
+        processed += 1;
+        sum_sq_error += sq as f64;
+        sum_dot_product += ref_dot_quant as f64;
+        sum_ref_sq += ref_sq as f64;
+        sum_quant_sq += quant_sq as f64;
     }
 
-    OperatorValidationReport {
+    // Check deadline after each batch of VALIDATION_BATCH_SIZE vectors.
+    if let Some(dl) = deadline {
+        if std::time::Instant::now() >= dl {
+            let total_elems = processed as f32 * out_features as f32;
+            let partial_rmse = (sum_sq_error as f32 / total_elems).sqrt();
+            let partial_ref_rms = (sum_ref_sq as f32 / total_elems).sqrt();
+            let partial_nrmse = partial_rmse / (partial_ref_rms + 1e-30);
+            let partial_cosine = sum_dot_product as f32
+                / ((sum_ref_sq as f32).sqrt() * (sum_quant_sq as f32).sqrt() + 1e-30);
+
+            return ValidationOutcome::Interrupted(InterruptedValidationReport {
+                phase: "single_vector".to_string(),
+                processed_vectors: processed,
+                partial_rmse,
+                partial_nrmse,
+                partial_cosine,
+                partial_ref_rms,
+            });
+        }
+    }
+
+    // End of chunk loop — next iteration or fall through to final report.
+    }
+
+    ValidationOutcome::Completed(OperatorValidationReport {
         rmse: worst_rmse,
         operator_nrmse: worst_nrmse,
         cosine_similarity: total_cosine / num_vectors,
@@ -486,7 +549,7 @@ fn validate_operator_space_single(
         ref_output_rms: accumulated_ref_rms / num_vectors,
         norm_ratio_drift: worst_norm_drift,
         sign_agreement: total_sign_agreement / num_vectors,
-    }
+    })
 }
 
 /// Validate operator-space (matmul) quality on a deterministic calibration
@@ -527,7 +590,7 @@ pub fn validate_operator_space(
         })
         .collect();
 
-    validate_operator_space_with_vectors(
+    match validate_operator_space_with_vectors(
         source,
         in_features,
         out_features,
@@ -537,7 +600,12 @@ pub fn validate_operator_space(
         scale_vector,
         &synthetic_vectors,
         None,
-    )
+        None,
+    ) {
+        ValidationOutcome::Completed(report) => report,
+        // Never interrupted because deadline is None.
+        ValidationOutcome::Interrupted(_) => unreachable!(),
+    }
 }
 
 /// Validate operator-space quality using a calibration activation bank's vectors.
@@ -551,7 +619,8 @@ pub fn validate_operator_space_with_bank(
     scale_vector: Option<&[f32]>,
     vectors: &[Vec<f32>],
     pre_unpacked: Option<&[f32]>,
-) -> OperatorValidationReport {
+    deadline: Option<std::time::Instant>,
+) -> ValidationOutcome {
     validate_operator_space_with_vectors(
         source,
         in_features,
@@ -562,5 +631,6 @@ pub fn validate_operator_space_with_bank(
         scale_vector,
         vectors,
         pre_unpacked,
+        deadline,
     )
 }

@@ -1221,17 +1221,16 @@ fn pack_matrix_nf4_inline(
                 }
                 QuantizationAdmissionFailure::TimeoutDeadline {
                     candidates_attempted,
-                    last_weight_nrmse,
-                    last_zero_collapse_ratio: _,
-                    last_operator_rmse: _,
-                    last_operator_nrmse,
-                    last_cosine_similarity,
-                    last_ref_output_rms: _,
+                    best_candidate,
                     vectors_processed,
                     expired_phase,
                 } => {
                     output_lines.push(format!(
-                        "  TIMEOUT for {key}: candidates={candidates_attempted:?} phase={expired_phase} vectors={vectors_processed} wNRMSE={last_weight_nrmse:.4} oNRMSE={last_operator_nrmse:.4} cos={last_cosine_similarity:.4}"
+                        "  TIMEOUT for {key}: candidates={candidates_attempted:?} phase={expired_phase} vectors={vectors_processed} wNRMSE={:.4} oNRMSE={:.4} cos={:.4} hgates={}",
+                        best_candidate.weight_nrmse,
+                        best_candidate.operator_nrmse,
+                        best_candidate.cosine_similarity,
+                        best_candidate.hard_gates_passed,
                     ));
                 }
             }
