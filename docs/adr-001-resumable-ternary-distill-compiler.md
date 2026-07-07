@@ -75,9 +75,78 @@ Local refinement operates per tensor, not per model. It optimizes only the candi
 L_operator = 1/B sum_b=1..B ||x_b W^T - x_b W_hat^T||^2
 ```
 
-Full loss includes weight, operator, cosine, norm, runtime, and byte terms. Runtime and byte terms are selection costs, not differentiable loss.
+The BF16 output targets Y = XW_bf16^T are captured once per tensor and cached keyed by tensor digest plus activation-bank digest. Subsequent refinement iterations read the cached targets rather than re-executing the BF16 model.
 
-Initial refinement algorithm: alternating least-squares scale update followed by threshold-based code reassignment. No full backpropagation through the model. Each refinement epoch produces a new candidate version; only the best is retained.
+Full loss includes weight, operator, cosine, norm, runtime, and byte terms. Runtime and byte terms are selection costs, not differentiable loss:
+
+```math
+L = \u03bb_out \u00b7 MSE(XW_bf16^T, XW_ternary^T)
+  + \u03bb_cos \u00b7 (1 - cosine(Y_bf16, Y_ternary))
+  + \u03bb_weight \u00b7 regularize(W_ternary, W_bf16)
+  + \u03bb_cost \u00b7 representation_cost
+```
+
+#### 4.1. Bounded Ternary Refinement Ladder
+
+A Tile640 has 3^{640} possible ternary code assignments before considering scales. The compiler does not enumerate this space. Instead it searches the restricted ternary space around the BF16 tensor in a way that is exhaustive at the local decision level and bounded at the tile level.
+
+For a fixed Tile640 block, the problem is:
+
+Given BF16 weights W, activation bank X, and teacher outputs Y = XW^T, find ternary codes Q \u2208 {-1, 0, +1}^640 and scale s such that X(sQ)^T \u2248 Y.
+
+The refinement ladder is a strict sequence of seven tiers. Each tier refines the current ternary candidate. If a tier does not sufficiently reduce operator loss, the candidate escalates to the next tier. If all ternary tiers fail, the tensor is promoted to NF4 or INT8.
+
+| Tier | Operation | Scope | Rate |
+|------|-----------|-------|------|
+| 1 | Closed-form scale fit | All tiles, given current Q | Every tier change |
+| 2 | Coordinate ternary search | High-error individual weights | Test -1, 0, +1 per weight, accept if loss reduces |
+| 3 | Exhaustive local group search | Worst 1-5% of tiles, groups of 4 or 8 weights | 3^4 = 81 or 3^8 = 6,561 states per group, GPU-evaluated |
+| 4 | Per-channel / reduction-axis scale sidecar | Full tensor | Evaluated via operator-space gate |
+| 5 | Sparse residual correction | Select high-error output channels | Fixed-size residual vector appended to sidecar segment |
+| 6 | NF4 Tile640 | Full tensor | Standard admission pipeline |
+| 7 | INT8 Tile640 | Full tensor | Standard admission pipeline |
+
+Tiers 1 through 5 form the ternary refinement cascade; tiers 6 and 7 are the escalation path.
+
+#### 4.2. Coordinate Descent (Tier 2)
+
+For each weight position in a high-error tile, test all three assignments -1, 0, and +1. Calculate which reduces the activation-weighted output loss most. Keep the winner, then move to the next coordinate. This is coordinate descent over a discrete ternary alphabet.
+
+Each coordinate decision is exact \u2014 the chosen assignment is optimal for that position given all other positions held fixed. A pass visits every weight in the tile once. Multiple passes are bounded by a strict iteration limit (8-32 rounds per tensor).
+
+Require a minimum error improvement per round. If the improvement plateaus, stop and proceed to the next tier or escalate.
+
+#### 4.3. Exhaustive Group Search (Tier 3)
+
+Divide the Tile640 into groups of 4 or 8 weights. A group of 4 has 81 states; a group of 8 has 6,561 states. For the highest-error groups (worst 1-5% of all groups in the tensor), evaluate all local states against the residual output contribution.
+
+This is feasible on GPU because it is applied only to a small number of selected groups, not every group in every tensor.
+
+#### 4.4. Refinement Termination and Escalation
+
+Refinement is explicitly bounded per tensor:
+
+- Maximum refinement rounds: 32 (Tier 2 coordinate passes)
+- Maximum group-search tiles: 5% of all tiles in the tensor (Tier 3)
+- Minimum improvement threshold: 1% NRMSE reduction per round; if below, stop and escalate
+- Wall-clock budget per tensor: 60 seconds (enforced by admission pipeline deadline)
+
+When refinement terminates without reaching operator parity:
+
+1. Emit a qualification receipt stating "ternary attempted and rejected" with the best metrics achieved
+2. Escalate that tensor to NF4 (Tier 6) or INT8 (Tier 7)
+3. Proceed to the next tensor
+
+The compiler never assumes every matrix can be made ternary by enough retries. The mixed-precision compiler exists precisely because the correct answer for some tensors is "ternary failed honestly; preserve this one at NF4 or INT8."
+
+#### 4.5. Strict Promotion Gate
+
+A tensor is promoted to ternary only if the refined candidate passes operator-space validation:
+
+1. Against cached BF16 outputs on the promotion activation bank (must pass the promotion profile)
+2. Independently against cached BF16 outputs on the holdout activation bank (must pass the holdout profile)
+
+Promotion bank pass and holdout bank pass are both required. A candidate that passes promotion but fails holdout does not become ternary \u2014 it escalates to NF4 or INT8. A candidate that passes neither does not retry refinement indefinitely; it escalates immediately.
 
 ### 5. Per-Tensor Qualification DAG
 
