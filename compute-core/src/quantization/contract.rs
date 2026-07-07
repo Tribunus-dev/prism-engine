@@ -270,4 +270,22 @@ pub enum QuantizationAdmissionFailure {
         last_ref_output_rms: f32,
     },
     PackerFailure(String),
+    /// The per-tensor wall-clock deadline expired during validation.
+    /// Carries the best candidate metrics seen so far and the phase in
+    /// which time ran out, so the caller can distinguish "ternary
+    /// fundamentally failed" from "this tensor needs a larger budget."
+    TimeoutDeadline {
+        candidates_attempted: Vec<String>,
+        last_weight_nrmse: f64,
+        last_zero_collapse_ratio: f64,
+        last_operator_rmse: f32,
+        last_operator_nrmse: f32,
+        last_cosine_similarity: f32,
+        last_ref_output_rms: f32,
+        /// Number of validation vectors processed before timeout.
+        vectors_processed: u32,
+        /// Name of the phase where the deadline expired (e.g. "probe",
+        /// "promotion", "holdout").
+        expired_phase: String,
+    },
 }

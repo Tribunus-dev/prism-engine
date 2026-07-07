@@ -8,11 +8,16 @@
 //! This replaces ad-hoc per-matrix packing loops with a structured,
 //! fail-closed qualification system.
 
-/// Maximum number of validation vectors used per operator-space validation pass.
-/// Prevents pathological runs where large activation banks (12k+ samples) cause
-/// hours-per-tensor validation. A single candidate may run up to three validation
-/// passes (stress, promotion, holdout), each capped at this depth.
-pub const MAX_VALIDATION_VECTORS: usize = 256;
+/// Tiered vector budgets per validation phase.
+///
+/// Probe/stress gate uses the smallest budget (32-64) so bad candidates fail
+/// quickly. Promotion and holdout gates use larger budgets (128-256) for
+/// candidates that are already plausible. The promotion and holdout banks
+/// come from the CalibrationSuite's separate promotion and holdout fields,
+/// so their vectors are automatically disjoint.
+pub const PROBE_STRESS_VECTORS: usize = 64;
+pub const PROMOTION_VECTORS: usize = 256;
+pub const HOLDOUT_VECTORS: usize = 256;
 
 use super::calibration::*;
 use super::contract::*;
@@ -248,6 +253,8 @@ pub fn quantize_tensor(
     let mut last_operator_nrmse = 0.0f32;
     let mut last_cosine_similarity = 0.0f32;
     let mut last_ref_output_rms = 0.0f32;
+    let mut vectors_processed: u32 = 0;
+    let mut current_phase: &str = "init";
 
     // Resolve stress and activation vectors from the respective suites.
     // Resize vectors to match the weight's row count (stress bank dim may differ
@@ -275,16 +282,14 @@ pub fn quantize_tensor(
         .map(|bank| resize_vectors(bank.holdout.clone(), rows));
 
     // Cap all vector banks to MAX_VALIDATION_VECTORS to prevent pathological
-    // runs on large activation banks (12k+ samples). Truncation applies per
-    // validation pass (stress, promotion, holdout); a single candidate may
-    // run up to three capped passes.
-    let cap_bank = |mut vectors: Vec<Vec<f32>>| -> Vec<Vec<f32>> {
-        vectors.truncate(MAX_VALIDATION_VECTORS);
-        vectors
-    };
-    let stress_vectors = stress_vectors.map(|v| cap_bank(v));
-    let calibration_promotion = calibration_promotion.map(|v| cap_bank(v));
-    let calibration_holdout = calibration_holdout.map(|v| cap_bank(v));
+    // Tiered vector budgets per validation phase.
+    // Probe/stress: 64 \u2014 fast fail for bad candidates.
+    // Promotion:    256 \u2014 reasonable depth for plausible candidates.
+    // Holdout:      256 \u2014 from the CalibrationSuite's separate holdout bank,
+    //                      so vectors are automatically disjoint from promotion.
+    let stress_vectors = stress_vectors.map(|mut v| { v.truncate(PROBE_STRESS_VECTORS); v });
+    let calibration_promotion = calibration_promotion.map(|mut v| { v.truncate(PROMOTION_VECTORS); v });
+    let calibration_holdout = calibration_holdout.map(|mut v| { v.truncate(HOLDOUT_VECTORS); v });
 
     let has_activation_bank = calibration_promotion.is_some() && calibration_holdout.is_some();
 
@@ -294,7 +299,7 @@ pub fn quantize_tensor(
 
     for &format in &candidates {
         if std::time::Instant::now() >= tensor_deadline {
-            return Err(QuantizationAdmissionFailure::NoCandidatePassed {
+            return Err(QuantizationAdmissionFailure::TimeoutDeadline {
                 candidates_attempted: candidates.iter().map(|f| format!("{:?}", f)).collect(),
                 last_weight_nrmse,
                 last_zero_collapse_ratio,
@@ -302,6 +307,8 @@ pub fn quantize_tensor(
                 last_operator_nrmse,
                 last_cosine_similarity,
                 last_ref_output_rms,
+                vectors_processed,
+                expired_phase: current_phase.to_string(),
             });
         }
         let (codes, scales, biases, scale_vector) =
@@ -337,6 +344,10 @@ pub fn quantize_tensor(
         }
 
         // ── Layer 1: Stress bank validation (always run) ───────────
+        current_phase = "probe";
+        if let Some(ref v) = stress_vectors {
+            vectors_processed += v.len() as u32;
+        }
         let operator_report = match &stress_vectors {
             Some(vectors) => {
                 let pre_unpacked = Some(reconstructed.as_slice());
@@ -374,6 +385,8 @@ pub fn quantize_tensor(
 
         // ── Layer 2: Activation bank validation (prerendered, optional) ──
         if let Some(ref promo_vecs) = calibration_promotion {
+            current_phase = "promotion";
+            vectors_processed += promo_vecs.len() as u32;
             let promo_report = validate_operator_space_with_bank(
                 source,
                 rows,
@@ -391,6 +404,8 @@ pub fn quantize_tensor(
             }
         }
         if let Some(ref hold_vecs) = calibration_holdout {
+            current_phase = "holdout";
+            vectors_processed += hold_vecs.len() as u32;
             let holdout_report = validate_operator_space_with_bank(
                 source,
                 rows,
