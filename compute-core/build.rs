@@ -40,6 +40,7 @@ fn main() {
             "nf4_tile640_gemv.metal",
             "int8_tile640_gemv.metal",
             "nf4_tile640_scaled_reduction_gemv.metal",
+            "fused_teacher_student_gemv.metal",
         ];
         for src in metal_sources {
             println!(

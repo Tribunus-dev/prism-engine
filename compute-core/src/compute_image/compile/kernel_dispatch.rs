@@ -839,6 +839,81 @@ impl DenseProjectionDispatcher {
 // ErrorPartialDispatcher
 // ═══════════════════════════════════════════════════════════════════════════
 
+
+
+/// Dispatches the fused teacher-student GEMV kernel.
+/// Computes both forward passes in a single dispatch.
+#[cfg(feature = "metal-dispatch")]
+pub struct FusedTeacherStudentDispatcher {
+    registry: RegistryRef,
+    kernel_name: &'static str,
+}
+
+#[cfg(feature = "metal-dispatch")]
+impl FusedTeacherStudentDispatcher {
+    pub fn new(registry: RegistryRef) -> Self {
+        FusedTeacherStudentDispatcher {
+            registry,
+            kernel_name: "fused_teacher_student_gemv",
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch(
+        &self,
+        command_buffer: &CommandBufferRef,
+        teacher_weights: &Buffer,
+        student_weights: &Buffer,
+        input_vecs: &Buffer,
+        teacher_out: &Buffer,
+        student_out: &Buffer,
+        loss_per_vec: &Buffer,
+        rows: u32,
+        cols: u32,
+        debug: bool,
+    ) {
+        let (pso, device) = {
+            let mut reg = self.registry.lock();
+            let fcv = FunctionConstantValues::new();
+            let pso = reg.get_or_create(self.kernel_name, &fcv, 0);
+            (pso, reg.device().clone())
+        };
+        let encoder = command_buffer.new_compute_command_encoder();
+        encoder.set_compute_pipeline_state(&pso);
+        encoder.set_buffer(0, Some(teacher_weights), 0);
+        encoder.set_buffer(1, Some(student_weights), 0);
+        encoder.set_buffer(2, Some(input_vecs), 0);
+        encoder.set_buffer(3, Some(teacher_out), 0);
+        encoder.set_buffer(4, Some(student_out), 0);
+        encoder.set_buffer(5, Some(loss_per_vec), 0);
+        let rows_buf = device.new_buffer_with_data(
+            &rows as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let cols_buf = device.new_buffer_with_data(
+            &cols as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let debug_val: u32 = if debug { 1 } else { 0 };
+        let debug_buf = device.new_buffer_with_data(
+            &debug_val as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(6, Some(&rows_buf), 0);
+        encoder.set_buffer(7, Some(&cols_buf), 0);
+        encoder.set_buffer(8, Some(&debug_buf), 0);
+        let total = (rows as u64) * (cols as u64);
+        encoder.dispatch_threads(
+            MTLSize { width: total, height: 1, depth: 1 },
+            MTLSize { width: 64, height: 1, depth: 1 },
+        );
+        encoder.end_encoding();
+    }
+}
+
 /// Dispatches the error-partial kernel that compares teacher vs student outputs.
 ///
 /// Produces one `ErrorPartial` record per comparison element, which the CPU
@@ -1942,108 +2017,6 @@ impl FusedMultimodalDispatcher {
         receipt.threads_per_threadgroup = 64;
         receipt.output_elements = out_dim;
         receipt.flags = if instrumented { 1 } else { 0 };
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// FusedTeacherStudentDispatcher
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Dispatches the fused teacher-student GEMV kernel.
-///
-/// Computes both teacher (f32 reference) and student (quantized reconstruction)
-/// forward passes in a single pass over the input, with optional debug output
-/// of per-element squared errors for CPU-side MSE computation.
-///
-/// Buffer layout matches `templates/fused_teacher_student_gemv.metal`:
-///   [[buffer(0)]]  teacher_weights — f32 reference [rows, cols]
-///   [[buffer(1)]]  student_weights — f32 reconstructed [rows, cols]
-///   [[buffer(2)]]  input_vecs      — [num_vectors, rows]
-///   [[buffer(3)]]  teacher_out     — [num_vectors, cols]
-///   [[buffer(4)]]  student_out     — [num_vectors, cols]
-///   [[buffer(5)]]  loss_per_vec    — debug only
-///   [[buffer(6)]]  rows            — constant uint
-///   [[buffer(7)]]  cols            — constant uint
-///   [[buffer(8)]]  debug_outputs   — constant uint
-///
-/// Grid: { num_vectors * cols, 1, 1 }, one thread per output element.
-#[cfg(feature = "metal-dispatch")]
-pub struct FusedTeacherStudentDispatcher {
-    registry: RegistryRef,
-    kernel_name: &'static str,
-}
-
-#[cfg(feature = "metal-dispatch")]
-impl FusedTeacherStudentDispatcher {
-    pub fn new(registry: RegistryRef) -> Self {
-        FusedTeacherStudentDispatcher {
-            registry,
-            kernel_name: "fused_teacher_student_gemv",
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn dispatch(
-        &self,
-        command_buffer: &CommandBufferRef,
-        teacher_weights: &Buffer,
-        student_weights: &Buffer,
-        input_vecs: &Buffer,
-        teacher_out: &Buffer,
-        student_out: &Buffer,
-        loss_per_vec: Option<&Buffer>,
-        rows: u32,
-        cols: u32,
-        num_vectors: u32,
-        debug: bool,
-    ) {
-        let (pso, device) = {
-            let mut reg = self.registry.lock();
-            let fcv = FunctionConstantValues::new();
-            let pso = reg.get_or_create(self.kernel_name, &fcv, 0);
-            (pso, reg.device().clone())
-        };
-
-        let encoder = command_buffer.new_compute_command_encoder();
-        encoder.set_compute_pipeline_state(&pso);
-
-        encoder.set_buffer(0, Some(teacher_weights), 0);
-        encoder.set_buffer(1, Some(student_weights), 0);
-        encoder.set_buffer(2, Some(input_vecs), 0);
-        encoder.set_buffer(3, Some(teacher_out), 0);
-        encoder.set_buffer(4, Some(student_out), 0);
-        if debug {
-            if let Some(loss) = loss_per_vec {
-                encoder.set_buffer(5, Some(loss), 0);
-            }
-        }
-
-        let rows_buf = device.new_buffer_with_data(
-            &rows as *const u32 as *const std::ffi::c_void,
-            std::mem::size_of::<u32>() as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
-        let cols_buf = device.new_buffer_with_data(
-            &cols as *const u32 as *const std::ffi::c_void,
-            std::mem::size_of::<u32>() as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
-        let debug_val: u32 = if debug { 1 } else { 0 };
-        let debug_buf = device.new_buffer_with_data(
-            &debug_val as *const u32 as *const std::ffi::c_void,
-            std::mem::size_of::<u32>() as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
-        encoder.set_buffer(6, Some(&rows_buf), 0);
-        encoder.set_buffer(7, Some(&cols_buf), 0);
-        encoder.set_buffer(8, Some(&debug_buf), 0);
-
-        let total_threads = (num_vectors as u64) * (cols as u64);
-        encoder.dispatch_thread_groups(
-            MTLSize { width: total_threads, height: 1, depth: 1 },
-            MTLSize { width: 1, height: 1, depth: 1 },
-        );
-        encoder.end_encoding();
     }
 }
 
