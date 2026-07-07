@@ -453,12 +453,41 @@ pub type PrismCimageHeader = CimageHeader;
 pub type PrismCimageLayoutMeta = CimageLayoutMeta;
 /// Backward-compatible function alias
 /// V1 MatrixWeightBinding with canonical LE serialization.
-pub const MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH: usize = 2 + 4 + 16 + 1 + 2 + 32
-    + 4 + 4 + 2 + 4 + 2 + 1 + 1 + 1 + 8 + 8 + 4 + 1 + 8 + 8 + 2
-    + 1 + 8 + 8 + 1 + 1 + 4 + 1 + 8 + 8 + 4;
+pub const MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH: usize = 2
+    + 4
+    + 16
+    + 1
+    + 2
+    + 32
+    + 4
+    + 4
+    + 2
+    + 4
+    + 2
+    + 1
+    + 1
+    + 1
+    + 8
+    + 8
+    + 4
+    + 1
+    + 8
+    + 8
+    + 2
+    + 1
+    + 8
+    + 8
+    + 1
+    + 1
+    + 4
+    + 1
+    + 8
+    + 8
+    + 4;
 // Verify: 2+4+16+1+2+32+4+4+2+4+2+1+1+1+8+8+4+1+8+8+2+1+8+8+1+1+4+1+8+8+4
 
 #[repr(C)]
+#[derive(Debug, Clone)]
 pub struct MatrixWeightBindingV1 {
     pub binding_wire_version: u16,
     pub matrix_id: u32,
@@ -474,23 +503,150 @@ pub struct MatrixWeightBindingV1 {
     pub macro_layout: u8,
     pub tail_handling: u8,
     pub code_segment: u8,
-    code_offset: u64,
-    code_length: u64,
-    code_tile_stride_bytes: u32,
+    pub code_offset: u64,
+    pub code_length: u64,
+    pub code_tile_stride_bytes: u32,
     pub metadata_segment: u8,
-    metadata_offset: u64,
-    metadata_length: u64,
-    metadata_tile_stride_bytes: u16,
+    pub metadata_offset: u64,
+    pub metadata_length: u64,
+    pub metadata_tile_stride_bytes: u16,
     pub sidecar_segment: u8,
-    sidecar_offset: u64,
-    sidecar_length: u64,
+    pub sidecar_offset: u64,
+    pub sidecar_length: u64,
     pub sidecar_kind: u8,
     pub sidecar_element_format: u8,
     pub sidecar_count: u32,
     pub residual_segment: u8,
-    residual_offset: u64,
-    residual_length: u64,
+    pub residual_offset: u64,
+    pub residual_length: u64,
     pub required_alignment_bytes: u32,
+}
+
+impl MatrixWeightBindingV1 {
+    /// Construct a new MatrixWeightBindingV1, validating that binding_wire_version == 1.
+    pub fn new(
+        binding_wire_version: u16,
+        matrix_id: u32,
+        tensor_id: [u8; 16],
+        representation: u8,
+        representation_version: u16,
+        kernel_abi_digest: [u8; 32],
+        in_features: u32,
+        out_features: u32,
+        reduction_tile_size: u16,
+        tiles_per_output_channel: u32,
+        tail_reduction_count: u16,
+        macro_layout: u8,
+        tail_handling: u8,
+        code_segment: u8,
+        code_offset: u64,
+        code_length: u64,
+        code_tile_stride_bytes: u32,
+        metadata_segment: u8,
+        metadata_offset: u64,
+        metadata_length: u64,
+        metadata_tile_stride_bytes: u16,
+        sidecar_segment: u8,
+        sidecar_offset: u64,
+        sidecar_length: u64,
+        sidecar_kind: u8,
+        sidecar_element_format: u8,
+        sidecar_count: u32,
+        residual_segment: u8,
+        residual_offset: u64,
+        residual_length: u64,
+        required_alignment_bytes: u32,
+    ) -> Result<Self, String> {
+        let bind = MatrixWeightBindingV1 {
+            binding_wire_version,
+            matrix_id,
+            tensor_id,
+            representation,
+            representation_version,
+            kernel_abi_digest,
+            in_features,
+            out_features,
+            reduction_tile_size,
+            tiles_per_output_channel,
+            tail_reduction_count,
+            macro_layout,
+            tail_handling,
+            code_segment,
+            code_offset,
+            code_length,
+            code_tile_stride_bytes,
+            metadata_segment,
+            metadata_offset,
+            metadata_length,
+            metadata_tile_stride_bytes,
+            sidecar_segment,
+            sidecar_offset,
+            sidecar_length,
+            sidecar_kind,
+            sidecar_element_format,
+            sidecar_count,
+            residual_segment,
+            residual_offset,
+            residual_length,
+            required_alignment_bytes,
+        };
+        bind.validate()?;
+        Ok(bind)
+    }
+
+    /// Validate structural invariants for this binding.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.binding_wire_version != 1 {
+            return Err(format!(
+                "binding_wire_version must be 1, got {}",
+                self.binding_wire_version
+            ));
+        }
+        if self.representation > 3 {
+            return Err(format!(
+                "representation must be 0..=3 (valid RuntimeRepresentationClass), got {}",
+                self.representation
+            ));
+        }
+        if self.representation == 3 {
+            // RawF32 special rules
+            if self.reduction_tile_size != 0 {
+                return Err(format!(
+                    "RawF32 (representation==3) requires reduction_tile_size == 0, got {}",
+                    self.reduction_tile_size
+                ));
+            }
+            if self.tiles_per_output_channel != 0 {
+                return Err(format!(
+                    "RawF32 (representation==3) requires tiles_per_output_channel == 0, got {}",
+                    self.tiles_per_output_channel
+                ));
+            }
+            let expected_code_len = (self.in_features as u64)
+                .checked_mul(self.out_features as u64)
+                .and_then(|v| v.checked_mul(4))
+                .ok_or_else(|| "overflow computing expected code_length for RawF32".to_string())?;
+            if self.code_length != expected_code_len {
+                return Err(format!(
+                    "RawF32 (representation==3) requires code_length == in_features * out_features * 4, got {}, expected {}",
+                    self.code_length, expected_code_len
+                ));
+            }
+            if self.metadata_length != 0 {
+                return Err(format!(
+                    "RawF32 (representation==3) requires metadata_length == 0, got {}",
+                    self.metadata_length
+                ));
+            }
+            if self.sidecar_length != 0 {
+                return Err(format!(
+                    "RawF32 (representation==3) requires sidecar_length == 0, got {}",
+                    self.sidecar_length
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Serialize a MatrixWeightBindingV1 in canonical little-endian format.
@@ -537,14 +693,22 @@ pub fn read_matrix_weight_binding_v1_le(data: &[u8]) -> Result<MatrixWeightBindi
     if data.len() < MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH {
         return Err(format!(
             "MatrixWeightBindingV1 too small: {} < {}",
-            data.len(), MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH
+            data.len(),
+            MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH
         ));
     }
     let mut off = 0usize;
-    let mut read = |n: usize| -> &[u8] { let s = &data[off..off+n]; off += n; s };
+    let mut read = |n: usize| -> &[u8] {
+        let s = &data[off..off + n];
+        off += n;
+        s
+    };
     let bv: u16 = u16::from_le_bytes(read(2).try_into().unwrap());
     if bv != 1 {
-        return Err(format!("unknown MatrixWeightBindingV1 wire version: {}", bv));
+        return Err(format!(
+            "unknown MatrixWeightBindingV1 wire version: {}",
+            bv
+        ));
     }
     let rep: u8 = read(1)[0];
     if rep > 3 {
@@ -553,12 +717,12 @@ pub fn read_matrix_weight_binding_v1_le(data: &[u8]) -> Result<MatrixWeightBindi
     let rt: u16 = u16::from_le_bytes(read(2).try_into().unwrap());
     if rep <= 2 && rt != 640 {
         return Err(format!(
-            "quantized format requires reduction_tile_size=640, got {}", rt
+            "quantized format requires reduction_tile_size=640, got {}",
+            rt
         ));
     }
     let ifeat: u32 = u32::from_le_bytes(read(4).try_into().unwrap());
     let ofeat: u32 = u32::from_le_bytes(read(4).try_into().unwrap());
-    drop(read(4)); // tiles_per_output_channel (derivable)
     let _ = read(4); // tiles_per_output_channel (derivable)
     let trc: u16 = u16::from_le_bytes(read(2).try_into().unwrap());
     if rep <= 2 && trc != (ifeat % 640) as u16 {
@@ -938,6 +1102,295 @@ pub fn requantize_kv_to_swizzled_u8(
         slc_buf[b] = s;
     }
 }
+
+
+/// Model hyper-parameters needed to build the cimage header.
+#[derive(Debug, Clone, Copy)]
+pub struct ModelConfig {
+    pub num_layers: u32,
+    pub num_heads: u32,
+    pub head_dim: u32,
+    pub hidden_dim: u32,
+    pub intermediate_dim: u32,
+    pub vocab_size: u32,
+    pub quantization_schema: u32,
+    pub draft_num_layers: u32,
+}
+
+/// Input: one compiled tensor ready for sealing into a cimage.
+#[derive(Debug, Clone)]
+pub struct CompiledTensor {
+    pub binding: MatrixWeightBindingV1,
+    pub codes: Vec<u8>,
+    pub metadata: Vec<u8>,
+}
+
+/// Build a sealed cimage binary from compiled tensors and a model config.
+///
+/// The output contains:
+///   - CimageHeader at offset 0 with segment directory entries
+///   - A MatrixContract segment (SegmentKind::MatrixContract = 41)
+///   - Code payload segments per representation
+///   - Metadata payload segments per representation
+///
+/// Segment layout:
+///   offset 0: CimageHeader (CIMAGE_HEADER_WIRE_SIZE bytes)
+///   offset H: MatrixContract segment
+///   offset H+M: codes (concatenated per tensor, format-specific SegmentKind)
+///   offset H+M+C: metadata (concatenated per tensor, format-specific SegmentKind)
+///
+/// Returns the complete cimage as Vec<u8> on success, or a descriptive error.
+pub fn build_cimage(
+    tensors: Vec<CompiledTensor>,
+    config: ModelConfig,
+) -> Result<Vec<u8>, String> {
+    // ── Compute MatrixContract segment ──────────────────────────────
+    let mut contract_buf = Vec::with_capacity(
+        4 + tensors.len() * MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH,
+    );
+    contract_buf.extend_from_slice(&(tensors.len() as u32).to_le_bytes());
+    for tensor in &tensors {
+        write_matrix_weight_binding_v1_le(&mut contract_buf, &tensor.binding)
+            .map_err(|e| format!("write binding: {e}"))?;
+    }
+    let contract_len = contract_buf.len() as u64;
+
+    // PAD to page boundary
+    let pad_to_page = |n: u64| -> u64 {
+        ((n + CIMAGE_PAGE_SIZE - 1) / CIMAGE_PAGE_SIZE) * CIMAGE_PAGE_SIZE
+    };
+
+    // ── Compute code and metadata payloads per tensor ───────────────
+    // Segment kind mapping per representation (code, metadata).
+    let segment_kinds = |rep: u8| -> (u32, u32) {
+        match rep {
+            0 => (SegmentKind::TernaryWeights as u32, SegmentKind::BlockScales as u32),
+            1 => (SegmentKind::Nf4Tile640Weights as u32, SegmentKind::BlockBiases as u32),
+            2 => (SegmentKind::Int8Tile640Weights as u32, SegmentKind::BlockBiases as u32),
+            3 => (SegmentKind::RawF16Weights as u32, 0xFFFFFFFF),
+            _ => (0xFFFFFFFF, 0xFFFFFFFF),
+        }
+    };
+
+    // Collect unique segment kinds and their payloads.
+    // codes_segments: Vec<(segment_kind_u32, &[u8])>
+    let mut code_segments: Vec<(u32, Vec<u8>)> = Vec::with_capacity(tensors.len());
+    let mut meta_segments: Vec<(u32, Vec<u8>)> = Vec::with_capacity(tensors.len());
+
+    for tensor in &tensors {
+        let (code_kind, meta_kind) = segment_kinds(tensor.binding.representation);
+        if code_kind != 0xFFFFFFFF {
+            code_segments.push((code_kind, tensor.codes.clone()));
+        }
+        if meta_kind != 0xFFFFFFFF && !tensor.metadata.is_empty() {
+            meta_segments.push((meta_kind, tensor.metadata.clone()));
+        }
+    }
+
+    // Concatenate payloads by segment kind
+    fn concat_by_kind(segments: &[(u32, Vec<u8>)]) -> Vec<(u32, Vec<u8>)> {
+        let mut map: std::collections::BTreeMap<u32, Vec<u8>> = std::collections::BTreeMap::new();
+        for (kind, data) in segments {
+            map.entry(*kind).or_default().extend_from_slice(data);
+        }
+        map.into_iter().collect()
+    }
+
+    let code_blobs = concat_by_kind(&code_segments);
+    let meta_blobs = concat_by_kind(&meta_segments);
+
+    // ── Compute segment offsets ─────────────────────────────────────
+    let header_size = CIMAGE_HEADER_WIRE_SIZE as u64;
+    let header_page = pad_to_page(header_size);
+
+    // Contract segment starts right after header page
+    let contract_offset = header_page;
+    let contract_page_end = pad_to_page(contract_offset + contract_len);
+
+    // Code segments start after contract
+    let mut code_offset = contract_page_end;
+    let mut code_sizes: Vec<(u32, u64, u64)> = Vec::with_capacity(code_blobs.len());
+    for (kind, blob) in &code_blobs {
+        let len = blob.len() as u64;
+        code_sizes.push((*kind, code_offset, len));
+        code_offset = pad_to_page(code_offset + len);
+    }
+
+    // Metadata segments start after codes
+    let mut meta_offset = code_offset.max(contract_page_end + 1); // ensure past contract
+    let mut meta_sizes: Vec<(u32, u64, u64)> = Vec::with_capacity(meta_blobs.len());
+    for (kind, blob) in &meta_blobs {
+        let len = blob.len() as u64;
+        meta_sizes.push((*kind, meta_offset, len));
+        meta_offset = pad_to_page(meta_offset + len);
+    }
+
+    let total_size = meta_offset;
+
+    // ── Build segment directory ─────────────────────────────────────
+    let mut segment_count: u32 = 1; // always have MatrixContract
+    let mut segments = [SegmentEntry {
+        kind: 0,
+        offset: 0,
+        length: 0,
+    }; CIMAGE_SEGMENT_CAPACITY];
+
+    segments[0] = SegmentEntry {
+        kind: SegmentKind::MatrixContract as u32,
+        offset: contract_offset,
+        length: contract_len,
+    };
+
+    let mut seg_index = 1;
+    for (kind, offset, len) in &code_sizes {
+        if *len > 0 && seg_index < CIMAGE_SEGMENT_CAPACITY as usize {
+            segments[seg_index] = SegmentEntry {
+                kind: *kind,
+                offset: *offset,
+                length: *len,
+            };
+            seg_index += 1;
+            segment_count += 1;
+        }
+    }
+    for (kind, offset, len) in &meta_sizes {
+        if *len > 0 && seg_index < CIMAGE_SEGMENT_CAPACITY as usize {
+            segments[seg_index] = SegmentEntry {
+                kind: *kind,
+                offset: *offset,
+                length: *len,
+            };
+            seg_index += 1;
+            segment_count += 1;
+        }
+    }
+
+    // ── Build header ────────────────────────────────────────────────
+    let header = CimageHeader {
+        magic: PRISM_MAGIC,
+        version: 1,
+        segment_count,
+        payload_hash: [0u8; 32],
+        num_layers: config.num_layers,
+        num_heads: config.num_heads,
+        head_dim: config.head_dim,
+        hidden_dim: config.hidden_dim,
+        intermediate_dim: config.intermediate_dim,
+        vocab_size: config.vocab_size,
+        quantization_schema: config.quantization_schema,
+        draft_num_layers: config.draft_num_layers,
+        segments,
+        _pad: [0u8; 8],
+    };
+    // ── Write the cimage to a Vec<u8> buffer ────────────────────────
+    let mut out = vec![0u8; total_size as usize];
+
+    // Write header
+    let mut cursor = std::io::Cursor::new(&mut out);
+use std::io::{Write, Seek};
+    cursor.seek(std::io::SeekFrom::Start(0)).unwrap();
+    write_cimage_header_le(&mut cursor, &header)
+        .map_err(|e| format!("write header: {e}"))?;
+
+    // Write MatrixContract segment
+    cursor.seek(std::io::SeekFrom::Start(contract_offset)).unwrap();
+    cursor.write_all(&contract_buf)
+        .map_err(|e| format!("write contract: {e}"))?;
+
+    // Write code segments
+    for (kind, blob) in &code_blobs {
+        let offset = code_sizes.iter().find(|(k, _, _)| *k == *kind).map(|(_, o, _)| *o).unwrap();
+        cursor.seek(std::io::SeekFrom::Start(offset)).unwrap();
+        cursor.write_all(blob).map_err(|e| format!("write code seg {kind}: {e}"))?;
+    }
+
+    // Write metadata segments
+    for (kind, blob) in &meta_blobs {
+        let offset = meta_sizes.iter().find(|(k, _, _)| *k == *kind).map(|(_, o, _)| *o).unwrap();
+        cursor.seek(std::io::SeekFrom::Start(offset)).unwrap();
+        cursor.write_all(blob).map_err(|e| format!("write meta seg {kind}: {e}"))?;
+    }
+
+    Ok(out)
+}
+
+#[cfg(test)]
+mod build_cimage_tests {
+    use super::*;
+
+    fn make_dummy_binding(rep: u8, in_f: u32, out_f: u32) -> MatrixWeightBindingV1 {
+        let tiles = ((in_f as u64) + 639) / 640;
+        let total_tiles = (out_f as u64) * tiles;
+        let (code_bs, meta_bs) = match rep {
+            0 => (160u64, 4u64),
+            1 => (320u64, 8u64),
+            2 => (640u64, 4u64),
+            _ => (0u64, 0u64),
+        };
+        MatrixWeightBindingV1 {
+            binding_wire_version: 1,
+            matrix_id: 1,
+            tensor_id: [0u8; 16],
+            representation: rep,
+            representation_version: 1,
+            kernel_abi_digest: [0u8; 32],
+            in_features: in_f,
+            out_features: out_f,
+            reduction_tile_size: 640,
+            tiles_per_output_channel: tiles as u32,
+            tail_reduction_count: (in_f % 640) as u16,
+            macro_layout: 1,
+            tail_handling: 1,
+            code_segment: match rep { 0 => 1u8, 1 => 26u8, 2 => 39u8, _ => 38u8 },
+            code_offset: 0,
+            code_length: total_tiles * code_bs,
+            code_tile_stride_bytes: code_bs as u32,
+            metadata_segment: match rep { 0 => 2u8, 1 => 27u8, 2 => 27u8, _ => 0u8 },
+            metadata_offset: 0,
+            metadata_length: total_tiles * meta_bs,
+            metadata_tile_stride_bytes: meta_bs as u16,
+            sidecar_segment: 0,
+            sidecar_offset: 0,
+            sidecar_length: 0,
+            sidecar_kind: 0,
+            sidecar_element_format: 0,
+            sidecar_count: 0,
+            residual_segment: 0,
+            residual_offset: 0,
+            residual_length: 0,
+            required_alignment_bytes: 64,
+        }
+    }
+
+    #[test]
+    fn build_basic_cimage() {
+        let binding = make_dummy_binding(1, 640, 640);
+        let tensors = vec![
+            CompiledTensor {
+                binding: binding.clone(),
+                codes: vec![0xABu8; 640 * 320],
+                metadata: vec![0xCDu8; 640 * 8],
+            },
+        ];
+        let result = build_cimage(
+            tensors,
+            ModelConfig {
+                num_layers: 1,
+                num_heads: 8,
+                head_dim: 128,
+                hidden_dim: 4096,
+                intermediate_dim: 16384,
+                vocab_size: 32000,
+                quantization_schema: 1,
+                draft_num_layers: 0,
+            },
+        );
+        assert!(result.is_ok(), "build_cimage failed: {:?}", result.err());
+        let cimage = result.unwrap();
+        assert!(cimage.len() > 0, "empty cimage");
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

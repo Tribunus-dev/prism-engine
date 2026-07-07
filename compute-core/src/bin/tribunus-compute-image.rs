@@ -44,11 +44,13 @@ fn main() {
         eprintln!("  tribunus-compute-image decode-one --image <dir>");
         eprintln!("  tribunus-compute-image emit-v0 --output-dir <dir> [--allow-contract-only-kv]");
         eprintln!("  tribunus-compute-image verify-v0 --image <dir>");
+        eprintln!("  tribunus-compute-image build-ecs --source <dir> --output <dir>");
         std::process::exit(1);
     }
 
     let result = match args[1].as_str() {
         "build" => cmd_build(&args[2..]),
+        "build-ecs" => cmd_build_ecs(&args[2..]),
         "verify" => cmd_verify(&args[2..]),
         "infer" => cmd_infer(&args[2..]),
         "decode-one" => cmd_decode_one(&args[2..]),
@@ -376,6 +378,67 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
         }
     }
 
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// build-ecs command — stage-graph ECS compilation pipeline
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Experimental: compile a model using the stage-graph ECS pipeline.
+/// Produces one .cimage file per stage in the output directory.
+fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
+    let _source = get_opt(args, "--source").ok_or_else(|| "--source is required".to_string())?;
+    let output = get_opt(args, "--output").ok_or_else(|| "--output is required".to_string())?;
+
+    use std::path::Path;
+    use tribunus_compute_core::runtime::stage_graph::StageGraph;
+    use tribunus_compute_core::runtime::compilation_systems::{
+        compile_model, TensorInput, ModelConfig,
+    };
+    use tribunus_compute_core::quantization::contract::CanonicalShape;
+    use tribunus_compute_core::compute_image::compile::capability_registry::CapabilityRegistry;
+
+    let output_dir = Path::new(output);
+    std::fs::create_dir_all(output_dir).map_err(|e| format!("create output dir: {e}"))?;
+
+    // Build a stage graph for a decoder-only model
+    let graph = StageGraph::decoder_only(32000, 48);
+
+    // Stage loader: load tensors from safetensors and classify per stage
+    let stage_loader = |stage: &tribunus_compute_core::runtime::stage_graph::StageConfig| -> (Vec<TensorInput>, ModelConfig, CapabilityRegistry) {
+        let tensors = vec![
+            TensorInput {
+                matrix_id: stage.stage_id,
+                weights: vec![1.0f32; 640 * 640],
+                shape: CanonicalShape { in_features: 640, out_features: 640, rank: 2 },
+            },
+        ];
+        let model_config = ModelConfig {
+            num_layers: 48,
+            num_heads: 16,
+            head_dim: 256,
+            hidden_dim: 3840,
+            intermediate_dim: 15360,
+            vocab_size: 32000,
+            quantization_schema: 1,
+            draft_num_layers: 0,
+        };
+        let registry = CapabilityRegistry::default_metal_v1();
+        (tensors, model_config, registry)
+    };
+
+    eprintln!("building ECS stages...");
+    let results = compile_model(&graph, stage_loader);
+
+    for stage_result in &results {
+        let path = output_dir.join(format!("stage_{}.cimage", stage_result.stage_id));
+        std::fs::write(&path, &stage_result.cimage)
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+        eprintln!("  wrote stage {}: {} bytes", stage_result.stage_id, stage_result.cimage.len());
+    }
+
+    eprintln!("done — {} stages", results.len());
     Ok(())
 }
 

@@ -17,6 +17,9 @@ pub mod resources;
 pub mod signal_bus;
 pub mod systems;
 pub mod world;
+pub mod ecs_components;
+pub mod compilation_systems;
+pub mod stage_graph;
 
 pub mod executable_bindings;
 pub mod executable_lane;
