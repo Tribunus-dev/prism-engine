@@ -59,6 +59,7 @@ fn parallel_sha256(data: &[u8]) -> [u8; 32] {
 use tribunus_compute_core::ane_compile::compile_ane_artifacts;
 use tribunus_compute_core::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
 use tribunus_compute_core::compute_image::compile::execution_graph::MatrixWeightBinding;
+use tribunus_compute_core::compute_image::compile::execution_graph::{SidecarElementFormat, sidecar_byte_len};
 use tribunus_compute_core::compute_image::compile::ternary::{
     model_artifact_tag, CimageHeader, ModelArtifactEntry, SegmentEntry, SegmentKind,
     CIMAGE_SEGMENT_CAPACITY, QUANT_SCHEMA_NF4_TILE640,
@@ -1377,7 +1378,9 @@ fn collect_triplet_segments(
 ///     [weights_segment: u8]
 ///     [tile_metadata_segment: u8]
 ///     [sidecar_segment: u8]          // 0xFF = none
-///     [_reserved: u8; 5]
+///     [sidecar_kind: u8]          // SidecarKind discriminant (0=None, 1=ReductionAxisScale)
+///     [sidecar_element_format: u8] // SidecarElementFormat (0=None, 1=F16, 2=F32)
+///     [_reserved: u8; 3]           // must be zero
 ///     [rows: u32 LE]
 ///     [cols: u32 LE]
 ///     [tiles_per_row: u32 LE]
@@ -1399,7 +1402,9 @@ fn build_matrix_contract_blob(bindings: &[MatrixWeightBinding]) -> Vec<u8> {
         buf.push(b.weights_segment);
         buf.push(b.tile_metadata_segment);
         buf.push(b.sidecar_segment);
-        buf.extend_from_slice(&[0u8; 5]); // reserved
+        buf.push(b.sidecar_kind);
+        buf.push(b.sidecar_element_format);
+        buf.extend_from_slice(&[0u8; 3]); // reserved
         buf.extend_from_slice(&b.rows.to_le_bytes());
         buf.extend_from_slice(&b.cols.to_le_bytes());
         buf.extend_from_slice(&b.tiles_per_row.to_le_bytes());
@@ -1409,6 +1414,7 @@ fn build_matrix_contract_blob(bindings: &[MatrixWeightBinding]) -> Vec<u8> {
 
 /// Deserialize a MatrixContract blob into a Vec of MatrixWeightBinding records.
 /// Reads the explicit LE field format produced by build_matrix_contract_blob.
+#[allow(dead_code)]
 fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
     let per_binding = 69usize;
     if data.len() < 4 {
@@ -1428,7 +1434,9 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
         let weights_segment = data[c1+49];
         let tile_metadata_segment = data[c1+50];
         let sidecar_segment = data[c1+51];
-        let reserved = &data[c1+52..c1+57];
+        let sidecar_kind = data[c1+52];
+        let sidecar_element_format = data[c1+53];
+        let reserved = &data[c1+54..c1+57];
         let sidecar_count = u32::from_le_bytes(data[c1+40..c1+44].try_into().unwrap());
 
         // ── Field-validity checks (fail closed) ──────────────────────
@@ -1436,12 +1444,23 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
         if format > 2 {
             return Vec::new();
         }
-        // sidecar_segment must be 0xFF (none) or 40 (QuantizationSidecars).
-        if sidecar_segment != 0xFF && sidecar_segment != 40 {
+        // sidecar_kind must be 0 (None) or 1 (ReductionAxisScale).
+        if sidecar_kind > 1 {
             return Vec::new();
         }
-        // sidecar_count == 0 ↔ sidecar_segment == 0xFF.
-        if (sidecar_count == 0) != (sidecar_segment == 0xFF) {
+        // sidecar_element_format must be 0 (None), 1 (F16), or 2 (F32).
+        if sidecar_element_format > 2 {
+            return Vec::new();
+        }
+        // sidecar_count == 0 → sidecar_kind == 0, sidecar_segment == 0xFF.
+        if sidecar_count == 0 && (sidecar_kind != 0 || sidecar_segment != 0xFF) {
+            return Vec::new();
+        }
+        // sidecar_count > 0 → sidecar_kind == 1, sidecar_segment == 40,
+        //                    sidecar_element_format in {1, 2}.
+        if sidecar_count > 0
+            && (sidecar_kind != 1 || sidecar_segment != 40 || sidecar_element_format == 0)
+        {
             return Vec::new();
         }
         // Reserved bytes must be zero (future fields use these).
@@ -1461,7 +1480,9 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
             weights_segment,
             tile_metadata_segment,
             sidecar_segment,
-            _pad: [0u8; 5],
+            sidecar_kind,
+            sidecar_element_format,
+            _pad: [0u8; 3],
             rows: u32::from_le_bytes(data[c1+57..c1+61].try_into().unwrap()),
             cols: u32::from_le_bytes(data[c1+61..c1+65].try_into().unwrap()),
             tiles_per_row: u32::from_le_bytes(data[c1+65..c1+69].try_into().unwrap()),
@@ -1473,46 +1494,79 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
 }
 
 /// Validate that every binding's ranges fit within their referenced segment sizes.
-/// Returns a Vec of error messages — empty means all pass.
+/// Returns Ok(()) or Err with all validation errors.
+#[allow(dead_code)]
 fn validate_binding_ranges(
     bindings: &[MatrixWeightBinding],
     segment_sizes: &std::collections::HashMap<u8, u64>,
-) -> Vec<String> {
+) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
     for b in bindings {
         let mid = b.matrix_id;
-        if let Some(&sz) = segment_sizes.get(&b.weights_segment) {
-            let end = b.weights_offset.checked_add(b.weights_bytes).unwrap_or(u64::MAX);
-            if end > sz {
-                errors.push(format!(
-                    "binding[{}]: weights range [{}..{}) exceeds segment {} size {}",
-                    mid, b.weights_offset, end, b.weights_segment, sz
-                ));
+        // weights: unconditional — every binding must reference an existing segment
+        let sz = match segment_sizes.get(&b.weights_segment) {
+            Some(&s) => s,
+            None => {
+                errors.push(format!("binding[{mid}]: missing weights segment {}", b.weights_segment));
+                continue;
             }
+        };
+        let end = b.weights_offset.checked_add(b.weights_bytes).unwrap_or(u64::MAX);
+        if end > sz {
+            errors.push(format!(
+                "binding[{mid}]: weights range [{}..{}) exceeds segment {} size {}",
+                b.weights_offset, end, b.weights_segment, sz
+            ));
         }
-        if let Some(&sz) = segment_sizes.get(&b.tile_metadata_segment) {
-            let end = b.tile_metadata_offset.checked_add(b.tile_metadata_bytes).unwrap_or(u64::MAX);
-            if end > sz {
-                errors.push(format!(
-                    "binding[{}]: tile_metadata range [{}..{}) exceeds segment {} size {}",
-                    mid, b.tile_metadata_offset, end, b.tile_metadata_segment, sz
-                ));
+
+        // tile_metadata: unconditional
+        let sz = match segment_sizes.get(&b.tile_metadata_segment) {
+            Some(&s) => s,
+            None => {
+                errors.push(format!("binding[{mid}]: missing tile_metadata segment {}", b.tile_metadata_segment));
+                continue;
             }
+        };
+        let end = b.tile_metadata_offset.checked_add(b.tile_metadata_bytes).unwrap_or(u64::MAX);
+        if end > sz {
+            errors.push(format!(
+                "binding[{mid}]: tile_metadata range [{}..{}) exceeds segment {} size {}",
+                b.tile_metadata_offset, end, b.tile_metadata_segment, sz
+            ));
         }
-        if b.sidecar_count > 0 && b.sidecar_segment != 0xFF {
-            if let Some(&sz) = segment_sizes.get(&b.sidecar_segment) {
-                let sc_bytes = (b.sidecar_count as u64).checked_mul(4).unwrap_or(u64::MAX);
-                let end = b.sidecar_offset.checked_add(sc_bytes).unwrap_or(u64::MAX);
-                if end > sz {
-                    errors.push(format!(
-                        "binding[{}]: sidecar range [{}..{}) exceeds segment {} size {}",
-                        mid, b.sidecar_offset, end, b.sidecar_segment, sz
-                    ));
+
+        // sidecar: only when sidecar_count > 0 and sidecar_kind != 0
+        if b.sidecar_count > 0 && b.sidecar_kind != 0 {
+            let sz = match segment_sizes.get(&b.sidecar_segment) {
+                Some(&s) => s,
+                None => {
+                    errors.push(format!("binding[{mid}]: missing sidecar segment {}", b.sidecar_segment));
+                    continue;
                 }
+            };
+            let sc_fmt = match b.sidecar_element_format {
+                0 => SidecarElementFormat::None,
+                1 => SidecarElementFormat::F16,
+                2 => SidecarElementFormat::F32,
+                _ => unreachable!(),
+            };
+            let sc_bytes = match sidecar_byte_len(b.sidecar_count, sc_fmt) {
+                Some(n) => n,
+                None => {
+                    errors.push(format!("binding[{mid}]: sidecar_byte_len overflow for count {}", b.sidecar_count));
+                    continue;
+                }
+            };
+            let end = b.sidecar_offset.checked_add(sc_bytes).unwrap_or(u64::MAX);
+            if end > sz {
+                errors.push(format!(
+                    "binding[{mid}]: sidecar range [{}..{}) exceeds segment {} size {}",
+                    b.sidecar_offset, end, b.sidecar_segment, sz
+                ));
             }
         }
     }
-    errors
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 fn main() {
@@ -2289,7 +2343,7 @@ fn main() {
                 weights_segment: w_seg,
                 tile_metadata_segment: 27u8, // BlockBiases
                 sidecar_segment: sidecar_seg_id,
-                _pad: [0u8; 5],
+                sidecar_kind: 0, sidecar_element_format: 0, _pad: [0u8; 3],
                 rows: wb.rows as u32,
                 cols: wb.cols as u32,
                 tiles_per_row: wb.tiles_per_row as u32,
@@ -3683,7 +3737,7 @@ mod tests {
                 format: 0,
                 weights_segment: 26,
                 tile_metadata_segment: 27,
-                _pad: [0u8; 5],
+                sidecar_kind: 0, sidecar_element_format: 0, _pad: [0u8; 3],
                 rows: 3840,
                 cols: 4096,
                 tiles_per_row: 7,
@@ -3700,7 +3754,7 @@ mod tests {
                 format: 2,
                 weights_segment: 39,
                 tile_metadata_segment: 27,
-                _pad: [0u8; 5],
+                sidecar_kind: 1, sidecar_element_format: 1, _pad: [0u8; 3],
                 rows: 3840,
                 cols: 3840,
                 tiles_per_row: 6,
@@ -3744,6 +3798,8 @@ mod tests {
                 sidecar_offset: 0,
                 sidecar_count: 3840,
                 sidecar_segment: 40,
+                sidecar_kind: 1,
+                sidecar_element_format: 1,
                 ..MatrixWeightBinding::default()
             },
         ];
@@ -3817,9 +3873,11 @@ fn test_read_contract_sidecar_count_segment_mismatch() {
 fn test_read_contract_invalid_reserved_nonzero() {
         let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
             format: 0,
+            sidecar_count: 0,
+            sidecar_segment: 0xFF,
             ..MatrixWeightBinding::default()
         }]);
-        valid[4 + 53] = 1;
+        valid[4 + 54] = 1;
         assert!(read_matrix_contract_blob(&valid).is_empty());
 }
 
@@ -3870,7 +3928,7 @@ fn test_read_contract_invalid_reserved_nonzero() {
                 sidecar_offset: 0, sidecar_count: 0, sidecar_segment: 0xFF,
                 matrix_id: 0, format: 0, rows: ROWS as u32, cols: COLS as u32,
                 tiles_per_row: TILES_PER_ROW, weights_segment: 26,
-                tile_metadata_segment: 27, _pad: [0u8; 5],
+                tile_metadata_segment: 27, sidecar_kind: 0, sidecar_element_format: 0, _pad: [0u8; 3],
             },
             MatrixWeightBinding {
                 weights_offset: 0, weights_bytes: i8c.len() as u64,
@@ -3878,7 +3936,7 @@ fn test_read_contract_invalid_reserved_nonzero() {
                 sidecar_offset: 0, sidecar_count: 0, sidecar_segment: 0xFF,
                 matrix_id: 1, format: 2, rows: ROWS as u32, cols: COLS as u32,
                 tiles_per_row: TILES_PER_ROW, weights_segment: 39,
-                tile_metadata_segment: 27, _pad: [0u8; 5],
+                tile_metadata_segment: 27, sidecar_kind: 0, sidecar_element_format: 0, _pad: [0u8; 3],
             },
             MatrixWeightBinding {
                 weights_offset: sc_wo, weights_bytes: scc.len() as u64,
@@ -3887,7 +3945,7 @@ fn test_read_contract_invalid_reserved_nonzero() {
                 sidecar_segment: 40, matrix_id: 2, format: 1,
                 rows: ROWS as u32, cols: COLS as u32,
                 tiles_per_row: TILES_PER_ROW, weights_segment: 26,
-                tile_metadata_segment: 27, _pad: [0u8; 5],
+                tile_metadata_segment: 27, sidecar_kind: 1, sidecar_element_format: 1, _pad: [0u8; 3],
             },
         ];
         let blob = build_matrix_contract_blob(&bindings);
@@ -3999,10 +4057,11 @@ fn test_read_contract_invalid_reserved_nonzero() {
         map.insert(27u8, 5120u64);
         let b = MatrixWeightBinding {
             weights_offset: 0, weights_bytes: 50000, weights_segment: 26, format: 0,
+            tile_metadata_segment: 27,
             ..MatrixWeightBinding::default()
         };
-        let errs = validate_binding_ranges(&[b], &map);
-        assert!(!errs.is_empty());
+        let errs = validate_binding_ranges(&[b], &map).unwrap_err();
+        assert!(!errs.is_empty(), "expected errors");
         assert!(errs[0].contains("weights"), "err: {}", errs[0]);
 }
 
@@ -4013,11 +4072,11 @@ fn test_read_contract_invalid_reserved_nonzero() {
         map.insert(27u8, 5120u64);
         let b = MatrixWeightBinding {
             tile_metadata_offset: 0, tile_metadata_bytes: 6000, format: 0,
-            tile_metadata_segment: 27,
+            tile_metadata_segment: 27, weights_segment: 26,
             ..MatrixWeightBinding::default()
         };
-        let errs = validate_binding_ranges(&[b], &map);
-        assert!(!errs.is_empty());
+        let errs = validate_binding_ranges(&[b], &map).unwrap_err();
+        assert!(!errs.is_empty(), "expected errors");
         assert!(errs[0].contains("tile_metadata"), "err: {}", errs[0]);
 }
 
@@ -4029,12 +4088,13 @@ fn test_read_contract_invalid_reserved_nonzero() {
         map.insert(40u8, 2560u64);
         let b = MatrixWeightBinding {
             sidecar_offset: 2000, sidecar_count: 640,
+            sidecar_kind: 1, sidecar_element_format: 1,
             sidecar_segment: 40, format: 1,
-            weights_segment: 26,
+            weights_segment: 26, tile_metadata_segment: 27,
             ..MatrixWeightBinding::default()
         };
-        let errs = validate_binding_ranges(&[b], &map);
-        assert!(!errs.is_empty());
+        let errs = validate_binding_ranges(&[b], &map).unwrap_err();
+        assert!(!errs.is_empty(), "expected errors");
         assert!(errs[0].contains("sidecar"), "err: {}", errs[0]);
     }
 
@@ -4050,7 +4110,7 @@ fn test_read_contract_invalid_reserved_nonzero() {
             format: 0,
             ..MatrixWeightBinding::default()
         };
-        assert!(validate_binding_ranges(&[b], &map).is_empty());
+        assert!(validate_binding_ranges(&[b], &map).is_ok());
     }
 
     #[test]
@@ -4059,8 +4119,8 @@ fn test_read_contract_invalid_reserved_nonzero() {
         map.insert(26u8, 40960u64);
         let b = MatrixWeightBinding {
             weights_offset: 0, weights_bytes: 40960,
-            weights_segment: 26,
+            weights_segment: 26, tile_metadata_segment: 26,
             ..MatrixWeightBinding::default()
         };
-        assert!(validate_binding_ranges(&[b], &map).is_empty());
+        assert!(validate_binding_ranges(&[b], &map).is_ok());
     }

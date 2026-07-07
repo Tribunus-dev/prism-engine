@@ -288,6 +288,163 @@ impl Nf4Tile640ProjectionDispatcher {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Nf4ScaledReductionTile640Dispatcher
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Dispatches the NF4 Tile640 FP32 GEMV kernel with per-column FP16
+/// reduction-axis scaling sidecar.
+///
+/// Buffer layout matches
+/// `compute_image/templates/nf4_tile640_scaled_reduction_gemv.metal`:
+///   [[buffer(0)]]  packed_weights     — raw Tile640 packed u8 rows
+///   [[buffer(1)]]  tile_scales        — fp32 per-group scales
+///   [[buffer(2)]]  tile_biases        — fp32 per-group biases
+///   [[buffer(3)]]  input              — fp32 activation vector [in_dim]
+///   [[buffer(4)]]  output             — fp32 result vector
+///   [[buffer(5)]]  num_macro_tiles    — constant uint (ceil(in_dim / 640))
+///   [[buffer(6)]]  in_dim             — constant uint (real width; guards
+///                                       the partial-tile activation and
+///                                       reduction_scales reads)
+///   [[buffer(7)]]  reduction_scales   — device const half* FP16 column-scale
+///                                       sidecar
+#[cfg(feature = "metal-dispatch")]
+pub struct Nf4ScaledReductionTile640Dispatcher {
+    registry: RegistryRef,
+    kernel_name: &'static str,
+}
+
+#[cfg(feature = "metal-dispatch")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Nf4ScaledReductionTile640Offsets {
+    pub weights_offset: u64,
+    pub scales_offset: u64,
+    pub biases_offset: u64,
+    pub reduction_scale_offset: u64,
+}
+
+#[cfg(feature = "metal-dispatch")]
+impl Nf4ScaledReductionTile640Dispatcher {
+    pub fn new(registry: RegistryRef) -> Self {
+        Self {
+            registry,
+            kernel_name: "fused_gemv_nf4_scaled_reduction_tile640_fp32",
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch(
+        &self,
+        command_buffer: &CommandBufferRef,
+        packed_weights_buffer: &Buffer,
+        scales_buffer: &Buffer,
+        biases_buffer: &Buffer,
+        input_buffer: &Buffer,
+        output_buffer: &Buffer,
+        reduction_scales_buffer: &Buffer,
+        params: &ProjectionParams,
+        receipt: &mut KernelReceipt,
+    ) {
+        self.dispatch_with_offsets(
+            command_buffer,
+            packed_weights_buffer,
+            scales_buffer,
+            biases_buffer,
+            input_buffer,
+            output_buffer,
+            reduction_scales_buffer,
+            params,
+            Nf4ScaledReductionTile640Offsets::default(),
+            receipt,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_with_offsets(
+        &self,
+        command_buffer: &CommandBufferRef,
+        packed_weights_buffer: &Buffer,
+        scales_buffer: &Buffer,
+        biases_buffer: &Buffer,
+        input_buffer: &Buffer,
+        output_buffer: &Buffer,
+        reduction_scales_buffer: &Buffer,
+        params: &ProjectionParams,
+        offsets: Nf4ScaledReductionTile640Offsets,
+        receipt: &mut KernelReceipt,
+    ) {
+        let (pso, device) = {
+            let mut reg = self.registry.lock();
+            let fcv = FunctionConstantValues::new();
+            let pso = reg.get_or_create(self.kernel_name, &fcv, 0);
+            (pso, reg.device().clone())
+        };
+
+        let encoder = command_buffer.new_compute_command_encoder();
+        encoder.set_compute_pipeline_state(&pso);
+        encoder.set_buffer(0, Some(packed_weights_buffer), offsets.weights_offset);
+        encoder.set_buffer(1, Some(scales_buffer), offsets.scales_offset);
+        encoder.set_buffer(2, Some(biases_buffer), offsets.biases_offset);
+        encoder.set_buffer(3, Some(input_buffer), 0);
+        encoder.set_buffer(4, Some(output_buffer), 0);
+
+        let num_macro_tiles = params.page_count.max(1);
+        let num_macro_tiles_buf = device.new_buffer_with_data(
+            &num_macro_tiles as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(5, Some(&num_macro_tiles_buf), 0);
+
+        // buffer(6): real (unpadded) input width.  The kernel guards both the
+        // activation and the reduction_scales read against this so a partial
+        // last tile (in_dim not a multiple of 640) never reads past
+        // `in_vector[in_dim]` or `reduction_scales[in_dim]`.
+        let in_dim_val = params.in_dim;
+        let in_dim_buf = device.new_buffer_with_data(
+            &in_dim_val as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(6, Some(&in_dim_buf), 0);
+
+        // buffer(7): FP16 reduction-axis scale sidecar.  The kernel loads
+        // this inside the innermost loop and multiplies it against the
+        // activation before the NF4 weight apply.
+        encoder.set_buffer(7, Some(reduction_scales_buffer), offsets.reduction_scale_offset);
+
+        encoder.dispatch_thread_groups(
+            MTLSize {
+                width: params.out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 32,
+                height: 1,
+                depth: 1,
+            },
+        );
+        encoder.end_encoding();
+
+        receipt.kernel_id = 14; // NF4_TILE640_SCALED_REDUCTION
+        receipt.phase_id = 0;
+        receipt.page_count = num_macro_tiles;
+        receipt.sidecar_hits = 0;
+        receipt.sidecar_entries_read = 0;
+        receipt.threadgroups = params.out_dim;
+        receipt.threads_per_threadgroup = 32;
+        receipt.output_elements = params.out_dim;
+        receipt.flags = 0;
+        receipt.logical_weight_bytes = (params.out_dim as u64) * (num_macro_tiles as u64) * 320;
+        // NF4 scales+biases (40 bytes/tile) plus FP16 reduction scales (2 bytes/input element).
+        receipt.logical_sidecar_bytes =
+            (params.out_dim as u64) * (num_macro_tiles as u64) * 5 * 2 * 4
+            + (params.in_dim as u64) * 2;
+        receipt.logical_activation_bytes = (params.in_dim as u64) * 4 + (params.out_dim as u64) * 4;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Int8Tile640GEMVDispatcher
 // ═══════════════════════════════════════════════════════════════════════════
 

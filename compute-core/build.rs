@@ -39,6 +39,7 @@ fn main() {
             // `fused_gemv_nf4_tile640_fp32`, so the teacher cimage can't execute.
             "nf4_tile640_gemv.metal",
             "int8_tile640_gemv.metal",
+            "nf4_tile640_scaled_reduction_gemv.metal",
         ];
         for src in metal_sources {
             println!(

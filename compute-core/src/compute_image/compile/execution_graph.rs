@@ -26,6 +26,35 @@ pub enum QuantizedWeightFormat {
     TernaryTile640ScaledReductionAxis = 5,
 }
 
+/// Declares the per-element encoding of sidecar data payloads.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SidecarElementFormat {
+    #[default]
+    None = 0,
+    F16 = 1,
+    F32 = 2,
+}
+
+/// Declares the logical role of sidecar data.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SidecarKind {
+    #[default]
+    None = 0,
+    ReductionAxisScale = 1,
+}
+
+/// Compute the byte length of a sidecar payload from its declared element format.
+pub fn sidecar_byte_len(count: u32, fmt: SidecarElementFormat) -> Option<u64> {
+    let element_size = match fmt {
+        SidecarElementFormat::None => 0,
+        SidecarElementFormat::F16 => 2,
+        SidecarElementFormat::F32 => 4,
+    };
+    (count as u64).checked_mul(element_size)
+}
+
 /// Per-matrix weight binding — the full contract between the compiler's
 /// packing pass and every runtime dispatch path.
 ///
@@ -43,9 +72,9 @@ pub struct MatrixWeightBinding {
     /// Byte length of tile metadata data.
     pub tile_metadata_bytes: u64,
     /// Byte offset into sidecar_segment for reduction scales (0 = no sidecar).
-    /// Sentinal: sidecar_count == 0 means no sidecar (offset may be 0).
+    /// Sentinal: sidecar_kind == None means no sidecar (offset may be 0).
     pub sidecar_offset: u64,
-    /// Number of FP16 reduction-axis scale values.
+    /// Number of sidecar values (element count, not bytes).
     pub sidecar_count: u32,
     /// Index into the bindings array.
     pub matrix_id: u32,
@@ -57,7 +86,11 @@ pub struct MatrixWeightBinding {
     pub tile_metadata_segment: u8,
     /// SegmentKind value for the reduction-axis sidecar (0xFF = none).
     pub sidecar_segment: u8,
-    pub _pad: [u8; 5],
+    /// Logical role of the sidecar data (SidecarKind discriminant).
+    pub sidecar_kind: u8,
+    /// Per-element encoding format (SidecarElementFormat discriminant).
+    pub sidecar_element_format: u8,
+    pub _pad: [u8; 3],
     /// Logical matrix dimensions.
     pub rows: u32,
     pub cols: u32,
