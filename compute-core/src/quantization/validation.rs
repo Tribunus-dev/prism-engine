@@ -73,8 +73,8 @@ pub fn validate_weight_space(
 /// Returns the worst-case metrics across all vectors.
 pub fn validate_operator_space_with_vectors(
     source: &[f32],
-    rows: usize,
-    cols: usize,
+    in_features: usize,
+    out_features: usize,
     packed_codes: &[u8],
     packed_scales: &[f32],
     packed_biases: &[f32],
@@ -88,8 +88,8 @@ pub fn validate_operator_space_with_vectors(
     if num_vectors < ACCELERATE_BATCH_THRESHOLD {
         return validate_operator_space_single(
             source,
-            rows,
-            cols,
+            in_features,
+            out_features,
             packed_codes,
             packed_scales,
             packed_biases,
@@ -100,8 +100,8 @@ pub fn validate_operator_space_with_vectors(
     }
 
     // ── Batched Accelerate path ──────────────────────────────────
-    // Flatten activation vectors to contiguous [num_vectors, rows].
-    let mut inputs_flat = Vec::with_capacity(num_vectors * rows);
+    // Flatten activation vectors to contiguous [num_vectors, in_features].
+    let mut inputs_flat = Vec::with_capacity(num_vectors * in_features);
     for v in vectors {
         inputs_flat.extend_from_slice(v);
     }
@@ -110,7 +110,7 @@ pub fn validate_operator_space_with_vectors(
     #[cfg(any(feature = "metal-dispatch", feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
     let quant_weights: Vec<f32> = match pre_unpacked {
         Some(w) => w.to_vec(),
-        None => unpack_nf4_weights(packed_codes, packed_scales, packed_biases, rows, cols),
+        None => unpack_nf4_weights(packed_codes, packed_scales, packed_biases, in_features, out_features),
     };
 
     // ── Batched path: GPU (metal-dispatch) or Accelerate (CPU) ──
@@ -137,75 +137,75 @@ pub fn validate_operator_space_with_vectors(
             GpuBatchMatmulDispatcher::new(&registry)
         });
 
-        let ref_results = GPU_INIT.run(source, &inputs_flat, rows, cols, num_vectors);
-        let mut quant_results = GPU_INIT.run(&quant_weights, &inputs_flat, rows, cols, num_vectors);
+        let ref_results = GPU_INIT.run(source, &inputs_flat, in_features, out_features, num_vectors);
+        let mut quant_results = GPU_INIT.run(&quant_weights, &inputs_flat, in_features, out_features, num_vectors);
 
         // Post-scale quantized outputs by reduction-axis scale vector.
         if let Some(sv) = scale_vector {
             for k in 0..num_vectors {
-                let base = k * cols;
-                for j in 0..cols {
+                let base = k * out_features;
+                for j in 0..out_features {
                     quant_results[base + j] *= sv[j];
                 }
             }
         }
 
-        return compute_operator_metrics(&ref_results, &quant_results, num_vectors, cols);
+        return compute_operator_metrics(&ref_results, &quant_results, num_vectors, out_features);
     }
 
     // CPU fallback (also reachable when metal-dispatch is not enabled).
     #[cfg(all(not(feature = "metal-dispatch"), any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios")))]
     {
     // Batch reference matmul: C = A @ B
-    //   A = inputs [num_vectors × rows], lda = rows
-    //   B = source [rows × cols],       ldb = cols
-    //   C = refs   [num_vectors × cols], ldc = cols
-    let mut refs_flat = vec![0.0f32; num_vectors * cols];
+    //   A = inputs [num_vectors × in_features], lda = in_features
+    //   B = source [in_features × out_features], ldb = out_features
+    //   C = refs   [num_vectors × out_features], ldc = out_features
+    let mut refs_flat = vec![0.0f32; num_vectors * out_features];
     unsafe {
         cblas_sgemm(
             CBLAS_ROW_MAJOR,
             CBLAS_NO_TRANS,
             CBLAS_NO_TRANS,
             num_vectors as i32,
-            cols as i32,
-            rows as i32,
+            out_features as i32,
+            in_features as i32,
             1.0,
             inputs_flat.as_ptr(),
-            rows as i32,
+            in_features as i32,
             source.as_ptr(),
-            cols as i32,
+            out_features as i32,
             0.0,
             refs_flat.as_mut_ptr(),
-            cols as i32,
+            out_features as i32,
         );
     }
 
     // Batch quantized matmul: same layout, using unpacked NF4 weights.
-    let mut quants_flat = vec![0.0f32; num_vectors * cols];
+    let mut quants_flat = vec![0.0f32; num_vectors * out_features];
     unsafe {
         cblas_sgemm(
             CBLAS_ROW_MAJOR,
             CBLAS_NO_TRANS,
             CBLAS_NO_TRANS,
             num_vectors as i32,
-            cols as i32,
-            rows as i32,
+            out_features as i32,
+            in_features as i32,
             1.0,
             inputs_flat.as_ptr(),
-            rows as i32,
+            in_features as i32,
             quant_weights.as_ptr(),
-            cols as i32,
+            out_features as i32,
             0.0,
             quants_flat.as_mut_ptr(),
-            cols as i32,
+            out_features as i32,
         );
     }
 
     // Post-scale quantized outputs by reduction-axis scale vector.
     if let Some(sv) = scale_vector {
         for k in 0..num_vectors {
-            let base = k * cols;
-            for j in 0..cols {
+            let base = k * out_features;
+            for j in 0..out_features {
                 quants_flat[base + j] *= sv[j];
             }
         }
@@ -222,16 +222,16 @@ pub fn validate_operator_space_with_vectors(
     let nf = num_vectors as f32;
 
     for k in 0..num_vectors {
-        let base = k * cols;
-        let ref_row = &refs_flat[base..base + cols];
-        let quant_row = &quants_flat[base..base + cols];
-
+        let base = k * out_features;
+        let ref_row = &refs_flat[base..base + out_features];
+        let quant_row = &quants_flat[base..base + out_features];
+ 
         let mut sq = 0.0f32;
         let mut ref_sq = 0.0f32;
         let mut quant_sq = 0.0f32;
         let mut ref_dot_quant = 0.0f32;
         let mut sign_match = 0u32;
-        for j in 0..cols {
+        for j in 0..out_features {
             let diff = quant_row[j] - ref_row[j];
             sq += diff * diff;
             ref_sq += ref_row[j] * ref_row[j];
@@ -241,10 +241,10 @@ pub fn validate_operator_space_with_vectors(
                 sign_match += 1;
             }
         }
-        let trial_rmse = (sq / cols as f32).sqrt();
-        let ref_rms = (ref_sq / cols as f32).sqrt();
+        let trial_rmse = (sq / out_features as f32).sqrt();
+        let ref_rms = (ref_sq / out_features as f32).sqrt();
         let trial_nrmse = trial_rmse / (ref_rms + 1e-30);
-        let quant_rms = (quant_sq / cols as f32).sqrt();
+        let quant_rms = (quant_sq / out_features as f32).sqrt();
         let trial_norm_drift = (quant_rms / (ref_rms + 1e-30) - 1.0).abs();
         let trial_cosine = ref_dot_quant / ((ref_sq).sqrt() * (quant_sq).sqrt() + 1e-30);
 
@@ -262,7 +262,7 @@ pub fn validate_operator_space_with_vectors(
         }
         total_cosine += trial_cosine;
         accumulated_ref_rms += ref_rms;
-        total_sign_agreement += sign_match as f32 / cols as f32;
+        total_sign_agreement += sign_match as f32 / out_features as f32;
     }
 
     OperatorValidationReport {
@@ -286,8 +286,8 @@ pub fn validate_operator_space_with_vectors(
     {
         return validate_operator_space_single(
             source,
-            rows,
-            cols,
+            in_features,
+            out_features,
             packed_codes,
             packed_scales,
             packed_biases,
@@ -300,7 +300,7 @@ pub fn validate_operator_space_with_vectors(
 
 /// Compute per-vector operator metrics from batched reference and quantized outputs.
 ///
-/// Both `refs_flat` and `quants_flat` are [num_vectors × cols] row-major flat arrays.
+/// Both `refs_flat` and `quants_flat` are [num_vectors × out_features] row-major flat arrays.
 /// Returns the aggregate `OperatorValidationReport` (worst-case metrics across all
 /// vectors plus averages for cosine similarity, ref_output_rms, and sign agreement).
 #[cfg(feature = "metal-dispatch")]
@@ -308,7 +308,7 @@ fn compute_operator_metrics(
     refs_flat: &[f32],
     quants_flat: &[f32],
     num_vectors: usize,
-    cols: usize,
+    out_features: usize,
 ) -> OperatorValidationReport {
     let mut worst_rmse = 0.0f32;
     let mut worst_nrmse = 0.0f32;
@@ -320,16 +320,16 @@ fn compute_operator_metrics(
     let nf = num_vectors as f32;
 
     for k in 0..num_vectors {
-        let base = k * cols;
-        let ref_row = &refs_flat[base..base + cols];
-        let quant_row = &quants_flat[base..base + cols];
+        let base = k * out_features;
+        let ref_row = &refs_flat[base..base + out_features];
+        let quant_row = &quants_flat[base..base + out_features];
 
         let mut sq = 0.0f32;
         let mut ref_sq = 0.0f32;
         let mut quant_sq = 0.0f32;
         let mut ref_dot_quant = 0.0f32;
         let mut sign_match = 0u32;
-        for j in 0..cols {
+        for j in 0..out_features {
             let diff = quant_row[j] - ref_row[j];
             sq += diff * diff;
             ref_sq += ref_row[j] * ref_row[j];
@@ -339,10 +339,10 @@ fn compute_operator_metrics(
                 sign_match += 1;
             }
         }
-        let trial_rmse = (sq / cols as f32).sqrt();
-        let ref_rms = (ref_sq / cols as f32).sqrt();
+        let trial_rmse = (sq / out_features as f32).sqrt();
+        let ref_rms = (ref_sq / out_features as f32).sqrt();
         let trial_nrmse = trial_rmse / (ref_rms + 1e-30);
-        let quant_rms = (quant_sq / cols as f32).sqrt();
+        let quant_rms = (quant_sq / out_features as f32).sqrt();
         let trial_norm_drift = (quant_rms / (ref_rms + 1e-30) - 1.0).abs();
         let trial_cosine = ref_dot_quant / ((ref_sq).sqrt() * (quant_sq).sqrt() + 1e-30);
 
@@ -360,7 +360,7 @@ fn compute_operator_metrics(
         }
         total_cosine += trial_cosine;
         accumulated_ref_rms += ref_rms;
-        total_sign_agreement += sign_match as f32 / cols as f32;
+        total_sign_agreement += sign_match as f32 / out_features as f32;
     }
 
     OperatorValidationReport {
@@ -377,8 +377,8 @@ fn compute_operator_metrics(
 /// Single-vector validation (used for small batches where Accelerate overhead dominates).
 fn validate_operator_space_single(
     source: &[f32],
-    rows: usize,
-    cols: usize,
+    in_features: usize,
+    out_features: usize,
     packed_codes: &[u8],
     packed_scales: &[f32],
     packed_biases: &[f32],
@@ -397,23 +397,23 @@ fn validate_operator_space_single(
 
     for input in vectors {
         // Reference: Y = X @ W^T (original source weights, no scaling).
-        let mut ref_out = vec![0.0f32; cols];
-        for j in 0..cols {
+        let mut ref_out = vec![0.0f32; out_features];
+        for j in 0..out_features {
             let mut sum = 0.0f32;
-            for i in 0..rows {
-                sum += source[i * cols + j] * input[i];
+            for i in 0..in_features {
+                sum += source[i * out_features + j] * input[i];
             }
             ref_out[j] = sum;
         }
 
         // NF4 dequant matmul via the reference CPU implementation.
-        let mut nf4_out = vec![0.0f32; cols];
+        let mut nf4_out = vec![0.0f32; out_features];
         match pre_unpacked {
             Some(qw) => {
-                for j in 0..cols {
+                for j in 0..out_features {
                     let mut sum = 0.0f32;
-                    for i in 0..rows {
-                        sum += qw[i * cols + j] * input[i];
+                    for i in 0..in_features {
+                        sum += qw[i * out_features + j] * input[i];
                     }
                     nf4_out[j] = sum;
                 }
@@ -425,8 +425,8 @@ fn validate_operator_space_single(
                     packed_scales,
                     packed_biases,
                     1,
-                    rows,
-                    cols,
+                    in_features,
+                    out_features,
                     &mut nf4_out,
                 );
             }
@@ -434,7 +434,7 @@ fn validate_operator_space_single(
 
         // Post-scale by the reduction-axis scale vector (applies per output column).
         if let Some(sv) = scale_vector {
-            for j in 0..cols {
+            for j in 0..out_features {
                 nf4_out[j] *= sv[j];
             }
         }
@@ -444,7 +444,7 @@ fn validate_operator_space_single(
         let mut quant_sq = 0.0f32;
         let mut ref_dot_quant = 0.0f32;
         let mut sign_match = 0u32;
-        for j in 0..cols {
+        for j in 0..out_features {
             let diff = nf4_out[j] - ref_out[j];
             sq += diff * diff;
             ref_sq += ref_out[j] * ref_out[j];
@@ -454,10 +454,10 @@ fn validate_operator_space_single(
                 sign_match += 1;
             }
         }
-        let trial_rmse = (sq / cols as f32).sqrt();
-        let ref_rms = (ref_sq / cols as f32).sqrt();
+        let trial_rmse = (sq / out_features as f32).sqrt();
+        let ref_rms = (ref_sq / out_features as f32).sqrt();
         let trial_nrmse = trial_rmse / (ref_rms + 1e-30);
-        let quant_rms = (quant_sq / cols as f32).sqrt();
+        let quant_rms = (quant_sq / out_features as f32).sqrt();
         let trial_norm_drift = (quant_rms / (ref_rms + 1e-30) - 1.0).abs();
         let trial_cosine = ref_dot_quant / ((ref_sq).sqrt() * (quant_sq).sqrt() + 1e-30);
 
@@ -475,7 +475,7 @@ fn validate_operator_space_single(
         }
         total_cosine += trial_cosine;
         accumulated_ref_rms += ref_rms;
-        total_sign_agreement += sign_match as f32 / cols as f32;
+        total_sign_agreement += sign_match as f32 / out_features as f32;
     }
 
     OperatorValidationReport {
@@ -493,8 +493,8 @@ fn validate_operator_space_single(
 /// suite of 5 synthetic test vectors.
 pub fn validate_operator_space(
     source: &[f32],
-    rows: usize,
-    cols: usize,
+    in_features: usize,
+    out_features: usize,
     packed_codes: &[u8],
     packed_scales: &[f32],
     packed_biases: &[f32],
@@ -511,7 +511,7 @@ pub fn validate_operator_space(
     let synthetic_vectors: Vec<Vec<f32>> = (0..5)
         .map(|trial| {
             let state = &mut rng_state;
-            (0..rows)
+            (0..in_features)
                 .map(|i| match trial {
                     0 => (i as f64 * 0.1).sin() as f32,
                     1 => (i as f64 * 0.07).cos() as f32,
@@ -529,8 +529,8 @@ pub fn validate_operator_space(
 
     validate_operator_space_with_vectors(
         source,
-        rows,
-        cols,
+        in_features,
+        out_features,
         packed_codes,
         packed_scales,
         packed_biases,
@@ -543,8 +543,8 @@ pub fn validate_operator_space(
 /// Validate operator-space quality using a calibration activation bank's vectors.
 pub fn validate_operator_space_with_bank(
     source: &[f32],
-    rows: usize,
-    cols: usize,
+    in_features: usize,
+    out_features: usize,
     packed_codes: &[u8],
     packed_scales: &[f32],
     packed_biases: &[f32],
@@ -554,8 +554,8 @@ pub fn validate_operator_space_with_bank(
 ) -> OperatorValidationReport {
     validate_operator_space_with_vectors(
         source,
-        rows,
-        cols,
+        in_features,
+        out_features,
         packed_codes,
         packed_scales,
         packed_biases,

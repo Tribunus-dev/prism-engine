@@ -1020,6 +1020,15 @@ struct PackJob {
     data: Vec<f32>,
     rows: usize,
     cols: usize,
+    /// Physical tensor shape from the checkpoint (e.g. [out_features, in_features]).
+    shape: Vec<usize>,
+}
+
+/// Extract physical dimensions from a checkpoint shape vector.
+fn physical_dims_from_shape(shape: &[usize]) -> (usize, usize) {
+    let rows = if shape.len() >= 2 { shape[0] } else { 0 };
+    let cols = if shape.len() >= 2 { shape[1] } else { 1 };
+    (rows, cols)
 }
 
 /// Pack a weight matrix using nf4tile640 inline (single-pass, no accumulation).
@@ -1044,6 +1053,8 @@ fn pack_matrix_nf4_inline(
     data: &[f32],
     rows: usize,
     cols: usize,
+    rows_physical: usize,
+    cols_physical: usize,
     channel_sq_map: &mut HashMap<String, Vec<f32>>,
     selection_receipts: &mut Vec<ProfileSelectionReceipt>,
     plan_entries: &mut Vec<QuantizationPlanEntry>,
@@ -1055,27 +1066,6 @@ fn pack_matrix_nf4_inline(
     _quality_policy: &str,
     output_lines: &mut Vec<String>,
 ) {
-    // ── Per-channel second moments for AW-LS activation-weighted packing ──
-    let mut channel_sq = vec![0.0f32; cols];
-    let n = data.len().min(rows * cols);
-    let effective_rows = n / cols;
-    for i in 0..effective_rows {
-        for j in 0..cols {
-            let v = data[i * cols + j];
-            channel_sq[j] += v * v;
-        }
-    }
-    for j in 0..cols {
-        channel_sq[j] /= effective_rows as f32;
-    }
-    if data.len() != rows * cols {
-        eprintln!(
-            "  [size-warn] {}: data has {} f32 elements, expected {} (rows={}, cols={})",
-            key, data.len(), rows * cols, rows, cols
-        );
-    }
-    channel_sq_map.insert(key.to_string(), channel_sq.clone());
-
     // Validate data size against declared dimensions.  Some checkpoint tensors
     // (e.g. fused QKV projections) have more elements than rows × cols for a
     // single projection key.  Truncate with a warning rather than panicking in
@@ -1095,6 +1085,37 @@ fn pack_matrix_nf4_inline(
     } else {
         data
     };
+
+    // Transpose from checkpoint [out_features, in_features] to code convention [in_features, out_features]
+    // new[in * out_features + out] = old[out * in_features + in]
+    let mut transposed_buf: Vec<f32>;
+    let data = if rows_physical != rows || cols_physical != cols {
+        let in_features = rows;
+        let out_features = cols;
+        transposed_buf = vec![0.0f32; rows * cols];
+        for in_ in 0..in_features {
+            for out in 0..out_features {
+                transposed_buf[in_ * out_features + out] = data[out * in_features + in_];
+            }
+        }
+        &transposed_buf[..]
+    } else {
+        data
+    };
+
+    // ── Per-channel second moments for AW-LS activation-weighted packing ──
+    let mut channel_sq = vec![0.0f32; cols];
+    let effective_rows = rows;
+    for i in 0..effective_rows {
+        for j in 0..cols {
+            let v = data[i * cols + j];
+            channel_sq[j] += v * v;
+        }
+    }
+    for j in 0..cols {
+        channel_sq[j] /= effective_rows as f32;
+    }
+    channel_sq_map.insert(key.to_string(), channel_sq.clone());
 
     // ── Profile selection ────────────────────────────────────────────
     let role = classify_matrix_role(key);
@@ -1951,6 +1972,8 @@ fn main() {
                     &data,
                     *rows,
                     *cols,
+                    shape.first().copied().unwrap_or(0),
+                    shape.get(1).copied().unwrap_or(1),
                     &mut channel_sq_map,
                     &mut selection_receipts,
                     &mut plan_entries,
@@ -2015,6 +2038,8 @@ fn main() {
                 &data,
                 rows,
                 cols,
+                shape.first().copied().unwrap_or(0),
+                shape.get(1).copied().unwrap_or(1),
                 &mut channel_sq_map,
                 &mut selection_receipts,
                 &mut plan_entries,
@@ -2063,8 +2088,8 @@ fn main() {
         for layer in 0..NUM_LAYERS {
             for (mat_name, rows, cols) in MATRICES {
                 let key = tensor_key(layer, mat_name);
-                if let Some((data, _shape)) = load_tensor(&key, &shard_paths) {
-                    jobs.push(PackJob { key, data, rows: *rows, cols: *cols });
+                if let Some((data, shape)) = load_tensor(&key, &shard_paths) {
+                    jobs.push(PackJob { key, data, rows: *rows, cols: *cols, shape });
                 } else {
                     println!("\n  WARNING: {key} not found");
                 }
@@ -2093,6 +2118,8 @@ fn main() {
                 &job.data,
                 job.rows,
                 job.cols,
+                physical_dims_from_shape(&job.shape).0,
+                physical_dims_from_shape(&job.shape).1,
                 &mut local_sq,
                 &mut local_rec,
                 &mut local_plan,
@@ -2233,6 +2260,8 @@ fn main() {
                             &f32_data,
                             rows,
                             cols,
+                            shape.first().copied().unwrap_or(0),
+                            shape.get(1).copied().unwrap_or(1),
                             &mut channel_sq_map,
                             &mut selection_receipts,
                             &mut plan_entries,
