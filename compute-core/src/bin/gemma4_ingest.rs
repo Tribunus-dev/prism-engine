@@ -2649,6 +2649,9 @@ fn main() {
         Ok(aligned)
     };
 
+    let assembly_start = std::time::Instant::now();
+    eprintln!("  [ASSEMBLY] packing complete, starting segment writes");
+
     // Write MetalLib segment 0
     let metal_offset = page_align(&mut writer).unwrap();
     writer.write_all(&metallib_bytes).unwrap();
@@ -2981,6 +2984,10 @@ fn main() {
         segments,
         _pad: [0u8; 8],
     };
+    eprintln!(
+        "  [ASSEMBLY] segment writes done ({:.1}s), writing header",
+        assembly_start.elapsed().as_secs_f32()
+    );
     writer.seek(SeekFrom::Start(0)).unwrap();
     let header_bytes = unsafe {
         std::slice::from_raw_parts(
@@ -2992,12 +2999,25 @@ fn main() {
     writer.flush().unwrap();
     drop(writer);
 
-    let cimage_bytes = std::fs::read(output).unwrap_or_else(|e| {
-        eprintln!("  ERROR: cannot read back {output}: {e}");
+    // Use mmap for verification — avoids loading the entire multi-GB cimage into RAM.
+    let cimage_file = std::fs::File::open(output).unwrap_or_else(|e| {
+        eprintln!("  ERROR: cannot open {output} for verification: {e}");
         std::process::exit(1);
     });
+    let cimage_bytes = unsafe {
+        memmap2::Mmap::map(&cimage_file).unwrap_or_else(|e| {
+            eprintln!("  ERROR: cannot mmap {output}: {e}");
+            std::process::exit(1);
+        })
+    };
+    let file_size = cimage_bytes.len();
+    eprintln!(
+        "  [ASSEMBLY] file written ({:.1}s, {:.1} MB), verifying...",
+        assembly_start.elapsed().as_secs_f32(),
+        file_size as f64 / (1024.0 * 1024.0)
+    );
 
-    // ── Step 5: Verify ─────────────────────────────────────────
+    // \u2500\u2500 Step 5: Verify \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     match tribunus_compute_core::compute_image::compile::ternary::verify_cimage(&cimage_bytes) {
         Ok((header, _)) => {
             println!("  ✓ SHA-256 integrity PASSED");
