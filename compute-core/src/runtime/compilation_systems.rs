@@ -528,15 +528,15 @@ pub struct CompiledBinding {
 
 /// Run the full ECS compilation pipeline on a set of tensors.
 pub fn compile_tensors(
-    tensors: Vec<TensorInput>,
+    mut tensors: Vec<TensorInput>,
     registry: CapabilityRegistry,
 ) -> Vec<CompiledBinding> {
     let mut world = World::with_capacity((tensors.len() as u32).max(32));
     world.insert_resource(registry);
     let mut entity_for_input: Vec<(Entity, usize)> = Vec::with_capacity(tensors.len());
-    for (i, tensor) in tensors.iter().enumerate() {
+    for (i, tensor) in tensors.iter_mut().enumerate() {
         let entity = world.spawn().unwrap();
-        world.insert(entity, SourceWeights(tensor.weights.clone()));
+        world.insert(entity, SourceWeights(std::mem::take(&mut tensor.weights)));
         world.insert(entity, TensorShape(tensor.shape));
         world.insert(entity, CompilationStatus::new());
         entity_for_input.push((entity, i));
@@ -581,7 +581,7 @@ pub fn compile_tensors(
 /// pipeline, and returns the sealed cimage wrapped in a
 /// `StageCimageResource` along with per-tensor bindings.
 pub fn compile_stage(
-    tensors: Vec<TensorInput>,
+    mut tensors: Vec<TensorInput>,
     stage_config: StageConfig,
     model_config: ModelConfig,
     registry: CapabilityRegistry,
@@ -592,9 +592,9 @@ pub fn compile_stage(
 
     let stage_id = stage_config.stage_id;
     let mut entity_for_input: Vec<(Entity, usize)> = Vec::with_capacity(tensors.len());
-    for (i, tensor) in tensors.iter().enumerate() {
+    for (i, tensor) in tensors.iter_mut().enumerate() {
         let entity = world.spawn().unwrap();
-        world.insert(entity, SourceWeights(tensor.weights.clone()));
+        world.insert(entity, SourceWeights(std::mem::take(&mut tensor.weights)));
         world.insert(entity, TensorShape(tensor.shape));
         world.insert(entity, CompilationStatus::new());
         entity_for_input.push((entity, i));

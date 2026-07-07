@@ -80,6 +80,21 @@ enum LoadedModel {
     },
 }
 
+impl LoadedModel {
+    fn vocab_size(&self) -> u32 {
+        match self {
+            LoadedModel::Store { vocab_size, .. } => *vocab_size,
+            LoadedModel::Cimage { vocab_size, .. } => *vocab_size,
+        }
+    }
+    fn image_hash(&self) -> &str {
+        match self {
+            LoadedModel::Store { image_hash, .. } => image_hash,
+            LoadedModel::Cimage { .. } => "cimage",
+        }
+    }
+}
+
 /// Parameters for a text generation request.
 ///
 /// All numeric fields use their MLX-native defaults when left at zero
@@ -366,7 +381,8 @@ impl ComputeEngine {
         let mut activations: Vec<f32> = input.to_vec();
 
         for layer in &graph.layers {
-            match layer.kind {
+            let node_kind: NodeKind = unsafe { std::mem::transmute(layer.node_kind) };
+            match node_kind {
                 NodeKind::DecoderLayer | NodeKind::DraftLayer | NodeKind::DSparkDraftLayer => {
                     // Decoder layer: load weights from the appropriate segment
                     // and compute output = weights × input
@@ -376,8 +392,8 @@ impl ComputeEngine {
                         .ok_or_else(|| "no weight segment for decoder layer".to_string())?;
 
                     // CPU forward pass (placeholder — Metal dispatch when Metal is available)
-                    let in_dim = layer.in_dim as usize;
-                    let out_dim = layer.out_dim as usize;
+                    let dim = layer.hidden_dim as usize;
+                    let (in_dim, out_dim) = (dim, dim);
                     if in_dim == 0 || out_dim == 0 {
                         continue;
                     }
@@ -401,14 +417,15 @@ impl ComputeEngine {
                 }
                 NodeKind::LmHead | NodeKind::EmbeddingAssembly => {
                     // Projection: same GEMV as decoder layer
-                    let in_dim = layer.in_dim as usize;
-                    let out_dim = layer.out_dim as usize;
+                    let dim = layer.hidden_dim as usize;
+                    let (in_dim, out_dim) = (dim, dim);
                     if in_dim == 0 || out_dim == 0 {
                         continue;
                     }
                     let weight_bytes = weight_segments
                         .get(&(SegmentKind::Nf4Tile640Weights as u32))
                         .or_else(|| weight_segments.get(&(SegmentKind::Int8Tile640Weights as u32)))
+                        .map(|v| v.as_slice())
                         .unwrap_or(&[]);
                     let mut output = vec![0.0f32; out_dim];
                     for i in 0..out_dim {
@@ -432,8 +449,8 @@ impl ComputeEngine {
                 | NodeKind::VisionFinalProjection | NodeKind::AudioFrameEmbed
                 | NodeKind::AudioProjection => {
                     // Projection layers: same GEMV as above
-                    let in_dim = layer.in_dim as usize;
-                    let out_dim = layer.out_dim as usize;
+                    let dim = layer.hidden_dim as usize;
+                    let (in_dim, out_dim) = (dim, dim);
                     if in_dim > 0 && out_dim > 0 {
                         let mut output = vec![0.0f32; out_dim];
                         for i in 0..out_dim {
@@ -722,7 +739,7 @@ impl ComputeEngine {
             .map_err(|e| crate::Error::from_reason(format!("Seal verification failed: {}", e)))?;
 
         // TODO: read vocab_size from model metadata / capability record
-        let loaded = LoadedModel {
+        let loaded = LoadedModel::Store {
             image_hash: image_hash.clone(),
             model_path: model_dir,
             vocab_size: DEFAULT_VOCAB_SIZE,
@@ -755,7 +772,7 @@ impl ComputeEngine {
         let vocab_size = self
             .loaded_model
             .as_ref()
-            .map(|m| m.vocab_size)
+            .map(|m| m.vocab_size())
             .unwrap_or(DEFAULT_VOCAB_SIZE);
 
         if let Some(&id) = input_ids.iter().find(|&&id| id >= vocab_size) {

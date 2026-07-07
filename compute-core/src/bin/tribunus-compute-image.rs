@@ -44,7 +44,7 @@ fn main() {
         eprintln!("  tribunus-compute-image decode-one --image <dir>");
         eprintln!("  tribunus-compute-image emit-v0 --output-dir <dir> [--allow-contract-only-kv]");
         eprintln!("  tribunus-compute-image verify-v0 --image <dir>");
-        eprintln!("  tribunus-compute-image build-ecs --source <dir> --output <dir>");
+        eprintln!("  tribunus-compute-image build-ecs --source <dir> [--draft-source <dir>] [--tts-source <dir>] --output <dir>");
         std::process::exit(1);
     }
 
@@ -389,10 +389,11 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
 /// Produces one .cimage file per stage in the output directory.
 fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     let source = get_opt(args, "--source").ok_or_else(|| "--source is required".to_string())?;
+    let draft_source = get_opt(args, "--draft-source");
+    let tts_source = get_opt(args, "--tts-source");
     let output = get_opt(args, "--output").ok_or_else(|| "--output is required".to_string())?;
 
     use std::path::Path;
-    use std::collections::HashMap;
     use std::fs;
     use std::fs::File;
     use safetensors::SafeTensors;
@@ -409,158 +410,138 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     let output_dir = Path::new(output);
     fs::create_dir_all(output_dir).map_err(|e| format!("create output dir: {e}"))?;
 
-    // —— Load all safetensors from source directory ——
-    let source_dir = Path::new(source);
-    let mut all_tensors: Vec<(String, Vec<f32>, Vec<usize>)> = Vec::new();
-    let mut hidden_dim = 0u32;
-    let mut num_layers = 0u32;
-    let mut num_heads = 0u32;
-    let num_heads = 0u32;
-    let mut head_dim = 0u32;
-    let mut intermediate_dim = 0u32;
-    let mut vocab_size = 0u32;
+    // Source 0: main model. Source 1 (optional): draft. Source 2 (optional): TTS.
+    let source_dirs: [(&str, Option<&str>); 3] = [
+        (source, None),
+        (draft_source.unwrap_or(""), Some("MtpDraft")),
+        (tts_source.unwrap_or(""), Some("AudioEncoder")),
+    ];
 
-    for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
-        let entry = entry.map_err(|e| format!("entry: {e}"))?;
-        let path = entry.path();
-        if !path.extension().map_or(false, |e| e == "safetensors") {
-            continue;
-    }
-        eprintln!("  loading {}", path.display());
-        let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
-        let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
-        let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
-
-        for (key, view) in tensors.tensors() {
-            let dtype = view.dtype();
-            let shape: Vec<usize> = view.shape().to_vec();
-            let data = view.data().to_vec();
-            let f32_data = match dtype {
-                safetensors::Dtype::F32 => data.chunks_exact(4)
-                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                    .collect(),
-                safetensors::Dtype::BF16 => data.chunks_exact(2)
-                    .map(|c| {
-                        let bits = ((c[0] as u32) << 16) | ((c[1] as u32) << 24);
-                        f32::from_bits(bits)
-                    })
-                    .collect(),
-                _ => {
-                    eprintln!("  skipping {}: unsupported dtype {:?}", key, dtype);
-                    continue;
-}
-    };
-
-            // Infer model dimensions from the first tensor seen
-            if shape.len() >= 2 && vocab_size == 0 {
-                if key.contains("embed_tokens") || key.contains("lm_head") {
-                    vocab_size = shape[0] as u32;
-                    hidden_dim = shape[1] as u32;
-                }
-            }
-            if key.contains("self_attn.q_proj") && num_heads == 0 {
-                hidden_dim = shape[1] as u32;
-                // Approximate: head_dim=256 for Gemma 4, 128 for others
-                head_dim = 256;
-            }
-            if key.contains("mlp.gate_proj") && intermediate_dim == 0 {
-                intermediate_dim = shape[0] as u32;
-            }
-            if key.contains("layers.") {
-                let n = key.split('.').filter_map(|s| s.parse::<u32>().ok()).next().unwrap_or(0);
-                num_layers = num_layers.max(n + 1);
-            }
-
-            all_tensors.push((key.clone(), f32_data, shape));
-        }
-    }
-
-    if all_tensors.is_empty() {
-        return Err("No safetensor files found in source directory".into());
-    }
-    eprintln!("loaded {} tensors, {} layers, hidden={}, vocab={}",
-        all_tensors.len(), num_layers, hidden_dim, vocab_size);
-
-    // —— Classify tensors per component type ——
+    // ── Types and helpers ─────────────────────────────────────────────────
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     enum TensorGroup {
-        Embedding,
-        Decoder,
-        LmHead,
-        Norm,
-        VisionEncoder,
-        AudioEncoder,
-        MtpDraft,
-        Other,
+        Embedding, Decoder, LmHead, Norm, VisionEncoder, AudioEncoder, MtpDraft, Other,
     }
-
     fn classify_key(name: &str) -> TensorGroup {
         let n = name;
-        // Ignored: optimizer, momentum, variance, cache
         if n.contains("optimizer") || n.contains("momentum") || n.contains("_cache")
             || n.contains("adam_") || n.contains("rmsprop") { return TensorGroup::Other; }
-        // MTP draft
         if n.contains("mtp") || n.contains("draft") || n.contains("speculative")
             || n.contains("proposal") || n.contains("dspark") || n.contains("confidence_head")
             || n.contains("dflash") || n.contains("eagle") { return TensorGroup::MtpDraft; }
-        // Vision encoder
         if n.contains("multimodal_image") || n.contains("mm_image")
             || n.contains("vision_") || n.contains("vision.")
             || n.contains("image_") || n.contains("image.")
             || n.contains("patch") || (n.contains("projection") && n.contains("layers")) {
             return TensorGroup::VisionEncoder;
         }
-        // Audio encoder
         if n.contains("multimodal_audio") || n.contains("mm_audio")
             || n.contains("audio_") || n.contains("audio.")
             || n.contains("waveform") || n.contains("speech") {
             return TensorGroup::AudioEncoder;
         }
-        // Decoder layer
         if n.contains("self_attn") || n.contains("mlp.")
             || n.contains("input_layernorm") || n.contains("post_attention_layernorm")
             || (n.contains(".layers.") && (n.ends_with(".weight") || n.ends_with(".bias"))) {
             return TensorGroup::Decoder;
         }
-        // Embedding
         if n.contains("embed_tokens") || n.contains("embed.") || n.contains("wte")
-            || n.contains("tok_embeddings") {
-            return TensorGroup::Embedding;
-        }
-        // LM head
+            || n.contains("tok_embeddings") { return TensorGroup::Embedding; }
         if n.contains("lm_head") || n.contains("output.") || n.contains("embed_out")
             || n.contains("head.") { return TensorGroup::LmHead; }
-        // Norms (shared, not per-layer)
         if n.contains("norm.") || n.contains("final_layernorm") || n.contains("ln_f") {
             return TensorGroup::Norm;
         }
         TensorGroup::Other
     }
 
-    // Group tensors
-    let mut grouped: HashMap<TensorGroup, Vec<TensorInput>> = HashMap::new();
-    let mut matrix_id = 0u32;
-    for (key, weights, shape) in &all_tensors {
-        let group = classify_key(key);
-        if group == TensorGroup::Other { continue; }
-        let (in_f, out_f) = if shape.len() == 2 {
-            (shape[0] as u32, shape[1] as u32)
-        } else if shape.len() == 1 {
-            (shape[0] as u32, 1u32)
-        } else {
-            continue;
-        };
-        grouped.entry(group).or_default().push(TensorInput {
-            matrix_id: matrix_id,
-            weights: weights.clone(),
-            shape: CanonicalShape { in_features: in_f, out_features: out_f, rank: shape.len() as u16 },
-        });
-        matrix_id += 1;
+    /// Metadata-only tensor record (no weight data loaded).
+    struct TensorMeta {
+        key: String,
+        shape: Vec<usize>,
+        group: TensorGroup,
+        layer: u32,  // 0 for non-layer tensors
     }
 
+    // ── Phase 1: Scan tensor metadata only (no weight data loaded) ──────
+    let mut hidden_dim = 0u32;
+    let mut num_layers = 0u32;
+    let mut num_heads = 0u32;
+    let mut head_dim = 0u32;
+    let mut intermediate_dim = 0u32;
+    let mut vocab_size = 0u32;
+    let mut tensor_meta: Vec<TensorMeta> = Vec::new();
+
+    for (source_dir, group_override) in &source_dirs {
+        if source_dir.is_empty() { continue; }
+        let source_dir = Path::new(source_dir);
+        for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
+            let entry = entry.map_err(|e| format!("entry: {e}"))?;
+            let path = entry.path();
+            if !path.extension().map_or(false, |e| e == "safetensors") { continue; }
+            let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
+            let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
+            let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+
+            for (key, view) in tensors.tensors() {
+                let shape: Vec<usize> = view.shape().to_vec();
+                let group = match group_override {
+                    Some(s) if *s == "MtpDraft" => TensorGroup::MtpDraft,
+                    Some(s) if *s == "AudioEncoder" => TensorGroup::AudioEncoder,
+                    _ => classify_key(&key),
+                };
+                // Extract layer number from "layers.N" in the key
+                let layer = key.split('.')
+                    .skip_while(|s| *s != "layers")
+                    .nth(1)
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                tensor_meta.push(TensorMeta {
+                    key: key.clone(),
+                    shape: shape.clone(),
+                    group: group,
+                    layer,
+                });
+
+                // Infer model dimensions from keys/shapes
+                if shape.len() >= 2 && vocab_size == 0 {
+                    if key.contains("embed_tokens") || key.contains("lm_head") {
+                        vocab_size = shape[0] as u32;
+                        hidden_dim = shape[1] as u32;
+                    }
+                }
+                if key.contains("self_attn.q_proj") && num_heads == 0 && shape.len() >= 2 {
+                    hidden_dim = shape[1] as u32;
+                    head_dim = 256;
+                }
+                if key.contains("mlp.gate_proj") && intermediate_dim == 0 && !shape.is_empty() {
+                    intermediate_dim = shape[0] as u32;
+                }
+                if key.contains("layers.") {
+                    let n = key.split('.').filter_map(|s| s.parse::<u32>().ok()).next().unwrap_or(0);
+                    num_layers = num_layers.max(n + 1);
+                }
+            }
+        }
+    }
+    if tensor_meta.is_empty() {
+        return Err("No safetensor files found in source directory".into());
+    }
+    eprintln!("scanned {} tensors, {} layers, hidden={}, vocab={}",
+        tensor_meta.len(), num_layers, hidden_dim, vocab_size);
+
+    // Build group index from metadata (no weight data yet)
+    let mut grouped: Vec<(TensorGroup, Vec<&TensorMeta>)> = Vec::new();
+    for meta in &tensor_meta {
+        if meta.group == TensorGroup::Other { continue; }
+        match grouped.iter().position(|(g, _)| *g == meta.group) {
+            Some(idx) => grouped[idx].1.push(meta),
+            None => grouped.push((meta.group.clone(), vec![meta])),
+        }
+    }
     eprintln!("grouped tensors:");
-    for (group, tensors) in &grouped {
-        eprintln!("  {:?}: {} tensors", group, tensors.len());
+    for (group, metas) in &grouped {
+        eprintln!("  {:?}: {} tensors", group, metas.len());
     }
 
     let model_config = ModelConfig {
@@ -578,83 +559,206 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         expert_intermediate_dim: 0,
     };
 
-    // —— Compile each group as a stage ——
-    for (group, tensors) in &grouped {
+    // ── Phase 2: For each group, stream-load tensors and compile ─────────
+    const LAYERS_PER_BATCH: u32 = 4;
+    let mut matrix_id: u32 = 0;
+    for (group, metas) in &grouped {
+        // Special case: Decoder group is ~40+ GB, batch by layer
+        if *group == TensorGroup::Decoder {
+            // Group metas by layer number
+            let mut per_layer: std::collections::BTreeMap<u32, Vec<&&TensorMeta>> =
+                std::collections::BTreeMap::new();
+            for meta in metas {
+                per_layer.entry(meta.layer).or_default().push(meta);
+            }
+            let layer_nums: Vec<u32> = per_layer.keys().copied().collect();
+            eprintln!("decoder: {} layers, processing in batches of {}",
+                layer_nums.len(), LAYERS_PER_BATCH);
+
+            for batch_chunk in layer_nums.chunks(LAYERS_PER_BATCH as usize) {
+                // Collect keys for this batch's layers
+                let batch_keys: std::collections::HashSet<String> = batch_chunk
+                    .iter()
+                    .flat_map(|l| per_layer[l].iter())
+                    .map(|m| m.key.clone())
+                    .collect();
+
+                let mut batch_tensors: Vec<TensorInput> = Vec::with_capacity(batch_keys.len());
+                // Load only tensors matching keys in this batch
+                for (_dir_idx, (sd, _)) in source_dirs.iter().enumerate() {
+                    if sd.is_empty() { continue; }
+                    let source_dir = Path::new(sd);
+                    for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
+                        let entry = entry.map_err(|e| format!("entry: {e}"))?;
+                        let path = entry.path();
+                        if !path.extension().map_or(false, |e| e == "safetensors") { continue; }
+                        eprintln!("  loading {} for decoder layers {:?}", path.display(), batch_chunk);
+                        let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
+                        let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
+                        let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+                        for (key, view) in tensors.tensors() {
+                            if !batch_keys.contains(&key) { continue; }
+                            let dtype = view.dtype();
+                            let shape: Vec<usize> = view.shape().to_vec();
+                            let data = view.data().to_vec();
+                            let f32_data = match dtype {
+                                safetensors::Dtype::F32 => data.chunks_exact(4)
+                                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                                    .collect(),
+                                safetensors::Dtype::BF16 => data.chunks_exact(2)
+                                    .map(|c| {
+                                        let bits = ((c[0] as u32) << 16) | ((c[1] as u32) << 24);
+                                        f32::from_bits(bits)
+                                    })
+                                    .collect(),
+                                _ => { continue; }
+                            };
+                            let (in_f, out_f) = if shape.len() >= 2 {
+                                (shape[0] as u32, shape[1] as u32)
+                            } else if shape.len() == 1 {
+                                (shape[0] as u32, 1u32)
+                            } else { continue; };
+                            batch_tensors.push(TensorInput {
+                                matrix_id,
+                                weights: f32_data,
+                                shape: CanonicalShape { in_features: in_f, out_features: out_f, rank: shape.len() as u16 },
+                            });
+                            matrix_id += 1;
+                        }
+                    }
+                }
+
+                if batch_tensors.is_empty() { continue; }
+
+                let stage_config = StageConfig {
+                    stage_id: 1, component: ComponentType::DecoderLayer,
+                    tensor_key_patterns: vec![],
+                    quantization: StageQuantizationConfig::decoder_default(),
+                    backend: BackendKind::Metal, gpu_memory_utilization: 0.6, tensor_parallel_size: 1,
+                };
+                let batch_label = format!("decoder_layers_{}_{}", batch_chunk[0], batch_chunk.last().unwrap());
+                eprintln!("compiling {} with {} tensors...", batch_label, batch_tensors.len());
+                let (stage_result, bindings) = compile_stage(
+                    batch_tensors, stage_config, model_config, CapabilityRegistry::default_metal_v1(),
+                );
+                let path = output_dir.join(format!("stage_1_{}.cimage", batch_label));
+                fs::write(&path, &stage_result.cimage)
+                    .map_err(|e| format!("write {}: {e}", path.display()))?;
+                eprintln!("  wrote {}: {} bytes, {} bindings",
+                    path.display(), stage_result.cimage.len(), bindings.len());
+            }
+            continue;
+        }
+
+        let mut group_tensors: Vec<TensorInput> = Vec::with_capacity(metas.len());
+
+        // Re-open safetensors files and load only tensors matching this group
+        for (_dir_idx, (sd, _)) in source_dirs.iter().enumerate() {
+            if sd.is_empty() { continue; }
+            let source_dir = Path::new(sd);
+            for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
+                let entry = entry.map_err(|e| format!("entry: {e}"))?;
+                let path = entry.path();
+                if !path.extension().map_or(false, |e| e == "safetensors") { continue; }
+                eprintln!("  loading {} for stage {:?}", path.display(), group);
+                let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
+                let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
+                let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+
+                for (key, view) in tensors.tensors() {
+                    // Load only if the key matches a tensor in this group
+                    if !metas.iter().any(|m| m.key == key) { continue; }
+
+                    let dtype = view.dtype();
+                    let shape: Vec<usize> = view.shape().to_vec();
+                    let data = view.data().to_vec();
+                    let f32_data = match dtype {
+                        safetensors::Dtype::F32 => data.chunks_exact(4)
+                            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                            .collect(),
+                        safetensors::Dtype::BF16 => data.chunks_exact(2)
+                            .map(|c| {
+                                let bits = ((c[0] as u32) << 16) | ((c[1] as u32) << 24);
+                                f32::from_bits(bits)
+                            })
+                            .collect(),
+                        _ => { continue; }
+                    };
+                    let (in_f, out_f) = if shape.len() >= 2 {
+                        (shape[0] as u32, shape[1] as u32)
+                    } else if shape.len() == 1 {
+                        (shape[0] as u32, 1u32)
+                    } else {
+                        continue;
+                    };
+                    group_tensors.push(TensorInput {
+                        matrix_id,
+                        weights: f32_data,
+                        shape: CanonicalShape { in_features: in_f, out_features: out_f, rank: shape.len() as u16 },
+                    });
+                    matrix_id += 1;
+                }
+            }
+        }
+
+        if group_tensors.is_empty() {
+            eprintln!("  no tensors loaded for {:?}, skipping", group);
+            continue;
+        }
+
         let stage_config = match group {
             TensorGroup::Embedding => StageConfig {
-                stage_id: 0,
-                component: ComponentType::TextEmbedding,
+                stage_id: 0, component: ComponentType::TextEmbedding,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::projection_default(),
-                backend: BackendKind::Metal,
-                gpu_memory_utilization: 0.3,
-                tensor_parallel_size: 1,
+                backend: BackendKind::Metal, gpu_memory_utilization: 0.3, tensor_parallel_size: 1,
             },
             TensorGroup::Decoder => StageConfig {
-                stage_id: 1,
-                component: ComponentType::DecoderLayer,
+                stage_id: 1, component: ComponentType::DecoderLayer,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::decoder_default(),
-                backend: BackendKind::Metal,
-                gpu_memory_utilization: 0.6,
-                tensor_parallel_size: 1,
+                backend: BackendKind::Metal, gpu_memory_utilization: 0.6, tensor_parallel_size: 1,
             },
             TensorGroup::LmHead => StageConfig {
-                stage_id: 2,
-                component: ComponentType::LmHead,
+                stage_id: 2, component: ComponentType::LmHead,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::projection_default(),
-                backend: BackendKind::Metal,
-                gpu_memory_utilization: 0.1,
-                tensor_parallel_size: 1,
+                backend: BackendKind::Metal, gpu_memory_utilization: 0.1, tensor_parallel_size: 1,
             },
             TensorGroup::Norm => StageConfig {
-                stage_id: 3,
-                component: ComponentType::Norm,
+                stage_id: 3, component: ComponentType::Norm,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::projection_default(),
-                backend: BackendKind::Metal,
-                gpu_memory_utilization: 0.1,
-                tensor_parallel_size: 1,
+                backend: BackendKind::Metal, gpu_memory_utilization: 0.1, tensor_parallel_size: 1,
             },
             TensorGroup::VisionEncoder => StageConfig {
-                stage_id: 4,
-                component: ComponentType::VisionEncoder,
+                stage_id: 4, component: ComponentType::VisionEncoder,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::encoder_default(),
-                backend: BackendKind::Metal,
-                gpu_memory_utilization: 0.4,
-                tensor_parallel_size: 1,
+                backend: BackendKind::Metal, gpu_memory_utilization: 0.4, tensor_parallel_size: 1,
             },
             TensorGroup::AudioEncoder => StageConfig {
-                stage_id: 5,
-                component: ComponentType::AudioEncoder,
+                stage_id: 5, component: ComponentType::AudioEncoder,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::encoder_default(),
-                backend: BackendKind::Metal,
-                gpu_memory_utilization: 0.4,
-                tensor_parallel_size: 1,
+                backend: BackendKind::Metal, gpu_memory_utilization: 0.4, tensor_parallel_size: 1,
             },
             TensorGroup::MtpDraft => StageConfig {
-                stage_id: 6,
-                component: ComponentType::MtpDraft,
+                stage_id: 6, component: ComponentType::MtpDraft,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::decoder_default(),
-                backend: BackendKind::Metal,
-                gpu_memory_utilization: 0.3,
-                tensor_parallel_size: 1,
+                backend: BackendKind::Metal, gpu_memory_utilization: 0.3, tensor_parallel_size: 1,
             },
-            TensorGroup::Other => continue,
+            _ => continue,
         };
-
-        eprintln!("compiling stage {} ({}) with {} tensors...",
-            stage_config.stage_id, stage_config.component.as_str(), tensors.len());
 
         let stage_id = stage_config.stage_id;
         let stage_label = stage_config.component.as_str().to_string();
+        eprintln!("compiling stage {} ({}) with {} tensors...",
+            stage_id, stage_label, group_tensors.len());
 
         let (stage_result, bindings) = compile_stage(
-            tensors.clone(),
+            group_tensors,  // moved — freed after compile
             stage_config,
             model_config,
             CapabilityRegistry::default_metal_v1(),
@@ -670,10 +774,6 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     eprintln!("done — {} groups compiled", grouped.len());
     Ok(())
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// verify command
-// ═══════════════════════════════════════════════════════════════════════════
 
 fn cmd_verify(args: &[String]) -> Result<(), String> {
     let image = get_opt(args, "--image").ok_or_else(|| "--image is required".to_string())?;

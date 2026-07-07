@@ -130,6 +130,8 @@ pub enum NodeKind {
     DSparkDraftPreProjection = 13,
     /// DSpark semi-AR draft post-projection
     DSparkDraftPostProjection = 14,
+    /// LM head projection: hidden → logits
+    LmHead = 15,
 }
 
 /// Per-layer execution node in the decoder DAG.

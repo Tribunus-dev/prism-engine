@@ -39,6 +39,7 @@ pub mod verify;
 pub mod awls;
 pub mod fused;
 pub mod protection;
+pub mod accelerate;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Section 1: Format Constants
@@ -215,7 +216,7 @@ pub fn pack_nf4_tile_awls(
         let act_chunk: [f32; GROUP_SIZE] = std::array::from_fn(|i| activation_weights[start + i]);
 
         // Step 1: initial max-abs scaling + code assignment
-        let max_abs = chunk.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+        let max_abs = accelerate::max_abs(&chunk);
         let init_scale = if max_abs > 0.0 {
             max_abs / max_codebook
         } else {
@@ -224,9 +225,9 @@ pub fn pack_nf4_tile_awls(
         let init_bias = 0.0f32;
 
         let mut code_indices = [0u8; GROUP_SIZE];
-        for (i, &v) in chunk.iter().enumerate() {
-            let normalized = v / init_scale;
-            code_indices[i] = nf4_quantize(normalized);
+        let normalized = accelerate::vsdiv(&chunk, init_scale);
+        for (i, &v) in normalized.iter().enumerate() {
+            code_indices[i] = nf4_quantize(v);
         }
 
         // Step 2: AW-LS optimization (if activation weights are non-uniform)
@@ -365,8 +366,9 @@ pub fn pack_nf4_weights_awls(
     activation_weights: Option<&[f32]>,
     max_iters: u8,
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, u32, u32) {
-    // Use only the first rows × cols elements.  The caller should have
-    // validated, but guard against fused/malformed tensors gracefully.
+    use rayon::prelude::*;
+
+    // Use only the first rows × cols elements.
     let weights = if weights.len() >= rows * cols {
         &weights[..rows * cols]
     } else {
@@ -384,31 +386,41 @@ pub fn pack_nf4_weights_awls(
 
     let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
     let total_tiles = rows * tiles_per_row;
+
+    // Parallel: process each (row, tile) pair independently.
+    // Each row's tiles are computed in parallel, then collected.
+    let tile_results: Vec<(Vec<u8>, Vec<f32>, Vec<f32>)> = (0..rows)
+        .into_par_iter()
+        .flat_map(|row| {
+            let row_base = row * cols;
+            (0..tiles_per_row).into_par_iter().map(move |tile_idx| {
+                let col_start = tile_idx * TILE_ELEMENTS;
+                let mut tile_vals = [0.0f32; TILE_ELEMENTS];
+                let mut act_vals = [1.0f32; TILE_ELEMENTS];
+                for i in 0..TILE_ELEMENTS {
+                    let c = col_start + i;
+                    if c < cols {
+                        tile_vals[i] = weights[row_base + c];
+                        if let Some(act) = activation_weights {
+                            act_vals[i] = act[c];
+                        }
+                    } else {
+                        tile_vals[i] = 0.0;
+                    }
+                }
+                pack_nf4_tile_awls(&tile_vals, &act_vals, max_iters)
+            })
+        })
+        .collect();
+
+    // Serial: append results to output vecs in tile order.
     let mut all_codes = Vec::with_capacity(total_tiles * PACKED_BYTES_PER_TILE);
     let mut all_scales = Vec::with_capacity(total_tiles * SCALES_F32_PER_TILE);
     let mut all_biases = Vec::with_capacity(total_tiles * SCALES_F32_PER_TILE);
-
-    for row in 0..rows {
-        for tile_idx in 0..tiles_per_row {
-            let col_start = tile_idx * TILE_ELEMENTS;
-            let mut tile_vals = [0.0f32; TILE_ELEMENTS];
-            let mut act_vals = [1.0f32; TILE_ELEMENTS]; // uniform default
-            for i in 0..TILE_ELEMENTS {
-                let c = col_start + i;
-                if c < cols {
-                    tile_vals[i] = weights[row * cols + c];
-                    if let Some(act) = activation_weights {
-                        act_vals[i] = act[c];
-                    }
-                } else {
-                    tile_vals[i] = 0.0;
-                }
-            }
-            let (codes, scales, biases) = pack_nf4_tile_awls(&tile_vals, &act_vals, max_iters);
-            all_codes.extend(codes);
-            all_scales.extend(scales);
-            all_biases.extend(biases);
-        }
+    for (codes, scales, biases) in tile_results {
+        all_codes.extend(codes);
+        all_scales.extend(scales);
+        all_biases.extend(biases);
     }
 
     (all_codes, all_scales, all_biases, rows as u32, cols as u32)
@@ -571,43 +583,50 @@ pub fn pack_int8_weights(
     rows: usize,
     cols: usize,
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+    use rayon::prelude::*;
+
     let num_tiles = cols.div_ceil(TILE_ELEMENTS);
     let tile_cols = num_tiles * TILE_ELEMENTS;
-
     let mut codes = vec![0u8; rows * tile_cols];
     let mut scales = Vec::with_capacity(rows * num_tiles);
     let biases = vec![0.0f32; rows * num_tiles];
 
-    for i in 0..rows {
-        for t in 0..num_tiles {
-            let col_start = t * TILE_ELEMENTS;
-            let col_end = (col_start + TILE_ELEMENTS).min(cols);
-
-            let mut max_abs = 0.0f32;
-            for j in col_start..col_end {
-                let v = weights[i * cols + j].abs();
-                if v > max_abs {
-                    max_abs = v;
+    // Parallelize over rows; each row's tiles are independent.
+    let row_results: Vec<(Vec<u8>, Vec<f32>)> = (0..rows)
+        .into_par_iter()
+        .map(|i| {
+            let mut row_codes = vec![0u8; tile_cols];
+            let mut row_scales = Vec::with_capacity(num_tiles);
+            for t in 0..num_tiles {
+                let col_start = t * TILE_ELEMENTS;
+                let col_end = (col_start + TILE_ELEMENTS).min(cols);
+                let mut max_abs = 0.0f32;
+                for j in col_start..col_end {
+                    let v = weights[i * cols + j].abs();
+                    if v > max_abs { max_abs = v; }
                 }
+                let scale = if max_abs > 1e-10f32 { max_abs / 127.0f32 } else { 1.0f32 };
+                for j in col_start..col_end {
+                    let offset = t * TILE_ELEMENTS + (j - col_start);
+                    let q = (weights[i * cols + j] / scale).round().clamp(-127.0, 127.0) as i8;
+                    row_codes[offset] = q as u8;
+                }
+                // Zero-pad remainder of tile
+                for j in col_end..col_start + TILE_ELEMENTS {
+                    let offset = t * TILE_ELEMENTS + (j - col_start);
+                    row_codes[offset] = 0u8;
+                }
+                row_scales.push(scale);
             }
-            let scale = if max_abs > 1e-10f32 {
-                max_abs / 127.0f32
-            } else {
-                1.0f32
-            };
+            (row_codes, row_scales)
+        })
+        .collect();
 
-            for j in col_start..col_end {
-                let idx = i * tile_cols + t * TILE_ELEMENTS + (j - col_start);
-                let q = (weights[i * cols + j] / scale).round().clamp(-127.0, 127.0) as i8;
-                codes[idx] = q as u8;
-            }
-            for j in col_end..col_start + TILE_ELEMENTS {
-                let idx = i * tile_cols + t * TILE_ELEMENTS + (j - col_start);
-                codes[idx] = 0u8;
-            }
-
-            scales.push(scale);
-        }
+    // Serial: copy results into contiguous output vecs.
+    for (i, (row_codes, row_scales)) in row_results.iter().enumerate() {
+        let code_start = i * tile_cols;
+        codes[code_start..code_start + tile_cols].copy_from_slice(row_codes);
+        scales.extend(row_scales);
     }
     (codes, scales, biases)
 }
