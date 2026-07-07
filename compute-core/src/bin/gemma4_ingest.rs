@@ -1415,7 +1415,8 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
         return Vec::new();
     }
     let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-    let expected = 4 + count * per_binding;
+    let expected = 4usize.checked_add(count.checked_mul(per_binding).unwrap_or(usize::MAX))
+        .unwrap_or(usize::MAX);
     if data.len() < expected {
         return Vec::new();
     }
@@ -1423,18 +1424,43 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
     let mut off = 4usize;
     for _ in 0..count {
         let c1 = off;
+        let format = data[c1+48];
+        let weights_segment = data[c1+49];
+        let tile_metadata_segment = data[c1+50];
+        let sidecar_segment = data[c1+51];
+        let reserved = &data[c1+52..c1+57];
+        let sidecar_count = u32::from_le_bytes(data[c1+40..c1+44].try_into().unwrap());
+
+        // ── Field-validity checks (fail closed) ──────────────────────
+        // Format must be 0 (Nf4Tile640Base), 1 (ScaledReductionAxis), or 2 (Int8Tile640Base).
+        if format > 2 {
+            return Vec::new();
+        }
+        // sidecar_segment must be 0xFF (none) or 40 (QuantizationSidecars).
+        if sidecar_segment != 0xFF && sidecar_segment != 40 {
+            return Vec::new();
+        }
+        // sidecar_count == 0 ↔ sidecar_segment == 0xFF.
+        if (sidecar_count == 0) != (sidecar_segment == 0xFF) {
+            return Vec::new();
+        }
+        // Reserved bytes must be zero (future fields use these).
+        if reserved.iter().any(|&b| b != 0) {
+            return Vec::new();
+        }
+
         let b = MatrixWeightBinding {
             weights_offset: u64::from_le_bytes(data[c1..c1+8].try_into().unwrap()),
             weights_bytes: u64::from_le_bytes(data[c1+8..c1+16].try_into().unwrap()),
             tile_metadata_offset: u64::from_le_bytes(data[c1+16..c1+24].try_into().unwrap()),
             tile_metadata_bytes: u64::from_le_bytes(data[c1+24..c1+32].try_into().unwrap()),
             sidecar_offset: u64::from_le_bytes(data[c1+32..c1+40].try_into().unwrap()),
-            sidecar_count: u32::from_le_bytes(data[c1+40..c1+44].try_into().unwrap()),
+            sidecar_count,
             matrix_id: u32::from_le_bytes(data[c1+44..c1+48].try_into().unwrap()),
-            format: data[c1+48],
-            weights_segment: data[c1+49],
-            tile_metadata_segment: data[c1+50],
-            sidecar_segment: data[c1+51],
+            format,
+            weights_segment,
+            tile_metadata_segment,
+            sidecar_segment,
             _pad: [0u8; 5],
             rows: u32::from_le_bytes(data[c1+57..c1+61].try_into().unwrap()),
             cols: u32::from_le_bytes(data[c1+61..c1+65].try_into().unwrap()),
@@ -3686,4 +3712,239 @@ mod tests {
         assert_eq!(decoded[1].sidecar_segment, 40);
         assert_eq!(decoded[1].sidecar_offset, 0);
     }
+}
+
+#[test]
+fn test_read_contract_truncated_header() {
+        assert!(read_matrix_contract_blob(b"").is_empty());
+        assert!(read_matrix_contract_blob(b"\x01").is_empty());
+        assert!(read_matrix_contract_blob(b"\x01\x00\x00").is_empty());
+}
+
+#[test]
+fn test_read_contract_truncated_record() {
+        assert!(read_matrix_contract_blob(b"\x01\x00\x00\x00").is_empty());
+        let mut partial = vec![1u8; 44];
+        partial[0..4].copy_from_slice(&1u32.to_le_bytes());
+        assert!(read_matrix_contract_blob(&partial).is_empty());
+}
+
+#[test]
+fn test_read_contract_absurd_count() {
+        let mut buf = vec![0u8; 73];
+        buf[0..4].copy_from_slice(&1_000_000u32.to_le_bytes());
+        assert!(read_matrix_contract_blob(&buf).is_empty());
+}
+
+#[test]
+fn test_read_contract_invalid_format() {
+        let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
+            format: 1,
+            ..MatrixWeightBinding::default()
+        }]);
+        valid[4 + 48] = 99;
+        assert!(read_matrix_contract_blob(&valid).is_empty());
+}
+
+#[test]
+fn test_read_contract_invalid_sidecar_segment() {
+        let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
+            format: 0,
+            sidecar_count: 0,
+            sidecar_segment: 0xFF,
+            ..MatrixWeightBinding::default()
+        }]);
+        valid[4 + 51] = 42;
+        assert!(read_matrix_contract_blob(&valid).is_empty());
+}
+
+#[test]
+fn test_read_contract_sidecar_count_segment_mismatch() {
+        let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
+            format: 0,
+            sidecar_count: 0,
+            sidecar_segment: 0xFF,
+            ..MatrixWeightBinding::default()
+        }]);
+        valid[4 + 40..4 + 44].copy_from_slice(&3840u32.to_le_bytes());
+        assert!(read_matrix_contract_blob(&valid).is_empty());
+}
+
+#[test]
+fn test_read_contract_invalid_reserved_nonzero() {
+        let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
+            format: 0,
+            ..MatrixWeightBinding::default()
+        }]);
+        valid[4 + 53] = 1;
+        assert!(read_matrix_contract_blob(&valid).is_empty());
+}
+
+    #[test]
+    fn test_mixed_artifact_e2e() {
+        use rand::Rng;
+        use tribunus_compute_core::nf4tile640::{
+            pack_int8_weights, pack_nf4_weights, unpack_int8_weights, unpack_nf4_weights,
+            TILE_ELEMENTS,
+        };
+        use tribunus_compute_core::quantization::admission::pack_candidate;
+        use tribunus_compute_core::quantization::contract::QuantizedMatrixFormat;
+
+        const ROWS: usize = 128;
+        const COLS: usize = TILE_ELEMENTS;
+        const TILES_PER_ROW: u32 = 1;
+        let mut rng = rand::thread_rng();
+
+        // 1. Pack three matrices
+        let nf4_src: Vec<f32> = (0..ROWS*COLS).map(|_| rng.gen_range(-1.0..1.0)).collect();
+        let int8_src: Vec<f32> = (0..ROWS*COLS).map(|_| rng.gen_range(-1.0..1.0)).collect();
+        let scaled_src: Vec<f32> = (0..ROWS*COLS).map(|_| rng.gen_range(-0.5..0.5)).collect();
+        let (n4c, n4s, n4b, ..)   = pack_nf4_weights(&nf4_src, ROWS, COLS);
+        let (i8c, i8s, i8b)       = pack_int8_weights(&int8_src, ROWS, COLS);
+        let (scc, scs, scb, scv) = pack_candidate(&scaled_src, ROWS, COLS,
+            QuantizedMatrixFormat::Nf4Tile640ScaledReductionAxis, None);
+        let scv = scv.unwrap();
+
+        // 2. Build segments
+        let wseg: Vec<u8> = [&i8c[..], &n4c[..], &scc[..]].concat();
+        fn f32v(v: &[f32]) -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() }
+        let tseg: Vec<u8> = [f32v(&i8s), f32v(&i8b),
+                             f32v(&n4s), f32v(&n4b),
+                             f32v(&scs), f32v(&scb)].concat();
+        let sseg: Vec<u8> = f32v(&scv);
+
+        // 3. Build MatrixContract bindings
+        let mr = ROWS as u64;
+        let mb = mr * 4;
+        let nf4_wo = i8c.len() as u64;
+        let sc_wo  = nf4_wo + n4c.len() as u64;
+        let nf4_meta = (ROWS as u64) * 5 * 2 * 4;
+        let int8_meta = (ROWS as u64) * 2 * 4;
+        let bindings = vec![
+            MatrixWeightBinding {
+                weights_offset: nf4_wo, weights_bytes: n4c.len() as u64,
+                tile_metadata_offset: int8_meta, tile_metadata_bytes: nf4_meta,
+                sidecar_offset: 0, sidecar_count: 0, sidecar_segment: 0xFF,
+                matrix_id: 0, format: 0, rows: ROWS as u32, cols: COLS as u32,
+                tiles_per_row: TILES_PER_ROW, weights_segment: 26,
+                tile_metadata_segment: 27, _pad: [0u8; 5],
+            },
+            MatrixWeightBinding {
+                weights_offset: 0, weights_bytes: i8c.len() as u64,
+                tile_metadata_offset: 0, tile_metadata_bytes: int8_meta,
+                sidecar_offset: 0, sidecar_count: 0, sidecar_segment: 0xFF,
+                matrix_id: 1, format: 2, rows: ROWS as u32, cols: COLS as u32,
+                tiles_per_row: TILES_PER_ROW, weights_segment: 39,
+                tile_metadata_segment: 27, _pad: [0u8; 5],
+            },
+            MatrixWeightBinding {
+                weights_offset: sc_wo, weights_bytes: scc.len() as u64,
+                tile_metadata_offset: int8_meta + nf4_meta, tile_metadata_bytes: nf4_meta,
+                sidecar_offset: 0, sidecar_count: COLS as u32,
+                sidecar_segment: 40, matrix_id: 2, format: 1,
+                rows: ROWS as u32, cols: COLS as u32,
+                tiles_per_row: TILES_PER_ROW, weights_segment: 26,
+                tile_metadata_segment: 27, _pad: [0u8; 5],
+            },
+        ];
+        let blob = build_matrix_contract_blob(&bindings);
+        let decoded = read_matrix_contract_blob(&blob);
+        assert_eq!(decoded.len(), 3);
+
+        // 4. Resolve segments and dequantize
+        use std::collections::HashMap;
+        let seg: HashMap<u8, &[u8]> = [
+            (26u8, &wseg[..]), (39u8, &wseg[..]),
+            (27u8, &tseg[..]), (40u8, &sseg[..]),
+        ].into_iter().collect();
+        let sources = [&nf4_src, &int8_src, &scaled_src];
+        let labels  = ["nf4", "int8", "scaled"];
+
+        for i in 0..3 {
+            let b = &decoded[i];
+            let orig = &bindings[i];
+            let src = sources[i];
+            let label = labels[i];
+            assert_eq!(b.format, orig.format, "{label}: format");
+            assert_eq!(b.sidecar_count, orig.sidecar_count, "{label}: sc_count");
+            assert_eq!(b.rows, ROWS as u32, "{label}: rows");
+            assert_eq!(b.cols, COLS as u32, "{label}: cols");
+            if b.sidecar_count == 0 {
+                assert_eq!(b.sidecar_segment, 0xFF, "{label}: no-sc seg");
+            } else {
+                assert_eq!(b.sidecar_segment, 40, "{label}: sc seg == 40");
+                assert_eq!(b.sidecar_offset, 0, "{label}: first sc offset 0");
+}
+
+            let w = &seg[&b.weights_segment]
+                [b.weights_offset as usize..][..b.weights_bytes as usize];
+            let m = &seg[&b.tile_metadata_segment]
+                [b.tile_metadata_offset as usize..][..b.tile_metadata_bytes as usize];
+            let sv: Vec<f32> = if b.sidecar_count > 0 {
+                (0..b.sidecar_count as usize).map(|i| {
+                    let s = seg[&b.sidecar_segment];
+                    let off = b.sidecar_offset as usize + i * 4;
+                    f32::from_le_bytes(s[off..off+4].try_into().unwrap())
+                }).collect()
+            } else { Vec::new() };
+
+            let rows = b.rows as usize;
+            let cols = b.cols as usize;
+
+            let mut recon: Vec<f32> = match b.format {
+                    0 | 1 => {
+                    let total_tiles = rows * b.tiles_per_row as usize;
+                    let n_scales = total_tiles * 5;
+                    let f32b = |off: usize, n: usize| -> Vec<f32> {
+                        (0..n).map(|i| f32::from_le_bytes(
+                            m[off + i*4..][..4].try_into().unwrap()
+                        )).collect()
+                    };
+                    unpack_nf4_weights(w, &f32b(0, n_scales), &f32b(n_scales*4, n_scales), rows, cols)
+}
+                2 => {
+                    let total_tiles = rows * b.tiles_per_row as usize;
+                    let scales: Vec<f32> = (0..total_tiles).map(|i|
+                        f32::from_le_bytes(m[i*4..][..4].try_into().unwrap())
+                    ).collect();
+                    let biases: Vec<f32> = (0..total_tiles).map(|i|
+                        f32::from_le_bytes(m[(total_tiles + i)*4..][..4].try_into().unwrap())
+                    ).collect();
+                    unpack_int8_weights(w, &scales, &biases, rows, cols)
+}
+                    f => panic!("{label}: unknown fmt {f}"),
+            };
+            if !sv.is_empty() {
+                for i in 0..recon.len() { recon[i] *= sv[i % cols]; }
+}
+
+            // 5. NRMSE
+            let rms = (src.iter().map(|v| v*v).sum::<f32>() / src.len() as f32).sqrt();
+            let diff: f32 = src.iter().zip(recon.iter()).map(|(a,b)| (a-b)*(a-b)).sum();
+            let nrmse = (diff / src.len() as f32).sqrt() / rms;
+            let ceil = if b.format == 2 { 0.02 } else { 0.05 };
+            let bound = if b.format == 2 { 0.03 } else { 0.15 };
+            assert!(nrmse < bound, "{label}: NRMSE {:.6} >= {bound}", nrmse);
+
+            // 6. Reference matmul: y = x * W^T (batch=4)
+            let batch = 4usize;
+            let inp: Vec<f32> = (0..batch*cols).map(|_| rng.gen_range(-1.0..1.0)).collect();
+            let mut refo = vec![0.0f32; batch*rows];
+            let mut qout = vec![0.0f32; batch*rows];
+            for b_ in 0..batch { for r in 0..rows {
+                let mut rs = 0.0f32; let mut qs = 0.0f32;
+                for c in 0..cols {
+                    let xi = inp[b_*cols + c];
+                    rs += xi * src[r*cols + c];
+                    qs += xi * recon[r*cols + c];
+}
+                refo[b_*rows + r] = rs;
+                qout[b_*rows + r] = qs;
+            }}
+            let dot: f32 = refo.iter().zip(qout.iter()).map(|(a,b)| a*b).sum();
+            let rn = refo.iter().map(|v| v*v).sum::<f32>().sqrt();
+            let qn = qout.iter().map(|v| v*v).sum::<f32>().sqrt();
+            let cos = if rn>1e-10 && qn>1e-10 { dot/(rn*qn) } else { 1.0 };
+            assert!(cos > 0.98, "{label}: cosine {:.8} <= 0.98", cos);
+}
 }
