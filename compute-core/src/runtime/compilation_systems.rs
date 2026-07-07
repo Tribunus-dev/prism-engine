@@ -185,15 +185,21 @@ pub fn admit_candidates(world: &mut World) {
                 }
             }
 
-            // No candidate passed
-            AdmissionResult {
+            // Final fallback: try RawF32 (always passes, NRMSE = 0)
+            let (codes, scales, biases, scale_vector) =
+                pack_candidate(&input.source, in_features, out_features, RuntimeRepresentationClass::RawF32, None);
+            let reconstructed = reconstruct_candidate(
+                RuntimeRepresentationClass::RawF32, &codes, &scales, &biases, in_features, out_features,
+                scale_vector.as_deref(),
+            );
+            return AdmissionResult {
                 entity: input.entity,
-                format: None,
-                codes_data: None,
-                reconstructed: None,
-                phase: CompilationPhase::Failed,
-                error: Some("No candidate format passed weight screening".into()),
-            }
+                format: Some(RuntimeRepresentationClass::RawF32),
+                codes_data: Some(CodesData { codes, scales, biases, scale_vector }),
+                reconstructed: Some(reconstructed),
+                phase: CompilationPhase::Admitted,
+                error: None,
+            };
         })
         .collect();
 
