@@ -13,13 +13,14 @@ use crate::quantization::admission::{
     candidate_plan, compute_weight_nrmse, pack_candidate, reconstruct_candidate,
 };
 use crate::quantization::contract::{CanonicalShape, 
-    BackendKind, QuantizationHint, RuntimeRepresentationClass, TensorClass,
+    QuantizationHint, RuntimeRepresentationClass, TensorClass,
 };
 use crate::runtime::ecs_components::{
     CodesData, CompilationPhase, CompilationStatus, ReconstructedWeights,
     RefinementOutcome, SourceWeights, TensorBinding, TensorShape,
 };
 use crate::runtime::stage_graph::{StageConfig, StageGraph, StageQuantizationConfig};
+use rayon::prelude::*;
 pub use crate::compute_image::compile::ternary::ModelConfig;
 use crate::runtime::world::{Entity, World};
 
@@ -100,101 +101,115 @@ pub fn validate_sources(world: &mut World) {
 ///
 /// If no candidate passes screening, the entity is marked `Failed`.
 pub fn admit_candidates(world: &mut World) {
-    let entities: Vec<Entity> = world.iter_entities_with::<SourceWeights>().collect();
-
-    // Read per-stage quantization config (if present) for thresholds and format priority.
+    // Phase 0 (serial): clone all entity data into plain structs
     let stage_config = world.get_resource::<StageConfigResource>().map(|r| r.0.clone());
     let stage_config_ref = stage_config.as_ref();
 
-    for entity in entities {
-        let _status = match world.get::<CompilationStatus>(entity) {
-            Some(s) if s.phase == CompilationPhase::SourceValidated
-                || s.phase == CompilationPhase::Pending =>
-            {
-                s.clone()
-            }
-            _ => continue,
-        };
+    // Build input structs with cloned data for parallel processing
+    struct EntityInput {
+        entity: Entity,
+        source: Vec<f32>,
+        in_features: usize,
+        out_features: usize,
+    }
 
-        // Clone data from world refs before any mutable access
-        let owned_source = world.get::<SourceWeights>(entity).map(|w| w.0.clone());
-        let owned_shape = world.get::<TensorShape>(entity).map(|s| s.0);
-        let source = match owned_source { Some(s) => s, None => continue };
-        let shape = match owned_shape { Some(s) => s, None => continue };
-        let in_features = shape.in_features as usize;
-        let out_features = shape.out_features as usize;
+    let inputs: Vec<EntityInput> = world.iter_entities_with::<SourceWeights>()
+        .filter_map(|entity| {
+            // Filter: only entities in SourceValidated or Pending phase
+            let _ = match world.get::<CompilationStatus>(entity) {
+                Some(s) if s.phase == CompilationPhase::SourceValidated
+                    || s.phase == CompilationPhase::Pending => s,
+                _ => return None,
+            };
+            // Status dropped, get the data
+            let source = world.get::<SourceWeights>(entity).map(|w| w.0.clone())?;
+            let shape = world.get::<TensorShape>(entity).map(|s| s.0)?;
+            Some(EntityInput {
+                entity,
+                source,
+                in_features: shape.in_features as usize,
+                out_features: shape.out_features as usize,
+            })
+        })
+        .collect();
 
-        let hint = QuantizationHint {
-            tensor_class: TensorClass::Unknown,
-            permit_int8_candidate: true,
-        };
+    // Phase 1 (parallel): run admission on cloned data
+    struct AdmissionResult {
+        entity: Entity,
+        format: Option<RuntimeRepresentationClass>,
+        codes_data: Option<CodesData>,
+        reconstructed: Option<Vec<f32>>,
+        phase: CompilationPhase,
+        error: Option<String>,
+    }
 
-        let candidates = candidate_plan(in_features, out_features, &hint);
+    let results: Vec<AdmissionResult> = inputs
+        .par_iter()
+        .map(|input| {
+            let in_features = input.in_features;
+            let out_features = input.out_features;
 
-        // Use stage-level format ordering if available; otherwise fall back to candidate_plan order.
-        let format_order: Vec<RuntimeRepresentationClass> = match &stage_config {
-            Some(cfg) => cfg.permitted_formats.clone(),
-            None => candidates.clone(),
-        };
+            let hint = QuantizationHint {
+                tensor_class: TensorClass::Unknown,
+                permit_int8_candidate: true,
+            };
+            let candidates = candidate_plan(in_features, out_features, &hint);
 
-        for &format in &format_order {
-            // Skip formats not in the candidate plan for this tensor shape.
-            if !candidates.contains(&format) {
-                continue;
-            }
+            let format_order: Vec<RuntimeRepresentationClass> = match &stage_config {
+                Some(cfg) => cfg.permitted_formats.clone(),
+                None => candidates.clone(),
+            };
 
-            // Skip formats that are not production-ready (but always allow RawF32).
-            if format != RuntimeRepresentationClass::RawF32 {
-                let blocked = world.get_resource::<CapabilityRegistry>().map_or(false, |r| {
-                    !r.is_production_ready(format, 1, BackendKind::Metal)
-                });
-                if blocked {
+            for &format in &format_order {
+                if !candidates.contains(&format) {
                     continue;
                 }
-            }
 
-            let (codes, scales, biases, scale_vector) =
-                pack_candidate(&source, in_features, out_features, format, None);
-            let reconstructed = reconstruct_candidate(
-                format,
-                &codes,
-                &scales,
-                &biases,
-                in_features,
-                out_features,
-                scale_vector.as_deref(),
-            );
-            let weight_nrmse = compute_weight_nrmse(&source, &reconstructed);
-
-            if weight_nrmse <= weight_screening_threshold(format, stage_config_ref) {
-                // Store packed data and reconstruction.
-                world.insert(
-                    entity,
-                    CodesData {
-                        codes,
-                        scales,
-                        biases,
-                        scale_vector,
-                    },
+                let (codes, scales, biases, scale_vector) =
+                    pack_candidate(&input.source, in_features, out_features, format, None);
+                let reconstructed = reconstruct_candidate(
+                    format, &codes, &scales, &biases, in_features, out_features,
+                    scale_vector.as_deref(),
                 );
-                world.insert(entity, ReconstructedWeights(reconstructed));
+                let weight_nrmse = compute_weight_nrmse(&input.source, &reconstructed);
 
-                // Advance status.
-                if let Some(s) = world.get_mut::<CompilationStatus>(entity) {
-                    s.phase = CompilationPhase::Admitted;
-                    s.format = Some(format);
-                    s.error = None;
+                if weight_nrmse <= weight_screening_threshold(format, stage_config_ref) {
+                    return AdmissionResult {
+                        entity: input.entity,
+                        format: Some(format),
+                        codes_data: Some(CodesData { codes, scales, biases, scale_vector }),
+                        reconstructed: Some(reconstructed),
+                        phase: CompilationPhase::Admitted,
+                        error: None,
+                    };
                 }
-                break; // first passing candidate wins
             }
-        }
 
-        // If no CodesData was inserted, no candidate passed.
-        if !world.has::<CodesData>(entity) {
-            if let Some(s) = world.get_mut::<CompilationStatus>(entity) {
-                s.phase = CompilationPhase::Failed;
-                s.error = Some("No candidate format passed weight screening".into());
+            // No candidate passed
+            AdmissionResult {
+                entity: input.entity,
+                format: None,
+                codes_data: None,
+                reconstructed: None,
+                phase: CompilationPhase::Failed,
+                error: Some("No candidate format passed weight screening".into()),
             }
+        })
+        .collect();
+
+    // Phase 2 (serial): write results back to the World
+    for result in results {
+        let entity = result.entity;
+        if let Some(codes) = result.codes_data {
+            world.insert(entity, codes);
+        }
+        if let Some(recon) = result.reconstructed {
+            world.insert(entity, ReconstructedWeights(recon));
+        }
+        if let Some(s) = world.get_mut::<CompilationStatus>(entity) {
+            s.phase = result.phase;
+            s.format = result.format;
+            s.error = result.error;
         }
     }
 }
