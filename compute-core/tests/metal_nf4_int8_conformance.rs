@@ -19,7 +19,8 @@ use rand::Rng;
 use std::sync::Arc;
 use tribunus_compute_core::compute_image::compile::kernel_dispatch::{
     Int8Tile640GEMVDispatcher, Int8Tile640Offsets, Nf4Tile640ProjectionDispatcher,
-    Nf4Tile640Offsets, RegistryRef,
+    Nf4Tile640Offsets, Nf4ScaledReductionTile640Dispatcher,
+    Nf4ScaledReductionTile640Offsets, RegistryRef,
 };
 use tribunus_compute_core::compute_image::compile::kernel_registry::KernelRegistry;
 use tribunus_compute_core::compute_image::compile::kernel_types::{
@@ -117,8 +118,11 @@ fn make_params(rows: u32, cols: u32) -> ProjectionParams {
 }
 
 /// Manual NF4 scaled-reduction dispatch: binds buffers 0-6 like the base
-/// NF4 kernel and buffer 7 = reduction_scales (FP16).  There is no
-/// dispatcher struct for the scaled NF4 kernel yet.
+/// Manual NF4 scaled-reduction dispatch: binds buffers 0-6 like the base
+/// NF4 kernel and buffer 7 = reduction_scales (FP16).  Used by the
+/// nonzero-offset test below which exercises the real dispatcher path
+/// separately; this helper keeps the explicit offset-zero path for
+/// ABI conformance comparison.
 fn dispatch_nf4_scaled_gemv(
     registry: &RegistryRef,
     cmd_buf: &CommandBufferRef,
@@ -350,6 +354,8 @@ fn test_metal_nf4_scaled_reduction_gemv() {
     // GPU path.
     let device = Device::system_default().expect("no Metal device");
     let registry: RegistryRef = Arc::new(Mutex::new(KernelRegistry::new(&device)));
+    // Use the real Nf4ScaledReductionTile640Dispatcher.
+    let dispatcher = Nf4ScaledReductionTile640Dispatcher::new(registry.clone());
 
     // Pack reduction scales as FP16 (half*) for the GPU.
     let reduction_scales_bytes: Vec<u8> = reduction_scales
@@ -396,8 +402,7 @@ fn test_metal_nf4_scaled_reduction_gemv() {
         let cmd_buf = cmd_queue.new_command_buffer();
         let mut receipt = zero_receipt();
 
-        dispatch_nf4_scaled_gemv(
-            &registry,
+        dispatcher.dispatch_with_offsets(
             &cmd_buf,
             &codes_buf,
             &scales_buf,
@@ -406,6 +411,7 @@ fn test_metal_nf4_scaled_reduction_gemv() {
             &out_buf,
             &rs_buf,
             &params,
+            Nf4ScaledReductionTile640Offsets::default(),
             &mut receipt,
         );
         cmd_buf.commit();
@@ -849,4 +855,94 @@ fn test_metal_int8_multi_tile() {
     let nrms = nrmse(&ref_out, &all_gpu);
     assert!(cos > 0.99, "INT8 multi-tile cosine {:.8} <= 0.99", cos);
     assert!(nrms < 0.02, "INT8 multi-tile NRMSE {:.6} >= 0.02", nrms);
+}
+
+/// Scaled NF4 through the real dispatcher with nonzero offsets for codes,
+/// scales, biases, and reduction scales — proving the full MatrixContract →
+/// Nf4ScaledReductionTile640Dispatcher resolution path.
+#[test]
+fn test_metal_nf4_scaled_reduction_nonzero_offsets() {
+    let mut rng = rand::thread_rng();
+    let cols = 640usize;
+    let rows = 64usize;
+
+    let src: Vec<f32> = (0..rows * cols).map(|_| rng.gen_range(-1.0..1.0)).collect();
+    let input: Vec<f32> = (0..BATCH * cols).map(|_| rng.gen_range(-0.5..0.5)).collect();
+    let reduction_scales: Vec<f32> = (0..cols).map(|_| rng.gen_range(0.1f32..2.0)).collect();
+
+    let (codes, scales, biases, ..) = pack_nf4_weights(&src, rows, cols);
+    let dequant_src = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
+    let ref_out = ref_scaled_matmul(&dequant_src, &input, &reduction_scales, rows, cols, BATCH);
+
+    let rs_bytes: Vec<u8> = reduction_scales.iter()
+        .copied()
+        .flat_map(|v| f16::from_f32(v).to_bits().to_le_bytes())
+        .collect();
+    let code_off = 64u64;
+    let scale_off = code_off + codes.len() as u64;
+    let bias_off = scale_off + (scales.len() * 4) as u64;
+    let rs_off = bias_off + (biases.len() * 4) as u64;
+    let total = (rs_off + rs_bytes.len() as u64) as usize;
+    let mut shared = vec![0u8; total];
+    for (i, b) in shared.iter_mut().enumerate() { *b = (i & 0xFF) as u8; }
+    shared[code_off as usize..][..codes.len()].copy_from_slice(&codes);
+    for (i, &v) in scales.iter().enumerate() {
+        shared[scale_off as usize + i*4..][..4].copy_from_slice(&v.to_le_bytes());
+    }
+    for (i, &v) in biases.iter().enumerate() {
+        shared[bias_off as usize + i*4..][..4].copy_from_slice(&v.to_le_bytes());
+    }
+    shared[rs_off as usize..][..rs_bytes.len()].copy_from_slice(&rs_bytes);
+
+    let device = Device::system_default().expect("no Metal device");
+    let registry: RegistryRef = Arc::new(Mutex::new(KernelRegistry::new(&device)));
+    let dispatcher = Nf4ScaledReductionTile640Dispatcher::new(registry.clone());
+
+    let shared_buf = device.new_buffer_with_data(
+        shared.as_ptr() as *const std::ffi::c_void,
+        shared.len() as u64,
+        MTLResourceOptions::StorageModeShared,
+    );
+
+    let offsets = Nf4ScaledReductionTile640Offsets {
+        weights_offset: code_off,
+        scales_offset: scale_off,
+        biases_offset: bias_off,
+        reduction_scale_offset: rs_off,
+    };
+
+    let params = make_params(rows as u32, cols as u32);
+    let mut all_gpu = Vec::with_capacity(BATCH * rows);
+    for b in 0..BATCH {
+        let input_slice = &input[b * cols..(b + 1) * cols];
+        let in_buf = device.new_buffer_with_data(
+            input_slice.as_ptr() as *const std::ffi::c_void,
+            (cols * 4) as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let out_buf = device.new_buffer(
+            (rows * 4) as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let cmd_queue = device.new_command_queue();
+        let cmd_buf = cmd_queue.new_command_buffer();
+        let mut receipt = zero_receipt();
+
+        dispatcher.dispatch_with_offsets(
+            &cmd_buf, &shared_buf, &shared_buf, &shared_buf,
+            &in_buf, &out_buf, &shared_buf, &params,
+            offsets, &mut receipt,
+        );
+        cmd_buf.commit();
+        cmd_buf.wait_until_completed();
+
+        let ptr = out_buf.contents() as *const f32;
+        let result = unsafe { std::slice::from_raw_parts(ptr, rows).to_vec() };
+        all_gpu.extend(result);
+    }
+
+    let cos = cosine_similarity(&ref_out, &all_gpu);
+    let nrms = nrmse(&ref_out, &all_gpu);
+    assert!(cos > 0.99, "NF4 scaled nonzero-offset cosine {:.8} <= 0.99", cos);
+    assert!(nrms < 0.15, "NF4 scaled nonzero-offset NRMSE {:.6} >= 0.15", nrms);
 }
