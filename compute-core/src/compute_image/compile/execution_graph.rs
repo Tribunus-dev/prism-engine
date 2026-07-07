@@ -32,8 +32,7 @@ pub enum QuantizedWeightFormat {
 /// Each matrix gets its own binding after the admission pipeline selects a
 /// format. Offsets are independent per segment so changing one matrix's
 /// format never shifts another's address.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct MatrixWeightBinding {
     /// Byte offset into weights_segment for this matrix's codes.
     pub weights_offset: u64,
@@ -44,6 +43,7 @@ pub struct MatrixWeightBinding {
     /// Byte length of tile metadata data.
     pub tile_metadata_bytes: u64,
     /// Byte offset into sidecar_segment for reduction scales (0 = no sidecar).
+    /// Sentinal: sidecar_count == 0 means no sidecar (offset may be 0).
     pub sidecar_offset: u64,
     /// Number of FP16 reduction-axis scale values.
     pub sidecar_count: u32,

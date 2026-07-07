@@ -1362,19 +1362,88 @@ fn collect_triplet_segments(
 }
 
 /// Build the binary MatrixContract segment: u32 count followed by count × MatrixWeightBinding.
+///
+/// Wire format:
+///   [count: u32 LE]
+///   for each binding:
+///     [weights_offset: u64 LE]
+///     [weights_bytes: u64 LE]
+///     [tile_metadata_offset: u64 LE]
+///     [tile_metadata_bytes: u64 LE]
+///     [sidecar_offset: u64 LE]
+///     [sidecar_count: u32 LE]        // 0 = no sidecar
+///     [matrix_id: u32 LE]
+///     [format: u8]
+///     [weights_segment: u8]
+///     [tile_metadata_segment: u8]
+///     [sidecar_segment: u8]          // 0xFF = none
+///     [_reserved: u8; 5]
+///     [rows: u32 LE]
+///     [cols: u32 LE]
+///     [tiles_per_row: u32 LE]
+///
+/// Endian-independent — always little-endian.
 fn build_matrix_contract_blob(bindings: &[MatrixWeightBinding]) -> Vec<u8> {
-    let mut buf =
-        Vec::with_capacity(4 + bindings.len() * std::mem::size_of::<MatrixWeightBinding>());
+    let per_binding = 69usize;
+    let mut buf = Vec::with_capacity(4 + bindings.len() * per_binding);
     buf.extend_from_slice(&(bindings.len() as u32).to_le_bytes());
     for b in bindings {
-        buf.extend_from_slice(unsafe {
-            std::slice::from_raw_parts(
-                b as *const MatrixWeightBinding as *const u8,
-                std::mem::size_of::<MatrixWeightBinding>(),
-            )
-        });
+        buf.extend_from_slice(&b.weights_offset.to_le_bytes());
+        buf.extend_from_slice(&b.weights_bytes.to_le_bytes());
+        buf.extend_from_slice(&b.tile_metadata_offset.to_le_bytes());
+        buf.extend_from_slice(&b.tile_metadata_bytes.to_le_bytes());
+        buf.extend_from_slice(&b.sidecar_offset.to_le_bytes());
+        buf.extend_from_slice(&b.sidecar_count.to_le_bytes());
+        buf.extend_from_slice(&b.matrix_id.to_le_bytes());
+        buf.push(b.format);
+        buf.push(b.weights_segment);
+        buf.push(b.tile_metadata_segment);
+        buf.push(b.sidecar_segment);
+        buf.extend_from_slice(&[0u8; 5]); // reserved
+        buf.extend_from_slice(&b.rows.to_le_bytes());
+        buf.extend_from_slice(&b.cols.to_le_bytes());
+        buf.extend_from_slice(&b.tiles_per_row.to_le_bytes());
     }
     buf
+}
+
+/// Deserialize a MatrixContract blob into a Vec of MatrixWeightBinding records.
+/// Reads the explicit LE field format produced by build_matrix_contract_blob.
+fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
+    let per_binding = 69usize;
+    if data.len() < 4 {
+        return Vec::new();
+    }
+    let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    let expected = 4 + count * per_binding;
+    if data.len() < expected {
+        return Vec::new();
+    }
+    let mut bindings = Vec::with_capacity(count);
+    let mut off = 4usize;
+    for _ in 0..count {
+        let c1 = off;
+        let b = MatrixWeightBinding {
+            weights_offset: u64::from_le_bytes(data[c1..c1+8].try_into().unwrap()),
+            weights_bytes: u64::from_le_bytes(data[c1+8..c1+16].try_into().unwrap()),
+            tile_metadata_offset: u64::from_le_bytes(data[c1+16..c1+24].try_into().unwrap()),
+            tile_metadata_bytes: u64::from_le_bytes(data[c1+24..c1+32].try_into().unwrap()),
+            sidecar_offset: u64::from_le_bytes(data[c1+32..c1+40].try_into().unwrap()),
+            sidecar_count: u32::from_le_bytes(data[c1+40..c1+44].try_into().unwrap()),
+            matrix_id: u32::from_le_bytes(data[c1+44..c1+48].try_into().unwrap()),
+            format: data[c1+48],
+            weights_segment: data[c1+49],
+            tile_metadata_segment: data[c1+50],
+            sidecar_segment: data[c1+51],
+            _pad: [0u8; 5],
+            rows: u32::from_le_bytes(data[c1+57..c1+61].try_into().unwrap()),
+            cols: u32::from_le_bytes(data[c1+61..c1+65].try_into().unwrap()),
+            tiles_per_row: u32::from_le_bytes(data[c1+65..c1+69].try_into().unwrap()),
+        };
+        bindings.push(b);
+        off += per_binding;
+    }
+    bindings
 }
 
 fn main() {
@@ -2533,8 +2602,10 @@ fn main() {
         length: metallib_bytes.len() as u64,
     };
     // Base segment index offset: nf4 mode inserts a BlockBiases segment at index 3,
-    // shifting all subsequent segments by 1.
-    // NF4 mode adds 3 extra segments (Int8Tile640Weights, QuantizationSidecars, MatrixContract).
+    // NF4 mode inserts 3 extra segments (Int8Tile640Weights at 3,
+    // QuantizationSidecars at 4, MatrixContract at 5), shifting ANE segments
+    // from indices 3..5 to 6..8.  BlockBiases (index 2) replaces BlockScales
+    // at the same index — no displacement from that substitution.
     let nf4_shift: u32 = if is_nf4_mode { 3 } else { 0 };
     // Cast to usize for slice indexing.
     let ns = nf4_shift as usize;
@@ -3526,5 +3597,93 @@ mod tests {
             source_digest: "abc".into(),
         }];
         validate_selection_integrity(&receipts, &[0, 1], "learn-gemma-v1");
+    }
+
+    #[test]
+    fn test_matrix_contract_roundtrip() {
+        let bindings = vec![
+            MatrixWeightBinding {
+                weights_offset: 0,
+                weights_bytes: 7372800,
+                tile_metadata_offset: 0,
+                tile_metadata_bytes: 92160,
+                sidecar_offset: 0,
+                sidecar_count: 0,
+                sidecar_segment: 0xFF,
+                matrix_id: 0,
+                format: 0,
+                weights_segment: 26,
+                tile_metadata_segment: 27,
+                _pad: [0u8; 5],
+                rows: 3840,
+                cols: 4096,
+                tiles_per_row: 7,
+            },
+            MatrixWeightBinding {
+                weights_offset: 7372800,
+                weights_bytes: 10076160,
+                tile_metadata_offset: 92160,
+                tile_metadata_bytes: 125952,
+                sidecar_offset: 0,
+                sidecar_count: 3840,
+                sidecar_segment: 40,
+                matrix_id: 1,
+                format: 2,
+                weights_segment: 39,
+                tile_metadata_segment: 27,
+                _pad: [0u8; 5],
+                rows: 3840,
+                cols: 3840,
+                tiles_per_row: 6,
+            },
+        ];
+
+        let blob = build_matrix_contract_blob(&bindings);
+        assert_eq!(blob.len(), 142);
+        assert_eq!(blob[0..4], 2u32.to_le_bytes());
+
+        let decoded = read_matrix_contract_blob(&blob);
+        assert_eq!(decoded.len(), 2);
+        assert_eq!(decoded[0].weights_offset, 0);
+        assert_eq!(decoded[0].weights_bytes, 7372800);
+        assert_eq!(decoded[0].format, 0);
+        assert_eq!(decoded[0].sidecar_count, 0);
+        assert_eq!(decoded[0].sidecar_segment, 0xFF);
+
+        assert_eq!(decoded[1].weights_offset, 7372800);
+        assert_eq!(decoded[1].format, 2);
+        assert_eq!(decoded[1].sidecar_count, 3840);
+        assert_eq!(decoded[1].sidecar_segment, 40);
+        assert_eq!(decoded[1].rows, 3840);
+        assert_eq!(decoded[1].cols, 3840);
+        assert_eq!(decoded[1].tiles_per_row, 6);
+
+        let reblob = build_matrix_contract_blob(&decoded);
+        assert_eq!(reblob, blob);
+    }
+
+    #[test]
+    fn test_sidecar_ambiguity() {
+        let bindings = vec![
+            MatrixWeightBinding {
+                sidecar_offset: 0,
+                sidecar_count: 0,
+                sidecar_segment: 0xFF,
+                ..MatrixWeightBinding::default()
+            },
+            MatrixWeightBinding {
+                sidecar_offset: 0,
+                sidecar_count: 3840,
+                sidecar_segment: 40,
+                ..MatrixWeightBinding::default()
+            },
+        ];
+        let blob = build_matrix_contract_blob(&bindings);
+        let decoded = read_matrix_contract_blob(&blob);
+        assert_eq!(decoded[0].sidecar_count, 0);
+        assert_eq!(decoded[0].sidecar_segment, 0xFF);
+        assert_eq!(decoded[1].sidecar_count, 3840);
+        assert_eq!(decoded[1].sidecar_segment, 40);
+        assert_eq!(decoded[1].sidecar_offset, 0);
     }
 }
