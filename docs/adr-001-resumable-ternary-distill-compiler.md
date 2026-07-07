@@ -159,6 +159,45 @@ Before sealing, the compiler reopens the serialized artifact and verifies: segme
 
 A replay mismatch invalidates the artifact.
 
+### 13. Memory-Augmented Architecture Support (Engram-Class Models)
+
+The cimage format infrastructure — segregated segments, content-addressed checkpoints, deterministic addressing, heterogeneous execution lanes — is well suited to host memory-augmented architectures such as DeepSeek Engram (Conditional Memory via Scalable Lookup, arXiv 2601.07372). However, Engram is not a drop-in addition to an existing Gemma 4 cimage. The gate, compressed-token mapping, hash heads, retrieved embeddings, fusion projections, and surrounding early Transformer layers are trained jointly. Adding the segment and kernel to a Gemma checkpoint produces a retrieval path with no learned semantic role.
+
+Engram is most valuable when it is native to the model's architecture and training process. For an Engram-native ternary model, the distill-compiler can treat the Engram module as a first-class executable component: quantize or ternarize the surrounding projections, preserve the hash/table contract, validate the gate and fusion path, and decide where the memory table should reside across CPU/GPU memory.
+
+The compiler strategy for Engram is therefore a fork based on source model architecture:
+
+| Source model | Compiler behavior |
+|---|---|
+| Standard transformer (Gemma 4) | Ordinary mixed ternary/NF4/INT8 cimage migration. No Engram segment. |
+| Engram-native source | Engram-aware ternary cimage compilation — table segment, gate/fusion projections, memory ABI, progressive table/tensor updates. |
+
+#### Cimage Infrastructure for Engram (segment-level prerequisites)
+
+Engram requires one new SegmentKind (`EngramMemoryTable = 42`) and a dedicated contract:
+
+```rust
+pub struct EngramTableContract {
+    pub tokenizer_compression_map: ContentAddress,
+    pub hash_family: String,
+    pub seed_schedule: Vec<u64>,
+    pub ngram_orders: Vec<u8>,
+    pub hash_heads_per_order: u8,
+    pub bucket_sizes: Vec<u32>,
+    pub embedding_dim_per_head: u16,
+    pub concatenated_embeddings_digest: Digest256,
+    pub gate_params_digest: Digest256,
+    pub fusion_params_digest: Digest256,
+    pub insertion_layer_range: (u8, u8),
+    pub calibration_receipt_digest: Digest256,
+    pub contract_digest: Digest256,
+}
+```
+
+On Apple Silicon, the table already lives in unified system memory. The useful optimization is not host-DRAM-to-GPU transport but: deterministic token-derived addresses to precompute and prefetch likely cache lines, overlap lookup with surrounding compute, and keep the table in an explicitly managed shared or private Metal resource according to measured access behavior.
+
+Engram support is a future multiplier. It becomes especially powerful when a model is trained with Engram from day one: the table can then be a separately versioned, host-resident, progressively refinable memory component while the Transformer bulk becomes aggressively ternarized.
+
 ## Consequences
 
 ### Positive

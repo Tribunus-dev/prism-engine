@@ -67,6 +67,37 @@ Six update classes are defined:
 - **KernelScheduleUpdate**: changes only compile-time specialization metadata, never payload bytes.
 - **MetadataOnlyReceiptUpgrade**: adds stronger validation evidence without changing runtime-visible bytes.
 
+### 4a. Memory-Augmented Architecture Updates (Engram-Class Models)
+
+For Engram-native models, memory-table updates differ from weight-matrix updates in essential ways. The Engram module is not an auxiliary lookup attached to an already-trained model — the gate, compressed-token mapping, hash heads, retrieved embeddings, fusion projections, and surrounding early Transformer layers are trained jointly. An update that changes only table buckets or prunes low-density entries can invalidate the learned distribution unless that operation is specifically trained and re-qualified.
+
+The atomic unit for an Engram update is therefore the full Engram module generation, not a partial table replacement:
+
+```rust
+pub struct EngramModuleGeneration {
+    pub module_id: String,
+    pub base_cimage_root: Digest256,
+    pub tokenizer_compression_map: ContentAddress,
+    pub hash_family: String,
+    pub seed_schedule: Vec<u64>,
+    pub ngram_orders: Vec<u8>,
+    pub hash_heads_per_order: u8,
+    pub bucket_sizes: Vec<u32>,
+    pub embedding_table_digest: Digest256,
+    pub gate_parameters_digest: Digest256,
+    pub fusion_parameters_digest: Digest256,
+    pub insertion_layer_range: (u8, u8),
+    pub calibration_receipt_digest: Digest256,
+    pub qualification_receipt_digest: Digest256,
+    pub target_abi_digest: Digest256,
+    pub contract_digest: Digest256,
+}
+```
+
+An `EngramModuleUpdate` must atomically version the tokenizer projection, hash specification, bucket geometry, table payload, gate weights, fusion weights, and compatibility range for the consuming layers. Partial-table operations (bucket pruning, reordering) require separate qualification receipts proving the operation preserves the learned distribution.
+
+This is not a blocker for existing Gemma 4 models, which have no Engram module. It is a future update class for Engram-native architectures.
+
 ### 5. Tensor Generation Contract
 
 Each accepted tensor generation is self-describing:
