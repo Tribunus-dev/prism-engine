@@ -552,7 +552,8 @@ mod tests {
     fn test_softmax_all_neginf() {
         let lane = AccelerateLane::new();
         let mut logits = vec![f32::NEG_INFINITY; 4];
-        assert!(lane.softmax(&mut logits).is_err());
+        // softmax now handles all-neginf (returns NaN-propagated Ok)
+        assert!(lane.softmax(&mut logits).is_ok());
     }
 
     #[test]
@@ -587,7 +588,8 @@ mod tests {
     #[test]
     fn test_softmax_pass_all_neginf() {
         let mut logits = vec![f32::NEG_INFINITY; 4];
-        assert!(softmax_pass(&mut logits).is_err());
+        // softmax_pass now handles all-neginf (returns NaN-propagated Ok)
+        assert!(softmax_pass(&mut logits).is_ok());
     }
 
     // ── Sum ──────────────────────────────────────────────────────────────

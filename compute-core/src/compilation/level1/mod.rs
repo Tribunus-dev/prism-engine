@@ -18,13 +18,13 @@ pub mod kd_gate;
 // whole `level1` module was `prism-backend`-gated.
 #[cfg(feature = "prism-backend")]
 pub mod checkpoint;
-#[cfg(feature = "prism-backend")]
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
 pub mod gates;
 #[cfg(feature = "prism-backend")]
 pub mod reducer;
-#[cfg(feature = "prism-backend")]
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
 pub mod scheduler;
 #[cfg(feature = "prism-backend")]
 pub mod student;
-#[cfg(feature = "prism-backend")]
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
 pub mod teacher;

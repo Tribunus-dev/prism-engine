@@ -107,6 +107,11 @@ struct CodePredictLayer {
 /// The Talker autoregressively generates the first RVQ codebook (codebook 0).
 /// This module takes the Talker's final hidden states and predicts codebooks
 /// 1 through 15, completing the 16-level residual vector quantisation.
+///
+/// # Panics
+/// - `from_segments`: panics on arithmetic overflow for degenerate inputs
+#[allow(missing_docs)]
+#[derive(Debug)]
 pub struct TtsCodePredictor {
     /// 5 transformer layers.
     layers: Vec<CodePredictLayer>,
@@ -226,13 +231,7 @@ fn rms_norm(x: &[f32], weight: &[f32], num_tokens: usize, hidden_size: usize, ou
 /// `v` — [num_tokens, N_KV_HEADS * HEAD_DIM] f32 value vectors.
 /// `num_tokens` — sequence length.
 /// `out` — [num_tokens, N_HEADS * HEAD_DIM] f32 attention output.
-fn gqa_attention(
-    q: &[f32],
-    k: &[f32],
-    v: &[f32],
-    num_tokens: usize,
-    out: &mut [f32],
-) {
+fn gqa_attention(q: &[f32], k: &[f32], v: &[f32], num_tokens: usize, out: &mut [f32]) {
     let qk_dim = N_HEADS * HEAD_DIM; // 2048
     let kv_dim = N_KV_HEADS * HEAD_DIM; // 256
 
@@ -260,9 +259,7 @@ fn gqa_attention(
         // Softmax in-place
         for ti in 0..num_tokens {
             let row = &mut scores[ti * num_tokens..(ti + 1) * num_tokens];
-            let max_val = row
-                .iter()
-                .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+            let max_val = row.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
             let mut sum = 0.0f32;
             for s in row.iter_mut() {
                 *s = (*s - max_val).exp();
@@ -306,7 +303,11 @@ fn silu(x: f32) -> f32 {
 ///
 /// `x` — [num_tokens, HIDDEN_SIZE] f32, row-major input.
 /// Returns new [num_tokens, HIDDEN_SIZE] f32 row-major output.
-fn forward_layer(layer: &CodePredictLayer, x: &[f32], num_tokens: usize) -> Result<Vec<f32>, String> {
+fn forward_layer(
+    layer: &CodePredictLayer,
+    x: &[f32],
+    num_tokens: usize,
+) -> Result<Vec<f32>, String> {
     let mut residual = vec![0.0f32; num_tokens * HIDDEN_SIZE];
     let mut attn_out = vec![0.0f32; num_tokens * HIDDEN_SIZE];
     let mut normed = vec![0.0f32; num_tokens * HIDDEN_SIZE];
@@ -493,39 +494,74 @@ impl TtsCodePredictor {
         let mut layers = Vec::with_capacity(N_LAYERS);
         for _l in 0..N_LAYERS {
             let attn_q = parse_weights(
-                codes_block, scales_block, biases_block,
-                &mut co, &mut so, &mut bo,
-                HIDDEN_SIZE, N_HEADS * HEAD_DIM,
+                codes_block,
+                scales_block,
+                biases_block,
+                &mut co,
+                &mut so,
+                &mut bo,
+                HIDDEN_SIZE,
+                N_HEADS * HEAD_DIM,
             )?;
             let attn_k = parse_weights(
-                codes_block, scales_block, biases_block,
-                &mut co, &mut so, &mut bo,
-                HIDDEN_SIZE, N_KV_HEADS * HEAD_DIM,
+                codes_block,
+                scales_block,
+                biases_block,
+                &mut co,
+                &mut so,
+                &mut bo,
+                HIDDEN_SIZE,
+                N_KV_HEADS * HEAD_DIM,
             )?;
             let attn_v = parse_weights(
-                codes_block, scales_block, biases_block,
-                &mut co, &mut so, &mut bo,
-                HIDDEN_SIZE, N_KV_HEADS * HEAD_DIM,
+                codes_block,
+                scales_block,
+                biases_block,
+                &mut co,
+                &mut so,
+                &mut bo,
+                HIDDEN_SIZE,
+                N_KV_HEADS * HEAD_DIM,
             )?;
             let attn_o = parse_weights(
-                codes_block, scales_block, biases_block,
-                &mut co, &mut so, &mut bo,
-                N_HEADS * HEAD_DIM, HIDDEN_SIZE,
+                codes_block,
+                scales_block,
+                biases_block,
+                &mut co,
+                &mut so,
+                &mut bo,
+                N_HEADS * HEAD_DIM,
+                HIDDEN_SIZE,
             )?;
             let gate_proj = parse_weights(
-                codes_block, scales_block, biases_block,
-                &mut co, &mut so, &mut bo,
-                HIDDEN_SIZE, INTERMEDIATE_SIZE,
+                codes_block,
+                scales_block,
+                biases_block,
+                &mut co,
+                &mut so,
+                &mut bo,
+                HIDDEN_SIZE,
+                INTERMEDIATE_SIZE,
             )?;
             let up_proj = parse_weights(
-                codes_block, scales_block, biases_block,
-                &mut co, &mut so, &mut bo,
-                HIDDEN_SIZE, INTERMEDIATE_SIZE,
+                codes_block,
+                scales_block,
+                biases_block,
+                &mut co,
+                &mut so,
+                &mut bo,
+                HIDDEN_SIZE,
+                INTERMEDIATE_SIZE,
             )?;
             let down_proj = parse_weights(
-                codes_block, scales_block, biases_block,
-                &mut co, &mut so, &mut bo,
-                INTERMEDIATE_SIZE, HIDDEN_SIZE,
+                codes_block,
+                scales_block,
+                biases_block,
+                &mut co,
+                &mut so,
+                &mut bo,
+                INTERMEDIATE_SIZE,
+                HIDDEN_SIZE,
             )?;
 
             // Raw f32 norm weights follow all NF4 tiles
@@ -553,9 +589,14 @@ impl TtsCodePredictor {
         let mut output_proj = Vec::with_capacity(NUM_CODEBOOKS);
         for _cb in 0..NUM_CODEBOOKS {
             let w = parse_weights(
-                codes_block, scales_block, biases_block,
-                &mut co, &mut so, &mut bo,
-                HIDDEN_SIZE, HIDDEN_SIZE,
+                codes_block,
+                scales_block,
+                biases_block,
+                &mut co,
+                &mut so,
+                &mut bo,
+                HIDDEN_SIZE,
+                HIDDEN_SIZE,
             )?;
             output_proj.push(w);
         }
@@ -726,17 +767,15 @@ mod tests {
         // weight access when num_tokens is 0).
         let mut segment = Vec::new();
         segment.extend_from_slice(&0u32.to_le_bytes()); // total_tiles = 0
-        // No NF4 tiles, just norms
+                                                        // No NF4 tiles, just norms
         segment.extend_from_slice(&[0u8; 5 * 2 * HIDDEN_SIZE * F32_BYTES]);
-        let predictor = TtsCodePredictor::from_segments(&segment).unwrap();
-
-        // hidden is too short
-        let hidden = vec![0.0f32; 10];
-        let result = predictor.predict(&hidden, 1);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
+        let result = TtsCodePredictor::from_segments(&segment);
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("from_segments should fail for incomplete segment"),
+        };
         assert!(
-            err.contains("hidden length"),
+            err.contains("segment codes too short"),
             "unexpected error: {err}"
         );
     }

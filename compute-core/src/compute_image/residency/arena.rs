@@ -85,7 +85,11 @@ impl ArenaRequirementsBuilder {
 
         KvCacheRequirements {
             max_context_tokens: max_context,
-            cache_bytes_per_token: per_layer / n_layers as u64,
+            cache_bytes_per_token: if n_layers > 0 {
+                per_layer / n_layers as u64
+            } else {
+                0
+            },
             total_cache_bytes: total,
             total_kv_cache_bytes: total,
             kv_cache_per_layer_bytes: per_layer,

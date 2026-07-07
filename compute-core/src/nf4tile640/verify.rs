@@ -124,20 +124,14 @@ pub fn structural_verify(
     // 3. Scales are all finite
     for (i, &s) in scales.iter().enumerate() {
         if !s.is_finite() {
-            errors.push(format!(
-                "non-finite scale at index {}: value={}",
-                i, s,
-            ));
+            errors.push(format!("non-finite scale at index {}: value={}", i, s,));
         }
     }
 
     // 4. Biases are all finite
     for (i, &b) in biases.iter().enumerate() {
         if !b.is_finite() {
-            errors.push(format!(
-                "non-finite bias at index {}: value={}",
-                i, b,
-            ));
+            errors.push(format!("non-finite bias at index {}: value={}", i, b,));
         }
     }
 
@@ -217,13 +211,7 @@ pub fn compute_matrix_metrics(
     let role = classify_matrix_role(matrix_name);
 
     // Run structural verification.
-    let structural_result = structural_verify(
-        codes,
-        scales,
-        biases,
-        rows as u32,
-        cols as u32,
-    );
+    let structural_result = structural_verify(codes, scales, biases, rows as u32, cols as u32);
 
     // If structural checks fail, return early with Failed status.
     // We cannot safely unpack because unpack_nf4_weights uses assert_eq!
@@ -246,7 +234,6 @@ pub fn compute_matrix_metrics(
     // Unpack (structural checks passed, so buffer sizes are correct).
     use crate::nf4tile640::unpack_nf4_weights;
     let reconstructed = unpack_nf4_weights(codes, scales, biases, rows, cols);
-
 
     // Compute per-element error.
     let n = original.len().min(reconstructed.len());
@@ -382,7 +369,10 @@ pub fn classify_matrices_and_verify_role(
         let avg_sqnr = (sum_sqnr / num_matrices as f64) as f32;
 
         // Count warnings separately for overall status.
-        let warnings = group.iter().filter(|m| m.quality_status == QualityStatus::Warning).count();
+        let warnings = group
+            .iter()
+            .filter(|m| m.quality_status == QualityStatus::Warning)
+            .count();
 
         let quality_status = if failures > 0 {
             QualityStatus::Failed
@@ -426,18 +416,20 @@ pub fn full_structure_verify_run(
 ) -> VerificationReceipt {
     let per_matrix: Vec<MatrixQualityMetrics> = matrices
         .iter()
-        .map(|(name, original, codes, scales, biases, rows, cols, profile_id)| {
-            compute_matrix_metrics(
-                name,
-                original,
-                codes,
-                scales,
-                biases,
-                *rows,
-                *cols,
-                *profile_id,
-            )
-        })
+        .map(
+            |(name, original, codes, scales, biases, rows, cols, profile_id)| {
+                compute_matrix_metrics(
+                    name,
+                    original,
+                    codes,
+                    scales,
+                    biases,
+                    *rows,
+                    *cols,
+                    *profile_id,
+                )
+            },
+        )
         .collect();
 
     let per_role = classify_matrices_and_verify_role(&per_matrix);
@@ -544,8 +536,8 @@ pub fn apply_quality_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nf4tile640::{pack_nf4_tile, pack_nf4_weights, TILE_ELEMENTS};
     use crate::nf4tile640::profile::PROFILE_ID_CANONICAL_NF4_V1;
+    use crate::nf4tile640::{pack_nf4_tile, pack_nf4_weights, TILE_ELEMENTS};
 
     /// Helper: generate a random-ish test tile.
     fn make_test_tile() -> [f32; TILE_ELEMENTS] {
@@ -627,10 +619,7 @@ mod tests {
         assert_eq!(metrics.profile_id, 0);
         // With a synthetic signal spanning [-1, 1], RMSE should be small
         // but non-zero due to NF4 quantization.
-        assert!(
-            metrics.weight_rmse >= 0.0,
-            "RMSE should be non-negative"
-        );
+        assert!(metrics.weight_rmse >= 0.0, "RMSE should be non-negative");
         assert!(
             metrics.weight_rmse < 0.5,
             "RMSE should be reasonable for NF4: got {}",
@@ -785,11 +774,7 @@ mod tests {
             0u32,
         )];
 
-        let receipt = full_structure_verify_run(
-            &matrices,
-            "abcd1234",
-            "sha256:deadbeef",
-        );
+        let receipt = full_structure_verify_run(&matrices, "abcd1234", "sha256:deadbeef");
 
         assert_eq!(receipt.verification_level, VerificationLevel::Structural);
         assert_eq!(receipt.num_matrices_checked, 1);

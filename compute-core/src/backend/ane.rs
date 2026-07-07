@@ -17,27 +17,26 @@
 //! No f32 dequantization step in the runtime — the conversion happens
 //! onboard the ANE in the planar engine hardware.
 
-#![cfg(target_os = "macos")]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use objc::{msg_send, sel, sel_impl};
 
 use crate::ane_bridge::{execute_ane_step, AneInferenceStep, AneProgramCache};
+#[cfg(target_os = "macos")]
 use crate::backend::heterogeneous_executor::BackendInstance;
 use metal;
 use metal::MTLResourceOptions;
 use std::ffi::c_void;
 
 use crate::backend::routing::{
-    BackendExecutionReceipt, BackendVersion, GraphRegion, OperationDescriptor,
-    BackendId, OperationFamily, OperationId, RequestedSubstrate, Substrate, BACKEND_ANE,
+    BackendExecutionReceipt, BackendId, BackendVersion, GraphRegion, OperationDescriptor,
+    OperationFamily, OperationId, RequestedSubstrate, Substrate, BACKEND_ANE,
 };
 use crate::backend::{
     BackendCapabilities, CompiledRegionBackend, DType, EvaluationReceipt, MatmulOp,
-    QuantizedMatmulOp, QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp,
-    TensorBackend, TensorHandle,
+    QuantizedMatmulOp, QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend,
+    TensorHandle,
 };
 use crate::compute_image::megakernel::{LAYERS, MAX_CONTEXT, NUM_KV_HEADS};
 
@@ -198,12 +197,7 @@ impl AneBackend {
     }
 
     /// Register a compiled ANE program for a given operation key.
-    pub fn register_program(
-        &mut self,
-        key: ProgramKey,
-        region_id: u64,
-        step: AneInferenceStep,
-    ) {
+    pub fn register_program(&mut self, key: ProgramKey, region_id: u64, step: AneInferenceStep) {
         self.programs_by_key.insert(key, region_id);
         self.region_programs.insert(region_id, step);
     }
@@ -238,17 +232,17 @@ impl AneBackend {
     /// Register a packed nf4tile640 weight buffer for ANE program binding.
     /// `packed_buffer` is a Metal buffer containing the raw packed tile bytes
     /// from the cimage weight segment, backed by an IOSurface for ANE access.
-    pub fn bind_packed_weights(
-        &mut self,
-        weight_name: &str,
-        packed_buffer: metal::Buffer,
-    ) {
-        self.packed_weight_bindings.insert(weight_name.to_string(), packed_buffer);
+    pub fn bind_packed_weights(&mut self, weight_name: &str, packed_buffer: metal::Buffer) {
+        self.packed_weight_bindings
+            .insert(weight_name.to_string(), packed_buffer);
     }
 
     /// Create a shared-mode Metal buffer from byte data.
     fn make_buffer(&self, data: &[u8]) -> Result<metal::Buffer, String> {
-        let device = self.device.as_ref().ok_or_else(|| "AneBackend: no Metal device available")?;
+        let device = self
+            .device
+            .as_ref()
+            .ok_or_else(|| "AneBackend: no Metal device available")?;
         Ok(device.new_buffer_with_data(
             data.as_ptr() as *const c_void,
             data.len() as u64,
@@ -367,7 +361,7 @@ impl TensorBackend for AneBackend {
         self.external_bindings.insert(owner_token, handle);
         Ok(handle)
     }
-    
+
     fn quantized_matmul(
         &mut self,
         _op: &QuantizedMatmulOp,
@@ -397,11 +391,7 @@ impl TensorBackend for AneBackend {
         Err("AneBackend: ANE does not execute primitive ops".into())
     }
 
-    fn rope(
-        &mut self,
-        _op: &RoPEOp,
-        _x: TensorHandle,
-    ) -> Result<TensorHandle, String> {
+    fn rope(&mut self, _op: &RoPEOp, _x: TensorHandle) -> Result<TensorHandle, String> {
         Err("AneBackend: ANE does not execute primitive ops".into())
     }
 
@@ -464,7 +454,10 @@ impl TensorBackend for AneBackend {
 
     fn read_f32(&mut self, handle: TensorHandle) -> Result<ReadbackReceipt, String> {
         let tensor = self.slot(handle)?;
-        let buf = tensor.buffer.as_ref().ok_or_else(|| "AneBackend: tensor has no buffer".to_string())?;
+        let buf = tensor
+            .buffer
+            .as_ref()
+            .ok_or_else(|| "AneBackend: tensor has no buffer".to_string())?;
         let len = buf.length() as usize;
         let ptr = buf.contents() as *const f32;
         let data: Vec<f32> = if len >= 4 {
@@ -515,6 +508,7 @@ impl TensorBackend for AneBackend {
 
 // ── BackendInstance ─────────────────────────────────────────────────────────
 
+#[cfg(target_os = "macos")]
 impl BackendInstance for AneBackend {
     fn backend_kind(&self) -> BackendId {
         BACKEND_ANE
@@ -695,11 +689,7 @@ impl CompiledRegionBackend for AneBackend {
 ///
 /// Called by the cimage loader in Phase 7 to populate the region→program
 /// mapping before compiled-region execution begins.
-pub fn register_ane_region(
-    backend: &mut AneBackend,
-    region_id: u64,
-    step: AneInferenceStep,
-) {
+pub fn register_ane_region(backend: &mut AneBackend, region_id: u64, step: AneInferenceStep) {
     backend.region_programs.insert(region_id, step);
 }
 

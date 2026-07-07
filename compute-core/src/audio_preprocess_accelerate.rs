@@ -83,10 +83,8 @@ pub fn load_wav_to_f32(bytes: &[u8]) -> Result<(Vec<f32>, u32, u16), String> {
                 }
                 let audio_format =
                     u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap());
-                channels =
-                    u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap());
-                sample_rate =
-                    u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap());
+                channels = u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap());
+                sample_rate = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap());
                 bits_per_sample =
                     u16::from_le_bytes(bytes[offset + 14..offset + 16].try_into().unwrap());
                 if audio_format != 1 && audio_format != 3 {
@@ -168,8 +166,13 @@ pub fn preprocess_audio_gemma4(samples: &[f32], sample_rate: u32) -> Result<Vec<
     let samples_16k = resample_linear(samples, sample_rate, TARGET_SAMPLE_RATE);
 
     // 2. Compute mel spectrogram via vDSP
-    let (mel_spec, _num_frames) =
-        compute_mel_spectrogram_vdsp(&samples_16k, N_FFT, HOP_LENGTH, NUM_MEL_BINS, TARGET_SAMPLE_RATE)?;
+    let (mel_spec, _num_frames) = compute_mel_spectrogram_vdsp(
+        &samples_16k,
+        N_FFT,
+        HOP_LENGTH,
+        NUM_MEL_BINS,
+        TARGET_SAMPLE_RATE,
+    )?;
 
     Ok(mel_spec)
 }
@@ -309,11 +312,11 @@ fn compute_mel_spectrogram_vdsp(
         //      realp[k] = Re(X[k]), imagp[k] = Im(X[k]) for k=1..N/2-1
         {
             let half_n = FFT_SIZE / 2;
-            mag2[0] = realp[0] * realp[0];                         // DC
+            mag2[0] = realp[0] * realp[0]; // DC
             for k in 1..half_n {
                 mag2[k] = realp[k] * realp[k] + imagp[k] * imagp[k];
             }
-            mag2[half_n] = imagp[0] * imagp[0];                    // Nyquist
+            mag2[half_n] = imagp[0] * imagp[0]; // Nyquist
         }
 
         // f. Mel filterbank + log10
@@ -391,7 +394,12 @@ mod tests {
         for f in [0.0, 100.0, 1000.0, 8000.0] {
             let m = hz_to_mel(f);
             let f_back = mel_to_hz(m);
-            assert!((f - f_back).abs() < 1.0, "Hz-mel error at {} Hz: {}", f, f_back);
+            assert!(
+                (f - f_back).abs() < 1.0,
+                "Hz-mel error at {} Hz: {}",
+                f,
+                f_back
+            );
         }
     }
 

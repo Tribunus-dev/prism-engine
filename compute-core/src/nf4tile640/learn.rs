@@ -101,6 +101,65 @@ pub struct LearningReceipt {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Activation saliency
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Per-matrix activation saliency profile produced by calibration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivationSaliencyProfile {
+    pub matrix_name: String,
+    pub outlier_channels: Vec<usize>,
+    pub base_scale_modifiers: Vec<f32>,
+    pub group_importances: Vec<f32>,
+}
+
+/// Compute activation-channel saliency from per-channel max-activation
+/// statistics collected during calibration.
+///
+/// Returns `(outlier_channels, base_scale_modifiers, group_importances)`:
+/// - `outlier_channels` — indices of the most-active channels (top 1%)
+/// - `base_scale_modifiers` — per-channel scaling factors (1.0 for normal
+///   channels; sqrt(act/mean) clamped to [1,10] for outliers)
+/// - `group_importances` — mean activation per group (groups of `group_size`)
+pub fn compute_activation_saliency(
+    per_channel_max_activations: &[f32],
+    _num_groups: usize,
+    group_size: usize,
+) -> (Vec<usize>, Vec<f32>, Vec<f32>) {
+    // Group importance = mean of channel max-activation in the group
+    let channel_importance: Vec<f32> = per_channel_max_activations
+        .iter()
+        .map(|&m| m.abs() + 1e-8)
+        .collect();
+    let group_importances: Vec<f32> = channel_importance
+        .chunks(group_size)
+        .map(|chunk| chunk.iter().sum::<f32>() / chunk.len() as f32)
+        .collect();
+    // Top 1% of channels as outlier
+    let mut sorted: Vec<(usize, f32)> = per_channel_max_activations
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| (i, v.abs()))
+        .collect();
+    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    let n_outliers = std::cmp::max(1, per_channel_max_activations.len() / 100);
+    let outlier_channels: Vec<usize> = sorted.iter().take(n_outliers).map(|(i, _)| *i).collect();
+    let mean_act = channel_importance.iter().sum::<f32>() / channel_importance.len() as f32;
+    let base_scale_modifiers: Vec<f32> = channel_importance
+        .iter()
+        .enumerate()
+        .map(|(i, &act)| {
+            if outlier_channels.contains(&i) {
+                (act / mean_act).sqrt().clamp(1.0, 10.0)
+            } else {
+                1.0
+            }
+        })
+        .collect();
+    (outlier_channels, base_scale_modifiers, group_importances)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Learned profile
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -118,7 +177,6 @@ pub struct LearnedProfile {
     /// Training receipt documenting the learning process.
     pub learning_receipt: LearningReceipt,
 }
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // Per-matrix profile selection
@@ -223,7 +281,10 @@ pub fn select_profile_for_matrix(
                     effective_bpw: 4.0,
                     source_digest: String::new(),
                 };
-                (fallback_profile(canonical_codebook, "canonical_won", baseline_mse), receipt)
+                (
+                    fallback_profile(canonical_codebook, "canonical_won", baseline_mse),
+                    receipt,
+                )
             }
         }
         None => {
@@ -241,7 +302,10 @@ pub fn select_profile_for_matrix(
                 effective_bpw: 4.0,
                 source_digest: String::new(),
             };
-            (fallback_profile(canonical_codebook, "unsupported_role", baseline_mse), receipt)
+            (
+                fallback_profile(canonical_codebook, "unsupported_role", baseline_mse),
+                receipt,
+            )
         }
     }
 }
@@ -315,7 +379,6 @@ pub fn weighted_scalar_lloyd_max(
 ) -> ([f32; 16], LearningReceipt) {
     let num_samples = samples.len();
     let canonical_objective = compute_weighted_mse(samples, &NF4_CODEBOOK);
-
 
     // Seed 0: return canonical NF4 codebook directly, no learning.
     if config.seed == 0 {
@@ -515,7 +578,11 @@ pub fn search_clipping_policies(
 
     if all_values.is_empty() {
         let (cb, receipt) = weighted_scalar_lloyd_max(&[], config);
-        let dummy = (ClippingPolicy::None, compute_weighted_mse(&[], &cb), receipt);
+        let dummy = (
+            ClippingPolicy::None,
+            compute_weighted_mse(&[], &cb),
+            receipt,
+        );
         return (ClippingPolicy::None, vec![dummy]);
     }
 
@@ -619,8 +686,8 @@ pub fn select_best_profile(
             return mse_cmp;
         }
         // 2. Clipping policy simplicity
-        let clip_cmp = clipping_simplicity(&a.clipping_policy)
-            .cmp(&clipping_simplicity(&b.clipping_policy));
+        let clip_cmp =
+            clipping_simplicity(&a.clipping_policy).cmp(&clipping_simplicity(&b.clipping_policy));
         if clip_cmp != std::cmp::Ordering::Equal {
             return clip_cmp;
         }
@@ -698,11 +765,7 @@ fn compute_weighted_mse(samples: &[(f32, f32)], codebook: &[f32; 16]) -> f64 {
 }
 
 /// Compute the clip threshold and scale for a given policy over all values.
-fn compute_clip_scale(
-    policy: &ClippingPolicy,
-    values: &[f32],
-    sorted_abs: &[f32],
-) -> (f32, f32) {
+fn compute_clip_scale(policy: &ClippingPolicy, values: &[f32], sorted_abs: &[f32]) -> (f32, f32) {
     match policy {
         ClippingPolicy::None => {
             let max_abs = values
@@ -789,7 +852,11 @@ fn bias_simplicity(policy: &BiasPolicy) -> u8 {
 }
 
 /// Build a fallback LearnedProfile that wraps the canonical codebook.
-fn fallback_profile(canonical_codebook: [f32; 16], reason: &str, baseline_mse: f64) -> LearnedProfile {
+fn fallback_profile(
+    canonical_codebook: [f32; 16],
+    reason: &str,
+    baseline_mse: f64,
+) -> LearnedProfile {
     let _ = reason; // used for logging context
     LearnedProfile {
         codebook: canonical_codebook,
@@ -838,7 +905,10 @@ mod tests {
             ..Default::default()
         };
         let (cb, _) = weighted_scalar_lloyd_max(&samples, &config);
-        assert_eq!(cb, NF4_CODEBOOK, "seed=0 must start from canonical codebook");
+        assert_eq!(
+            cb, NF4_CODEBOOK,
+            "seed=0 must start from canonical codebook"
+        );
     }
 
     /// Training should converge on a small synthetic set.
@@ -860,8 +930,14 @@ mod tests {
         let (cb, receipt) = weighted_scalar_lloyd_max(&samples, &config);
 
         // Must converge
-        assert!(receipt.converged, "Lloyd-Max should converge on synthetic data");
-        assert!(receipt.num_iterations <= 50, "should converge within iteration budget");
+        assert!(
+            receipt.converged,
+            "Lloyd-Max should converge on synthetic data"
+        );
+        assert!(
+            receipt.num_iterations <= 50,
+            "should converge within iteration budget"
+        );
 
         // Codebook must be sorted
         for w in cb.windows(2) {
@@ -938,7 +1014,11 @@ mod tests {
         };
         let (_, receipt) = weighted_scalar_lloyd_max(&samples, &config);
         let total: u32 = receipt.occupancy.iter().sum();
-        assert_eq!(total as usize, samples.len(), "occupancy must sum to num_samples");
+        assert_eq!(
+            total as usize,
+            samples.len(),
+            "occupancy must sum to num_samples"
+        );
     }
 
     /// Empty-centroid reinitialisation should produce valid centroids.
@@ -998,7 +1078,10 @@ mod tests {
     /// Importance from variance should be positive and well-behaved.
     #[test]
     fn test_importance_from_variance() {
-        assert!(importance_from_variance(0.0) > 0.0, "zero variance → epsilon");
+        assert!(
+            importance_from_variance(0.0) > 0.0,
+            "zero variance → epsilon"
+        );
         assert!(
             (importance_from_variance(4.0) - 2.0).abs() < 1e-6,
             "variance=4 → std=2"
@@ -1012,29 +1095,27 @@ mod tests {
     /// Search over clipping policies should pick a reasonable one.
     #[test]
     fn test_search_clipping_policies_basic() {
-        let raw: Vec<Vec<f32>> = vec![
-            (0..128).map(|i| (i as f32 / 128.0) * 2.0 - 1.0).collect(),
-        ];
+        let raw: Vec<Vec<f32>> = vec![(0..128).map(|i| (i as f32 / 128.0) * 2.0 - 1.0).collect()];
         let config = LearningConfig {
             seed: 1,
             max_iterations: 5,
-            clipping_candidates: vec![
-                ClippingPolicy::None,
-                ClippingPolicy::Percentile(99.0),
-            ],
+            clipping_candidates: vec![ClippingPolicy::None, ClippingPolicy::Percentile(99.0)],
             ..Default::default()
         };
         let (best, results) = search_clipping_policies(&raw, &config, "test");
         assert!(!results.is_empty(), "should have results");
-        assert_eq!(best, results[0].0, "best policy must be first result's policy");
+        assert_eq!(
+            best, results[0].0,
+            "best policy must be first result's policy"
+        );
     }
 
     /// Select best profile picks the best from candidates.
     #[test]
     fn test_select_best_profile_fallback() {
-        use std::collections::HashMap;
-        use crate::nf4tile640::calibration::{CalibrationConfig, CalibrationReceipt};
         use crate::nf4tile640::calibration::CoverageReceipt;
+        use crate::nf4tile640::calibration::{CalibrationConfig, CalibrationReceipt};
+        use std::collections::HashMap;
         // Empty samples_by_role → fallback path.
         let cal = CalibrationResult {
             receipt: CalibrationReceipt {
@@ -1076,5 +1157,64 @@ mod tests {
             "fallback should return canonical codebook"
         );
         assert_eq!(best.clipping_policy, ClippingPolicy::None);
+    }
+    /// Uniform activation → no outlier channels.
+    #[test]
+    fn test_activation_saliency_uniform() {
+        let per_channel = vec![1.0; 128];
+        let (outliers, modifiers, importances) = compute_activation_saliency(&per_channel, 4, 32);
+        // All channels equal → top-1% in 128 = 1 channel flagged, but
+        // since all values are identical every candidate is equally valid.
+        // The key invariant: every modifier is 1.0 because no channel
+        // is more active than the mean.
+        assert_eq!(outliers.len(), 1, "exactly one outlier channel");
+        for &m in &modifiers {
+            assert!(
+                (m - 1.0).abs() < 1e-6,
+                "uniform activation → modifier 1.0, got {m}"
+            );
+        }
+        assert_eq!(importances.len(), 4, "4 groups");
+        for &g in &importances {
+            assert!(
+                (g - 1.0).abs() < 1e-6,
+                "uniform group importance → 1.0, got {g}"
+            );
+        }
+    }
+
+    /// One channel 100× more active → flagged as outlier with scale > 1.
+    #[test]
+    fn test_activation_saliency_outliers() {
+        let mut per_channel = vec![1.0; 128];
+        per_channel[7] = 100.0; // channel 7 is the outlier
+        let per_channel = per_channel;
+        let (outliers, modifiers, importances) = compute_activation_saliency(&per_channel, 4, 32);
+        assert!(
+            outliers.contains(&7),
+            "channel 7 should be flagged as outlier"
+        );
+        // Channel 7 gets a boosted modifier
+        assert!(
+            modifiers[7] > 1.0,
+            "outlier channel should get scale > 1.0, got {}",
+            modifiers[7]
+        );
+        // Normal channels stay at 1.0
+        for i in 0..per_channel.len() {
+            if i != 7 {
+                assert!(
+                    (modifiers[i] - 1.0).abs() < 1e-6,
+                    "normal channel {i} should have modifier 1.0, got {}",
+                    modifiers[i]
+                );
+            }
+        }
+        // Group 0 (channels 0..31) has channel 7 → higher importance
+        assert!(
+            importances[0] > 1.0,
+            "group containing the outlier should have importance > 1.0"
+        );
+        assert_eq!(importances.len(), 4);
     }
 }

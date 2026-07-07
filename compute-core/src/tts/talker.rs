@@ -6,11 +6,10 @@
 //!
 //! Qwen3-TTS is Apache 2.0 licensed.
 
-
 #[allow(unused_imports)]
 use crate::compute_image::megakernel::kernels::{
-    SHADER_SRC, TTS_FFN_INTERMEDIATE, TTS_HIDDEN, TTS_LAYERS, TTS_MAX_CONTEXT,
-    TTS_NUM_KV_HEADS, TTS_TILES, TTS_TILES_FFN, TTS_VOCAB,
+    SHADER_SRC, TTS_FFN_INTERMEDIATE, TTS_HIDDEN, TTS_LAYERS, TTS_MAX_CONTEXT, TTS_NUM_KV_HEADS,
+    TTS_TILES, TTS_TILES_FFN, TTS_VOCAB,
 };
 use crate::nf4tile640::Nf4Weights;
 use metal::*;
@@ -170,7 +169,10 @@ impl TtsMegakernel {
     /// Returns `(logits, hidden_states)` where:
     /// - `logits`: `[TTS_VOCAB=2048]` f32 logits for codebook-0 token selection
     /// - `hidden_states`: `[TTS_HIDDEN=2048]` f32 pre-LM-head activations
-    pub fn decode_token_with_hidden(&self, input_token_id: u32) -> Result<(Vec<f32>, Vec<f32>), String> {
+    pub fn decode_token_with_hidden(
+        &self,
+        input_token_id: u32,
+    ) -> Result<(Vec<f32>, Vec<f32>), String> {
         let logits = self.decode_token(input_token_id)?;
         let hidden = vec![0.0f32; TTS_HIDDEN as usize];
         Ok((logits, hidden))
@@ -196,16 +198,91 @@ mod tests {
     #[test]
     fn tts_weight_bindings_create() {
         let w = TtsWeightBindings {
-            q_proj: vec![Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 2048, cols: 2048 }; 28],
-            k_proj: vec![Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 2048, cols: 2048 }; 28],
-            v_proj: vec![Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 2048, cols: 2048 }; 28],
-            o_proj: vec![Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 2048, cols: 2048 }; 28],
-            gate_proj: vec![Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 8192, cols: 2048 }; 28],
-            up_proj: vec![Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 8192, cols: 2048 }; 28],
-            down_proj: vec![Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 2048, cols: 8192 }; 28],
+            q_proj: vec![
+                Nf4Weights {
+                    packed_codes: vec![],
+                    scales: vec![],
+                    biases: vec![],
+                    rows: 2048,
+                    cols: 2048
+                };
+                28
+            ],
+            k_proj: vec![
+                Nf4Weights {
+                    packed_codes: vec![],
+                    scales: vec![],
+                    biases: vec![],
+                    rows: 2048,
+                    cols: 2048
+                };
+                28
+            ],
+            v_proj: vec![
+                Nf4Weights {
+                    packed_codes: vec![],
+                    scales: vec![],
+                    biases: vec![],
+                    rows: 2048,
+                    cols: 2048
+                };
+                28
+            ],
+            o_proj: vec![
+                Nf4Weights {
+                    packed_codes: vec![],
+                    scales: vec![],
+                    biases: vec![],
+                    rows: 2048,
+                    cols: 2048
+                };
+                28
+            ],
+            gate_proj: vec![
+                Nf4Weights {
+                    packed_codes: vec![],
+                    scales: vec![],
+                    biases: vec![],
+                    rows: 8192,
+                    cols: 2048
+                };
+                28
+            ],
+            up_proj: vec![
+                Nf4Weights {
+                    packed_codes: vec![],
+                    scales: vec![],
+                    biases: vec![],
+                    rows: 8192,
+                    cols: 2048
+                };
+                28
+            ],
+            down_proj: vec![
+                Nf4Weights {
+                    packed_codes: vec![],
+                    scales: vec![],
+                    biases: vec![],
+                    rows: 2048,
+                    cols: 8192
+                };
+                28
+            ],
             norms: vec![vec![0.0f32; 2048]; 28],
-            embed_tokens: Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 2048, cols: 2048 },
-            lm_head: Nf4Weights { packed_codes: vec![], scales: vec![], biases: vec![], rows: 2048, cols: 2048 },
+            embed_tokens: Nf4Weights {
+                packed_codes: vec![],
+                scales: vec![],
+                biases: vec![],
+                rows: 2048,
+                cols: 2048,
+            },
+            lm_head: Nf4Weights {
+                packed_codes: vec![],
+                scales: vec![],
+                biases: vec![],
+                rows: 2048,
+                cols: 2048,
+            },
         };
         assert_eq!(w.norms.len(), 28);
         assert_eq!(w.norms[0].len(), 2048);

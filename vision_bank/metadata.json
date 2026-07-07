@@ -1,0 +1,310 @@
+{
+  "tensor_name": "model.vision_embedder.patch_dense.weight",
+  "input_dim": 6912,
+  "output_dim": 3840,
+  "promotion_count": 12250,
+  "holdout_count": 6566,
+  "promotion_source_count": 32,
+  "holdout_source_count": 16,
+  "patch_size": 16,
+  "pooling_kernel": 3,
+  "normalization": "imagenet_mean_std",
+  "model_id": "google/gemma-4-12B-it-qat-q4_0-unquantized",
+  "model_digest": "58540658b6c08edab2ddc1fbde7f28cc9987ced3",
+  "preprocessing_version": "v1",
+  "activation_source": "prerendered",
+  "image_fixtures": {
+    "promotion": [
+      {
+        "variant": "checkerboard",
+        "width": 224,
+        "height": 224,
+        "seed": 1001
+      },
+      {
+        "variant": "gradient",
+        "width": 224,
+        "height": 224,
+        "seed": 1002
+      },
+      {
+        "variant": "text_screenshot",
+        "width": 224,
+        "height": 224,
+        "seed": 1003
+      },
+      {
+        "variant": "ui_screenshot",
+        "width": 224,
+        "height": 224,
+        "seed": 1004
+      },
+      {
+        "variant": "edges",
+        "width": 224,
+        "height": 224,
+        "seed": 1005
+      },
+      {
+        "variant": "low_light",
+        "width": 224,
+        "height": 224,
+        "seed": 1006
+      },
+      {
+        "variant": "texture",
+        "width": 448,
+        "height": 448,
+        "seed": 1007
+      },
+      {
+        "variant": "chart",
+        "width": 224,
+        "height": 224,
+        "seed": 1008
+      },
+      {
+        "variant": "line_art",
+        "width": 224,
+        "height": 224,
+        "seed": 1009
+      },
+      {
+        "variant": "aspect_ratio_wide",
+        "width": 448,
+        "height": 224,
+        "seed": 1010
+      },
+      {
+        "variant": "aspect_ratio_tall",
+        "width": 224,
+        "height": 448,
+        "seed": 1011
+      },
+      {
+        "variant": "portrait",
+        "width": 224,
+        "height": 224,
+        "seed": 1012
+      },
+      {
+        "variant": "checkerboard",
+        "width": 336,
+        "height": 336,
+        "seed": 1013
+      },
+      {
+        "variant": "gradient",
+        "width": 336,
+        "height": 336,
+        "seed": 1014
+      },
+      {
+        "variant": "text_screenshot",
+        "width": 448,
+        "height": 224,
+        "seed": 1015
+      },
+      {
+        "variant": "ui_screenshot",
+        "width": 224,
+        "height": 448,
+        "seed": 1016
+      },
+      {
+        "variant": "low_light",
+        "width": 336,
+        "height": 336,
+        "seed": 1017
+      },
+      {
+        "variant": "texture",
+        "width": 224,
+        "height": 224,
+        "seed": 1018
+      },
+      {
+        "variant": "chart",
+        "width": 336,
+        "height": 336,
+        "seed": 1019
+      },
+      {
+        "variant": "line_art",
+        "width": 336,
+        "height": 336,
+        "seed": 1020
+      },
+      {
+        "variant": "edges",
+        "width": 336,
+        "height": 336,
+        "seed": 1021
+      },
+      {
+        "variant": "portrait",
+        "width": 336,
+        "height": 336,
+        "seed": 1022
+      },
+      {
+        "variant": "checkerboard",
+        "width": 448,
+        "height": 448,
+        "seed": 1023
+      },
+      {
+        "variant": "gradient",
+        "width": 448,
+        "height": 224,
+        "seed": 1024
+      },
+      {
+        "variant": "text_screenshot",
+        "width": 336,
+        "height": 336,
+        "seed": 1025
+      },
+      {
+        "variant": "ui_screenshot",
+        "width": 336,
+        "height": 336,
+        "seed": 1026
+      },
+      {
+        "variant": "low_light",
+        "width": 448,
+        "height": 448,
+        "seed": 1027
+      },
+      {
+        "variant": "texture",
+        "width": 336,
+        "height": 336,
+        "seed": 1028
+      },
+      {
+        "variant": "chart",
+        "width": 448,
+        "height": 224,
+        "seed": 1029
+      },
+      {
+        "variant": "line_art",
+        "width": 448,
+        "height": 224,
+        "seed": 1030
+      },
+      {
+        "variant": "edges",
+        "width": 448,
+        "height": 224,
+        "seed": 1031
+      },
+      {
+        "variant": "portrait",
+        "width": 448,
+        "height": 224,
+        "seed": 1032
+      }
+    ],
+    "holdout": [
+      {
+        "variant": "checkerboard",
+        "width": 224,
+        "height": 224,
+        "seed": 2001
+      },
+      {
+        "variant": "gradient",
+        "width": 224,
+        "height": 224,
+        "seed": 2002
+      },
+      {
+        "variant": "text_screenshot",
+        "width": 224,
+        "height": 224,
+        "seed": 2003
+      },
+      {
+        "variant": "ui_screenshot",
+        "width": 336,
+        "height": 336,
+        "seed": 2004
+      },
+      {
+        "variant": "edges",
+        "width": 336,
+        "height": 336,
+        "seed": 2005
+      },
+      {
+        "variant": "low_light",
+        "width": 336,
+        "height": 336,
+        "seed": 2006
+      },
+      {
+        "variant": "texture",
+        "width": 224,
+        "height": 224,
+        "seed": 2007
+      },
+      {
+        "variant": "chart",
+        "width": 448,
+        "height": 224,
+        "seed": 2008
+      },
+      {
+        "variant": "line_art",
+        "width": 448,
+        "height": 224,
+        "seed": 2009
+      },
+      {
+        "variant": "portrait",
+        "width": 336,
+        "height": 336,
+        "seed": 2010
+      },
+      {
+        "variant": "aspect_ratio_wide",
+        "width": 224,
+        "height": 448,
+        "seed": 2011
+      },
+      {
+        "variant": "aspect_ratio_tall",
+        "width": 448,
+        "height": 224,
+        "seed": 2012
+      },
+      {
+        "variant": "checkerboard",
+        "width": 336,
+        "height": 336,
+        "seed": 2013
+      },
+      {
+        "variant": "gradient",
+        "width": 448,
+        "height": 448,
+        "seed": 2014
+      },
+      {
+        "variant": "low_light",
+        "width": 448,
+        "height": 448,
+        "seed": 2015
+      },
+      {
+        "variant": "texture",
+        "width": 336,
+        "height": 336,
+        "seed": 2016
+      }
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 use crate::tools::list_devices::tool_list_devices;
 use crate::tools::{FunctionCall, ToolDefinition};
+#[cfg(feature = "deno_core")]
 use serde_json::json;
 use std::path::Path;
 
@@ -24,6 +25,7 @@ pub fn sandbox_execute(
         "glob_files" => crate::tools::sandbox::tool_glob_files(&root, &call.arguments),
         "search_files" => crate::tools::sandbox::tool_search_files(&root, &call.arguments),
         "file_info" => crate::tools::sandbox::tool_file_info(&root, &call.arguments),
+        #[cfg(feature = "deno_core")]
         "run_javascript" => tool_javascript(&root, &call.arguments),
         "list_devices" => tool_list_devices(&root, &call.arguments),
         _ => return Err(format!("unknown tool '{}'", call.name)),
@@ -140,6 +142,7 @@ pub fn default_sandbox_tools() -> Vec<ToolDefinition> {
             }),
             required: vec!["path".into()],
         },
+        #[cfg(feature = "deno_core")]
         ToolDefinition {
             name: "run_javascript".into(),
             description: "Run JavaScript code in a sandboxed V8 isolate.  Has access to readFile(path), writeFile(path, content), listDirectory(path), and console.log.  No network, no subprocess, no env access.  Use for automation, testing, and web dev tasks.".into(),
@@ -157,6 +160,7 @@ pub fn default_sandbox_tools() -> Vec<ToolDefinition> {
     ]
 }
 
+#[cfg(feature = "deno_core")]
 fn tool_javascript(root: &Path, args: &serde_json::Value) -> serde_json::Value {
     let code = match args.get("code").and_then(|v| v.as_str()) {
         Some(s) => s,

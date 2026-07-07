@@ -14,13 +14,69 @@
 //! the Mac via MLX; what lives here is the loss/agreement/acceptance math that
 //! is identical on every platform and must be verified deterministically.
 
+// ── Accelerate-optimised softmax (macOS) vs scalar fallback ──────────────
+
+#[cfg(target_os = "macos")]
+#[link(name = "Accelerate", kind = "framework")]
+extern "C" {
+    /// Vector exponential: y[i] = exp(x[i]).
+    fn vvexpf(y: *mut f32, x: *const f32, n: *const i32);
+
+    /// Vector sum: result = sum(A[i]) over i in [0, N)
+    fn vDSP_sve(a: *const f32, a_stride: i32, result: *mut f32, n: i32);
+    /// Vector-scalar add: C[i] = A[i] + B
+    fn vDSP_vsadd(a: *const f32, a_stride: i32, b: *const f32, c: *mut f32, c_stride: i32, n: i32);
+
+    /// Vector-scalar multiply: C[i] = A[i] * B
+    fn vDSP_vsmul(a: *const f32, a_stride: i32, b: *const f32, c: *mut f32, c_stride: i32, n: i32);
+}
+
+/// Accelerated softmax body — one pre-allocated scratch buffer, in-place.
+/// Computes `out[i] = exp((logits[i] - max_val) * inv_temp) / sum`.
+#[cfg(target_os = "macos")]
+fn softmax_impl(logits: &[f32], max_val: f32, inv_temp: f32, out: &mut [f32]) {
+    let n = logits.len() as i32;
+    unsafe {
+        // Step 1: out[i] = logits[i] + (-max_val)  →  out[i] = logits[i] - max_val
+        let neg_max = -max_val;
+        vDSP_vsadd(logits.as_ptr(), 1, &neg_max, out.as_mut_ptr(), 1, n);
+
+        // Step 2: out[i] *= inv_temp  →  out[i] = (logits[i] - max_val) / temperature
+        vDSP_vsmul(out.as_ptr(), 1, &inv_temp, out.as_mut_ptr(), 1, n);
+
+        // Step 3: out[i] = exp(out[i]) — vvexpf supports in-place
+        vvexpf(out.as_mut_ptr(), out.as_ptr(), &n);
+
+        // Step 4: sum = Σ out[i]
+        let mut sum: f32 = 0.0;
+        vDSP_sve(out.as_ptr(), 1, &mut sum, n);
+        let inv_sum = (sum.max(1e-30_f32)).recip();
+
+        // Step 5: out[i] *= inv_sum  →  out[i] = exp(...) / sum
+        vDSP_vsmul(out.as_ptr(), 1, &inv_sum, out.as_mut_ptr(), 1, n);
+    }
+}
+
+/// Scalar fallback softmax — same contract as the accelerated version.
+#[cfg(not(target_os = "macos"))]
+fn softmax_impl(logits: &[f32], max_val: f32, inv_temp: f32, out: &mut [f32]) {
+    for i in 0..logits.len() {
+        out[i] = ((logits[i] - max_val) * inv_temp).exp();
+    }
+    let sum: f32 = out.iter().copied().sum::<f32>().max(1e-30_f32);
+    for e in out.iter_mut() {
+        *e /= sum;
+    }
+}
+
 /// Temperature-scaled softmax over one logit vector.
 fn softmax(logits: &[f32], temperature: f32) -> Vec<f32> {
     let t = temperature.max(1e-6);
-    let m = logits.iter().cloned().fold(f32::MIN, f32::max);
-    let ex: Vec<f32> = logits.iter().map(|&x| ((x - m) / t).exp()).collect();
-    let s: f32 = ex.iter().sum::<f32>().max(1e-30);
-    ex.iter().map(|&e| e / s).collect()
+    let inv_t = 1.0 / t;
+    let max_val = logits.iter().cloned().fold(f32::MIN, f32::max);
+    let mut result = vec![0.0_f32; logits.len()];
+    softmax_impl(logits, max_val, inv_t, &mut result);
+    result
 }
 
 /// Knowledge-distillation loss for one example: `T² · KL(p_teacher ‖ q_student)`
@@ -177,6 +233,50 @@ pub fn joint_kd_divergence(
     }
 }
 
+/// Multi-codebook KL divergence for parallel codebook prediction.
+///
+/// Qwen3-TTS uses a 16-layer multi-codebook design: it predicts multiple
+/// interleaved/parallel codebook indices simultaneously. Each codebook
+/// produces its own logit distribution per step. This function computes
+/// the KL divergence independently per codebook head, sums them, and
+/// normalises by the number of heads, producing
+/// `(1/H) · Σ_h KL(teacher_h || student_h)` so the magnitude is
+/// independent of codebook count.
+///
+/// Args:
+///   teacher_logits: &[Vec<f32>] — one logit vector per codebook head
+///   student_logits: &[Vec<f32>] — one logit vector per codebook head
+///   temperature: f32 — temperature for softening both distributions
+///
+/// Both slices must have the same length (same number of codebook heads).
+pub fn multi_codebook_kd_divergence(
+    teacher_logits: &[Vec<f32>],
+    student_logits: &[Vec<f32>],
+    temperature: f32,
+) -> f32 {
+    // Validate lengths
+    assert_eq!(
+        teacher_logits.len(),
+        student_logits.len(),
+        "teacher and student must have same number of codebook heads"
+    );
+
+    let n_heads = teacher_logits.len();
+    if n_heads == 0 {
+        return 0.0;
+    }
+
+    let mut total_kl = 0.0f32;
+    // Compute per-codebook KL divergence and sum
+    // This is equivalent to: (1/H) · Σ_h KL(p^teacher_h || q^student_h)
+    for (t_logits, s_logits) in teacher_logits.iter().zip(student_logits.iter()) {
+        total_kl += kd_divergence(t_logits, s_logits, temperature);
+    }
+
+    // Return mean across heads so the magnitude is independent of codebook count
+    total_kl / n_heads as f32
+}
+
 /// Result of the per-block acceptance gate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BlockAcceptance {
@@ -316,5 +416,33 @@ mod tests {
             j.primary
         );
         assert!((j.total - j.primary - 1e-6 * j.mtp[0]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_multi_codebook_kd_zero_when_equal() {
+        // Two codebook heads with identical logits -> KL = 0
+        let head1 = vec![1.0f32, 2.0, 3.0, 4.0];
+        let head2 = vec![4.0f32, 3.0, 2.0, 1.0];
+        let teacher = vec![head1.clone(), head2.clone()];
+        let student = vec![head1, head2];
+        let kl = multi_codebook_kd_divergence(&teacher, &student, 1.0);
+        assert!(kl.abs() < 1e-6, "identical logits should give zero KL");
+    }
+
+    #[test]
+    fn test_multi_codebook_kd_divergent_heads() {
+        // Two heads, one matches one diverges -> KL > 0 but not as large as both diverging
+        let matching = vec![1.0f32, 2.0, 3.0, 4.0];
+        let divergent = vec![100.0f32, 0.0, 0.0, 0.0];
+        let teacher = vec![matching.clone(), divergent.clone()];
+        // Only head 1 (divergent) diverges; the matching head is identical
+        let student = vec![matching, vec![0.0f32, 100.0, 0.0, 0.0]];
+        let kl = multi_codebook_kd_divergence(&teacher, &student, 1.0);
+        assert!(kl > 0.0, "divergent head should yield positive KL");
+        // Both divergent should be larger than one divergent
+        let both_divergent = vec![divergent.clone(), divergent];
+        let both_student = vec![vec![0.0f32, 100.0, 0.0, 0.0], vec![0.0f32, 0.0, 100.0, 0.0]];
+        let kl_both = multi_codebook_kd_divergence(&both_divergent, &both_student, 1.0);
+        assert!(kl_both > kl, "both heads diverging should give larger KL");
     }
 }

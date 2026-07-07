@@ -5,23 +5,28 @@
 //! `mlx_rs::Array` operations behind a generational slot-map registry.
 
 #[cfg(target_os = "macos")]
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(any(target_os = "macos", all(feature = "prism-backend-ios", target_os = "ios")))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
 pub mod accelerate;
-#[cfg(target_os = "macos")]
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 pub mod accelerate_ffi;
 /// Accelerate CPU execution lane — arena-view-based ops on CPU-accessible
 /// memory (zero-copy, no FFI). Pure Rust fallback with no OS dependency.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 pub mod accelerate_lane;
-#[cfg(target_os = "macos")]
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
 #[path = "ane.rs"]
 pub mod ane_backend;
-/// Megakernel fused Metal GPU decode — wraps Orchestrator as a BackendInstance.
-#[cfg(target_os = "macos")]
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod megakernel_backend;
 pub mod authority;
 pub mod completion;
 #[cfg(target_os = "macos")]
@@ -44,10 +49,16 @@ pub mod coreai_lane;
 #[cfg(feature = "candle-cpu")]
 pub mod cpu_attn;
 pub mod evaluation;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod flex_dispatch;
 pub mod graph;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 // production-neutral heterogeneous orchestration
 pub mod heterogeneous_executor;
 #[cfg(feature = "intel")]
@@ -55,12 +66,19 @@ pub mod intel_level_zero;
 /// Intel USM zero-copy buffer abstraction for iGPU (Level Zero / oneAPI).
 #[cfg(feature = "intel")]
 pub mod intel_usm;
+/// Megakernel fused Metal GPU decode — wraps Orchestrator as a BackendInstance.
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod megakernel_backend;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod metal;
 /// Metal consumer — validates Core ML output slots against CPU references.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod metal_consumer;
 /// Metal IOSurface binding — binds Metal consumers/producers to cimage slot contracts.
+#[cfg(target_os = "macos")]
 pub mod metal_iosurface;
 /// NPU abstraction — unified FFI for Apple ANE, Intel VPU, AMD XDNA.
 pub mod npu;
@@ -68,6 +86,7 @@ pub mod npu;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
+    feature = "prism-backend-ios",
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix"
@@ -82,6 +101,7 @@ pub mod tensor_registry;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
+    feature = "prism-backend-ios",
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix"
@@ -1113,13 +1133,11 @@ impl TraceRingBuffer {
 /// from the cimage plan).
 #[cfg(target_os = "macos")]
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub fn create_heterogeneous_executor() -> Result<
-    crate::backend::heterogeneous_executor::HeterogeneousExecutor,
-    String,
-> {
+pub fn create_heterogeneous_executor(
+) -> Result<crate::backend::heterogeneous_executor::HeterogeneousExecutor, String> {
+    use crate::backend::ane_backend::AneBackend;
     use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
     use crate::backend::metal::MetalBackend;
-    use crate::backend::ane_backend::AneBackend;
 
     let mut executor = HeterogeneousExecutor::new();
 
@@ -1140,14 +1158,11 @@ pub fn create_inference_executor(
     cimage_path: impl AsRef<std::path::Path>,
     batch_size: u32,
     int4_mode: bool,
-) -> Result<
-    crate::backend::heterogeneous_executor::HeterogeneousExecutor,
-    String,
-> {
-    use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
-    use crate::backend::metal::MetalBackend;
+) -> Result<crate::backend::heterogeneous_executor::HeterogeneousExecutor, String> {
     use crate::backend::ane_backend::AneBackend;
+    use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
     use crate::backend::megakernel_backend::MegakernelBackend;
+    use crate::backend::metal::MetalBackend;
 
     let mut executor = HeterogeneousExecutor::new();
 

@@ -12,7 +12,7 @@
 //!
 //! Requires: macOS 14.0+, Apple Silicon (M1 tested), xcrun toolchain
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

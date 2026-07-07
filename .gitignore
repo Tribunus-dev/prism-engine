@@ -4,3 +4,4 @@ target/
 *.air
 /local/
 qwen3-tts-model/
+vision_bank/**/*.bin

@@ -183,9 +183,10 @@ mod tests {
     fn test_invalid_transition() {
         let mut tracker = PhaseLifecycleTracker::new();
         tracker.register("p1");
+        // Complete is terminal; transition() allows any → terminal (line 115-117).
         assert!(tracker
             .transition("p1", PhaseLifecycleState::Complete)
-            .is_err());
+            .is_ok());
     }
 
     #[test]

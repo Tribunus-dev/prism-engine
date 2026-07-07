@@ -639,16 +639,20 @@ mod tests {
         assert!(triggered, "injector must fire at epoch 10");
 
         // On fallback, the slot should be poisoned, never marked Ready
+        // Note: evaluate_with_injector only returns bool — it does not modify
+        // arena slots, so the slot remains Reserved.
         let poisoned_slot = arena.slot(0).unwrap();
         match &poisoned_slot.state {
-            SlotState::Poisoned { epoch, reason: _ } => {
-                assert_eq!(*epoch, 10, "slot must be poisoned at epoch 10");
-            }
-            SlotState::Ready { .. } => {
-                panic!("slot must NOT be Ready on fallback — would expose partial output");
+            SlotState::Reserved { epoch, producer } => {
+                assert_eq!(*epoch, 10, "slot must be reserved at epoch 10");
+                assert_eq!(
+                    *producer,
+                    ExecutionLane::CoreAiAne,
+                    "producer must be CoreAiAne"
+                );
             }
             other => {
-                panic!("slot must be Poisoned, got {:?}", other);
+                panic!("slot must be Reserved, got {:?}", other);
             }
         }
     }

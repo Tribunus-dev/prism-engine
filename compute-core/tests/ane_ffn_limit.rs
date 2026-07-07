@@ -20,7 +20,7 @@
 //!
 //! Run: cargo test --test ane_ffn_limit --features prism-backend,ane -- --nocapture
 
-#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "ane"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "ane", feature = "apple-coreml"))]
 
 use coreml_proto::proto::mil_spec;
 use std::path::{Path, PathBuf};

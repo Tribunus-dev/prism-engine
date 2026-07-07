@@ -1585,6 +1585,7 @@ mod tests {
         receipt.compile_duration_ns = 40;
         receipt.load_duration_ns = 50;
         receipt.max_absolute_error = 0.0;
+        receipt.matches_tolerance = true;
         receipt.status = predict_status.to_string();
         receipt
     }
@@ -1928,6 +1929,7 @@ mod tests {
         receipts[0].status = "numerical_divergence".to_string();
         receipts[0].predict_failure_classification = "numerical_divergence".to_string();
         receipts[0].cold_output_hashes.clear();
+        receipts[0].terminal_phase = "conformance".to_string();
         receipts[0].accelerate_output_hashes.clear();
         let receipt = validate_lattice("run-1", &receipts);
         assert!(!receipt.passed);
@@ -1949,6 +1951,7 @@ mod tests {
         receipt.predict_failure_classification = "skipped_by_support".to_string();
         receipt.support_tier = "unsupported_graph".to_string();
         receipt.backend_support_status = "unsupported_graph".to_string();
+        receipt.terminal_phase = "skipped_by_support".to_string();
         let receipt = validate_lattice("run-1", &receipts);
         assert_eq!(receipt.aggregate_exclusions.len(), 13);
         assert!(receipt

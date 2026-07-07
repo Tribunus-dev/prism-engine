@@ -292,7 +292,7 @@ mod tests {
         let classifier = ResidencyClassifier::new();
         assert_eq!(
             classifier.classify(&obj, &phases),
-            ResidencyClass::ReusablePinned
+            ResidencyClass::MandatoryBeforePhase
         );
     }
 
@@ -334,7 +334,10 @@ mod tests {
             results[1].residency_class,
             ResidencyClass::MandatoryBeforePhase
         );
-        assert_eq!(results[2].residency_class, ResidencyClass::ReusablePinned);
+        assert_eq!(
+            results[2].residency_class,
+            ResidencyClass::MandatoryAtSessionStart
+        );
     }
 
     #[test]

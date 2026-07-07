@@ -4,7 +4,6 @@
 //! into a single decoder-width input sequence.
 
 use crate::compute_image::multimodal::InputModality;
-use crate::compute_image::multimodal::{MultimodalArtifactSummary, ProjectionPrecision};
 
 /// One part of a multimodal prompt.
 #[derive(Debug, Clone)]
@@ -158,39 +157,5 @@ impl MultimodalPromptPlan {
                 .embedding_spans
                 .iter()
                 .any(|s| s.modality != InputModality::Text)
-    }
-}
-
-impl MultimodalArtifactSummary {
-    /// Create an artifact summary from a loaded multimodal descriptor.
-    pub fn from_descriptor(
-        desc: &crate::compute_image::multimodal::MultimodalInputDescriptorV1,
-        projection_precision: ProjectionPrecision,
-    ) -> Self {
-        Self {
-            modalities: desc.modality_mask as u32,
-            image_soft_token_default: desc.image_default_soft_tokens,
-            image_soft_token_max: desc.image_max_soft_tokens,
-            projection_precision,
-            processor_contract_digest: desc.processor_contract_digest,
-            tensor_layout_digest: desc.tensor_layout_digest,
-        }
-    }
-
-    /// Create a text-only summary.
-    pub fn text_only() -> Self {
-        Self {
-            modalities: 0,
-            image_soft_token_default: 0,
-            image_soft_token_max: 0,
-            projection_precision: ProjectionPrecision::Unknown,
-            processor_contract_digest: [0u8; 32],
-            tensor_layout_digest: [0u8; 32],
-        }
-    }
-
-    /// Returns true if this artifact supports image input.
-    pub fn supports_image(&self) -> bool {
-        (self.modalities & 2) != 0
     }
 }

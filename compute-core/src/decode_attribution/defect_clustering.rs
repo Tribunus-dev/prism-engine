@@ -48,8 +48,8 @@ pub enum ClusterKind {
 impl ClusterKind {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ClusterKind::CoremlCompileContract => "coreai_compile_contract",
-            ClusterKind::CoremlPredictContract => "coreai_predict_contract",
+            ClusterKind::CoremlCompileContract => "coreml_compile_contract",
+            ClusterKind::CoremlPredictContract => "coreml_predict_contract",
             ClusterKind::MlxExecutionContract => "mlx_execution_contract",
             ClusterKind::MlxNumericalSemantics => "mlx_numerical_semantics",
             ClusterKind::AccelerateNumericalSemantics => "accelerate_numerical_semantics",

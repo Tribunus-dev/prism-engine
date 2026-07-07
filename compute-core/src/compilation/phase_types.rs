@@ -14,7 +14,9 @@ pub use super::phase_ir::{CompilationId, DeviceSignature, PhaseId};
 
 // ── Compile phase type ──────────────────────────────────────────────────────
 
-/// The 23 primitive phase types of the distill-compiler (spec §8).
+/// The 28 primitive phase types of the distill-compiler (spec §8).
+/// The 29 primitive phase types of the distill-compiler (spec §8).
+/// The 35 primitive phase types of the distill-compiler (spec §8, v3 multimodal).
 ///
 /// Every phase has immutable input and output tensor descriptors. The phase
 /// type determines the logical operation; the provider (Metal / Core ML /
@@ -44,6 +46,11 @@ pub enum PhaseType {
     SealStudentRegion,
     SealReceipt,
     CheckpointRun,
+    TapQkvProj,
+    TapOProj,
+    TapFfnGate,
+    TapFfnUp,
+    TapFfnDown,
 }
 
 // ── Element type ────────────────────────────────────────────────────────────
@@ -152,4 +159,19 @@ pub struct Phase {
     pub provider: ProviderKind,
     pub sequence_number: u64,
     pub metadata: HashMap<String, String>,
+}
+
+/// How a tensor is materialized between execution lanes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MaterializationMode {
+    /// IO-arena buffer reused by the consumer lane (proven zero-copy).
+    ReusedProviderBuffer,
+    /// Explicit shared-memory binding (IOSurface page-table op).
+    ExplicitSharedMemoryBinding,
+    /// Format conversion required (e.g. FP16→FP32).
+    ExplicitConversion,
+    /// Memory-level copy required.
+    ExplicitCopy,
+    /// Managed by Core ML runtime — exact cost unknown.
+    RuntimeManagedOpaqueTransfer,
 }

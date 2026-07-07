@@ -126,7 +126,9 @@ impl std::fmt::Debug for ComellationToken {
 
 impl Clone for ComellationToken {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -168,19 +170,19 @@ impl ComellationToken {
         // Safety: ConcreteBlock::copy creates a heap-allocated block.
         // The command buffer retains the block until it fires the handler.
         let handler = ConcreteBlock::new(move |_cmd_buf: &metal::CommandBufferRef| {
-                if let Some(inner) = weak.upgrade() {
-                    inner
-                        .completed
-                        .store(true, std::sync::atomic::Ordering::Release);
-                    let callbacks = inner.on_complete.lock().drain(..).collect::<Vec<_>>();
-                    for cb in callbacks {
-                        cb();
-                    }
-                    // Wake any condvar waiters.
-                    let (lock, cvar) = &inner.condvar_pair;
-                    *lock.lock() = true;
-                    cvar.notify_all();
+            if let Some(inner) = weak.upgrade() {
+                inner
+                    .completed
+                    .store(true, std::sync::atomic::Ordering::Release);
+                let callbacks = inner.on_complete.lock().drain(..).collect::<Vec<_>>();
+                for cb in callbacks {
+                    cb();
                 }
+                // Wake any condvar waiters.
+                let (lock, cvar) = &inner.condvar_pair;
+                *lock.lock() = true;
+                cvar.notify_all();
+            }
         });
         // Safety: copy() heap-allocates the block; the command buffer retains it.
         let handler = handler.copy();
@@ -197,7 +199,11 @@ impl ComellationToken {
     ///
     /// If the work has already completed, `f` is invoked immediately.
     pub fn then(&self, f: impl FnOnce() + Send + 'static) {
-        if self.inner.completed.load(std::sync::atomic::Ordering::Acquire) {
+        if self
+            .inner
+            .completed
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
             f();
         } else {
             self.inner.on_complete.lock().push(Box::new(f));
@@ -209,7 +215,11 @@ impl ComellationToken {
     /// Blocks on a Condvar signalled by the Metal completion handler or
     /// the paired [`Completer`].
     pub fn wait(&self) {
-        if self.inner.completed.load(std::sync::atomic::Ordering::Acquire) {
+        if self
+            .inner
+            .completed
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
             return;
         }
         let (lock, cvar) = &self.inner.condvar_pair;

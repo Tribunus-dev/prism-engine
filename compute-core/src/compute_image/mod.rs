@@ -10,12 +10,20 @@
 //! bounded residency, and output parity. No-copy Metal buffers remain v2.
 
 pub mod adapter;
+#[cfg(target_os = "macos")]
 pub mod ane_compile;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod ane_prefill;
+#[cfg(target_os = "macos")]
 pub mod apple_cimage_manifest;
+#[cfg(target_os = "macos")]
 pub mod apple_shared_arena;
 pub mod cimage_loader;
 pub mod cimage_packer;
+#[cfg(target_os = "macos")]
 pub mod compaction;
 pub mod compatibility;
 pub mod compile;
@@ -23,6 +31,7 @@ pub mod content_store;
 pub mod diag;
 pub mod executable;
 pub mod execution_shape;
+#[cfg(target_os = "macos")]
 pub mod fallback_plan;
 pub mod fusion_abi;
 pub mod fusion_plan;
@@ -30,8 +39,12 @@ pub mod fusion_receipts;
 pub mod fusion_sealing;
 #[cfg(feature = "tensix")]
 pub mod fusion_tensix;
-pub mod hf;
+#[cfg(any(
+    target_os = "macos",
+    all(feature = "prism-backend-ios", target_os = "ios")
+))]
 pub mod heterogeneous;
+pub mod hf;
 pub mod hw_assessment;
 pub mod hw_bench_suite;
 pub mod kernel_provider;
@@ -45,14 +58,28 @@ pub mod megakernel;
 pub mod metal_codegen;
 #[cfg(test)]
 pub mod metal_codegen_model_test;
+#[cfg(all(
+    target_os = "macos",
+    any(
+        feature = "mlx-backend",
+        feature = "prism-backend",
+        feature = "prism-backend-ios"
+    )
+))]
 pub mod metal_epilogue;
 pub mod metal_pipeline;
 pub mod model_family;
 pub mod multimodal;
+#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", all(feature = "prism-backend-ios", target_os = "ios")))]
 pub mod orchestrator;
 pub mod phase_dag;
 pub mod phase_fallback;
 pub mod phase_graph;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod phase_graph_binding;
 pub mod phase_graph_builder;
 pub mod phase_graph_validation;
@@ -64,10 +91,16 @@ pub mod program;
 pub mod quant;
 pub mod receipts;
 pub mod residency;
+pub mod scheduler;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod segment;
+pub mod slot_types;
 pub mod source;
 pub mod speculative_routing;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod subgraph_mil;
 #[cfg(feature = "tensix")]
 pub mod tensix;
@@ -1098,6 +1131,9 @@ mod tests {
             readiness: None,
             compile_date: Default::default(),
             compile_host: Default::default(),
+            quantization_profiles: Default::default(),
+            quantization_quality: Default::default(),
+            quantization_quality_status: Default::default(),
             source: source,
             architecture: crate::config::TextArchitecture {
                 hidden_size: 64,
@@ -1199,6 +1235,9 @@ mod tests {
             readiness: None,
             compile_date: Default::default(),
             compile_host: Default::default(),
+            quantization_profiles: Default::default(),
+            quantization_quality: Default::default(),
+            quantization_quality_status: Default::default(),
             source: SourceIdentity {
                 config_hash: "abc".into(),
                 shard_hashes: vec![],
@@ -1817,4 +1856,8 @@ mod tests {
         eprintln!("[decode-8] PASSED: {} tokens", tokens.len());
     }
 }
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod alpha_types;

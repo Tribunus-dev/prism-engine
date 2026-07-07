@@ -22,6 +22,7 @@ pub mod legacy_adapter;
 pub mod memory_pool;
 #[cfg(feature = "metal-dispatch")]
 pub mod metal_decoder;
+pub mod outlier_detector;
 pub mod phase_cancellation;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod phase_engine;

@@ -58,9 +58,7 @@ fn make_input(m: usize, k: usize) -> Vec<f32> {
 ///
 /// The returned byte slice borrows from `arena`. The caller must keep `arena`
 /// alive for as long as the slice is used.
-unsafe fn make_iosurface_buffer(
-    f32_data: &[f32],
-) -> Result<(Arena, &'static [u8]), String> {
+unsafe fn make_iosurface_buffer(f32_data: &[f32]) -> Result<(Arena, &'static [u8]), String> {
     let byte_count = (f32_data.len() * 4).next_power_of_two() as u32;
     let arena = Arena::new_bytes(byte_count)?;
     arena.lock()?;
@@ -136,12 +134,26 @@ fn test_cpu_nf4_dequant_reference() {
     let (packed_codes, scales, biases) = pack_small_weights(k, n);
 
     let mut output = vec![0.0f32; m * n];
-    dequant_matmul_reference(&input, &packed_codes, &scales, &biases, m, k, n, &mut output)
-        .expect("CPU dequant_matmul_reference should succeed");
+    dequant_matmul_reference(
+        &input,
+        &packed_codes,
+        &scales,
+        &biases,
+        m,
+        k,
+        n,
+        &mut output,
+    )
+    .expect("CPU dequant_matmul_reference should succeed");
 
     // Naive reference: unpack weights, then matmul.
-    let unpacked =
-        tribunus_compute_core::nf4tile640::unpack_nf4_weights(&packed_codes, &scales, &biases, k, n);
+    let unpacked = tribunus_compute_core::nf4tile640::unpack_nf4_weights(
+        &packed_codes,
+        &scales,
+        &biases,
+        k,
+        n,
+    );
     let mut expected = vec![0.0f32; m * n];
     for i in 0..m {
         for j in 0..n {
@@ -155,10 +167,7 @@ fn test_cpu_nf4_dequant_reference() {
     assert!(
         result.passed,
         "CPU reference matmul mismatch: max_abs_error={}, mean_abs_error={}, mismatches={}/{}",
-        result.max_abs_error,
-        result.mean_abs_error,
-        result.mismatches,
-        result.total_elements
+        result.max_abs_error, result.mean_abs_error, result.mismatches, result.total_elements
     );
 }
 
@@ -188,18 +197,23 @@ fn test_gpu_nf4_dequant_matches_cpu() -> Result<(), String> {
 
     // Metal backend.
     let mut backend = MetalBackend::new()?;
-    let gpu_output =
-        metal_quantized_matmul(&mut backend, &input, m, k, n, &packed_codes, &scales, &biases)?;
+    let gpu_output = metal_quantized_matmul(
+        &mut backend,
+        &input,
+        m,
+        k,
+        n,
+        &packed_codes,
+        &scales,
+        &biases,
+    )?;
 
     // Compare.
     let result = validate_matmul(&cpu_output, &gpu_output, 0.05);
     assert!(
         result.passed,
         "GPU-CPU mismatch: max_abs_error={}, mean_abs_error={}, mismatches={}/{}",
-        result.max_abs_error,
-        result.mean_abs_error,
-        result.mismatches,
-        result.total_elements
+        result.max_abs_error, result.mean_abs_error, result.mismatches, result.total_elements
     );
     Ok(())
 }
@@ -224,12 +238,7 @@ fn test_bind_external_does_not_copy() -> Result<(), String> {
     // Bind the IOSurface-backed buffer to MetalBackend.
     let mut backend = MetalBackend::new()?;
     let token = arena.io_surface_id() as u64;
-    let handle = backend.bind_external(
-        token,
-        slice,
-        &[test_data.len() as i32],
-        DType::F32,
-    )?;
+    let handle = backend.bind_external(token, slice, &[test_data.len() as i32], DType::F32)?;
 
     // Read back — should match what was written.
     let receipt = backend.read_f32(handle)?;
@@ -268,18 +277,10 @@ fn test_shared_buffer_identity() -> Result<(), String> {
     let mut metal_backend = MetalBackend::new()?;
     let mut ane_backend = AneBackend::default();
 
-    let m_handle = metal_backend.bind_external(
-        token,
-        slice,
-        &[test_data.len() as i32],
-        DType::F32,
-    )?;
-    let a_handle = ane_backend.bind_external(
-        token,
-        slice,
-        &[test_data.len() as i32],
-        DType::F32,
-    )?;
+    let m_handle =
+        metal_backend.bind_external(token, slice, &[test_data.len() as i32], DType::F32)?;
+    let a_handle =
+        ane_backend.bind_external(token, slice, &[test_data.len() as i32], DType::F32)?;
 
     // Both backends should read identical data.
     let m_receipt = metal_backend.read_f32(m_handle)?;
@@ -400,12 +401,8 @@ fn test_cross_backend_dependency() -> Result<(), String> {
     // ── Metal writes data into the IOSurface buffer ────────────────────
 
     let mut metal_backend = MetalBackend::new()?;
-    let m_handle = metal_backend.bind_external(
-        token_id,
-        slice,
-        &[test_data.len() as i32],
-        DType::F32,
-    )?;
+    let m_handle =
+        metal_backend.bind_external(token_id, slice, &[test_data.len() as i32], DType::F32)?;
 
     // Write known data through the Metal buffer's raw pointer to simulate
     // GPU compute output.
@@ -423,12 +420,8 @@ fn test_cross_backend_dependency() -> Result<(), String> {
     // ── ANE binds to the same IOSurface buffer ─────────────────────────
 
     let mut ane_backend = AneBackend::default();
-    let a_handle = ane_backend.bind_external(
-        token_id,
-        slice,
-        &[test_data.len() as i32],
-        DType::F32,
-    )?;
+    let a_handle =
+        ane_backend.bind_external(token_id, slice, &[test_data.len() as i32], DType::F32)?;
 
     // Wait for Metal to finish.
     token.wait();
@@ -500,11 +493,18 @@ fn test_heterogeneous_metal_to_ane_activation() -> Result<(), String> {
     // ── Step 1 & 2: Metal computes and stores in IOSurface buffer ──────
 
     let mut metal_backend = MetalBackend::new()?;
-    let gpu_output =
-        metal_quantized_matmul(&mut metal_backend, &input, m, k, n, &packed_codes, &scales, &biases)?;
+    let gpu_output = metal_quantized_matmul(
+        &mut metal_backend,
+        &input,
+        m,
+        k,
+        n,
+        &packed_codes,
+        &scales,
+        &biases,
+    )?;
 
-    let (output_arena, output_slice) =
-        unsafe { make_iosurface_buffer(&gpu_output)? };
+    let (output_arena, output_slice) = unsafe { make_iosurface_buffer(&gpu_output)? };
     let output_token = output_arena.io_surface_id() as u64;
 
     // Verify GPU output matches CPU reference.
@@ -513,9 +513,7 @@ fn test_heterogeneous_metal_to_ane_activation() -> Result<(), String> {
         result.passed,
         "GPU output should match CPU reference before cross-backend transfer: \
          max_abs_error={}, mismatches={}/{}",
-        result.max_abs_error,
-        result.mismatches,
-        result.total_elements
+        result.max_abs_error, result.mismatches, result.total_elements
     );
 
     // ── Step 3: Bind Metal output to IOSurface, create token ──────────
@@ -541,8 +539,7 @@ fn test_heterogeneous_metal_to_ane_activation() -> Result<(), String> {
     )?;
 
     // ANE writes into a separate output buffer.
-    let (ane_output_arena, ane_output_slice) =
-        unsafe { make_iosurface_buffer(&gpu_output)? };
+    let (ane_output_arena, ane_output_slice) = unsafe { make_iosurface_buffer(&gpu_output)? };
     let ane_output_token = ane_output_arena.io_surface_id() as u64;
 
     let _a_handle_dst = ane_backend.bind_external(

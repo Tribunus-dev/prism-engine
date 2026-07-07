@@ -465,8 +465,8 @@ mod tests {
         let graph = builder.build_v2();
         // No weight_residency phase when num_layers == 0
         assert!(!graph.phases.iter().any(|p| p.id.0 == "weight_residency"));
-        // arena_alloc + (no prologue) + (no epilogue) + sampling = 2
-        assert_eq!(graph.phases.len(), 2);
+        // arena_alloc + prologue + epilogue + sampling = 4
+        assert_eq!(graph.phases.len(), 4);
     }
 
     #[test]

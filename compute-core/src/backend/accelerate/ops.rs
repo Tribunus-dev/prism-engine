@@ -225,32 +225,34 @@ impl AccelerateBackend {
         F: FnOnce(&mut [f32]) -> Result<(), String>,
     {
         let n = shape.iter().product::<i32>() as usize;
-        // Clone the allocator Arc to avoid holding a reference through
-        // self while calling self.allocate_slot later.
-        let alloc_opt = self.allocator.clone();
-        if let Some(allocator) = alloc_opt {
-            let alloc = allocator.lock();
-            let arena_id = alloc.allocate(1, n as u32, crate::arena::DataType::Float16)?;
-            let arena = alloc
-                .get_arena(arena_id)
-                .ok_or_else(|| "arena not found".to_string())?;
-            let ptr = unsafe { arena.base_ptr() as *mut f32 };
-            let len = n;
-            let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
-            fill(slice)?;
+        // macOS: IOSurface-backed arena path for cross-lane zero-copy output.
+        #[cfg(target_os = "macos")]
+        {
+            let alloc_opt = self.allocator.clone();
+            if let Some(allocator) = alloc_opt {
+                let alloc = allocator.lock();
+                let arena_id = alloc.allocate(1, n as u32, crate::arena::DataType::Float16)?;
+                let arena = alloc
+                    .get_arena(arena_id)
+                    .ok_or_else(|| "arena not found".to_string())?;
+                let ptr = unsafe { arena.base_ptr() as *mut f32 };
+                let len = n;
+                let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+                fill(slice)?;
 
-            drop(alloc);
-            let idx = self.allocate_slot(TensorStorage::External { ptr, len }, shape)?;
-            Ok(TensorHandle {
-                slot: idx as u32,
-                generation: self.generations[idx],
-            })
-        } else {
-            let mut buf = uncached_vec_f32!(n);
-            let buf_slice = buf.as_mut_slice();
-            fill(buf_slice)?;
-            self.create_f32(buf_slice, shape)
+                drop(alloc);
+                let idx = self.allocate_slot(TensorStorage::External { ptr, len }, shape)?;
+                return Ok(TensorHandle {
+                    slot: idx as u32,
+                    generation: self.generations[idx],
+                });
+            }
         }
+        // Fallback: owned-tensor path (all platforms).
+        let mut buf = uncached_vec_f32!(n);
+        let buf_slice = buf.as_mut_slice();
+        fill(buf_slice)?;
+        self.create_f32(buf_slice, shape)
     }
 
     fn data(&self, handle: TensorHandle) -> Result<&[f32], String> {

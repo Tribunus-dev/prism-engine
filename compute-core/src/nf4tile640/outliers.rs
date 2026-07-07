@@ -233,7 +233,11 @@ pub fn detect_outlier_group(
     let mut sorted: Vec<f32> = group_values.to_vec();
     heap_sort(&mut sorted);
 
-    let max_abs = group_values.iter().copied().map(f32::abs).fold(0.0_f32, f32::max);
+    let max_abs = group_values
+        .iter()
+        .copied()
+        .map(f32::abs)
+        .fold(0.0_f32, f32::max);
 
     let p10 = percentile(&sorted, 10.0);
     let p50 = median(&sorted);
@@ -242,7 +246,11 @@ pub fn detect_outlier_group(
     let raw_spread = p90 - p10;
     let robust_spread = raw_spread.max(1e-8);
     let is_uniform = raw_spread < 1e-8;
-    let outlier_ratio = if is_uniform { 0.0 } else { max_abs / robust_spread };
+    let outlier_ratio = if is_uniform {
+        0.0
+    } else {
+        max_abs / robust_spread
+    };
 
     let threshold = policy.outlier_threshold * robust_spread;
     let num_outliers = group_values
@@ -319,10 +327,7 @@ pub fn quantize_and_residual(
 ///
 /// Computes `byte_count` as the serialized size of the pack:
 /// `4 (tile_index) + 4 (count) + residuals.len() * 12 (group_index + packed_position + residual)`.
-pub fn build_sidecar_pack(
-    tile_index: u32,
-    residuals: Vec<SidecarResidual>,
-) -> SidecarPack {
+pub fn build_sidecar_pack(tile_index: u32, residuals: Vec<SidecarResidual>) -> SidecarPack {
     let count = residuals.len() as u32;
     // Each residual: 4 (group_index) + 4 (packed_position) + 4 (residual_f32) = 12 bytes
     // Header: 4 (tile_index) + 4 (residual count)
@@ -337,11 +342,7 @@ pub fn build_sidecar_pack(
 /// Compute effective bits per weight (bpw) including sidecar overhead.
 ///
 /// `effective_bpw = base_bits + (sidecar_bytes * 8) / total_weight_count`
-pub fn compute_effective_bpw(
-    total_weight_count: u64,
-    sidecar_bytes: u64,
-    base_bits: u32,
-) -> f32 {
+pub fn compute_effective_bpw(total_weight_count: u64, sidecar_bytes: u64, base_bits: u32) -> f32 {
     if total_weight_count == 0 {
         return base_bits as f32;
     }
@@ -443,8 +444,8 @@ pub fn analyze_matrix_outliers(
     matrix_name: &str,
     rows: u32,
     cols: u32,
-    weights: &[f32],           // full row-major weight matrix
-    groups: &[Vec<f32>],       // pre-split groups (each 128 values)
+    weights: &[f32],     // full row-major weight matrix
+    groups: &[Vec<f32>], // pre-split groups (each 128 values)
     packed_codes: &[u8],
     scales: &[f32],
     biases: &[f32],
@@ -454,8 +455,7 @@ pub fn analyze_matrix_outliers(
     let total_groups = groups.len() as u32;
 
     // Step 1: Detect outliers
-    let (outlier_reports, _non_outlier_reports) =
-        detect_all_outliers(groups, matrix_name, policy);
+    let (outlier_reports, _non_outlier_reports) = detect_all_outliers(groups, matrix_name, policy);
 
     // Step 2: Build sidecar packs for outlier groups
     let mut sidecar_packs = Vec::new();
@@ -466,7 +466,10 @@ pub fn analyze_matrix_outliers(
         use std::collections::BTreeMap;
         let mut tile_outliers: BTreeMap<u32, Vec<&GroupOutlierReport>> = BTreeMap::new();
         for report in &outlier_reports {
-            tile_outliers.entry(report.tile_index).or_default().push(report);
+            tile_outliers
+                .entry(report.tile_index)
+                .or_default()
+                .push(report);
         }
 
         for (tile_idx, tile_reports) in &tile_outliers {
@@ -499,12 +502,7 @@ pub fn analyze_matrix_outliers(
                     let group_offset = gi as usize * crate::nf4tile640::GROUP_SIZE;
                     let original = weights.get(group_offset + pos).copied().unwrap_or(0.0);
 
-                    let residual = quantize_and_residual(
-                        original,
-                        reconstructed,
-                        gi,
-                        pos as u32,
-                    );
+                    let residual = quantize_and_residual(original, reconstructed, gi, pos as u32);
 
                     // Only store non-negligible residuals
                     if residual.residual.abs() > 1e-7 {
@@ -521,9 +519,7 @@ pub fn analyze_matrix_outliers(
 
     // Step 3: Protected channel analysis
     let protected_channels = if policy.protected_channels {
-        per_channel_importance.map(|imp| {
-            identify_protected_channels(matrix_name, imp, 5.0)
-        })
+        per_channel_importance.map(|imp| identify_protected_channels(matrix_name, imp, 5.0))
     } else {
         None
     };
@@ -599,7 +595,10 @@ mod tests {
         let policy = ProtectionPolicy::default();
         let report = detect_outlier_group(&group, 0, 0, "test_matrix", &policy);
 
-        assert!(report.is_outlier_group, "group with extreme outlier should be flagged");
+        assert!(
+            report.is_outlier_group,
+            "group with extreme outlier should be flagged"
+        );
         assert_eq!(report.group_index, 0);
         assert_eq!(report.tile_index, 0);
         assert!((report.max_abs - 100.0).abs() < 1e-6);
@@ -707,8 +706,8 @@ mod tests {
     #[test]
     fn test_nf4_reconstruct_value() {
         // Build a single tile of 640 values, pack it, then reconstruct one element.
-        use crate::nf4tile640::pack_nf4_tile;
         use crate::nf4tile640::nf4_quantize;
+        use crate::nf4tile640::pack_nf4_tile;
 
         let values = [0.5_f32; 640];
         let (codes, scales, biases) = pack_nf4_tile(&values);
@@ -719,7 +718,12 @@ mod tests {
         // Note: pack_nf4_tile normalizes by scale before quantizing, so we must too.
         let code = nf4_quantize(0.5 / scales[0]);
         let expected = nf4_dequantize(code) * scales[0] + biases[0];
-        assert!((recon - expected).abs() < 1e-6, "recon={} expected={}", recon, expected);
+        assert!(
+            (recon - expected).abs() < 1e-6,
+            "recon={} expected={}",
+            recon,
+            expected
+        );
     }
 
     #[test]
@@ -737,15 +741,7 @@ mod tests {
 
         let policy = ProtectionPolicy::default();
         let result = analyze_matrix_outliers(
-            "test",
-            rows, cols,
-            &weights,
-            &groups,
-            &codes,
-            &scales,
-            &biases,
-            None,
-            &policy,
+            "test", rows, cols, &weights, &groups, &codes, &scales, &biases, None, &policy,
         );
 
         assert_eq!(result.matrix_name, "test");

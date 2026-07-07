@@ -3,7 +3,7 @@
 //! Run: cargo test --test heterogeneous_hardware_validations --features prism-backend -- --nocapture
 //! Requires: macOS 14.0+ on Apple Silicon
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

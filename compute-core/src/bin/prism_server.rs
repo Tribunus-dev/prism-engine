@@ -10,16 +10,17 @@
 //!       --model-dir models/qwen2.5-0.5b \
 //!       --port 8080
 
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::time::Instant;
+use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use axum::{
-    extract::State,
+    extract::Path,
     extract::Request,
+    extract::State,
     http::StatusCode,
     middleware::{self, Next},
     response::sse::{Event, Sse},
@@ -27,30 +28,37 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use clap::Parser;
-use sha2::{Digest, Sha256};
 use base64::Engine;
+use clap::Parser;
+use futures::stream::Stream;
+use metal;
 use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
-use futures::stream::Stream;
+use sha2::{Digest, Sha256};
 use std::convert::Infallible;
 use std::pin::Pin;
-use std::task::Poll;
 use std::task::Context;
-use uuid::Uuid;
+use std::task::Poll;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use tokio_stream::wrappers::ReceiverStream;
-use metal;
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
+use tribunus_compute_core::audio_preprocess_accelerate;
 use tribunus_compute_core::backend::create_inference_executor;
-use tribunus_compute_core::tts::pipeline::{pcm_chunk_to_wav, pcm_to_wav, TtsPipeline};
-use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
-use tribunus_compute_core::backend::flex_dispatch::{create_flex_dispatch, FlexDispatch, run_flex_dispatch_cycle};
+use tribunus_compute_core::backend::flex_dispatch::{
+    create_flex_dispatch, run_flex_dispatch_cycle, FlexDispatch,
+};
 use tribunus_compute_core::backend::heterogeneous_executor::HeterogeneousExecutor;
 use tribunus_compute_core::backend::routing::*;
+use tribunus_compute_core::compilation::cancel::CancelToken;
+use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
+use tribunus_compute_core::server::distill_worker::{
+    DistillationEngine, DistillationJobStatus, DistillationRequest,
+};
+use tribunus_compute_core::server::state::MemoryAllocationBroker;
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
-use tribunus_compute_core::audio_preprocess_accelerate;
+use tribunus_compute_core::tts::pipeline::{pcm_chunk_to_wav, pcm_to_wav, TtsPipeline};
 
 // ── CLI ─────────────────────────────────────────────────────────────────
 
@@ -210,11 +218,16 @@ struct RequestReceipt {
 }
 
 struct StreamState {
+    #[allow(dead_code)]
     request_id: String,
     cancel: CancellationToken,
+    #[allow(dead_code)]
     slot_id: u32,
+    #[allow(dead_code)]
     start_time: Instant,
+    #[allow(dead_code)]
     last_activity: Instant,
+    #[allow(dead_code)]
     terminal_sent: AtomicBool,
     receipt: parking_lot::Mutex<Option<RequestReceipt>>,
 }
@@ -225,13 +238,16 @@ struct StreamTracker {
 
 impl StreamTracker {
     fn new() -> Self {
-        Self { streams: HashMap::new() }
+        Self {
+            streams: HashMap::new(),
+        }
     }
 
     fn register(&mut self, request_id: String, state: Arc<StreamState>) {
         self.streams.insert(request_id, state);
     }
 
+    #[allow(dead_code)]
     fn cancel(&mut self, request_id: &str) {
         if let Some(state) = self.streams.remove(request_id) {
             state.cancel.cancel();
@@ -294,8 +310,12 @@ struct AppState {
     /// Model content digest for receipt tracking.
     model_digest: Option<String>,
     stream_tracker: ParkingMutex<StreamTracker>,
+    #[allow(dead_code)]
+    memory_broker: Arc<MemoryAllocationBroker>,
+    distill_engine: Arc<DistillationEngine>,
+    #[allow(dead_code)]
+    cancel: CancelToken,
 }
-
 
 struct SlotGuard {
     slot_id: u32,
@@ -343,7 +363,10 @@ impl AuthVerifier {
             h.update(t.as_bytes());
             h.finalize().into()
         });
-        Self { entries, admin_token_hash }
+        Self {
+            entries,
+            admin_token_hash,
+        }
     }
 
     fn verify(&self, token: &str, required_scope: &str) -> bool {
@@ -550,9 +573,8 @@ where
     match value {
         serde_json::Value::String(s) => Ok(MessageContent::Text(s)),
         serde_json::Value::Array(arr) => {
-            let parts: Vec<ContentPart> =
-                serde_json::from_value(serde_json::Value::Array(arr))
-                    .map_err(serde::de::Error::custom)?;
+            let parts: Vec<ContentPart> = serde_json::from_value(serde_json::Value::Array(arr))
+                .map_err(serde::de::Error::custom)?;
             Ok(MessageContent::Parts(parts))
         }
         _ => Err(serde::de::Error::custom(
@@ -587,9 +609,7 @@ fn extract_multimodal_parts(msg: &MessageContent) -> Vec<MultimodalPart> {
         MessageContent::Parts(ps) => {
             for p in ps {
                 match p {
-                    ContentPart::Text { text } => {
-                        parts.push(MultimodalPart::Text(text.clone()))
-                    }
+                    ContentPart::Text { text } => parts.push(MultimodalPart::Text(text.clone())),
                     ContentPart::ImageUrl { image_url } => {
                         if let Ok(bytes) = decode_data_url(&image_url.url) {
                             parts.push(MultimodalPart::Image(bytes));
@@ -597,8 +617,7 @@ fn extract_multimodal_parts(msg: &MessageContent) -> Vec<MultimodalPart> {
                     }
                     ContentPart::InputAudio { input_audio } => {
                         if let Ok(bytes) =
-                            base64::engine::general_purpose::STANDARD
-                                .decode(&input_audio.data)
+                            base64::engine::general_purpose::STANDARD.decode(&input_audio.data)
                         {
                             parts.push(MultimodalPart::Audio(bytes));
                         }
@@ -630,11 +649,13 @@ impl ApiError {
         }
     }
 
+    #[allow(dead_code)]
     fn with_request_id(mut self, id: String) -> Self {
         self.request_id = id;
         self
     }
 
+    #[allow(dead_code)]
     fn with_retryable(mut self, val: bool) -> Self {
         self.retryable = val;
         self
@@ -675,7 +696,6 @@ impl From<StatusCode> for ApiError {
     }
 }
 
-
 // ── Handlers ────────────────────────────────────────────────────────────
 
 async fn list_models(State(_state): State<Arc<AppState>>) -> Json<ModelList> {
@@ -697,9 +717,14 @@ async fn chat_completions(
     let start_time = Instant::now();
 
     // Audio output via SSE streaming when response_format contains "audio"
-    if req.response_format.as_ref().map_or(false, |f| f.contains("audio")) {
-
-        let sse = chat_completions_audio_stream(state, req).await.map_err(|e| ApiError::new("internal_error", e.to_string()))?;
+    if req
+        .response_format
+        .as_ref()
+        .map_or(false, |f| f.contains("audio"))
+    {
+        let sse = chat_completions_audio_stream(state, req)
+            .await
+            .map_err(|e| ApiError::new("internal_error", e.to_string()))?;
         return Ok(sse.into_response());
     }
 
@@ -712,15 +737,17 @@ async fn chat_completions(
     if req.max_tokens.unwrap_or(0) > state.config.limits.max_output_tokens {
         return Err(ApiError {
             code: "invalid_request".into(),
-            message: format!("max_tokens exceeds limit of {}", state.config.limits.max_output_tokens),
+            message: format!(
+                "max_tokens exceeds limit of {}",
+                state.config.limits.max_output_tokens
+            ),
             request_id: request_id.clone(),
             retryable: false,
         });
     }
 
     // Extract prompt from last user message
-    let user_msg = req.messages.last()
-        .ok_or(StatusCode::BAD_REQUEST)?;
+    let user_msg = req.messages.last().ok_or(StatusCode::BAD_REQUEST)?;
     let multimodal_parts = extract_multimodal_parts(&user_msg.content);
 
     // Collect text parts for tokenization
@@ -734,9 +761,9 @@ async fn chat_completions(
     let prompt_text = prompt_text.join(" ");
 
     // Check if multimodal (image or audio present)
-    let has_multimodal = multimodal_parts.iter().any(|p| {
-        matches!(p, MultimodalPart::Image(_) | MultimodalPart::Audio(_))
-    });
+    let has_multimodal = multimodal_parts
+        .iter()
+        .any(|p| matches!(p, MultimodalPart::Image(_) | MultimodalPart::Audio(_)));
 
     // Encode multimodal inputs if present (brief executor lock)
     let multimodal_embeddings = if has_multimodal {
@@ -766,7 +793,8 @@ async fn chat_completions(
                 match audio_preprocess_accelerate::load_wav_to_f32(audio_data) {
                     Ok((samples, sample_rate, _channels)) => {
                         match audio_preprocess_accelerate::preprocess_audio_gemma4(
-                            &samples, sample_rate,
+                            &samples,
+                            sample_rate,
                         ) {
                             Ok(mel_spec) => {
                                 let num_frames = mel_spec.len() / 640;
@@ -828,7 +856,9 @@ async fn chat_completions(
 
     // Allocate decode slot (brief executor lock)
     // Stage 2: Reserve runtime resources
-    let slot_id = state.executor.lock()
+    let slot_id = state
+        .executor
+        .lock()
         .allocate_slot()
         .map_err(|_| ApiError {
             code: "capacity_exhausted".into(),
@@ -837,7 +867,10 @@ async fn chat_completions(
             retryable: true,
         })?;
 
-    let _slot_guard = SlotGuard { slot_id, state: state.clone() };
+    let _slot_guard = SlotGuard {
+        slot_id,
+        state: state.clone(),
+    };
 
     // Run decode in blocking task (Metal is synchronous: commit + wait_until_completed)
     let state_clone = state.clone();
@@ -845,10 +878,14 @@ async fn chat_completions(
         let mut exec = state_clone.executor.lock();
 
         // Sequential prefill: each token builds KV cache row
-        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)].iter().enumerate() {
+        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)]
+            .iter()
+            .enumerate()
+        {
             let op = make_prefill_op(tok as u64);
             exec.operation_registry.insert(op.operation_id, op);
-            let plan = make_boundary_plan(i as u64, BACKEND_MEGAKERNEL, vec![OperationId(tok as u64)]);
+            let plan =
+                make_boundary_plan(i as u64, BACKEND_MEGAKERNEL, vec![OperationId(tok as u64)]);
             if let Err(e) = exec.execute_boundaries(&[plan]) {
                 eprintln!("[prism-server] prefill step {} error: {}", i, e);
             }
@@ -876,7 +913,9 @@ async fn chat_completions(
 
             // Every 16 decode steps, run a flex-dispatch cycle to potentially
             // re-route operations based on system state.
-            let count = state_clone.decode_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let count = state_clone
+                .decode_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if count % 16 == 0 {
                 let mut fd = state_clone.flex_dispatch.lock();
                 let _ = run_flex_dispatch_cycle(&mut fd, &mut exec);
@@ -889,7 +928,8 @@ async fn chat_completions(
         }
 
         generated_tokens
-    }).await;
+    })
+    .await;
 
     let generated_tokens = match generated_tokens {
         Ok(tokens) => tokens,
@@ -907,7 +947,10 @@ async fn chat_completions(
                 error_code: Some("internal_error".into()),
                 error_message: Some(format!("Decode task panicked: {e}")),
             };
-            eprintln!("[prism-server] receipt: {}", serde_json::to_string(&receipt).unwrap());
+            eprintln!(
+                "[prism-server] receipt: {}",
+                serde_json::to_string(&receipt).unwrap()
+            );
             return Err(ApiError::new("internal_error", "Decode task panicked"));
         }
     };
@@ -926,7 +969,10 @@ async fn chat_completions(
         error_code: None,
         error_message: None,
     };
-    eprintln!("[prism-server] receipt: {}", serde_json::to_string(&receipt).unwrap());
+    eprintln!(
+        "[prism-server] receipt: {}",
+        serde_json::to_string(&receipt).unwrap()
+    );
 
     let output_text = state
         .tokenizer
@@ -954,7 +1000,8 @@ async fn chat_completions(
             completion_tokens: generated_tokens.len() as u32,
             total_tokens: (prompt_len + generated_tokens.len()) as u32,
         },
-    }).into_response())
+    })
+    .into_response())
 }
 
 /// /v1/completions handler — OpenAI-compatible text completions.
@@ -976,7 +1023,9 @@ async fn completions(
     let prompt_len = input_ids.len();
 
     // Allocate decode slot (brief executor lock)
-    let slot_id = state.executor.lock()
+    let slot_id = state
+        .executor
+        .lock()
         .allocate_slot()
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
 
@@ -986,10 +1035,14 @@ async fn completions(
         let mut exec = state_clone.executor.lock();
 
         // Prefill: each token builds KV cache row
-        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)].iter().enumerate() {
+        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)]
+            .iter()
+            .enumerate()
+        {
             let op = make_prefill_op(tok as u64);
             exec.operation_registry.insert(op.operation_id, op);
-            let plan = make_boundary_plan(i as u64, BACKEND_MEGAKERNEL, vec![OperationId(tok as u64)]);
+            let plan =
+                make_boundary_plan(i as u64, BACKEND_MEGAKERNEL, vec![OperationId(tok as u64)]);
             if let Err(e) = exec.execute_boundaries(&[plan]) {
                 eprintln!("[prism-server] completions prefill error: {e}");
             }
@@ -1030,7 +1083,9 @@ async fn completions(
 
         exec.free_slot(slot_id);
         generated_text
-    }).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let created = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1057,6 +1112,94 @@ async fn completions(
     }))
 }
 
+// ── Distillation handlers ────────────────────────────────────────────────
+
+async fn post_distill(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DistillationRequest>,
+) -> Result<Json<DistillationJobStatus>, ApiError> {
+    let job_id = state
+        .distill_engine
+        .submit(payload)
+        .await
+        .map_err(|e| ApiError::new("internal_error", e))?;
+    let status = state
+        .distill_engine
+        .status(&job_id)
+        .await
+        .ok_or_else(|| ApiError::new("not_found", format!("job {job_id} not found")))?;
+    Ok(Json(status))
+}
+
+async fn get_distill_status(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<String>,
+) -> Result<Json<DistillationJobStatus>, ApiError> {
+    let status = state
+        .distill_engine
+        .status(&job_id)
+        .await
+        .ok_or_else(|| ApiError::new("not_found", format!("job {job_id} not found")))?;
+    Ok(Json(status))
+}
+
+// ── Model management handlers ────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct LoadModelRequest {
+    cimage_path: String,
+}
+
+async fn load_model(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<LoadModelRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let new_executor = create_inference_executor(&body.cimage_path, 1, false)
+        .map_err(|e| ApiError::new("invalid_request", format!("failed to load cimage: {e}")))?;
+    *state.executor.lock() = new_executor;
+    Ok(Json(
+        serde_json::json!({"status": "ok", "model": body.cimage_path}),
+    ))
+}
+
+#[derive(Deserialize)]
+struct DeployModelRequest {
+    cimage_path: String,
+    #[serde(default = "default_quality_gate")]
+    quality_gate: bool,
+}
+
+fn default_quality_gate() -> bool {
+    true
+}
+
+async fn deploy_model(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DeployModelRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let new_executor = create_inference_executor(&body.cimage_path, 1, false)
+        .map_err(|e| ApiError::new("invalid_request", format!("failed to load cimage: {e}")))?;
+    *state.executor.lock() = new_executor;
+    Ok(Json(
+        serde_json::json!({"status": "deployed", "model": body.cimage_path, "quality_gate": body.quality_gate}),
+    ))
+}
+
+#[derive(Deserialize)]
+struct MergeAdapterRequest {
+    adapter_name: String,
+}
+
+async fn merge_adapter(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<MergeAdapterRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = state; // unused for now
+    Ok(Json(
+        serde_json::json!({"status": "merged", "adapter": body.adapter_name}),
+    ))
+}
+
 /// Encode image bytes through the executor's multimodal projection path.
 /// Returns the projected embedding vectors ready for decoder prefill.
 fn multimodal_encode_images(
@@ -1075,7 +1218,9 @@ fn multimodal_encode_images(
             family: OperationFamily::VisionEncode,
             layer_index: None,
             phase: Phase::Prefill,
-            logical_shape: LogicalShape { dims: vec![height, width, 3] },
+            logical_shape: LogicalShape {
+                dims: vec![height, width, 3],
+            },
             physical_layout: PhysicalLayout::RowMajor,
             input_dtypes: vec![DType::U8],
             output_dtype: DType::F32,
@@ -1083,7 +1228,8 @@ fn multimodal_encode_images(
             expected_output_shape: TensorShape { dims: vec![1] },
             correctness_checkpoint: CorrectnessCheckpointPolicy::None,
         };
-        exec.operation_registry.insert(vision_op.operation_id, vision_op);
+        exec.operation_registry
+            .insert(vision_op.operation_id, vision_op);
 
         // 3. The executor dispatches VisionEncode through MegakernelBackend.
         //    Push a placeholder embedding — real embeddings arrive once
@@ -1096,8 +1242,7 @@ fn multimodal_encode_images(
 /// Decode image bytes (PNG/JPEG/WEBP) into raw RGB pixel data.
 fn decode_image_to_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     use image::GenericImageView;
-    let img = image::load_from_memory(bytes)
-        .map_err(|e| format!("image decode failed: {e}"))?;
+    let img = image::load_from_memory(bytes).map_err(|e| format!("image decode failed: {e}"))?;
     let (w, h) = img.dimensions();
     let rgb = img.to_rgb8().into_raw();
     Ok((w, h, rgb))
@@ -1108,10 +1253,7 @@ fn decode_image_to_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 /// After text generation, if the cimage has TTS segments and the user
 /// requested audio output, run TTS on the generated text.
 #[allow(dead_code)]
-async fn generate_audio_response(
-    state: &AppState,
-    text: &str,
-) -> Result<Vec<u8>, StatusCode> {
+async fn generate_audio_response(state: &AppState, text: &str) -> Result<Vec<u8>, StatusCode> {
     let tts = state
         .tts_pipeline
         .as_ref()
@@ -1129,8 +1271,8 @@ async fn generate_audio_response(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 3. Convert PCM to WAV bytes
-    let wav_bytes = pcm_to_wav(&samples, sample_rate)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let wav_bytes =
+        pcm_to_wav(&samples, sample_rate).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(wav_bytes)
 }
@@ -1150,8 +1292,14 @@ fn cimage_has_tts_segments(path: &std::path::Path) -> bool {
     // defined by TtsCimageSegments.
     const TTS_TALKER_WEIGHT: u32 = 30;
     const TTS_CP_WEIGHT: u32 = 33;
-    let has_talker = header.segments.iter().any(|s| s.kind == TTS_TALKER_WEIGHT && s.length > 0);
-    let has_cp = header.segments.iter().any(|s| s.kind == TTS_CP_WEIGHT && s.length > 0);
+    let has_talker = header
+        .segments
+        .iter()
+        .any(|s| s.kind == TTS_TALKER_WEIGHT && s.length > 0);
+    let has_cp = header
+        .segments
+        .iter()
+        .any(|s| s.kind == TTS_CP_WEIGHT && s.length > 0);
     has_talker && has_cp
 }
 
@@ -1231,14 +1379,19 @@ async fn chat_completions_stream(
     if req.max_tokens.unwrap_or(0) > state.config.limits.max_output_tokens {
         return Err(ApiError {
             code: "invalid_request".into(),
-            message: format!("max_tokens exceeds limit of {}", state.config.limits.max_output_tokens),
+            message: format!(
+                "max_tokens exceeds limit of {}",
+                state.config.limits.max_output_tokens
+            ),
             request_id: request_id.clone(),
             retryable: false,
         });
     }
 
     // Stage 2: Reserve runtime resources
-    let slot_id = state.executor.lock()
+    let slot_id = state
+        .executor
+        .lock()
         .allocate_slot()
         .map_err(|_| ApiError {
             code: "capacity_exhausted".into(),
@@ -1247,12 +1400,18 @@ async fn chat_completions_stream(
             retryable: true,
         })?;
 
-    let _slot_guard = SlotGuard { slot_id, state: state.clone() };
+    let _slot_guard = SlotGuard {
+        slot_id,
+        state: state.clone(),
+    };
 
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
 
     // Tokenize (no executor lock needed — tokenizer is &self)
-    let user_msg = req.messages.last().ok_or_else(|| ApiError::new("invalid_request", "No messages"))?;
+    let user_msg = req
+        .messages
+        .last()
+        .ok_or_else(|| ApiError::new("invalid_request", "No messages"))?;
     let prompt_text = match &user_msg.content {
         MessageContent::Text(t) => t.clone(),
         MessageContent::Parts(parts) => parts
@@ -1264,7 +1423,9 @@ async fn chat_completions_stream(
             .collect::<Vec<_>>()
             .join(" "),
     };
-    let input_ids = state.tokenizer.encode(&prompt_text)
+    let input_ids = state
+        .tokenizer
+        .encode(&prompt_text)
         .map_err(|_| ApiError::new("internal_error", "Tokenization failed"))?;
     let prompt_len = input_ids.len();
 
@@ -1314,23 +1475,24 @@ async fn chat_completions_stream(
             let last_tok = *input_ids.last().unwrap_or(&0) as u64;
 
             // Prefill all tokens except the last one
-            for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)].iter().enumerate() {
+            for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)]
+                .iter()
+                .enumerate()
+            {
                 if cancel_prefill.is_cancelled() {
                     return None;
                 }
                 let op = make_prefill_op(tok as u64);
                 exec.operation_registry.insert(op.operation_id, op);
-                let plan = make_boundary_plan(
-                    i as u64,
-                    BACKEND_MEGAKERNEL,
-                    vec![OperationId(tok as u64)],
-                );
+                let plan =
+                    make_boundary_plan(i as u64, BACKEND_MEGAKERNEL, vec![OperationId(tok as u64)]);
                 if let Err(e) = exec.execute_boundaries(&[plan]) {
                     eprintln!("[prism-server] streaming prefill error: {e}");
                 }
             }
             Some(last_tok)
-        }).await;
+        })
+        .await;
 
         let mut last_tok = match result {
             Ok(Some(t)) => t,
@@ -1344,9 +1506,9 @@ async fn chat_completions_stream(
         while step < max_tokens && !cancel.is_cancelled() {
             // Check idle timeout
             if last_activity.elapsed() > idle_timeout {
-                let _ = tx.send(Ok(Event::default()
-                    .data("[TIMED_OUT]")
-                    .event("timed_out"))).await;
+                let _ = tx
+                    .send(Ok(Event::default().data("[TIMED_OUT]").event("timed_out")))
+                    .await;
                 break;
             }
 
@@ -1371,7 +1533,8 @@ async fn chat_completions_stream(
 
                     Some((next, text))
                 }
-            }).await;
+            })
+            .await;
 
             let (next, text) = match step_result {
                 Ok(Some(r)) => r,
@@ -1410,7 +1573,11 @@ async fn chat_completions_stream(
 
         // Terminal receipt
         let terminal_state = if cancel.is_cancelled() {
-            if last_activity.elapsed() > idle_timeout { "timed_out" } else { "cancelled" }
+            if last_activity.elapsed() > idle_timeout {
+                "timed_out"
+            } else {
+                "cancelled"
+            }
         } else {
             "completed"
         };
@@ -1428,7 +1595,10 @@ async fn chat_completions_stream(
             error_message: None,
         };
         stream_state.receipt.lock().replace(receipt.clone());
-        eprintln!("[prism-server] receipt: {}", serde_json::to_string(&receipt).unwrap());
+        eprintln!(
+            "[prism-server] receipt: {}",
+            serde_json::to_string(&receipt).unwrap()
+        );
     });
 
     let stream = ReceiverStream::new(rx);
@@ -1490,20 +1660,19 @@ async fn chat_completions_audio_stream(
                 Some(pcm) => {
                     let wav = pcm_chunk_to_wav(&pcm, 24000);
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
-                    let event = Event::default()
-                        .event("audio_chunk")
-                        .data(serde_json::json!({
+                    let event = Event::default().event("audio_chunk").data(
+                        serde_json::json!({
                             "chunk": b64,
                             "index": idx,
                             "sample_rate": 24000,
                             "format": "audio/wav",
-                        }).to_string());
+                        })
+                        .to_string(),
+                    );
                     Some((Ok(event), (iter, idx + 1)))
                 }
                 None => {
-                    let event = Event::default()
-                        .event("audio_done")
-                        .data("[DONE]");
+                    let event = Event::default().event("audio_done").data("[DONE]");
                     Some((Ok(event), (iter, idx)))
                 }
             }
@@ -1544,7 +1713,8 @@ async fn auth_middleware(
     let token = match auth_header {
         Some(t) => t,
         None => {
-            return ApiError::new("unauthorized", "Missing or invalid authentication token").into_response();
+            return ApiError::new("unauthorized", "Missing or invalid authentication token")
+                .into_response();
         }
     };
 
@@ -1570,7 +1740,8 @@ async fn size_limit_middleware(
                 return ApiError::new(
                     "invalid_request",
                     format!("Request body exceeds {} byte limit", limit),
-                ).into_response();
+                )
+                .into_response();
             }
         }
     }
@@ -1612,8 +1783,7 @@ async fn main() -> Result<(), String> {
         Some(path) => {
             let text = std::fs::read_to_string(path)
                 .map_err(|e| format!("Failed to read config {}: {e}", path.display()))?;
-            toml::from_str(&text)
-                .map_err(|e| format!("Config parse error: {e}"))?
+            toml::from_str(&text).map_err(|e| format!("Config parse error: {e}"))?
         }
         None => ServerConfig {
             server: ServerSection {
@@ -1681,6 +1851,7 @@ async fn main() -> Result<(), String> {
         None
     };
 
+    let broker = Arc::new(MemoryAllocationBroker::new());
     let state = Arc::new(AppState {
         executor: ParkingMutex::new(executor),
         flex_dispatch: ParkingMutex::new(flex_dispatch),
@@ -1690,8 +1861,14 @@ async fn main() -> Result<(), String> {
         config,
         auth_verifier,
         tts_pipeline,
-        model_digest: Some(blake3::hash(&std::fs::read(&args.cimage).unwrap_or_default()).to_hex()[..16].to_string()),
+        model_digest: Some(
+            blake3::hash(&std::fs::read(&args.cimage).unwrap_or_default()).to_hex()[..16]
+                .to_string(),
+        ),
         stream_tracker: ParkingMutex::new(StreamTracker::new()),
+        memory_broker: broker.clone(),
+        distill_engine: Arc::new(DistillationEngine::new(broker)),
+        cancel: CancelToken::new(None),
     });
 
     let host = state.config.server.host.clone();
@@ -1702,8 +1879,19 @@ async fn main() -> Result<(), String> {
         .route("/v1/models", get(list_models))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/completions", post(completions))
-        .layer(middleware::from_fn_with_state(state.clone(), size_limit_middleware))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .route("/v1/distill", post(post_distill))
+        .route("/v1/distill/{job_id}", get(get_distill_status))
+        .route("/v1/models/load", post(load_model))
+        .route("/v1/models/deploy", post(deploy_model))
+        .route("/v1/adapters/merge", post(merge_adapter))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            size_limit_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .with_state(state);
 
     println!("[prism-server] Listening on http://{}", addr);

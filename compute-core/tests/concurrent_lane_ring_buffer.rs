@@ -6,7 +6,7 @@
 //! Run:  cargo test --test concurrent_lane_ring_buffer --features prism-backend -- --nocapture
 //! Requires: macOS 14.0+ on Apple Silicon
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

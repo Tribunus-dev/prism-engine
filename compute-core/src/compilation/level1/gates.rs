@@ -11,6 +11,7 @@ use super::super::receipt::{BlockMetric, CertificationSection, RollingMetric};
 use super::reducer::AccelerateReducer;
 use super::scheduler::{Level1Config, Level1Scheduler};
 use super::student::TernaryStudent;
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
 use super::teacher::MetalTeacher;
 
 // ── Determinism gate ────────────────────────────────────────────────────────

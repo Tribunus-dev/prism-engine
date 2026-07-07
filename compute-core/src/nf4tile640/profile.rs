@@ -114,13 +114,22 @@ impl CodebookDescriptor {
             kind: CodebookKind::CanonicalNf4,
             precision: "F32".into(),
             values: vec![
-                -1.0, -0.6961928009986877, -0.5250731024742126,
-                -0.3949175179004669, -0.28444138169288635,
-                -0.18477340042591095, -0.09105004370212555,
-                0.0, 0.07958029955625534,
-                0.16093020141124725, 0.2461123028397569,
-                0.3379152008295059, 0.44070979952812195,
-                0.5626170039176941, 0.7229568362236023, 1.0,
+                -1.0,
+                -0.6961928009986877,
+                -0.5250731024742126,
+                -0.3949175179004669,
+                -0.28444138169288635,
+                -0.18477340042591095,
+                -0.09105004370212555,
+                0.0,
+                0.07958029955625534,
+                0.16093020141124725,
+                0.2461123028397569,
+                0.3379152008295059,
+                0.44070979952812195,
+                0.5626170039176941,
+                0.7229568362236023,
+                1.0,
             ],
             clipping_policy: ClippingPolicy::None,
             bias_policy: BiasPolicy::None,
@@ -137,7 +146,10 @@ impl CodebookDescriptor {
     /// Validate the descriptor: must have exactly 16 values, sorted ascending.
     pub fn validate(&self) -> Result<(), String> {
         if self.values.len() != 16 {
-            return Err(format!("codebook must have 16 values, got {}", self.values.len()));
+            return Err(format!(
+                "codebook must have 16 values, got {}",
+                self.values.len()
+            ));
         }
         for w in self.values.windows(2) {
             if w[0] > w[1] {

@@ -6,7 +6,7 @@
 //! These tests use the `predict()` data-pointer path (not `predict_pixelbuffer`)
 //! to avoid pixel-format compatibility issues with CVPixelBuffer on M1.
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

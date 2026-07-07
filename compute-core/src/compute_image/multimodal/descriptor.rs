@@ -332,6 +332,37 @@ pub struct MultimodalArtifactSummary {
     pub tensor_layout_digest: [u8; 32],
 }
 
+impl MultimodalArtifactSummary {
+    pub fn from_descriptor(
+        desc: &MultimodalInputDescriptorV1,
+        projection_precision: ProjectionPrecision,
+    ) -> Self {
+        Self {
+            modalities: desc.modality_mask as u32,
+            image_soft_token_default: desc.image_default_soft_tokens,
+            image_soft_token_max: desc.image_max_soft_tokens,
+            projection_precision,
+            processor_contract_digest: desc.processor_contract_digest,
+            tensor_layout_digest: desc.tensor_layout_digest,
+        }
+    }
+
+    pub fn text_only() -> Self {
+        Self {
+            modalities: 0,
+            image_soft_token_default: 0,
+            image_soft_token_max: 0,
+            projection_precision: ProjectionPrecision::Unknown,
+            processor_contract_digest: [0u8; 32],
+            tensor_layout_digest: [0u8; 32],
+        }
+    }
+
+    pub fn supports_image(&self) -> bool {
+        (self.modalities & 2) != 0
+    }
+}
+
 // ──────────────────────────────────────────────
 // 9. MultimodalAssemblyReceipt
 // ──────────────────────────────────────────────

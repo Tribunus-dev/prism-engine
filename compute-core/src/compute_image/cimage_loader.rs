@@ -1006,8 +1006,8 @@ pub fn load_heterogeneous_executor(
     String,
 > {
     use crate::backend::routing::{
-        CorrectnessCheckpointPolicy, LogicalShape, OperationDescriptor,
-        OperationId, Phase, TensorShape,
+        CorrectnessCheckpointPolicy, LogicalShape, OperationDescriptor, OperationId, Phase,
+        TensorShape,
     };
     use crate::backend::DType;
     use crate::compute_image::heterogeneous::types::HeterogeneousExecutionImage;
@@ -1023,7 +1023,9 @@ pub fn load_heterogeneous_executor(
     if end > mmap_data.len() {
         return Err(format!(
             "HeterogeneousImage segment at offset {} length {} exceeds mmap size {}",
-            segment.offset, segment.length, mmap_data.len()
+            segment.offset,
+            segment.length,
+            mmap_data.len()
         ));
     }
     let blob = &mmap_data[start..end];

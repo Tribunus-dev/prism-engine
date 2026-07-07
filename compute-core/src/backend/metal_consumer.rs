@@ -1,4 +1,6 @@
+#[cfg(target_os = "macos")]
 use crate::compute_image::apple_shared_arena::AppleSharedArena;
+#[cfg(target_os = "macos")]
 use crate::compute_image::apple_shared_arena::SlotState;
 
 // Metal import — only on macOS with metal-dispatch feature.

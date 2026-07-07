@@ -8,6 +8,9 @@ use super::profiling::SystemState;
 use crate::backend::heterogeneous_executor::HeterogeneousExecutor;
 use crate::backend::routing::*;
 use crate::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX};
+use crate::compilation::phase_types::PhaseType;
+use crate::scheduling::outlier_detector::OutlierDetector;
+use std::sync::{Arc, Mutex};
 
 /// Default decode-step interval for sampling system state.
 pub const DEFAULT_SAMPLE_INTERVAL: u32 = 16;
@@ -72,6 +75,8 @@ pub struct FlexDispatch {
     pub sample_interval: u32,
     /// Steps since the last sample.
     pub steps_since_sample: u32,
+    /// Optional outlier detector for precision overrides.
+    pub outlier_detector: Option<Arc<Mutex<OutlierDetector>>>,
 }
 
 impl FlexDispatch {
@@ -82,6 +87,7 @@ impl FlexDispatch {
             last_state: SystemState::default(),
             sample_interval: 16,
             steps_since_sample: u32::MAX, // Sample on first call.
+            outlier_detector: None,
         }
     }
 
@@ -91,6 +97,7 @@ impl FlexDispatch {
             last_state: SystemState::default(),
             sample_interval: steps,
             steps_since_sample: u32::MAX,
+            outlier_detector: None,
         }
     }
 
@@ -240,6 +247,60 @@ impl FlexDispatch {
         }
 
         Ok(())
+    }
+
+    /// Install an outlier detector for precision-override decisions.
+    pub fn set_outlier_detector(&mut self, detector: Arc<Mutex<OutlierDetector>>) {
+        self.outlier_detector = Some(detector);
+    }
+
+    /// Check whether a matrix has active precision overrides.
+    ///
+    /// Returns `Some("bf16")` if any channel for this matrix is flagged
+    /// as an outlier, or `None` if no override is active.
+    pub fn check_precision_override(&self, matrix: &str) -> Option<&str> {
+        let detector = self.outlier_detector.as_ref()?;
+        let guard = detector.lock().ok()?;
+        let has_override = guard.active_overrides().iter().any(|(id, _)| id == matrix);
+        if has_override {
+            Some("bf16")
+        } else {
+            None
+        }
+    }
+
+    /// Overload: check ANE offload eligibility including precision overrides.
+    ///
+    /// If the matrix has a precision override, offload is suppressed so the
+    /// high-precision path runs on GPU. Otherwise delegates to the system
+    /// state check.
+    pub fn should_offload_to_ane(&self, matrix: &str) -> bool {
+        if self.check_precision_override(matrix).is_some() {
+            return false;
+        }
+        self.last_state.should_offload_to_ane()
+    }
+
+    /// Observe activations at a PhaseType tap point.
+    ///
+    /// Only the `TapQkvProj`, `TapOProj`, `TapFfnGate`, `TapFfnUp`, and
+    /// `TapFfnDown` variants are treated as observation points. Other phase
+    /// types are silently ignored.
+    pub fn observe_activations(&self, tap: PhaseType, activations: &[f32]) {
+        let matrix_id = match tap {
+            PhaseType::TapQkvProj => "tap.qkv_proj",
+            PhaseType::TapOProj => "tap.o_proj",
+            PhaseType::TapFfnGate => "tap.ffn_gate",
+            PhaseType::TapFfnUp => "tap.ffn_up",
+            PhaseType::TapFfnDown => "tap.ffn_down",
+            _ => return,
+        };
+        let Some(detector) = &self.outlier_detector else {
+            return;
+        };
+        let _ = detector
+            .lock()
+            .map(|mut guard| guard.observe(&matrix_id.to_string(), activations));
     }
 }
 

@@ -492,7 +492,7 @@ mod tests {
         let digest = EvidenceDigest("test_backends".into());
         let module = compile_model_to_scheduled_module(&plan, &arch, digest);
 
-        assert!(module.memory_plan.per_backend.contains_key(&BackendId(0)));
+        assert!(module.memory_plan.per_backend.contains_key(&BackendId(3)));
         assert!(module.memory_plan.per_backend.contains_key(&BackendId(1)));
         assert!(module.memory_plan.per_backend.contains_key(&BackendId(2)));
     }

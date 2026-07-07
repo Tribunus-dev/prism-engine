@@ -14,8 +14,8 @@ use crate::backend::routing::{
     OperationFamily, BACKEND_MEGAKERNEL,
 };
 use crate::backend::{
-    BackendCapabilities, CompiledRegionBackend, DType, EvaluationReceipt, QuantizedMatmulOp,
-    QuantizedWeightHandle, ReadbackReceipt, MatmulOp, RmsNormOp, RoPEOp, TensorBackend,
+    BackendCapabilities, CompiledRegionBackend, DType, EvaluationReceipt, MatmulOp,
+    QuantizedMatmulOp, QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend,
     TensorHandle,
 };
 use crate::compute_image::orchestrator::Orchestrator;
@@ -54,18 +54,10 @@ impl TensorBackend for MegakernelBackend {
     // Stub — the megakernel manages its own buffers internally.
     // Returns Err for any tensor operations since the megakernel
     // allocates and manages its own Metal buffers via launch().
-    fn create_f32(
-        &mut self,
-        _data: &[f32],
-        _shape: &[i32],
-    ) -> Result<TensorHandle, String> {
+    fn create_f32(&mut self, _data: &[f32], _shape: &[i32]) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: use Orchestrator's internal buffers".into())
     }
-    fn create_u32(
-        &mut self,
-        _data: &[u32],
-        _shape: &[i32],
-    ) -> Result<TensorHandle, String> {
+    fn create_u32(&mut self, _data: &[u32], _shape: &[i32]) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
     fn create_f32_from_bf16_bits(
@@ -118,49 +110,25 @@ impl TensorBackend for MegakernelBackend {
     ) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
-    fn rope(
-        &mut self,
-        _op: &RoPEOp,
-        _x: TensorHandle,
-    ) -> Result<TensorHandle, String> {
+    fn rope(&mut self, _op: &RoPEOp, _x: TensorHandle) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
-    fn add(
-        &mut self,
-        _a: TensorHandle,
-        _b: TensorHandle,
-    ) -> Result<TensorHandle, String> {
+    fn add(&mut self, _a: TensorHandle, _b: TensorHandle) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
-    fn multiply(
-        &mut self,
-        _a: TensorHandle,
-        _b: TensorHandle,
-    ) -> Result<TensorHandle, String> {
+    fn multiply(&mut self, _a: TensorHandle, _b: TensorHandle) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
     fn silu(&mut self, _x: TensorHandle) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
-    fn transpose(
-        &mut self,
-        _x: TensorHandle,
-        _dims: &[i32],
-    ) -> Result<TensorHandle, String> {
+    fn transpose(&mut self, _x: TensorHandle, _dims: &[i32]) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
-    fn reshape(
-        &mut self,
-        _x: TensorHandle,
-        _shape: &[i32],
-    ) -> Result<TensorHandle, String> {
+    fn reshape(&mut self, _x: TensorHandle, _shape: &[i32]) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
-    fn softmax(
-        &mut self,
-        _x: TensorHandle,
-        _axis: i32,
-    ) -> Result<TensorHandle, String> {
+    fn softmax(&mut self, _x: TensorHandle, _axis: i32) -> Result<TensorHandle, String> {
         Err("MegakernelBackend: not supported".into())
     }
     fn index_select(
@@ -188,10 +156,7 @@ impl TensorBackend for MegakernelBackend {
             eval_calls: 1,
         })
     }
-    fn read_f32(
-        &mut self,
-        _handle: TensorHandle,
-    ) -> Result<ReadbackReceipt, String> {
+    fn read_f32(&mut self, _handle: TensorHandle) -> Result<ReadbackReceipt, String> {
         Err("MegakernelBackend: readback not supported directly".into())
     }
     fn shape(&self, _handle: TensorHandle) -> Result<Vec<i32>, String> {
@@ -277,9 +242,9 @@ impl BackendInstance for MegakernelBackend {
                     fallback_occurred: false,
                 })
             }
-            OperationFamily::PrefillFragment => Err(
-                "MegakernelBackend: prefill not implemented on megakernel path".into(),
-            ),
+            OperationFamily::PrefillFragment => {
+                Err("MegakernelBackend: prefill not implemented on megakernel path".into())
+            }
             OperationFamily::VisionEncode => {
                 Err("VisionEncode: use the server's multimodal path".into())
             }
@@ -294,16 +259,11 @@ impl BackendInstance for MegakernelBackend {
             OperationFamily::MultimodalProject => {
                 Err("MultimodalProject: use the server's multimodal path".into())
             }
-            _ => Err(format!(
-                "MegakernelBackend: unsupported {:?}",
-                op.family
-            )),
+            _ => Err(format!("MegakernelBackend: unsupported {:?}", op.family)),
         }
     }
 
-    fn as_compiled_region_backend(
-        &mut self,
-    ) -> Option<&mut dyn CompiledRegionBackend> {
+    fn as_compiled_region_backend(&mut self) -> Option<&mut dyn CompiledRegionBackend> {
         Some(self)
     }
 }

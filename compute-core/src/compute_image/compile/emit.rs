@@ -5,8 +5,7 @@
 use crate::compute_image::compile::source::{source_tensor_view, SourceTensor};
 use crate::compute_image::manifest::{
     Manifest, Nf4Tile640Layout, QuantizationDesc, QuantizationProfileEntry,
-    QuantizationQualityStatus, SegmentKind, ShardHash, SharedWeightLayout,
-    SourceIdentity,
+    QuantizationQualityStatus, SegmentKind, ShardHash, SharedWeightLayout, SourceIdentity,
 };
 use crate::config::PackedLinearShapes;
 use memmap2::Mmap;
@@ -428,44 +427,43 @@ pub(crate) fn dtype_to_array(bytes: &[u8], dtype: &str, shape: &[u32]) -> crate:
 /// Build default quantization profile entries for the manifest.
 /// Starts with canonical NF4. Future: add learned profiles.
 pub fn build_default_quantization_profiles() -> Vec<QuantizationProfileEntry> {
-    vec![
-        QuantizationProfileEntry {
-            profile_id: 0,
-            name: "canonical_nf4_v1".into(),
-            abi_version: 1,
-            codebook: vec![
-                -1.0,
-                -0.6961928009986877,
-                -0.5250731024742126,
-                -0.3949175179004669,
-                -0.28444138169288635,
-                -0.18477340042591095,
-                -0.09105004370212555,
-                0.0,
-                0.07958029955625534,
-                0.16093020141124725,
-                0.2461123028397569,
-                0.3379152008295059,
-                0.44070979952812195,
-                0.5626170039176941,
-                0.7229568362236023,
-                1.0,
-            ],
-            group_size: 128,
-            tile_elements: 640,
-            clipping_policy: "none".into(),
-            bias_policy: "none".into(),
-            sidecar_policy: "none".into(),
-            training_objective: String::new(),
-            training_iterations: 0,
-            calibration_digest: None,
-            source_model_digest: None,
-            compiler_revision: String::new(),
-        },
-    ]
+    vec![QuantizationProfileEntry {
+        profile_id: 0,
+        name: "canonical_nf4_v1".into(),
+        abi_version: 1,
+        codebook: vec![
+            -1.0,
+            -0.6961928009986877,
+            -0.5250731024742126,
+            -0.3949175179004669,
+            -0.28444138169288635,
+            -0.18477340042591095,
+            -0.09105004370212555,
+            0.0,
+            0.07958029955625534,
+            0.16093020141124725,
+            0.2461123028397569,
+            0.3379152008295059,
+            0.44070979952812195,
+            0.5626170039176941,
+            0.7229568362236023,
+            1.0,
+        ],
+        group_size: 128,
+        tile_elements: 640,
+        clipping_policy: "none".into(),
+        bias_policy: "none".into(),
+        sidecar_policy: "none".into(),
+        training_objective: String::new(),
+        training_iterations: 0,
+        calibration_digest: None,
+        source_model_digest: None,
+        compiler_revision: String::new(),
+    }]
 }
 
 /// Build default quantization quality status.
+#[allow(dead_code)]
 pub fn build_quantization_quality_status() -> QuantizationQualityStatus {
     QuantizationQualityStatus::Unknown
 }

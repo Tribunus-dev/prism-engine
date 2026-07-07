@@ -15,10 +15,10 @@
 use super::*;
 use crate::compute_image::cimage_loader::CimageDeployment;
 use crate::compute_image::kv_interleave::*;
+use crate::tts::talker::{TtsMegakernel, TtsWeightBindings};
 use block::ConcreteBlock;
 use metal::*;
 use std::sync::mpsc;
-use crate::tts::talker::{TtsMegakernel, TtsWeightBindings};
 /// Logits per slot: 1 main head + N MTP heads, each VOCAB_SIZE half values.
 pub const LOGITS_PER_SLOT: u64 = (1 + NUM_MTP_HEADS as u64) * VOCAB_SIZE as u64 * 2;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -32,13 +32,11 @@ fn compute_num_slots(device: &Device) -> u64 {
     let working_set = device.recommended_max_working_set_size();
 
     // Per-slot KV cache cost in bytes (nf4tile640 K+V + FP16 scratch + logits)
-    let nf4_kv_per_slot =
-        (LAYERS as u64) * (MAX_CONTEXT as u64) * KV_NF4_PER_POSITION;
+    let nf4_kv_per_slot = (LAYERS as u64) * (MAX_CONTEXT as u64) * KV_NF4_PER_POSITION;
     let scratch_per_slot =
         (MAX_CONTEXT as u64) * (NUM_KV_HEADS as u64) * (GLOBAL_HEAD_DIM as u64) * 2 * 2; // K+V FP16
     let logits_per_slot = LOGITS_PER_SLOT;
-    let per_slot_total =
-        nf4_kv_per_slot + scratch_per_slot + logits_per_slot;
+    let per_slot_total = nf4_kv_per_slot + scratch_per_slot + logits_per_slot;
 
     // Reserve ~1.5 GB for model weights, scales, embed table, centroids, norms
     let kv_budget = working_set.saturating_sub(1_500_000_000);
@@ -182,14 +180,17 @@ impl Megakernel {
         let nf4_total = nf4_per_slot * num_slots;
 
         // Packed codes (u32 × 80 per tile, one K+V pair per head per position)
-        let kv_codes = self.device.new_buffer(
-            nf4_total * 320 / 360, MTLResourceOptions::StorageModeShared);
+        let kv_codes = self
+            .device
+            .new_buffer(nf4_total * 320 / 360, MTLResourceOptions::StorageModeShared);
         // Block scales (f32 × 5 per tile)
-        let kv_scales = self.device.new_buffer(
-            nf4_total * 20 / 360, MTLResourceOptions::StorageModeShared);
+        let kv_scales = self
+            .device
+            .new_buffer(nf4_total * 20 / 360, MTLResourceOptions::StorageModeShared);
         // Block biases (f32 × 5 per tile)
-        let kv_biases = self.device.new_buffer(
-            nf4_total * 20 / 360, MTLResourceOptions::StorageModeShared);
+        let kv_biases = self
+            .device
+            .new_buffer(nf4_total * 20 / 360, MTLResourceOptions::StorageModeShared);
 
         unsafe {
             std::ptr::write_bytes(kv_codes.contents(), 0, nf4_total as usize * 320 / 360);
@@ -1040,9 +1041,9 @@ impl Megakernel {
 
 /// Per-decode buffers returned by [`Megakernel::launch`].
 pub struct KernelBuffers {
-    pub kv_codes: metal::Buffer,   // nf4tile640 packed codes (u32 × 80 per tile)
-    pub kv_scales: metal::Buffer,  // nf4tile640 block scales (f32 × 5 per tile)
-    pub kv_biases: metal::Buffer,  // nf4tile640 block biases (f32 × 5 per tile)
+    pub kv_codes: metal::Buffer, // nf4tile640 packed codes (u32 × 80 per tile)
+    pub kv_scales: metal::Buffer, // nf4tile640 block scales (f32 × 5 per tile)
+    pub kv_biases: metal::Buffer, // nf4tile640 block biases (f32 × 5 per tile)
     pub kv_scratch_k: metal::Buffer,
     pub kv_scratch_v: metal::Buffer,
     pub ring_entries: metal::Buffer, // RING_SIZE * 5 * 4 bytes (WorkEntry[512])

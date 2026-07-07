@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::backend::completion::{ComellationToken, ComputationToken};
 use mpsgraph::{DataType, Device, Graph, ShapedType, TensorData};
-use crate::backend::completion::{ComputationToken, ComellationToken};
 
 use crate::backend::heterogeneous_executor::BackendInstance;
 use crate::backend::routing::{
@@ -135,7 +135,10 @@ impl MetalBackend {
             .new_library_with_source(src, &metal::CompileOptions::new())
             .map_err(|e| format!("Metal library compile failed: {e}"))?;
         let kernel = lib
-            .get_function("dequant_mul_nf4tile640", None::<metal::FunctionConstantValues>)
+            .get_function(
+                "dequant_mul_nf4tile640",
+                None::<metal::FunctionConstantValues>,
+            )
             .map_err(|e| format!("Metal kernel not found: {e}"))?;
         let pipeline = self
             .mtl_device
@@ -334,7 +337,7 @@ impl TensorBackend for MetalBackend {
         let tiles_per_col = n.div_ceil(nf4tile640::TILE_ELEMENTS);
         let total_tiles = k * tiles_per_col;
         let expected_codes_size = total_tiles * nf4tile640::PACKED_BYTES_PER_TILE; // 320
-        let expected_meta_count = total_tiles * nf4tile640::GROUPS_PER_TILE;     // 5 per tile
+        let expected_meta_count = total_tiles * nf4tile640::GROUPS_PER_TILE; // 5 per tile
         if w_data.len() != expected_codes_size {
             return Err(format!(
                 "quantized_matmul: packed codes size {} != expected {} (k={} n={} tiles_per_col={})",
@@ -355,12 +358,19 @@ impl TensorBackend for MetalBackend {
         if s_data.len() != expected_meta_count || b_data.len() != expected_meta_count {
             return Err(format!(
                 "quantized_matmul: scale/bias count {} != expected {} (k={} n={})",
-                s_data.len(), expected_meta_count, k, n,
+                s_data.len(),
+                expected_meta_count,
+                k,
+                n,
             ));
         }
 
         // Clone data to release the immutable borrow on self before ensure_nf4_kernel borrows mutably.
-        let x_buf = tx.buffer.as_ref().ok_or("input tensor has no buffer")?.clone();
+        let x_buf = tx
+            .buffer
+            .as_ref()
+            .ok_or("input tensor has no buffer")?
+            .clone();
         let w_bytes = w_data.to_vec();
         let s_bytes = s_data.to_vec();
         let b_bytes = b_data.to_vec();
@@ -417,8 +427,16 @@ impl TensorBackend for MetalBackend {
         enc.set_bytes(7, 4, &n_val as *const u32 as *const std::ffi::c_void);
         enc.set_bytes(8, 2, &gs_val as *const u16 as *const std::ffi::c_void);
 
-        let grid = metal::MTLSize { width: n as u64, height: m as u64, depth: 1 };
-        let group = metal::MTLSize { width: 16, height: 16, depth: 1 };
+        let grid = metal::MTLSize {
+            width: n as u64,
+            height: m as u64,
+            depth: 1,
+        };
+        let group = metal::MTLSize {
+            width: 16,
+            height: 16,
+            depth: 1,
+        };
         enc.dispatch_threads(grid, group);
         enc.end_encoding();
         cmd_buf.commit();
@@ -440,8 +458,16 @@ impl TensorBackend for MetalBackend {
     ) -> Result<TensorHandle, String> {
         let tx = self.slot(x)?;
         let tw = self.slot(weight)?;
-        let x_buf = tx.buffer.as_ref().ok_or("Input tensor has no buffer")?.clone();
-        let w_buf = tw.buffer.as_ref().ok_or("Weight tensor has no buffer")?.clone();
+        let x_buf = tx
+            .buffer
+            .as_ref()
+            .ok_or("Input tensor has no buffer")?
+            .clone();
+        let w_buf = tw
+            .buffer
+            .as_ref()
+            .ok_or("Weight tensor has no buffer")?
+            .clone();
         let dim = op.dim as usize;
         let total: usize = tx.shape.iter().map(|&d| d as usize).product();
         let batch = total / dim;
@@ -449,7 +475,11 @@ impl TensorBackend for MetalBackend {
 
         // Build MPSGraph.
         let graph = Graph::new();
-        let x_ph = graph.placeholder(Some(&[batch as isize, dim as isize]), DataType::Float32, None);
+        let x_ph = graph.placeholder(
+            Some(&[batch as isize, dim as isize]),
+            DataType::Float32,
+            None,
+        );
         let w_ph = graph.placeholder(Some(&[dim as isize]), DataType::Float32, None);
 
         // Compute mean(x^2) via matmul with ones: [batch,dim] @ [dim,1] = [batch,1].
@@ -457,11 +487,13 @@ impl TensorBackend for MetalBackend {
         let x_sq = graph.square(&x_ph, None);
         let ones = graph.constant_with_scalar(1.0_f64, Some(&[dim, 1usize]), DataType::Float32);
         let sum_sq = graph.matrix_multiplication(&x_sq, &ones, None);
-        let dim_c = graph.constant_with_scalar(dim as f64, Some(&[1usize, 1usize]), DataType::Float32);
+        let dim_c =
+            graph.constant_with_scalar(dim as f64, Some(&[1usize, 1usize]), DataType::Float32);
         let mean_sq = graph.division(&sum_sq, &dim_c, None);
 
         // Add epsilon.
-        let eps_c = graph.constant_with_scalar(op.eps as f64, Some(&[1usize, 1usize]), DataType::Float32);
+        let eps_c =
+            graph.constant_with_scalar(op.eps as f64, Some(&[1usize, 1usize]), DataType::Float32);
         let mean_eps = graph.addition(&mean_sq, &eps_c, None);
 
         // sqrt -> divide -> multiply by weight.
@@ -480,10 +512,7 @@ impl TensorBackend for MetalBackend {
             Some(&[batch as isize, dim as isize]),
             DataType::Float32,
         );
-        let w_st = ShapedType::new_with_shape_data_type(
-            Some(&[dim as isize]),
-            DataType::Float32,
-        );
+        let w_st = ShapedType::new_with_shape_data_type(Some(&[dim as isize]), DataType::Float32);
 
         let mut compile_feeds = HashMap::new();
         compile_feeds.insert(&*x_ph, &*x_st);
@@ -500,15 +529,12 @@ impl TensorBackend for MetalBackend {
         // MTLBuffer wrapper TensorData.
         let x_td = TensorData::new_with_mtl_buffer(&x_buf, &[batch, dim], DataType::Float32, None);
         let w_td = TensorData::new_with_mtl_buffer(&w_buf, &[dim], DataType::Float32, None);
-        let out_td = TensorData::new_with_mtl_buffer(&out_buf, &[batch, dim], DataType::Float32, None);
+        let out_td =
+            TensorData::new_with_mtl_buffer(&out_buf, &[batch, dim], DataType::Float32, None);
 
         let queue = self.mtl_device.new_command_queue();
-        let _results = executable.run_with_command_queue(
-            &queue,
-            &[&*x_td, &*w_td],
-            Some(&[&*out_td]),
-            None,
-        );
+        let _results =
+            executable.run_with_command_queue(&queue, &[&*x_td, &*w_td], Some(&[&*out_td]), None);
 
         Ok(self.alloc_slot(MetalTensor {
             buffer: Some(out_buf),
@@ -525,8 +551,7 @@ impl TensorBackend for MetalBackend {
         let total: usize = shape.iter().map(|&d| d as usize).product();
         let x_buf = tx.buffer.as_ref().ok_or("Input tensor has no buffer")?;
         let x_ptr = x_buf.contents() as *const u8;
-        let x_f32: &[f32] =
-            unsafe { std::slice::from_raw_parts(x_ptr as *const f32, total) };
+        let x_f32: &[f32] = unsafe { std::slice::from_raw_parts(x_ptr as *const f32, total) };
 
         if head_dim == 0 || total % head_dim != 0 {
             return Err(format!(
@@ -579,10 +604,8 @@ impl TensorBackend for MetalBackend {
         let b_ptr = b_buf.contents() as *const u8;
         let a_len = a_buf.length() as usize;
         let b_len = b_buf.length() as usize;
-        let a_f32: &[f32] =
-            unsafe { std::slice::from_raw_parts(a_ptr as *const f32, a_len / 4) };
-        let b_f32: &[f32] =
-            unsafe { std::slice::from_raw_parts(b_ptr as *const f32, b_len / 4) };
+        let a_f32: &[f32] = unsafe { std::slice::from_raw_parts(a_ptr as *const f32, a_len / 4) };
+        let b_f32: &[f32] = unsafe { std::slice::from_raw_parts(b_ptr as *const f32, b_len / 4) };
         let sum: Vec<f32> = a_f32.iter().zip(b_f32.iter()).map(|(x, y)| x + y).collect();
         let out_buf = self.mtl_device.new_buffer_with_data(
             sum.as_ptr() as *const std::ffi::c_void,
@@ -606,10 +629,8 @@ impl TensorBackend for MetalBackend {
         let b_ptr = b_buf.contents() as *const u8;
         let a_len = a_buf.length() as usize;
         let b_len = b_buf.length() as usize;
-        let a_f32: &[f32] =
-            unsafe { std::slice::from_raw_parts(a_ptr as *const f32, a_len / 4) };
-        let b_f32: &[f32] =
-            unsafe { std::slice::from_raw_parts(b_ptr as *const f32, b_len / 4) };
+        let a_f32: &[f32] = unsafe { std::slice::from_raw_parts(a_ptr as *const f32, a_len / 4) };
+        let b_f32: &[f32] = unsafe { std::slice::from_raw_parts(b_ptr as *const f32, b_len / 4) };
         let prod: Vec<f32> = a_f32.iter().zip(b_f32.iter()).map(|(x, y)| x * y).collect();
         let out_buf = self.mtl_device.new_buffer_with_data(
             prod.as_ptr() as *const std::ffi::c_void,
@@ -626,7 +647,11 @@ impl TensorBackend for MetalBackend {
 
     fn silu(&mut self, x: TensorHandle) -> Result<TensorHandle, String> {
         let tx = self.slot(x)?;
-        let x_buf = tx.buffer.as_ref().ok_or("Input tensor has no buffer")?.clone();
+        let x_buf = tx
+            .buffer
+            .as_ref()
+            .ok_or("Input tensor has no buffer")?
+            .clone();
         let shape: Vec<isize> = tx.shape.iter().map(|&d| d as isize).collect();
         let shape_usize: Vec<usize> = tx.shape.iter().map(|&d| d as usize).collect();
         let out_shape = tx.shape.clone();
@@ -676,7 +701,11 @@ impl TensorBackend for MetalBackend {
 
     fn reshape(&mut self, x: TensorHandle, shape: &[i32]) -> Result<TensorHandle, String> {
         let tensor = self.slot(x)?;
-        let buf = tensor.buffer.as_ref().ok_or("Tensor has no buffer")?.clone();
+        let buf = tensor
+            .buffer
+            .as_ref()
+            .ok_or("Tensor has no buffer")?
+            .clone();
         let dtype = tensor.dtype;
         Ok(self.alloc_slot(MetalTensor {
             buffer: Some(buf),
@@ -688,7 +717,11 @@ impl TensorBackend for MetalBackend {
 
     fn softmax(&mut self, x: TensorHandle, axis: i32) -> Result<TensorHandle, String> {
         let tx = self.slot(x)?;
-        let x_buf = tx.buffer.as_ref().ok_or("Input tensor has no buffer")?.clone();
+        let x_buf = tx
+            .buffer
+            .as_ref()
+            .ok_or("Input tensor has no buffer")?
+            .clone();
         let shape: Vec<isize> = tx.shape.iter().map(|&d| d as isize).collect();
         let shape_usize: Vec<usize> = tx.shape.iter().map(|&d| d as usize).collect();
         let out_shape = tx.shape.clone();
@@ -762,8 +795,7 @@ impl TensorBackend for MetalBackend {
         &mut self,
         group_id: u64,
         outputs: &[TensorHandle],
-    ) -> Result<ComputationToken, String>
-    {
+    ) -> Result<ComputationToken, String> {
         self.evaluate(group_id, outputs)?;
 
         // Create a Metal command buffer with an async completion handler.
@@ -803,7 +835,10 @@ impl TensorBackend for MetalBackend {
 
     fn read_f32(&mut self, handle: TensorHandle) -> Result<ReadbackReceipt, String> {
         let tensor = self.slot(handle)?;
-        let buf = tensor.buffer.as_ref().ok_or("read_f32: tensor has no buffer")?;
+        let buf = tensor
+            .buffer
+            .as_ref()
+            .ok_or("read_f32: tensor has no buffer")?;
         let count: usize = tensor.shape.iter().map(|&d| d as usize).product();
         let ptr = buf.contents() as *const f32;
         let data: Vec<f32> = unsafe { std::slice::from_raw_parts(ptr, count) }.to_vec();

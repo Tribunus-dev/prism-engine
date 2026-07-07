@@ -9,7 +9,7 @@
 //! flatten+reshape internally: input [1, seq_len * D] is reshaped to
 //! [1, 1, seq_len, D] for SDPA, then reshaped back to [1, seq_len * D].
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
 
 use std::path::{Path, PathBuf};
 

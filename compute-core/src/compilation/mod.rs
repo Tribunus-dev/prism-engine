@@ -9,36 +9,69 @@
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod activation_abi;
 pub mod admission;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod ane_admission_gate;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod ane_eligibility;
 pub mod ane_lane;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod apple_installation;
 pub mod arena;
 pub mod bench_metrics;
+#[cfg(feature = "prism-backend")]
+pub mod boundary_sensitivity;
 pub mod bridge_provider;
+pub mod cancel;
 pub mod distill_core;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod epoch_scheduler;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod evidence_probe;
 pub mod failure_injector;
 pub mod frontier;
+pub mod graph_equalization;
+#[cfg(feature = "prism-backend")]
+pub mod matrix_distill;
 pub mod memory_budget;
 pub mod phase_ir;
 pub mod phase_types;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod profitability;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod qualification_gate;
 pub mod receipt;
 pub mod region_catalogue;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod region_planner;
 pub mod staging;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 pub mod tri_lane;
 
 // Not gated here: `level1/mod.rs` gates each Metal/CoreML-dependent submodule

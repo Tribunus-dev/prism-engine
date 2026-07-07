@@ -717,50 +717,53 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
         concurrency.estimated_total_throughput
     );
 
-    // ── Decompose and compile Core ML subgraphs ─────────────────────────
-    // Each candidate subgraph is compiled into a .mlmodelc and benchmarked.
-    // The decomposition splits ops between Core ML (ANE) and Accelerate (CPU).
-    let tmp_dir = std::env::temp_dir().join(format!(
-        "tribunus-subgraph-{:x}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&tmp_dir).ok();
-    let candidates = crate::compute_image::compile::coreai::candidate_subgraphs();
-    let mut decompositions = Vec::new();
-    for (name, ops) in &candidates {
-        let decomp =
-            crate::compute_image::compile::coreai::decompose_subgraph(name, ops, &concurrency);
-        eprintln!(
-            "[hw-assessment] subgraph '{}': {} Core ML ops + {} Accelerate ops",
-            name,
-            decomp.coreai_ops.len(),
-            decomp.accelerate_ops.len()
-        );
-        if !decomp.coreai_ops.is_empty() {
-            match crate::compute_image::compile::coreai::compile_subgraph(
+    #[cfg(target_os = "macos")]
+    {
+        // ── Decompose and compile Core ML subgraphs ─────────────────────
+        // Each candidate subgraph is compiled into a .mlmodelc and benchmarked.
+        // The decomposition splits ops between Core ML (ANE) and Accelerate (CPU).
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "tribunus-subgraph-{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).ok();
+        let candidates = crate::compute_image::compile::coreai::candidate_subgraphs();
+        let mut decompositions = Vec::new();
+        for (name, ops) in &candidates {
+            let decomp =
+                crate::compute_image::compile::coreai::decompose_subgraph(name, ops, &concurrency);
+            eprintln!(
+                "[hw-assessment] subgraph '{}': {} Core ML ops + {} Accelerate ops",
                 name,
-                &decomp.coreai_ops,
-                &std::collections::HashMap::from([
-                    ("hidden".to_string(), vec![4096i64]),
-                    ("vocab".to_string(), vec![32768i64]),
-                    ("head_dim".to_string(), vec![128i64]),
-                ]),
-                &std::collections::HashMap::new(),
-                &tmp_dir,
-                false,
-            ) {
-                Ok(modelc_path) => {
-                    eprintln!("[hw-assessment]   compiled: {}", modelc_path);
-                }
-                Err(e) => {
-                    eprintln!("[hw-assessment]   compile failed: {}", e);
+                decomp.coreai_ops.len(),
+                decomp.accelerate_ops.len()
+            );
+            if !decomp.coreai_ops.is_empty() {
+                match crate::compute_image::compile::coreai::compile_subgraph(
+                    name,
+                    &decomp.coreai_ops,
+                    &std::collections::HashMap::from([
+                        ("hidden".to_string(), vec![4096i64]),
+                        ("vocab".to_string(), vec![32768i64]),
+                        ("head_dim".to_string(), vec![128i64]),
+                    ]),
+                    &std::collections::HashMap::new(),
+                    &tmp_dir,
+                    false,
+                ) {
+                    Ok(modelc_path) => {
+                        eprintln!("[hw-assessment]   compiled: {}", modelc_path);
+                    }
+                    Err(e) => {
+                        eprintln!("[hw-assessment]   compile failed: {}", e);
+                    }
                 }
             }
+            decompositions.push(decomp);
         }
-        decompositions.push(decomp);
     }
 
     AssessmentReceipt {

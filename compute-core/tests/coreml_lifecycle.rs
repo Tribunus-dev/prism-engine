@@ -1,4 +1,11 @@
 //! Core ML lifecycle conformance tests.
+//! Core ML lifecycle conformance tests.
+//!
+//! Tests generational region handles, cache validation, stale-handle
+//! rejection, real MLModel loading, and compile/execute lifecycle.
+//! Uses `CoreMlModel::load` through the native coreml_bridge.
+#![cfg(feature = "apple-coreml")]
+//! Core ML lifecycle conformance tests.
 //!
 //! Tests generational region handles, cache validation, stale-handle
 //! rejection, real MLModel loading, and compile/execute lifecycle.

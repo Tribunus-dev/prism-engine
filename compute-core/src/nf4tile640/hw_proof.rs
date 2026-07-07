@@ -11,8 +11,7 @@
 use std::collections::HashMap;
 
 use crate::nf4tile640::learn::{
-    LearnedProfile, LearningConfig, LearningReceipt, ProfileSelectionReceipt, SelectionReason,
-    select_profile_for_matrix,
+    select_profile_for_matrix, LearnedProfile, LearningConfig, LearningReceipt, SelectionReason,
 };
 use crate::nf4tile640::profile::{BiasPolicy, ClippingPolicy, SidecarPolicy};
 use crate::nf4tile640::roles::MatrixRole;
@@ -106,11 +105,7 @@ fn test_hw_proof_fixture_cimage_selection_report() {
         let mean = data.iter().sum::<f32>() / data.len() as f32;
         let min = data.iter().cloned().fold(f32::MAX, f32::min);
         let max = data.iter().cloned().fold(f32::MIN, f32::max);
-        let var = data
-            .iter()
-            .map(|v| (v - mean).powi(2))
-            .sum::<f32>()
-            / data.len() as f32;
+        let var = data.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / data.len() as f32;
         println!("  {name}: mean={mean:.6}, min={min:.6}, max={max:.6}, var={var:.6}");
     }
     describe("attention", &attention_w);
@@ -124,12 +119,11 @@ fn test_hw_proof_fixture_cimage_selection_report() {
         0.5,
     ];
     let ffn_codebook: [f32; 16] = [
-        -0.50, -0.40, -0.30, -0.22, -0.15, -0.10, -0.05, 0.0,
-        0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.50,
+        -0.50, -0.40, -0.30, -0.22, -0.15, -0.10, -0.05, 0.0, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40,
+        0.50, 0.50,
     ];
     let boundary_codebook: [f32; 16] = [
-        -0.1, 0.0, 0.1, 0.2, 0.3, 0.35, 0.38, 0.4,
-        0.45, 0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1.0,
+        -0.1, 0.0, 0.1, 0.2, 0.3, 0.35, 0.38, 0.4, 0.45, 0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1.0,
     ];
 
     let mut learned_profiles: HashMap<MatrixRole, LearnedProfile> = HashMap::new();
@@ -261,12 +255,14 @@ fn test_hw_proof_metal_dispatch_with_profile() {
     let attention_w = make_attention_like(rows as usize, cols as usize);
 
     // Pack with canonical NF4 codebook (for comparison reference)
-    let (codes, scales, biases, _p_rows, p_cols) =
+    let (codes, scales, biases, _p_rows, _p_cols) =
         pack_nf4_weights(&attention_w, rows as usize, cols as usize);
 
     // Create input vector: shape [1, K] where K = rows = 2.
     // One batch row, k=2 inner-dim elements.
-    let input: Vec<f32> = (0..rows).map(|r| (r as f32) / rows as f32 * 2.0 - 1.0).collect();
+    let input: Vec<f32> = (0..rows)
+        .map(|r| (r as f32) / rows as f32 * 2.0 - 1.0)
+        .collect();
 
     // CPU reference: dequant + matmul with M=1 (single input vector)
     let mut cpu_output = vec![0.0f32; cols as usize];
@@ -275,7 +271,7 @@ fn test_hw_proof_metal_dispatch_with_profile() {
         &codes,
         &scales,
         &biases,
-        1,          // m = 1 input vector
+        1,             // m = 1 input vector
         rows as usize, // k = weight rows
         cols as usize, // n = weight cols
         &mut cpu_output,
@@ -389,7 +385,9 @@ fn test_hw_proof_metal_dispatch_with_profile() {
 
     // Read GPU output
     let gpu_ptr = output_buf.contents() as *const f32;
-    let gpu_output: Vec<f32> = (0..cols as usize).map(|i| unsafe { *gpu_ptr.add(i) }).collect();
+    let gpu_output: Vec<f32> = (0..cols as usize)
+        .map(|i| unsafe { *gpu_ptr.add(i) })
+        .collect();
 
     // Compare GPU vs CPU
     for i in 0..cols as usize {
@@ -448,8 +446,9 @@ fn test_hw_proof_metal_dispatch_with_profile() {
 
     // Read GPU output with profile descriptor
     let gpu_ptr2 = output_buf.contents() as *const f32;
-    let gpu_output2: Vec<f32> =
-        (0..cols as usize).map(|i| unsafe { *gpu_ptr2.add(i) }).collect();
+    let gpu_output2: Vec<f32> = (0..cols as usize)
+        .map(|i| unsafe { *gpu_ptr2.add(i) })
+        .collect();
 
     // With the canonical NF4 codebook bound as profile, outputs should match fallback
     for i in 0..cols as usize {

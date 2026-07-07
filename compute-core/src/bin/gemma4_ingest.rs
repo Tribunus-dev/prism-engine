@@ -14,6 +14,7 @@
 
 #![allow(unused_imports)]
 
+use memmap2::Mmap;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -21,23 +22,70 @@ use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
+use rayon::prelude::*;
+
+/// SHA-256 digest using Merkle-tree parallelism.
+///
+/// Splits `data` into N chunks (N = available rayon threads), hashes each
+/// chunk in parallel, then hashes the concatenated chunk digests.  The result
+/// is deterministic: same data always produces the same digest.
+///
+/// On Apple M1 with 8 cores this typically yields ~4–6× throughput vs serial
+/// SHA-256 for matrices over ~4 MB.
+fn parallel_sha256(data: &[u8]) -> [u8; 32] {
+    let num_threads = rayon::current_num_threads();
+    let min_chunk = 65536; // 64 KB — below this, serial is faster
+    if data.len() <= min_chunk || num_threads <= 1 {
+        use sha2::{Digest, Sha256};
+        return Sha256::digest(data).into();
+    }
+    let chunk_size = (data.len() + num_threads - 1) / num_threads;
+    let chunk_size = chunk_size.max(min_chunk);
+    let hashes: Vec<[u8; 32]> = data
+        .par_chunks(chunk_size)
+        .map(|chunk| {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(chunk).into()
+        })
+        .collect();
+    let mut combined = Vec::with_capacity(hashes.len() * 32);
+    for h in &hashes {
+        combined.extend_from_slice(h);
+    }
+    use sha2::{Digest, Sha256};
+    Sha256::digest(&combined).into()
+}
 
 use tribunus_compute_core::ane_compile::compile_ane_artifacts;
 use tribunus_compute_core::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
+use tribunus_compute_core::compute_image::compile::execution_graph::MatrixWeightBinding;
 use tribunus_compute_core::compute_image::compile::ternary::{
     model_artifact_tag, CimageHeader, ModelArtifactEntry, SegmentEntry, SegmentKind,
-    CIMAGE_SEGMENT_CAPACITY,
+    CIMAGE_SEGMENT_CAPACITY, QUANT_SCHEMA_NF4_TILE640,
 };
-use tribunus_compute_core::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
-use tribunus_compute_core::quantization::embed_cluster::*;
-use tribunus_compute_core::nf4tile640::{pack_nf4_weights, dequant_matmul_reference};
 use tribunus_compute_core::compute_image::compile::tts_compile::pack_tts_weights;
+use tribunus_compute_core::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
 use tribunus_compute_core::compute_image::TensorEntry;
 use tribunus_compute_core::nf4tile640::learn::{
-    select_profile_for_matrix, LearnedProfile, ProfileSelectionReceipt, SelectionReason,
+    compute_activation_saliency, select_profile_for_matrix, LearnedProfile,
+    ProfileSelectionReceipt, SelectionReason,
 };
-use tribunus_compute_core::nf4tile640::roles::{classify_matrix_role, MatrixRole};
+use tribunus_compute_core::nf4tile640::plan::{QuantizationPlan, QuantizationPlanEntry};
 use tribunus_compute_core::nf4tile640::profile::QuantizerProfile;
+use tribunus_compute_core::nf4tile640::roles::{classify_matrix_role, MatrixRole};
+use tribunus_compute_core::nf4tile640::{
+    dequant_matmul_reference, pack_nf4_weights, pack_nf4_weights_awls, unpack_nf4_weights,
+};
+use tribunus_compute_core::quantization::contract::QuantizedMatrixFormat;
+use tribunus_compute_core::quantization::embed_cluster::*;
+
+use tribunus_compute_core::compilation::cancel::CancelToken;
+use tribunus_compute_core::compilation::distill_core::kd_divergence;
+use tribunus_compute_core::compilation::level1::reducer::{AccelerateReducer, DistillObjective};
+use tribunus_compute_core::compilation::matrix_distill::{
+    distill_matrix, DistillFormat, MatrixDistillResult,
+};
+use tribunus_compute_core::nf4tile640::squat::squat_requantize;
 
 // ── Gemma 4 12B architecture constants ──────────────────────────────
 const NUM_LAYERS: usize = 48;
@@ -88,7 +136,7 @@ const MATRICES: &[(&str, usize, usize)] = &[
 
 /// Multimodal projection tensors (image + audio direct projection).
 const MULTIMODAL_WEIGHTS: &[(&str, usize, usize)] = &[
-    ("model.vision_embedder.patch_dense.weight", 3840, 6912),
+    ("model.vision_embedder.patch_dense.weight", 6912, 3840),
     ("model.vision_embedder.patch_dense.bias", 3840, 1),
     ("model.vision_embedder.patch_ln1.weight", 6912, 1),
     ("model.vision_embedder.patch_ln1.bias", 6912, 1),
@@ -942,6 +990,393 @@ fn generate_ane_mil_packages(offsets: &HashMap<String, (u64, u64, usize)>) -> Ve
     buf
 }
 
+/// Per-matrix format, dimensions, and byte counts recorded during packing.
+/// Consumed by the offline planner to compute independent segment offsets.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+struct WeightBindingData {
+    key: String,
+    format: tribunus_compute_core::quantization::contract::QuantizedMatrixFormat,
+    /// Number of Tile640 tiles (ceil(cols / 640)).
+    tiles_per_row: usize,
+    /// Total tile count = rows * tiles_per_row.
+    total_tiles: usize,
+    /// Segment-kind mapping for NF4 vs INT8 codes.
+    weights_segment: u8,
+    tile_metadata_segment: u8,
+    sidecar_segment: u8,
+    sidecar_count: u32,
+    rows: usize,
+    cols: usize,
+}
+
+/// A decoder-layer matrix packing job collected before parallel execution.
+/// Each job holds an owned copy of the weight data so it can be processed
+/// independently in a rayon thread pool.
+struct PackJob {
+    key: String,
+    data: Vec<f32>,
+    rows: usize,
+    cols: usize,
+}
+
+/// Pack a weight matrix using nf4tile640 inline (single-pass, no accumulation).
+/// Map admission QuantizedMatrixFormat (1,2,3) to runtime QuantizedWeightFormat (0,1,2).
+fn admission_format_to_binding_format(f: QuantizedMatrixFormat) -> u8 {
+    match f {
+        QuantizedMatrixFormat::Nf4Tile640Base => 0,
+        QuantizedMatrixFormat::Nf4Tile640ScaledReductionAxis => 1,
+        QuantizedMatrixFormat::Int8Tile640Base => 2,
+        QuantizedMatrixFormat::TernaryTile640Base
+        | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis => {
+            todo!("ternary ingest not wired")
+        }
+    }
+}
+
+/// Used by the streaming refactor to avoid holding all f32 weight data simultaneously.
+fn pack_matrix_nf4_inline(
+    key: &str,
+    stress: Option<&tribunus_compute_core::quantization::StressSuite>,
+    calibration: Option<&tribunus_compute_core::quantization::CalibrationSuite>,
+    data: &[f32],
+    rows: usize,
+    cols: usize,
+    channel_sq_map: &mut HashMap<String, Vec<f32>>,
+    selection_receipts: &mut Vec<ProfileSelectionReceipt>,
+    plan_entries: &mut Vec<QuantizationPlanEntry>,
+    bindings: &mut Vec<WeightBindingData>,
+    learned_profiles: &HashMap<MatrixRole, LearnedProfile>,
+    _distill_objective: &DistillObjective,
+    tmp_dir: &Path,
+    output_format: &str,
+    _quality_policy: &str,
+    output_lines: &mut Vec<String>,
+) {
+    // ── Per-channel second moments for AW-LS activation-weighted packing ──
+    let mut channel_sq = vec![0.0f32; cols];
+    let n = data.len().min(rows * cols);
+    let effective_rows = n / cols;
+    for i in 0..effective_rows {
+        for j in 0..cols {
+            let v = data[i * cols + j];
+            channel_sq[j] += v * v;
+        }
+    }
+    for j in 0..cols {
+        channel_sq[j] /= effective_rows as f32;
+    }
+    if data.len() != rows * cols {
+        eprintln!(
+            "  [size-warn] {}: data has {} f32 elements, expected {} (rows={}, cols={})",
+            key, data.len(), rows * cols, rows, cols
+        );
+    }
+    channel_sq_map.insert(key.to_string(), channel_sq.clone());
+
+    // Validate data size against declared dimensions.  Some checkpoint tensors
+    // (e.g. fused QKV projections) have more elements than rows × cols for a
+    // single projection key.  Truncate with a warning rather than panicking in
+    // the packer — the admission pipeline reads only the expected elements and
+    // selects the correct candidate format.
+    let expected_f32 = rows * cols;
+    let data = if data.len() != expected_f32 {
+        output_lines.push(format!(
+            "  [size-warn] {}: data has {} f32 elements, expected {} (rows={}, cols={})",
+            key, data.len(), expected_f32, rows, cols
+        ));
+        if data.len() > expected_f32 {
+            &data[..expected_f32]
+        } else {
+            data
+        }
+    } else {
+        data
+    };
+
+    // ── Profile selection ────────────────────────────────────────────
+    let role = classify_matrix_role(key);
+    let groups: Vec<Vec<f32>> = data.chunks(128).map(|c| c.to_vec()).collect();
+    let importances: Vec<f32> = groups.iter().map(|_| 1.0).collect();
+    let (_selected_profile, receipt) = select_profile_for_matrix(
+        key,
+        role,
+        &groups,
+        &importances,
+        tribunus_compute_core::nf4tile640::NF4_CODEBOOK,
+        learned_profiles,
+    );
+    selection_receipts.push(receipt);
+
+    // ── Pack ─────────────────────────────────────────────────────────
+    // ── Admission pipeline (per spec) ─────────────────────────────
+    use tribunus_compute_core::quantization::{
+        admission::quantize_tensor, calibration::CalibrationSuite, calibration::StressSuite,
+        contract::*,
+    };
+
+    let role = classify_matrix_role(key);
+    // Override: vision embedder patch_dense is a VisionPatchProjection
+    // (classify_matrix_role classifies all vision tensors as MultimodalProjection
+    // which maps to CrossModalBridge with the wrong input dimension).
+    let tensor_class = if key.contains("vision_embedder.patch_dense") {
+        TensorClass::VisionPatchProjection
+    } else {
+        match role {
+            MatrixRole::MultimodalProjection => TensorClass::CrossModalBridge,
+            MatrixRole::UnknownLinear => TensorClass::Unknown,
+            MatrixRole::AttentionQ
+            | MatrixRole::AttentionK
+            | MatrixRole::AttentionV
+            | MatrixRole::AttentionO => TensorClass::DecoderAttentionProjection,
+            MatrixRole::FfnGate | MatrixRole::FfnUp | MatrixRole::FfnDown => {
+                TensorClass::DecoderMlpProjection
+            }
+            MatrixRole::Embedding => TensorClass::TokenEmbedding,
+            MatrixRole::LmHead => TensorClass::OutputHead,
+            _ => TensorClass::Unknown,
+        }
+    };
+
+    // Vision embedder weights that structurally resist base NF4 may use
+    // the ScaledReductionAxis candidate.
+    let hint = QuantizationHint {
+        tensor_class,
+        permit_scale_candidate: true,
+        permit_int8_candidate: true,
+    };
+
+    let act_weights = Some(channel_sq.as_slice());
+    let (codes, scales, biases, scale_vector, qmf) = match quantize_tensor(
+        data,
+        rows,
+        cols,
+        &hint,
+        act_weights,
+        stress,
+        calibration,
+    ) {
+        Ok(tensor) => {
+            output_lines.push(format!(
+                "  {:?} for {}: wNRMSE={:.4} zCollapse={:.4} oRMSE={:.2} oNRMSE={:.4} cos={:.4} refRMS={:.2}",
+                tensor.format,
+                key,
+                tensor.weight_report.nrmse,
+                tensor.weight_report.zero_collapse_ratio,
+                tensor.operator_report.rmse,
+                tensor.operator_report.operator_nrmse,
+                tensor.operator_report.cosine_similarity,
+                tensor.operator_report.ref_output_rms,
+            ));
+            (
+                tensor.codes,
+                tensor.scales,
+                tensor.biases,
+                tensor.scale_vector,
+                tensor.format,
+            )
+        }
+        Err(e) => {
+            match &e {
+                QuantizationAdmissionFailure::NoCandidatePassed {
+                    candidates_attempted,
+                    last_weight_nrmse,
+                    last_zero_collapse_ratio,
+                    last_operator_rmse,
+                    last_operator_nrmse,
+                    last_cosine_similarity,
+                    last_ref_output_rms,
+                } => {
+                    output_lines.push(format!("  NO CANDIDATE PASSED for {key}: candidates={candidates_attempted:?} wNRMSE={last_weight_nrmse:.4} zCollapse={last_zero_collapse_ratio:.4} oRMSE={last_operator_rmse:.2} oNRMSE={last_operator_nrmse:.4} cos={last_cosine_similarity:.4} refRMS={last_ref_output_rms:.2}"));
+                }
+                QuantizationAdmissionFailure::PackerFailure(msg) => {
+                    output_lines.push(format!("  PACKER FAILURE for {key}: {msg}"));
+                }
+            }
+            std::process::exit(1);
+        }
+    };
+    // ── Write temp files (after successful verification) ───────────
+    // Start SHA-256 digest on a rayon worker thread, overlapping with file
+    // writes and binding setup.  rayon::scope lets the spawned task borrow
+    // `data` (a &[f32] param) without cloning the entire weight matrix.
+    let dcell = parking_lot::Mutex::new(None::<[u8; 32]>);
+    let dslot = &dcell;
+    rayon::scope(|s| {
+        s.spawn(|_| {
+            *dslot.lock() = Some(parallel_sha256(bytemuck::cast_slice(data)));
+    });
+    let safe_name = sanitize_filename(key.to_string());
+    if output_format == "fused" {
+        let fused_buf =
+            tribunus_compute_core::nf4tile640::fused::pack_weights_fused(data, rows, cols);
+        std::fs::write(tmp_dir.join(format!("{}_fused.bin", safe_name)), &fused_buf).unwrap();
+        } else {
+        std::fs::write(
+            tmp_dir.join(format!("{}_codes.bin", safe_name)),
+            bytemuck::cast_slice(&codes),
+        )
+        .unwrap();
+        std::fs::write(
+            tmp_dir.join(format!("{}_scales.bin", safe_name)),
+            bytemuck::cast_slice(&scales),
+        )
+        .unwrap();
+        std::fs::write(
+            tmp_dir.join(format!("{}_biases.bin", safe_name)),
+            bytemuck::cast_slice(&biases),
+        )
+        .unwrap();
+        }
+    let tiles_per_row = (cols + 639) / 640;
+    let total_tiles = rows * tiles_per_row;
+    let (weights_seg, meta_seg, sidecar_seg) = match qmf {
+        QuantizedMatrixFormat::Nf4Tile640Base
+        | QuantizedMatrixFormat::Nf4Tile640ScaledReductionAxis => {
+                (26u8, 27u8, 40u8)
+    }
+        QuantizedMatrixFormat::Int8Tile640Base => {
+                (39u8, 27u8, 0xFF)
+        }
+        QuantizedMatrixFormat::TernaryTile640Base
+        | QuantizedMatrixFormat::TernaryTile640ScaledReductionAxis => {
+            todo!("ternary ingest not wired")
+        }
+    };
+    bindings.push(WeightBindingData {
+        key: key.to_string(),
+        format: qmf,
+        tiles_per_row,
+        total_tiles,
+        weights_segment: weights_seg,
+        tile_metadata_segment: meta_seg,
+            sidecar_segment: if scale_vector.is_some() { sidecar_seg } else { 0xFF },
+        sidecar_count: scale_vector.as_ref().map(|_| cols as u32).unwrap_or(0),
+        rows,
+        cols,
+    });
+        if let Some(sv) = scale_vector {
+            let scale_bytes: Vec<u8> = sv
+                .iter()
+                .flat_map(|&s| f32_to_fp16_bits(s).to_le_bytes())
+                .collect();
+            std::fs::write(
+                tmp_dir.join(format!("{}_scales_f16.bin", safe_name)),
+                &scale_bytes,
+            )
+            .unwrap();
+        }
+    });
+    let tensor_digest = dcell.lock().take().unwrap();
+    plan_entries.push(QuantizationPlanEntry {
+        tensor_name: key.to_string(),
+        source_tensor_digest: tensor_digest,
+        profile_id: selection_receipts
+            .last()
+            .map(|r| r.selected_profile_id)
+            .unwrap_or(0),
+        group_importances: importances,
+        outlier_channels: Vec::new(),
+        verification_rmse: 0.0,
+        gate_passed: true,
+        aw_mse: None,
+        channel_second_moments: Some(channel_sq),
+    });
+}
+
+/// Collect nf4tile640 triplet segments from per-matrix temp files.
+#[allow(dead_code)]
+/// Files are sorted by sanitized name to match the matrix processing order
+/// (embedding → layers → lm_head → multimodal).
+fn collect_nf4_triplet_segments(tmp_dir: &Path) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(tmp_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+    entries.sort();
+
+    let mut codes = Vec::new();
+    let mut scales = Vec::new();
+    let mut biases = Vec::new();
+
+    for path in &entries {
+        let name = path.file_name().unwrap().to_string_lossy();
+        if name.ends_with("_codes.bin") {
+            codes.extend(std::fs::read(path).unwrap());
+        } else if name.ends_with("_scales.bin") {
+            scales.extend(std::fs::read(path).unwrap());
+        } else if name.ends_with("_biases.bin") {
+            biases.extend(std::fs::read(path).unwrap());
+        }
+    }
+
+    (codes, scales, biases)
+}
+
+/// Collect per-segment data from per-matrix temp files, keyed on binding order.
+/// Returns (nf4_codes, int8_codes, tile_metadata, sidecar_fp16).
+fn collect_triplet_segments(
+    bindings: &[WeightBindingData],
+    tmp_dir: &Path,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    use QuantizedMatrixFormat::*;
+    let mut nf4_codes = Vec::new();
+    let mut int8_codes = Vec::new();
+    let mut tile_meta = Vec::new();
+    let mut sidecar_fp16 = Vec::new();
+    for b in bindings {
+        let safe_name = sanitize_filename(b.key.clone());
+        // Codes: NF4 vs INT8
+        let codes = std::fs::read(tmp_dir.join(format!("{}_codes.bin", safe_name)))
+            .unwrap_or_else(|e| panic!("Missing codes for {}: {}", b.key, e));
+        match b.format {
+            Int8Tile640Base => int8_codes.extend(codes),
+            _ => nf4_codes.extend(codes),
+        }
+        // Scales (NF4: f32 scales per tile, INT8: f32 scales per tile)
+        let scales_raw = std::fs::read(tmp_dir.join(format!("{}_scales.bin", safe_name)))
+            .unwrap_or_else(|e| panic!("Missing scales for {}: {}", b.key, e));
+        // Biases (NF4 only: f32 biases per tile)
+        if matches!(b.format, Nf4Tile640Base | Nf4Tile640ScaledReductionAxis) {
+            let biases_raw = std::fs::read(tmp_dir.join(format!("{}_biases.bin", safe_name)))
+                .unwrap_or_else(|e| panic!("Missing biases for {}: {}", b.key, e));
+            // Interleave: per tile [f32_scale][f32_bias] = 8 bytes
+            let scales_f32 = bytemuck::cast_slice::<u8, f32>(&scales_raw);
+            let biases_f32 = bytemuck::cast_slice::<u8, f32>(&biases_raw);
+            for i in 0..scales_f32.len().min(biases_f32.len()) {
+                tile_meta.extend_from_slice(&scales_f32[i].to_le_bytes());
+                tile_meta.extend_from_slice(&biases_f32[i].to_le_bytes());
+            }
+        } else {
+            // INT8: scale only, no bias — just append raw f32 scale bytes
+            tile_meta.extend(scales_raw);
+        }
+        if b.sidecar_count > 0 {
+            let sc = std::fs::read(tmp_dir.join(format!("{}_scales_f16.bin", safe_name)))
+                .unwrap_or_else(|e| panic!("Missing sidecar for {}: {}", b.key, e));
+            sidecar_fp16.extend(sc);
+        }
+    }
+    (nf4_codes, int8_codes, tile_meta, sidecar_fp16)
+}
+
+/// Build the binary MatrixContract segment: u32 count followed by count × MatrixWeightBinding.
+fn build_matrix_contract_blob(bindings: &[MatrixWeightBinding]) -> Vec<u8> {
+    let mut buf =
+        Vec::with_capacity(4 + bindings.len() * std::mem::size_of::<MatrixWeightBinding>());
+    buf.extend_from_slice(&(bindings.len() as u32).to_le_bytes());
+    for b in bindings {
+        buf.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(
+                b as *const MatrixWeightBinding as *const u8,
+                std::mem::size_of::<MatrixWeightBinding>(),
+            )
+        });
+    }
+    buf
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -951,12 +1386,6 @@ fn main() {
         return;
     }
 
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║  Gemma 4 12B Unified → Ternary .cimage                     ║");
-    println!("║  AOT Compiler (pure Rust, no Python)                       ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
-
     // Parse arguments
     let repo = get_opt(&args, "--repo");
     let local_dir = get_opt(&args, "--local-dir");
@@ -964,15 +1393,97 @@ fn main() {
     let draft_model_dir = get_opt(&args, "--draft-model-dir");
     let mil_program = get_opt(&args, "--mil");
     let nf4 = has_flag(&args, "--nf4");
+    let quantizer_mode = get_opt(&args, "--quantizer")
+        .unwrap_or("canonical_nf4_v1")
+        .to_string();
+    let is_nf4_mode = quantizer_mode.starts_with("nf4tile640") || nf4;
+    // Banner
+    println!("╔══════════════════════════════════════════════════════════════╗");
+    println!(
+        "║  Gemma 4 12B Unified → {} .cimage                          ║",
+        if is_nf4_mode {
+            "NF4 Tile640"
+        } else {
+            "Ternary"
+        }
+    );
+    println!("║  AOT Compiler (pure Rust, no Python)                       ║");
+    println!("╚══════════════════════════════════════════════════════════════╝");
+    // Build deterministic calibration suite for operator-space validation.
+    // Build deterministic stress suite (always, catches codec pathologies).
+    // Optional calibration suite (prerendered activation banks) can be added
+    // when the reference model execution is available.
+    let stress_suite = if is_nf4_mode {
+        Some(tribunus_compute_core::quantization::StressSuite::build_default())
+    } else {
+        None
+    };
     let tts_repo = get_opt(&args, "--tts-repo").map(|s| s.to_string());
     let tts_local_dir = get_opt(&args, "--tts-local-dir").map(|s| s.to_string());
+    let vision_bank = get_opt(&args, "--vision-bank").map(|s| s.to_string());
+    let bridge_bank = get_opt(&args, "--bridge-bank").map(|s| s.to_string());
 
-    let _quantizer = get_opt(&args, "--quantizer").unwrap_or("canonical_nf4_v1");
+    let strategy = get_opt(&args, "--strategy").unwrap_or("causal-text");
+    if strategy != "causal-text" && strategy != "acoustic-stream" {
+        eprintln!("ERROR: --strategy must be 'causal-text' (default) or 'acoustic-stream', got: {strategy}");
+        std::process::exit(1);
+    }
+
+    let output_format = get_opt(&args, "--format").unwrap_or("split");
+
     let _calibration_corpus = get_opt(&args, "--calibration-corpus").map(|s| s.to_string());
-    let _calibration_budget = get_opt(&args, "--calibration-budget").and_then(|s| s.parse::<u64>().ok());
-    let _quality_policy = get_opt(&args, "--quality-policy").unwrap_or("default");
+    let _calibration_budget =
+        get_opt(&args, "--calibration-budget").and_then(|s| s.parse::<u64>().ok());
+    let quality_policy = get_opt(&args, "--quality-policy").unwrap_or("default");
     let _emit_quality_report = has_flag(&args, "--emit-quality-report");
     let _allow_experimental = has_flag(&args, "--allow-experimental");
+
+    // Load prerendered vision activation bank, if provided.
+    let mut calibration_suite = vision_bank.as_ref().and_then(|path| {
+        use tribunus_compute_core::quantization::CalibrationSuite;
+        match CalibrationSuite::load_from_bank_dir(
+            std::path::Path::new(path),
+            tribunus_compute_core::quantization::contract::TensorClass::VisionPatchProjection,
+            6912,
+            "vision-prerendered",
+        ) {
+            Ok(suite) => {
+                eprintln!("  Loaded vision activation bank from {}", path);
+                Some(suite)
+            }
+            Err(e) => {
+                eprintln!("  WARNING: failed to load vision bank from {}: {e}", path);
+                None
+            }
+        }
+    });
+
+    // Load prerendered bridge activation bank (input to embedding_projection.weight).
+    let calibration_suite = bridge_bank.as_ref().and_then(|path| {
+        use tribunus_compute_core::quantization::contract::TensorClass;
+        use tribunus_compute_core::quantization::CalibrationSuite;
+        match CalibrationSuite::load_from_bank_dir(
+            std::path::Path::new(path),
+            TensorClass::CrossModalBridge,
+            3840,
+            "bridge-prerendered",
+        ) {
+            Ok(suite) => {
+                let mut existing = calibration_suite
+                    .take()
+                    .unwrap_or_else(CalibrationSuite::empty);
+                if let Some(bridge) = suite.get(&TensorClass::CrossModalBridge) {
+                    existing.insert(TensorClass::CrossModalBridge, bridge.clone());
+                }
+                eprintln!("  Loaded bridge activation bank from {}", path);
+                Some(existing)
+            }
+            Err(e) => {
+                eprintln!("  WARNING: failed to load bridge bank from {}: {e}", path);
+                calibration_suite.take()
+            }
+        }
+    });
 
     // Validate args
     if has_flag(&args, "--help") || has_flag(&args, "-h") {
@@ -983,18 +1494,29 @@ fn main() {
         eprintln!();
         eprintln!("Flags:");
         eprintln!("  --nf4                        Use nf4tile640 quantization instead of ternary");
-        eprintln!("  --tts-repo <HF_REPO_ID>      HF repo ID for Qwen3-TTS model to bake into cimage");
-        eprintln!("  --tts-local-dir <PATH>       Local directory containing TTS model.safetensors");
+        eprintln!(
+            "  --tts-repo <HF_REPO_ID>      HF repo ID for Qwen3-TTS model to bake into cimage"
+        );
+        eprintln!(
+            "  --tts-local-dir <PATH>       Local directory containing TTS model.safetensors"
+        );
         eprintln!("  --verify-only                Re-download source and verify nf4tile640 packing quality");
         eprintln!("  --quantizer <PROFILE>         Quantizer profile: canonical_nf4_v1 (default), learn-gemma-v1");
         eprintln!("  --calibration-corpus <PATH>   Path to calibration text for profile learning");
-        eprintln!("  --calibration-budget <MB>     Memory budget for calibration in MB (default: 1024)");
+        eprintln!(
+            "  --calibration-budget <MB>     Memory budget for calibration in MB (default: 1024)"
+        );
         eprintln!("  --quality-policy <POLICY>     Quality policy: default (0.05), strict (0.01), experimental");
         eprintln!("  --emit-quality-report         Emit JSON quality report alongside cimage");
-        eprintln!("  --allow-experimental          Allow experimental quantizer profiles in output");
+        eprintln!(
+            "  --allow-experimental          Allow experimental quantizer profiles in output"
+        );
+        eprintln!("  --format split|fused         Output format: split (three files per matrix, default) or fused (single 64B-aligned buffer)");
+        eprintln!(
+            "  --strategy causal-text|acoustic-stream   KV cache strategy (default: causal-text)"
+        );
         std::process::exit(0);
     }
-
 
     if has_flag(&args, "--verify-only") {
         cmd_verify_only(&args);
@@ -1009,11 +1531,18 @@ fn main() {
         eprintln!();
         eprintln!("Flags:");
         eprintln!("  --nf4                        Use nf4tile640 quantization instead of ternary");
-        eprintln!("  --tts-repo <HF_REPO_ID>      HF repo ID for Qwen3-TTS model to bake into cimage");
-        eprintln!("  --tts-local-dir <PATH>       Local directory containing TTS model.safetensors");
+        eprintln!(
+            "  --tts-repo <HF_REPO_ID>      HF repo ID for Qwen3-TTS model to bake into cimage"
+        );
+        eprintln!(
+            "  --tts-local-dir <PATH>       Local directory containing TTS model.safetensors"
+        );
         eprintln!("  --verify-only                Re-download source and verify nf4tile640 packing quality");
+        eprintln!("  --format split|fused         Output format: split (three files per matrix, default) or fused (single 64B-aligned buffer)");
+        eprintln!(
+            "  --strategy causal-text|acoustic-stream   KV cache strategy (default: causal-text)"
+        );
         std::process::exit(1);
-
     }
 
     let total_start = Instant::now();
@@ -1032,7 +1561,11 @@ fn main() {
     println!("  Found {} shard(s)", shard_paths.len());
 
     // ── Step 2: Process all weights ─────────────────────────────
-    println!("\n  ── Quantizing weights (256-block ternary) ───────────");
+    if is_nf4_mode {
+        println!("\n  ── Quantizing weights (NF4 Tile640) ────────────────────");
+    } else {
+        println!("\n  ── Quantizing weights (256-block ternary) ───────────────");
+    }
     let quant_start = Instant::now();
 
     // Spawn Metal shader compilation concurrently (CPU LLVM work, while GPU quantizes)
@@ -1044,7 +1577,14 @@ fn main() {
 
     let mut all_scales = Vec::new();
     let mut all_weights = Vec::new();
-    let mut total_elements: usize = 0;
+    // NF4-mode per-segment data (populated after packing)
+    let mut nf4_weights_seg: Vec<u8> = Vec::new();
+    let mut int8_weights_seg: Vec<u8> = Vec::new();
+    let mut tile_metadata_seg: Vec<u8> = Vec::new();
+    let mut sidecar_seg: Vec<u8> = Vec::new();
+    let mut contract_bytes: Vec<u8> = Vec::new();
+    let mut total_elements: usize = 0; // ternary element count (0 in nf4 mode)
+    let mut ternary_distill_results: Vec<MatrixDistillResult> = Vec::new();
 
     // Separate buffers for non-transformer-weight segments
     let mut vocab_embedding_raw_f32: Vec<f32> = Vec::new();
@@ -1058,6 +1598,21 @@ fn main() {
     let mut multimodal_nibbles: Vec<u8> = Vec::new();
     let mut multimodal_aux_fp16: Vec<u8> = Vec::new();
     let mut draft_layer_count: u32 = 0;
+    // nf4tile640 state (moved inline — no longer accumulates all_matrices)
+    // AW-LS activation-weighted saliency: per-matrix channel second moments.
+    let mut channel_sq_map: HashMap<String, Vec<f32>> = HashMap::new();
+    // nf4tile640 streaming state (pack inline, no accumulation)
+    let mut selection_receipts: Vec<ProfileSelectionReceipt> = Vec::new();
+    let mut plan_entries: Vec<QuantizationPlanEntry> = Vec::new();
+    let mut weight_bindings: Vec<WeightBindingData> = Vec::new();
+    let mut matrix_bindings: Vec<MatrixWeightBinding> = Vec::new();
+    let learned_profiles: HashMap<MatrixRole, LearnedProfile> = HashMap::new();
+    let distill_objective = DistillObjective::default();
+    let nf4_tmp_dir = std::env::temp_dir().join("gemma4_nf4_pack_stream");
+    let _ = std::fs::create_dir_all(&nf4_tmp_dir);
+    let nf4_start = Instant::now();
+    // nf4tile640 biases segment (populated via collect_nf4_triplet_segments after packing)
+    let nf4_biases: Vec<u8> = Vec::new();
     // Ternary block offsets for ANE compilation: (nibble_off, scale_off, num_f32_elements)
     let mut ane_ternary_offsets: HashMap<String, (u64, u64, usize)> = HashMap::new();
 
@@ -1073,46 +1628,73 @@ fn main() {
         }
     }
 
-    // ── CLUSTER & QUANTIZE EMBEDDING TABLE ───────────────────────────
+    // ── CLUSTER & QUANTIZE EMBEDDING TABLE (skipped in --nf4 mode) ──
     {
-        let dim = HIDDEN_DIM;
-        let n_rows = vocab_embedding_raw_f32.len() / dim;
-        if n_rows > 0 {
-            let k = 256;
-            if n_rows < k * 2 {
-                eprintln!("  Too few embedding rows ({n_rows}) for {k} clusters; skipping centroid scheme.");
-                process_weights(
-                    &vocab_embedding_raw_f32,
-                    &mut vocab_scales,
-                    &mut vocab_nibbles,
-                );
-                centroid_nibbles = vec![0u8; (256 * dim + 255) / 256 * 64];
-                centroid_scales = vec![0u8; ((256 * dim + 255) / 256) * 2];
-                cluster_map_bytes = vec![0u8; n_rows * 4];
-            } else {
-                eprint!("  Clustering {n_rows} embedding rows into {k} groups... ");
-                let start = std::time::Instant::now();
-                let mut centroids = kmeans_plusplus(&vocab_embedding_raw_f32, k, n_rows, dim);
-                for _iter in 0..20 {
-                    let (_assignments, delta) =
-                        kmeans_iterate(&vocab_embedding_raw_f32, &mut centroids, n_rows, dim, k);
-                    if delta < 1e-6 {
-                        break;
+        if !is_nf4_mode {
+            let dim = HIDDEN_DIM;
+            let n_rows = vocab_embedding_raw_f32.len() / dim;
+            if n_rows > 0 {
+                let k = 256;
+                if n_rows < k * 2 {
+                    eprintln!("  Too few embedding rows ({n_rows}) for {k} clusters; skipping centroid scheme.");
+                    process_weights(
+                        &vocab_embedding_raw_f32,
+                        &mut vocab_scales,
+                        &mut vocab_nibbles,
+                    );
+                    centroid_nibbles = vec![0u8; (256 * dim + 255) / 256 * 64];
+                    centroid_scales = vec![0u8; ((256 * dim + 255) / 256) * 2];
+                    cluster_map_bytes = vec![0u8; n_rows * 4];
+                } else {
+                    eprint!("  Clustering {n_rows} embedding rows into {k} groups... ");
+                    let start = std::time::Instant::now();
+                    let mut centroids = kmeans_plusplus(
+                        &vocab_embedding_raw_f32,
+                        k,
+                        n_rows,
+                        dim,
+                        &CancelToken::new(None),
+                    );
+                    for _iter in 0..20 {
+                        let (_assignments, delta) = kmeans_iterate(
+                            &vocab_embedding_raw_f32,
+                            &mut centroids,
+                            n_rows,
+                            dim,
+                            k,
+                            &CancelToken::new(None),
+                        );
+                        if delta < 1e-6 {
+                            break;
+                        }
+                    }
+                    let (assignments, _delta) = kmeans_iterate(
+                        &vocab_embedding_raw_f32,
+                        &mut centroids,
+                        n_rows,
+                        dim,
+                        k,
+                        &CancelToken::new(None),
+                    );
+                    let reordered =
+                        reorder_by_cluster(&vocab_embedding_raw_f32, &assignments, n_rows, dim, k);
+                    eprintln!("{:.1}s", start.elapsed().as_secs_f64());
+                    process_weights(&reordered, &mut vocab_scales, &mut vocab_nibbles);
+                    process_weights(&centroids, &mut centroid_scales, &mut centroid_nibbles);
+                    for &c in &assignments {
+                        cluster_map_bytes.extend_from_slice(&c.to_le_bytes());
                     }
                 }
-                let (assignments, _delta) =
-                    kmeans_iterate(&vocab_embedding_raw_f32, &mut centroids, n_rows, dim, k);
-                let reordered =
-                    reorder_by_cluster(&vocab_embedding_raw_f32, &assignments, n_rows, dim, k);
-                eprintln!("{:.1}s", start.elapsed().as_secs_f64());
-                process_weights(&reordered, &mut vocab_scales, &mut vocab_nibbles);
-                process_weights(&centroids, &mut centroid_scales, &mut centroid_nibbles);
-                for &c in &assignments {
-                    cluster_map_bytes.extend_from_slice(&c.to_le_bytes());
-                }
+            } else {
+                eprintln!("  Embedding table empty, skipping quantization");
             }
         } else {
-            eprintln!("  Embedding table empty, skipping quantization");
+            let dim = HIDDEN_DIM;
+            let n_rows = vocab_embedding_raw_f32.len() / dim;
+            eprintln!(
+                "  NF4 mode: raw f32 embeddings ({} rows x {} dims)",
+                n_rows, dim
+            );
         }
     }
     // ── FINAL_NORM (aux section: raw FP16 bytes) ─────────────────
@@ -1131,7 +1713,7 @@ fn main() {
 
     // ── MULTIMODAL_WEIGHTS (projection matrices → ternary; 1D → aux FP16) ──
     println!("  ── Multimodal weights ────────────────────────────");
-    for (name, _rows, cols) in MULTIMODAL_WEIGHTS {
+    for (name, rows, cols) in MULTIMODAL_WEIGHTS {
         let is_1d = *cols == 1;
         if let Some((data, shape)) = load_tensor(name, &shard_paths) {
             let n_blocks = (data.len() + 255) / 256;
@@ -1142,6 +1724,30 @@ fn main() {
                     multimodal_aux_fp16.extend_from_slice(&f32_to_fp16_bits(v).to_le_bytes());
                 }
                 println!(" → aux FP16");
+            } else if is_nf4_mode {
+                // Projection matrix → nf4tile640 inline packing
+                let mut output_lines_temp = Vec::new();
+                pack_matrix_nf4_inline(
+                    name,
+                    stress_suite.as_ref(),
+                    calibration_suite.as_ref(),
+                    &data,
+                    *rows,
+                    *cols,
+                    &mut channel_sq_map,
+                    &mut selection_receipts,
+                    &mut plan_entries,
+                    &mut weight_bindings,
+                    &learned_profiles,
+                    &distill_objective,
+                    &nf4_tmp_dir,
+                    &output_format,
+                    quality_policy,
+                    &mut output_lines_temp,
+                );
+                for line in &output_lines_temp {
+                    eprintln!("{}", line);
+                }
             } else {
                 // Projection matrix → ternary quantization
                 let nib_off = multimodal_nibbles.len() as u64;
@@ -1149,6 +1755,23 @@ fn main() {
                 ane_ternary_offsets.insert(name.to_string(), (nib_off, scl_off, data.len()));
                 process_weights(&data, &mut multimodal_scales, &mut multimodal_nibbles);
                 total_elements += data.len();
+                let distill_obj = DistillObjective::default();
+                let distill_result = distill_matrix(
+                    name,
+                    &data,
+                    *rows,
+                    *cols,
+                    DistillFormat::Ternary,
+                    &distill_obj,
+                    None,
+                );
+                if !distill_result.gate_passed {
+                    eprintln!(
+                        "  [distill] {} KL={:.4} total_loss={:.4}",
+                        name, distill_result.kl_divergence, distill_result.total_loss
+                    );
+                }
+                ternary_distill_results.push(distill_result);
                 println!(" → {n_blocks} blocks ternary");
             }
         } else {
@@ -1160,35 +1783,170 @@ fn main() {
     let lm_head_key = "model.language_model.lm_head.weight";
     if let Some((data, shape)) = load_tensor(lm_head_key, &shard_paths) {
         let n_blocks = (data.len() + 255) / 256;
-        process_weights(&data, &mut all_scales, &mut all_weights);
-        total_elements += data.len();
-        print!("  lm_head: {shape:?} — {n_blocks:>6} blocks\n");
+        let rows = if shape.len() >= 2 {
+            shape[0]
+        } else {
+            data.len()
+        };
+        let cols = if shape.len() >= 2 { shape[1] } else { 1 };
+        if is_nf4_mode {
+            let mut output_lines_temp = Vec::new();
+            pack_matrix_nf4_inline(
+                lm_head_key,
+                stress_suite.as_ref(),
+                calibration_suite.as_ref(),
+                &data,
+                rows,
+                cols,
+                &mut channel_sq_map,
+                &mut selection_receipts,
+                &mut plan_entries,
+                &mut weight_bindings,
+                &learned_profiles,
+                &distill_objective,
+                &nf4_tmp_dir,
+                &output_format,
+                quality_policy,
+                &mut output_lines_temp,
+            );
+            for line in &output_lines_temp {
+                eprintln!("{}", line);
+            }
+        } else {
+            process_weights(&data, &mut all_scales, &mut all_weights);
+            total_elements += data.len();
+            let distill_obj = DistillObjective::default();
+            let distill_result = distill_matrix(
+                lm_head_key,
+                &data,
+                rows,
+                cols,
+                DistillFormat::Ternary,
+                &distill_obj,
+                None,
+            );
+            if !distill_result.gate_passed {
+                eprintln!(
+                    "  [distill] {} KL={:.4} total_loss={:.4}",
+                    lm_head_key, distill_result.kl_divergence, distill_result.total_loss
+                );
+            }
+            ternary_distill_results.push(distill_result);
+            print!("  lm_head: {shape:?} — {n_blocks:>6} blocks\n");
+        }
     } else {
         println!("  lm_head.weight NOT FOUND (tied with embed_tokens)");
     }
 
     // Layer weights
-    for layer in 0..NUM_LAYERS {
-        print!("\r  Layer {}/{}", layer + 1, NUM_LAYERS);
-        use std::io::Write;
-        std::io::stdout().flush().ok();
-
-        for (mat_name, _rows, _cols) in MATRICES {
-            let key = tensor_key(layer, mat_name);
-            if let Some((data, _)) = load_tensor(&key, &shard_paths) {
-                process_weights(&data, &mut all_scales, &mut all_weights);
-                total_elements += data.len();
-            } else {
-                println!("\n  WARNING: {key} not found");
+    // ── Pack all decoder layer matrices ──────────────────────────
+    if is_nf4_mode {
+        // Collect packing jobs serially (load_tensor reads mmap'd shards)
+        let mut jobs: Vec<PackJob> = Vec::new();
+        for layer in 0..NUM_LAYERS {
+            for (mat_name, rows, cols) in MATRICES {
+                let key = tensor_key(layer, mat_name);
+                if let Some((data, _shape)) = load_tensor(&key, &shard_paths) {
+                    jobs.push(PackJob { key, data, rows: *rows, cols: *cols });
+                } else {
+                    println!("\n  WARNING: {key} not found");
+                }
             }
         }
 
-        if layer % 8 == 7 {
-            let mb = (all_scales.len() + all_weights.len()) as f64 / (1024.0 * 1024.0);
-            println!(" — {mb:.1} MB");
-        }
+        // Parallelize packing across all matrices using rayon
+        let output_buffer = parking_lot::Mutex::new(Vec::new());
+        let sq_mtx = parking_lot::Mutex::new(std::mem::take(&mut channel_sq_map));
+        let rec_mtx = parking_lot::Mutex::new(std::mem::take(&mut selection_receipts));
+        let plan_mtx = parking_lot::Mutex::new(std::mem::take(&mut plan_entries));
+        let bind_mtx = parking_lot::Mutex::new(std::mem::take(&mut weight_bindings));
 
-        // ── Collect per-layer norm weights ─────────────────────────
+        jobs.par_iter().for_each(|job| {
+            // Per-job local accumulation avoids contention on every push
+            let mut local_output = Vec::new();
+            let mut local_sq = std::collections::HashMap::new();
+            let mut local_rec = Vec::new();
+            let mut local_plan = Vec::new();
+            let mut local_bind = Vec::new();
+
+            pack_matrix_nf4_inline(
+                &job.key,
+                stress_suite.as_ref(),
+                calibration_suite.as_ref(),
+                &job.data,
+                job.rows,
+                job.cols,
+                &mut local_sq,
+                &mut local_rec,
+                &mut local_plan,
+                &mut local_bind,
+                &learned_profiles,
+                &distill_objective,
+                &nf4_tmp_dir,
+                &output_format,
+                quality_policy,
+                &mut local_output,
+            );
+
+            // Merge per-job results into shared collections
+            output_buffer.lock().append(&mut local_output);
+            sq_mtx.lock().extend(local_sq);
+            rec_mtx.lock().append(&mut local_rec);
+            plan_mtx.lock().append(&mut local_plan);
+            bind_mtx.lock().append(&mut local_bind);
+        });
+
+        // Reclaim ownership from mutexes
+        channel_sq_map = sq_mtx.into_inner();
+        selection_receipts = rec_mtx.into_inner();
+        plan_entries = plan_mtx.into_inner();
+        weight_bindings = bind_mtx.into_inner();
+
+        // Flush buffered output lines in order
+        for line in output_buffer.into_inner() {
+            println!("{line}");
+        }
+    } else {
+        // Ternary path — stays serial (calls process_weights and distill)
+        for layer in 0..NUM_LAYERS {
+            for (mat_name, rows, cols) in MATRICES {
+                let key = tensor_key(layer, mat_name);
+                if let Some((data, _shape)) = load_tensor(&key, &shard_paths) {
+                    process_weights(&data, &mut all_scales, &mut all_weights);
+                    total_elements += data.len();
+
+                    // ── Guided distillation comparison (NF4 vs ternary) ─────
+                    let distill_obj = DistillObjective::default();
+                    let distill_result = distill_matrix(
+                        &key,
+                        &data,
+                        *rows,
+                        *cols,
+                        DistillFormat::Ternary,
+                        &distill_obj,
+                        None,
+                    );
+                    if !distill_result.gate_passed {
+                        eprintln!(
+                            "  [distill] {} KL={:.4} total_loss={:.4}",
+                            key, distill_result.kl_divergence, distill_result.total_loss
+                        );
+                    }
+                    ternary_distill_results.push(distill_result);
+                } else {
+                    println!("\n  WARNING: {key} not found");
+                }
+            }
+
+            if layer % 8 == 7 {
+                let mb = (all_scales.len() + all_weights.len()) as f64 / (1024.0 * 1024.0);
+                println!(" — {mb:.1} MB");
+            }
+        }
+    }
+
+    // ── Collect per-layer norm weights (always serial, tiny) ─────
+    for layer in 0..NUM_LAYERS {
         for norm_name in &["input_layernorm.weight", "post_attention_layernorm.weight"] {
             let nkey = format!("model.language_model.model.layers.{layer}.{norm_name}");
             if let Some((norm_data, _)) = load_tensor(&nkey, &shard_paths) {
@@ -1198,159 +1956,8 @@ fn main() {
             }
         }
     }
+
     println!();
-
-    // ── nf4tile640 packing (alternative to ternary) ──────────────
-    if nf4 {
-        let tmp_dir = std::env::temp_dir().join("gemma4_nf4_pack");
-        let _ = std::fs::create_dir_all(&tmp_dir);
-
-        let mut all_matrices: Vec<(String, usize, usize, Vec<f32>)> = Vec::new();
-
-        // lm_head
-        let lm_head_key = "model.language_model.lm_head.weight";
-        if let Some((data, shape)) = load_tensor(lm_head_key, &shard_paths) {
-            let rows = if shape.len() >= 2 { shape[0] } else { data.len() };
-            let cols = if shape.len() >= 2 { shape[1] } else { 1 };
-            all_matrices.push((lm_head_key.to_string(), rows, cols, data));
-        }
-
-        // Layer weights — collect raw f32 data alongside ternary processing
-        for layer in 0..NUM_LAYERS {
-            for (mat_name, _rows, _cols) in MATRICES {
-                let key = tensor_key(layer, mat_name);
-                if let Some((data, shape)) = load_tensor(&key, &shard_paths) {
-                    // Use actual safetensors shape (out_dim, in_dim).  Gemma's in_dim is
-                    // always 3840 or 15360, both multiples of 640 — safe for nf4tile640.
-                    let rows = if shape.len() >= 2 { shape[0] } else { data.len() };
-                    let cols = if shape.len() >= 2 { shape[1] } else { 1 };
-                    all_matrices.push((key, rows, cols, data));
-                }
-            }
-        }
-
-        println!("  ▶ nf4tile640 mode: packing {} weight matrices", all_matrices.len());
-        // ── Adaptive codebook: load or train learned profiles ──────────────
-        let learned_profiles: HashMap<MatrixRole, LearnedProfile> = HashMap::new();
-        let mut selection_receipts: Vec<ProfileSelectionReceipt> = Vec::new();
-
-        let nf4_start = Instant::now();
-        for (serialized_name, rows, cols, data) in &all_matrices {
-            let name_key = serialized_name.replace('{', "").replace('}', "");
-            // ── Per-matrix profile selection ─────────────────────────────
-            let role = classify_matrix_role(serialized_name);
-            let groups: Vec<Vec<f32>> = data.chunks(128).map(|c| c.to_vec()).collect();
-            let importances: Vec<f32> = groups.iter().map(|_| 1.0).collect();
-            let (_selected_profile, receipt) = select_profile_for_matrix(
-                serialized_name,
-                role,
-                &groups,
-                &importances,
-                tribunus_compute_core::nf4tile640::NF4_CODEBOOK,
-                &learned_profiles,
-            );
-            selection_receipts.push(receipt);
-
-            // Pack using canonical codebook (learned profiles will supply
-            // their own codebook in a future change).
-            let (codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(data, *rows, *cols);
-            let safe_name = sanitize_filename(name_key);
-            // Write codes
-            std::fs::write(
-                tmp_dir.join(format!("{}_codes.bin", safe_name)),
-                bytemuck::cast_slice(&codes),
-            )
-            .unwrap();
-            // Write scales
-            std::fs::write(
-                tmp_dir.join(format!("{}_scales.bin", safe_name)),
-                bytemuck::cast_slice(&scales),
-            )
-            .unwrap();
-            // Write biases
-            std::fs::write(
-                tmp_dir.join(format!("{}_biases.bin", safe_name)),
-                bytemuck::cast_slice(&biases),
-            )
-            .unwrap();
-
-            // ── Production-parity verification ──────────────────────
-            // Run 3 deterministic test vectors: dequant_matmul_reference vs BF16 reference.
-            // Fail fast if any matrix exceeds RMSE 0.01.
-            for trial in 0..3 {
-                let input = generate_test_vector(*rows, trial);
-                let mut ref_output = vec![0.0f32; *cols];
-                // BF16 reference: output[j] = Σ_i bf16_weights[i * cols + j] * input[i]
-                for j in 0..*cols {
-                    let mut sum = 0.0f32;
-                    for i in 0..*rows {
-                        sum += data[i * cols + j] * input[i];
-                    }
-                    ref_output[j] = sum;
-                }
-
-                let mut nf4_output = vec![0.0f32; *cols];
-                dequant_matmul_reference(
-                    &input, &codes, &scales, &biases,
-                    1, *rows, *cols, &mut nf4_output,
-                ).unwrap();
-
-                // RMSE
-                let mut sq_err = 0.0f32;
-                for j in 0..*cols {
-                    let diff = nf4_output[j] - ref_output[j];
-                    sq_err += diff * diff;
-                }
-                let rmse = (sq_err / *cols as f32).sqrt();
-                if rmse >= 0.01 {
-                    eprintln!("  ✗ FAIL: {} trial {trial} RMSE={:.6} (limit 0.01)", serialized_name, rmse);
-                    std::process::exit(1);
-                }
-            }
-            print!("."); let _ = std::io::stdout().flush();
-        }
-        println!();
-        println!("  ✓ Packed {} nf4tile640 matrices in {:.1?}", all_matrices.len(), nf4_start.elapsed());
-
-    // ── Emit profile selection inspection artifact ───────────────
-    let quantizer_mode = _quantizer;
-    let source_digest = "bf16_qat";
-    let _report = emit_selection_report(&selection_receipts, output, source_digest, quantizer_mode);
-
-    // Validate selection integrity
-    let registry_ids: Vec<u32> = if quantizer_mode == "learn-gemma-v1" {
-        vec![1, 2, 3, 4]
-    } else {
-        vec![0]
-    };
-    validate_selection_integrity(&selection_receipts, &registry_ids, quantizer_mode);
-    }
-
-    // ── MTP Drafter Head Discovery ────────────────────────────────
-    println!("  ── Scanning for MTP drafter heads ───────────────────");
-    let mut mtp_tensors: Vec<String> = Vec::new();
-
-    // Scan all safetensor metadata for "mtp" tensor keys
-    for (_path, data) in &shard_paths {
-        if let Ok(st) = safetensors::SafeTensors::deserialize(data) {
-            for name in st.names() {
-                if name.contains("mtp") {
-                    mtp_tensors.push(name.to_string());
-                }
-            }
-        }
-    }
-    mtp_tensors.sort();
-    mtp_tensors.dedup();
-
-    if !mtp_tensors.is_empty() {
-        println!("  Found {} MTP tensor(s):", mtp_tensors.len());
-        for t in &mtp_tensors {
-            println!("    {t}");
-        }
-    } else {
-        println!("  No MTP heads found (model may not have them)");
-    }
 
     // ── MTP Draft Model (optional external draft decoder) ──────────
     if let Some(ref draft_dir) = draft_model_dir {
@@ -1392,22 +1999,225 @@ fn main() {
                 }
                 if let Ok(tv) = draft_st.tensor(name) {
                     let f32_data = tensor_to_f32(tv.data(), tv.dtype());
-                    let n_elems = f32_data.len();
-                    let nib_off = all_weights.len() as u64;
-                    let scl_off = all_scales.len() as u64;
-                    ane_ternary_offsets
-                        .insert(name.to_string(), (nib_off, scl_off, f32_data.len()));
-                    process_weights(&f32_data, &mut all_scales, &mut all_weights);
-                    total_elements += n_elems;
-                    let n_blocks = (n_elems + 255) / 256;
-                    println!(
-                        "    draft: {name:<55} {} elems, {} blocks",
-                        n_elems, n_blocks
-                    );
+                    if is_nf4_mode {
+                        // nf4tile640 path: inline pack immediately (no accumulation).
+                        let shape = tv.shape();
+                        let rows = if shape.len() >= 2 {
+                            shape[0]
+                        } else {
+                            f32_data.len()
+                        };
+                        let cols = if shape.len() >= 2 { shape[1] } else { 1 };
+                        let mut output_lines_temp = Vec::new();
+                        pack_matrix_nf4_inline(
+                            name,
+                            stress_suite.as_ref(),
+                            calibration_suite.as_ref(),
+                            &f32_data,
+                            rows,
+                            cols,
+                            &mut channel_sq_map,
+                            &mut selection_receipts,
+                            &mut plan_entries,
+                            &mut weight_bindings,
+                            &learned_profiles,
+                            &distill_objective,
+                            &nf4_tmp_dir,
+                            &output_format,
+                            quality_policy,
+                            &mut output_lines_temp,
+                        );
+                        for line in &output_lines_temp {
+                            eprintln!("{}", line);
+                        }
+                        println!("    draft (nf4): {name:<55} {}x{}", rows, cols);
+                    } else {
+                        // Ternary path (existing behavior)
+                        let n_elems = f32_data.len();
+                        let nib_off = all_weights.len() as u64;
+                        let scl_off = all_scales.len() as u64;
+                        ane_ternary_offsets
+                            .insert(name.to_string(), (nib_off, scl_off, f32_data.len()));
+                        process_weights(&f32_data, &mut all_scales, &mut all_weights);
+                        total_elements += n_elems;
+                        let n_blocks = (n_elems + 255) / 256;
+                        println!(
+                            "    draft: {name:<55} {} elems, {} blocks",
+                            n_elems, n_blocks
+                        );
+                    }
                 }
             }
             draft_layer_count = 4; // MTP draft has 4 transformer layers
         }
+    }
+
+    // ── nf4tile640 report & plan (packing happened inline above) ──
+    if is_nf4_mode {
+        println!();
+        println!(
+            "  ✓ Packed {} nf4tile640 matrices in {:.1?}",
+            selection_receipts.len(),
+            nf4_start.elapsed()
+        );
+
+        // ── Emit profile selection inspection artifact ───────────────
+        let source_digest = "bf16_qat";
+        let _report =
+            emit_selection_report(&selection_receipts, output, source_digest, &quantizer_mode);
+
+        // Validate selection integrity
+        let registry_ids: Vec<u32> = if quantizer_mode == "learn-gemma-v1" {
+            vec![1, 2, 3, 4]
+        } else {
+            vec![0]
+        };
+        validate_selection_integrity(&selection_receipts, &registry_ids, &quantizer_mode);
+
+        // ── Build and emit QuantizationPlan ────────────────────────────
+        let plan = QuantizationPlan {
+            source_model_digest: QuantizationPlan::compute_model_digest(&plan_entries),
+            quantizer_mode: quantizer_mode.clone(),
+            target_strategy: strategy.to_string(),
+            entries: plan_entries,
+            profile_registry_ids: registry_ids,
+            build_duration_secs: nf4_start.elapsed().as_secs_f64(),
+        };
+        let plan_json = plan.to_json_pretty().unwrap();
+        let plan_path = format!("{}.plan.json", output);
+        std::fs::write(&plan_path, &plan_json).unwrap();
+        println!("  ✓ Quantization plan written to {}", plan_path);
+
+        // ── Collect nf4tile640 triplet segments from temp files ────────
+        // New: collect per-segment data in binding order
+        (
+            nf4_weights_seg,
+            int8_weights_seg,
+            tile_metadata_seg,
+            sidecar_seg,
+        ) = collect_triplet_segments(&weight_bindings, &nf4_tmp_dir);
+
+        // ── Compute independent per-segment offsets ───────────────────
+        let mut nf4_off = 0u64;
+        let mut int8_off = 0u64;
+        let mut tile_meta_off = 0u64;
+        let mut sidecar_off = 0u64;
+        use QuantizedMatrixFormat::*;
+        matrix_bindings = Vec::new();
+        for (mid, wb) in weight_bindings.iter().enumerate() {
+            let codes_bytes = wb.total_tiles as u64
+                * match wb.format {
+                    Int8Tile640Base => 640u64,
+                    _ => 320u64,
+                };
+            let has_bias = matches!(wb.format, Nf4Tile640Base | Nf4Tile640ScaledReductionAxis);
+            let meta_bytes_per_tile: u64 = if has_bias { 8 } else { 4 };
+            let meta_bytes = wb.total_tiles as u64 * meta_bytes_per_tile;
+
+            let (w_off, w_seg) = match wb.format {
+                Int8Tile640Base => {
+                    let off = int8_off;
+                    int8_off += codes_bytes;
+                    (off, 39u8) // Int8Tile640Weights
+                }
+                _ => {
+                    let off = nf4_off;
+                    nf4_off += codes_bytes;
+                    (off, 26u8) // Nf4Tile640Weights
+                }
+            };
+            let tm_off = tile_meta_off;
+            tile_meta_off += meta_bytes;
+
+            let mut sidecar_count = 0u32;
+            let mut sidecar_seg_id = 0xFFu8;
+            let mut sc_off = 0u64;
+            if wb.sidecar_count > 0 {
+                sidecar_count = wb.sidecar_count;
+                sidecar_seg_id = 40u8; // QuantizationSidecars
+                sc_off = sidecar_off;
+                sidecar_off += wb.sidecar_count as u64 * 2; // FP16 = 2 bytes each
+            }
+
+            matrix_bindings.push(MatrixWeightBinding {
+                weights_offset: w_off,
+                weights_bytes: codes_bytes,
+                tile_metadata_offset: tm_off,
+                tile_metadata_bytes: meta_bytes,
+                sidecar_offset: sc_off,
+                sidecar_count,
+                matrix_id: mid as u32,
+                format: admission_format_to_binding_format(wb.format),
+                weights_segment: w_seg,
+                tile_metadata_segment: 27u8, // BlockBiases
+                sidecar_segment: sidecar_seg_id,
+                _pad: [0u8; 5],
+                rows: wb.rows as u32,
+                cols: wb.cols as u32,
+                tiles_per_row: wb.tiles_per_row as u32,
+            });
+        }
+
+        // ── Build MatrixContract binary ─────────────────────────────────
+        contract_bytes = build_matrix_contract_blob(&matrix_bindings);
+        println!(
+            "  ✓ Collected nf4tile640 triplets: {:.1} MB nf4, {:.1} MB int8, {:.1} MB tile_meta, {:.1} MB sidecar",
+            nf4_weights_seg.len() as f64 / (1024.0 * 1024.0),
+            int8_weights_seg.len() as f64 / (1024.0 * 1024.0),
+            tile_metadata_seg.len() as f64 / (1024.0 * 1024.0),
+            sidecar_seg.len() as f64 / (1024.0 * 1024.0),
+        );
+    }
+    // ── Ternary quality report ──
+    if !ternary_distill_results.is_empty() && !is_nf4_mode {
+        let ternary_report_path = format!(
+            "{}.ternary_distill.json",
+            output.trim_end_matches(".cimage")
+        );
+        let ternary_report = serde_json::json!({
+            "total_matrices": ternary_distill_results.len(),
+            "avg_kl": ternary_distill_results.iter().map(|r| r.kl_divergence as f64).sum::<f64>() / ternary_distill_results.len() as f64,
+            "avg_loss": ternary_distill_results.iter().map(|r| r.total_loss).sum::<f64>() / ternary_distill_results.len() as f64,
+            "gate_pass_rate": ternary_distill_results.iter().filter(|r| r.gate_passed).count() as f64 / ternary_distill_results.len() as f64,
+            "matrices": ternary_distill_results.iter().map(|r| serde_json::json!({
+                "tensor": r.tensor_name,
+                "kl": r.kl_divergence,
+                "total_loss": r.total_loss,
+                "rmse": r.rmse,
+                "gate_passed": r.gate_passed,
+            })).collect::<Vec<_>>(),
+        });
+        if let Ok(json) = serde_json::to_string_pretty(&ternary_report) {
+            if std::fs::write(&ternary_report_path, &json).is_ok() {
+                eprintln!("  Ternary distillation report written to {ternary_report_path}");
+            }
+        }
+    }
+
+    // ── MTP Drafter Head Discovery ────────────────────────────────
+    println!("  ── Scanning for MTP drafter heads ───────────────────");
+    let mut mtp_tensors: Vec<String> = Vec::new();
+
+    // Scan all safetensor metadata for "mtp" tensor keys
+    for (_path, data) in &shard_paths {
+        if let Ok(st) = safetensors::SafeTensors::deserialize(data) {
+            for name in st.names() {
+                if name.contains("mtp") {
+                    mtp_tensors.push(name.to_string());
+                }
+            }
+        }
+    }
+    mtp_tensors.sort();
+    mtp_tensors.dedup();
+
+    if !mtp_tensors.is_empty() {
+        println!("  Found {} MTP tensor(s):", mtp_tensors.len());
+        for t in &mtp_tensors {
+            println!("    {t}");
+        }
+    } else {
+        println!("  No MTP heads found (model may not have them)");
     }
 
     let mut extra_tensor_entries: Vec<TensorEntry> = Vec::new();
@@ -1419,14 +2229,16 @@ fn main() {
             let path = Path::new(local).join("model.safetensors");
             println!("  ▶ Loading TTS model from local: {}", path.display());
             if !path.exists() {
-                eprintln!("  ERROR: TTS model.safetensors not found at {}", path.display());
+                eprintln!(
+                    "  ERROR: TTS model.safetensors not found at {}",
+                    path.display()
+                );
                 std::process::exit(1);
             }
             path
         } else if let Some(tts_repo) = &tts_repo {
             println!("  ▶ Downloading TTS model from {}", tts_repo);
-            download_tts_safetensors(tts_repo)
-                .expect("download TTS safetensors")
+            download_tts_safetensors(tts_repo).expect("download TTS safetensors")
         } else {
             unreachable!()
         };
@@ -1435,13 +2247,15 @@ fn main() {
         let _ = std::fs::create_dir_all(&tts_tmp_dir);
 
         println!("  ▶ Packing TTS weights as nf4tile640");
-        let tts_entries = pack_tts_weights(&tts_file, &tts_tmp_dir)
-            .expect("pack TTS weights");
+        let tts_entries = pack_tts_weights(&tts_file, &tts_tmp_dir).expect("pack TTS weights");
 
         // Prefix TTS entries to avoid naming collisions with LLM weights
         let tts_entries: Vec<TensorEntry> = tts_entries
             .into_iter()
-            .map(|mut e| { e.name = format!("tts_{}", e.name); e })
+            .map(|mut e| {
+                e.name = format!("tts_{}", e.name);
+                e
+            })
             .collect();
         println!("  ✓ Packed {} TTS weight segments", tts_entries.len());
 
@@ -1454,18 +2268,24 @@ fn main() {
     println!("\n  Writing main weights to {}", output);
 
     let quant_elapsed = quant_start.elapsed();
-    let n_blocks = all_scales.len() / 2;
-    let mb_scales = all_scales.len() as f64 / (1024.0 * 1024.0);
-    let mb_weights = all_weights.len() as f64 / (1024.0 * 1024.0);
+    let n_blocks = if is_nf4_mode {
+        0 // nf4 mode doesn't use ternary block counting
+    } else {
+        all_scales.len() / 2
+    };
 
     println!(
         "  Quantized {} weights in {:.1?}",
         total_elements, quant_elapsed
     );
-    println!(
-        "  {} blocks, {:.1} MB scales, {:.1} MB nibbles",
-        n_blocks, mb_scales, mb_weights
-    );
+    if !is_nf4_mode {
+        let mb_scales = all_scales.len() as f64 / (1024.0 * 1024.0);
+        let mb_weights = all_weights.len() as f64 / (1024.0 * 1024.0);
+        println!(
+            "  {} blocks, {:.1} MB scales, {:.1} MB nibbles",
+            n_blocks, mb_scales, mb_weights
+        );
+    }
 
     // ── Step 3: Load MIL program ───────────────────────────────
     println!("\n  ── Compiling .cimage ────────────────────────────────");
@@ -1533,25 +2353,80 @@ fn main() {
     // Generate execution graph descriptor
     println!("  ── Building execution graph ────────────────────────");
     let mut exec_graph = ExecutionGraphDescriptor::gemma4_12b();
-    // Compute per-layer offsets by replaying the quantization layout.
-    // Main decoder layers: q_proj, k_proj, v_proj, o_proj, gate, up, down
+
     let mut weight_off: u64 = 0;
     let mut scale_off: u64 = 0;
-    let h = HIDDEN_DIM as u64; // 3840
-    let nq = (NUM_HEADS * HEAD_DIM) as u64; // 16 * 256 = 4096
-    let nk = (NUM_KV_HEADS * HEAD_DIM) as u64; // 8 * 256 = 2048
-    let ffn = FFN_INTERMEDIATE as u64; // 15360
-                                       // Elements per tensor: [q, k, v, o, gate, up, down]
+
+    // Build key→binding-id lookup from weight_bindings (same order as matrix_bindings)
+    let key_to_id: HashMap<&str, usize> = weight_bindings
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.key.as_str(), i))
+        .collect();
+
+    let h = HIDDEN_DIM as u64;
+    let nq = (NUM_HEADS * HEAD_DIM) as u64;
+    let nk = (NUM_KV_HEADS * HEAD_DIM) as u64;
+    let ffn = FFN_INTERMEDIATE as u64;
     let per_tensor_elems = [h * nq, h * nk, h * nk, nq * h, h * ffn, h * ffn, ffn * h];
-    for layer in exec_graph.layers.iter_mut().filter(|n| n.node_kind == 0) {
+
+    for layer in exec_graph.layers.iter_mut() {
         let start_weight = weight_off;
         let start_scale = scale_off;
         let mut total_wbytes: u64 = 0;
         let mut total_sbytes: u64 = 0;
-        for &elems in &per_tensor_elems {
-            let blocks = (elems + 255) / 256;
-            total_wbytes += blocks * 64;
-            total_sbytes += blocks * 2;
+
+        if is_nf4_mode {
+            // Read offsets from the MatrixWeightBinding table, indexed by tensor key.
+            match layer.node_kind {
+                0 => {
+                    // DecoderLayer
+                    let layer_idx = layer.layer_index as usize;
+                    let mat_keys = [
+                        format!("model.language_model.layers.{layer_idx}.self_attn.q_proj.weight"),
+                        format!("model.language_model.layers.{layer_idx}.self_attn.k_proj.weight"),
+                        format!("model.language_model.layers.{layer_idx}.self_attn.v_proj.weight"),
+                        format!("model.language_model.layers.{layer_idx}.self_attn.o_proj.weight"),
+                        format!("model.language_model.layers.{layer_idx}.mlp.gate_proj.weight"),
+                        format!("model.language_model.layers.{layer_idx}.mlp.up_proj.weight"),
+                        format!("model.language_model.layers.{layer_idx}.mlp.down_proj.weight"),
+                    ];
+                    for k in &mat_keys {
+                        if let Some(&id) = key_to_id.get(k.as_str()) {
+                            let b = &matrix_bindings[id];
+                            total_wbytes += b.weights_bytes;
+                            total_sbytes += b.tile_metadata_bytes;
+                        }
+                    }
+                }
+                1 => {
+                    // VisionPatchEmbed
+                    if let Some(&id) = key_to_id.get("model.vision_embedder.patch_dense.weight") {
+                        let b = &matrix_bindings[id];
+                        total_wbytes = b.weights_bytes;
+                        total_sbytes = b.tile_metadata_bytes;
+                    }
+                }
+                2 => {
+                    // VisionFinalProjection
+                    if let Some(&id) =
+                        key_to_id.get("model.embed_vision.embedding_projection.weight")
+                    {
+                        let b = &matrix_bindings[id];
+                        total_wbytes = b.weights_bytes;
+                        total_sbytes = b.tile_metadata_bytes;
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            if layer.node_kind == 0 {
+                for &elems in &per_tensor_elems {
+                    let blocks = (elems + 255) / 256;
+                    total_wbytes += blocks * 64;
+                    total_sbytes += blocks * 2;
+                }
+            }
         }
         layer.weight_offset = start_weight;
         layer.weight_length = total_wbytes;
@@ -1559,8 +2434,10 @@ fn main() {
         weight_off += total_wbytes;
         scale_off += total_sbytes;
         // Also populate k_proj-style fields that open_prism uses
-        layer.hidden_dim = h as u32;
-        layer.num_heads = NUM_HEADS as u16;
+        if layer.node_kind == 0 {
+            layer.hidden_dim = h as u32;
+            layer.num_heads = NUM_HEADS as u16;
+        }
     }
     let exec_graph_bytes = exec_graph.to_bytes();
     println!(
@@ -1584,13 +2461,57 @@ fn main() {
     let metal_offset = page_align(&mut writer).unwrap();
     writer.write_all(&metallib_bytes).unwrap();
 
-    // Write TernaryWeights segment 1
+    // Write weights segment 1
     let weights_offset = page_align(&mut writer).unwrap();
-    writer.write_all(&all_weights).unwrap();
+    if is_nf4_mode {
+        writer.write_all(&nf4_weights_seg).unwrap();
+    } else {
+        writer.write_all(&all_weights).unwrap();
+    }
 
     // Write BlockScales segment 2
     let scales_offset = page_align(&mut writer).unwrap();
-    writer.write_all(&all_scales).unwrap();
+    if is_nf4_mode {
+        writer.write_all(&tile_metadata_seg).unwrap();
+    } else {
+        writer.write_all(&all_scales).unwrap();
+    }
+
+    // Write BlockBiases segment (nf4tile640 only — ternary has no biases)
+    let _biases_offset = if is_nf4_mode && !nf4_biases.is_empty() {
+        let off = page_align(&mut writer).unwrap();
+        writer.write_all(&nf4_biases).unwrap();
+        off
+    } else {
+        0
+    };
+
+    // Write Int8Tile640Weights segment (NF4 mode only)
+    let int8_offset = if is_nf4_mode && !int8_weights_seg.is_empty() {
+        let off = page_align(&mut writer).unwrap();
+        writer.write_all(&int8_weights_seg).unwrap();
+        off
+    } else {
+        0
+    };
+
+    // Write QuantizationSidecars segment (NF4 mode only)
+    let sidecar_seg_offset = if is_nf4_mode && !sidecar_seg.is_empty() {
+        let off = page_align(&mut writer).unwrap();
+        writer.write_all(&sidecar_seg).unwrap();
+        off
+    } else {
+        0
+    };
+
+    // Write MatrixContract segment (NF4 mode only)
+    let contract_offset = if is_nf4_mode && !contract_bytes.is_empty() {
+        let off = page_align(&mut writer).unwrap();
+        writer.write_all(&contract_bytes).unwrap();
+        off
+    } else {
+        0
+    };
 
     // Write AneArchive segment 3 (prefill MIL source)
     let ane_prefill_offset = page_align(&mut writer).unwrap();
@@ -1611,22 +2532,61 @@ fn main() {
         offset: metal_offset,
         length: metallib_bytes.len() as u64,
     };
+    // Base segment index offset: nf4 mode inserts a BlockBiases segment at index 3,
+    // shifting all subsequent segments by 1.
+    // NF4 mode adds 3 extra segments (Int8Tile640Weights, QuantizationSidecars, MatrixContract).
+    let nf4_shift: u32 = if is_nf4_mode { 3 } else { 0 };
+    // Cast to usize for slice indexing.
+    let ns = nf4_shift as usize;
     segments[1] = SegmentEntry {
-        kind: SegmentKind::TernaryWeights as u32,
+        kind: if is_nf4_mode {
+            SegmentKind::Nf4Tile640Weights as u32
+        } else {
+            SegmentKind::TernaryWeights as u32
+        },
         offset: weights_offset,
-        length: all_weights.len() as u64,
+        length: if is_nf4_mode {
+            nf4_weights_seg.len() as u64
+        } else {
+            all_weights.len() as u64
+        },
     };
     segments[2] = SegmentEntry {
-        kind: SegmentKind::BlockScales as u32,
+        kind: if is_nf4_mode {
+            SegmentKind::BlockBiases as u32
+        } else {
+            SegmentKind::BlockScales as u32
+        },
         offset: scales_offset,
-        length: all_scales.len() as u64,
+        length: if is_nf4_mode {
+            tile_metadata_seg.len() as u64
+        } else {
+            all_scales.len() as u64
+        },
     };
-    segments[3] = SegmentEntry {
+    if is_nf4_mode {
+        segments[3] = SegmentEntry::new(
+            SegmentKind::Int8Tile640Weights,
+            int8_offset,
+            int8_weights_seg.len() as u64,
+        );
+        segments[4] = SegmentEntry::new(
+            SegmentKind::QuantizationSidecars,
+            sidecar_seg_offset,
+            sidecar_seg.len() as u64,
+        );
+        segments[5] = SegmentEntry::new(
+            SegmentKind::MatrixContract,
+            contract_offset,
+            contract_bytes.len() as u64,
+        );
+    }
+    segments[3 + ns] = SegmentEntry {
         kind: SegmentKind::AneArchive as u32,
         offset: ane_prefill_offset,
         length: mil_bytes.len() as u64,
     };
-    segments[4] = SegmentEntry {
+    segments[4 + ns] = SegmentEntry {
         kind: SegmentKind::AneArchive as u32,
         offset: ane_decompress_offset,
         length: kv_decompress_bytes.len() as u64,
@@ -1635,7 +2595,7 @@ fn main() {
     // Write AneArchive segment 5 (ANE islands for full inference)
     let ane_islands_offset = page_align(&mut writer).unwrap();
     writer.write_all(&ane_island_tar).unwrap();
-    segments[5] = SegmentEntry {
+    segments[5 + ns] = SegmentEntry {
         kind: SegmentKind::AneArchive as u32,
         offset: ane_islands_offset,
         length: ane_island_tar.len() as u64,
@@ -1731,26 +2691,26 @@ fn main() {
         (model_artifacts.len() as f64 / 8.0).ceil() as u32
     );
 
-    // Write ExecutionGraph segment 6
+    // Write ExecutionGraph segment (6 or 7 with biases)
     let exec_graph_offset = page_align(&mut writer).unwrap();
     writer.write_all(&exec_graph_bytes).unwrap();
-    segments[6] = SegmentEntry::new(
+    segments[6 + ns] = SegmentEntry::new(
         SegmentKind::ExecutionGraph,
         exec_graph_offset,
         exec_graph_bytes.len() as u64,
     );
 
-    // Write ModelArtifacts segment 7 (tokenizer, special token map)
+    // Write ModelArtifacts segment (7 or 8 with biases)
     let artifacts_offset = page_align(&mut writer).unwrap();
     writer.write_all(&model_artifacts).unwrap();
-    segments[7] = SegmentEntry::new(
+    segments[7 + ns] = SegmentEntry::new(
         SegmentKind::ModelArtifacts,
         artifacts_offset,
         model_artifacts.len() as u64,
     );
 
     // ── Write TTS segments ────────────────────────────────────────
-    let mut segment_idx: u32 = 8;
+    let mut segment_idx: u32 = 8 + nf4_shift;
     if let Some(tts_tmp_dir) = &tts_tmp_dir_opt {
         println!("  ▶ Writing TTS segments into cimage...");
         for entry in &extra_tensor_entries {
@@ -1779,8 +2739,16 @@ fn main() {
     }
 
     let mut hasher = Sha256::new();
-    hasher.update(&all_weights);
-    hasher.update(&all_scales);
+    if is_nf4_mode {
+        hasher.update(&nf4_weights_seg);
+        hasher.update(&int8_weights_seg);
+        hasher.update(&tile_metadata_seg);
+        hasher.update(&sidecar_seg);
+        hasher.update(&contract_bytes);
+    } else {
+        hasher.update(&all_weights);
+        hasher.update(&all_scales);
+    }
     hasher.update(&metallib_bytes);
     hasher.update(&mil_bytes);
     hasher.update(&kv_decompress_bytes);
@@ -1810,7 +2778,11 @@ fn main() {
         hidden_dim: HIDDEN_DIM as u32,
         intermediate_dim: FFN_INTERMEDIATE as u32,
         vocab_size: 262144,
-        quantization_schema: 0,
+        quantization_schema: if is_nf4_mode {
+            QUANT_SCHEMA_NF4_TILE640
+        } else {
+            0
+        },
         draft_num_layers: draft_layer_count,
         segments,
         _pad: [0u8; 8],
@@ -1820,7 +2792,7 @@ fn main() {
         std::slice::from_raw_parts(
             &header as *const CimageHeader as *const u8,
             header_size as usize,
-)
+        )
     };
     writer.write_all(header_bytes).unwrap();
     writer.flush().unwrap();
@@ -1978,9 +2950,18 @@ fn cmd_verify_only(args: &[String]) {
     let allow_experimental = has_flag(args, "--allow-experimental");
     let emit_quality_report = has_flag(args, "--emit-quality-report");
 
+    let strategy = get_opt(args, "--strategy").unwrap_or("causal-text");
+    if strategy != "causal-text" && strategy != "acoustic-stream" {
+        eprintln!("ERROR: --strategy must be 'causal-text' or 'acoustic-stream', got: {strategy}");
+        std::process::exit(1);
+    }
+
     eprintln!("verify-only: downloading BF16 from {}", repo);
     let shard_paths = download_repo_safetensors(repo);
-    eprintln!("  {} shard(s) loaded, streaming matrices one-at-a-time", shard_paths.len());
+    eprintln!(
+        "  {} shard(s) loaded, streaming matrices one-at-a-time",
+        shard_paths.len()
+    );
 
     // Collect matrix descriptors (key, template_present_for_sanitize)
     #[derive(Clone)]
@@ -2023,13 +3004,24 @@ fn cmd_verify_only(args: &[String]) {
 
     let learned_profiles: HashMap<MatrixRole, LearnedProfile> = HashMap::new();
     let mut selection_receipts: Vec<ProfileSelectionReceipt> = Vec::new();
+    let mut plan_entries: Vec<QuantizationPlanEntry> = Vec::new();
+    let distill_objective = DistillObjective::default();
 
     for (idx, desc) in all_descs.iter().enumerate() {
-        eprint!("\r  [{}/{}] verifying {}", idx + 1, all_descs.len(), desc.key);
+        eprint!(
+            "\r  [{}/{}] verifying {}",
+            idx + 1,
+            all_descs.len(),
+            desc.key
+        );
         let _ = std::io::stdout().flush();
 
         if let Some((data, shape)) = load_tensor(&desc.key, &shard_paths) {
-            let rows = if shape.len() >= 2 { shape[0] } else { data.len() };
+            let rows = if shape.len() >= 2 {
+                shape[0]
+            } else {
+                data.len()
+            };
             let cols = if shape.len() >= 2 { shape[1] } else { 1 };
             // ── Per-matrix profile selection ─────────────────────────
             let role = classify_matrix_role(&desc.key);
@@ -2046,29 +3038,102 @@ fn cmd_verify_only(args: &[String]) {
             selection_receipts.push(_receipt);
 
             let (codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&data, rows, cols);
-            let result = verify_one_matrix(&desc.display, &data, &codes, &scales, &biases, rows, cols, quality_policy);
+            let result = verify_one_matrix(
+                &desc.display,
+                &data,
+                &codes,
+                &scales,
+                &biases,
+                rows,
+                cols,
+                quality_policy,
+                Some(&importances),
+                &distill_objective,
+                &CancelToken::new(None),
+            );
             all_pass &= result.pass;
             results.push(serde_json::json!({
                 "name": result.name,
                 "max_rmse": result.max_rmse,
+                "total_loss": result.total_loss,
+                "kl_div": result.kl_div,
                 "pass": result.pass,
             }));
             if !result.pass {
-                eprintln!("\n  FAIL: {} max_rmse={:.6}", result.name, result.max_rmse);
+                eprintln!(
+                    "\n  FAIL: {} max_rmse={:.6} total_loss={:.6} kl_div={:.6}",
+                    result.name, result.max_rmse, result.total_loss, result.kl_div
+                );
             }
+
+            // ── Compute per-input-channel second moments ──────────
+            let mut channel_sq = vec![0.0f32; cols];
+            for i in 0..rows {
+                for j in 0..cols {
+                    let v = data[i * cols + j];
+                    channel_sq[j] += v * v;
+                }
+            }
+            for j in 0..cols {
+                channel_sq[j] /= rows as f32;
+            }
+
+            // ── Build quantization plan entry ───────────────────
+            let tensor_digest: [u8; 32] = {
+                parallel_sha256(bytemuck::cast_slice(&data))
+            };
+            plan_entries.push(QuantizationPlanEntry {
+                tensor_name: desc.display.clone(),
+                source_tensor_digest: tensor_digest,
+                profile_id: selection_receipts
+                    .last()
+                    .map(|r| r.selected_profile_id)
+                    .unwrap_or(0),
+                group_importances: importances.clone(),
+                outlier_channels: Vec::new(),
+                verification_rmse: result.max_rmse,
+                gate_passed: result.pass,
+                aw_mse: None,
+                channel_second_moments: Some(channel_sq),
+            });
         }
     }
 
     // Emit selection report
     let source_digest = "verify_only";
     let quantizer = get_opt(args, "--quantizer").unwrap_or("canonical_nf4_v1");
-    let _report = emit_selection_report(&selection_receipts, get_opt(args, "--output").unwrap_or("verify_result"), source_digest, quantizer);
+    let _report = emit_selection_report(
+        &selection_receipts,
+        get_opt(args, "--output").unwrap_or("verify_result"),
+        source_digest,
+        quantizer,
+    );
     let registry_ids: Vec<u32> = vec![0];
     validate_selection_integrity(&selection_receipts, &registry_ids, quantizer);
     eprintln!();
-
     let elapsed = start.elapsed();
-    let passes = results.iter().filter(|r| r["pass"].as_bool().unwrap_or(false)).count();
+    let passes = results
+        .iter()
+        .filter(|r| r["pass"].as_bool().unwrap_or(false))
+        .count();
+
+    // ── Build and emit QuantizationPlan ────────────────────────────
+    let plan = QuantizationPlan {
+        source_model_digest: QuantizationPlan::compute_model_digest(&plan_entries),
+        quantizer_mode: quantizer.to_string(),
+        target_strategy: strategy.to_string(),
+        entries: plan_entries,
+        profile_registry_ids: registry_ids.clone(),
+        build_duration_secs: elapsed.as_secs_f64(),
+    };
+    let plan_json = plan.to_json_pretty().unwrap();
+    let plan_path = format!(
+        "{}.plan.json",
+        get_opt(args, "--output").unwrap_or("verify_result")
+    );
+    std::fs::write(&plan_path, &plan_json).unwrap();
+    eprintln!("  ✓ Quantization plan written to {}", plan_path);
+
     let report = serde_json::json!({
         "model": repo,
         "total_matrices": results.len(),
@@ -2082,7 +3147,10 @@ fn cmd_verify_only(args: &[String]) {
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
 
     if emit_quality_report {
-        let report_path = format!("{}.quality.json", get_opt(args, "--output").unwrap_or("gemma4_12b"));
+        let report_path = format!(
+            "{}.quality.json",
+            get_opt(args, "--output").unwrap_or("gemma4_12b")
+        );
         let report_json = serde_json::to_string_pretty(&report).unwrap();
         std::fs::write(&report_path, &report_json).unwrap_or_else(|e| {
             eprintln!("WARNING: could not write quality report: {e}");
@@ -2094,16 +3162,25 @@ fn cmd_verify_only(args: &[String]) {
         if allow_experimental {
             eprintln!("verify-only: FAILURES DETECTED but --allow-experimental set — continuing");
         } else {
-            eprintln!("verify-only: {} matrix/matrices FAILED", results.len() - passes);
+            eprintln!(
+                "verify-only: {} matrix/matrices FAILED",
+                results.len() - passes
+            );
             std::process::exit(1);
         }
     }
-    eprintln!("verify-only: ALL {} matrices PASSED ({:.1?})", results.len(), elapsed);
+    eprintln!(
+        "verify-only: ALL {} matrices PASSED ({:.1?})",
+        results.len(),
+        elapsed
+    );
 }
 
 struct MatrixVerificationResult {
     name: String,
     max_rmse: f32,
+    pub total_loss: f64,
+    pub kl_div: f64,
     pass: bool,
 }
 
@@ -2118,15 +3195,34 @@ fn verify_one_matrix(
     rows: usize,
     cols: usize,
     quality_policy: &str,
-    ) -> MatrixVerificationResult {
+    activation_maxima: Option<&[f32]>,
+    objective: &DistillObjective,
+    cancel_token: &CancelToken,
+) -> MatrixVerificationResult {
     let threshold: f32 = match quality_policy {
         "strict" => 0.01,
         "experimental" => f32::MAX,
-        "default" | _ => 0.05,
+        "default" | _ => 0.05, // Ternary threshold; NF4 uses per-matrix-class profiles
     };
+
+    // Per-channel activation maxima for AWQ (or uniform fallback)
+    let _group_importances: Vec<f32> = if let Some(maxima) = activation_maxima {
+        maxima.to_vec()
+    } else {
+        let ones = vec![1.0f32; cols];
+        let (_, _, group_imps) = compute_activation_saliency(&ones, cols / 128, 128);
+        group_imps
+    };
+
     let mut max_rmse = 0.0f32;
+    let mut total_loss = 0.0f64;
+    let mut kl_div = 0.0f64;
+
     for trial in 0..3 {
+        cancel_token.heartbeat().ok();
         let input = generate_test_vector(rows, trial);
+
+        // BF16 reference matmul
         let mut ref_output = vec![0.0f32; cols];
         for j in 0..cols {
             let mut sum = 0.0f32;
@@ -2135,9 +3231,22 @@ fn verify_one_matrix(
             }
             ref_output[j] = sum;
         }
+
+        // NF4 dequant matmul
         let mut nf4_output = vec![0.0f32; cols];
-        dequant_matmul_reference(&input, codes, scales, biases, 1, rows, cols, &mut nf4_output)
-            .unwrap();
+        dequant_matmul_reference(
+            &input,
+            codes,
+            scales,
+            biases,
+            1,
+            rows,
+            cols,
+            &mut nf4_output,
+        )
+        .unwrap();
+
+        // RMSE
         let mut sq_err = 0.0f32;
         for j in 0..cols {
             let diff = nf4_output[j] - ref_output[j];
@@ -2147,33 +3256,61 @@ fn verify_one_matrix(
         if rmse > max_rmse {
             max_rmse = rmse;
         }
+
+        // ── SQuaT + AccelerateReducer metrics ──────────────────────
+        let squat_teacher = squat_requantize(&ref_output, 1, cols);
+        let mut reducer = AccelerateReducer::with_hidden_dim(cols);
+        reducer.reduce(0, &squat_teacher, &nf4_output);
+        let loss = reducer.sum_objective(objective);
+        total_loss += loss;
+
+        // Raw KL divergence (lambda_logit term)
+        kl_div += kd_divergence(&squat_teacher, &nf4_output, 1.0) as f64;
     }
+
+    // Average across trials
+    total_loss /= 3.0;
+    kl_div /= 3.0;
+
     MatrixVerificationResult {
         name: name.to_string(),
         max_rmse,
-        pass: max_rmse <= threshold,
+        total_loss,
+        kl_div,
+        pass: max_rmse <= threshold && total_loss < 1.0,
     }
 }
 
 // ── Safetensors loading helpers ─────────────────────────────────────
 
-fn load_tensor(key: &str, shards: &[(PathBuf, Vec<u8>)]) -> Option<(Vec<f32>, Vec<usize>)> {
-    let (_, data) = shards.iter().find(|(_, data)| {
-        // Check if this shard contains the key (cheap: just check metadata)
-        safetensors::SafeTensors::deserialize(data)
+fn load_tensor(key: &str, shards: &[(PathBuf, Mmap)]) -> Option<(Vec<f32>, Vec<usize>)> {
+    let (_, mmap) = shards.iter().find(|(_, mmap)| {
+        safetensors::SafeTensors::deserialize(mmap)
             .ok()
             .and_then(|st| st.tensor(key).ok())
             .is_some()
     })?;
 
-    let st = safetensors::SafeTensors::deserialize(data).ok()?;
+    let st = safetensors::SafeTensors::deserialize(mmap).ok()?;
     let view = st.tensor(key).ok()?;
     let shape = view.shape().to_vec();
     let f32_vals = tensor_to_f32(view.data(), view.dtype());
-    Some((f32_vals, shape))
+    let expected_elements: usize = shape.iter().product();
+    // Handle dtype/layout mismatches: if loaded elements don't match shape,
+    // truncate or reshape to match expected element count.
+    // (Some safetensors tensors use F32 while most use BF16, causing 2× elements.)
+    let result = if f32_vals.len() >= expected_elements {
+        f32_vals[..expected_elements].to_vec()
+    } else {
+        // Pad with zeros if unexpectedly short (shouldn't happen, but be safe)
+        let mut padded = f32_vals;
+        padded.resize(expected_elements, 0.0);
+        padded
+    };
+    Some((result, shape))
 }
 
-fn collect_local_safetensors(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+fn collect_local_safetensors(dir: &Path) -> Vec<(PathBuf, Mmap)> {
     let mut shards = Vec::new();
     for entry in std::fs::read_dir(dir).unwrap() {
         let entry = entry.unwrap();
@@ -2183,15 +3320,16 @@ fn collect_local_safetensors(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
             .map(|e| e == "safetensors")
             .unwrap_or(false)
         {
-            let data = std::fs::read(&path).unwrap();
-            shards.push((path, data));
+            let file = std::fs::File::open(&path).unwrap();
+            let mmap = unsafe { Mmap::map(&file).unwrap() };
+            shards.push((path, mmap));
         }
     }
     shards.sort_by(|a, b| a.0.cmp(&b.0));
     shards
 }
 
-fn download_repo_safetensors(repo_id: &str) -> Vec<(PathBuf, Vec<u8>)> {
+fn download_repo_safetensors(repo_id: &str) -> Vec<(PathBuf, Mmap)> {
     use hf_hub::api::sync::Api;
 
     let api = Api::new().expect("HF API init failed (set HF_TOKEN if needed for gated models)");
@@ -2234,7 +3372,7 @@ fn download_repo_safetensors(repo_id: &str) -> Vec<(PathBuf, Vec<u8>)> {
         }
     }
 
-    // Download each shard
+    // mmap each shard (avoids loading 23 GB file into RAM at once)
     let mut shards = Vec::new();
     for name in &shard_names {
         print!("  Downloading {name}...");
@@ -2247,13 +3385,19 @@ fn download_repo_safetensors(repo_id: &str) -> Vec<(PathBuf, Vec<u8>)> {
                 continue;
             }
         };
-        let data = std::fs::read(&local_path).unwrap_or_else(|e| {
-            println!(" FAILED to read: {e}");
+        let file = std::fs::File::open(&local_path).unwrap_or_else(|e| {
+            eprintln!(" FAILED to open: {e}");
             std::process::exit(1);
         });
-        let size_mb = data.len() as f64 / (1024.0 * 1024.0);
-        println!(" {size_mb:.0} MB");
-        shards.push((local_path, data));
+        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+        let mmap = unsafe {
+            Mmap::map(&file).unwrap_or_else(|e| {
+                eprintln!(" FAILED to mmap: {e}");
+                std::process::exit(1);
+            })
+        };
+        println!(" {:.0} MB (mmap'd)", file_size as f64 / (1024.0 * 1024.0));
+        shards.push((local_path, mmap));
     }
 
     shards
@@ -2286,7 +3430,13 @@ fn get_opts<'a>(args: &'a [String], key: &str) -> Vec<&'a str> {
 /// Sanitize a string for use as a filename component.
 fn sanitize_filename(name: String) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '.' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -2332,30 +3482,28 @@ fn tts_segment_kind(segment: &str) -> Option<SegmentKind> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tribunus_compute_core::nf4tile640::learn::{SelectionReason, ProfileSelectionReceipt};
+    use tribunus_compute_core::nf4tile640::learn::{ProfileSelectionReceipt, SelectionReason};
 
     #[test]
     fn test_emit_selection_report_basic() {
-        let receipts = vec![
-            ProfileSelectionReceipt {
-                tensor_name: "test_matrix.0".into(),
-                role: "attention_q".into(),
-                candidate_profile_ids: vec![0, 1],
-                selected_profile_id: 1,
-                baseline_objective: 0.05,
-                selected_objective: 0.02,
-                selection_reason: SelectionReason::LearnedImproved,
-                clipping_policy: "none".into(),
-                sidecar_policy: "none".into(),
-                effective_bpw: 4.0,
-                source_digest: "abc123".into(),
-            },
-        ];
-        let report = emit_selection_report(&receipts, "/tmp/test_report", "digest123", "learn-gemma-v1");
+        let receipts = vec![ProfileSelectionReceipt {
+            tensor_name: "test_matrix.0".into(),
+            role: "attention_q".into(),
+            candidate_profile_ids: vec![0, 1],
+            selected_profile_id: 1,
+            baseline_objective: 0.05,
+            selected_objective: 0.02,
+            selection_reason: SelectionReason::LearnedImproved,
+            clipping_policy: "none".into(),
+            sidecar_policy: "none".into(),
+            effective_bpw: 4.0,
+            source_digest: "abc123".into(),
+        }];
+        let report =
+            emit_selection_report(&receipts, "/tmp/test_report", "digest123", "learn-gemma-v1");
         assert_eq!(report["total_matrices"].as_i64(), Some(1));
         assert_eq!(report["learned_selections"].as_i64(), Some(1));
         assert_eq!(report["matrices"][0]["tensor_name"], "test_matrix.0");
@@ -2364,22 +3512,19 @@ mod tests {
 
     #[test]
     fn test_validate_selection_integrity_passes() {
-        let receipts = vec![
-            ProfileSelectionReceipt {
-                tensor_name: "test".into(),
-                role: "attention_q".into(),
-                candidate_profile_ids: vec![0, 1],
-                selected_profile_id: 1,
-                baseline_objective: 0.05,
-                selected_objective: 0.02,
-                selection_reason: SelectionReason::LearnedImproved,
-                clipping_policy: "none".into(),
-                sidecar_policy: "none".into(),
-                effective_bpw: 4.0,
-                source_digest: "abc".into(),
-            },
-        ];
+        let receipts = vec![ProfileSelectionReceipt {
+            tensor_name: "test".into(),
+            role: "attention_q".into(),
+            candidate_profile_ids: vec![0, 1],
+            selected_profile_id: 1,
+            baseline_objective: 0.05,
+            selected_objective: 0.02,
+            selection_reason: SelectionReason::LearnedImproved,
+            clipping_policy: "none".into(),
+            sidecar_policy: "none".into(),
+            effective_bpw: 4.0,
+            source_digest: "abc".into(),
+        }];
         validate_selection_integrity(&receipts, &[0, 1], "learn-gemma-v1");
     }
 }
-

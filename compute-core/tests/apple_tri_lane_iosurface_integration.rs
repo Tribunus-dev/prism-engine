@@ -1,3 +1,4 @@
+#![cfg(feature = "apple-coreml")]
 //! ANE-TRI-LANE-REALIZATION-0001 Phase 7: IOSurface integration soak.
 //!
 //! ```

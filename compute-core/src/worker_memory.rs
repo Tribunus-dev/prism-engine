@@ -9,9 +9,9 @@ use std::os::raw::c_int;
 use std::os::raw::c_void;
 
 #[cfg(feature = "mlx-backend")]
-use std::time::Instant;
-#[cfg(feature = "mlx-backend")]
 use crate::compute_image;
+#[cfg(feature = "mlx-backend")]
+use std::time::Instant;
 
 // ── Machine profile ───────────────────────────────────────────────-
 

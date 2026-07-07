@@ -19,6 +19,7 @@
 //! v6 segment directory are dead bytes under this formula. They should be
 //! removed in a follow-up pass once the format version is bumped.
 
+use crate::compilation::cancel::CancelToken;
 use std::collections::HashSet;
 
 // ── FP16 conversion ─────────────────────────────────────────────────
@@ -98,7 +99,89 @@ pub fn process_weights(weights_f32: &[f32], scales_out: &mut Vec<u8>, weights_ou
         weights_out.extend_from_slice(&nibbles);
     }
 }
+/// Pack weights into ternary 256-block format.
+/// Returns (codes, scales_f32, biases_empty).
+pub fn pack_ternary_weights(weights: &[f32], rows: usize, cols: usize) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+    assert_eq!(weights.len(), rows * cols);
+    let block_size = 256;
+    let blocks_per_row = cols.div_ceil(block_size);
+    let total_blocks = rows * blocks_per_row;
+    let mut codes = Vec::with_capacity(total_blocks * 64);
+    let mut scales = Vec::with_capacity(total_blocks);
+    for i in 0..rows {
+        for b in 0..blocks_per_row {
+            let col_start = b * block_size;
+            let mut block = [0.0f32; 256];
+            for j in 0..block_size {
+                let src_col = col_start + j;
+                block[j] = if src_col < cols { weights[i * cols + src_col] } else { 0.0 };
+            }
+            let (scale_fp16, nibbles) = quantize_block(&block);
+            codes.extend_from_slice(&nibbles);
+            let scale_f32 = f16_to_f32(scale_fp16);
+            scales.push(scale_f32);
+        }
+    }
+    (codes, scales, vec![])
+}
 
+/// Unpack ternary 256-block weights back to f32.
+pub fn unpack_ternary_weights(codes: &[u8], scales: &[f32], _biases: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let block_size = 256;
+    let blocks_per_row = cols.div_ceil(block_size);
+    let mut result = vec![0.0f32; rows * cols];
+    for i in 0..rows {
+        for b in 0..blocks_per_row {
+            let col_start = b * block_size;
+            if col_start >= cols {
+                break;
+            }
+            let block_idx = i * blocks_per_row + b;
+            let scale = scales[block_idx];
+            for j in 0..block_size {
+                let src_col = col_start + j;
+                if src_col >= cols {
+                    break;
+                }
+                let byte_idx = block_idx * 64 + j / 4;
+                let nibble = (codes[byte_idx] >> ((j % 4) * 2)) & 0x03;
+                let val = match nibble {
+                    1 => 1.0f32,
+                    2 => -1.0f32,
+                    _ => 0.0f32,
+                };
+                result[i * cols + src_col] = val * scale;
+            }
+        }
+    }
+    result
+}
+
+// ── Accelerate vDSP (macOS) ──────────────────────────────────────────
+#[cfg(target_os = "macos")]
+#[link(name = "Accelerate", kind = "framework")]
+#[allow(dead_code)]
+extern "C" {
+    fn vDSP_dotpr(
+        a: *const f32,
+        a_stride: isize,
+        b: *const f32,
+        b_stride: isize,
+        result: *mut f32,
+        length: usize,
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+fn dot_product(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len(), "dot_product: length mismatch");
+    let mut result: f32 = 0.0;
+    unsafe {
+        vDSP_dotpr(a.as_ptr(), 1, b.as_ptr(), 1, &mut result, a.len());
+    }
+    result
+}
 // ── K-Means Clustering (for embedding quantization) ──────────────────
 
 thread_local! {
@@ -120,7 +203,13 @@ pub fn rand_range(n: usize) -> usize {
 }
 
 /// K-Means++ centroid initialization.
-pub fn kmeans_plusplus(data: &[f32], k: usize, n_rows: usize, dim: usize) -> Vec<f32> {
+pub fn kmeans_plusplus(
+    data: &[f32],
+    k: usize,
+    n_rows: usize,
+    dim: usize,
+    cancel_token: &CancelToken,
+) -> Vec<f32> {
     let mut centroids: Vec<f32> = Vec::with_capacity(k * dim);
     let mut chosen: HashSet<usize> = HashSet::new();
     let first_idx = rand_range(n_rows);
@@ -128,6 +217,27 @@ pub fn kmeans_plusplus(data: &[f32], k: usize, n_rows: usize, dim: usize) -> Vec
     centroids.extend_from_slice(&data[first_idx * dim..(first_idx + 1) * dim]);
 
     let mut min_dist_sq: Vec<f32> = vec![f32::MAX; n_rows];
+
+    #[cfg(target_os = "macos")]
+    let data_norm2: Vec<f32>;
+
+    // ── Compute distance to the first centroid ──
+    #[cfg(target_os = "macos")]
+    {
+        data_norm2 = (0..n_rows)
+            .map(|i| {
+                let row = &data[i * dim..(i + 1) * dim];
+                dot_product(row, row)
+            })
+            .collect();
+        let first_centroid = centroids.chunks_exact(dim).last().unwrap();
+        let c_norm2 = dot_product(first_centroid, first_centroid);
+        for i in 0..n_rows {
+            let dot = dot_product(&data[i * dim..(i + 1) * dim], first_centroid);
+            min_dist_sq[i] = (data_norm2[i] + c_norm2 - 2.0 * dot).max(0.0);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
     for i in 0..n_rows {
         let row = &data[i * dim..(i + 1) * dim];
         let dist = row
@@ -139,6 +249,7 @@ pub fn kmeans_plusplus(data: &[f32], k: usize, n_rows: usize, dim: usize) -> Vec
     }
 
     for c in 1..k {
+        cancel_token.heartbeat().ok();
         let total_dist: f64 = min_dist_sq.iter().map(|&d| d as f64).sum();
         if total_dist <= 0.0 {
             let idx = loop {
@@ -164,6 +275,22 @@ pub fn kmeans_plusplus(data: &[f32], k: usize, n_rows: usize, dim: usize) -> Vec
         chosen.insert(next_idx);
         centroids.extend_from_slice(&data[next_idx * dim..(next_idx + 1) * dim]);
         let new_centroid = &centroids[c * dim..(c + 1) * dim];
+        #[cfg(target_os = "macos")]
+        {
+            let c_norm2 = dot_product(new_centroid, new_centroid);
+            for i in 0..n_rows {
+                if chosen.contains(&i) {
+                    min_dist_sq[i] = 0.0;
+                    continue;
+                }
+                let dot = dot_product(&data[i * dim..(i + 1) * dim], new_centroid);
+                let dist = (data_norm2[i] + c_norm2 - 2.0 * dot).max(0.0);
+                if dist < min_dist_sq[i] {
+                    min_dist_sq[i] = dist;
+                }
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
         for i in 0..n_rows {
             if chosen.contains(&i) {
                 min_dist_sq[i] = 0.0;
@@ -192,11 +319,45 @@ pub fn kmeans_iterate(
     n_rows: usize,
     dim: usize,
     k: usize,
+    cancel_token: &CancelToken,
 ) -> (Vec<u32>, f64) {
+    cancel_token.heartbeat().ok();
     let mut assignments: Vec<u32> = vec![0u32; n_rows];
 
     // ── Assignment: argmin of squared Euclidean distance ──
     // (Fixed from incorrect max-dot-product which mixed objectives.)
+    #[cfg(target_os = "macos")]
+    {
+        let data_norm2: Vec<f32> = (0..n_rows)
+            .map(|i| {
+                let row = &data[i * dim..(i + 1) * dim];
+                dot_product(row, row)
+            })
+            .collect();
+        let centroid_norm2: Vec<f32> = (0..k)
+            .map(|c| {
+                let cent = &centroids[c * dim..(c + 1) * dim];
+                dot_product(cent, cent)
+            })
+            .collect();
+        for i in 0..n_rows {
+            let mut best_c = 0u32;
+            let mut best_dist = f32::INFINITY;
+            for c in 0..k {
+                let dot = dot_product(
+                    &data[i * dim..(i + 1) * dim],
+                    &centroids[c * dim..(c + 1) * dim],
+                );
+                let dist = (data_norm2[i] + centroid_norm2[c] - 2.0 * dot).max(0.0);
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_c = c as u32;
+                }
+            }
+            assignments[i] = best_c;
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
     for i in 0..n_rows {
         let row = &data[i * dim..(i + 1) * dim];
         let mut best_c = 0u32;
@@ -396,11 +557,18 @@ mod tests {
             }
         }
 
-        let mut centroids = kmeans_plusplus(&data, k, n_rows, dim);
+        let mut centroids = kmeans_plusplus(&data, k, n_rows, dim, &CancelToken::new(None));
         let mut prev_distortion = f64::INFINITY;
 
         for iter in 0..20 {
-            let (_assignments, delta) = kmeans_iterate(&data, &mut centroids, n_rows, dim, k);
+            let (_assignments, delta) = kmeans_iterate(
+                &data,
+                &mut centroids,
+                n_rows,
+                dim,
+                k,
+                &CancelToken::new(None),
+            );
             // Distortion = sum of squared distances to assigned centroid.
             let mut distortion = 0.0_f64;
             for i in 0..n_rows {
@@ -451,8 +619,15 @@ mod tests {
             data.push(next_f32() * 10.0 + 50.0);
         }
 
-        let mut centroids = kmeans_plusplus(&data, k, n_rows, dim);
-        let (_assignments, _) = kmeans_iterate(&data, &mut centroids, n_rows, dim, k);
+        let mut centroids = kmeans_plusplus(&data, k, n_rows, dim, &CancelToken::new(None));
+        let (_assignments, _) = kmeans_iterate(
+            &data,
+            &mut centroids,
+            n_rows,
+            dim,
+            k,
+            &CancelToken::new(None),
+        );
 
         // Check how many clusters got at least one point.
         let empty_count = centroids
@@ -562,14 +737,28 @@ mod tests {
         }
 
         // Full pipeline: cluster -> reorder -> quantize -> dequantize
-        let mut centroids = kmeans_plusplus(&data, k, n_rows, dim);
+        let mut centroids = kmeans_plusplus(&data, k, n_rows, dim, &CancelToken::new(None));
         for _ in 0..20 {
-            let (_assignments, delta) = kmeans_iterate(&data, &mut centroids, n_rows, dim, k);
+            let (_assignments, delta) = kmeans_iterate(
+                &data,
+                &mut centroids,
+                n_rows,
+                dim,
+                k,
+                &CancelToken::new(None),
+            );
             if delta < 1e-6 {
                 break;
             }
         }
-        let (assignments, _) = kmeans_iterate(&data, &mut centroids, n_rows, dim, k);
+        let (assignments, _) = kmeans_iterate(
+            &data,
+            &mut centroids,
+            n_rows,
+            dim,
+            k,
+            &CancelToken::new(None),
+        );
         let reordered = reorder_by_cluster(&data, &assignments, n_rows, dim, k);
 
         // Quantize all blocks

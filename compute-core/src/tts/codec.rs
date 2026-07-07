@@ -52,10 +52,8 @@ fn parse_conv_layer_headers(data: &[u8]) -> Result<Vec<ConvLayerDesc<'_>>, Strin
         let in_ch = u32::from_le_bytes(data[offset + 4..offset + 8].try_into().unwrap());
         let kernel = u32::from_le_bytes(data[offset + 8..offset + 12].try_into().unwrap());
         let stride = u32::from_le_bytes(data[offset + 12..offset + 16].try_into().unwrap());
-        let wbytes =
-            u64::from_le_bytes(data[offset + 16..offset + 24].try_into().unwrap());
-        let bbytes =
-            u64::from_le_bytes(data[offset + 24..offset + 32].try_into().unwrap());
+        let wbytes = u64::from_le_bytes(data[offset + 16..offset + 24].try_into().unwrap());
+        let bbytes = u64::from_le_bytes(data[offset + 24..offset + 32].try_into().unwrap());
         offset += 32;
         if offset + wbytes as usize + bbytes as usize > data.len() {
             return Err(format!("conv layer data truncated at offset {offset}"));
@@ -67,7 +65,14 @@ fn parse_conv_layer_headers(data: &[u8]) -> Result<Vec<ConvLayerDesc<'_>>, Strin
             None
         };
         offset += wbytes as usize + bbytes as usize;
-        descs.push(ConvLayerDesc { out_ch, in_ch, kernel, stride, weight_data, bias_data });
+        descs.push(ConvLayerDesc {
+            out_ch,
+            in_ch,
+            kernel,
+            stride,
+            weight_data,
+            bias_data,
+        });
     }
     Ok(descs)
 }
@@ -267,8 +272,16 @@ impl MimiCodec {
             let n = num_tokens as u64;
             enc.set_bytes(3, 4, &num_tokens as *const u32 as *const std::ffi::c_void);
 
-            let grid = MTLSize { width: n, height: 16, depth: 128 };
-            let group = MTLSize { width: 1, height: 1, depth: 1 };
+            let grid = MTLSize {
+                width: n,
+                height: 16,
+                depth: 128,
+            };
+            let group = MTLSize {
+                width: 1,
+                height: 1,
+                depth: 1,
+            };
             enc.dispatch_threads(grid, group);
             enc.end_encoding();
             cmd_buf.commit();
@@ -300,15 +313,39 @@ impl MimiCodec {
             }
             enc.set_buffer(3, Some(out_buf), 0);
 
-            enc.set_bytes(4, 4, &layer.in_channels as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(5, 4, &layer.out_channels as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(
+                4,
+                4,
+                &layer.in_channels as *const u32 as *const std::ffi::c_void,
+            );
+            enc.set_bytes(
+                5,
+                4,
+                &layer.out_channels as *const u32 as *const std::ffi::c_void,
+            );
             enc.set_bytes(6, 4, &layer.stride as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(7, 4, &layer.kernel_size as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(8, 4, &current_frames as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(
+                7,
+                4,
+                &layer.kernel_size as *const u32 as *const std::ffi::c_void,
+            );
+            enc.set_bytes(
+                8,
+                4,
+                &current_frames as *const u32 as *const std::ffi::c_void,
+            );
 
             let total = (out_frames as u64) * (out_channels as u64);
-            let grid = MTLSize { width: total, height: 1, depth: 1 };
-            let group = MTLSize { width: 64, height: 1, depth: 1 };
+            let grid = MTLSize {
+                width: total,
+                height: 1,
+                depth: 1,
+            };
+            let group = MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            };
             enc.dispatch_threads(grid, group);
             enc.end_encoding();
             cmd_buf.commit();
@@ -324,16 +361,8 @@ impl MimiCodec {
         // ── Step 3: overlap-add ──────────────────────────────────────────
         // Each frame = kernel_size of the last layer (or stride-aligned).
         // Use hop_size = stride of last layer for standard overlap-add.
-        let last_stride = self
-            .conv_layers
-            .last()
-            .map(|l| l.stride)
-            .unwrap_or(1);
-        let last_kernel = self
-            .conv_layers
-            .last()
-            .map(|l| l.kernel_size)
-            .unwrap_or(1);
+        let last_stride = self.conv_layers.last().map(|l| l.stride).unwrap_or(1);
+        let last_kernel = self.conv_layers.last().map(|l| l.kernel_size).unwrap_or(1);
         let frame_size = last_kernel;
         let hop_size = last_stride;
         // Output length: each frame contributes frame_size samples,
@@ -354,13 +383,29 @@ impl MimiCodec {
             enc.set_buffer(1, Some(&output_buf), 0);
             enc.set_buffer(2, None, 0); // no window function
 
-            enc.set_bytes(3, 4, &current_frames as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(
+                3,
+                4,
+                &current_frames as *const u32 as *const std::ffi::c_void,
+            );
             enc.set_bytes(4, 4, &hop_size as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(5, 4, &frame_size as *const u32 as *const std::ffi::c_void);
-            enc.set_bytes(6, 4, &output_samples as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(
+                6,
+                4,
+                &output_samples as *const u32 as *const std::ffi::c_void,
+            );
 
-            let grid = MTLSize { width: current_frames as u64, height: 1, depth: 1 };
-            let group = MTLSize { width: 64, height: 1, depth: 1 };
+            let grid = MTLSize {
+                width: current_frames as u64,
+                height: 1,
+                depth: 1,
+            };
+            let group = MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            };
             enc.dispatch_threads(grid, group);
             enc.end_encoding();
             cmd_buf.commit();
@@ -369,8 +414,7 @@ impl MimiCodec {
 
         // ── Read back ────────────────────────────────────────────────────
         let ptr = output_buf.contents() as *const u8;
-        let out_bytes =
-            unsafe { std::slice::from_raw_parts(ptr, (output_samples as usize) * 4) };
+        let out_bytes = unsafe { std::slice::from_raw_parts(ptr, (output_samples as usize) * 4) };
         let samples: Vec<f32> = out_bytes
             .chunks_exact(4)
             .map(|c| f32::from_le_bytes(c.try_into().unwrap()))

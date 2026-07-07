@@ -1,5 +1,3 @@
-//! ANE-TRI-LANE-CIMAGE-0001: Apple tri-lane execution plan types.
-//!
 //! Compile-time plan embedding for three-lane (ANE/GPU/CPU) heterogeneous
 //! execution on Apple Silicon.  The plan is sealed in the CImage manifest
 //! and executed by the runtime scheduler as authoritative data — placement
@@ -200,23 +198,8 @@ pub enum AneExperimentalReason {
     TelemetryGathering,
 }
 
-// ── Materialization mode ─────────────────────────────────────────────────
-
-/// How tensor data crosses a device boundary.  Should never be called
-/// "zero-copy" unless the provider proves it for the exact buffer route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum MaterializationMode {
-    /// IO-arena buffer reused by the consumer lane (proven zero-copy).
-    ReusedProviderBuffer,
-    /// Explicit shared-memory binding (IOSurface page-table op).
-    ExplicitSharedMemoryBinding,
-    /// Format conversion required (e.g. FP16→FP32).
-    ExplicitConversion,
-    /// Memory-level copy required.
-    ExplicitCopy,
-    /// Managed by Core ML runtime — exact cost unknown.
-    RuntimeManagedOpaqueTransfer,
-}
+/// Materialization mode re-exported from the unconditional phase_types module.
+pub use crate::compilation::phase_types::MaterializationMode;
 
 // ── Buffer ownership ─────────────────────────────────────────────────────
 

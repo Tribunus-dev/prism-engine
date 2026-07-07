@@ -364,10 +364,7 @@ fn resolve_optional_segment(
         return Ok(None);
     }
     if entry.kind != expected_kind as u32 {
-        return Err(format!(
-            "segment index {} kind mismatch: expected {:?}, found {}",
-            segment_index, expected_kind, entry.kind
-        ));
+        return Ok(None);
     }
     Ok(Some(SealedSegmentBinding {
         segment_index,

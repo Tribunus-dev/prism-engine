@@ -1,3 +1,4 @@
+#![cfg(feature = "apple-coreml")]
 //! Bit-accurate parity tests validating MLX references vs Core ML predictions.
 
 use tribunus_compute_core::arena::{Arena, DataType};

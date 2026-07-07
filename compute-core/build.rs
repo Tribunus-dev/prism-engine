@@ -5,11 +5,20 @@ fn forward(name: &str) {
     println!("cargo:rustc-env=TRIBUNUS_{name}={value}");
 }
 
+fn metal_sdk_for_target(target: &str) -> &'static str {
+    if target.contains("apple-ios") {
+        "iphoneos"
+    } else {
+        "macosx"
+    }
+}
+
 fn main() {
+    let host_target = std::env::var("TARGET").unwrap_or_default();
+
     // ── Metal kernel compilation ────────────────────────────────────────
     // Only compile Metal shaders when the metal-dispatch feature is active.
-    #[cfg(feature = "metal-dispatch")]
-    {
+    if cfg!(feature = "metal-dispatch") {
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
         let template_dir = std::path::Path::new(&manifest_dir)
             .join("src")
@@ -23,10 +32,13 @@ fn main() {
             "palettized_gemm.metal",
             "fused_gate_up.metal",
             "ternary_tile640_gemv.metal",
+            // Batched FP32 GEMV for compile-time operator validation on GPU.
+            "batched_gemv_fp32.metal",
             // NF4 teacher forward GEMV — without this the kernel is never
             // compiled into the metallib and KernelRegistry cannot find
             // `fused_gemv_nf4_tile640_fp32`, so the teacher cimage can't execute.
             "nf4_tile640_gemv.metal",
+            "int8_tile640_gemv.metal",
         ];
         for src in metal_sources {
             println!(
@@ -54,12 +66,13 @@ fn main() {
         // Step 1: compile each .metal -> .air
         let mut air_files = Vec::new();
         for src in metal_sources {
+            let sdk = metal_sdk_for_target(&host_target);
             let src_path = template_dir.join(src);
             let air_file = std::path::Path::new(&out_dir)
                 .join(src)
                 .with_extension("air");
             let status = std::process::Command::new("xcrun")
-                .args(["-sdk", "macosx", "metal", "-c"])
+                .args(["-sdk", &sdk, "metal", "-c"])
                 .arg(&src_path)
                 .arg("-o")
                 .arg(&air_file)
@@ -70,9 +83,10 @@ fn main() {
         }
 
         // Step 2: link all .air → .metallib
+        let sdk = metal_sdk_for_target(&host_target);
         let metallib_path = std::path::Path::new(&out_dir).join("palettized_kernels.metallib");
         let mut link_cmd = std::process::Command::new("xcrun");
-        link_cmd.args(["-sdk", "macosx", "metallib", "-o"]);
+        link_cmd.args(["-sdk", &sdk, "metallib", "-o"]);
         link_cmd.arg(&metallib_path);
         for air in &air_files {
             link_cmd.arg(air);
@@ -135,53 +149,59 @@ fn main() {
     // Guard: on non-macOS targets, a CPU backend feature must be explicit.
 
     // Compile the ObjC++ Core ML / IOSurface bridge.
-    #[cfg(all(
-        target_os = "macos",
-        any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi")
-    ))]
+    // Uses a runtime TARGET check because build.rs cfg reflects the HOST platform,
+    // not the cross-compilation target. IOSurface is macOS-only on iOS.
+    let is_macos_target =
+        host_target == "aarch64-apple-darwin" || host_target == "x86_64-apple-darwin";
+
+    if is_macos_target
+        && (cfg!(feature = "mlx-backend")
+            || cfg!(feature = "prism-backend")
+            || cfg!(feature = "ffi"))
     {
         let _out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
-        #[cfg(not(feature = "coreai-backend"))]
-        cc::Build::new()
-            .file("src/bridge/coreai_arena.mm")
-            .flag("-fobjc-arc")
-            .flag("-std=c++17")
-            .compile("coreai_arena");
-        #[cfg(not(feature = "coreai-backend"))]
-        cc::Build::new()
-            .file("src/bridge/coreai_exec.mm")
-            .flag("-fobjc-arc")
-            .flag("-fblocks")
-            .flag("-std=c++17")
-            .compile("coreai_exec");
-        #[cfg(not(feature = "coreai-backend"))]
-        cc::Build::new()
-            .file("src/bridge/coreai_state.mm")
-            .flag("-fobjc-arc")
-            .flag("-fblocks")
-            .flag("-std=c++17")
-            .compile("coreai_state");
+        if !cfg!(feature = "coreai-backend") {
+            cc::Build::new()
+                .file("src/bridge/coreai_arena.mm")
+                .flag("-fobjc-arc")
+                .flag("-std=c++17")
+                .compile("coreai_arena");
+            // ObjC++ .mm files need C++ standard library for personality v0.
+            println!("cargo:rustc-link-lib=c++");
+            cc::Build::new()
+                .file("src/bridge/coreai_exec.mm")
+                .flag("-fobjc-arc")
+                .flag("-fblocks")
+                .flag("-std=c++17")
+                .compile("coreai_exec");
+            cc::Build::new()
+                .file("src/bridge/coreai_state.mm")
+                .flag("-fobjc-arc")
+                .flag("-fblocks")
+                .flag("-std=c++17")
+                .compile("coreai_state");
+        }
         cc::Build::new()
             .file("src/bridge/ane_private.mm")
             .flag("-fobjc-arc")
             .flag("-fblocks")
             .flag("-std=c++17")
             .compile("ane_private");
+
         // Framework dependencies.
         println!("cargo:rustc-link-lib=framework=CoreML");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=IOSurface");
         println!("cargo:rustc-link-lib=framework=Metal");
         println!("cargo:rustc-link-lib=framework=CoreVideo");
+        println!("cargo:rustc-link-lib=framework=Accelerate");
 
         // Swift @C bridge prototype. Replaces coreai_exec.mm + coreai_state.mm
         // when the `coreai-backend` feature is enabled. Core AI's types are
         // Swift structs — not bridgeable from ObjC++.
-        #[cfg(feature = "coreai-backend")]
-        {
+        if cfg!(feature = "coreai-backend") {
             let swift_out = format!("{}/libcoreai_bridge.o", _out_dir);
             let swift_src = "src/bridge/coreai_bridge.swift";
-
             let status = std::process::Command::new("swiftc")
                 .args(["-c", "-emit-object", "-module-name", "CoreAiBridge"])
                 .arg(swift_src)
@@ -190,8 +210,8 @@ fn main() {
                 .arg("-v")
                 .status()
                 .expect("swiftc failed");
-            assert!(status.success(), "swiftc returned non-zero");
 
+            assert!(status.success(), "swiftc returned non-zero");
             cc::Build::new().object(&swift_out).compile("coreai_bridge");
             println!("cargo:rustc-link-lib=framework=CoreAI");
             println!("cargo:rustc-link-lib=framework=CoreML");

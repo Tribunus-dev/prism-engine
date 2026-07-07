@@ -70,8 +70,8 @@ struct RawTensor {
 
 /// Read a `.safetensors` file and return all tensor entries.
 fn read_safetensors(path: &Path) -> Result<Vec<RawTensor>, String> {
-    let raw = std::fs::read(path)
-        .map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
+    let raw =
+        std::fs::read(path).map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
 
     if raw.len() < 8 {
         return Err("file too small for safetensors header".into());
@@ -114,10 +114,12 @@ fn read_safetensors(path: &Path) -> Result<Vec<RawTensor>, String> {
 
         let start: usize = offsets[0]
             .as_u64()
-            .ok_or_else(|| format!("tensor '{}' invalid start offset", name))? as usize;
+            .ok_or_else(|| format!("tensor '{}' invalid start offset", name))?
+            as usize;
         let end: usize = offsets[1]
             .as_u64()
-            .ok_or_else(|| format!("tensor '{}' invalid end offset", name))? as usize;
+            .ok_or_else(|| format!("tensor '{}' invalid end offset", name))?
+            as usize;
 
         if end < start || end > raw.len() - data_start {
             return Err(format!(
@@ -145,7 +147,12 @@ fn read_safetensors(path: &Path) -> Result<Vec<RawTensor>, String> {
 /// Pack a single 2D weight matrix as nf4tile640.
 ///
 /// Returns (packed_weight, packed_scales, packed_biases, padded_in_dim).
-fn pack_nf4_tile640_matrix(data: &[u8], dtype: &str, out_dim: u32, in_dim: u32) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), String> {
+fn pack_nf4_tile640_matrix(
+    data: &[u8],
+    dtype: &str,
+    out_dim: u32,
+    in_dim: u32,
+) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), String> {
     quantize_nf4_tile640_matrix_from_raw(data, dtype, out_dim, in_dim)
         .map(|(w, s, b, _packed_in, _shape)| (w, s, b))
         .map_err(|e| format!("nf4 quantize {}x{}: {}", out_dim, in_dim, e))
@@ -218,7 +225,11 @@ pub fn pack_tts_weights(
             || tensor.name.contains("embedding");
 
         if is_codebook {
-            codebook_data = Some((tensor.data.clone(), tensor.shape.clone(), tensor.dtype.clone()));
+            codebook_data = Some((
+                tensor.data.clone(),
+                tensor.shape.clone(),
+                tensor.dtype.clone(),
+            ));
             codebook_name = tensor.name.clone();
             continue;
         }
@@ -250,117 +261,132 @@ pub fn pack_tts_weights(
     let mut all_entries: Vec<TensorEntry> = Vec::new();
 
     // Helper: write a triplet segment + build entries.
-    let mut write_triplet = |prefix: &str, acc: &ComponentAccumulator, _tts_seg_kind_base: u32| -> Result<(), String> {
-        if acc.is_empty() {
-            return Ok(());
-        }
+    let mut write_triplet =
+        |prefix: &str, acc: &ComponentAccumulator, _tts_seg_kind_base: u32| -> Result<(), String> {
+            if acc.is_empty() {
+                return Ok(());
+            }
 
-        let weight_path = output_dir.join(format!("{}_weight.bin", prefix));
-        let scale_path = output_dir.join(format!("{}_scale.bin", prefix));
-        let bias_path = output_dir.join(format!("{}_bias.bin", prefix));
+            let weight_path = output_dir.join(format!("{}_weight.bin", prefix));
+            let scale_path = output_dir.join(format!("{}_scale.bin", prefix));
+            let bias_path = output_dir.join(format!("{}_bias.bin", prefix));
 
-        std::fs::write(&weight_path, &acc.weight_bytes)
-            .map_err(|e| format!("write {}: {}", weight_path.display(), e))?;
-        std::fs::write(&scale_path, &acc.scale_bytes)
-            .map_err(|e| format!("write {}: {}", scale_path.display(), e))?;
-        std::fs::write(&bias_path, &acc.bias_bytes)
-            .map_err(|e| format!("write {}: {}", bias_path.display(), e))?;
+            std::fs::write(&weight_path, &acc.weight_bytes)
+                .map_err(|e| format!("write {}: {}", weight_path.display(), e))?;
+            std::fs::write(&scale_path, &acc.scale_bytes)
+                .map_err(|e| format!("write {}: {}", scale_path.display(), e))?;
+            std::fs::write(&bias_path, &acc.bias_bytes)
+                .map_err(|e| format!("write {}: {}", bias_path.display(), e))?;
 
-        // Aggregate logical shape: total out_dim across all tensors, padded tile640 dims.
-        let total_out: u32 = acc.tensor_shapes.iter().map(|(o, _)| o).sum();
-        let total_in: u32 = acc.tensor_shapes.iter().map(|(_, i)| (i + 639) / 640 * 640).sum();
+            // Aggregate logical shape: total out_dim across all tensors, padded tile640 dims.
+            let total_out: u32 = acc.tensor_shapes.iter().map(|(o, _)| o).sum();
+            let total_in: u32 = acc
+                .tensor_shapes
+                .iter()
+                .map(|(_, i)| (i + 639) / 640 * 640)
+                .sum();
 
-        let weight_entry = TensorEntry {
-            id: 0,
-            name: format!("{}.weight", prefix),
-            role: "tts_weight".to_string(),
-            layer: None,
-            segment: weight_path.file_name().unwrap().to_string_lossy().to_string(),
-            source_filename: String::new(),
-            source_sha256: String::new(),
-            source_offset: 0,
-            offset: 0,
-            byte_length: acc.weight_bytes.len() as u64,
-            logical_dtype: "BF16".to_string(),
-            storage_dtype: "U8".to_string(),
-            logical_shape: vec![total_out, total_in],
-            physical_shape: vec![total_out, total_in],
-            mutability: "frozen".to_string(),
-            quantization: Some(crate::compute_image::manifest::QuantizationDesc {
-                bits: 4,
-                group_size: 128,
-                groups: (acc.scale_bytes.len() / 4) as u32,
-                scale_tensor_id: 0,
-                bias_tensor_id: 0,
-                storage_layout: Some(crate::compute_image::manifest::SharedWeightLayout::Nf4Tile640(
-                    crate::compute_image::manifest::Nf4Tile640Layout {
-                        tile_elements: 640,
-                        quant_group_size: 128,
-                        groups_per_tile: 5,
-                        packed_weight_bytes_per_tile: 320,
-                        scale_values_per_tile: 5,
-                        bias_values_per_tile: 5,
-                        packed_weight_dtype: "U8".to_string(),
-                        metadata_dtype: "F32".to_string(),
-                        weight_lane_read_bytes: 32,
-                        profile_id: None,
-                    },
-                )),
-            }),
-            tensor_alignment_bytes: 16,
-            layout_version: 1,
-            artifact_bindings: HashMap::new(),
+            let weight_entry = TensorEntry {
+                id: 0,
+                name: format!("{}.weight", prefix),
+                role: "tts_weight".to_string(),
+                layer: None,
+                segment: weight_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                source_filename: String::new(),
+                source_sha256: String::new(),
+                source_offset: 0,
+                offset: 0,
+                byte_length: acc.weight_bytes.len() as u64,
+                logical_dtype: "BF16".to_string(),
+                storage_dtype: "U8".to_string(),
+                logical_shape: vec![total_out, total_in],
+                physical_shape: vec![total_out, total_in],
+                mutability: "frozen".to_string(),
+                quantization: Some(crate::compute_image::manifest::QuantizationDesc {
+                    bits: 4,
+                    group_size: 128,
+                    groups: (acc.scale_bytes.len() / 4) as u32,
+                    scale_tensor_id: 0,
+                    bias_tensor_id: 0,
+                    storage_layout: Some(
+                        crate::compute_image::manifest::SharedWeightLayout::Nf4Tile640(
+                            crate::compute_image::manifest::Nf4Tile640Layout {
+                                tile_elements: 640,
+                                quant_group_size: 128,
+                                groups_per_tile: 5,
+                                packed_weight_bytes_per_tile: 320,
+                                scale_values_per_tile: 5,
+                                bias_values_per_tile: 5,
+                                packed_weight_dtype: "U8".to_string(),
+                                metadata_dtype: "F32".to_string(),
+                                weight_lane_read_bytes: 32,
+                                profile_id: None,
+                            },
+                        ),
+                    ),
+                }),
+                tensor_alignment_bytes: 16,
+                layout_version: 1,
+                artifact_bindings: HashMap::new(),
+            };
+
+            let scale_entry = TensorEntry {
+                id: 0,
+                name: format!("{}.scales", prefix),
+                role: "tts_scale".to_string(),
+                layer: None,
+                segment: scale_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                source_filename: String::new(),
+                source_sha256: String::new(),
+                source_offset: 0,
+                offset: 0,
+                byte_length: acc.scale_bytes.len() as u64,
+                logical_dtype: "F32".to_string(),
+                storage_dtype: "F32".to_string(),
+                logical_shape: vec![total_out, (acc.scale_bytes.len() as u32) / total_out / 4],
+                physical_shape: vec![total_out, (acc.scale_bytes.len() as u32) / total_out / 4],
+                mutability: "frozen".to_string(),
+                quantization: None,
+                tensor_alignment_bytes: 16,
+                layout_version: 1,
+                artifact_bindings: HashMap::new(),
+            };
+
+            let bias_entry = TensorEntry {
+                id: 0,
+                name: format!("{}.biases", prefix),
+                role: "tts_bias".to_string(),
+                layer: None,
+                segment: bias_path.file_name().unwrap().to_string_lossy().to_string(),
+                source_filename: String::new(),
+                source_sha256: String::new(),
+                source_offset: 0,
+                offset: 0,
+                byte_length: acc.bias_bytes.len() as u64,
+                logical_dtype: "F32".to_string(),
+                storage_dtype: "F32".to_string(),
+                logical_shape: vec![total_out, (acc.bias_bytes.len() as u32) / total_out / 4],
+                physical_shape: vec![total_out, (acc.bias_bytes.len() as u32) / total_out / 4],
+                mutability: "frozen".to_string(),
+                quantization: None,
+                tensor_alignment_bytes: 16,
+                layout_version: 1,
+                artifact_bindings: HashMap::new(),
+            };
+
+            all_entries.push(weight_entry);
+            all_entries.push(scale_entry);
+            all_entries.push(bias_entry);
+            Ok(())
         };
-
-        let scale_entry = TensorEntry {
-            id: 0,
-            name: format!("{}.scales", prefix),
-            role: "tts_scale".to_string(),
-            layer: None,
-            segment: scale_path.file_name().unwrap().to_string_lossy().to_string(),
-            source_filename: String::new(),
-            source_sha256: String::new(),
-            source_offset: 0,
-            offset: 0,
-            byte_length: acc.scale_bytes.len() as u64,
-            logical_dtype: "F32".to_string(),
-            storage_dtype: "F32".to_string(),
-            logical_shape: vec![total_out, (acc.scale_bytes.len() as u32) / total_out / 4],
-            physical_shape: vec![total_out, (acc.scale_bytes.len() as u32) / total_out / 4],
-            mutability: "frozen".to_string(),
-            quantization: None,
-            tensor_alignment_bytes: 16,
-            layout_version: 1,
-            artifact_bindings: HashMap::new(),
-        };
-
-        let bias_entry = TensorEntry {
-            id: 0,
-            name: format!("{}.biases", prefix),
-            role: "tts_bias".to_string(),
-            layer: None,
-            segment: bias_path.file_name().unwrap().to_string_lossy().to_string(),
-            source_filename: String::new(),
-            source_sha256: String::new(),
-            source_offset: 0,
-            offset: 0,
-            byte_length: acc.bias_bytes.len() as u64,
-            logical_dtype: "F32".to_string(),
-            storage_dtype: "F32".to_string(),
-            logical_shape: vec![total_out, (acc.bias_bytes.len() as u32) / total_out / 4],
-            physical_shape: vec![total_out, (acc.bias_bytes.len() as u32) / total_out / 4],
-            mutability: "frozen".to_string(),
-            quantization: None,
-            tensor_alignment_bytes: 16,
-            layout_version: 1,
-            artifact_bindings: HashMap::new(),
-        };
-
-        all_entries.push(weight_entry);
-        all_entries.push(scale_entry);
-        all_entries.push(bias_entry);
-        Ok(())
-    };
 
     write_triplet("tts_talker", &talker, 30)?;
     write_triplet("tts_code_predictor", &code_predictor, 33)?;

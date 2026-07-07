@@ -7,8 +7,8 @@
 
 use std::collections::HashMap;
 
-use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use crate::nf4tile640::roles::MatrixRole;
 use crate::nf4tile640::NF4_CODEBOOK;
@@ -405,22 +405,28 @@ impl StreamingStateCollector {
         was_clipped: bool,
     ) {
         // ── Update role accumulators ──────────────────────────────────────
-        let acc = self
-            .role_stats
-            .entry(role)
-            .or_insert_with(|| {
-                let mut a = RoleAccumulator::default();
-                a.value_min = f32::MAX;
-                a.value_max = f32::MIN;
-                a
-            });
+        let acc = self.role_stats.entry(role).or_insert_with(|| {
+            let mut a = RoleAccumulator::default();
+            a.value_min = f32::MAX;
+            a.value_max = f32::MIN;
+            a
+        });
         acc.ingest_group(group_values, was_clipped);
 
         // ── Collect per-channel moments ───────────────────────────────────
         if self.config.collect_moments {
-            let counts = self.moment_counts.entry(role).or_insert_with(|| vec![0u64; group_values.len()]);
-            let means = self.moment_means.entry(role).or_insert_with(|| vec![0.0f64; group_values.len()]);
-            let m2s = self.moment_m2s.entry(role).or_insert_with(|| vec![0.0f64; group_values.len()]);
+            let counts = self
+                .moment_counts
+                .entry(role)
+                .or_insert_with(|| vec![0u64; group_values.len()]);
+            let means = self
+                .moment_means
+                .entry(role)
+                .or_insert_with(|| vec![0.0f64; group_values.len()]);
+            let m2s = self
+                .moment_m2s
+                .entry(role)
+                .or_insert_with(|| vec![0.0f64; group_values.len()]);
 
             for (pos, &val) in group_values.iter().enumerate() {
                 let v = val as f64;
@@ -440,9 +446,10 @@ impl StreamingStateCollector {
 
         // ── Collect importance ────────────────────────────────────────────
         if self.config.collect_importance {
-            let imp = self.importance_buffers.entry(role).or_insert_with(|| {
-                vec![0.0f32; group_values.len()]
-            });
+            let imp = self
+                .importance_buffers
+                .entry(role)
+                .or_insert_with(|| vec![0.0f32; group_values.len()]);
             // Accumulate group importance as the running per-channel estimate.
             for (pos, imp_val) in imp.iter_mut().enumerate() {
                 if pos < group_values.len() {
@@ -495,10 +502,7 @@ impl StreamingStateCollector {
 
     /// Directly set per-channel importance for a given role.
     pub fn record_input_importance(&mut self, role: MatrixRole, channel: u32, variance: f32) {
-        let imp = self
-            .importance_buffers
-            .entry(role)
-            .or_insert_with(Vec::new);
+        let imp = self.importance_buffers.entry(role).or_insert_with(Vec::new);
         let idx = channel as usize;
         if idx >= imp.len() {
             imp.resize(idx + 1, 0.0);
@@ -519,7 +523,10 @@ impl StreamingStateCollector {
         // Flatten strata back into per-role sample vectors for legacy API.
         let mut samples_by_role: HashMap<MatrixRole, Vec<CalibrationSample>> = HashMap::new();
         for ((role, _bucket), stratum) in &self.strata {
-            samples_by_role.entry(*role).or_default().extend(stratum.samples.iter().cloned());
+            samples_by_role
+                .entry(*role)
+                .or_default()
+                .extend(stratum.samples.iter().cloned());
         }
 
         // Build per-role statistics and receipt.
@@ -734,11 +741,22 @@ mod tests {
         let run = |cfg: CalibrationConfig| -> Vec<CalibrationSample> {
             let mut c = StreamingStateCollector::new(cfg);
             for layer in 0..10 {
-                for g in 0..5 {
-                    c.ingest_weight_group(MatrixRole::AttentionQ, layer, &group, 1.0, 0.0, 1.0, false);
+                for _g in 0..5 {
+                    c.ingest_weight_group(
+                        MatrixRole::AttentionQ,
+                        layer,
+                        &group,
+                        1.0,
+                        0.0,
+                        1.0,
+                        false,
+                    );
                 }
             }
-            c.finish().samples_by_role.remove(&MatrixRole::AttentionQ).unwrap_or_default()
+            c.finish()
+                .samples_by_role
+                .remove(&MatrixRole::AttentionQ)
+                .unwrap_or_default()
         };
 
         let a = run(cfg.clone());
@@ -814,9 +832,21 @@ mod tests {
         let early_count = samples.iter().filter(|s| s.layer_index == 0).count();
         let middle_count = samples.iter().filter(|s| s.layer_index == 16).count();
         let late_count = samples.iter().filter(|s| s.layer_index == 40).count();
-        assert!(early_count > 0, "early layer should contribute samples, got {}", early_count);
-        assert!(middle_count > 0, "middle layer should contribute samples, got {}", middle_count);
-        assert!(late_count > 0, "late layer should contribute samples, got {}", late_count);
+        assert!(
+            early_count > 0,
+            "early layer should contribute samples, got {}",
+            early_count
+        );
+        assert!(
+            middle_count > 0,
+            "middle layer should contribute samples, got {}",
+            middle_count
+        );
+        assert!(
+            late_count > 0,
+            "late layer should contribute samples, got {}",
+            late_count
+        );
         // Each bucket has capacity 150/3 = 50. Groups are 128 values, so first 50 fill.
         assert_eq!(early_count, 50, "early bucket should fill to capacity");
         assert_eq!(middle_count, 50, "middle bucket should fill to capacity");
@@ -851,9 +881,18 @@ mod tests {
         let stats = &result.role_stats[&MatrixRole::FfnDown];
 
         assert_eq!(stats.num_groups, 2);
-        assert!(stats.num_samples >= 200, "num_samples should reflect first-k within stratum");
-        assert!((stats.clipped_fraction - 0.5).abs() < 1e-6, "clipped_fraction should be 0.5");
-        assert!(stats.group_span_max > 2.5, "group_span_max should capture the larger span");
+        assert!(
+            stats.num_samples >= 200,
+            "num_samples should reflect first-k within stratum"
+        );
+        assert!(
+            (stats.clipped_fraction - 0.5).abs() < 1e-6,
+            "clipped_fraction should be 0.5"
+        );
+        assert!(
+            stats.group_span_max > 2.5,
+            "group_span_max should capture the larger span"
+        );
     }
 
     #[test]
@@ -986,7 +1025,11 @@ mod tests {
         let late = samples.iter().filter(|s| s.layer_index == 40).count();
 
         assert!(early > 0, "early bucket should have samples, got {}", early);
-        assert!(middle > 0, "middle bucket should have samples, got {}", middle);
+        assert!(
+            middle > 0,
+            "middle bucket should have samples, got {}",
+            middle
+        );
         assert!(late > 0, "late bucket should have samples, got {}", late);
         // 10 groups * 128 = 1280 values, cap=100 → exactly 100.
         assert_eq!(early, 100, "early bucket should fill to capacity");
@@ -1015,12 +1058,17 @@ mod tests {
         // Should have 3 entries for AttentionQ.
         assert_eq!(coverage.entries.len(), 3, "should have 3 bucket entries");
 
-        let mut bucket_names: Vec<&str> = coverage.entries.iter().map(|e| e.bucket.as_str()).collect();
+        let mut bucket_names: Vec<&str> =
+            coverage.entries.iter().map(|e| e.bucket.as_str()).collect();
         bucket_names.sort();
         assert_eq!(bucket_names, vec!["early", "late", "middle"]);
 
         for entry in &coverage.entries {
-            assert!(entry.group_count > 0, "entry for {} should have groups", entry.role);
+            assert!(
+                entry.group_count > 0,
+                "entry for {} should have groups",
+                entry.role
+            );
         }
     }
 
@@ -1043,15 +1091,23 @@ mod tests {
 
         let result = c.finish();
         let samples = &result.samples_by_role[&MatrixRole::FfnGate];
-        let early: Vec<&CalibrationSample> = samples.iter().filter(|s| s.layer_index == 0).collect();
+        let early: Vec<&CalibrationSample> =
+            samples.iter().filter(|s| s.layer_index == 0).collect();
 
         // Expect exactly 10 (capacity) from the early bucket, not 640.
         assert_eq!(early.len(), 10, "first-k should fill capacity then stop");
 
         // Verify coverage receipt confirms the cap was reached.
         let coverage = result.coverage;
-        let early_entry = coverage.entries.iter().find(|e| e.bucket == "early").unwrap();
-        assert!(early_entry.sample_cap_reached, "early bucket should report cap reached");
+        let early_entry = coverage
+            .entries
+            .iter()
+            .find(|e| e.bucket == "early")
+            .unwrap();
+        assert!(
+            early_entry.sample_cap_reached,
+            "early bucket should report cap reached"
+        );
         assert_eq!(early_entry.sampled_values, 10);
     }
 }

@@ -40,9 +40,9 @@ pub const TTS_NUM_KV_HEADS: u32 = 8;
 #[allow(dead_code)]
 pub const TTS_HEAD_DIM: u32 = 256;
 #[allow(dead_code)]
-pub const TTS_TILES: u32 = (TTS_HIDDEN + 639) / 640;  // ~4 tiles
+pub const TTS_TILES: u32 = (TTS_HIDDEN + 639) / 640; // ~4 tiles
 #[allow(dead_code)]
-pub const TTS_TILES_FFN: u32 = (TTS_FFN_INTERMEDIATE + 639) / 640;  // ~13
+pub const TTS_TILES_FFN: u32 = (TTS_FFN_INTERMEDIATE + 639) / 640; // ~13
 #[allow(dead_code)]
 pub const TTS_VOCAB: u32 = 2048;
 #[allow(dead_code)]
@@ -65,14 +65,14 @@ pub const L1_CAPACITY: u32 = 20480;
 
 // ── nf4tile640 KV cache layout constants ──────────────────────────
 #[allow(dead_code)]
-pub const NF4TILE_GROUPS_PER_TILE: u32 = 5;  // 640/128
-pub const NF4TILE_CODES_PER_TILE: u32 = 80;  // 80 × u32 = 320 bytes
-pub const NF4TILE_SCALES_PER_TILE: u32 = 5;  // 5 × f32 = 20 bytes
-pub const NF4TILE_BIASES_PER_TILE: u32 = 5;  // 5 × f32 = 20 bytes
-pub const NF4TILE_BYTE_PER_TILE: u32 = 360;  // 320 + 20 + 20
-pub const KV_TILES_PER_HEAD: u32 = 1;         // 512 dim → 1 tile
-pub const KV_NF4_PER_HEAD: u64 = 720;         // K+V: 2 × 360
-pub const KV_NF4_PER_POSITION: u64 = 5760;    // 8 heads × 720
+pub const NF4TILE_GROUPS_PER_TILE: u32 = 5; // 640/128
+pub const NF4TILE_CODES_PER_TILE: u32 = 80; // 80 × u32 = 320 bytes
+pub const NF4TILE_SCALES_PER_TILE: u32 = 5; // 5 × f32 = 20 bytes
+pub const NF4TILE_BIASES_PER_TILE: u32 = 5; // 5 × f32 = 20 bytes
+pub const NF4TILE_BYTE_PER_TILE: u32 = 360; // 320 + 20 + 20
+pub const KV_TILES_PER_HEAD: u32 = 1; // 512 dim → 1 tile
+pub const KV_NF4_PER_HEAD: u64 = 720; // K+V: 2 × 360
+pub const KV_NF4_PER_POSITION: u64 = 5760; // 8 heads × 720
 pub const KV_NF4_PER_LAYER_POSITION: u64 = 5760;
 pub const KV_NF4_PER_SLOT: u64 = KV_NF4_PER_POSITION * L1_CAPACITY as u64 * LAYERS as u64;
 

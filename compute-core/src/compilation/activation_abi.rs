@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::placement::ExecutionLane;
 use crate::compilation::phase_ir::TensorDtype;
-use crate::compilation::tri_lane::MaterializationMode;
-use crate::compute_image::apple_shared_arena::SlotState;
+use crate::compilation::phase_types::MaterializationMode;
+use crate::compute_image::slot_types::SlotState;
 
 // ── Activation ABI variants ──────────────────────────────────────────────
 

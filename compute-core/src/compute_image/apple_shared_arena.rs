@@ -20,46 +20,7 @@ type ArenaId = String;
 #[allow(dead_code)]
 type SlotGeneration = u64;
 
-/// Failure reason for poisoned slots.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum SlotFailureReason {
-    LayoutMismatch { expected: String, actual: String },
-    CoreAiPredictionFailed(String),
-    MetalDispatchFailed(String),
-    Timeout { deadline_ns: u64 },
-    NumericalGuardFailed(String),
-    AllocationPrevented,
-    InternalError(String),
-}
-
-/// Slot state with explicit ownership semantics.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum SlotState {
-    Free,
-    Reserved {
-        epoch: u64,
-        producer: ExecutionLane,
-    },
-    Writing {
-        epoch: u64,
-        producer: ExecutionLane,
-    },
-    Ready {
-        epoch: u64,
-        producer: ExecutionLane,
-    },
-    Reading {
-        epoch: u64,
-        consumer: ExecutionLane,
-    },
-    Retired {
-        epoch: u64,
-    },
-    Poisoned {
-        epoch: u64,
-        reason: SlotFailureReason,
-    },
-}
+pub use crate::compute_image::slot_types::{SlotFailureReason, SlotState};
 
 /// IOSurface slot manifest (immutable, from CImage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,15 +40,8 @@ pub struct IOSurfaceSlotManifest {
     pub required_alignment: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SlotReuseClass {
-    Exclusive,
-    SharedReadOnly,
-    RingReuse { ring_depth: u8 },
-}
-
-/// Re-export ExecutionLane for convenience.
 pub use crate::backend::placement::ExecutionLane;
+pub use crate::compute_image::slot_types::SlotReuseClass;
 
 /// Pool-level telemetry for IOSurface lifecycle diagnostics.
 ///

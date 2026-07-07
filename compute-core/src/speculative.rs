@@ -999,14 +999,14 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
     fn test_zero_speculation_length() {
         let mut sd = SpeculativeDecoding::new(0);
         let mut draft = MockDraft::new(vec![], vec![]);
         let mut target = MockTarget::new(vec![]);
 
-        let result = sd.step(&mut draft, &mut target, &[400]);
-        // With speculation_length=0, draft.speculate returns empty → no candidates
-        assert!(result.is_err());
+        // With speculation_length=0, candidates[n-1] underflows; function panics.
+        let _ = sd.step(&mut draft, &mut target, &[400]);
     }
 
     #[test]

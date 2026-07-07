@@ -14,9 +14,9 @@ use crate::arena::Arena;
 use crate::backend::flex_dispatch::FlexDispatch;
 use crate::backend::routing::*;
 use crate::backend::CompiledRegionBackend;
+use crate::backend::DType;
 use crate::backend::TensorBackend;
 use crate::backend::TensorHandle;
-use crate::backend::DType;
 use crate::memory::allocator::IosurfaceAllocator;
 
 /// Number of slots in the decode slot pool.
@@ -116,7 +116,7 @@ pub trait BackendInstance: TensorBackend {
     /// Default returns `None`.
     fn last_decoded_token(&self) -> Option<u64> {
         None
-}
+    }
 }
 
 // ── TensorRegistry ──────────────────────────────────────────────────────────
@@ -133,7 +133,9 @@ struct TensorRegistry {
 
 impl TensorRegistry {
     fn new() -> Self {
-        Self { op_outputs: HashMap::new() }
+        Self {
+            op_outputs: HashMap::new(),
+        }
     }
 }
 
@@ -241,7 +243,9 @@ impl HeterogeneousExecutor {
             .iter()
             .find(|b| b.backend_kind() == BACKEND_MEGAKERNEL)
             .ok_or_else(|| "MegakernelBackend not registered".to_string())?;
-        backend.last_decoded_token().ok_or_else(|| "MegakernelBackend did not provide a decoded token".to_string())
+        backend
+            .last_decoded_token()
+            .ok_or_else(|| "MegakernelBackend did not provide a decoded token".to_string())
     }
 
     /// Get the current route for an operation, if one has been set.
@@ -264,12 +268,17 @@ impl HeterogeneousExecutor {
 
     /// Get the current decode position for a slot.
     pub fn slot_position(&self, slot_id: u32) -> u32 {
-        self.slot_positions.get(slot_id as usize).copied().unwrap_or(0)
+        self.slot_positions
+            .get(slot_id as usize)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Advance the decode position for a slot.
     pub fn advance_slot_position(&mut self, slot_id: u32) {
-        if let Some(p) = self.slot_positions.get_mut(slot_id as usize) { *p += 1; }
+        if let Some(p) = self.slot_positions.get_mut(slot_id as usize) {
+            *p += 1;
+        }
     }
 
     /// Number of active slots.
@@ -336,7 +345,10 @@ impl HeterogeneousExecutor {
         let elapsed_ns = boundary_start.elapsed().as_nanos() as u64;
         let support = policy_support(plan.backend_id, &plan.policy);
 
-        let actual_sync_count = if matches!(&plan.synchronization, SynchronizationPolicy::Barrier | SynchronizationPolicy::Token(_)) {
+        let actual_sync_count = if matches!(
+            &plan.synchronization,
+            SynchronizationPolicy::Barrier | SynchronizationPolicy::Token(_)
+        ) {
             1
         } else {
             0
@@ -415,7 +427,6 @@ impl HeterogeneousExecutor {
     fn op_outputs(&self, op_id: u64) -> Option<&Vec<TensorHandle>> {
         self.tensor_registry.op_outputs.get(&op_id)
     }
-
 }
 
 // ── BoundaryExecutor implementation ────────────────────────────────────────
@@ -454,7 +465,6 @@ impl BoundaryExecutor for HeterogeneousExecutor {
             // Reserve space for operation receipts (used below)
             let mut _op_receipts: Vec<BackendExecutionReceipt> =
                 Vec::with_capacity(plan.operations.len());
-
 
             // Collect newly allocated output handles for batch registration
             // after the else branch's backend borrow is dropped.
@@ -533,12 +543,11 @@ impl BoundaryExecutor for HeterogeneousExecutor {
                                 .map(|&d| d as i32)
                                 .collect();
 
-                            let output_handle = compiled_backend
-                                .create_owned_from_bytes(
-                                    &vec![0u8; size],
-                                    &shape,
-                                    op_desc.output_dtype,
-                                )?;
+                            let output_handle = compiled_backend.create_owned_from_bytes(
+                                &vec![0u8; size],
+                                &shape,
+                                op_desc.output_dtype,
+                            )?;
 
                             // Collect for registration after backend borrow drops
                             _new_outputs
@@ -596,11 +605,14 @@ impl BoundaryExecutor for HeterogeneousExecutor {
             //    Phase 2: iterate plan.release_after and call _backend.release().
 
             // 6. Handle synchronization
-            let actual_sync_count = if matches!(&plan.synchronization, SynchronizationPolicy::Barrier | SynchronizationPolicy::Token(_)) {
-                    1
-                } else {
-                    0
-                };
+            let actual_sync_count = if matches!(
+                &plan.synchronization,
+                SynchronizationPolicy::Barrier | SynchronizationPolicy::Token(_)
+            ) {
+                1
+            } else {
+                0
+            };
 
             // 7. Emit receipt with observed timing
             let elapsed_ns = boundary_start.elapsed().as_nanos() as u64;

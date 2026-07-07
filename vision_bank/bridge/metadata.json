@@ -1,0 +1,18 @@
+{
+  "tensor_name": "model.embed_vision.embedding_projection.weight",
+  "input_dim": 3840,
+  "output_dim": 3840,
+  "promotion_count": 12250,
+  "holdout_count": 6566,
+  "promotion_source_count": 32,
+  "holdout_source_count": 16,
+  "patch_size": 16,
+  "pooling_kernel": 3,
+  "normalization": "imagenet_mean_std",
+  "model_id": "google/gemma-4-12B-it-qat-q4_0-unquantized",
+  "model_digest": "58540658b6c08edab2ddc1fbde7f28cc9987ced3",
+  "preprocessing_version": "v1",
+  "activation_source": "prerendered",
+  "promotion_digest": "826d62e31979b4be32fcb525fc86e2041a48130c73317dd6214a6a3fc399cd3f",
+  "holdout_digest": "d964c9a480c56bebdc30dadc7a284ec23f9371e6170f8701809889b7fe9f6f54"
+}

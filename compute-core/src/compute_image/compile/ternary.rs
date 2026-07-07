@@ -107,6 +107,19 @@ pub enum SegmentKind {
     TtsCodecWeight = 36,
     /// TTS codebook embeddings (16 codebooks × 2048 entries × 128 dim)
     TtsCodebook = 37,
+    /// Raw FP16 weights (for matrices that can't be nf4tile640-quantized).
+    /// Loaded as-is, no dequantization needed.
+    RawF16Weights = 38,
+    /// Int8Tile640 packed weights (640-byte code stride per tile).
+    Int8Tile640Weights = 39,
+    /// Quantization sidecars — reduction-axis FP16 scale vectors and future
+    /// residual metadata. Each entry maps to the sidecar_segment field of a
+    /// MatrixWeightBinding.
+    QuantizationSidecars = 40,
+    /// Array of MatrixWeightBinding records — the per-tensor format contract
+    /// between the compiler's packing pass and every runtime dispatch path.
+    /// Binary: count (u32) followed by `count` MatrixWeightBinding structs.
+    MatrixContract = 41,
 }
 
 /// One entry in the cimage segment directory.

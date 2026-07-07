@@ -10,7 +10,7 @@
 //!
 //! Run:  cargo test --features prism-backend --test ane_real_concurrent_execution
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;

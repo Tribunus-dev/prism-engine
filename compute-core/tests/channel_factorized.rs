@@ -19,7 +19,7 @@
 //!
 //! Run: cargo test --test channel_factorized --features prism-backend -- --nocapture
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
 
 use coreml_proto::proto::mil_spec;
 use std::path::{Path, PathBuf};

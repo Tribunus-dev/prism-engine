@@ -78,8 +78,7 @@ impl TtsPipeline {
         let talker_s_bytes = segment_data(deployment, talker_s)?;
         let talker_b_bytes = segment_data(deployment, talker_b)?;
 
-        let weight_bindings =
-            parse_talker_weights(talker_w_bytes, talker_s_bytes, talker_b_bytes)?;
+        let weight_bindings = parse_talker_weights(talker_w_bytes, talker_s_bytes, talker_b_bytes)?;
 
         let talker = TtsMegakernel::new(device, weight_bindings)?;
 
@@ -157,9 +156,7 @@ impl TtsPipeline {
             // using logits as hidden-state proxy.
             // (Talker agent is adding decode_token_with_hidden.)
             #[cfg(feature = "talker_hidden_state")]
-            let (logits, hs) = {
-                self.talker.decode_token_with_hidden(current_token)?
-            };
+            let (logits, hs) = { self.talker.decode_token_with_hidden(current_token)? };
             #[cfg(not(feature = "talker_hidden_state"))]
             let (logits, hs) = {
                 let logits = self.talker.decode_token(current_token)?;
@@ -190,7 +187,9 @@ impl TtsPipeline {
         let num_audio_tokens = audio_tokens.len();
 
         // 3. Code Predictor → [num_tokens × 16] codebook indices
-        let codebook_indices = self.code_predictor.predict(&hidden_states, num_audio_tokens)?;
+        let codebook_indices = self
+            .code_predictor
+            .predict(&hidden_states, num_audio_tokens)?;
 
         // codebook_indices layout: [cb0_t0..cb0_tN, cb1_t0..cb1_tN, ...]
         // MimiCodec expects interleaved: [t0_cb0..t0_cb15, t1_cb0..t1_cb15, ...]
@@ -240,9 +239,7 @@ impl TtsPipeline {
 
         for step in 0..max_audio_tokens {
             #[cfg(feature = "talker_hidden_state")]
-            let (logits, hs) = {
-                self.talker.decode_token_with_hidden(current_token)?
-            };
+            let (logits, hs) = { self.talker.decode_token_with_hidden(current_token)? };
             #[cfg(not(feature = "talker_hidden_state"))]
             let (logits, hs) = {
                 let logits = self.talker.decode_token(current_token)?;
@@ -284,8 +281,9 @@ impl TtsPipeline {
             let chunk_hidden = &all_hidden[chunk_start_flat..chunk_end_flat];
 
             // 3. Code Predictor on this chunk's hidden states
-            let codebook_indices =
-                self.code_predictor.predict(chunk_hidden, chunk_token_count)?;
+            let codebook_indices = self
+                .code_predictor
+                .predict(chunk_hidden, chunk_token_count)?;
 
             // 4. Interleave for Mimi Codec (same pattern as generate())
             let mut interleaved = Vec::with_capacity(chunk_token_count * NUM_CODEBOOKS);
@@ -441,7 +439,9 @@ fn parse_talker_weights(
     } else {
         return Err(format!(
             "Talker segment too short for norms: need offset+{} = {}, have {} bytes",
-            norms_expected, norms_end, codes.len()
+            norms_expected,
+            norms_end,
+            codes.len()
         ));
     };
 
@@ -534,7 +534,7 @@ pub fn pcm_chunk_to_wav(samples: &[f32], sample_rate: u32) -> Vec<u8> {
     wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
     wav.extend_from_slice(&2u16.to_le_bytes()); // block align
     wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
-    // data chunk
+                                                 // data chunk
     wav.extend_from_slice(b"data");
     wav.extend_from_slice(&(data_size as u32).to_le_bytes());
     for &s in samples {

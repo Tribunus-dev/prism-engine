@@ -13,7 +13,7 @@
 //! Run: cargo test --test ane_matmul_streams --features prism-backend -- --nocapture
 //! Requires: macOS 14.0+ on Apple Silicon
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(all(target_os = "macos", feature = "prism-backend", feature = "apple-coreml"))]
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;

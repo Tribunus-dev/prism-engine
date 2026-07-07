@@ -18,8 +18,11 @@
 //! Drag the generated `.swift` and `.h` files into your Xcode project.
 use std::sync::Arc;
 use tribunus_compute_core::agent;
+#[cfg(target_os = "macos")]
 use tribunus_compute_core::backend::create_inference_executor;
+#[cfg(target_os = "macos")]
 use tribunus_compute_core::backend::heterogeneous_executor::HeterogeneousExecutor;
+#[cfg(target_os = "macos")]
 use tribunus_compute_core::backend::routing::*;
 use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
 use tribunus_compute_core::config::operation_route::OperationRoute;
@@ -291,6 +294,7 @@ pub trait CompilerProgressCallback: Send + Sync {
 /// The output directory will contain the .cimage binary (loaded by
 /// `BridgeMultiplexer.load`), manifest.json, segment files, and optional
 /// ANE model archives.  Returns the path to the compiled output directory.
+#[cfg(target_os = "macos")]
 #[uniffi::export]
 pub fn prism_compile_gguf(
     gguf_path: String,
@@ -377,6 +381,7 @@ pub fn prism_compile_nf4(
 #[derive(uniffi::Object)]
 pub struct BridgeMultiplexer {
     #[allow(dead_code)]
+    #[cfg(target_os = "macos")]
     pub(crate) executor: parking_lot::Mutex<Option<HeterogeneousExecutor>>,
     pub(crate) tts: Option<TtsPipeline>,
     pub(crate) tokenizer: Option<tribunus_compute_core::tokenizer::TribunusTokenizer>,
@@ -390,9 +395,11 @@ impl BridgeMultiplexer {
     #[uniffi::constructor]
     pub fn load(cimage_path: String, model_dir: String) -> Result<Arc<Self>, BridgeError> {
         let cpath = std::path::Path::new(&cimage_path);
-        // Try new heterogeneous executor first
+        #[cfg(target_os = "macos")]
         let executor = create_inference_executor(cpath, 1, false)
             .map_err(|e| BridgeError::CimageLoadFailed(e.to_string()))?;
+        #[cfg(not(target_os = "macos"))]
+        let _executor = ();
 
         // Try loading TTS if available
         let device = metal::Device::system_default()
@@ -407,6 +414,7 @@ impl BridgeMultiplexer {
         ).ok();
 
         Ok(Arc::new(Self {
+            #[cfg(target_os = "macos")]
             executor: parking_lot::Mutex::new(Some(executor)),
             tts,
             tokenizer,
@@ -473,6 +481,7 @@ pub trait MultimodalStreamCallback: Send + Sync {
 /// Callback interface that lets the V8 sandbox drive the WKWebView.
 /// Implemented in Swift — each method blocks the V8 thread until the
 /// WebKit operation completes on the Main Actor.
+#[cfg(feature = "deno_core")]
 #[uniffi::export(callback_interface)]
 pub trait BrowserRuntimeDriver: Send + Sync {
     /// Navigate to a URL. Returns "ok" or an error message starting with "ERROR:".
@@ -487,6 +496,7 @@ pub trait BrowserRuntimeDriver: Send + Sync {
     fn download(&self, url: String, filename: String) -> String;
 }
 
+#[cfg(feature = "deno_core")]
 /// Run JavaScript in the V8 sandbox with a browser driver for web ops.
 /// The driver is called synchronously from V8 ops — it must block until
 /// the WKWebView operation completes.
@@ -578,6 +588,7 @@ pub async fn prism_xray_navigate(url: String) -> Result<String, BridgeError> {
 ///
 /// `cimage_path` — compiled .cimage from `prism_compile_gguf`.
 /// `model_dir` — directory containing tokenizer.json and config.json.
+#[cfg(target_os = "macos")]
 #[uniffi::export]
 pub fn prism_infer_multimodal_stream(
     cimage_path: String,

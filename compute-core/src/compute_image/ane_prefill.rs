@@ -366,7 +366,17 @@ mod tests {
         let op_types: Vec<&str> = ops.iter().map(|o| o.r#type.as_str()).collect();
         assert_eq!(
             op_types,
-            vec!["conv", "conv", "conv", "conv", "silu", "conv", "mul", "conv", "add"],
+            vec![
+                "convolution",
+                "convolution",
+                "convolution",
+                "convolution",
+                "silu",
+                "convolution",
+                "mul",
+                "convolution",
+                "add"
+            ],
             "op types must match expected MLP+projection pipeline"
         );
 

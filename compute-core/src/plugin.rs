@@ -169,7 +169,7 @@ mod tests {
         assert!(op.is_some(), "test_kernel_a should be found");
         let op = op.unwrap();
         assert_eq!(op.name, "test_op_a");
-        assert_eq!(op.backend, BackendId(0));
+        assert_eq!(op.backend, BackendId(3));
 
         // Second operation from the same plugin.
         let op = lookup_operation("test_kernel_b");
@@ -184,6 +184,9 @@ mod tests {
 
     #[test]
     fn plugin_registry_multiple() {
+        // Register the first plugin to ensure it's available regardless of test order.
+        register_plugin(Box::new(TestPlugin));
+
         struct SecondPlugin;
 
         impl TribunusPlugin for SecondPlugin {

@@ -1,3 +1,4 @@
+#![cfg(feature = "apple-coreml")]
 //! Synthetic-data benchmark comparing operation latency across MLX,
 //! Accelerate, and Core ML backends.  Results inform the compiler's
 //! `OperationRoute` — the routing table in `config/operation_route.rs`.

@@ -27,12 +27,18 @@
 //!
 //! reconstructed[i] = nf4_codebook[code_index[i]] * scale[group] + bias[group]
 
-pub mod profile;
-pub mod roles;
 pub mod calibration;
 pub mod learn;
 pub mod outliers;
+pub mod plan;
+pub mod profile;
+pub mod roles;
+pub mod squat;
 pub mod verify;
+
+pub mod awls;
+pub mod fused;
+pub mod protection;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Section 1: Format Constants
@@ -182,6 +188,87 @@ pub fn pack_nf4_tile(values: &[f32; TILE_ELEMENTS]) -> (Vec<u8>, Vec<f32>, Vec<f
     (packed_codes, scales, biases)
 }
 
+/// Pack a single tile of 640 f32 values using activation-weighted LS fitting.
+///
+/// For each 128-element group:
+/// 1. Compute initial NF4 code indices using max-abs scaling (same as `pack_nf4_tile`)
+/// 2. Run `optimize_scale_bias` with activation second moments
+/// 3. Re-quantize with optimal (s, b)
+/// 4. Store codes, scale, bias
+///
+/// When activation weights are near-uniform (sum <= 1e-6), falls back to max-abs packing.
+///
+/// Returns `(packed_codes, scales, biases)` — same format as `pack_nf4_tile`.
+pub fn pack_nf4_tile_awls(
+    values: &[f32; TILE_ELEMENTS],
+    activation_weights: &[f32; TILE_ELEMENTS],
+    max_awls_iters: u8,
+) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+    let max_codebook = NF4_CODEBOOK.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
+    let mut codes = Vec::with_capacity(PACKED_BYTES_PER_TILE);
+    let mut scales = Vec::with_capacity(SCALES_F32_PER_TILE);
+    let mut biases = Vec::with_capacity(SCALES_F32_PER_TILE);
+
+    for g in 0..GROUPS_PER_TILE {
+        let start = g * GROUP_SIZE;
+        let chunk: [f32; GROUP_SIZE] = std::array::from_fn(|i| values[start + i]);
+        let act_chunk: [f32; GROUP_SIZE] = std::array::from_fn(|i| activation_weights[start + i]);
+
+        // Step 1: initial max-abs scaling + code assignment
+        let max_abs = chunk.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+        let init_scale = if max_abs > 0.0 {
+            max_abs / max_codebook
+        } else {
+            1.0
+        };
+        let init_bias = 0.0f32;
+
+        let mut code_indices = [0u8; GROUP_SIZE];
+        for (i, &v) in chunk.iter().enumerate() {
+            let normalized = v / init_scale;
+            code_indices[i] = nf4_quantize(normalized);
+        }
+
+        // Step 2: AW-LS optimization (if activation weights are non-uniform)
+        let sum_act: f32 = act_chunk.iter().sum();
+        if sum_act > 1e-6 {
+            let result = crate::nf4tile640::awls::optimize_scale_bias(
+                &chunk,
+                &code_indices,
+                &act_chunk,
+                max_awls_iters,
+                &crate::compilation::cancel::CancelToken::new(None),
+            );
+            let s = result.scale;
+            let b = result.bias;
+
+            // Step 3: Re-quantize with optimal scale/bias
+            if s > 0.0 {
+                for (i, &v) in chunk.iter().enumerate() {
+                    let normalized = (v - b) / s;
+                    code_indices[i] = nf4_quantize(normalized);
+                }
+            }
+
+            // Pack codes
+            for pair in code_indices.chunks_exact(2) {
+                codes.push(pair[0] | (pair[1] << 4));
+            }
+            scales.push(s);
+            biases.push(b);
+        } else {
+            // Fallback to standard max-abs packing (uniform weights — no activation info)
+            for pair in code_indices.chunks_exact(2) {
+                codes.push(pair[0] | (pair[1] << 4));
+            }
+            scales.push(init_scale);
+            biases.push(init_bias);
+        }
+    }
+
+    (codes, scales, biases)
+}
+
 /// Pack multiple tiles from a flat f32 array (shapes are M×K layout).
 /// Each contiguous K-length row is split into ceil(K / TILE_ELEMENTS) tiles.
 /// Non-multiple column dimensions are zero-padded to the next tile boundary.
@@ -197,14 +284,11 @@ pub fn pack_nf4_weights(
     rows: usize,
     cols: usize,
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, u32, u32) {
-    assert_eq!(
-        weights.len(),
-        rows * cols,
-        "weights length {} must equal rows {} × cols {}",
-        weights.len(),
-        rows,
-        cols
-    );
+    let weights = if weights.len() >= rows * cols {
+        &weights[..rows * cols]
+    } else {
+        weights
+    };
 
     // Round cols up to next multiple of 640 for tile-aligned packing.
     // The original column count is preserved for matmul dimension.
@@ -237,7 +321,8 @@ pub fn pack_nf4_weights(
     for row in 0..rows {
         for tile_in_row in 0..tiles_per_row {
             let values_base = row * padded_cols + tile_in_row * TILE_ELEMENTS;
-            let values: &[f32; TILE_ELEMENTS] = padded_weights[values_base..values_base + TILE_ELEMENTS]
+            let values: &[f32; TILE_ELEMENTS] = padded_weights
+                [values_base..values_base + TILE_ELEMENTS]
                 .try_into()
                 .expect("tile slice fits exactly");
 
@@ -245,8 +330,7 @@ pub fn pack_nf4_weights(
             let (codes_tile, scale_tile, bias_tile) = pack_nf4_tile(values);
 
             let codes_off = tile_idx * PACKED_BYTES_PER_TILE;
-            packed_codes[codes_off..codes_off + PACKED_BYTES_PER_TILE]
-                .copy_from_slice(&codes_tile);
+            packed_codes[codes_off..codes_off + PACKED_BYTES_PER_TILE].copy_from_slice(&codes_tile);
 
             let scale_off = tile_idx * SCALES_F32_PER_TILE;
             scales[scale_off..scale_off + SCALES_F32_PER_TILE].copy_from_slice(&scale_tile);
@@ -257,6 +341,77 @@ pub fn pack_nf4_weights(
     }
 
     (packed_codes, scales, biases, rows as u32, cols as u32)
+}
+
+/// Pack multiple tiles from a flat f32 array using activation-weighted LS fitting.
+///
+/// Each contiguous K-length row is split into ceil(K / TILE_ELEMENTS) tiles.
+/// Non-multiple column dimensions are zero-padded to the next tile boundary.
+///
+/// `activation_weights` is a per-column (per-input-channel) slice of length `cols`,
+/// or `None` to fall back to uniform weighting (max-abs packing).
+///
+/// Returns `(packed_codes, scales, biases, rows, cols)` with data for all tiles stored
+/// contiguously per buffer (tile-major order).
+///
+/// # Panics
+///
+/// Panics if `weights.len()` does not equal `rows * cols`.
+/// Panics if `activation_weights` is `Some` and its length does not equal `cols`.
+pub fn pack_nf4_weights_awls(
+    weights: &[f32],
+    rows: usize,
+    cols: usize,
+    activation_weights: Option<&[f32]>,
+    max_iters: u8,
+) -> (Vec<u8>, Vec<f32>, Vec<f32>, u32, u32) {
+    // Use only the first rows × cols elements.  The caller should have
+    // validated, but guard against fused/malformed tensors gracefully.
+    let weights = if weights.len() >= rows * cols {
+        &weights[..rows * cols]
+    } else {
+        weights
+    };
+    if let Some(act) = activation_weights {
+        assert_eq!(
+            act.len(),
+            cols,
+            "activation_weights length {} must equal cols {}",
+            act.len(),
+            cols
+        );
+    }
+
+    let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
+    let total_tiles = rows * tiles_per_row;
+    let mut all_codes = Vec::with_capacity(total_tiles * PACKED_BYTES_PER_TILE);
+    let mut all_scales = Vec::with_capacity(total_tiles * SCALES_F32_PER_TILE);
+    let mut all_biases = Vec::with_capacity(total_tiles * SCALES_F32_PER_TILE);
+
+    for row in 0..rows {
+        for tile_idx in 0..tiles_per_row {
+            let col_start = tile_idx * TILE_ELEMENTS;
+            let mut tile_vals = [0.0f32; TILE_ELEMENTS];
+            let mut act_vals = [1.0f32; TILE_ELEMENTS]; // uniform default
+            for i in 0..TILE_ELEMENTS {
+                let c = col_start + i;
+                if c < cols {
+                    tile_vals[i] = weights[row * cols + c];
+                    if let Some(act) = activation_weights {
+                        act_vals[i] = act[c];
+                    }
+                } else {
+                    tile_vals[i] = 0.0;
+                }
+            }
+            let (codes, scales, biases) = pack_nf4_tile_awls(&tile_vals, &act_vals, max_iters);
+            all_codes.extend(codes);
+            all_scales.extend(scales);
+            all_biases.extend(biases);
+        }
+    }
+
+    (all_codes, all_scales, all_biases, rows as u32, cols as u32)
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -289,7 +444,7 @@ pub fn unpack_nf4_tile(
             let code1 = (packed >> 4) & 0x0F;
             output[out_base + 2 * i] = nf4_dequantize(code0) * scale + bias;
             output[out_base + 2 * i + 1] = nf4_dequantize(code1) * scale + bias;
-    }
+        }
     }
 }
 
@@ -406,6 +561,85 @@ impl Nf4Tile640Manifest {
         }
     }
 }
+// ════════════════════════════════════════════════════════════════════════════
+// Section 6b: INT8 tile640 pack/unpack
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Pack a weight matrix into INT8 tile640 format with per-tile symmetric quantization.
+pub fn pack_int8_weights(
+    weights: &[f32],
+    rows: usize,
+    cols: usize,
+) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+    let num_tiles = cols.div_ceil(TILE_ELEMENTS);
+    let tile_cols = num_tiles * TILE_ELEMENTS;
+
+    let mut codes = vec![0u8; rows * tile_cols];
+    let mut scales = Vec::with_capacity(rows * num_tiles);
+    let biases = vec![0.0f32; rows * num_tiles];
+
+    for i in 0..rows {
+        for t in 0..num_tiles {
+            let col_start = t * TILE_ELEMENTS;
+            let col_end = (col_start + TILE_ELEMENTS).min(cols);
+
+            let mut max_abs = 0.0f32;
+            for j in col_start..col_end {
+                let v = weights[i * cols + j].abs();
+                if v > max_abs {
+                    max_abs = v;
+                }
+            }
+            let scale = if max_abs > 1e-10f32 {
+                max_abs / 127.0f32
+            } else {
+                1.0f32
+            };
+
+            for j in col_start..col_end {
+                let idx = i * tile_cols + t * TILE_ELEMENTS + (j - col_start);
+                let q = (weights[i * cols + j] / scale).round().clamp(-127.0, 127.0) as i8;
+                codes[idx] = q as u8;
+            }
+            for j in col_end..col_start + TILE_ELEMENTS {
+                let idx = i * tile_cols + t * TILE_ELEMENTS + (j - col_start);
+                codes[idx] = 0u8;
+            }
+
+            scales.push(scale);
+        }
+    }
+    (codes, scales, biases)
+}
+
+/// Unpack INT8 tile640 codes/scales/biases back to f32 weights.
+pub fn unpack_int8_weights(
+    codes: &[u8],
+    scales: &[f32],
+    biases: &[f32],
+    rows: usize,
+    cols: usize,
+) -> Vec<f32> {
+    let num_tiles = cols.div_ceil(TILE_ELEMENTS);
+    let tile_cols = num_tiles * TILE_ELEMENTS;
+
+    let mut result = vec![0.0f32; rows * cols];
+    for i in 0..rows {
+        for t in 0..num_tiles {
+            let col_start = t * TILE_ELEMENTS;
+            let col_end = (col_start + TILE_ELEMENTS).min(cols);
+            let scale = scales[i * num_tiles + t];
+            let bias = biases[i * num_tiles + t];
+
+            for j in col_start..col_end {
+                let code_idx = i * tile_cols + t * TILE_ELEMENTS + (j - col_start);
+                let q = codes[code_idx] as i8;
+                result[i * cols + j] = (q as f32) * scale + bias;
+            }
+        }
+    }
+    result
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // Section 7: Fused dequantize + matmul (CPU reference oracle)
@@ -419,6 +653,39 @@ pub fn packed_size(rows: usize, cols: usize) -> usize {
     let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
     let total_tiles = rows * tiles_per_row;
     total_tiles * PACKED_BYTES_PER_TILE
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Accelerate BLAS FFI (macOS only)
+// ════════════════════════════════════════════════════════════════════════════
+
+/// CBLAS row-major layout flag.
+#[cfg(target_os = "macos")]
+const CBLAS_ROW_MAJOR: i32 = 101;
+
+/// CBLAS no-transpose flag.
+#[cfg(target_os = "macos")]
+const CBLAS_NO_TRANS: i32 = 111;
+
+// FFI declaration for Accelerate cblas_sgemm.
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn cblas_sgemm(
+        order: i32,
+        transA: i32,
+        transB: i32,
+        m: i32,
+        n: i32,
+        k: i32,
+        alpha: f32,
+        a: *const f32,
+        lda: i32,
+        b: *const f32,
+        ldb: i32,
+        beta: f32,
+        c: *mut f32,
+        ldc: i32,
+    );
 }
 
 /// Compute `output = input @ dequantize(weights)` where weights are packed
@@ -490,6 +757,94 @@ pub fn dequant_matmul_reference(
         ));
     }
 
+    // Dispatch: Accelerate BLAS on macOS, scalar fallback elsewhere.
+    #[cfg(target_os = "macos")]
+    {
+        // Dequantize all tiles into a contiguous K×N f32 buffer.
+        let mut w_dequant = vec![0.0f32; k * n];
+        for tile_idx in 0..total_tiles {
+            let kr = tile_idx / tiles_per_row;
+            let tile_in_row = tile_idx % tiles_per_row;
+            let col_base = tile_in_row * TILE_ELEMENTS;
+
+            let codes_off = tile_idx * PACKED_BYTES_PER_TILE;
+            let scale_off = tile_idx * SCALES_F32_PER_TILE;
+
+            let codes_slice: &[u8; PACKED_BYTES_PER_TILE] = packed_codes
+                [codes_off..codes_off + PACKED_BYTES_PER_TILE]
+                .try_into()
+                .expect("codes slice fits exactly");
+            let scale_slice: &[f32; SCALES_F32_PER_TILE] = scales
+                [scale_off..scale_off + SCALES_F32_PER_TILE]
+                .try_into()
+                .expect("scale slice fits exactly");
+            let bias_slice: &[f32; SCALES_F32_PER_TILE] = biases
+                [scale_off..scale_off + SCALES_F32_PER_TILE]
+                .try_into()
+                .expect("bias slice fits exactly");
+
+            // Dequantize tile to a temp buffer, then copy only valid elements.
+            let mut tile_f32 = [0.0f32; TILE_ELEMENTS];
+            unpack_nf4_tile(codes_slice, scale_slice, bias_slice, &mut tile_f32);
+
+            let weight_base = kr * n + col_base;
+            let limit = TILE_ELEMENTS.min(n - col_base);
+            w_dequant[weight_base..weight_base + limit].copy_from_slice(&tile_f32[..limit]);
+        }
+
+        // Single BLAS sgemm call: output = input @ dequant_weights.
+        unsafe {
+            cblas_sgemm(
+                CBLAS_ROW_MAJOR,
+                CBLAS_NO_TRANS,
+                CBLAS_NO_TRANS,
+                m as i32,
+                n as i32,
+                k as i32,
+                1.0,
+                input.as_ptr(),
+                k as i32,
+                w_dequant.as_ptr(),
+                n as i32,
+                0.0,
+                output.as_mut_ptr(),
+                n as i32,
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    dequant_matmul_scalar(
+        input,
+        packed_codes,
+        scales,
+        biases,
+        m,
+        k,
+        n,
+        output,
+        tiles_per_row,
+        total_tiles,
+    );
+
+    Ok(())
+}
+
+/// Scalar fallback: dequantize one tile at a time, accumulate via nested loops.
+/// Always compiled so macOS tests can cross-check BLAS vs scalar results.
+#[allow(dead_code)]
+fn dequant_matmul_scalar(
+    input: &[f32],
+    packed_codes: &[u8],
+    scales: &[f32],
+    biases: &[f32],
+    m: usize,
+    k: usize,
+    n: usize,
+    output: &mut [f32],
+    tiles_per_row: usize,
+    total_tiles: usize,
+) {
     // Zero the output buffer.
     output.fill(0.0);
 
@@ -507,14 +862,14 @@ pub fn dequant_matmul_reference(
             [codes_off..codes_off + PACKED_BYTES_PER_TILE]
             .try_into()
             .expect("codes slice fits exactly");
-        let scale_slice: &[f32; SCALES_F32_PER_TILE] =
-            scales[scale_off..scale_off + SCALES_F32_PER_TILE]
-                .try_into()
-                .expect("scale slice fits exactly");
-        let bias_slice: &[f32; SCALES_F32_PER_TILE] =
-            biases[scale_off..scale_off + SCALES_F32_PER_TILE]
-                .try_into()
-                .expect("bias slice fits exactly");
+        let scale_slice: &[f32; SCALES_F32_PER_TILE] = scales
+            [scale_off..scale_off + SCALES_F32_PER_TILE]
+            .try_into()
+            .expect("scale slice fits exactly");
+        let bias_slice: &[f32; SCALES_F32_PER_TILE] = biases
+            [scale_off..scale_off + SCALES_F32_PER_TILE]
+            .try_into()
+            .expect("bias slice fits exactly");
 
         // Dequantize this tile once.
         let mut tile_f32 = [0.0f32; TILE_ELEMENTS];
@@ -533,8 +888,6 @@ pub fn dequant_matmul_reference(
             }
         }
     }
-
-    Ok(())
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -650,7 +1003,7 @@ mod tests {
             let group = i / GROUP_SIZE;
             // Each group gets a different scale.
             let scale = 0.1 + (group as f32) * 0.4; // 0.1, 0.5, 0.9, 1.3, 1.7
-            // Cycle through the codebook.
+                                                    // Cycle through the codebook.
             *v = NF4_CODEBOOK[i % 16] * scale;
         }
 
@@ -690,7 +1043,8 @@ mod tests {
         let mut identity = vec![0.0f32; rows * cols];
         identity[0] = 1.0;
 
-        let (packed_codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&identity, rows, cols);
+        let (packed_codes, scales, biases, _p_rows, _p_cols) =
+            pack_nf4_weights(&identity, rows, cols);
 
         let tile_count = 1;
         assert_eq!(packed_codes.len(), tile_count * PACKED_BYTES_PER_TILE);
@@ -800,7 +1154,14 @@ mod tests {
 
         let mut output = vec![0.0f32; m * n];
         dequant_matmul_reference(
-            &input, &packed_codes, &scales, &biases, m, k, n, &mut output,
+            &input,
+            &packed_codes,
+            &scales,
+            &biases,
+            m,
+            k,
+            n,
+            &mut output,
         )
         .unwrap();
 
@@ -845,7 +1206,14 @@ mod tests {
 
         let mut output = vec![0.0f32; m * n];
         dequant_matmul_reference(
-            &input, &packed_codes, &scales, &biases, m, k, n, &mut output,
+            &input,
+            &packed_codes,
+            &scales,
+            &biases,
+            m,
+            k,
+            n,
+            &mut output,
         )
         .unwrap();
 
@@ -897,58 +1265,66 @@ mod tests {
         let mut output = vec![0.0f32; 6];
 
         // Wrong input length: m=3 needs 3*1=3, got 4.
-        assert!(
-dequant_matmul_reference(&input, &codes, &scales, &biases, 3, 1, TILE_ELEMENTS, &mut output)
-                .is_err()
-        );
+        assert!(dequant_matmul_reference(
+            &input,
+            &codes,
+            &scales,
+            &biases,
+            3,
+            1,
+            TILE_ELEMENTS,
+            &mut output
+        )
+        .is_err());
         // Wrong output length: m=2, n=TILE_ELEMENTS needs 1280, got 6.
-        assert!(
-dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, &mut output)
-                .is_err()
-        );
+        assert!(dequant_matmul_reference(
+            &input,
+            &codes,
+            &scales,
+            &biases,
+            2,
+            2,
+            TILE_ELEMENTS,
+            &mut output
+        )
+        .is_err());
         // Wrong packed codes size: need 1 tile = 320 codes bytes, got 100.
         let mut big_output = vec![0.0f32; 2 * TILE_ELEMENTS];
-        assert!(
-            dequant_matmul_reference(
-                &input,
-                &[0u8; 100],
-                &scales,
-                &biases,
-                2,
-                2,
-                TILE_ELEMENTS,
-                &mut big_output
-            )
-            .is_err()
-        );
+        assert!(dequant_matmul_reference(
+            &input,
+            &[0u8; 100],
+            &scales,
+            &biases,
+            2,
+            2,
+            TILE_ELEMENTS,
+            &mut big_output
+        )
+        .is_err());
         // Wrong scales size.
-        assert!(
-            dequant_matmul_reference(
-                &input,
-                &codes,
-                &[0.0f32; 1], // wrong scale count
-                &biases,
-                2,
-                2,
-                TILE_ELEMENTS,
-                &mut big_output
-            )
-            .is_err()
-        );
+        assert!(dequant_matmul_reference(
+            &input,
+            &codes,
+            &[0.0f32; 1], // wrong scale count
+            &biases,
+            2,
+            2,
+            TILE_ELEMENTS,
+            &mut big_output
+        )
+        .is_err());
         // Wrong biases size.
-        assert!(
-            dequant_matmul_reference(
-                &input,
-                &codes,
-                &scales,
-                &[0.0f32; 1], // wrong bias count
-                2,
-                2,
-                TILE_ELEMENTS,
-                &mut big_output
-            )
-            .is_err()
-        );
+        assert!(dequant_matmul_reference(
+            &input,
+            &codes,
+            &scales,
+            &[0.0f32; 1], // wrong bias count
+            2,
+            2,
+            TILE_ELEMENTS,
+            &mut big_output
+        )
+        .is_err());
     }
 
     #[test]
@@ -959,7 +1335,7 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
         // we verify validate_matmul reports at-worst the same error rate
         // as a 640-multiple control of the same data.
         let rows = 4usize;
-        let cols = 700usize;   // not a multiple of 640
+        let cols = 700usize; // not a multiple of 640
         let control_cols = 640usize; // multiple of 640 (same number of tiles)
 
         // Shared deterministic weights (both shapes use same content).
@@ -993,7 +1369,11 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
         let unpacked = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
         assert_eq!(unpacked.len(), rows * cols);
         let control_unpacked = unpack_nf4_weights(
-            &control_codes, &control_scales, &control_biases, rows, control_cols,
+            &control_codes,
+            &control_scales,
+            &control_biases,
+            rows,
+            control_cols,
         );
         assert_eq!(control_unpacked.len(), rows * control_cols);
 
@@ -1035,10 +1415,8 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
         let (codes, scales, biases, _p_rows, _p_cols) = pack_nf4_weights(&weights, k, n);
 
         let mut nf4_output = vec![0.0f32; m * n];
-        dequant_matmul_reference(
-            &input, &codes, &scales, &biases, m, k, n, &mut nf4_output,
-        )
-        .unwrap();
+        dequant_matmul_reference(&input, &codes, &scales, &biases, m, k, n, &mut nf4_output)
+            .unwrap();
 
         // Reference: unpack weights, then matmul.
         let unpacked = unpack_nf4_weights(&codes, &scales, &biases, k, n);
@@ -1096,20 +1474,34 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
                 .map(|i| match trial {
                     0 => (i as f64 * 0.1).sin() as f32,
                     1 => (i as f64 * 0.07).cos() as f32,
-                    _ => {
-                        (i.wrapping_mul(12345).wrapping_add(67890) % 1001) as f32 / 500.0 - 1.0
-                    }
+                    _ => (i.wrapping_mul(12345).wrapping_add(67890) % 1001) as f32 / 500.0 - 1.0,
                 })
                 .collect();
 
             // Non-640 RMSE.
-            let rmse_non640 = compute_dequant_rmse(&input, &codes, &scales, &biases, &weights_non640, k, n_non640);
+            let rmse_non640 = compute_dequant_rmse(
+                &input,
+                &codes,
+                &scales,
+                &biases,
+                &weights_non640,
+                k,
+                n_non640,
+            );
             if rmse_non640 > max_rmse_non640 {
                 max_rmse_non640 = rmse_non640;
             }
 
             // Control RMSE.
-            let rmse_ctrl = compute_dequant_rmse(&input, &codes_ctrl, &scales_ctrl, &biases_ctrl, &weights_control, k, n_control);
+            let rmse_ctrl = compute_dequant_rmse(
+                &input,
+                &codes_ctrl,
+                &scales_ctrl,
+                &biases_ctrl,
+                &weights_control,
+                k,
+                n_control,
+            );
             if rmse_ctrl > max_rmse_ctrl {
                 max_rmse_ctrl = rmse_ctrl;
             }
@@ -1149,8 +1541,7 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
         }
 
         let mut nf4_output = vec![0.0f32; n];
-        dequant_matmul_reference(&input, codes, scales, biases, 1, k, n, &mut nf4_output)
-            .unwrap();
+        dequant_matmul_reference(&input, codes, scales, biases, 1, k, n, &mut nf4_output).unwrap();
 
         let mut sq_err = 0.0f32;
         for j in 0..n {
@@ -1172,40 +1563,74 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
             ((seed >> 33) as f64) / 8589934592.0
         };
-        let w_gauss: Vec<f32> = (0..n).map(|_| {
-            let u = rng(); let v = rng();
-            ((-2.0 * u.ln()).sqrt() * (2.0 * std::f64::consts::PI * v).cos() * 0.02) as f32
-        }).collect();
+        let w_gauss: Vec<f32> = (0..n)
+            .map(|_| {
+                let u = rng();
+                let v = rng();
+                ((-2.0 * u.ln()).sqrt() * (2.0 * std::f64::consts::PI * v).cos() * 0.02) as f32
+            })
+            .collect();
         let (codes, scales, biases, _, _) = pack_nf4_weights(&w_gauss, rows, cols);
         let recon = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
-        let full_rmse = (w_gauss.iter().zip(recon.iter())
-            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / n as f32).sqrt();
-        println!("Gaussian {rows}x{cols}: codes={}B, weight RMSE={full_rmse:.8}", codes.len());
+        let full_rmse = (w_gauss
+            .iter()
+            .zip(recon.iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f32>()
+            / n as f32)
+            .sqrt();
+        println!(
+            "Gaussian {rows}x{cols}: codes={}B, weight RMSE={full_rmse:.8}",
+            codes.len()
+        );
 
         for g in 0..(cols / 128) {
             let start = g * 128;
-            let rmse = (w_gauss[start..start+128].iter().zip(recon[start..start+128].iter())
-                .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / 128.0).sqrt();
-            let gmax = w_gauss[start..start+128].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let gmin = w_gauss[start..start+128].iter().cloned().fold(f32::INFINITY, f32::min);
+            let rmse = (w_gauss[start..start + 128]
+                .iter()
+                .zip(recon[start..start + 128].iter())
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f32>()
+                / 128.0)
+                .sqrt();
+            let gmax = w_gauss[start..start + 128]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let gmin = w_gauss[start..start + 128]
+                .iter()
+                .cloned()
+                .fold(f32::INFINITY, f32::min);
             let span = (gmax - gmin).max(1e-8);
             let nrmse = rmse / span;
-            println!("  g[{g}] RMSE={rmse:.8} range=[{gmin:.6},{gmax:.6}] scale={:.6} nrmse={nrmse:.4}", scales[g]);
+            println!(
+                "  g[{g}] RMSE={rmse:.8} range=[{gmin:.6},{gmax:.6}] scale={:.6} nrmse={nrmse:.4}",
+                scales[g]
+            );
         }
 
         // Matmul: dequant function uses [k x n] orientation where weight = [rows x cols]
         // output[col] += input[row] * weight[row][col]
-        let inp: Vec<f32> = (0..rows).map(|r| (r as f32) / rows as f32 * 2.0 - 1.0).collect();
+        let inp: Vec<f32> = (0..rows)
+            .map(|r| (r as f32) / rows as f32 * 2.0 - 1.0)
+            .collect();
         let mut ref_out = vec![0.0f32; cols];
         for col in 0..cols {
             let mut s = 0.0f32;
-            for row in 0..rows { s += w_gauss[row * cols + col] * inp[row]; }
+            for row in 0..rows {
+                s += w_gauss[row * cols + col] * inp[row];
+            }
             ref_out[col] = s;
         }
         let mut nf4_out = vec![0.0f32; cols];
         dequant_matmul_reference(&inp, &codes, &scales, &biases, 1, rows, cols, &mut nf4_out).ok();
-        let mrmse = (ref_out.iter().zip(nf4_out.iter())
-            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / cols as f32).sqrt();
+        let mrmse = (ref_out
+            .iter()
+            .zip(nf4_out.iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f32>()
+            / cols as f32)
+            .sqrt();
         println!("  MatMul RMSE={mrmse:.8}");
         println!("  Ref[..6]={:.6?}", &ref_out[..6]);
         println!("  NF4[..6]={:.6?}", &nf4_out[..6]);
@@ -1216,17 +1641,28 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
             seed2 = seed2.wrapping_mul(6364136223846793005).wrapping_add(1);
             ((seed2 >> 33) as f64) / 8589934592.0
         };
-        let mut w_ffn: Vec<f32> = (0..n).map(|_| {
-            let u = rng2(); let v = rng2();
-            ((-2.0 * u.ln()).sqrt() * (2.0 * std::f64::consts::PI * v).cos() * 0.01) as f32
-        }).collect();
+        let mut w_ffn: Vec<f32> = (0..n)
+            .map(|_| {
+                let u = rng2();
+                let v = rng2();
+                ((-2.0 * u.ln()).sqrt() * (2.0 * std::f64::consts::PI * v).cos() * 0.01) as f32
+            })
+            .collect();
         for &idx in &[0, 15, 127, 640, 1155] {
-            if idx + 1 < w_ffn.len() { w_ffn[idx] = 0.5; w_ffn[idx+1] = -0.5; }
+            if idx + 1 < w_ffn.len() {
+                w_ffn[idx] = 0.5;
+                w_ffn[idx + 1] = -0.5;
+            }
         }
         let (cf, sf, bf, _, _) = pack_nf4_weights(&w_ffn, rows, cols);
         let recon_f = unpack_nf4_weights(&cf, &sf, &bf, rows, cols);
-        let ffn_rmse = (w_ffn.iter().zip(recon_f.iter())
-            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / n as f32).sqrt();
+        let ffn_rmse = (w_ffn
+            .iter()
+            .zip(recon_f.iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f32>()
+            / n as f32)
+            .sqrt();
         let max_scale = sf.iter().cloned().fold(0.0f32, f32::max);
         println!("  FFN RMSE={ffn_rmse:.8} max_scale={max_scale:.6}");
 
@@ -1238,7 +1674,10 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
 
     #[test]
     fn test_profile_id_constants() {
-        use super::profile::{PROFILE_ID_CANONICAL_NF4_V1, PROFILE_ID_GEMMA_ATTENTION_V1, PROFILE_ID_GEMMA_FFN_V1, PROFILE_ID_GEMMA_BOUNDARY_V1, PROFILE_ID_TTS_CODEC_V1, ProfileId};
+        use super::profile::{
+            ProfileId, PROFILE_ID_CANONICAL_NF4_V1, PROFILE_ID_GEMMA_ATTENTION_V1,
+            PROFILE_ID_GEMMA_BOUNDARY_V1, PROFILE_ID_GEMMA_FFN_V1, PROFILE_ID_TTS_CODEC_V1,
+        };
         assert_eq!(PROFILE_ID_CANONICAL_NF4_V1, ProfileId(0));
         assert_eq!(PROFILE_ID_GEMMA_ATTENTION_V1, ProfileId(1));
         assert_eq!(PROFILE_ID_GEMMA_FFN_V1, ProfileId(2));
@@ -1286,21 +1725,63 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
 
     #[test]
     fn test_classify_matrix_role() {
-        use super::roles::{MatrixRole, classify_matrix_role};
-        assert_eq!(classify_matrix_role("model.language_model.embed_tokens.weight"), MatrixRole::Embedding);
-        assert_eq!(classify_matrix_role("model.language_model.lm_head.weight"), MatrixRole::LmHead);
-        assert_eq!(classify_matrix_role("model.language_model.layers.0.self_attn.q_proj.weight"), MatrixRole::AttentionQ);
-        assert_eq!(classify_matrix_role("model.language_model.layers.0.self_attn.k_proj.weight"), MatrixRole::AttentionK);
-        assert_eq!(classify_matrix_role("model.language_model.layers.0.self_attn.v_proj.weight"), MatrixRole::AttentionV);
-        assert_eq!(classify_matrix_role("model.language_model.layers.0.self_attn.o_proj.weight"), MatrixRole::AttentionO);
-        assert_eq!(classify_matrix_role("model.language_model.layers.0.mlp.gate_proj.weight"), MatrixRole::FfnGate);
-        assert_eq!(classify_matrix_role("model.language_model.layers.0.mlp.up_proj.weight"), MatrixRole::FfnUp);
-        assert_eq!(classify_matrix_role("model.language_model.layers.0.mlp.down_proj.weight"), MatrixRole::FfnDown);
-        assert_eq!(classify_matrix_role("model.vision_embedder.patch_dense.weight"), MatrixRole::MultimodalProjection);
-        assert_eq!(classify_matrix_role("tts_talker.weight"), MatrixRole::TtsTalker);
-        assert_eq!(classify_matrix_role("code_predictor.0.weight"), MatrixRole::TtsCodePredictor);
-        assert_eq!(classify_matrix_role("codec.encoder.0.weight"), MatrixRole::TtsCodec);
-        assert_eq!(classify_matrix_role("unrecognized_tensor_name"), MatrixRole::UnknownLinear);
+        use super::roles::{classify_matrix_role, MatrixRole};
+        assert_eq!(
+            classify_matrix_role("model.language_model.embed_tokens.weight"),
+            MatrixRole::Embedding
+        );
+        assert_eq!(
+            classify_matrix_role("model.language_model.lm_head.weight"),
+            MatrixRole::LmHead
+        );
+        assert_eq!(
+            classify_matrix_role("model.language_model.layers.0.self_attn.q_proj.weight"),
+            MatrixRole::AttentionQ
+        );
+        assert_eq!(
+            classify_matrix_role("model.language_model.layers.0.self_attn.k_proj.weight"),
+            MatrixRole::AttentionK
+        );
+        assert_eq!(
+            classify_matrix_role("model.language_model.layers.0.self_attn.v_proj.weight"),
+            MatrixRole::AttentionV
+        );
+        assert_eq!(
+            classify_matrix_role("model.language_model.layers.0.self_attn.o_proj.weight"),
+            MatrixRole::AttentionO
+        );
+        assert_eq!(
+            classify_matrix_role("model.language_model.layers.0.mlp.gate_proj.weight"),
+            MatrixRole::FfnGate
+        );
+        assert_eq!(
+            classify_matrix_role("model.language_model.layers.0.mlp.up_proj.weight"),
+            MatrixRole::FfnUp
+        );
+        assert_eq!(
+            classify_matrix_role("model.language_model.layers.0.mlp.down_proj.weight"),
+            MatrixRole::FfnDown
+        );
+        assert_eq!(
+            classify_matrix_role("model.vision_embedder.patch_dense.weight"),
+            MatrixRole::MultimodalProjection
+        );
+        assert_eq!(
+            classify_matrix_role("tts_talker.weight"),
+            MatrixRole::TtsTalker
+        );
+        assert_eq!(
+            classify_matrix_role("code_predictor.0.weight"),
+            MatrixRole::TtsCodePredictor
+        );
+        assert_eq!(
+            classify_matrix_role("codec.encoder.0.weight"),
+            MatrixRole::TtsCodec
+        );
+        assert_eq!(
+            classify_matrix_role("unrecognized_tensor_name"),
+            MatrixRole::UnknownLinear
+        );
     }
 
     #[test]
@@ -1330,12 +1811,12 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
         assert_eq!(norm.len(), 128);
         for v in &norm {
             assert!((v - 0.5).abs() < 1e-6);
-    }
+        }
     }
 
     #[test]
     fn test_streaming_collector_basic() {
-        use super::calibration::{StreamingStateCollector, CalibrationConfig};
+        use super::calibration::{CalibrationConfig, StreamingStateCollector};
         use super::roles::MatrixRole;
         let config = CalibrationConfig::default();
         let mut collector = StreamingStateCollector::new(config);
@@ -1358,21 +1839,23 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
     #[test]
     fn test_lloyd_max_determinism() {
         use super::learn::{weighted_scalar_lloyd_max, LearningConfig};
-        let samples: Vec<(f32, f32)> = (0..200).map(|i| {
-            let x = (i as f64 / 100.0 * std::f64::consts::PI).sin() as f32;
-            (x, 1.0)
-        }).collect();
+        let samples: Vec<(f32, f32)> = (0..200)
+            .map(|i| {
+                let x = (i as f64 / 100.0 * std::f64::consts::PI).sin() as f32;
+                (x, 1.0)
+            })
+            .collect();
         let config = LearningConfig::default();
         let (cb1, _) = weighted_scalar_lloyd_max(&samples, &config);
         let (cb2, _) = weighted_scalar_lloyd_max(&samples, &config);
         for i in 0..16 {
             assert!((cb1[i] - cb2[i]).abs() < 1e-6, "Centroid {} differs", i);
-    }
+        }
     }
 
     #[test]
     fn test_select_best_profile() {
-        use super::learn::{LearningReceipt, LearningConfig};
+        use super::learn::{LearningConfig, LearningReceipt};
         let receipt = LearningReceipt {
             role: "attention_q".into(),
             num_samples: 100,
@@ -1410,49 +1893,54 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
         let scales = vec![1.0f32; 10];
         let biases = vec![0.0f32; 10];
         let result = structural_verify(&codes, &scales, &biases, 2, 640);
-        assert!(result.is_ok(), "0xFF should be valid codes (15 in each nibble)");
+        assert!(
+            result.is_ok(),
+            "0xFF should be valid codes (15 in each nibble)"
+        );
     }
 
     #[test]
     fn test_apply_quality_policy_default() {
         use super::verify::{apply_quality_policy, MatrixQualityMetrics, QualityStatus};
-        let metrics = vec![
-            MatrixQualityMetrics {
-                matrix_name: "test".into(),
-                role: "attention_q".into(),
-                profile_id: 0,
-                weight_rmse: 0.02,
-                weight_nrmse: 0.01,
-                max_abs_error: 0.1,
-                sqnr_db: 25.0,
-                effective_bpw: 4.0,
-                quality_status: QualityStatus::Passed,
-            },
-        ];
+        let metrics = vec![MatrixQualityMetrics {
+            matrix_name: "test".into(),
+            role: "attention_q".into(),
+            profile_id: 0,
+            weight_rmse: 0.02,
+            weight_nrmse: 0.01,
+            max_abs_error: 0.1,
+            sqnr_db: 25.0,
+            effective_bpw: 4.0,
+            quality_status: QualityStatus::Passed,
+        }];
         let result = apply_quality_policy(&metrics, "default");
-        assert_eq!(result[0].quality_status, QualityStatus::Passed,
-            "0.02 RMSE should pass default policy (0.05 threshold)");
+        assert_eq!(
+            result[0].quality_status,
+            QualityStatus::Passed,
+            "0.02 RMSE should pass default policy (0.05 threshold)"
+        );
     }
 
     #[test]
     fn test_apply_quality_policy_strict() {
         use super::verify::{apply_quality_policy, MatrixQualityMetrics, QualityStatus};
-        let metrics = vec![
-            MatrixQualityMetrics {
-                matrix_name: "test".into(),
-                role: "attention_q".into(),
-                profile_id: 0,
-                weight_rmse: 0.02,
-                weight_nrmse: 0.01,
-                max_abs_error: 0.1,
-                sqnr_db: 25.0,
-                effective_bpw: 4.0,
-                quality_status: QualityStatus::Passed,
-            },
-        ];
+        let metrics = vec![MatrixQualityMetrics {
+            matrix_name: "test".into(),
+            role: "attention_q".into(),
+            profile_id: 0,
+            weight_rmse: 0.02,
+            weight_nrmse: 0.01,
+            max_abs_error: 0.1,
+            sqnr_db: 25.0,
+            effective_bpw: 4.0,
+            quality_status: QualityStatus::Passed,
+        }];
         let result = apply_quality_policy(&metrics, "strict");
-        assert_eq!(result[0].quality_status, QualityStatus::Failed,
-            "0.02 RMSE should FAIL strict policy (0.01 threshold)");
+        assert_eq!(
+            result[0].quality_status,
+            QualityStatus::Failed,
+            "0.02 RMSE should FAIL strict policy (0.01 threshold)"
+        );
     }
 
     // ── Pack/unpack round-trip test ───────────────────────────────────────
@@ -1464,9 +1952,159 @@ dequant_matmul_reference(&input, &codes, &scales, &biases, 2, 2, TILE_ELEMENTS, 
         let original: Vec<f32> = (0..640).map(|i| (i as f32) / 640.0 * 2.0 - 1.0).collect();
         let (codes, scales, biases, _, _) = super::pack_nf4_weights(&original, rows, cols);
         let reconstructed = super::unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
-        let rmse = (original.iter().zip(reconstructed.iter())
-            .map(|(a,b)| (a-b).powi(2)).sum::<f32>() / original.len() as f32).sqrt();
+        let rmse = (original
+            .iter()
+            .zip(reconstructed.iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f32>()
+            / original.len() as f32)
+            .sqrt();
         assert!(rmse < 0.1, "pack→unpack RMSE too high: {rmse:.6}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn accelerate_matches_scalar() {
+        // Cross-check: the Accelerate BLAS path in dequant_matmul_reference
+        // must produce results identical to the scalar fallback within f32
+        // precision.
+        let m = 3usize;
+        let k = 5usize;
+        let n = 700usize; // non-multiple-of-640 to exercise padding
+
+        // Random weight matrix spanning the NF4 codebook.
+        let mut weights = vec![0.0f32; k * n];
+        for i in 0..k {
+            for j in 0..n {
+                let phase = (i * n + j) as f32 * 0.013;
+                weights[i * n + j] = (phase - phase.floor() - 0.5) * 2.0;
+            }
+        }
+
+        let (codes, scales, biases, _p_rows, _p_cols) = super::pack_nf4_weights(&weights, k, n);
+
+        // Input with varied values (non-zero to exercise full accumulation).
+        let input: Vec<f32> = (0..m * k).map(|x| (x as f32 + 1.0) * 0.25).collect();
+
+        // BLAS path (via dequant_matmul_reference on macOS).
+        let mut blas_output = vec![0.0f32; m * n];
+        super::dequant_matmul_reference(
+            &input,
+            &codes,
+            &scales,
+            &biases,
+            m,
+            k,
+            n,
+            &mut blas_output,
+        )
+        .unwrap();
+
+        // Scalar path.
+        let tiles_per_row = n.div_ceil(super::TILE_ELEMENTS);
+        let total_tiles = k * tiles_per_row;
+        let mut scalar_output = vec![0.0f32; m * n];
+        super::dequant_matmul_scalar(
+            &input,
+            &codes,
+            &scales,
+            &biases,
+            m,
+            k,
+            n,
+            &mut scalar_output,
+            tiles_per_row,
+            total_tiles,
+        );
+
+        // Compare element-wise with tight tolerance.
+        let mut max_diff = 0.0f32;
+        let mut sum_sq = 0.0f32;
+        for idx in 0..m * n {
+            let diff = (blas_output[idx] - scalar_output[idx]).abs();
+            if diff > max_diff {
+                max_diff = diff;
+            }
+            sum_sq += diff * diff;
+        }
+        let rmse = (sum_sq / (m * n) as f32).sqrt();
+        assert!(
+            max_diff < 1e-4,
+            "BLAS vs scalar: max_diff={:.2e} >= 1e-4 at M={m} K={k} N={n}",
+            max_diff,
+        );
+        assert!(rmse < 1e-5, "BLAS vs scalar: RMSE={:.2e} >= 1e-5", rmse,);
+    }
+
+    // ── AW-LS tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_awls_pack_lower_mse_than_maxabs() {
+        // Create a tile with non-uniform distribution
+        let mut vals = [0.0f32; TILE_ELEMENTS];
+        let mut act_w = [1.0f32; TILE_ELEMENTS];
+        for i in 0..640 {
+            // First channel has high activation weight and specific value
+            if i < 128 {
+                vals[i] = 3.0; // Large value, should be well-reconstructed
+                act_w[i] = 10.0; // High importance
+            } else if i < 256 {
+                vals[i] = -0.1; // Small value
+                act_w[i] = 0.1; // Low importance
+            } else {
+                vals[i] = 0.5 * ((i as f32) / 640.0 * std::f32::consts::PI * 2.0).sin();
+                act_w[i] = 1.0;
+            }
+        }
+
+        // Max-abs baseline
+        let (codes_ma, scales_ma, biases_ma) = pack_nf4_tile(&vals);
+        let mut ma_out = [0.0f32; TILE_ELEMENTS];
+        {
+            let mut c_arr = [0u8; 320];
+            let mut s_arr = [0.0f32; 5];
+            let mut b_arr = [0.0f32; 5];
+            c_arr.copy_from_slice(&codes_ma);
+            s_arr.copy_from_slice(&scales_ma);
+            b_arr.copy_from_slice(&biases_ma);
+            crate::nf4tile640::unpack_nf4_tile(&c_arr, &s_arr, &b_arr, &mut ma_out);
+        }
+
+        // AW-LS
+        let (codes_aw, scales_aw, biases_aw) = pack_nf4_tile_awls(&vals, &act_w, 8);
+        let mut aw_out = [0.0f32; TILE_ELEMENTS];
+        {
+            let mut c_arr = [0u8; 320];
+            let mut s_arr = [0.0f32; 5];
+            let mut b_arr = [0.0f32; 5];
+            c_arr.copy_from_slice(&codes_aw);
+            s_arr.copy_from_slice(&scales_aw);
+            b_arr.copy_from_slice(&biases_aw);
+            crate::nf4tile640::unpack_nf4_tile(&c_arr, &s_arr, &b_arr, &mut aw_out);
+        }
+
+        // AW-MSE: activation-weighted
+        let aw_mse_ma: f64 = vals
+            .iter()
+            .zip(ma_out.iter())
+            .zip(act_w.iter())
+            .map(|((v, r), a)| (*a as f64) * ((v - r) as f64).powi(2))
+            .sum::<f64>()
+            / TILE_ELEMENTS as f64;
+        let aw_mse_aw: f64 = vals
+            .iter()
+            .zip(aw_out.iter())
+            .zip(act_w.iter())
+            .map(|((v, r), a)| (*a as f64) * ((v - r) as f64).powi(2))
+            .sum::<f64>()
+            / TILE_ELEMENTS as f64;
+
+        assert!(
+            aw_mse_aw <= aw_mse_ma * 1.1 + 1e-6,
+            "AW-LS AW-MSE {:.6} should not exceed max-abs AW-MSE {:.6} by more than 10%%",
+            aw_mse_aw,
+            aw_mse_ma
+        );
     }
 }
 

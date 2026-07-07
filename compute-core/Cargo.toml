@@ -25,6 +25,7 @@ mlx-rs = { path = "../mlx-rs-fork/mlx-rs", optional = true }
 mlx-sys = { path = "../mlx-rs-fork/mlx-sys", optional = true }
 safetensors = "0.5"
 sha2 = { version = "0.10", features = ["asm"] }
+p256 = { version = "0.13", features = ["ecdsa", "digest"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
@@ -67,8 +68,9 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 content_inspector = "0.2"
 encoding_rs = "0.8"
-deno_core = "0.405"
-deno_core_icudata = "0.77"
+sqlite = "0.37"
+deno_core = { version = "0.405", optional = true }
+deno_core_icudata = { version = "0.77", optional = true }
 anyhow = "1.0.102"
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 
@@ -79,6 +81,8 @@ default = []
 #    worker, taps, fused decode. Hermetic: compiles from a clean checkout
 #    with Xcode CLT + Rust only. Does NOT imply mlx-backend.
 prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal", "dep:image"]
+# iOS variant — Metal + TTS + inference but no CoreML/server/ANE/arena.
+prism-backend-ios = ["prism-backend", "metal-dispatch", "backend-metal", "dep:image"]
 # 2. RESEARCH — the MLX executor/model stack and everything built on it.
 #    Requires the MLX source tree (see mlx-rs-fork/mlx-sys/build.rs).
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
@@ -110,6 +114,7 @@ private-development = []
 image = []
 msgpack = []
 coreai-backend = []
+apple-coreml = []
 
 flux-klein-mlx = []
 backend-metal = ["dep:mpsgraph"]
@@ -171,6 +176,11 @@ required-features = ["prism-backend"]
 [[bin]]
 name = "gemma4-ingest"
 path = "src/bin/gemma4_ingest.rs"
+required-features = ["prism-backend"]
+
+[[bin]]
+name = "diagnose-nf4-roundtrip"
+path = "src/bin/diagnose_nf4_roundtrip.rs"
 required-features = ["prism-backend"]
 
 [[bin]]

@@ -5,6 +5,7 @@
     feature = "backend-cpu",
     feature = "mlx-backend",
     feature = "prism-backend",
+    feature = "prism-backend-ios",
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix",
@@ -21,121 +22,105 @@ extern crate self as tribunus_compute_core;
 pub mod analysis;
 #[cfg(all(
     target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
+    any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
 pub mod ane;
-#[cfg(all(
+#[cfg(any(
     target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
+    all(feature = "prism-backend-ios", target_os = "ios")
 ))]
 pub mod ane_bridge;
-#[cfg(feature = "prism-backend")]
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
 pub mod ane_compile;
-#[cfg(feature = "prism-backend")]
-pub mod tts;
 #[cfg(all(
     target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
+    any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
 pub mod arena;
 #[cfg(target_os = "macos")]
 pub mod arena_info;
+#[cfg(any(feature = "prism-backend", feature = "prism-backend-ios"))]
+pub mod tts;
 // Pure Rust (atomics + uuid) — must stay unconditional: `errors.rs` (an
 // unconditional module) imports `arena_lifecycle::LifecycleState`, so gating
 // this to macOS broke every non-mac build.
 pub mod arena_lifecycle;
 #[cfg(all(
     target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
+    any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
 pub mod arena_pool;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod attention;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod audio;
-#[cfg(any(feature = "prism-backend", feature = "mlx-backend"))]
+#[cfg(any(
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "mlx-backend"
+))]
 pub mod audio_preprocess_accelerate;
 #[cfg(feature = "generation-tts")]
 pub mod audio_provider;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod autopsy;
 pub mod backend;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod benchmark;
-#[cfg(all(
-    target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
-))]
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
 pub mod bridge;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod cache;
-#[cfg(feature = "prism-backend")]
+#[cfg(any(feature = "prism-backend", feature = "prism-backend-ios"))]
 pub mod calibration;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod capability;
 pub mod cli;
-#[cfg(any(
-    any(
-        feature = "mlx-backend",
-        feature = "prism-backend",
-        feature = "backend-cpu"
-    ),
-    feature = "prism-backend",
-))]
 pub mod compilation;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod compile;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod compile_pipeline;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod compile_progress;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod compile_state;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod compiler;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+))]
 pub mod compute_image;
 pub mod compute_image_v0;
 pub mod compute_ir;
@@ -146,56 +131,46 @@ pub mod config_namespace;
 #[cfg(feature = "mlx-backend")]
 pub mod contracts;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod copy_ledger;
-#[cfg(any(
+#[cfg(all(
+    target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
 ))]
 pub mod coreai;
 #[cfg(all(
     target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
+    any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
 pub mod coreai_audit;
 #[cfg(all(
     target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
+    any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
 pub mod coreai_bridge;
 #[cfg(all(
     target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
+    any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
 pub mod coreai_pipeline;
 #[cfg(all(
     target_os = "macos",
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    )
+    any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
 pub mod coreai_state;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod cpu_benchmarks;
 pub mod crash_breadcrumb;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod decode_attribution;
 /// Device registry — runtime hardware enumeration and capability discovery.
@@ -210,59 +185,43 @@ pub mod engine_policy;
 pub mod engine_receipts;
 pub mod errors;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod evidence;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod executor;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod executor_projection;
 pub mod experiment;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod external_array;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "ffi"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+))]
 pub mod ffi;
 pub mod fusion_region;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod gemma;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod generation;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod gguf;
 pub mod gpu_memory;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod gpu_worker;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod heterogeneous;
 #[cfg(feature = "mlx-backend")]
@@ -272,59 +231,58 @@ pub mod image_provider;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod inference;
 pub mod inference_profile;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 pub mod integration;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod kv_arena;
-#[cfg(feature = "mlx-backend")]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod kv_cache;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod layout_compiler;
 pub mod layout_transform;
 #[cfg(feature = "mlx-backend")]
 pub mod loader;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod parsing;
 #[cfg(feature = "generation-video")]
 pub mod video_provider;
 #[macro_use]
 pub mod logging;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod editing;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod exo;
 /// Pure-data types for KV cache, usable without mlx dependency.
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod kv_cache_types;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
+pub mod kv_cache_types;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod lora;
 pub mod lut;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod mapped_image;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod memory;
 #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
@@ -332,47 +290,32 @@ pub mod metal_capture;
 #[cfg(feature = "metal-dispatch")]
 pub mod metal_launcher;
 pub mod metrics;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod mil_builder;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod mlpackage;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod mlx_api_compat;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod mlx_executor;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod mlx_inventory;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod mlx_patch_register;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod mlx_runtime_probe;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod model;
 pub mod model_adapter;
@@ -382,123 +325,107 @@ pub mod model_cache;
 pub mod model_runtime;
 pub mod model_store;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod models;
 pub mod native_kernel;
 pub mod nf4tile640;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod operation_catalog;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod pipeline_parity;
 pub mod placement_profile;
 pub mod plugin;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod primitives;
 pub mod profile_compiler;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod profiled_executor;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod profiled_model;
 #[cfg(any(feature = "mlx-backend", feature = "candle-cpu"))]
 pub mod projection_executor;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod projection_identity;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod projection_tests;
 #[cfg(any(
-    any(
-        any(feature = "mlx-backend", feature = "prism-backend"),
-        feature = "prism-backend"
-    ),
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
     feature = "candle-cpu",
     feature = "intel",
-    feature = "tensix"
+    feature = "tensix",
 ))]
 /// Always-available projection data types (see module docs).
 pub mod projection_types;
 pub mod quantization;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod quantized;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 pub mod readiness_gates;
 pub mod receipt;
 pub mod receipts;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod registry;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod replay_projection;
 pub mod requalification;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod research;
 #[cfg(feature = "mlx-backend")]
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod research_contracts;
 #[cfg(feature = "mlx-backend")]
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod research_metrics;
 #[cfg(feature = "mlx-backend")]
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
-pub mod research_trace;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod research_trace;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 pub mod residency;
 pub mod ring;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod runtime;
 pub mod runtime_contract;
 pub mod runtime_orchestration;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod runtime_trace;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub mod scheduling;
-#[cfg(feature = "server")]
+#[cfg(all(target_os = "macos", feature = "server"))]
 pub mod server;
 #[cfg(feature = "mlx-backend")]
 pub mod session;
@@ -506,18 +433,24 @@ pub mod session;
 #[cfg(feature = "mlx-backend")]
 pub mod sidecar;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod speculative;
 
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod supervisor_crash;
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 pub mod agent;
 #[cfg(feature = "candle-cpu")]
 pub mod candle_cpu_backend;
@@ -528,41 +461,43 @@ pub mod streaming;
 pub mod tokenizer;
 pub mod toolchain_attest;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod tools;
 pub mod transform_recipe;
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod treatment;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod validator;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod video;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod vision;
 pub mod worker_crash_ledger;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod worker_dispatch;
 #[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
 ))]
 pub mod worker_memory;
 pub mod worker_protocol;
@@ -571,16 +506,10 @@ pub use crate::session::{
     ControlSessionState, GenerationControlSession, InferenceSession, InferenceSessionState,
     SamplerConfig,
 };
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub use coreml_proto;
 
-#[cfg(any(
-    any(feature = "mlx-backend", feature = "prism-backend"),
-    feature = "prism-backend"
-))]
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub use crate::compilation::phase_ir::{
     LogicalTensorId, MaterializationPlan, PhaseEdge, PhaseRegion, RegionId,
 };

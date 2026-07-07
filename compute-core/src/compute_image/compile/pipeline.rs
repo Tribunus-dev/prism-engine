@@ -1541,9 +1541,7 @@ pub(crate) fn compile_sequential(
     builder.set_phase_graph(dag);
 
     // ── Quantization profile registry & quality evidence ───────────
-    builder.set_quantization_profiles(
-        super::emit::build_default_quantization_profiles(),
-    );
+    builder.set_quantization_profiles(super::emit::build_default_quantization_profiles());
     // Quality status stays at default Unknown (no learning run yet).
     // Full qualification will override with per-tensor evidence.
 
@@ -2123,8 +2121,8 @@ pub(crate) fn emit_heterogeneous_image(
     loaded: &LoadedSource,
     output_dir: &Path,
 ) -> Result<(), String> {
-    use crate::compute_image::heterogeneous::types::*;
     use crate::compute_image::heterogeneous::builder::HeterogeneousImageBuilder;
+    use crate::compute_image::heterogeneous::types::*;
 
     // Build model identity
     let identity = ModelIdentity {
@@ -2212,8 +2210,7 @@ pub(crate) fn emit_heterogeneous_image(
         .map_err(|e| format!("serialize heterogeneous image: {e}"))?;
 
     let path = output_dir.join("heterogeneous_image.json");
-    std::fs::write(&path, &json)
-        .map_err(|e| format!("write heterogeneous_image.json: {e}"))?;
+    std::fs::write(&path, &json).map_err(|e| format!("write heterogeneous_image.json: {e}"))?;
 
     Ok(())
 }

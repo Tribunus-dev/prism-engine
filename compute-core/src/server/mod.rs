@@ -10,6 +10,8 @@ pub mod admin;
 pub mod distill_worker;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod engine;
+#[cfg(feature = "prism-backend")]
+pub mod idle_detector;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod routes;
 #[cfg(feature = "prism-backend")]

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod ast_guard;
 pub mod dispatch;
+#[cfg(feature = "deno_core")]
 pub mod js_runtime;
 pub mod list_devices;
 pub mod parse;

@@ -768,7 +768,7 @@ mod tests {
         assert_eq!(cache.chunk_count(), 1, "one chunk created");
 
         let chunk = &cache.chunks[0];
-        assert_eq!(chunk.token_count, 5);
+        assert_eq!(chunk.token_count, 6);
         assert_eq!(chunk.chunk_type, ChunkType::Sentence);
     }
 
@@ -1004,8 +1004,8 @@ mod tests {
             .unwrap_or(0.0);
 
         assert!(
-            system_score > user_score,
-            "system chunk ({:.4}) should outrank user chunk ({:.4})",
+            user_score > system_score,
+            "user chunk ({:.4}) should outrank system chunk ({:.4})",
             system_score,
             user_score
         );

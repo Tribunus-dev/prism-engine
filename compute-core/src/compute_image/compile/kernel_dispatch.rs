@@ -288,6 +288,287 @@ impl Nf4Tile640ProjectionDispatcher {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Int8Tile640GEMVDispatcher
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Dispatches the INT8 Tile640 FP32 GEMV kernel.
+///
+/// Buffer layout matches `compute_image/templates/int8_tile640_gemv.metal`:
+///   [[buffer(0)]]  packed_weights       — raw Tile640 i8 bytes (640 bytes/tile)
+///   [[buffer(1)]]  scales               — fp32 per-tile scales
+///   [[buffer(2)]]  bias_padding         — fp32 per-tile biases (always 0)
+///   [[buffer(3)]]  in_vector            — fp32 activation vector [in_dim]
+///   [[buffer(4)]]  out_vector           — fp32 result vector
+///   [[buffer(5)]]  num_macro_tiles      — constant uint (ceil(in_dim / 640))
+///   [[buffer(6)]]  in_dim               — constant uint (real width; guards the
+///                                           partial-tile reads)
+///   [[buffer(7)]]  reduction_scales     — device const half* FP16 column-scale
+///                                         sidecar (null buffer = none)
+///
+/// ANE: Not yet implemented for INT8. The `QuantizedWeightFormat::Int8Tile640Base`
+/// and `Int8Tile640ScaledReductionAxis` variants are defined in `execution_graph.rs`,
+/// and `MatrixWeightBinding` carries the `format` discriminant.  ANE lowering is
+/// deferred — the Metal kernel handles INT8 GEMV until an ANE-compatible lowering
+/// path is separately qualified.
+#[cfg(feature = "metal-dispatch")]
+pub struct Int8Tile640GEMVDispatcher {
+    registry: RegistryRef,
+    kernel_name: &'static str,
+}
+
+#[cfg(feature = "metal-dispatch")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Int8Tile640Offsets {
+    pub weights_offset: u64,
+    pub scales_offset: u64,
+    pub biases_offset: u64,
+}
+
+#[cfg(feature = "metal-dispatch")]
+impl Int8Tile640GEMVDispatcher {
+    pub fn new(registry: RegistryRef) -> Self {
+        Self {
+            registry,
+            kernel_name: "fused_gemv_int8_tile640_fp32",
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch(
+        &self,
+        command_buffer: &CommandBufferRef,
+        packed_weights_buffer: &Buffer,
+        scales_buffer: &Buffer,
+        biases_buffer: &Buffer,
+        input_buffer: &Buffer,
+        output_buffer: &Buffer,
+        reduction_scales_buffer: Option<&Buffer>,
+        params: &ProjectionParams,
+        receipt: &mut KernelReceipt,
+    ) {
+        self.dispatch_with_offsets(
+            command_buffer,
+            packed_weights_buffer,
+            scales_buffer,
+            biases_buffer,
+            input_buffer,
+            output_buffer,
+            reduction_scales_buffer,
+            params,
+            Int8Tile640Offsets::default(),
+            receipt,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_with_offsets(
+        &self,
+        command_buffer: &CommandBufferRef,
+        packed_weights_buffer: &Buffer,
+        scales_buffer: &Buffer,
+        biases_buffer: &Buffer,
+        input_buffer: &Buffer,
+        output_buffer: &Buffer,
+        reduction_scales_buffer: Option<&Buffer>,
+        params: &ProjectionParams,
+        offsets: Int8Tile640Offsets,
+        receipt: &mut KernelReceipt,
+    ) {
+        let (pso, device) = {
+            let mut reg = self.registry.lock();
+            let fcv = FunctionConstantValues::new();
+            let pso = reg.get_or_create(self.kernel_name, &fcv, 0);
+            (pso, reg.device().clone())
+        };
+
+        let encoder = command_buffer.new_compute_command_encoder();
+        encoder.set_compute_pipeline_state(&pso);
+        encoder.set_buffer(0, Some(packed_weights_buffer), offsets.weights_offset);
+        encoder.set_buffer(1, Some(scales_buffer), offsets.scales_offset);
+        encoder.set_buffer(2, Some(biases_buffer), offsets.biases_offset);
+        encoder.set_buffer(3, Some(input_buffer), 0);
+        encoder.set_buffer(4, Some(output_buffer), 0);
+
+        let num_macro_tiles = params.page_count.max(1);
+        let num_macro_tiles_buf = device.new_buffer_with_data(
+            &num_macro_tiles as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(5, Some(&num_macro_tiles_buf), 0);
+
+        // buffer(6): real (unpadded) input width.  The kernel guards the
+        // activation and reduction_scales reads against this so a partial
+        // last tile never reads past `in_vector[in_dim]` or `reduction_scales[in_dim]`.
+        let in_dim_val = params.in_dim;
+        let in_dim_buf = device.new_buffer_with_data(
+            &in_dim_val as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(6, Some(&in_dim_buf), 0);
+
+        // buffer(7): optional FP16 reduction-axis scale sidecar.
+        // The kernel applies reduction_scales[col] * activation[col] before
+        // the multiply, implementing Y = (X ⊛ S) W'^T.
+        if let Some(rs) = reduction_scales_buffer {
+            encoder.set_buffer(7, Some(rs), 0);
+        }
+
+        encoder.dispatch_thread_groups(
+            MTLSize {
+                width: params.out_dim as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 32,
+                height: 1,
+                depth: 1,
+            },
+        );
+        encoder.end_encoding();
+
+        receipt.kernel_id = 13; // INT8_TILE640_GEMV
+        receipt.phase_id = 0;
+        receipt.page_count = num_macro_tiles;
+        receipt.sidecar_hits = 0;
+        receipt.sidecar_entries_read = 0;
+        receipt.threadgroups = params.out_dim;
+        receipt.threads_per_threadgroup = 32;
+        receipt.output_elements = params.out_dim;
+        receipt.flags = 0;
+        let tile_bytes: u64 = 640;
+        receipt.logical_weight_bytes = (params.out_dim as u64) * (num_macro_tiles as u64) * tile_bytes;
+        // INT8: one f32 scale + one f32 bias_padding (always zero) per tile =
+        // 8 bytes per tile of tile_metadata.
+        receipt.logical_sidecar_bytes =
+            (params.out_dim as u64) * (num_macro_tiles as u64) * 2 * 4;
+        receipt.logical_activation_bytes = (params.in_dim as u64) * 4 + (params.out_dim as u64) * 4;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GpuBatchMatmul
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Dispatches `batched_gemv_fp32` — a one-thread-per-output-element GEMV
+/// for compile-time operator validation on GPU.
+///
+/// Usage pattern:
+/// ```ignore
+/// let dispatcher = GpuBatchMatmulDispatcher::new(&registry);
+/// let (ref_outputs, quant_outputs) = dispatcher.dispatch(
+///     &cmd_buf, &weights, &inputs, rows, cols, num_vectors,
+/// );
+/// ```
+#[cfg(feature = "metal-dispatch")]
+pub struct GpuBatchMatmulDispatcher {
+    registry: RegistryRef,
+}
+
+#[cfg(feature = "metal-dispatch")]
+impl GpuBatchMatmulDispatcher {
+    pub fn new(registry: &RegistryRef) -> Self {
+        Self {
+            registry: registry.clone(),
+        }
+    }
+
+    /// Run one batched GEMV on GPU and return the output matrix
+    /// as [num_vectors × cols] f32.
+    pub fn run(
+        &self,
+        weights: &[f32],
+        inputs: &[f32],
+        rows: usize,
+        cols: usize,
+        num_vectors: usize,
+    ) -> Vec<f32> {
+        use metal::*;
+
+        // Acquire PSO and a cloned Device inside the lock guard, then drop
+        // the lock so subsequent buffer operations borrow only the owned Device.
+        let (pso, device) = {
+            let mut reg = self.registry.lock();
+            let pso = reg.get_or_create(
+                "batched_gemv_fp32",
+                &metal::FunctionConstantValues::new(),
+                0u64,
+            );
+            (pso, reg.device().clone())
+        };
+
+        // Allocate GPU buffers (shared storage — unified memory on M1).
+        let total_weight_bytes = (rows * cols * 4) as u64;
+        let total_input_bytes = (num_vectors * rows * 4) as u64;
+        let total_output_bytes = (num_vectors * cols * 4) as u64;
+
+        let weight_buf = device.new_buffer_with_data(
+            weights.as_ptr() as *const std::ffi::c_void,
+            total_weight_bytes,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let input_buf = device.new_buffer_with_data(
+            inputs.as_ptr() as *const std::ffi::c_void,
+            total_input_bytes,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let output_buf = device.new_buffer(
+            total_output_bytes,
+            MTLResourceOptions::StorageModeShared,
+        );
+
+        // Create command buffer and encoder.
+        let cmd_queue = device.new_command_queue();
+        let cmd_buf = cmd_queue.new_command_buffer();
+        let encoder = cmd_buf.new_compute_command_encoder();
+
+        encoder.set_compute_pipeline_state(&pso);
+        encoder.set_buffer(0, Some(&weight_buf), 0);
+        encoder.set_buffer(1, Some(&input_buf), 0);
+        encoder.set_buffer(2, Some(&output_buf), 0);
+
+        // Pass rows and cols as constant buffers.
+        let rows_val: [u32; 1] = [rows as u32];
+        let rows_buf = device.new_buffer_with_data(
+            rows_val.as_ptr() as *const std::ffi::c_void,
+            4,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let cols_val: [u32; 1] = [cols as u32];
+        let cols_buf = device.new_buffer_with_data(
+            cols_val.as_ptr() as *const std::ffi::c_void,
+            4,
+            MTLResourceOptions::StorageModeShared,
+        );
+        encoder.set_buffer(3, Some(&rows_buf), 0);
+        encoder.set_buffer(4, Some(&cols_buf), 0);
+
+        // Dispatch: one thread per output element.
+        let total_threads = (num_vectors * cols) as u64;
+        let thread_group_size = 256u64;
+        let num_groups = (total_threads + thread_group_size - 1) / thread_group_size;
+        encoder.dispatch_thread_groups(
+            MTLSize { width: num_groups, height: 1, depth: 1 },
+            MTLSize { width: thread_group_size, height: 1, depth: 1 },
+        );
+
+        encoder.end_encoding();
+        cmd_buf.commit();
+        cmd_buf.wait_until_completed();
+
+        // Read back.
+        let ptr = output_buf.contents() as *const f32;
+        let result = unsafe {
+            std::slice::from_raw_parts(ptr, num_vectors * cols).to_vec()
+        };
+
+        result
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // DenseProjectionDispatcher
 // ═══════════════════════════════════════════════════════════════════════════
 

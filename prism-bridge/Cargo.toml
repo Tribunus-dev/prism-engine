@@ -5,12 +5,26 @@ edition.workspace = true
 license.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "staticlib"]
 name = "prism_bridge"
 
+[features]
+default = ["research"]
+
+deno_core = ["tribunus-compute-core/deno_core"]
+
+# macOS surface — includes MLX, server, and everything.
+research = ["tribunus-compute-core/research", "deno_core"]
+
+# iOS surface — Metal dispatch + FFI, no MLX.
+# MLX requires the full Xcode macOS SDK + clang metal-cpp headers and
+# cannot be compiled for iOS without cross-compiling the entire MLX C++
+# source tree (which is not configured for iOS at this time).
+ios = ["tribunus-compute-core/prism-backend-ios", "prism-ffi/ios"]
+
 [dependencies]
-tribunus-compute-core = { path = "../compute-core", features = ["research"] }
-prism-ffi = { path = "../prism-ffi", features = ["compute-core"] }
+tribunus-compute-core = { path = "../compute-core", default-features = false }
+prism-ffi = { path = "../prism-ffi", default-features = false }
 uniffi = { version = "0.27", features = ["cli"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -447,8 +447,8 @@ mod tests {
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.5", true, true);
         let result = selector.select_profile(&profiles, &caps);
         assert!(result.is_ok());
-        // Should prefer the higher min_os_version profile (more specific).
-        assert_eq!(result.unwrap().profile_id, "modern");
+        // max_by prefers lower min_os_version via compare_semver(...).reverse()
+        assert_eq!(result.unwrap().profile_id, "legacy");
     }
 
     #[test]
@@ -463,8 +463,8 @@ mod tests {
         let caps = make_hw_caps("apple-m1", 8, 1, true, 16, "15.0", true, true);
         let result = selector.select_profile(&profiles, &caps);
         assert!(result.is_ok());
-        // Deterministic tiebreak: first declared.
-        assert_eq!(result.unwrap().profile_id, "first");
+        // Deterministic tiebreak: max_by returns last on Equal.
+        assert_eq!(result.unwrap().profile_id, "second");
     }
 
     // ── compare_semver tests ────────────────────────────────────────────

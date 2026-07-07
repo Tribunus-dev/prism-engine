@@ -55,8 +55,8 @@ fn test_profile_descriptor_metal_layout() {
 fn test_fallback_codebook_matches_cpu() {
     // The Metal shader fallback values must match CPU's NF4_CODEBOOK exactly.
     let metal_fallback: [f32; 16] = [
-        -1.0, -0.6961928, -0.5250731, -0.3949175, -0.2844414, -0.1847734, -0.09105, 0.0,
-        0.0795803, 0.1609302, 0.2461123, 0.3379152, 0.4407099, 0.562617, 0.7229568, 1.0,
+        -1.0, -0.6961928, -0.5250731, -0.3949175, -0.2844414, -0.1847734, -0.09105, 0.0, 0.0795803,
+        0.1609302, 0.2461123, 0.3379152, 0.4407099, 0.562617, 0.7229568, 1.0,
     ];
     let cpu = crate::nf4tile640::NF4_CODEBOOK;
     for i in 0..16 {
@@ -73,8 +73,8 @@ fn test_fallback_codebook_matches_cpu() {
 fn test_canonical_codebook_matches_fallback() {
     let desc = CodebookDescriptor::canonical_nf4();
     let metal_fallback: [f32; 16] = [
-        -1.0, -0.6961928, -0.5250731, -0.3949175, -0.2844414, -0.1847734, -0.09105, 0.0,
-        0.0795803, 0.1609302, 0.2461123, 0.3379152, 0.4407099, 0.562617, 0.7229568, 1.0,
+        -1.0, -0.6961928, -0.5250731, -0.3949175, -0.2844414, -0.1847734, -0.09105, 0.0, 0.0795803,
+        0.1609302, 0.2461123, 0.3379152, 0.4407099, 0.562617, 0.7229568, 1.0,
     ];
     for i in 0..16 {
         assert!(

@@ -20,7 +20,17 @@ use super::super::receipt::{ObjectiveWeights, PhaseExecutionRecord};
 
 use super::reducer::AccelerateReducer;
 use super::student::TernaryStudent;
+#[cfg(all(target_os = "macos", feature = "prism-backend"))]
 use super::teacher::MetalTeacher;
+
+// ── VLM tap kinds ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VlmTapKind {
+    SpatialPatch,
+    GridAttention2D,
+    RotaryEmbedding2D,
+}
 
 // ── Scheduler configuration ─────────────────────────────────────────────────
 
@@ -418,5 +428,78 @@ impl Level1Scheduler {
     /// Reference to the reducer for reading computed metrics.
     pub fn reducer(&self) -> &AccelerateReducer {
         &self.reducer
+    }
+}
+
+// ── Diffusion time-stratified sampler ───────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct DiffusionTimeStratifiedSampler {
+    pub noise_samples: Vec<u32>,
+    pub geometry_samples: Vec<u32>,
+    pub detail_samples: Vec<u32>,
+    pub seed: u64,
+}
+
+impl DiffusionTimeStratifiedSampler {
+    pub fn new(samples_per_phase: usize, seed: u64) -> Self {
+        let mut sampler = Self {
+            noise_samples: Vec::with_capacity(samples_per_phase),
+            geometry_samples: Vec::with_capacity(samples_per_phase),
+            detail_samples: Vec::with_capacity(samples_per_phase),
+            seed,
+        };
+        let rng = |range: std::ops::Range<u32>, s: &mut u64| -> Option<u32> {
+            *s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let len = range.len() as u64;
+            if len == 0 {
+                return None;
+            }
+            Some(range.start + (*s % len) as u32)
+        };
+        for _ in 0..samples_per_phase {
+            if let Some(t) = rng(800..1001, &mut sampler.seed) {
+                sampler.noise_samples.push(t);
+            }
+            if let Some(t) = rng(400..800, &mut sampler.seed) {
+                sampler.geometry_samples.push(t);
+            }
+            if let Some(t) = rng(0..400, &mut sampler.seed) {
+                sampler.detail_samples.push(t);
+            }
+        }
+        sampler
+    }
+
+    pub fn all_samples(&self) -> Vec<u32> {
+        let mut all = Vec::new();
+        all.extend(&self.noise_samples);
+        all.extend(&self.geometry_samples);
+        all.extend(&self.detail_samples);
+        all
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diffusion_sampler_produces_correct_ranges() {
+        let sampler = DiffusionTimeStratifiedSampler::new(10, 42);
+        assert_eq!(sampler.noise_samples.len(), 10);
+        assert_eq!(sampler.geometry_samples.len(), 10);
+        assert_eq!(sampler.detail_samples.len(), 10);
+        for &t in &sampler.noise_samples {
+            assert!(t >= 800 && t <= 1000);
+        }
+        for &t in &sampler.geometry_samples {
+            assert!(t >= 400 && t < 800);
+        }
+        for &t in &sampler.detail_samples {
+            assert!(t < 400);
+        }
     }
 }

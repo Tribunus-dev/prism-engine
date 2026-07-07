@@ -7,6 +7,64 @@
 /// Magic bytes: "PRMEXEC1"
 pub const EXECUTION_GRAPH_MAGIC: [u8; 8] = *b"PRMEXEC1";
 
+/// Discriminant of a quantized weight format.
+/// Determines which Metal kernel and tile stride to use.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuantizedWeightFormat {
+    /// NF4 Tile640: 320-byte codes per tile, f32 scale + bias per tile.
+    Nf4Tile640Base = 0,
+    /// NF4 Tile640 with per-column FP16 reduction-axis scale sidecar.
+    Nf4Tile640ScaledReductionAxis = 1,
+    /// INT8 Tile640: 640-byte codes per tile, f32 scale per tile, no bias.
+    Int8Tile640Base = 2,
+    /// INT8 Tile640 with per-column FP16 reduction-axis scale sidecar.
+    Int8Tile640ScaledReductionAxis = 3,
+    /// Ternary Tile640: 64-byte nibble codes per 256-element block, FP16 scale per block.
+    TernaryTile640Base = 4,
+    /// Ternary Tile640 with per-column FP16 reduction-axis scale sidecar.
+    TernaryTile640ScaledReductionAxis = 5,
+}
+
+/// Per-matrix weight binding — the full contract between the compiler's
+/// packing pass and every runtime dispatch path.
+///
+/// Each matrix gets its own binding after the admission pipeline selects a
+/// format. Offsets are independent per segment so changing one matrix's
+/// format never shifts another's address.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MatrixWeightBinding {
+    /// Byte offset into weights_segment for this matrix's codes.
+    pub weights_offset: u64,
+    /// Byte length of codes data in weights_segment.
+    pub weights_bytes: u64,
+    /// Byte offset into tile_metadata_segment for this matrix's tile metadata.
+    pub tile_metadata_offset: u64,
+    /// Byte length of tile metadata data.
+    pub tile_metadata_bytes: u64,
+    /// Byte offset into sidecar_segment for reduction scales (0 = no sidecar).
+    pub sidecar_offset: u64,
+    /// Number of FP16 reduction-axis scale values.
+    pub sidecar_count: u32,
+    /// Index into the bindings array.
+    pub matrix_id: u32,
+    /// QuantizedWeightFormat discriminant.
+    pub format: u8,
+    /// SegmentKind value for the packed codes.
+    pub weights_segment: u8,
+    /// SegmentKind value for tile metadata (scales + biases).
+    pub tile_metadata_segment: u8,
+    /// SegmentKind value for the reduction-axis sidecar (0xFF = none).
+    pub sidecar_segment: u8,
+    pub _pad: [u8; 5],
+    /// Logical matrix dimensions.
+    pub rows: u32,
+    pub cols: u32,
+    /// Tile columns per row of this matrix.
+    pub tiles_per_row: u32,
+}
+
 /// Attention type for a decoder layer.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -35,13 +35,18 @@ pub fn create_flex_dispatch() -> FlexDispatch {
     fd
 }
 
+#[cfg(target_os = "macos")]
 /// Run one dispatch cycle: sample system state, reroute all operations,
 /// and return the number of routes that changed.
 pub fn run_flex_dispatch_cycle(
     flex: &mut FlexDispatch,
     executor: &mut crate::backend::heterogeneous_executor::HeterogeneousExecutor,
 ) -> Result<usize, String> {
-    let old_routes: Vec<_> = executor.routing_table.iter().map(|(k, v)| (*k, *v)).collect();
+    let old_routes: Vec<_> = executor
+        .routing_table
+        .iter()
+        .map(|(k, v)| (*k, *v))
+        .collect();
     flex.reroute(executor)?;
     let new_routes = &executor.routing_table;
     let changed = old_routes
@@ -51,6 +56,7 @@ pub fn run_flex_dispatch_cycle(
     Ok(changed)
 }
 
+#[cfg(target_os = "macos")]
 #[cfg(test)]
 #[cfg(test)]
 mod tests {

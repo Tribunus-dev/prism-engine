@@ -7,12 +7,14 @@
 pub mod builder;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod runtime;
+pub mod shape_ext;
 pub mod types;
 
 // Re-export everything from submodules.
 pub use builder::*;
 #[cfg(feature = "mlx-backend")]
 pub use runtime::*;
+pub use shape_ext::*;
 pub use types::*;
 
 pub use crate::compute_image::manifest::types::{
@@ -161,7 +163,7 @@ fn system_memory_bytes() -> u64 {
     {
         unsafe {
             extern "C" {
-            #[allow(dead_code)]
+                #[allow(dead_code)]
                 fn sysctlbyname(
                     name: *const c_char,
                     oldp: *mut c_void,

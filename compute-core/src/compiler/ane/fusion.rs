@@ -362,6 +362,7 @@ pub fn build_fused_ane_regions(regions: &[ScheduledRegion]) -> Vec<AneFusedArtif
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::routing::BACKEND_ANE;
     use crate::backend::routing::{BackendId, TensorId};
     use crate::compiler::scheduled::{DependencyKind, RegionDependency, ScheduledRegion};
 
@@ -404,10 +405,10 @@ mod tests {
     #[test]
     fn test_fuse_two_ane_regions() {
         let regions = vec![
-            make_region(1, 0, 1, vec![], vec![]), // MLX
-            make_region(2, 3, 2, vec![], vec![]), // ANE
-            make_region(3, 3, 3, vec![], vec![]), // ANE
-            make_region(4, 0, 1, vec![], vec![]), // MLX
+            make_region(1, 0, 1, vec![], vec![]),             // MLX
+            make_region(2, BACKEND_ANE.0, 2, vec![], vec![]), // ANE
+            make_region(3, BACKEND_ANE.0, 3, vec![], vec![]), // ANE
+            make_region(4, 0, 1, vec![], vec![]),             // MLX
         ];
         let pass = AneFusionPass::new(AneFusionConfig::default());
         assert!(pass.applies_to(&regions));
@@ -428,9 +429,9 @@ mod tests {
     #[test]
     fn test_fuse_three_ane_regions() {
         let regions = vec![
-            make_region(1, 3, 1, vec![], vec![]),
-            make_region(2, 3, 2, vec![], vec![]),
-            make_region(3, 3, 3, vec![], vec![]),
+            make_region(1, BACKEND_ANE.0, 1, vec![], vec![]),
+            make_region(2, BACKEND_ANE.0, 2, vec![], vec![]),
+            make_region(3, BACKEND_ANE.0, 3, vec![], vec![]),
         ];
         let pass = AneFusionPass::new(AneFusionConfig::default());
         let (fused, _) = pass.fuse(&regions);
@@ -445,8 +446,8 @@ mod tests {
             ..Default::default()
         };
         let regions = vec![
-            make_region(1, 3, 1, vec![], vec![]), // ANE, 1 op
-            make_region(2, 3, 1, vec![], vec![]), // ANE, 2 ops total — below min
+            make_region(1, BACKEND_ANE.0, 1, vec![], vec![]), // ANE, 1 op
+            make_region(2, BACKEND_ANE.0, 1, vec![], vec![]), // ANE, 2 ops total — below min
         ];
         let pass = AneFusionPass::new(config);
         let (fused, _) = pass.fuse(&regions);
@@ -456,9 +457,9 @@ mod tests {
     #[test]
     fn test_singleton_bridging() {
         let regions = vec![
-            make_region(1, 3, 3, vec![], vec![]), // run of 3
-            make_region(2, 3, 1, vec![], vec![]), // singleton
-            make_region(3, 3, 2, vec![], vec![]), // run of 2
+            make_region(1, BACKEND_ANE.0, 3, vec![], vec![]), // run of 3
+            make_region(2, BACKEND_ANE.0, 1, vec![], vec![]), // singleton
+            make_region(3, BACKEND_ANE.0, 2, vec![], vec![]), // run of 2
         ];
         let pass = AneFusionPass::new(AneFusionConfig::default());
         let (fused, _) = pass.fuse(&regions);
@@ -474,13 +475,13 @@ mod tests {
             ..Default::default()
         };
         let regions = vec![
-            make_region(1, 0, 1, vec![], vec![]), // MLX
-            make_region(2, 3, 3, vec![], vec![]), // ANE run of 3
-            make_region(3, 0, 1, vec![], vec![]), // MLX — breaks run
-            make_region(4, 3, 1, vec![], vec![]), // ANE singleton
-            make_region(5, 0, 1, vec![], vec![]), // MLX
-            make_region(6, 3, 2, vec![], vec![]), // ANE run of 2
-            make_region(7, 0, 1, vec![], vec![]), // MLX
+            make_region(1, 0, 1, vec![], vec![]),             // MLX
+            make_region(2, BACKEND_ANE.0, 3, vec![], vec![]), // ANE run of 3
+            make_region(3, 0, 1, vec![], vec![]),             // MLX — breaks run
+            make_region(4, BACKEND_ANE.0, 1, vec![], vec![]), // ANE singleton
+            make_region(5, 0, 1, vec![], vec![]),             // MLX
+            make_region(6, BACKEND_ANE.0, 2, vec![], vec![]), // ANE run of 2
+            make_region(7, 0, 1, vec![], vec![]),             // MLX
         ];
         let pass = AneFusionPass::new(config);
         let (fused, _) = pass.fuse(&regions);
@@ -501,9 +502,9 @@ mod tests {
         };
         // 8 ANE ops across 3 regions → cap at 3 per fused region
         let regions = vec![
-            make_region(1, 3, 3, vec![], vec![]),
-            make_region(2, 3, 3, vec![], vec![]),
-            make_region(3, 3, 2, vec![], vec![]),
+            make_region(1, BACKEND_ANE.0, 3, vec![], vec![]),
+            make_region(2, BACKEND_ANE.0, 3, vec![], vec![]),
+            make_region(3, BACKEND_ANE.0, 2, vec![], vec![]),
         ];
         let pass = AneFusionPass::new(config);
         let (fused, _) = pass.fuse(&regions);
@@ -518,7 +519,7 @@ mod tests {
             tensors: vec![],
             kind: DependencyKind::Data,
         };
-        let mut r = make_region(1, 3, 2, vec![TensorId(1)], vec![TensorId(2)]);
+        let mut r = make_region(1, BACKEND_ANE.0, 2, vec![TensorId(1)], vec![TensorId(2)]);
         r.dependencies = vec![dep.clone()];
 
         let pass = AneFusionPass::new(AneFusionConfig::default());

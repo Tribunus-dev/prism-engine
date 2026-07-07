@@ -17,9 +17,9 @@ use crate::compute_image::compile::ternary::{
 use crate::compute_image::compile::ternary::{
     QUANT_SCHEMA_NF4_TILE640, QUANT_SCHEMA_TERNARY_TILE640,
 };
+use crate::compute_image::compile::tts_compile::pack_tts_weights;
 use crate::compute_image::manifest::Manifest;
 use crate::compute_image::manifest::SharedWeightLayout;
-use crate::compute_image::compile::tts_compile::pack_tts_weights;
 use crate::compute_image::multimodal::descriptor::{
     MultimodalInputDescriptorV1, ProjectionRole, ProjectionTensorRecord,
     MULTIMODAL_DESCRIPTOR_MAGIC,
@@ -30,7 +30,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn is_draft_tensor_name(name: &str) -> bool {
     name.contains("draft") || name.contains("mtp")
@@ -1571,9 +1571,18 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         ("tts_talker_weight.bin", SegmentKind::TtsTalkerWeight),
         ("tts_talker_scale.bin", SegmentKind::TtsTalkerScale),
         ("tts_talker_bias.bin", SegmentKind::TtsTalkerBias),
-        ("tts_code_predictor_weight.bin", SegmentKind::TtsCodePredictorWeight),
-        ("tts_code_predictor_scale.bin", SegmentKind::TtsCodePredictorScale),
-        ("tts_code_predictor_bias.bin", SegmentKind::TtsCodePredictorBias),
+        (
+            "tts_code_predictor_weight.bin",
+            SegmentKind::TtsCodePredictorWeight,
+        ),
+        (
+            "tts_code_predictor_scale.bin",
+            SegmentKind::TtsCodePredictorScale,
+        ),
+        (
+            "tts_code_predictor_bias.bin",
+            SegmentKind::TtsCodePredictorBias,
+        ),
         ("tts_codec_weight.bin", SegmentKind::TtsCodecWeight),
         ("tts_codebook.bin", SegmentKind::TtsCodebook),
     ];
@@ -1582,24 +1591,30 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
     let tts_safetensors_path = input_dir.join("tts_model.safetensors");
     if tts_safetensors_path.exists() {
         if let Ok(_tts_entries) = pack_tts_weights(&tts_safetensors_path, input_dir) {
-            eprintln!("[cimage] TTS weights pre-packed from '{}'", tts_safetensors_path.display());
+            eprintln!(
+                "[cimage] TTS weights pre-packed from '{}'",
+                tts_safetensors_path.display()
+            );
         }
     }
 
-    let mut weight_segments: Vec<Vec<u8>> = Vec::new();
-    let mut extra_segments: Vec<(SegmentKind, Vec<u8>)> = Vec::new();
+    // Store only paths for large disk-backed segments (streaming read during write phase).
+    // In-memory synthesized data (execution graph, model artifacts) kept as Vec<u8>.
+    let mut weight_files: Vec<PathBuf> = Vec::new();
+    let mut extra_files: Vec<(SegmentKind, PathBuf)> = Vec::new();
+    let mut extra_data: Vec<(SegmentKind, Vec<u8>)> = Vec::new();
     for entry in std::fs::read_dir(input_dir)? {
         let entry = entry?;
         let name = entry.file_name();
         let name_str = name.to_string_lossy().to_string();
         if name_str.starts_with("segment_") && name_str.ends_with(".bin") {
-            weight_segments.push(std::fs::read(entry.path())?);
+            weight_files.push(entry.path());
             continue;
         }
         let mut matched = false;
         for (pat, kind) in kernel_patterns {
             if name_str == *pat {
-                extra_segments.push((*kind, std::fs::read(entry.path())?));
+                extra_files.push((*kind, entry.path()));
                 matched = true;
                 break;
             }
@@ -1611,7 +1626,7 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
             if name_str == *pat
                 || (kind == &SegmentKind::AneArchive && name_str.ends_with(".ane.tar"))
             {
-                extra_segments.push((*kind, std::fs::read(entry.path())?));
+                extra_files.push((*kind, entry.path()));
                 matched = true;
                 break;
             }
@@ -1621,7 +1636,7 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         }
         for (pat, kind) in tts_patterns {
             if name_str == *pat {
-                extra_segments.push((*kind, std::fs::read(entry.path())?));
+                extra_files.push((*kind, entry.path()));
                 break;
             }
         }
@@ -1629,24 +1644,42 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
 
     let mut multimodal = synthesize_multimodal_segments(input_dir, manifest.as_ref())?;
     if let Some(bytes) = load_or_synthesize_execution_graph(input_dir, manifest.as_ref())? {
-        extra_segments.push((SegmentKind::ExecutionGraph, bytes));
+        extra_data.push((SegmentKind::ExecutionGraph, bytes));
     }
     if let Some(bytes) = load_or_synthesize_model_artifacts(input_dir, manifest.as_ref())? {
-        extra_segments.push((SegmentKind::ModelArtifacts, bytes));
+        extra_data.push((SegmentKind::ModelArtifacts, bytes));
     }
 
     // ── Heterogeneous execution image ──────────────────────────
     let heterogeneous_path = input_dir.join("heterogeneous_image.json");
     if heterogeneous_path.exists() {
         if let Ok(bytes) = std::fs::read(&heterogeneous_path) {
-            extra_segments.push((SegmentKind::HeterogeneousImage, bytes));
+            extra_data.push((SegmentKind::HeterogeneousImage, bytes));
         }
     }
+
+    // Sum byte lengths for all segments of a given kind across both file and in-memory sources.
+    let segment_total_len = |kind: SegmentKind| -> u64 {
+        let file_sum: u64 = extra_files
+            .iter()
+            .filter(|(k, _)| *k == kind)
+            .filter_map(|(_, p)| p.metadata().ok().map(|m| m.len()))
+            .sum();
+        let mem_sum: u64 = extra_data
+            .iter()
+            .filter(|(k, _)| *k == kind)
+            .map(|(_, d)| d.len() as u64)
+            .sum();
+        file_sum + mem_sum
+    };
 
     // 2. Compute layout
     let mut slots: Vec<Slot> = Vec::new();
     let header_size = std::mem::size_of::<CimageHeader>() as u64;
-    let weights_total: u64 = weight_segments.iter().map(|d| d.len() as u64).sum();
+    let weights_total: u64 = weight_files
+        .iter()
+        .filter_map(|p| p.metadata().ok().map(|m| m.len()))
+        .sum();
 
     let mut cursor = header_size;
     let mut push_slot = |kind: SegmentKind, len: u64| {
@@ -1664,16 +1697,15 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         });
         cursor += len;
     };
-    for (kind, data) in &extra_segments {
-        match kind {
-            SegmentKind::MetalLib
-            | SegmentKind::CudaLib
-            | SegmentKind::RocmLib
-            | SegmentKind::LevelZeroLib
-            | SegmentKind::VulkanLib
-            | SegmentKind::WebGpuLib => push_slot(*kind, data.len() as u64),
-            _ => {}
-        }
+    for kind in &[
+        SegmentKind::MetalLib,
+        SegmentKind::CudaLib,
+        SegmentKind::RocmLib,
+        SegmentKind::LevelZeroLib,
+        SegmentKind::VulkanLib,
+        SegmentKind::WebGpuLib,
+    ] {
+        push_slot(*kind, segment_total_len(*kind));
     }
     push_slot(SegmentKind::TernaryWeights, weights_total);
     if let Some(multimodal) = &multimodal {
@@ -1702,25 +1734,31 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
             multimodal.auxiliary_weights.len() as u64,
         );
     }
-    for (kind, data) in &extra_segments {
-        match kind {
-            SegmentKind::ExecutionGraph | SegmentKind::ModelArtifacts => {
-                push_slot(*kind, data.len() as u64)
-            }
-            _ => {}
-        }
+    for kind in &[SegmentKind::ExecutionGraph, SegmentKind::ModelArtifacts] {
+        push_slot(*kind, segment_total_len(*kind));
     }
-    for (kind, data) in &extra_segments {
-        match kind {
-            SegmentKind::AneArchive
-            | SegmentKind::IntelNpuBlob
-            | SegmentKind::AmdNpuBlob
-            | SegmentKind::QualcommNpuBlob
-            | SegmentKind::GoogleTpuBlob
-            | SegmentKind::HuaweiAscendBlob
-            | SegmentKind::HailoBlob => push_slot(*kind, data.len() as u64),
-            _ => {}
-        }
+    for kind in &[
+        SegmentKind::AneArchive,
+        SegmentKind::IntelNpuBlob,
+        SegmentKind::AmdNpuBlob,
+        SegmentKind::QualcommNpuBlob,
+        SegmentKind::GoogleTpuBlob,
+        SegmentKind::HuaweiAscendBlob,
+        SegmentKind::HailoBlob,
+    ] {
+        push_slot(*kind, segment_total_len(*kind));
+    }
+    for kind in &[
+        SegmentKind::TtsTalkerWeight,
+        SegmentKind::TtsTalkerScale,
+        SegmentKind::TtsTalkerBias,
+        SegmentKind::TtsCodePredictorWeight,
+        SegmentKind::TtsCodePredictorScale,
+        SegmentKind::TtsCodePredictorBias,
+        SegmentKind::TtsCodecWeight,
+        SegmentKind::TtsCodebook,
+    ] {
+        push_slot(*kind, segment_total_len(*kind));
     }
     if let Some(multimodal) = &mut multimodal {
         if multimodal.descriptor.len() >= std::mem::size_of::<MultimodalInputDescriptorV1>() {
@@ -1747,7 +1785,7 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         }
     }
     if let Some(multimodal) = &multimodal {
-        if let Some((_, graph_bytes)) = extra_segments
+        if let Some((_, graph_bytes)) = extra_data
             .iter_mut()
             .find(|(kind, _)| *kind == SegmentKind::ExecutionGraph)
         {
@@ -1774,77 +1812,81 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
     }
     let mut builder = AlignedMmapBuilder::new(mmap);
     builder.cursor = header_size as usize;
+    let mut payload_hasher = Sha256::new();
 
-    for (kind, bytes) in &extra_segments {
-        match kind {
-            SegmentKind::MetalLib
-            | SegmentKind::CudaLib
-            | SegmentKind::RocmLib
-            | SegmentKind::LevelZeroLib
-            | SegmentKind::VulkanLib
-            | SegmentKind::WebGpuLib => {
-                if !bytes.is_empty() {
-                    builder.align_cursor();
-                    builder.allocate_slice(bytes.len()).copy_from_slice(bytes);
+    // Write all segments by iterating slots in their computed (header) order.
+    // Snap cursor to the layout-computed slot offset (PATTERN A).
+    // File-backed segments are read one-at-a-time and dropped immediately.
+    for slot in &slots {
+        if slot.length == 0 {
+            continue;
+        }
+        builder.cursor = slot.offset as usize;
+        let mut seg_slice = builder.allocate_slice(slot.length as usize);
+
+        match slot.kind {
+            SegmentKind::TernaryWeights => {
+                for wpath in &weight_files {
+                    let data = std::fs::read(wpath)?;
+                    payload_hasher.update(&data);
+                    let (head, tail) = seg_slice.split_at_mut(data.len());
+                    head.copy_from_slice(&data);
+                    seg_slice = tail;
                 }
             }
-            _ => {}
-        }
-    }
-
-    if weights_total > 0 {
-        builder.align_cursor();
-        let mut seg_slice = builder.allocate_slice(weights_total as usize);
-        for data in &weight_segments {
-            let (head, tail) = seg_slice.split_at_mut(data.len());
-            head.copy_from_slice(data);
-            seg_slice = tail;
-        }
-    }
-
-    if let Some(multimodal) = &multimodal {
-        for bytes in [
-            &multimodal.projection_weights,
-            &multimodal.projection_scales,
-            &multimodal.projection_biases,
-            &multimodal.descriptor,
-            &multimodal.position_embeddings,
-            &multimodal.auxiliary_weights,
-        ] {
-            if !bytes.is_empty() {
-                builder.align_cursor();
-                builder.allocate_slice(bytes.len()).copy_from_slice(bytes);
-            }
-        }
-    }
-
-    for (kind, bytes) in &extra_segments {
-        match kind {
-            SegmentKind::ExecutionGraph | SegmentKind::ModelArtifacts => {
-                if !bytes.is_empty() {
-                    builder.align_cursor();
-                    builder.allocate_slice(bytes.len()).copy_from_slice(bytes);
+            SegmentKind::MultimodalProjectionWeights
+            | SegmentKind::MultimodalProjectionScales
+            | SegmentKind::MultimodalProjectionBiases
+            | SegmentKind::MultimodalInputDescriptor
+            | SegmentKind::MultimodalPositionEmbeddings
+            | SegmentKind::MultimodalAuxiliaryWeights => {
+                let bytes = match slot.kind {
+                    SegmentKind::MultimodalProjectionWeights => {
+                        multimodal.as_ref().map(|m| &m.projection_weights[..])
+                    }
+                    SegmentKind::MultimodalProjectionScales => {
+                        multimodal.as_ref().map(|m| &m.projection_scales[..])
+                    }
+                    SegmentKind::MultimodalProjectionBiases => {
+                        multimodal.as_ref().map(|m| &m.projection_biases[..])
+                    }
+                    SegmentKind::MultimodalInputDescriptor => {
+                        multimodal.as_ref().map(|m| &m.descriptor[..])
+                    }
+                    SegmentKind::MultimodalPositionEmbeddings => {
+                        multimodal.as_ref().map(|m| &m.position_embeddings[..])
+                    }
+                    SegmentKind::MultimodalAuxiliaryWeights => {
+                        multimodal.as_ref().map(|m| &m.auxiliary_weights[..])
+                    }
+                    _ => None,
+                };
+                if let Some(bytes) = bytes {
+                    payload_hasher.update(bytes);
+                    seg_slice.copy_from_slice(bytes);
                 }
             }
-            _ => {}
-        }
-    }
-
-    for (kind, bytes) in &extra_segments {
-        match kind {
-            SegmentKind::AneArchive
-            | SegmentKind::IntelNpuBlob
-            | SegmentKind::AmdNpuBlob
-            | SegmentKind::QualcommNpuBlob
-            | SegmentKind::GoogleTpuBlob
-            | SegmentKind::HuaweiAscendBlob
-            | SegmentKind::HailoBlob => {
-                if !bytes.is_empty() {
-                    builder.align_cursor();
-                    builder.allocate_slice(bytes.len()).copy_from_slice(bytes);
+            _ => {
+                // File-backed segments of this kind (MetalLib, AneArchive, etc.)
+                for (kind, path) in &extra_files {
+                    if *kind == slot.kind {
+                        let data = std::fs::read(path)?;
+                        payload_hasher.update(&data);
+                        let (head, tail) = seg_slice.split_at_mut(data.len());
+                        head.copy_from_slice(&data);
+                        seg_slice = tail;
+                    }
+                }
+                // In-memory segments of this kind (ExecutionGraph, ModelArtifacts, etc.)
+                for (kind, data) in &extra_data {
+                    if *kind == slot.kind {
+                        payload_hasher.update(data);
+                        let (head, tail) = seg_slice.split_at_mut(data.len());
+                        head.copy_from_slice(data);
+                        seg_slice = tail;
+                    }
                 }
             }
-            _ => {}
         }
     }
 
@@ -1866,52 +1908,6 @@ pub fn pack_cimage_from_dir(input_dir: &Path, output_path: &Path) -> std::io::Re
         );
     }
 
-    let mut payload_hasher = Sha256::new();
-    for slot in &slots {
-        match slot.kind {
-            SegmentKind::TernaryWeights => {
-                for segment in &weight_segments {
-                    payload_hasher.update(segment);
-                }
-            }
-            SegmentKind::MultimodalProjectionWeights => {
-                if let Some(multimodal) = &multimodal {
-                    payload_hasher.update(&multimodal.projection_weights);
-                }
-            }
-            SegmentKind::MultimodalProjectionScales => {
-                if let Some(multimodal) = &multimodal {
-                    payload_hasher.update(&multimodal.projection_scales);
-                }
-            }
-            SegmentKind::MultimodalProjectionBiases => {
-                if let Some(multimodal) = &multimodal {
-                    payload_hasher.update(&multimodal.projection_biases);
-                }
-            }
-            SegmentKind::MultimodalInputDescriptor => {
-                if let Some(multimodal) = &multimodal {
-                    payload_hasher.update(&multimodal.descriptor);
-                }
-            }
-            SegmentKind::MultimodalPositionEmbeddings => {
-                if let Some(multimodal) = &multimodal {
-                    payload_hasher.update(&multimodal.position_embeddings);
-                }
-            }
-            SegmentKind::MultimodalAuxiliaryWeights => {
-                if let Some(multimodal) = &multimodal {
-                    payload_hasher.update(&multimodal.auxiliary_weights);
-                }
-            }
-            _ => {
-                if let Some((_, bytes)) = extra_segments.iter().find(|(kind, _)| *kind == slot.kind)
-                {
-                    payload_hasher.update(bytes);
-                }
-            }
-        }
-    }
     let payload_hash: [u8; 32] = payload_hasher.finalize().into();
     let (
         num_layers,
@@ -2928,22 +2924,26 @@ fn stable_name_hash(name: &str) -> u64 {
 }
 
 fn read_tensor_payload(path: &Path, offset: u64, byte_length: u64) -> std::io::Result<Vec<u8>> {
-    let bytes = std::fs::read(path)?;
-    let start = offset as usize;
-    let end = start.saturating_add(byte_length as usize);
-    if end > bytes.len() {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let end = offset.saturating_add(byte_length);
+    if end > file_len {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!(
                 "tensor slice {}..{} exceeds segment {} length {}",
-                start,
+                offset,
                 end,
                 path.display(),
-                bytes.len()
+                file_len
             ),
         ));
     }
-    Ok(bytes[start..end].to_vec())
+    file.seek(SeekFrom::Start(offset))?;
+    let mut buf = vec![0u8; byte_length as usize];
+    file.read_exact(&mut buf)?;
+    Ok(buf)
 }
 
 fn read_json_if_present(path: &Path) -> Option<serde_json::Value> {
@@ -2976,9 +2976,9 @@ fn header_fields_from_manifest(manifest: Option<&Manifest>) -> (u32, u32, u32, u
 mod tests {
     use super::*;
     use crate::compute_image::manifest::{
-        CompileReadiness, Nf4Tile640Layout, QuantizationDesc, ResidencyPlan, Segment,
-        SegmentKind as ManifestSegmentKind, ShardHash, SharedWeightLayout, SourceIdentity,
-        TensorEntry, QuantizationQualityStatus,
+        CompileReadiness, Nf4Tile640Layout, QuantizationDesc, QuantizationQualityStatus,
+        ResidencyPlan, Segment, SegmentKind as ManifestSegmentKind, ShardHash, SharedWeightLayout,
+        SourceIdentity, TensorEntry,
     };
     use crate::config::{
         AudioArchitecture, GenerationRegime, LayerPlan, ModelExecutionPlan, RopeSpec,

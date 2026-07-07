@@ -6,8 +6,7 @@
 use super::types::{
     compute_manifest_hash, default_alignment_bytes, default_layout_version,
     default_tensor_alignment_bytes, AliasEntry, Manifest, MetalKernelArtifact, QuantizationDesc,
-    QuantizationQualityStatus, ResidencyPlan, Segment, SegmentKind, SourceIdentity,
-    TensorEntry,
+    QuantizationQualityStatus, ResidencyPlan, Segment, SegmentKind, SourceIdentity, TensorEntry,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

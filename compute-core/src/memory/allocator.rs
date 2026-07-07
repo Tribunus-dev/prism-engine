@@ -683,10 +683,9 @@ mod tests {
     #[test]
     fn test_dtype_not_supported() {
         let alloc = IosurfaceAllocator::new(0);
-        // Arena::new supports Float16 and Float32 only.
+        // Arena::new now supports Float32 as well.
         let result = alloc.allocate(1, 4, DataType::Float32);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("FP16"));
+        assert!(result.is_ok());
     }
 
     #[test]

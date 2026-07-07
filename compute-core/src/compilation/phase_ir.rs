@@ -260,6 +260,7 @@ pub struct PhaseRegion {
     pub region_id: RegionId,
     pub operations: Vec<CompilePhaseDescriptor>,
     pub placement_candidates: Vec<crate::compilation::phase_ir::CompilePlacement>,
+    #[cfg(target_os = "macos")]
     pub ane_eligibility: crate::compilation::ane_eligibility::AneEligibility,
     pub input_contract: Option<crate::compilation::activation_abi::ActivationContract>,
     pub output_contract: Option<crate::compilation::activation_abi::ActivationContract>,

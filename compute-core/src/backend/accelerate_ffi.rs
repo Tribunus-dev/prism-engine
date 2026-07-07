@@ -82,6 +82,16 @@ extern "C" {
         n: i32,
     );
 
+    /// Vector-scalar add: C[i] = A[i] + B
+    pub fn vDSP_vsadd(
+        a: *const f32,
+        a_stride: i32,
+        b: *const f32,
+        c: *mut f32,
+        c_stride: i32,
+        n: i32,
+    );
+
     /// Element-wise maximum: C[i] = A[i] if A[i] > B[i] else B[i]
     pub fn vDSP_vmax(
         a: *const f32,
@@ -171,13 +181,7 @@ extern "C" {
     );
 
     /// Magnitude squared for split-complex data.
-    pub fn vDSP_zvmags(
-        a: *const DSPSplitComplex,
-        stride: i32,
-        c: *mut f32,
-        c_stride: i32,
-        n: u32,
-    );
+    pub fn vDSP_zvmags(a: *const DSPSplitComplex, stride: i32, c: *mut f32, c_stride: i32, n: u32);
 
     /// Generate a Hann window.
     pub fn vDSP_hann_window(c: *mut f32, n: u32, flag: i32);

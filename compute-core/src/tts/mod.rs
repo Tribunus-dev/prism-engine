@@ -7,7 +7,7 @@
 //!
 //! Qwen3-TTS is Apache 2.0 licensed.
 
-pub mod talker;
 pub mod code_predictor;
 pub mod codec;
 pub mod pipeline;
+pub mod talker;

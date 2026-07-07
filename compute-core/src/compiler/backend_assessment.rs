@@ -52,22 +52,22 @@ struct BackendBlock {
 fn score_backend(op: &GraphOperation, backend: BackendId) -> u32 {
     match backend.0 {
         0 => {
-            // MLX — GPU-accelerated, best for matmul and fused activation ops
+            // Metal — Apple GPU via Metal Performance Shaders, efficient for matmul and fused activations
             match op.family {
                 OperationFamily::Matmul => 100,
                 OperationFamily::QuantizedMatmul => 100,
-                OperationFamily::Softmax => 90,
-                OperationFamily::RmsNorm => 80,
-                OperationFamily::RoPE => 80,
-                OperationFamily::Silu => 85,
-                _ => 70,
+                OperationFamily::Softmax => 85,
+                OperationFamily::RmsNorm => 75,
+                OperationFamily::RoPE => 75,
+                OperationFamily::Silu => 80,
+                _ => 65,
             }
         }
         1 => {
             // Accelerate — CPU BLAS / BNNS, good for element-wise and layout ops
             match op.family {
                 OperationFamily::Add | OperationFamily::Multiply => 90,
-                OperationFamily::Silu => 85,
+                OperationFamily::Silu => 84,
                 OperationFamily::RmsNorm => 75,
                 OperationFamily::Matmul => 60,
                 OperationFamily::QuantizedMatmul => 80,
@@ -79,7 +79,7 @@ fn score_backend(op: &GraphOperation, backend: BackendId) -> u32 {
             }
         }
         2 => {
-            // Core ML — ANE islands for attention-heavy regions
+            // ANE — Apple Neural Engine for attention-heavy regions
             match op.family {
                 OperationFamily::AttentionBlock => 90,
                 OperationFamily::MlpBlock => 70,
@@ -88,12 +88,23 @@ fn score_backend(op: &GraphOperation, backend: BackendId) -> u32 {
             }
         }
         3 => {
-            // Orion / ANE private runtime — lowest-level ANE access
+            // MLX — Apple GPU via MLX framework, best for matmul and fused activation ops
             match op.family {
-                OperationFamily::AttentionBlock => 95,
-                OperationFamily::MlpBlock => 75,
-                OperationFamily::DecoderLayer => 95,
-                _ => 25,
+                OperationFamily::Matmul => 100,
+                OperationFamily::QuantizedMatmul => 100,
+                OperationFamily::Softmax => 90,
+                OperationFamily::RmsNorm => 80,
+                OperationFamily::RoPE => 80,
+                OperationFamily::Silu => 86,
+                _ => 70,
+            }
+        }
+        4 => {
+            // Megakernel — fused Metal GPU decode, optimised for quantized matmul
+            match op.family {
+                OperationFamily::Matmul => 95,
+                OperationFamily::QuantizedMatmul => 100,
+                _ => 10,
             }
         }
         _ => 10,
@@ -321,7 +332,7 @@ fn build_groups(assignments: &[(OperationId, BackendId)]) -> Vec<BackendBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::routing::SynchronizationPolicy;
+    use crate::backend::routing::{SynchronizationPolicy, BACKEND_ACCELERATE, BACKEND_MLX};
 
     // Helper to create a test operation
     fn make_op(
@@ -368,9 +379,9 @@ mod tests {
     }
 
     #[test]
-    fn test_score_backend_orion_decoder_layer() {
+    fn test_score_backend_ane_decoder_layer() {
         let op = make_op(1, OperationFamily::DecoderLayer, None, None, None, false);
-        assert_eq!(score_backend(&op, BackendId(3)), 95);
+        assert_eq!(score_backend(&op, BackendId(2)), 90);
     }
 
     #[test]
@@ -431,28 +442,29 @@ mod tests {
     #[test]
     fn test_cross_backend_groups_and_transfers() {
         // Force a cross-backend scenario: op1 is best on MLX, op2 on Accelerate,
-        // op3 on MLX again.  This creates three groups with two transfers.
-        let op1 = make_op(1, OperationFamily::Matmul, None, None, None, false); // best: MLX(100) > Accel(60)
-        let op2 = make_op(2, OperationFamily::Transpose, None, None, None, false); // best: Accel(90) > MLX(70)
-        let op3 = make_op(3, OperationFamily::Silu, None, None, None, false); // best: MLX(85) > Accel(85) — MLX wins default
+        // op3 on MLX again (MLX silu=86 > Accel silu=84).  This creates three groups with two transfers.
+        let op1 = make_op(1, OperationFamily::Matmul, None, None, None, false);
+        let op2 = make_op(2, OperationFamily::Transpose, None, None, None, false);
+        let op3 = make_op(3, OperationFamily::Silu, None, None, None, false);
 
         let graph = ModelOperationGraph {
             operations: vec![op1, op2, op3],
             operand_shapes: HashMap::new(),
         };
 
-        let (plans, transfers) = assess_and_route(&graph, &[BackendId(0), BackendId(1)]).unwrap();
+        let (plans, transfers) =
+            assess_and_route(&graph, &[BACKEND_MLX, BACKEND_ACCELERATE]).unwrap();
         // MLX → Accelerate → MLX = 3 groups, 2 transfers
         assert_eq!(plans.len(), 3);
         assert_eq!(transfers.len(), 2);
 
         // First group: MLX
-        assert_eq!(plans[0].plan.backend_id, BackendId(0));
+        assert_eq!(plans[0].plan.backend_id, BACKEND_MLX);
         assert_eq!(plans[0].plan.operations, vec![OperationId(1)]);
         assert_eq!(plans[0].plan.synchronization, SynchronizationPolicy::None);
 
         // Second group: Accelerate
-        assert_eq!(plans[1].plan.backend_id, BackendId(1));
+        assert_eq!(plans[1].plan.backend_id, BACKEND_ACCELERATE);
         assert_eq!(plans[1].plan.operations, vec![OperationId(2)]);
         assert_eq!(
             plans[1].plan.synchronization,
@@ -460,21 +472,21 @@ mod tests {
         );
 
         // Third group: MLX
-        assert_eq!(plans[2].plan.backend_id, BackendId(0));
+        assert_eq!(plans[2].plan.backend_id, BACKEND_MLX);
         assert_eq!(plans[2].plan.operations, vec![OperationId(3)]);
         assert_eq!(
             plans[2].plan.synchronization,
             SynchronizationPolicy::Barrier
         );
 
-        // Ti: MLX→Accel transfer for tensor of op1 (id=1)
-        assert_eq!(transfers[0].source_backend, BackendId(0));
-        assert_eq!(transfers[0].destination_backend, BackendId(1));
+        // Transfer: MLX→Accel for tensor of op1 (id=1)
+        assert_eq!(transfers[0].source_backend, BACKEND_MLX);
+        assert_eq!(transfers[0].destination_backend, BACKEND_ACCELERATE);
         assert_eq!(transfers[0].tensor_id, TensorId(1));
 
         // Transfer: Accel→MLX for tensor of op2 (id=2)
-        assert_eq!(transfers[1].source_backend, BackendId(1));
-        assert_eq!(transfers[1].destination_backend, BackendId(0));
+        assert_eq!(transfers[1].source_backend, BACKEND_ACCELERATE);
+        assert_eq!(transfers[1].destination_backend, BACKEND_MLX);
         assert_eq!(transfers[1].tensor_id, TensorId(2));
     }
 
