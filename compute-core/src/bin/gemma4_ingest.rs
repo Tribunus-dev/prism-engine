@@ -1039,7 +1039,7 @@ fn admission_format_to_binding_format(f: QuantizedMatrixFormat) -> u8 {
         QuantizedMatrixFormat::Nf4Tile640Base => 0,
         QuantizedMatrixFormat::Int8Tile640Base => 1,
         QuantizedMatrixFormat::TernaryTile640Base => todo!("ternary ingest not wired"),
-        QuantizedMatrixFormat::RawF16 => 3,
+        QuantizedMatrixFormat::RawF32 => 3,
     }
 }
 
@@ -1305,7 +1305,7 @@ fn pack_matrix_nf4_inline(
             QuantizedMatrixFormat::Int8Tile640Base => (39u8, 27u8, 0xFF),
             QuantizedMatrixFormat::TernaryTile640Base
             => todo!("ternary ingest not wired"),
-            QuantizedMatrixFormat::RawF16 => todo!("raw f16 ingest not wired"),
+            QuantizedMatrixFormat::RawF32 => todo!("raw f32 ingest not wired"),
         };
         bindings.push(WeightBindingData {
             key: key.to_string(),
@@ -1508,7 +1508,7 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
         let sidecar_count = u32::from_le_bytes(data[c1 + 40..c1 + 44].try_into().unwrap());
 
         // ── Field-validity checks (fail closed) ──────────────────────
-        // Format: 0=Nf4Tile640Base, 1=Int8Tile640Base, 2=TernaryTile640Base, 3=RawF16.
+        // Format: 0=Nf4Tile640Base, 1=Int8Tile640Base, 2=TernaryTile640Base, 3=RawF32.
         if format > 2 {
             return Vec::new();
         }

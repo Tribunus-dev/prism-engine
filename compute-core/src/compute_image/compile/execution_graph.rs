@@ -22,7 +22,7 @@ pub enum QuantizedWeightFormat {
     /// Ternary Tile640: 64-byte nibble codes per 256-element block, FP16 scale per block.
     TernaryTile640Base = 2,
     /// Raw F16 passthrough.
-    RawF16 = 3,
+    RawF32 = 3,
 }
 
 /// Declares the per-element encoding of sidecar data payloads.

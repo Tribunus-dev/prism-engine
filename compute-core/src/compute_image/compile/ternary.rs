@@ -452,6 +452,153 @@ impl TensorRecord {
 pub type PrismCimageHeader = CimageHeader;
 pub type PrismCimageLayoutMeta = CimageLayoutMeta;
 /// Backward-compatible function alias
+/// V1 MatrixWeightBinding with canonical LE serialization.
+pub const MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH: usize = 2 + 4 + 16 + 1 + 2 + 32
+    + 4 + 4 + 2 + 4 + 2 + 1 + 1 + 1 + 8 + 8 + 4 + 1 + 8 + 8 + 2
+    + 1 + 8 + 8 + 1 + 1 + 4 + 1 + 8 + 8 + 4;
+// Verify: 2+4+16+1+2+32+4+4+2+4+2+1+1+1+8+8+4+1+8+8+2+1+8+8+1+1+4+1+8+8+4
+
+#[repr(C)]
+pub struct MatrixWeightBindingV1 {
+    pub binding_wire_version: u16,
+    pub matrix_id: u32,
+    pub tensor_id: [u8; 16],
+    pub representation: u8,
+    pub representation_version: u16,
+    pub kernel_abi_digest: [u8; 32],
+    pub in_features: u32,
+    pub out_features: u32,
+    pub reduction_tile_size: u16,
+    pub tiles_per_output_channel: u32,
+    pub tail_reduction_count: u16,
+    pub macro_layout: u8,
+    pub tail_handling: u8,
+    pub code_segment: u8,
+    code_offset: u64,
+    code_length: u64,
+    code_tile_stride_bytes: u32,
+    pub metadata_segment: u8,
+    metadata_offset: u64,
+    metadata_length: u64,
+    metadata_tile_stride_bytes: u16,
+    pub sidecar_segment: u8,
+    sidecar_offset: u64,
+    sidecar_length: u64,
+    pub sidecar_kind: u8,
+    pub sidecar_element_format: u8,
+    pub sidecar_count: u32,
+    pub residual_segment: u8,
+    residual_offset: u64,
+    residual_length: u64,
+    pub required_alignment_bytes: u32,
+}
+
+/// Serialize a MatrixWeightBindingV1 in canonical little-endian format.
+pub fn write_matrix_weight_binding_v1_le<W: std::io::Write>(
+    w: &mut W,
+    b: &MatrixWeightBindingV1,
+) -> std::io::Result<()> {
+    w.write_all(&b.binding_wire_version.to_le_bytes())?;
+    w.write_all(&b.matrix_id.to_le_bytes())?;
+    w.write_all(&b.tensor_id)?;
+    w.write_all(&[b.representation])?;
+    w.write_all(&b.representation_version.to_le_bytes())?;
+    w.write_all(&b.kernel_abi_digest)?;
+    w.write_all(&b.in_features.to_le_bytes())?;
+    w.write_all(&b.out_features.to_le_bytes())?;
+    w.write_all(&b.reduction_tile_size.to_le_bytes())?;
+    w.write_all(&b.tiles_per_output_channel.to_le_bytes())?;
+    w.write_all(&b.tail_reduction_count.to_le_bytes())?;
+    w.write_all(&[b.macro_layout])?;
+    w.write_all(&[b.tail_handling])?;
+    w.write_all(&[b.code_segment])?;
+    w.write_all(&b.code_offset.to_le_bytes())?;
+    w.write_all(&b.code_length.to_le_bytes())?;
+    w.write_all(&b.code_tile_stride_bytes.to_le_bytes())?;
+    w.write_all(&[b.metadata_segment])?;
+    w.write_all(&b.metadata_offset.to_le_bytes())?;
+    w.write_all(&b.metadata_length.to_le_bytes())?;
+    w.write_all(&b.metadata_tile_stride_bytes.to_le_bytes())?;
+    w.write_all(&[b.sidecar_segment])?;
+    w.write_all(&b.sidecar_offset.to_le_bytes())?;
+    w.write_all(&b.sidecar_length.to_le_bytes())?;
+    w.write_all(&[b.sidecar_kind])?;
+    w.write_all(&[b.sidecar_element_format])?;
+    w.write_all(&b.sidecar_count.to_le_bytes())?;
+    w.write_all(&[b.residual_segment])?;
+    w.write_all(&b.residual_offset.to_le_bytes())?;
+    w.write_all(&b.residual_length.to_le_bytes())?;
+    w.write_all(&b.required_alignment_bytes.to_le_bytes())?;
+    Ok(())
+}
+
+/// Parse a MatrixWeightBindingV1 from a byte slice (canonical LE).
+pub fn read_matrix_weight_binding_v1_le(data: &[u8]) -> Result<MatrixWeightBindingV1, String> {
+    if data.len() < MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH {
+        return Err(format!(
+            "MatrixWeightBindingV1 too small: {} < {}",
+            data.len(), MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH
+        ));
+    }
+    let mut off = 0usize;
+    let mut read = |n: usize| -> &[u8] { let s = &data[off..off+n]; off += n; s };
+    let bv: u16 = u16::from_le_bytes(read(2).try_into().unwrap());
+    if bv != 1 {
+        return Err(format!("unknown MatrixWeightBindingV1 wire version: {}", bv));
+    }
+    let rep: u8 = read(1)[0];
+    if rep > 3 {
+        return Err(format!("unknown representation discriminant: {}", rep));
+    }
+    let rt: u16 = u16::from_le_bytes(read(2).try_into().unwrap());
+    if rep <= 2 && rt != 640 {
+        return Err(format!(
+            "quantized format requires reduction_tile_size=640, got {}", rt
+        ));
+    }
+    let ifeat: u32 = u32::from_le_bytes(read(4).try_into().unwrap());
+    let ofeat: u32 = u32::from_le_bytes(read(4).try_into().unwrap());
+    drop(read(4)); // tiles_per_output_channel (derivable)
+    let _ = read(4); // tiles_per_output_channel (derivable)
+    let trc: u16 = u16::from_le_bytes(read(2).try_into().unwrap());
+    if rep <= 2 && trc != (ifeat % 640) as u16 {
+        return Err("tail_reduction_count mismatch".into());
+    }
+    Ok(MatrixWeightBindingV1 {
+        binding_wire_version: bv,
+        matrix_id: u32::from_le_bytes(read(4).try_into().unwrap()),
+        tensor_id: read(16).try_into().unwrap(),
+        representation: rep,
+        representation_version: u16::from_le_bytes(read(2).try_into().unwrap()),
+        kernel_abi_digest: read(32).try_into().unwrap(),
+        in_features: ifeat,
+        out_features: ofeat,
+        reduction_tile_size: rt,
+        tiles_per_output_channel: u32::from_le_bytes(read(4).try_into().unwrap()),
+        tail_reduction_count: trc,
+        macro_layout: read(1)[0],
+        tail_handling: read(1)[0],
+        code_segment: read(1)[0],
+        code_offset: u64::from_le_bytes(read(8).try_into().unwrap()),
+        code_length: u64::from_le_bytes(read(8).try_into().unwrap()),
+        code_tile_stride_bytes: u32::from_le_bytes(read(4).try_into().unwrap()),
+        metadata_segment: read(1)[0],
+        metadata_offset: u64::from_le_bytes(read(8).try_into().unwrap()),
+        metadata_length: u64::from_le_bytes(read(8).try_into().unwrap()),
+        metadata_tile_stride_bytes: u16::from_le_bytes(read(2).try_into().unwrap()),
+        sidecar_segment: read(1)[0],
+        sidecar_offset: u64::from_le_bytes(read(8).try_into().unwrap()),
+        sidecar_length: u64::from_le_bytes(read(8).try_into().unwrap()),
+        sidecar_kind: read(1)[0],
+        sidecar_element_format: read(1)[0],
+        sidecar_count: u32::from_le_bytes(read(4).try_into().unwrap()),
+        residual_segment: read(1)[0],
+        residual_offset: u64::from_le_bytes(read(8).try_into().unwrap()),
+        residual_length: u64::from_le_bytes(read(8).try_into().unwrap()),
+        required_alignment_bytes: u32::from_le_bytes(read(4).try_into().unwrap()),
+    })
+}
+
 pub fn verify_prism_cimage(
     bytes: &[u8],
 ) -> Result<(PrismCimageHeader, PrismCimageLayoutMeta), String> {

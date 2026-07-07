@@ -6,6 +6,65 @@
 //! A matrix either passes its declared validation contract or the compilation
 //! fails before sealing. No degraded-quality artifact may be emitted.
 
+// \u2500\u2500 Wire ABI versions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+/// Cimage major wire version for V1.
+pub const CIMAGE_MAJOR_VERSION: u16 = 1;
+/// MatrixContract wire version for V1.
+pub const MATRIX_CONTRACT_WIRE_VERSION: u16 = 1;
+/// ExecutionGraph wire version for V1.
+pub const EXECUTION_GRAPH_WIRE_VERSION: u16 = 1;
+/// Representation registry version for V1.
+pub const REPRESENTATION_REGISTRY_VERSION: u16 = 1;
+
+// \u2500\u2500 Tile geometry constants \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+pub const REDUCTION_TILE_SIZE: usize = 640;
+pub const TERNARY_TILE640_CODE_BYTES: usize = 160;
+pub const TERNARY_TILE640_METADATA_BYTES: usize = 4;  // alpha F32
+pub const NF4_TILE640_CODE_BYTES: usize = 320;
+pub const NF4_TILE640_METADATA_BYTES: usize = 8;      // alpha + beta F32
+pub const INT8_TILE640_CODE_BYTES: usize = 640;
+pub const INT8_TILE640_METADATA_BYTES: usize = 4;     // alpha F32 only
+
+// \u2500\u2500 V1 wire ABI representation discriminants \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RuntimeRepresentationClass {
+    TernaryTile640Base = 0,
+    Nf4Tile640Base = 1,
+    Int8Tile640Base = 2,
+    RawF32 = 3,
+}
+
+// \u2500\u2500 Source matrix layout declaration \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceMatrixLayout {
+    /// Prism canonical: W[in_features, out_features]
+    PrismInByOut,
+    /// Checkpoint convention: W_checkpoint[out_features, in_features]
+    CheckpointOutByIn,
+}
+
+// \u2500\u2500 Canonical shape contract \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+#[derive(Debug, Clone, Copy)]
+pub struct CanonicalShape {
+    pub in_features: u32,
+    pub out_features: u32,
+    pub rank: u16,
+}
+
+// \u2500\u2500 Tail handling contract \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TailHandlingContract {
+    ActivationZeroPredicationV1 = 1,
+}
+
+// \u2500\u2500 Tile macro layout \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileMacroLayout {
+    OutputChannelContiguous = 1,
+    ReductionTileInterleaved = 2,
+}
+
 /// NF4 tile640 representation family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -19,7 +78,7 @@ pub enum QuantizedMatrixFormat {
     /// Ternary tile640: 256-element blocks, 2-bit codes, FP16 scale per block.
     TernaryTile640Base = 3,
     /// Raw F16 passthrough for tensors that cannot meet compressed parity.
-    RawF16 = 4,
+    RawF32 = 4,
 }
 
 /// Packing policy for Nf4Tile640Base \u2014 determines how tile alpha/beta are derived.
@@ -29,19 +88,6 @@ pub enum Nf4PackPolicy {
     MaxAbsV1,
     AwlsV1,
     OutputScaledFoldedV1,
-}
-
-/// Macro-layout of tile payload bytes, determined by kernel ABI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TileMacroLayout {
-    OutputChannelContiguous,
-    ReductionTileInterleaved,
-}
-
-/// Contract for partial final tiles where in_features % 640 != 0.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TailHandlingContract {
-    ActivationZeroPredicationV1,
 }
 
 /// NF4 codebook version.

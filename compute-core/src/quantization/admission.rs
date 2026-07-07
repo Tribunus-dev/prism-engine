@@ -76,10 +76,10 @@ pub fn pack_candidate(
             let (codes, scales, biases) = pack_int8_weights(source, in_features, out_features);
             (codes, scales, biases, None)
         }
-        QuantizedMatrixFormat::RawF16 => {
-            // RawF16 passthrough: convert f32 source to F16 bytes.
+        QuantizedMatrixFormat::RawF32 => {
+            // RawF32 passthrough: store f32 source bytes directly.
             let codes: Vec<u8> = source.iter()
-                .flat_map(|x| (half::f16::from_f32(*x)).to_le_bytes())
+                .flat_map(|x| x.to_le_bytes())
                 .collect();
             (codes, vec![], vec![], None)
         }
@@ -109,12 +109,12 @@ pub fn reconstruct_candidate(
         QuantizedMatrixFormat::Int8Tile640Base => {
             unpack_int8_weights(codes, scales, biases, in_features, out_features)
         }
-        QuantizedMatrixFormat::RawF16 => {
-            // RawF16 passthrough: decode F16 bytes directly to f32.
-            let f16s: Vec<half::f16> = codes.chunks_exact(2)
-                .map(|b| half::f16::from_le_bytes([b[0], b[1]]))
+        QuantizedMatrixFormat::RawF32 => {
+            // RawF32 passthrough: decode F32 bytes directly.
+            let f32s: Vec<f32> = codes.chunks_exact(4)
+                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                 .collect();
-            f16s.iter().map(|x| x.to_f32()).collect()
+            f32s
         }
     };
     match scale_vector {
