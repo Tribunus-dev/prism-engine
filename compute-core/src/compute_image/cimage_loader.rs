@@ -19,12 +19,20 @@ use crate::compute_image::compile::ternary::{
     model_artifact_tag, verify_cimage, LayerDirectoryEntry, ModelArtifactEntry, SegmentEntry,
     SegmentKind, PRISM_MAGIC,
 };
+use crate::compute_image::compile::ternary::{
+    read_matrix_weight_binding_v1_le, MatrixWeightBindingV1, MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH,
+};
 use crate::compute_image::megakernel::kernels::HIDDEN_DIM;
 use crate::compute_image::multimodal::descriptor::{
     MultimodalArtifactSummary, MultimodalCapabilities, MultimodalInputDescriptorV1,
     ProjectionBackend, ProjectionPrecision, ProjectionTensorRecord,
 };
 use crate::compute_image::multimodal::SealedMultimodalBindings;
+use crate::quantization::contract::{
+    RuntimeRepresentationClass, TailHandlingContract, TileMacroLayout, INT8_TILE640_CODE_BYTES,
+    INT8_TILE640_METADATA_BYTES, NF4_TILE640_CODE_BYTES, NF4_TILE640_METADATA_BYTES,
+    TERNARY_TILE640_CODE_BYTES, TERNARY_TILE640_METADATA_BYTES,
+};
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -1062,6 +1070,300 @@ pub fn load_heterogeneous_executor(
     }
     executor.set_operation_registry(operation_registry);
     Ok(Some((executor, image)))
+}
+
+/// Parse the MatrixContract segment (SegmentKind::MatrixContract = 41) into
+/// a Vec of MatrixWeightBindingV1 records.
+///
+/// The segment format is: u32 count (LE) followed by count × MatrixWeightBindingV1.
+pub fn parse_matrix_contract(data: &[u8]) -> Result<Vec<MatrixWeightBindingV1>, String> {
+    if data.len() < 4 {
+        return Err("MatrixContract segment too small".into());
+    }
+    let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    let mut bindings = Vec::with_capacity(count);
+    let mut offset = 4usize;
+    for i in 0..count {
+        if offset + MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH > data.len() {
+            return Err(format!(
+                "MatrixContract: binding {} truncated at offset {}/{}",
+                i,
+                offset,
+                data.len()
+            ));
+        }
+        let binding_slice = &data[offset..offset + MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH];
+        let binding = read_matrix_weight_binding_v1_le(binding_slice)?;
+        bindings.push(binding);
+        offset += MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH;
+    }
+    Ok(bindings)
+}
+
+/// Validate a MatrixWeightBindingV1 against spec \u00a716 structural invariants.
+///
+/// Checks per-format byte formulas, segment bounds, and overflow safety.
+pub fn validate_binding(
+    binding: &MatrixWeightBindingV1,
+    cimage_bytes: usize,
+) -> Result<(), String> {
+    // Common validation
+    if binding.binding_wire_version != 1 {
+        return Err(format!(
+            "binding {}: unknown wire version {}",
+            binding.matrix_id, binding.binding_wire_version
+        ));
+    }
+    if binding.representation > 3 {
+        return Err(format!(
+            "binding {}: unknown representation discriminant {}",
+            binding.matrix_id, binding.representation
+        ));
+    }
+    let rep = match binding.representation {
+        0 => RuntimeRepresentationClass::TernaryTile640Base,
+        1 => RuntimeRepresentationClass::Nf4Tile640Base,
+        2 => RuntimeRepresentationClass::Int8Tile640Base,
+        3 => RuntimeRepresentationClass::RawF32,
+        _ => return Err(format!("binding {}: unknown rep", binding.matrix_id)),
+    };
+
+    let in_f = binding.in_features as u64;
+    let out_f = binding.out_features as u64;
+    let tiles = binding.tiles_per_output_channel as u64;
+    let total_tiles = out_f
+        .checked_mul(tiles)
+        .ok_or_else(|| format!("binding {}: total_tiles overflow", binding.matrix_id))?;
+
+    match rep {
+        RuntimeRepresentationClass::TernaryTile640Base => {
+            let expected_code = total_tiles
+                .checked_mul(TERNARY_TILE640_CODE_BYTES as u64)
+                .ok_or_else(|| format!("binding {}: code length overflow", binding.matrix_id))?;
+            let expected_meta = total_tiles
+                .checked_mul(TERNARY_TILE640_METADATA_BYTES as u64)
+                .ok_or_else(|| {
+                    format!("binding {}: metadata length overflow", binding.matrix_id)
+                })?;
+            if binding.code_length != expected_code {
+                return Err(format!(
+                    "binding {}: ternary code_length {} != {}",
+                    binding.matrix_id, binding.code_length, expected_code
+                ));
+            }
+            if binding.metadata_length != expected_meta {
+                return Err(format!(
+                    "binding {}: ternary metadata_length {} != {}",
+                    binding.matrix_id, binding.metadata_length, expected_meta
+                ));
+            }
+            if binding.code_tile_stride_bytes != TERNARY_TILE640_CODE_BYTES as u32 {
+                return Err(format!(
+                    "binding {}: ternary code_tile_stride_bytes {} != {}",
+                    binding.matrix_id, binding.code_tile_stride_bytes, TERNARY_TILE640_CODE_BYTES
+                ));
+            }
+            if binding.metadata_tile_stride_bytes != TERNARY_TILE640_METADATA_BYTES as u16 {
+                return Err(format!(
+                    "binding {}: ternary metadata_tile_stride_bytes {} != {}",
+                    binding.matrix_id,
+                    binding.metadata_tile_stride_bytes,
+                    TERNARY_TILE640_METADATA_BYTES
+                ));
+            }
+            if binding.sidecar_length != 0 {
+                return Err(format!(
+                    "binding {}: ternary sidecar must be empty",
+                    binding.matrix_id
+                ));
+            }
+        }
+        RuntimeRepresentationClass::Nf4Tile640Base => {
+            let expected_code = total_tiles
+                .checked_mul(NF4_TILE640_CODE_BYTES as u64)
+                .ok_or_else(|| format!("binding {}: code length overflow", binding.matrix_id))?;
+            let expected_meta = total_tiles
+                .checked_mul(NF4_TILE640_METADATA_BYTES as u64)
+                .ok_or_else(|| {
+                    format!("binding {}: metadata length overflow", binding.matrix_id)
+                })?;
+            if binding.code_length != expected_code {
+                return Err(format!(
+                    "binding {}: nf4 code_length {} != {}",
+                    binding.matrix_id, binding.code_length, expected_code
+                ));
+            }
+            if binding.metadata_length != expected_meta {
+                return Err(format!(
+                    "binding {}: nf4 metadata_length {} != {}",
+                    binding.matrix_id, binding.metadata_length, expected_meta
+                ));
+            }
+            if binding.code_tile_stride_bytes != NF4_TILE640_CODE_BYTES as u32 {
+                return Err(format!(
+                    "binding {}: nf4 code_tile_stride_bytes {} != {}",
+                    binding.matrix_id, binding.code_tile_stride_bytes, NF4_TILE640_CODE_BYTES
+                ));
+            }
+            if binding.metadata_tile_stride_bytes != NF4_TILE640_METADATA_BYTES as u16 {
+                return Err(format!(
+                    "binding {}: nf4 metadata_tile_stride_bytes {} != {}",
+                    binding.matrix_id,
+                    binding.metadata_tile_stride_bytes,
+                    NF4_TILE640_METADATA_BYTES
+                ));
+            }
+            if binding.sidecar_length != 0 {
+                return Err(format!(
+                    "binding {}: nf4 sidecar must be empty",
+                    binding.matrix_id
+                ));
+            }
+        }
+        RuntimeRepresentationClass::Int8Tile640Base => {
+            let expected_code = total_tiles
+                .checked_mul(INT8_TILE640_CODE_BYTES as u64)
+                .ok_or_else(|| format!("binding {}: code length overflow", binding.matrix_id))?;
+            let expected_meta = total_tiles
+                .checked_mul(INT8_TILE640_METADATA_BYTES as u64)
+                .ok_or_else(|| {
+                    format!("binding {}: metadata length overflow", binding.matrix_id)
+                })?;
+            if binding.code_length != expected_code {
+                return Err(format!(
+                    "binding {}: int8 code_length {} != {}",
+                    binding.matrix_id, binding.code_length, expected_code
+                ));
+            }
+            if binding.metadata_length != expected_meta {
+                return Err(format!(
+                    "binding {}: int8 metadata_length {} != {}",
+                    binding.matrix_id, binding.metadata_length, expected_meta
+                ));
+            }
+            if binding.code_tile_stride_bytes != INT8_TILE640_CODE_BYTES as u32 {
+                return Err(format!(
+                    "binding {}: int8 code_tile_stride_bytes {} != {}",
+                    binding.matrix_id, binding.code_tile_stride_bytes, INT8_TILE640_CODE_BYTES
+                ));
+            }
+            if binding.metadata_tile_stride_bytes != INT8_TILE640_METADATA_BYTES as u16 {
+                return Err(format!(
+                    "binding {}: int8 metadata_tile_stride_bytes {} != {}",
+                    binding.matrix_id,
+                    binding.metadata_tile_stride_bytes,
+                    INT8_TILE640_METADATA_BYTES
+                ));
+            }
+            if binding.sidecar_length != 0 {
+                return Err(format!(
+                    "binding {}: int8 sidecar must be empty",
+                    binding.matrix_id
+                ));
+            }
+        }
+        RuntimeRepresentationClass::RawF32 => {
+            if binding.reduction_tile_size != 0 {
+                return Err(format!(
+                    "binding {}: RawF32 reduction_tile_size must be 0",
+                    binding.matrix_id
+                ));
+            }
+            if binding.tiles_per_output_channel != 0 {
+                return Err(format!(
+                    "binding {}: RawF32 tiles_per_output_channel must be 0",
+                    binding.matrix_id
+                ));
+            }
+            if binding.code_tile_stride_bytes != 0 {
+                return Err(format!(
+                    "binding {}: RawF32 code_tile_stride_bytes must be 0",
+                    binding.matrix_id
+                ));
+            }
+            let expected_payload = in_f
+                .checked_mul(out_f)
+                .ok_or_else(|| format!("binding {}: RawF32 payload overflow", binding.matrix_id))?
+                .checked_mul(4)
+                .ok_or_else(|| {
+                    format!("binding {}: RawF32 payload*4 overflow", binding.matrix_id)
+                })?;
+            if binding.code_length != expected_payload {
+                return Err(format!(
+                    "binding {}: RawF32 code_length {} != {}x{}x4={}",
+                    binding.matrix_id, binding.code_length, in_f, out_f, expected_payload
+                ));
+            }
+            if binding.metadata_length != 0 {
+                return Err(format!(
+                    "binding {}: RawF32 metadata must be empty",
+                    binding.matrix_id
+                ));
+            }
+            if binding.sidecar_length != 0 {
+                return Err(format!(
+                    "binding {}: RawF32 sidecar must be empty",
+                    binding.matrix_id
+                ));
+            }
+            if binding.residual_length != 0 {
+                return Err(format!(
+                    "binding {}: RawF32 residual must be empty",
+                    binding.matrix_id
+                ));
+            }
+        }
+    }
+
+    // Validate segment bounds
+    let code_end = (binding.code_offset as usize)
+        .checked_add(binding.code_length as usize)
+        .ok_or_else(|| format!("binding {}: code offset+length overflow", binding.matrix_id))?;
+    if code_end > cimage_bytes {
+        return Err(format!(
+            "binding {}: code segment ends at {} exceeds cimage size {}",
+            binding.matrix_id, code_end, cimage_bytes
+        ));
+    }
+
+    if binding.metadata_length > 0 {
+        let meta_end = (binding.metadata_offset as usize)
+            .checked_add(binding.metadata_length as usize)
+            .ok_or_else(|| {
+                format!(
+                    "binding {}: metadata offset+length overflow",
+                    binding.matrix_id
+                )
+            })?;
+        if meta_end > cimage_bytes {
+            return Err(format!(
+                "binding {}: metadata segment ends at {} exceeds cimage size {}",
+                binding.matrix_id, meta_end, cimage_bytes
+            ));
+        }
+    }
+
+    // Validate macro layout
+    if binding.macro_layout != TileMacroLayout::OutputChannelContiguous as u8
+        && binding.macro_layout != TileMacroLayout::ReductionTileInterleaved as u8
+    {
+        return Err(format!(
+            "binding {}: unknown macro layout {}",
+            binding.matrix_id, binding.macro_layout
+        ));
+    }
+
+    // Validate tail handling contract
+    if binding.tail_handling != TailHandlingContract::ActivationZeroPredicationV1 as u8
+        && rep != RuntimeRepresentationClass::RawF32
+    {
+        return Err(format!(
+            "binding {}: unknown tail handling contract {}",
+            binding.matrix_id, binding.tail_handling
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

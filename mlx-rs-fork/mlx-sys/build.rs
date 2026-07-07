@@ -86,7 +86,10 @@ fn build_and_link_mlx_c() {
             sibling
         }
     };
-    cmake_args.push(format!("-DFETCHCONTENT_SOURCE_DIR_MLX={}", mlx_src.display()));
+    cmake_args.push(format!(
+        "-DFETCHCONTENT_SOURCE_DIR_MLX={}",
+        mlx_src.display()
+    ));
 
     // Metal shader compilation is disabled because the mlx-tribunus fork's
     // .metal files have bfloat16_t/half type collisions (

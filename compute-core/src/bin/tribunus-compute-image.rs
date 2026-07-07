@@ -388,57 +388,281 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
 /// Experimental: compile a model using the stage-graph ECS pipeline.
 /// Produces one .cimage file per stage in the output directory.
 fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
-    let _source = get_opt(args, "--source").ok_or_else(|| "--source is required".to_string())?;
+    let source = get_opt(args, "--source").ok_or_else(|| "--source is required".to_string())?;
     let output = get_opt(args, "--output").ok_or_else(|| "--output is required".to_string())?;
 
     use std::path::Path;
-    use tribunus_compute_core::runtime::stage_graph::StageGraph;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::fs::File;
+    use safetensors::SafeTensors;
+    use memmap2::Mmap;
     use tribunus_compute_core::runtime::compilation_systems::{
-        compile_model, TensorInput, ModelConfig,
+        compile_stage, TensorInput, ModelConfig,
     };
-    use tribunus_compute_core::quantization::contract::CanonicalShape;
+    use tribunus_compute_core::runtime::stage_graph::{
+        StageConfig, ComponentType, StageQuantizationConfig,
+    };
     use tribunus_compute_core::compute_image::compile::capability_registry::CapabilityRegistry;
+    use tribunus_compute_core::quantization::contract::{CanonicalShape, BackendKind};
 
     let output_dir = Path::new(output);
-    std::fs::create_dir_all(output_dir).map_err(|e| format!("create output dir: {e}"))?;
+    fs::create_dir_all(output_dir).map_err(|e| format!("create output dir: {e}"))?;
 
-    // Build a stage graph for a decoder-only model
-    let graph = StageGraph::decoder_only(32000, 48);
+    // —— Load all safetensors from source directory ——
+    let source_dir = Path::new(source);
+    let mut all_tensors: Vec<(String, Vec<f32>, Vec<usize>)> = Vec::new();
+    let mut hidden_dim = 0u32;
+    let mut num_layers = 0u32;
+    let mut num_heads = 0u32;
+    let num_heads = 0u32;
+    let mut head_dim = 0u32;
+    let mut intermediate_dim = 0u32;
+    let mut vocab_size = 0u32;
 
-    // Stage loader: load tensors from safetensors and classify per stage
-    let stage_loader = |stage: &tribunus_compute_core::runtime::stage_graph::StageConfig| -> (Vec<TensorInput>, ModelConfig, CapabilityRegistry) {
-        let tensors = vec![
-            TensorInput {
-                matrix_id: stage.stage_id,
-                weights: vec![1.0f32; 640 * 640],
-                shape: CanonicalShape { in_features: 640, out_features: 640, rank: 2 },
-            },
-        ];
-        let model_config = ModelConfig {
-            num_layers: 48,
-            num_heads: 16,
-            head_dim: 256,
-            hidden_dim: 3840,
-            intermediate_dim: 15360,
-            vocab_size: 32000,
-            quantization_schema: 1,
-            draft_num_layers: 0,
-        };
-        let registry = CapabilityRegistry::default_metal_v1();
-        (tensors, model_config, registry)
+    for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
+        let entry = entry.map_err(|e| format!("entry: {e}"))?;
+        let path = entry.path();
+        if !path.extension().map_or(false, |e| e == "safetensors") {
+            continue;
+    }
+        eprintln!("  loading {}", path.display());
+        let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
+        let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
+        let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+
+        for (key, view) in tensors.tensors() {
+            let dtype = view.dtype();
+            let shape: Vec<usize> = view.shape().to_vec();
+            let data = view.data().to_vec();
+            let f32_data = match dtype {
+                safetensors::Dtype::F32 => data.chunks_exact(4)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect(),
+                safetensors::Dtype::BF16 => data.chunks_exact(2)
+                    .map(|c| {
+                        let bits = ((c[0] as u32) << 16) | ((c[1] as u32) << 24);
+                        f32::from_bits(bits)
+                    })
+                    .collect(),
+                _ => {
+                    eprintln!("  skipping {}: unsupported dtype {:?}", key, dtype);
+                    continue;
+}
     };
 
-    eprintln!("building ECS stages...");
-    let results = compile_model(&graph, stage_loader);
+            // Infer model dimensions from the first tensor seen
+            if shape.len() >= 2 && vocab_size == 0 {
+                if key.contains("embed_tokens") || key.contains("lm_head") {
+                    vocab_size = shape[0] as u32;
+                    hidden_dim = shape[1] as u32;
+                }
+            }
+            if key.contains("self_attn.q_proj") && num_heads == 0 {
+                hidden_dim = shape[1] as u32;
+                // Approximate: head_dim=256 for Gemma 4, 128 for others
+                head_dim = 256;
+            }
+            if key.contains("mlp.gate_proj") && intermediate_dim == 0 {
+                intermediate_dim = shape[0] as u32;
+            }
+            if key.contains("layers.") {
+                let n = key.split('.').filter_map(|s| s.parse::<u32>().ok()).next().unwrap_or(0);
+                num_layers = num_layers.max(n + 1);
+            }
 
-    for stage_result in &results {
-        let path = output_dir.join(format!("stage_{}.cimage", stage_result.stage_id));
-        std::fs::write(&path, &stage_result.cimage)
-            .map_err(|e| format!("write {}: {e}", path.display()))?;
-        eprintln!("  wrote stage {}: {} bytes", stage_result.stage_id, stage_result.cimage.len());
+            all_tensors.push((key.clone(), f32_data, shape));
+        }
     }
 
-    eprintln!("done — {} stages", results.len());
+    if all_tensors.is_empty() {
+        return Err("No safetensor files found in source directory".into());
+    }
+    eprintln!("loaded {} tensors, {} layers, hidden={}, vocab={}",
+        all_tensors.len(), num_layers, hidden_dim, vocab_size);
+
+    // —— Classify tensors per component type ——
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    enum TensorGroup {
+        Embedding,
+        Decoder,
+        LmHead,
+        Norm,
+        VisionEncoder,
+        AudioEncoder,
+        MtpDraft,
+        Other,
+    }
+
+    fn classify_key(name: &str) -> TensorGroup {
+        let n = name;
+        // Ignored: optimizer, momentum, variance, cache
+        if n.contains("optimizer") || n.contains("momentum") || n.contains("_cache")
+            || n.contains("adam_") || n.contains("rmsprop") { return TensorGroup::Other; }
+        // MTP draft
+        if n.contains("mtp") || n.contains("draft") || n.contains("speculative")
+            || n.contains("proposal") { return TensorGroup::MtpDraft; }
+        // Vision encoder
+        if n.contains("multimodal_image") || n.contains("mm_image")
+            || n.contains("vision_") || n.contains("vision.")
+            || n.contains("image_") || n.contains("image.")
+            || n.contains("patch") || (n.contains("projection") && n.contains("layers")) {
+            return TensorGroup::VisionEncoder;
+        }
+        // Audio encoder
+        if n.contains("multimodal_audio") || n.contains("mm_audio")
+            || n.contains("audio_") || n.contains("audio.")
+            || n.contains("waveform") || n.contains("speech") {
+            return TensorGroup::AudioEncoder;
+        }
+        // Decoder layer
+        if n.contains("self_attn") || n.contains("mlp.")
+            || n.contains("input_layernorm") || n.contains("post_attention_layernorm")
+            || (n.contains(".layers.") && (n.ends_with(".weight") || n.ends_with(".bias"))) {
+            return TensorGroup::Decoder;
+        }
+        // Embedding
+        if n.contains("embed_tokens") || n.contains("embed.") || n.contains("wte")
+            || n.contains("tok_embeddings") {
+            return TensorGroup::Embedding;
+        }
+        // LM head
+        if n.contains("lm_head") || n.contains("output.") || n.contains("embed_out")
+            || n.contains("head.") { return TensorGroup::LmHead; }
+        // Norms (shared, not per-layer)
+        if n.contains("norm.") || n.contains("final_layernorm") || n.contains("ln_f") {
+            return TensorGroup::Norm;
+        }
+        TensorGroup::Other
+    }
+
+    // Group tensors
+    let mut grouped: HashMap<TensorGroup, Vec<TensorInput>> = HashMap::new();
+    let mut matrix_id = 0u32;
+    for (key, weights, shape) in &all_tensors {
+        let group = classify_key(key);
+        if group == TensorGroup::Other { continue; }
+        let (in_f, out_f) = if shape.len() == 2 {
+            (shape[0] as u32, shape[1] as u32)
+        } else if shape.len() == 1 {
+            (shape[0] as u32, 1u32)
+        } else {
+            continue;
+        };
+        grouped.entry(group).or_default().push(TensorInput {
+            matrix_id: matrix_id,
+            weights: weights.clone(),
+            shape: CanonicalShape { in_features: in_f, out_features: out_f, rank: shape.len() as u16 },
+        });
+        matrix_id += 1;
+    }
+
+    eprintln!("grouped tensors:");
+    for (group, tensors) in &grouped {
+        eprintln!("  {:?}: {} tensors", group, tensors.len());
+    }
+
+    let model_config = ModelConfig {
+        num_layers,
+        num_heads: num_heads.max(8),
+        head_dim: head_dim.max(128),
+        hidden_dim: hidden_dim.max(1024),
+        intermediate_dim: intermediate_dim.max(4096),
+        vocab_size: vocab_size.max(32000),
+        quantization_schema: 1,
+        draft_num_layers: 0,
+    };
+
+    // —— Compile each group as a stage ——
+    for (group, tensors) in &grouped {
+        let stage_config = match group {
+            TensorGroup::Embedding => StageConfig {
+                stage_id: 0,
+                component: ComponentType::TextEmbedding,
+                tensor_key_patterns: vec![],
+                quantization: StageQuantizationConfig::projection_default(),
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.3,
+                tensor_parallel_size: 1,
+            },
+            TensorGroup::Decoder => StageConfig {
+                stage_id: 1,
+                component: ComponentType::DecoderLayer,
+                tensor_key_patterns: vec![],
+                quantization: StageQuantizationConfig::decoder_default(),
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.6,
+                tensor_parallel_size: 1,
+            },
+            TensorGroup::LmHead => StageConfig {
+                stage_id: 2,
+                component: ComponentType::LmHead,
+                tensor_key_patterns: vec![],
+                quantization: StageQuantizationConfig::projection_default(),
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.1,
+                tensor_parallel_size: 1,
+            },
+            TensorGroup::Norm => StageConfig {
+                stage_id: 3,
+                component: ComponentType::Norm,
+                tensor_key_patterns: vec![],
+                quantization: StageQuantizationConfig::projection_default(),
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.1,
+                tensor_parallel_size: 1,
+            },
+            TensorGroup::VisionEncoder => StageConfig {
+                stage_id: 4,
+                component: ComponentType::VisionEncoder,
+                tensor_key_patterns: vec![],
+                quantization: StageQuantizationConfig::encoder_default(),
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.4,
+                tensor_parallel_size: 1,
+            },
+            TensorGroup::AudioEncoder => StageConfig {
+                stage_id: 5,
+                component: ComponentType::AudioEncoder,
+                tensor_key_patterns: vec![],
+                quantization: StageQuantizationConfig::encoder_default(),
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.4,
+                tensor_parallel_size: 1,
+            },
+            TensorGroup::MtpDraft => StageConfig {
+                stage_id: 6,
+                component: ComponentType::MtpDraft,
+                tensor_key_patterns: vec![],
+                quantization: StageQuantizationConfig::decoder_default(),
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.3,
+                tensor_parallel_size: 1,
+            },
+            TensorGroup::Other => continue,
+        };
+
+        eprintln!("compiling stage {} ({}) with {} tensors...",
+            stage_config.stage_id, stage_config.component.as_str(), tensors.len());
+
+        let stage_id = stage_config.stage_id;
+        let stage_label = stage_config.component.as_str().to_string();
+
+        let (stage_result, bindings) = compile_stage(
+            tensors.clone(),
+            stage_config,
+            model_config,
+            CapabilityRegistry::default_metal_v1(),
+        );
+
+        let path = output_dir.join(format!("stage_{}_{}.cimage", stage_id, stage_label));
+        fs::write(&path, &stage_result.cimage)
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+        eprintln!("  wrote {}: {} bytes, {} bindings",
+            path.display(), stage_result.cimage.len(), bindings.len());
+    }
+
+    eprintln!("done — {} groups compiled", grouped.len());
     Ok(())
 }
 

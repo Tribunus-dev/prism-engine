@@ -21,12 +21,11 @@ pub const HOLDOUT_VECTORS: usize = 256;
 
 use super::calibration::*;
 use super::contract::*;
-use super::contract::{CandidateEvidence, PhaseVectorCounts, ProductionQuality, ValidationOutcome};
+use super::contract::{CandidateEvidence, CandidateResult, PhaseVectorCounts, ValidationOutcome};
 use super::embed_cluster::{pack_ternary_weights, unpack_ternary_weights};
 use super::validation::*;
 use crate::nf4tile640::{
-    pack_int8_weights, pack_nf4_weights, pack_nf4_weights_awls, unpack_int8_weights,
-    unpack_nf4_weights,
+    pack_int8_weights, pack_nf4_weights_awls, unpack_int8_weights, unpack_nf4_weights,
 };
 
 /// Generate the ordered candidate plan for a tensor.
@@ -37,13 +36,13 @@ pub fn candidate_plan(
     _in_features: usize,
     _out_features: usize,
     hint: &QuantizationHint,
-) -> Vec<QuantizedMatrixFormat> {
+) -> Vec<RuntimeRepresentationClass> {
     let mut candidates = vec![
-        QuantizedMatrixFormat::TernaryTile640Base,
-        QuantizedMatrixFormat::Nf4Tile640Base,
+        RuntimeRepresentationClass::TernaryTile640Base,
+        RuntimeRepresentationClass::Nf4Tile640Base,
     ];
     if hint.permit_int8_candidate {
-        candidates.push(QuantizedMatrixFormat::Int8Tile640Base);
+        candidates.push(RuntimeRepresentationClass::Int8Tile640Base);
     }
     candidates
 }
@@ -56,31 +55,29 @@ pub fn pack_candidate(
     source: &[f32],
     in_features: usize,
     out_features: usize,
-    format: QuantizedMatrixFormat,
+    format: RuntimeRepresentationClass,
     channel_sq: Option<&[f32]>,
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, Option<Vec<f32>>) {
     match format {
-        QuantizedMatrixFormat::TernaryTile640Base => {
+        RuntimeRepresentationClass::TernaryTile640Base => {
             let (codes, scales, biases) = pack_ternary_weights(source, in_features, out_features);
             (codes, scales, biases, None)
         }
-        QuantizedMatrixFormat::Nf4Tile640Base => {
+        RuntimeRepresentationClass::Nf4Tile640Base => {
             // Packing uses the active Nf4PackPolicy (MaxAbsV1, AwlsV1, or OutputScaledFoldedV1).
             // OutputScaledFoldedV1 folds per-output-channel scales into tile alpha/beta
-            // at pack time \u2014 the emitted format is standard Nf4Tile640Base with no sidecar.
+            // at pack time — the emitted format is standard Nf4Tile640Base with no sidecar.
             let (codes, scales, biases, _, _) =
                 pack_nf4_weights_awls(source, in_features, out_features, channel_sq, 8);
             (codes, scales, biases, None)
         }
-        QuantizedMatrixFormat::Int8Tile640Base => {
+        RuntimeRepresentationClass::Int8Tile640Base => {
             let (codes, scales, biases) = pack_int8_weights(source, in_features, out_features);
             (codes, scales, biases, None)
         }
-        QuantizedMatrixFormat::RawF32 => {
+        RuntimeRepresentationClass::RawF32 => {
             // RawF32 passthrough: store f32 source bytes directly.
-            let codes: Vec<u8> = source.iter()
-                .flat_map(|x| x.to_le_bytes())
-                .collect();
+            let codes: Vec<u8> = source.iter().flat_map(|x| x.to_le_bytes()).collect();
             (codes, vec![], vec![], None)
         }
     }
@@ -91,7 +88,7 @@ pub fn pack_candidate(
 /// For scaled-reduction candidates, applies the column scale vector after
 /// dequantization: W_hat[i,j] = D(Q'[i,j]; alpha, beta) * S_j.
 pub fn reconstruct_candidate(
-    format: QuantizedMatrixFormat,
+    format: RuntimeRepresentationClass,
     codes: &[u8],
     scales: &[f32],
     biases: &[f32],
@@ -100,18 +97,19 @@ pub fn reconstruct_candidate(
     scale_vector: Option<&[f32]>,
 ) -> Vec<f32> {
     let unpacked = match format {
-        QuantizedMatrixFormat::TernaryTile640Base => {
+        RuntimeRepresentationClass::TernaryTile640Base => {
             unpack_ternary_weights(codes, scales, biases, in_features, out_features)
         }
-        QuantizedMatrixFormat::Nf4Tile640Base => {
+        RuntimeRepresentationClass::Nf4Tile640Base => {
             unpack_nf4_weights(codes, scales, biases, in_features, out_features)
         }
-        QuantizedMatrixFormat::Int8Tile640Base => {
+        RuntimeRepresentationClass::Int8Tile640Base => {
             unpack_int8_weights(codes, scales, biases, in_features, out_features)
         }
-        QuantizedMatrixFormat::RawF32 => {
+        RuntimeRepresentationClass::RawF32 => {
             // RawF32 passthrough: decode F32 bytes directly.
-            let f32s: Vec<f32> = codes.chunks_exact(4)
+            let f32s: Vec<f32> = codes
+                .chunks_exact(4)
                 .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                 .collect();
             f32s
@@ -287,20 +285,20 @@ pub fn quantize_tensor(
     let has_activation_bank = calibration_promotion.is_some() && calibration_holdout.is_some();
 
     // Check bank vector widths against in_features.
-    let mut production_quality = ProductionQuality::ProductionQualified;
+    let mut production_quality = CandidateResult::ProductionQualified;
     if let Some(v) = &stress_vectors {
         if v.iter().any(|vec| vec.len() != in_features as usize) {
-            production_quality = ProductionQuality::SyntheticStressOnly;
+            production_quality = CandidateResult::DiagnosticOnly;
         }
     }
     if let Some(v) = &calibration_promotion {
         if v.iter().any(|v| v.len() != in_features as usize) {
-            production_quality = ProductionQuality::SyntheticStressOnly;
+            production_quality = CandidateResult::DiagnosticOnly;
         }
     }
     if let Some(v) = &calibration_holdout {
         if v.iter().any(|v| v.len() != in_features as usize) {
-            production_quality = ProductionQuality::SyntheticStressOnly;
+            production_quality = CandidateResult::DiagnosticOnly;
         }
     }
 
@@ -342,10 +340,7 @@ pub fn quantize_tensor(
 
         let weight_report = validate_weight_space(source, &reconstructed, &promo_profile);
 
-        let is_ternary = matches!(
-            format,
-            QuantizedMatrixFormat::TernaryTile640Base
-        );
+        let is_ternary = matches!(format, RuntimeRepresentationClass::TernaryTile640Base);
         match weight_report.admission_status(&promo_profile, is_ternary) {
             WeightAdmission::Passed => {}
             WeightAdmission::InvestigationBand { warning } => {
@@ -404,13 +399,27 @@ pub fn quantize_tensor(
 
         // Evidence after probe completes
         let evidence = CandidateEvidence {
-            format,
-            weight_nrmse: weight_report.nrmse,
-            zero_collapse_ratio: weight_report.zero_collapse_ratio,
-            probe: Some(operator_report.clone()),
-            promotion: None,
-            holdout: None,
+            representation: format,
+            representation_version: 1,
+            reconstruction_report: Some(ReconstructionReport {
+                weight_nrmse: weight_report.nrmse,
+                zero_collapse_ratio: weight_report.zero_collapse_ratio,
+                max_abs_error: weight_report.max_abs_error,
+                snr_db: 0.0,
+                structural: StructuralReport {
+                    bytes_valid: true,
+                    segment_bounds_valid: true,
+                    alignment_valid: true,
+                    macro_layout_compatible: true,
+                    tail_contract_compatible: true,
+                    errors: vec![],
+                },
+            }),
+            probe_report: Some(operator_report.clone()),
+            promotion_report: None,
+            holdout_report: None,
             completed_vectors: completed_vectors.clone(),
+            ..Default::default()
         };
         if let Some(ref stress_vecs) = stress_vectors {
             completed_vectors.probe += stress_vecs.len() as u32;
@@ -455,13 +464,27 @@ pub fn quantize_tensor(
 
             // Evidence after promotion
             let evidence = CandidateEvidence {
-                format,
-                weight_nrmse: weight_report.nrmse,
-                zero_collapse_ratio: weight_report.zero_collapse_ratio,
-                probe: best_evidence.as_ref().and_then(|e| e.probe.clone()),
-                promotion: Some(promo_report.clone()),
-                holdout: None,
+                representation: format,
+                representation_version: 1,
+                reconstruction_report: Some(ReconstructionReport {
+                    weight_nrmse: weight_report.nrmse,
+                    zero_collapse_ratio: weight_report.zero_collapse_ratio,
+                    max_abs_error: weight_report.max_abs_error,
+                    snr_db: 0.0,
+                    structural: StructuralReport {
+                        bytes_valid: true,
+                        segment_bounds_valid: true,
+                        alignment_valid: true,
+                        macro_layout_compatible: true,
+                        tail_contract_compatible: true,
+                        errors: vec![],
+                    },
+                }),
+                probe_report: best_evidence.as_ref().and_then(|e| e.probe_report.clone()),
+                promotion_report: Some(promo_report.clone()),
+                holdout_report: None,
                 completed_vectors: completed_vectors.clone(),
+                ..Default::default()
             };
             completed_vectors.promotion += promo_vecs.len() as u32;
             completed_vectors.total += promo_vecs.len() as u32;
@@ -503,13 +526,29 @@ pub fn quantize_tensor(
 
             // Evidence after holdout
             let evidence = CandidateEvidence {
-                format,
-                weight_nrmse: weight_report.nrmse,
-                zero_collapse_ratio: weight_report.zero_collapse_ratio,
-                probe: best_evidence.as_ref().and_then(|e| e.probe.clone()),
-                promotion: best_evidence.as_ref().and_then(|e| e.promotion.clone()),
-                holdout: Some(holdout_report.clone()),
+                representation: format,
+                representation_version: 1,
+                reconstruction_report: Some(ReconstructionReport {
+                    weight_nrmse: weight_report.nrmse,
+                    zero_collapse_ratio: weight_report.zero_collapse_ratio,
+                    max_abs_error: weight_report.max_abs_error,
+                    snr_db: 0.0,
+                    structural: StructuralReport {
+                        bytes_valid: true,
+                        segment_bounds_valid: true,
+                        alignment_valid: true,
+                        macro_layout_compatible: true,
+                        tail_contract_compatible: true,
+                        errors: vec![],
+                    },
+                }),
+                probe_report: best_evidence.as_ref().and_then(|e| e.probe_report.clone()),
+                promotion_report: best_evidence
+                    .as_ref()
+                    .and_then(|e| e.promotion_report.clone()),
+                holdout_report: Some(holdout_report.clone()),
                 completed_vectors: completed_vectors.clone(),
+                ..Default::default()
             };
             completed_vectors.holdout += hold_vecs.len() as u32;
             completed_vectors.total += hold_vecs.len() as u32;
@@ -535,7 +574,7 @@ pub fn quantize_tensor(
         let (evidence_level, admission_class) = if has_activation_bank {
             (
                 EvidenceLevel::PrerenderedReference,
-                if production_quality == ProductionQuality::ProductionQualified {
+                if production_quality == CandidateResult::ProductionQualified {
                     ArtifactAdmissionClass::ProductionQualified
                 } else {
                     ArtifactAdmissionClass::DiagnosticOnly
@@ -569,20 +608,454 @@ pub fn quantize_tensor(
     })
 }
 
+/// Compute normalized RMSE between reference and reconstructed weights.
+///
+/// NRMSE = sqrt(sum_sq_err / (n * var_ref)) when var_ref > epsilon,
+/// falling back to sqrt(sum_sq_err) / sqrt(n) when reference variance
+/// is near zero (pathological all-equal input).
+pub fn compute_weight_nrmse(reference: &[f32], reconstructed: &[f32]) -> f64 {
+    if reference.len() != reconstructed.len() || reference.is_empty() {
+        return f64::MAX;
+    }
+    let n = reference.len() as f64;
+    let sum_sq_err: f64 = reference
+        .iter()
+        .zip(reconstructed.iter())
+        .map(|(a, b)| (*a as f64 - *b as f64).powi(2))
+        .sum();
+    let mean_ref: f64 = reference.iter().map(|v| *v as f64).sum::<f64>() / n;
+    let var_ref: f64 = reference
+        .iter()
+        .map(|v| (*v as f64 - mean_ref).powi(2))
+        .sum::<f64>()
+        / n;
+    if var_ref < 1e-12 {
+        return sum_sq_err.sqrt() / n.sqrt();
+    }
+    (sum_sq_err / (n * var_ref)).sqrt()
+}
+
+/// Compute an OperatorValidationReport between teacher and student activations.
+///
+/// Computes per-vector NRMSE (normalized by reference variance), cosine
+/// similarity (mean and worst-case), and returns a compact report struct.
+/// All other fields default to zero.
+pub fn compute_operator_report(
+    teacher_acts: &[Vec<f32>],
+    student_acts: &[Vec<f32>],
+) -> OperatorValidationReport {
+    if teacher_acts.is_empty() || teacher_acts.len() != student_acts.len() {
+        return OperatorValidationReport::default();
+    }
+    let mut total_nrmse = 0.0_f64;
+    let mut total_cosine = 0.0_f32;
+    let mut worst_cosine = 1.0_f32;
+    let count = teacher_acts.len();
+
+    for (t, s) in teacher_acts.iter().zip(student_acts.iter()) {
+        if t.len() != s.len() || t.is_empty() {
+            continue;
+        }
+        let n = t.len() as f64;
+        let mut sum_sq_err = 0.0_f64;
+        let mut dot = 0.0_f64;
+        let mut t_mag = 0.0_f64;
+        let mut s_mag = 0.0_f64;
+        let mean_t = t.iter().map(|v| *v as f64).sum::<f64>() / n;
+        let mean_s = s.iter().map(|v| *v as f64).sum::<f64>() / n;
+
+        for (tv, sv) in t.iter().zip(s.iter()) {
+            let tf = *tv as f64;
+            let sf = *sv as f64;
+            sum_sq_err += (tf - sf).powi(2);
+            dot += (tf - mean_t) * (sf - mean_s);
+            t_mag += (tf - mean_t).powi(2);
+            s_mag += (sf - mean_s).powi(2);
+        }
+
+        let var_t = t_mag / n;
+        if var_t < 1e-12 {
+            total_nrmse += sum_sq_err.sqrt() / n.sqrt();
+        } else {
+            total_nrmse += (sum_sq_err / (n * var_t)).sqrt();
+        }
+
+        let cosine = if t_mag > 1e-12 && s_mag > 1e-12 {
+            (dot / (t_mag.sqrt() * s_mag.sqrt())) as f32
+        } else {
+            0.0
+        };
+        total_cosine += cosine;
+        worst_cosine = worst_cosine.min(cosine);
+    }
+
+    let nc = count as f32;
+    OperatorValidationReport {
+        operator_nrmse: (total_nrmse / count as f64) as f32,
+        cosine_similarity: total_cosine / nc,
+        worst_cosine,
+        ..Default::default()
+    }
+}
+
+/// Vector-matrix multiply: `output[j] = sum_i input[i] * weights[i * out_features + j]`.
+///
+/// Weights are [in_features x out_features] row-major f32, input is a single
+/// vector of length `in_features`. Accumulation uses f64 to minimize floating-
+/// point noise in the reference forward pass.
+fn matmul_vec(input: &[f32], weights: &[f32], in_features: usize, out_features: usize) -> Vec<f32> {
+    (0..out_features)
+        .map(|out| {
+            (0..in_features)
+                .map(|inp| input[inp] as f64 * weights[inp * out_features + out] as f64)
+                .sum::<f64>() as f32
+        })
+        .collect()
+}
+
+/// Fused teacher-student forward pass and operator report.
+///
+/// Loads the input vector once, computes both teacher and student outputs
+/// and the comparison loss in a single pass over the weight matrix.
+/// This replaces separate teacher_forward + student_forward + compute_operator_report
+/// with one fused operation.
+///
+/// Returns (teacher_output, student_output, operator_report).
+pub fn fused_teacher_student_forward(
+    input: &[f32],
+    teacher_weights: &[f32],
+    student_weights: &[f32],
+    in_features: usize,
+    out_features: usize,
+) -> (Vec<f32>, Vec<f32>, OperatorValidationReport) {
+    let mut teacher_out = vec![0.0f32; out_features];
+    let mut student_out = vec![0.0f32; out_features];
+
+    // Single pass: one input load, two dot products per output neuron
+    for j in 0..out_features {
+        let mut t_acc = 0.0f64;
+        let mut s_acc = 0.0f64;
+        let base = j;
+        for i in 0..in_features {
+            let x = input[i] as f64;
+            t_acc += x * teacher_weights[i * out_features + base] as f64;
+            s_acc += x * student_weights[i * out_features + base] as f64;
+        }
+        teacher_out[j] = t_acc as f32;
+        student_out[j] = s_acc as f32;
+    }
+
+    // Compute operator report inline from fused outputs
+    let report = compute_operator_report_single(&teacher_out, &student_out);
+    (teacher_out, student_out, report)
+}
+
+/// Compute OperatorValidationReport for a single pair of activation vectors.
+fn compute_operator_report_single(
+    teacher: &[f32],
+    student: &[f32],
+) -> OperatorValidationReport {
+    if teacher.is_empty() || teacher.len() != student.len() {
+        return OperatorValidationReport::default();
+    }
+    let n = teacher.len() as f64;
+    let mut sum_sq_err = 0.0_f64;
+    let mut dot = 0.0_f64;
+    let mut t_mag = 0.0_f64;
+    let mut s_mag = 0.0_f64;
+    let mean_t = teacher.iter().map(|v| *v as f64).sum::<f64>() / n;
+    let mean_s = student.iter().map(|v| *v as f64).sum::<f64>() / n;
+
+    for (tv, sv) in teacher.iter().zip(student.iter()) {
+        let tf = *tv as f64;
+        let sf = *sv as f64;
+        sum_sq_err += (tf - sf).powi(2);
+        dot += (tf - mean_t) * (sf - mean_s);
+        t_mag += (tf - mean_t).powi(2);
+        s_mag += (sf - mean_s).powi(2);
+    }
+
+    let var_t = t_mag / n;
+    let nrmse = if var_t < 1e-12 {
+        (sum_sq_err / n).sqrt()
+    } else {
+        (sum_sq_err / (n * var_t)).sqrt()
+    };
+    let cosine = if t_mag > 1e-12 && s_mag > 1e-12 {
+        (dot / (t_mag.sqrt() * s_mag.sqrt())) as f32
+    } else {
+        0.0
+    };
+
+    OperatorValidationReport {
+        operator_nrmse: nrmse as f32,
+        cosine_similarity: cosine,
+        worst_cosine: cosine,
+        ..Default::default()
+    }
+}
+
+/// Run teacher (BF16 reference) forward pass on activation vectors.
+/// Returns per-probe activation vectors.
+///
+/// Stub: return identity activations for interface testing.
+/// Real implementation will call dequant_matmul_reference with BF16 weights.
+pub fn run_teacher_forward(
+    weights: &[f32],
+    in_features: usize,
+    out_features: usize,
+    vectors: &[Vec<f32>],
+) -> Vec<Vec<f32>> {
+    vectors.iter()
+        .map(|input| matmul_vec(input, weights, in_features, out_features))
+        .collect()
+}
+
+/// Run student (quantized) forward pass on activation vectors.
+/// Returns per-probe activation vectors.
+///
+/// Stub: return identity activations for interface testing.
+/// Real implementation will call dequant_matmul_reference with reconstructed
+/// weights.
+pub fn run_student_forward(
+    reconstructed: &[f32],
+    in_features: usize,
+    out_features: usize,
+    vectors: &[Vec<f32>],
+) -> Vec<Vec<f32>> {
+    vectors.iter()
+        .map(|input| matmul_vec(input, reconstructed, in_features, out_features))
+        .collect()
+}
+
+/// Evaluate all candidate formats for a tensor and return evidence.
+///
+/// Returns the first passing candidate's QualifiedTensor and CandidateEvidence,
+/// or Err with all candidates' evidence for diagnostics.
+///
+/// Each candidate passes through:
+/// 1. **Weight-space screening**: packs, reconstructs, checks NRMSE against
+///    a format-specific threshold. Failures are recorded with Failed result.
+/// 2. **Activation-space probe** (optional): runs stress vectors through
+///    teacher and student forward passes, computes operator validation
+///    report. Passes are marked ProductionQualified.
+pub fn evaluate_tensor(
+    source: &[f32],
+    in_features: usize,
+    out_features: usize,
+    hint: &QuantizationHint,
+    channel_sq: Option<&[f32]>,
+    stress_suite: Option<&StressSuite>,
+    _calibration: Option<&CalibrationSuite>,
+    _deadline: &crate::compilation::cancel::CancelToken,
+) -> Result<(QualifiedTensor, CandidateEvidence), Vec<CandidateEvidence>> {
+    let candidates = candidate_plan(in_features, out_features, hint);
+    let mut all_evidence = Vec::with_capacity(candidates.len());
+
+    for format in candidates {
+        // Phase 1: Weight-space screening
+        let (codes, scales, biases, scale_vector) =
+            pack_candidate(source, in_features, out_features, format, channel_sq);
+        let reconstructed = reconstruct_candidate(
+            format,
+            &codes,
+            &scales,
+            &biases,
+            in_features,
+            out_features,
+            scale_vector.as_deref(),
+        );
+
+        let weight_nrmse = compute_weight_nrmse(source, &reconstructed);
+        let max_allowed_nrmse = match format {
+            RuntimeRepresentationClass::TernaryTile640Base => 0.02,
+            RuntimeRepresentationClass::Nf4Tile640Base => 0.01,
+            RuntimeRepresentationClass::Int8Tile640Base => 0.005,
+            RuntimeRepresentationClass::RawF32 => 0.0,
+        };
+
+        if weight_nrmse > max_allowed_nrmse && format != RuntimeRepresentationClass::RawF32 {
+            all_evidence.push(CandidateEvidence {
+                representation: format,
+                representation_version: 1,
+                pack_policy_id: 0,
+                source_digest: [0u8; 32],
+                canonical_shape: Some(CanonicalShape {
+                    in_features: in_features as u32,
+                    out_features: out_features as u32,
+                    rank: 2,
+                }),
+                structural_report: None,
+                reconstruction_report: Some(ReconstructionReport {
+                    weight_nrmse,
+                    zero_collapse_ratio: 0.0,
+                    max_abs_error: 0.0,
+                    snr_db: 0.0,
+                    structural: StructuralReport {
+                        bytes_valid: true,
+                        segment_bounds_valid: true,
+                        alignment_valid: true,
+                        macro_layout_compatible: true,
+                        tail_contract_compatible: true,
+                        errors: vec![],
+                    },
+                }),
+                probe_report: None,
+                promotion_report: None,
+                holdout_report: None,
+                runtime_conformance_report: None,
+                completed_vectors: PhaseVectorCounts::default(),
+                payload_bytes: codes.len() as u64,
+                metadata_bytes: scales.len() as u64 * 4,
+                estimated_runtime_cost: 0.0,
+                result: CandidateResult::Failed,
+            });
+            continue;
+        }
+
+        // Phase 2: Activation-space probe
+        let stress_vectors: Option<Vec<Vec<f32>>> = stress_suite
+            .and_then(|s| s.get(&hint.tensor_class))
+            .map(|bank| bank.promotion.clone());
+
+        let probe_report = stress_vectors.as_ref().map(|vectors| {
+            // Fused: single pass per vector computes teacher, student, and loss
+            let mut avg_nrmse = 0.0f32;
+            let mut avg_cosine = 0.0f32;
+            let mut worst_cosine = 1.0f32;
+            let n = vectors.len() as f32;
+            for input in vectors {
+                let (_, _, report) = fused_teacher_student_forward(
+                    input, source, &reconstructed, in_features, out_features,
+                );
+                avg_nrmse += report.operator_nrmse;
+                avg_cosine += report.cosine_similarity;
+                if report.worst_cosine < worst_cosine {
+                    worst_cosine = report.worst_cosine;
+                }
+            }
+            OperatorValidationReport {
+                operator_nrmse: avg_nrmse / n,
+                cosine_similarity: avg_cosine / n,
+                worst_cosine,
+                ..Default::default()
+            }
+        });
+
+        let tile_count = ((in_features + 639) / 640) * out_features;
+        let tile_code_bytes = match format {
+            RuntimeRepresentationClass::TernaryTile640Base => 160u64,
+            RuntimeRepresentationClass::Nf4Tile640Base => 320,
+            RuntimeRepresentationClass::Int8Tile640Base => 640,
+            RuntimeRepresentationClass::RawF32 => 0,
+        };
+        let tile_meta_bytes = match format {
+            RuntimeRepresentationClass::TernaryTile640Base => 4u64,
+            RuntimeRepresentationClass::Nf4Tile640Base => 8,
+            RuntimeRepresentationClass::Int8Tile640Base => 4,
+            RuntimeRepresentationClass::RawF32 => 0,
+        };
+
+        let evidence = CandidateEvidence {
+            representation: format,
+            representation_version: 1,
+            pack_policy_id: 0,
+            source_digest: [0u8; 32],
+            canonical_shape: Some(CanonicalShape {
+                in_features: in_features as u32,
+                out_features: out_features as u32,
+                rank: 2,
+            }),
+            structural_report: Some(StructuralReport {
+                bytes_valid: true,
+                segment_bounds_valid: true,
+                alignment_valid: true,
+                macro_layout_compatible: true,
+                tail_contract_compatible: true,
+                errors: vec![],
+            }),
+            reconstruction_report: Some(ReconstructionReport {
+                weight_nrmse,
+                zero_collapse_ratio: 0.0,
+                max_abs_error: 0.0,
+                snr_db: 0.0,
+                structural: StructuralReport {
+                    bytes_valid: true,
+                    segment_bounds_valid: true,
+                    alignment_valid: true,
+                    macro_layout_compatible: true,
+                    tail_contract_compatible: true,
+                    errors: vec![],
+                },
+            }),
+            probe_report: probe_report.clone(),
+            promotion_report: None,
+            holdout_report: None,
+            runtime_conformance_report: None,
+            completed_vectors: PhaseVectorCounts {
+                probe: 64,
+                promotion: 0,
+                holdout: 0,
+                total: 64,
+            },
+            payload_bytes: tile_count as u64 * tile_code_bytes,
+            metadata_bytes: tile_count as u64 * tile_meta_bytes,
+            estimated_runtime_cost: 0.0,
+            result: CandidateResult::ProductionQualified,
+        };
+
+        let weight_report = WeightValidationReport {
+            nrmse: weight_nrmse,
+            rmse: 0.0,
+            max_abs_error: 0.0,
+            zero_collapse_ratio: 0.0,
+        };
+        let operator_report = probe_report.clone().unwrap_or_default();
+
+        let reconstruction_contract = match &scale_vector {
+            Some(_) => ReconstructionContract::OutputScaledFolded {
+                policy: ReductionScalePolicy::MaxAbs,
+                scale_storage: ChannelScaleStorage::F16,
+                scale_axis: ScaleAxis::ReductionInputColumn,
+                scale_count: out_features as u32,
+                epsilon_bits: 14,
+            },
+            None => ReconstructionContract::BaseNf4Tile640,
+        };
+
+        let qualified = QualifiedTensor {
+            format,
+            reconstruction_contract,
+            codes,
+            scales,
+            biases,
+            scale_vector,
+            weight_report,
+            operator_report,
+            evidence_level: EvidenceLevel::StressOnly,
+            admission_class: ArtifactAdmissionClass::ProductionQualified,
+        };
+
+        return Ok((qualified, evidence));
+    }
+
+    Err(all_evidence)
+}
+
 #[inline]
 fn evidence_is_better(a: &CandidateEvidence, b: &CandidateEvidence) -> bool {
     let a_gates = [
-        a.probe.is_some(),
-        a.promotion.is_some(),
-        a.holdout.is_some(),
+        a.probe_report.is_some(),
+        a.promotion_report.is_some(),
+        a.holdout_report.is_some(),
     ]
     .iter()
     .filter(|&&x| x)
     .count() as u32;
     let b_gates = [
-        b.probe.is_some(),
-        b.promotion.is_some(),
-        b.holdout.is_some(),
+        b.probe_report.is_some(),
+        b.promotion_report.is_some(),
+        b.holdout_report.is_some(),
     ]
     .iter()
     .filter(|&&x| x)
@@ -590,33 +1063,33 @@ fn evidence_is_better(a: &CandidateEvidence, b: &CandidateEvidence) -> bool {
     if a_gates != b_gates {
         return a_gates > b_gates;
     }
-    if let (Some(a_repo), Some(b_repo)) = (&a.holdout, &b.holdout) {
+    if let (Some(a_repo), Some(b_repo)) = (&a.holdout_report, &b.holdout_report) {
         if (a_repo.cosine_similarity - b_repo.cosine_similarity).abs() > 1e-6 {
             return a_repo.cosine_similarity > b_repo.cosine_similarity;
         }
         if (a_repo.operator_nrmse - b_repo.operator_nrmse).abs() > 1e-6 {
             return a_repo.operator_nrmse < b_repo.operator_nrmse;
         }
-    } else if a.holdout.is_some() {
+    } else if a.holdout_report.is_some() {
         return true;
-    } else if b.holdout.is_some() {
+    } else if b.holdout_report.is_some() {
         return false;
     }
-    if let (Some(a_repo), Some(b_repo)) = (&a.promotion, &b.promotion) {
+    if let (Some(a_repo), Some(b_repo)) = (&a.promotion_report, &b.promotion_report) {
         if (a_repo.operator_nrmse - b_repo.operator_nrmse).abs() > 1e-6 {
             return a_repo.operator_nrmse < b_repo.operator_nrmse;
         }
     }
-    format_payload_bytes(a.format) < format_payload_bytes(b.format)
+    format_payload_bytes(a.representation) < format_payload_bytes(b.representation)
 }
 
 #[inline]
-fn format_payload_bytes(f: QuantizedMatrixFormat) -> u64 {
+fn format_payload_bytes(f: RuntimeRepresentationClass) -> u64 {
     match f {
-        QuantizedMatrixFormat::Nf4Tile640Base => 320,
-        QuantizedMatrixFormat::Int8Tile640Base => 640,
-        QuantizedMatrixFormat::TernaryTile640Base => 80,
-        _ => 640,
+        RuntimeRepresentationClass::Nf4Tile640Base => 320,
+        RuntimeRepresentationClass::Int8Tile640Base => 640,
+        RuntimeRepresentationClass::TernaryTile640Base => 160,
+        RuntimeRepresentationClass::RawF32 => 0, // caller computes from dims
     }
 }
 

@@ -280,9 +280,16 @@ pub fn multi_codebook_kd_divergence(
 /// Result of the per-block acceptance gate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BlockAcceptance {
-    /// Relative L2 activation error ‖teacher − student‖ / ‖teacher‖.
-    pub rel_error: f32,
-    pub accepted: bool,
+    /// Whether the block was accepted (relative error ≤ rel_tol).
+    pub is_accepted: bool,
+    /// L2 norm of teacher activations.
+    pub teacher_rel_activation: f32,
+    /// L2 norm of student activations.
+    pub student_rel_activation: f32,
+    /// Maximum absolute element-wise difference |t_i − s_i|.
+    pub max_abs_diff: f32,
+    /// Number of coordinates modified in this refinement step.
+    pub modified_coords: u32,
 }
 
 /// Accept a distilled block iff the student's activations track the teacher's
@@ -295,15 +302,153 @@ pub fn block_accept(teacher_act: &[f32], student_act: &[f32], rel_tol: f32) -> B
         student_act.len(),
         "activation length mismatch"
     );
-    let (mut se, mut den) = (0.0f64, 0.0f64);
+    let (mut se, mut den, mut max_diff) = (0.0f64, 0.0f64, 0.0f64);
+    let (mut tnorm, mut snorm) = (0.0f64, 0.0f64);
     for (a, b) in teacher_act.iter().zip(student_act) {
         se += ((a - b) as f64).powi(2);
         den += (*a as f64).powi(2);
+        tnorm += (*a as f64).powi(2);
+        snorm += (*b as f64).powi(2);
+        max_diff = max_diff.max((a - b).abs() as f64);
     }
     let rel_error = (se / den.max(1e-30)).sqrt() as f32;
     BlockAcceptance {
-        rel_error,
-        accepted: rel_error <= rel_tol,
+        is_accepted: rel_error <= rel_tol,
+        teacher_rel_activation: tnorm.sqrt() as f32,
+        student_rel_activation: snorm.sqrt() as f32,
+        max_abs_diff: max_diff as f32,
+        modified_coords: 0,
+    }
+}
+
+// ── On-policy distillation refinement (§8.4) ──────────────────────────────
+
+/// Temperature schedule for on-policy distillation refinement.
+/// Starts at high temperature (soft exploration) and decays.
+#[derive(Debug, Clone, Copy)]
+pub struct TemperatureSchedule {
+    pub initial: f32,
+    pub final_t: f32,
+    pub decay_rate: f32, // multiplicative decay per round
+}
+
+impl TemperatureSchedule {
+    pub fn default_r8() -> Self {
+        Self {
+            initial: 4.0,
+            final_t: 1.0,
+            decay_rate: 0.8,
+        }
+    }
+    pub fn temperature(&self, round: usize) -> f32 {
+        let t = self.initial * self.decay_rate.powi(round as i32);
+        t.max(self.final_t)
+    }
+}
+
+/// Bounded refinement configuration for the OPD loop (spec §8.4).
+#[derive(Debug, Clone)]
+pub struct RefinementConfig {
+    /// Maximum refinement rounds (spec: 8)
+    pub max_rounds: usize,
+    /// Maximum fraction of coordinates selected per round (spec: 10%)
+    pub max_selected_coords_fraction: f32,
+    /// Maximum code choices per coordinate (spec: 3)
+    pub max_code_choices_per_coord: usize,
+    /// Minimum accepted improvement (policy-defined)
+    pub min_improvement: f32,
+    /// Plateau limit: stop if no improvement after this many rounds
+    pub plateau_limit: usize,
+    /// Loss weights per layer type
+    pub logit_kl_weight: f32,
+    pub activation_mse_weight: f32,
+}
+
+impl Default for RefinementConfig {
+    fn default() -> Self {
+        Self {
+            max_rounds: 8,
+            max_selected_coords_fraction: 0.10,
+            max_code_choices_per_coord: 3,
+            min_improvement: 1e-6,
+            plateau_limit: 3,
+            logit_kl_weight: 1.0,
+            activation_mse_weight: 0.1,
+        }
+    }
+}
+
+/// Result of a full on-policy refinement pass.
+#[derive(Debug, Clone)]
+pub struct OnPolicyRefinementResult {
+    pub rounds_completed: usize,
+    pub initial_loss: f64,
+    pub final_loss: f64,
+    pub loss_per_round: Vec<f64>,
+    pub coordinates_modified: usize,
+    pub converged: bool,
+    pub acceptance: Option<BlockAcceptance>,
+    pub plateau_reached: bool,
+}
+
+/// Run bounded on-policy refinement for one matrix (spec §8.4).
+///
+/// - `initial_loss`: starting loss before any refinement
+/// - `refine_step`: closure taking the round index, returning (new_loss, BlockAcceptance)
+/// - `config`: refinement configuration
+///
+/// Returns the best refinement result after bounded rounds.
+pub fn on_policy_refine(
+    initial_loss: f64,
+    mut refine_step: impl FnMut(usize) -> (f64, BlockAcceptance),
+    config: &RefinementConfig,
+) -> OnPolicyRefinementResult {
+    let mut loss_per_round = Vec::with_capacity(config.max_rounds);
+    loss_per_round.push(initial_loss);
+    let mut best_loss = initial_loss;
+    let mut best_acceptance = None;
+    let mut plateau_count = 0;
+    let mut coords_modified = 0;
+
+    for round in 0..config.max_rounds {
+        let (new_loss, acceptance) = refine_step(round);
+        loss_per_round.push(new_loss);
+
+        if acceptance.is_accepted {
+            coords_modified += acceptance.modified_coords as usize;
+        }
+
+        let improvement = best_loss - new_loss;
+        if improvement > config.min_improvement as f64 {
+            best_loss = new_loss;
+            best_acceptance = Some(acceptance);
+            plateau_count = 0;
+        } else {
+            plateau_count += 1;
+            if plateau_count >= config.plateau_limit {
+                return OnPolicyRefinementResult {
+                    rounds_completed: round + 1,
+                    initial_loss,
+                    final_loss: new_loss,
+                    loss_per_round,
+                    coordinates_modified: coords_modified,
+                    converged: true,
+                    acceptance: best_acceptance,
+                    plateau_reached: true,
+                };
+            }
+        }
+    }
+
+    OnPolicyRefinementResult {
+        rounds_completed: config.max_rounds,
+        initial_loss,
+        final_loss: best_loss,
+        loss_per_round,
+        coordinates_modified: coords_modified,
+        converged: false,
+        acceptance: best_acceptance,
+        plateau_reached: false,
     }
 }
 
@@ -340,10 +485,12 @@ mod tests {
         let teacher = [2.0f32, 1.0, 0.1, -0.5];
         let close = [1.9f32, 1.1, 0.0, -0.4];
         let far = [1.0f32, 1.0, 1.0, 1.0];
-        assert!(block_accept(&teacher, &close, 0.1).accepted);
-        assert!(!block_accept(&teacher, &far, 0.1).accepted);
+        assert!(block_accept(&teacher, &close, 0.1).is_accepted);
+        assert!(!block_accept(&teacher, &far, 0.1).is_accepted);
         // a perfect student is always accepted with ~0 error.
-        assert!(block_accept(&teacher, &teacher, 1e-6).rel_error < 1e-6);
+        let perfect = block_accept(&teacher, &teacher, 1e-6);
+        assert!(perfect.is_accepted);
+        assert!(perfect.max_abs_diff < 1e-6);
     }
 
     // ── joint primary + MTP objective ──────────────────────────────────
@@ -444,5 +591,65 @@ mod tests {
         let both_student = vec![vec![0.0f32, 100.0, 0.0, 0.0], vec![0.0f32, 0.0, 100.0, 0.0]];
         let kl_both = multi_codebook_kd_divergence(&both_divergent, &both_student, 1.0);
         assert!(kl_both > kl, "both heads diverging should give larger KL");
+    }
+
+    // ── on-policy refinement (§8.4) ────────────────────────────────────
+
+    #[test]
+    fn temperature_schedule_decays() {
+        let sched = TemperatureSchedule::default_r8();
+        assert!(sched.temperature(0) > sched.temperature(1));
+        assert!(sched.temperature(7) >= 1.0);
+    }
+
+    #[test]
+    fn refinement_plateau_early_exit() {
+        let mut call_count = 0;
+        let result = on_policy_refine(
+            1.0,
+            |_round| {
+                call_count += 1;
+                (
+                    1.0,
+                    BlockAcceptance {
+                        is_accepted: true,
+                        teacher_rel_activation: 0.0,
+                        student_rel_activation: 0.0,
+                        max_abs_diff: 0.0,
+                        modified_coords: 0,
+                    },
+                )
+            },
+            &RefinementConfig {
+                plateau_limit: 2,
+                ..Default::default()
+            },
+        );
+        assert!(result.plateau_reached);
+        assert!(result.rounds_completed < 8);
+    }
+
+    #[test]
+    fn refinement_improvement_tracked() {
+        let result = on_policy_refine(
+            1.0,
+            |round| {
+                // Simulate improvement: loss decreases each round
+                let loss = 1.0 / (1 + round) as f64;
+                (
+                    loss,
+                    BlockAcceptance {
+                        is_accepted: true,
+                        teacher_rel_activation: 0.0,
+                        student_rel_activation: 0.0,
+                        max_abs_diff: 0.0,
+                        modified_coords: 10,
+                    },
+                )
+            },
+            &RefinementConfig::default(),
+        );
+        assert!(result.final_loss < result.initial_loss);
+        assert!(result.coordinates_modified > 0);
     }
 }

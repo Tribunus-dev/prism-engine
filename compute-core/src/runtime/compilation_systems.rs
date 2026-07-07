@@ -510,7 +510,7 @@ pub fn compile_tensors(
     tensors: Vec<TensorInput>,
     registry: CapabilityRegistry,
 ) -> Vec<CompiledBinding> {
-    let mut world = World::new();
+    let mut world = World::with_capacity((tensors.len() as u32).max(32));
     world.insert_resource(registry);
     let mut entity_for_input: Vec<(Entity, usize)> = Vec::with_capacity(tensors.len());
     for (i, tensor) in tensors.iter().enumerate() {
@@ -565,7 +565,7 @@ pub fn compile_stage(
     model_config: ModelConfig,
     registry: CapabilityRegistry,
 ) -> (StageCimageResource, Vec<CompiledBinding>) {
-    let mut world = World::new();
+    let mut world = World::with_capacity((tensors.len() as u32).max(32));
     world.insert_resource(registry);
     world.insert_resource(StageConfigResource(stage_config.quantization.clone()));
 

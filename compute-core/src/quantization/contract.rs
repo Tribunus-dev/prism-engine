@@ -19,14 +19,14 @@ pub const REPRESENTATION_REGISTRY_VERSION: u16 = 1;
 // \u2500\u2500 Tile geometry constants \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 pub const REDUCTION_TILE_SIZE: usize = 640;
 pub const TERNARY_TILE640_CODE_BYTES: usize = 160;
-pub const TERNARY_TILE640_METADATA_BYTES: usize = 4;  // alpha F32
+pub const TERNARY_TILE640_METADATA_BYTES: usize = 4; // alpha F32
 pub const NF4_TILE640_CODE_BYTES: usize = 320;
-pub const NF4_TILE640_METADATA_BYTES: usize = 8;      // alpha + beta F32
+pub const NF4_TILE640_METADATA_BYTES: usize = 8; // alpha + beta F32
 pub const INT8_TILE640_CODE_BYTES: usize = 640;
-pub const INT8_TILE640_METADATA_BYTES: usize = 4;     // alpha F32 only
+pub const INT8_TILE640_METADATA_BYTES: usize = 4; // alpha F32 only
 
 // \u2500\u2500 V1 wire ABI representation discriminants \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum RuntimeRepresentationClass {
     TernaryTile640Base = 0,
@@ -35,7 +35,7 @@ pub enum RuntimeRepresentationClass {
     RawF32 = 3,
 }
 
-// \u2500\u2500 Source matrix layout declaration \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// ── Source matrix layout declaration ────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceMatrixLayout {
     /// Prism canonical: W[in_features, out_features]
@@ -52,7 +52,77 @@ pub struct CanonicalShape {
     pub rank: u16,
 }
 
-// \u2500\u2500 Tail handling contract \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+impl CanonicalShape {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.in_features == 0 {
+            return Err("CanonicalShape: in_features must be > 0".into());
+        }
+        if self.out_features == 0 {
+            return Err("CanonicalShape: out_features must be > 0".into());
+        }
+        if self.rank != 2 {
+            return Err(format!("CanonicalShape: rank must be 2, got {}", self.rank));
+        }
+        Ok(())
+    }
+    pub fn element_count(&self) -> Option<u64> {
+        (self.in_features as u64).checked_mul(self.out_features as u64)
+    }
+}
+
+pub fn validate_source_layout(
+    source_rows: u32,
+    source_cols: u32,
+    source_element_count: u64,
+    in_features: u32,
+    out_features: u32,
+    layout: SourceMatrixLayout,
+) -> Result<CanonicalShape, String> {
+    if source_rows == 0 || source_cols == 0 {
+        return Err("validate_source_layout: source dimensions must be > 0".into());
+    }
+    let source_expected = (source_rows as u64)
+        .checked_mul(source_cols as u64)
+        .ok_or_else(|| "source dimensions overflow".to_string())?;
+    if source_element_count != source_expected {
+        return Err(format!(
+            "validate_source_layout: count {} != {}x{}={}",
+            source_element_count, source_rows, source_cols, source_expected
+        ));
+    }
+    let (norm_in, norm_out) = match layout {
+        SourceMatrixLayout::PrismInByOut => (source_rows, source_cols),
+        SourceMatrixLayout::CheckpointOutByIn => (source_cols, source_rows),
+    };
+    if norm_in != in_features {
+        return Err(format!(
+            "validate_source_layout: normalized in {} != expected {}",
+            norm_in, in_features
+        ));
+    }
+    if norm_out != out_features {
+        return Err(format!(
+            "validate_source_layout: normalized out {} != expected {}",
+            norm_out, out_features
+        ));
+    }
+    let norm_count = (in_features as u64)
+        .checked_mul(out_features as u64)
+        .ok_or_else(|| "expected dimensions overflow".to_string())?;
+    if norm_count != source_element_count {
+        return Err(format!(
+            "validate_source_layout: normalized count {} != source count {}",
+            norm_count, source_element_count
+        ));
+    }
+    Ok(CanonicalShape {
+        in_features,
+        out_features,
+        rank: 2,
+    })
+}
+
+// \u2500\u2500 Tail handling contract \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TailHandlingContract {
     ActivationZeroPredicationV1 = 1,
@@ -206,7 +276,7 @@ pub struct QuantizationValidationProfile {
 }
 
 /// Weight-space validation results.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct WeightValidationReport {
     pub rmse: f64,
     pub nrmse: f64,
@@ -271,7 +341,7 @@ pub enum WeightAdmission {
 }
 
 /// Operator-space validation results.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OperatorValidationReport {
     /// Absolute RMSE between reference and quantized matmul outputs.
     pub rmse: f32,
@@ -301,13 +371,45 @@ impl OperatorValidationReport {
 /// Evidence collected for a candidate during admission.
 #[derive(Debug, Clone)]
 pub struct CandidateEvidence {
-    pub format: QuantizedMatrixFormat,
-    pub weight_nrmse: f64,
-    pub zero_collapse_ratio: f64,
-    pub probe: Option<OperatorValidationReport>,
-    pub promotion: Option<OperatorValidationReport>,
-    pub holdout: Option<OperatorValidationReport>,
+    pub representation: RuntimeRepresentationClass,
+    pub representation_version: u16,
+    pub pack_policy_id: u16,
+    pub source_digest: [u8; 32],
+    pub canonical_shape: Option<CanonicalShape>,
+    pub structural_report: Option<StructuralReport>,
+    pub reconstruction_report: Option<ReconstructionReport>,
+    pub probe_report: Option<OperatorValidationReport>,
+    pub promotion_report: Option<OperatorValidationReport>,
+    pub holdout_report: Option<OperatorValidationReport>,
+    pub runtime_conformance_report: Option<RuntimeConformanceReport>,
     pub completed_vectors: PhaseVectorCounts,
+    pub payload_bytes: u64,
+    pub metadata_bytes: u64,
+    pub estimated_runtime_cost: f64,
+    pub result: CandidateResult,
+}
+
+impl Default for CandidateEvidence {
+    fn default() -> Self {
+        CandidateEvidence {
+            representation: RuntimeRepresentationClass::Nf4Tile640Base,
+            representation_version: 0,
+            pack_policy_id: 0,
+            source_digest: [0u8; 32],
+            canonical_shape: None,
+            structural_report: None,
+            reconstruction_report: None,
+            probe_report: None,
+            promotion_report: None,
+            holdout_report: None,
+            runtime_conformance_report: None,
+            completed_vectors: PhaseVectorCounts::default(),
+            payload_bytes: 0,
+            metadata_bytes: 0,
+            estimated_runtime_cost: 0.0,
+            result: CandidateResult::DiagnosticOnly,
+        }
+    }
 }
 
 /// Counts of validation vectors completed in each phase.
@@ -317,15 +419,6 @@ pub struct PhaseVectorCounts {
     pub promotion: u32,
     pub holdout: u32,
     pub total: u32,
-}
-
-/// Qualification level of a candidate for production.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProductionQuality {
-    /// Validated with synthetic stress vectors only (no activation bank).
-    SyntheticStressOnly,
-    /// Validated with a real activation bank and passed all gates.
-    ProductionQualified,
 }
 
 /// Receipt for a stratified-selection round of activation vectors.
@@ -371,7 +464,7 @@ pub struct InterruptedValidationReport {
 /// The best candidate seen so far.
 #[derive(Debug, Clone)]
 pub struct BestCandidateSnapshot {
-    pub format: QuantizedMatrixFormat,
+    pub format: RuntimeRepresentationClass,
     pub weight_nrmse: f64,
     pub zero_collapse_ratio: f64,
     pub operator_rmse: f32,
@@ -402,7 +495,7 @@ impl BestCandidateSnapshot {
 /// A matrix that passed admission for a specific representation.
 #[derive(Debug, Clone)]
 pub struct QualifiedTensor {
-    pub format: QuantizedMatrixFormat,
+    pub format: RuntimeRepresentationClass,
     pub reconstruction_contract: ReconstructionContract,
     pub codes: Vec<u8>,
     pub scales: Vec<f32>,
@@ -423,6 +516,115 @@ pub struct QuantizationHint {
     pub tensor_class: TensorClass,
     /// Whether the compiler may attempt Int8Tile640Base candidates.
     pub permit_int8_candidate: bool,
+}
+
+/// Target execution backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum BackendKind {
+    Metal = 0,
+    CpuReference = 1,
+    Ane = 2,
+}
+
+/// Target backend capability for a representation.
+#[derive(Debug, Clone)]
+pub struct RepresentationCapability {
+    pub representation: RuntimeRepresentationClass,
+    pub representation_version: u16,
+    pub backend: BackendKind,
+    pub kernel_abi_digest: [u8; 32],
+    pub cpu_reference_ready: bool,
+    pub parser_ready: bool,
+    pub artifact_writer_ready: bool,
+    pub loader_ready: bool,
+    pub runtime_kernel_ready: bool,
+    pub nonzero_offset_test_passed: bool,
+    pub tail_mask_test_passed: bool,
+    pub mixed_format_test_passed: bool,
+    pub end_to_end_profile_test_passed: bool,
+    pub production_ready: bool,
+}
+
+/// Qualification result for a candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CandidateResult {
+    ProductionQualified,
+    DiagnosticOnly,
+    Failed,
+    Skipped,
+}
+
+/// Structural validation results for a candidate.
+#[derive(Debug, Clone)]
+pub struct StructuralReport {
+    pub bytes_valid: bool,
+    pub segment_bounds_valid: bool,
+    pub alignment_valid: bool,
+    pub macro_layout_compatible: bool,
+    pub tail_contract_compatible: bool,
+    pub errors: Vec<String>,
+}
+
+impl StructuralReport {
+    pub fn is_pass(&self) -> bool {
+        self.bytes_valid
+            && self.segment_bounds_valid
+            && self.alignment_valid
+            && self.macro_layout_compatible
+            && self.tail_contract_compatible
+            && self.errors.is_empty()
+    }
+}
+
+/// Weight-space reconstruction quality.
+#[derive(Debug, Clone)]
+pub struct ReconstructionReport {
+    pub weight_nrmse: f64,
+    pub zero_collapse_ratio: f64,
+    pub max_abs_error: f64,
+    pub snr_db: f64,
+    pub structural: StructuralReport,
+}
+
+/// Runtime kernel conformance results.
+#[derive(Debug, Clone)]
+pub struct RuntimeConformanceReport {
+    pub cpu_reference_parity: bool,
+    pub nonzero_offset_passed: bool,
+    pub tail_mask_passed: bool,
+    pub mixed_format_passed: bool,
+    pub errors: Vec<String>,
+}
+
+/// Activation trace format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ActivationTraceFormat {
+    RawF32 = 0,
+    SyntheticStressOnly = 1,
+}
+
+/// Production activation trace with exact graph-boundary semantics.
+#[derive(Debug, Clone)]
+pub struct ActivationTrace {
+    pub trace_version: u16,
+    pub tensor_id: [u8; 16],
+    pub source_model_digest: [u8; 32],
+    pub logical_width: u32,
+    pub sample_count: u32,
+    pub profile_id: [u8; 16],
+    pub trace_digest: [u8; 32],
+    pub data_format: ActivationTraceFormat,
+    pub storage_ref: ArtifactRef,
+}
+
+/// Reference to an artifact in the content store.
+#[derive(Debug, Clone)]
+pub struct ArtifactRef {
+    pub segment: u8,
+    pub offset: u64,
+    pub length: u64,
 }
 
 /// Structured admission failure.

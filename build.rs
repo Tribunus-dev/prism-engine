@@ -16,6 +16,7 @@ fn main() {
         "fused_gate_up.metal",
         "ternary_tile640_gemv.metal",
         "silu_vec.metal",
+        "fused_teacher_student_gemv.metal",
     ];
     for src in metal_sources {
         println!(

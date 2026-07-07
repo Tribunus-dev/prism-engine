@@ -58,13 +58,15 @@ fn parallel_sha256(data: &[u8]) -> [u8; 32] {
 
 use tribunus_compute_core::ane_compile::compile_ane_artifacts;
 use tribunus_compute_core::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
-use tribunus_compute_core::compute_image::compile::execution_graph::MatrixWeightBinding;
 use tribunus_compute_core::compute_image::compile::execution_graph::{
     sidecar_byte_len, SidecarElementFormat,
 };
+use tribunus_compute_core::compute_image::compile::ternary::MatrixWeightBindingV1;
 use tribunus_compute_core::compute_image::compile::ternary::{
-    model_artifact_tag, write_cimage_header_le, CimageHeader, ModelArtifactEntry, SegmentEntry,
-    SegmentKind, CIMAGE_HEADER_WIRE_SIZE, CIMAGE_SEGMENT_CAPACITY, QUANT_SCHEMA_NF4_TILE640,
+    model_artifact_tag, read_matrix_weight_binding_v1_le, write_cimage_header_le,
+    write_matrix_weight_binding_v1_le, CimageHeader, ModelArtifactEntry, SegmentEntry, SegmentKind,
+    CIMAGE_HEADER_WIRE_SIZE, CIMAGE_SEGMENT_CAPACITY, MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH,
+    QUANT_SCHEMA_NF4_TILE640,
 };
 use tribunus_compute_core::compute_image::compile::tts_compile::pack_tts_weights;
 use tribunus_compute_core::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
@@ -79,7 +81,9 @@ use tribunus_compute_core::nf4tile640::roles::{classify_matrix_role, MatrixRole}
 use tribunus_compute_core::nf4tile640::{
     dequant_matmul_reference, pack_nf4_weights, pack_nf4_weights_awls, unpack_nf4_weights,
 };
-use tribunus_compute_core::quantization::contract::QuantizedMatrixFormat;
+use tribunus_compute_core::quantization::contract::{
+    RuntimeRepresentationClass, INT8_TILE640_CODE_BYTES, NF4_TILE640_CODE_BYTES,
+};
 use tribunus_compute_core::quantization::embed_cluster::*;
 
 use tribunus_compute_core::compilation::cancel::CancelToken;
@@ -999,7 +1003,7 @@ fn generate_ane_mil_packages(offsets: &HashMap<String, (u64, u64, usize)>) -> Ve
 #[allow(dead_code)]
 struct WeightBindingData {
     key: String,
-    format: tribunus_compute_core::quantization::contract::QuantizedMatrixFormat,
+    format: RuntimeRepresentationClass,
     /// Number of Tile640 tiles (ceil(cols / 640)).
     tiles_per_row: usize,
     /// Total tile count = rows * tiles_per_row.
@@ -1034,12 +1038,12 @@ fn physical_dims_from_shape(shape: &[usize]) -> (usize, usize) {
 
 /// Pack a weight matrix using nf4tile640 inline (single-pass, no accumulation).
 /// Map admission QuantizedMatrixFormat (1,2,3) to runtime QuantizedWeightFormat (0,1,2).
-fn admission_format_to_binding_format(f: QuantizedMatrixFormat) -> u8 {
+fn admission_format_to_binding_format(f: RuntimeRepresentationClass) -> u8 {
     match f {
-        QuantizedMatrixFormat::Nf4Tile640Base => 0,
-        QuantizedMatrixFormat::Int8Tile640Base => 1,
-        QuantizedMatrixFormat::TernaryTile640Base => todo!("ternary ingest not wired"),
-        QuantizedMatrixFormat::RawF32 => 3,
+        RuntimeRepresentationClass::Nf4Tile640Base => 1,
+        RuntimeRepresentationClass::Int8Tile640Base => 2,
+        RuntimeRepresentationClass::TernaryTile640Base => 0,
+        RuntimeRepresentationClass::RawF32 => 3,
     }
 }
 
@@ -1212,9 +1216,13 @@ fn pack_matrix_nf4_inline(
                 } => {
                     let (w_nrmse, o_nrmse, cos) = if let Some(ev) = best_evidence {
                         (
-                            ev.weight_nrmse,
-                            ev.probe.as_ref().map_or(0.0, |r| r.operator_nrmse),
-                            ev.probe.as_ref().map_or(0.0, |r| r.cosine_similarity),
+                            ev.reconstruction_report
+                                .as_ref()
+                                .map_or(0.0, |r| r.weight_nrmse),
+                            ev.probe_report.as_ref().map_or(0.0, |r| r.operator_nrmse),
+                            ev.probe_report
+                                .as_ref()
+                                .map_or(0.0, |r| r.cosine_similarity),
                         )
                     } else {
                         (0.0f64, 0.0f32, 0.0f32)
@@ -1236,13 +1244,17 @@ fn pack_matrix_nf4_inline(
                 } => {
                     let (w_nrmse, o_nrmse, cos, hgates) = if let Some(ev) = best_evidence {
                         (
-                            ev.weight_nrmse,
-                            ev.probe.as_ref().map_or(0.0, |r| r.operator_nrmse),
-                            ev.probe.as_ref().map_or(0.0, |r| r.cosine_similarity),
+                            ev.reconstruction_report
+                                .as_ref()
+                                .map_or(0.0, |r| r.weight_nrmse),
+                            ev.probe_report.as_ref().map_or(0.0, |r| r.operator_nrmse),
+                            ev.probe_report
+                                .as_ref()
+                                .map_or(0.0, |r| r.cosine_similarity),
                             [
-                                ev.probe.is_some(),
-                                ev.promotion.is_some(),
-                                ev.holdout.is_some(),
+                                ev.probe_report.is_some(),
+                                ev.promotion_report.is_some(),
+                                ev.holdout_report.is_some(),
                             ]
                             .iter()
                             .filter(|&&x| x)
@@ -1300,16 +1312,27 @@ fn pack_matrix_nf4_inline(
         }
         let tiles_per_row = (cols + 639) / 640;
         let total_tiles = rows * tiles_per_row;
-        let (weights_seg, meta_seg, sidecar_seg) = match qmf {
-            QuantizedMatrixFormat::Nf4Tile640Base => (26u8, 27u8, 40u8),
-            QuantizedMatrixFormat::Int8Tile640Base => (39u8, 27u8, 0xFF),
-            QuantizedMatrixFormat::TernaryTile640Base
-            => todo!("ternary ingest not wired"),
-            QuantizedMatrixFormat::RawF32 => todo!("raw f32 ingest not wired"),
+        let rrc: RuntimeRepresentationClass = match qmf {
+            RuntimeRepresentationClass::Nf4Tile640Base => {
+                RuntimeRepresentationClass::Nf4Tile640Base
+            }
+            RuntimeRepresentationClass::Int8Tile640Base => {
+                RuntimeRepresentationClass::Int8Tile640Base
+            }
+            RuntimeRepresentationClass::TernaryTile640Base => {
+                RuntimeRepresentationClass::TernaryTile640Base
+            }
+            RuntimeRepresentationClass::RawF32 => RuntimeRepresentationClass::RawF32,
+        };
+        let (weights_seg, meta_seg, sidecar_seg) = match rrc {
+            RuntimeRepresentationClass::Nf4Tile640Base => (26u8, 27u8, 40u8),
+            RuntimeRepresentationClass::Int8Tile640Base => (39u8, 27u8, 0xFF),
+            RuntimeRepresentationClass::TernaryTile640Base => (1u8, 27u8, 0xFF),
+            RuntimeRepresentationClass::RawF32 => (38u8, 0xFF, 0xFF),
         };
         bindings.push(WeightBindingData {
             key: key.to_string(),
-            format: qmf,
+            format: rrc,
             tiles_per_row,
             total_tiles,
             weights_segment: weights_seg,
@@ -1388,7 +1411,7 @@ fn collect_triplet_segments(
     bindings: &[WeightBindingData],
     tmp_dir: &Path,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
-    use QuantizedMatrixFormat::*;
+    use RuntimeRepresentationClass::*;
     let mut nf4_codes = Vec::new();
     let mut int8_codes = Vec::new();
     let mut tile_meta = Vec::new();
@@ -1399,14 +1422,14 @@ fn collect_triplet_segments(
         let codes = std::fs::read(tmp_dir.join(format!("{}_codes.bin", safe_name)))
             .unwrap_or_else(|e| panic!("Missing codes for {}: {}", b.key, e));
         match b.format {
-            Int8Tile640Base => int8_codes.extend(codes),
+            RuntimeRepresentationClass::Int8Tile640Base => int8_codes.extend(codes),
             _ => nf4_codes.extend(codes),
         }
         // Scales (NF4: f32 scales per tile, INT8: f32 scales per tile)
         let scales_raw = std::fs::read(tmp_dir.join(format!("{}_scales.bin", safe_name)))
             .unwrap_or_else(|e| panic!("Missing scales for {}: {}", b.key, e));
         // Biases (NF4 only: f32 biases per tile)
-        if matches!(b.format, QuantizedMatrixFormat::Nf4Tile640Base) {
+        if matches!(b.format, RuntimeRepresentationClass::Nf4Tile640Base) {
             let biases_raw = std::fs::read(tmp_dir.join(format!("{}_biases.bin", safe_name)))
                 .unwrap_or_else(|e| panic!("Missing biases for {}: {}", b.key, e));
             // Interleave: per tile [f32_scale][f32_bias] = 8 bytes
@@ -1453,28 +1476,12 @@ fn collect_triplet_segments(
 ///     [tiles_per_row: u32 LE]
 ///
 /// Endian-independent — always little-endian.
-fn build_matrix_contract_blob(bindings: &[MatrixWeightBinding]) -> Vec<u8> {
-    let per_binding = 69usize;
+fn build_matrix_contract_blob(bindings: &[MatrixWeightBindingV1]) -> Vec<u8> {
+    let per_binding = MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH;
     let mut buf = Vec::with_capacity(4 + bindings.len() * per_binding);
     buf.extend_from_slice(&(bindings.len() as u32).to_le_bytes());
     for b in bindings {
-        buf.extend_from_slice(&b.weights_offset.to_le_bytes());
-        buf.extend_from_slice(&b.weights_bytes.to_le_bytes());
-        buf.extend_from_slice(&b.tile_metadata_offset.to_le_bytes());
-        buf.extend_from_slice(&b.tile_metadata_bytes.to_le_bytes());
-        buf.extend_from_slice(&b.sidecar_offset.to_le_bytes());
-        buf.extend_from_slice(&b.sidecar_count.to_le_bytes());
-        buf.extend_from_slice(&b.matrix_id.to_le_bytes());
-        buf.push(b.format);
-        buf.push(b.weights_segment);
-        buf.push(b.tile_metadata_segment);
-        buf.push(b.sidecar_segment);
-        buf.push(b.sidecar_kind);
-        buf.push(b.sidecar_element_format);
-        buf.extend_from_slice(&[0u8; 3]); // reserved
-        buf.extend_from_slice(&b.rows.to_le_bytes());
-        buf.extend_from_slice(&b.cols.to_le_bytes());
-        buf.extend_from_slice(&b.tiles_per_row.to_le_bytes());
+        write_matrix_weight_binding_v1_le(&mut buf, b).unwrap();
     }
     buf
 }
@@ -1482,81 +1489,23 @@ fn build_matrix_contract_blob(bindings: &[MatrixWeightBinding]) -> Vec<u8> {
 /// Deserialize a MatrixContract blob into a Vec of MatrixWeightBinding records.
 /// Reads the explicit LE field format produced by build_matrix_contract_blob.
 #[allow(dead_code)]
-fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
-    let per_binding = 69usize;
+fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBindingV1> {
     if data.len() < 4 {
         return Vec::new();
     }
     let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-    let expected = 4usize
-        .checked_add(count.checked_mul(per_binding).unwrap_or(usize::MAX))
-        .unwrap_or(usize::MAX);
-    if data.len() < expected {
-        return Vec::new();
-    }
     let mut bindings = Vec::with_capacity(count);
     let mut off = 4usize;
     for _ in 0..count {
-        let c1 = off;
-        let format = data[c1 + 48];
-        let weights_segment = data[c1 + 49];
-        let tile_metadata_segment = data[c1 + 50];
-        let sidecar_segment = data[c1 + 51];
-        let sidecar_kind = data[c1 + 52];
-        let sidecar_element_format = data[c1 + 53];
-        let reserved = &data[c1 + 54..c1 + 57];
-        let sidecar_count = u32::from_le_bytes(data[c1 + 40..c1 + 44].try_into().unwrap());
-
-        // ── Field-validity checks (fail closed) ──────────────────────
-        // Format: 0=Nf4Tile640Base, 1=Int8Tile640Base, 2=TernaryTile640Base, 3=RawF32.
-        if format > 2 {
-            return Vec::new();
+        let remaining = &data[off..];
+        match read_matrix_weight_binding_v1_le(remaining) {
+            Ok(b) => {
+                let consumed = MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH;
+                bindings.push(b);
+                off += consumed;
+            }
+            Err(_) => return Vec::new(),
         }
-        // sidecar_kind must be 0 (None) or 1 (ReductionAxisScale).
-        if sidecar_kind > 1 {
-            return Vec::new();
-        }
-        // sidecar_element_format must be 0 (None), 1 (F16), or 2 (F32).
-        if sidecar_element_format > 2 {
-            return Vec::new();
-        }
-        // sidecar_count == 0 → sidecar_kind == 0, sidecar_segment == 0xFF.
-        if sidecar_count == 0 && (sidecar_kind != 0 || sidecar_segment != 0xFF) {
-            return Vec::new();
-        }
-        // sidecar_count > 0 → sidecar_kind == 1, sidecar_segment == 40,
-        //                    sidecar_element_format in {1, 2}.
-        if sidecar_count > 0
-            && (sidecar_kind != 1 || sidecar_segment != 40 || sidecar_element_format == 0)
-        {
-            return Vec::new();
-        }
-        // Reserved bytes must be zero (future fields use these).
-        if reserved.iter().any(|&b| b != 0) {
-            return Vec::new();
-        }
-
-        let b = MatrixWeightBinding {
-            weights_offset: u64::from_le_bytes(data[c1..c1 + 8].try_into().unwrap()),
-            weights_bytes: u64::from_le_bytes(data[c1 + 8..c1 + 16].try_into().unwrap()),
-            tile_metadata_offset: u64::from_le_bytes(data[c1 + 16..c1 + 24].try_into().unwrap()),
-            tile_metadata_bytes: u64::from_le_bytes(data[c1 + 24..c1 + 32].try_into().unwrap()),
-            sidecar_offset: u64::from_le_bytes(data[c1 + 32..c1 + 40].try_into().unwrap()),
-            sidecar_count,
-            matrix_id: u32::from_le_bytes(data[c1 + 44..c1 + 48].try_into().unwrap()),
-            format,
-            weights_segment,
-            tile_metadata_segment,
-            sidecar_segment,
-            sidecar_kind,
-            sidecar_element_format,
-            _pad: [0u8; 3],
-            rows: u32::from_le_bytes(data[c1 + 57..c1 + 61].try_into().unwrap()),
-            cols: u32::from_le_bytes(data[c1 + 61..c1 + 65].try_into().unwrap()),
-            tiles_per_row: u32::from_le_bytes(data[c1 + 65..c1 + 69].try_into().unwrap()),
-        };
-        bindings.push(b);
-        off += per_binding;
     }
     bindings
 }
@@ -1565,53 +1514,50 @@ fn read_matrix_contract_blob(data: &[u8]) -> Vec<MatrixWeightBinding> {
 /// Returns Ok(()) or Err with all validation errors.
 #[allow(dead_code)]
 fn validate_binding_ranges(
-    bindings: &[MatrixWeightBinding],
+    bindings: &[MatrixWeightBindingV1],
     segment_sizes: &std::collections::HashMap<u8, u64>,
 ) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
     for b in bindings {
         let mid = b.matrix_id;
         // weights: unconditional — every binding must reference an existing segment
-        let sz = match segment_sizes.get(&b.weights_segment) {
+        let sz = match segment_sizes.get(&b.code_segment) {
             Some(&s) => s,
             None => {
                 errors.push(format!(
                     "binding[{mid}]: missing weights segment {}",
-                    b.weights_segment
+                    b.code_segment
                 ));
                 continue;
             }
         };
-        let end = b
-            .weights_offset
-            .checked_add(b.weights_bytes)
-            .unwrap_or(u64::MAX);
+        let end = b.code_offset.checked_add(b.code_length).unwrap_or(u64::MAX);
         if end > sz {
             errors.push(format!(
                 "binding[{mid}]: weights range [{}..{}) exceeds segment {} size {}",
-                b.weights_offset, end, b.weights_segment, sz
+                b.code_offset, end, b.code_segment, sz
             ));
         }
 
         // tile_metadata: unconditional
-        let sz = match segment_sizes.get(&b.tile_metadata_segment) {
+        let sz = match segment_sizes.get(&b.metadata_segment) {
             Some(&s) => s,
             None => {
                 errors.push(format!(
                     "binding[{mid}]: missing tile_metadata segment {}",
-                    b.tile_metadata_segment
+                    b.metadata_segment
                 ));
                 continue;
             }
         };
         let end = b
-            .tile_metadata_offset
-            .checked_add(b.tile_metadata_bytes)
+            .metadata_offset
+            .checked_add(b.metadata_length)
             .unwrap_or(u64::MAX);
         if end > sz {
             errors.push(format!(
                 "binding[{mid}]: tile_metadata range [{}..{}) exceeds segment {} size {}",
-                b.tile_metadata_offset, end, b.tile_metadata_segment, sz
+                b.metadata_offset, end, b.metadata_segment, sz
             ));
         }
 
@@ -1887,7 +1833,7 @@ fn main() {
     let mut selection_receipts: Vec<ProfileSelectionReceipt> = Vec::new();
     let mut plan_entries: Vec<QuantizationPlanEntry> = Vec::new();
     let mut weight_bindings: Vec<WeightBindingData> = Vec::new();
-    let mut matrix_bindings: Vec<MatrixWeightBinding> = Vec::new();
+    let mut matrix_bindings: Vec<MatrixWeightBindingV1> = Vec::new();
     let learned_profiles: HashMap<MatrixRole, LearnedProfile> = HashMap::new();
     let distill_objective = DistillObjective::default();
     let nf4_tmp_dir = std::env::temp_dir().join("gemma4_nf4_pack_stream");
@@ -2398,15 +2344,15 @@ fn main() {
         let mut int8_off = 0u64;
         let mut tile_meta_off = 0u64;
         let mut sidecar_off = 0u64;
-        use QuantizedMatrixFormat::*;
+        use RuntimeRepresentationClass::*;
         matrix_bindings = Vec::new();
         for (mid, wb) in weight_bindings.iter().enumerate() {
             let codes_bytes = wb.total_tiles as u64
                 * match wb.format {
-                    Int8Tile640Base => 640u64,
-                    _ => 320u64,
+                    RuntimeRepresentationClass::Int8Tile640Base => INT8_TILE640_CODE_BYTES as u64,
+                    _ => NF4_TILE640_CODE_BYTES as u64,
                 };
-            let has_bias = matches!(wb.format, Nf4Tile640Base);
+            let has_bias = matches!(wb.format, RuntimeRepresentationClass::Nf4Tile640Base);
             let meta_bytes_per_tile: u64 = if has_bias { 8 } else { 4 };
             let meta_bytes = wb.total_tiles as u64 * meta_bytes_per_tile;
 
@@ -2435,24 +2381,49 @@ fn main() {
                 sidecar_off += wb.sidecar_count as u64 * 2; // FP16 = 2 bytes each
             }
 
-            matrix_bindings.push(MatrixWeightBinding {
-                weights_offset: w_off,
-                weights_bytes: codes_bytes,
-                tile_metadata_offset: tm_off,
-                tile_metadata_bytes: meta_bytes,
-                sidecar_offset: sc_off,
-                sidecar_count,
+            let representation = admission_format_to_binding_format(wb.format);
+            matrix_bindings.push(MatrixWeightBindingV1 {
+                binding_wire_version: 1u16,
                 matrix_id: mid as u32,
-                format: admission_format_to_binding_format(wb.format),
-                weights_segment: w_seg,
-                tile_metadata_segment: 27u8, // BlockBiases
+                tensor_id: [0u8; 16],
+                representation,
+                representation_version: 1u16,
+                kernel_abi_digest: [0u8; 32],
+                in_features: wb.rows as u32,
+                out_features: wb.cols as u32,
+                reduction_tile_size: 640u16,
+                tiles_per_output_channel: wb.tiles_per_row as u32,
+                tail_reduction_count: (wb.cols % 640) as u16,
+                macro_layout: 1u8,
+                tail_handling: 1u8,
+                code_segment: w_seg,
+                code_offset: w_off,
+                code_length: codes_bytes,
+                code_tile_stride_bytes: match representation {
+                    0 => 160,
+                    1 => 320,
+                    2 => 640,
+                    _ => 0,
+                },
+                metadata_segment: 27u8,
+                metadata_offset: tm_off,
+                metadata_length: meta_bytes,
+                metadata_tile_stride_bytes: match representation {
+                    0 => 4u16,
+                    1 => 8u16,
+                    2 => 4u16,
+                    _ => 0u16,
+                },
                 sidecar_segment: sidecar_seg_id,
+                sidecar_offset: sc_off,
+                sidecar_length: 0u64,
                 sidecar_kind: if sidecar_count > 0 { 1 } else { 0 },
                 sidecar_element_format: if sidecar_count > 0 { 1 } else { 0 },
-                _pad: [0u8; 3],
-                rows: wb.rows as u32,
-                cols: wb.cols as u32,
-                tiles_per_row: wb.tiles_per_row as u32,
+                sidecar_count,
+                residual_segment: 0u8,
+                residual_offset: 0u64,
+                residual_length: 0u64,
+                required_alignment_bytes: 64u32,
             });
         }
 
@@ -2693,8 +2664,8 @@ fn main() {
                     for k in &mat_keys {
                         if let Some(&id) = key_to_id.get(k.as_str()) {
                             let b = &matrix_bindings[id];
-                            total_wbytes += b.weights_bytes;
-                            total_sbytes += b.tile_metadata_bytes;
+                            total_wbytes += b.code_length;
+                            total_sbytes += b.metadata_length;
                         }
                     }
                 }
@@ -2702,8 +2673,8 @@ fn main() {
                     // VisionPatchEmbed
                     if let Some(&id) = key_to_id.get("model.vision_embedder.patch_dense.weight") {
                         let b = &matrix_bindings[id];
-                        total_wbytes = b.weights_bytes;
-                        total_sbytes = b.tile_metadata_bytes;
+                        total_wbytes = b.code_length;
+                        total_sbytes = b.metadata_length;
                     }
                 }
                 2 => {
@@ -2712,8 +2683,8 @@ fn main() {
                         key_to_id.get("model.embed_vision.embedding_projection.weight")
                     {
                         let b = &matrix_bindings[id];
-                        total_wbytes = b.weights_bytes;
-                        total_sbytes = b.tile_metadata_bytes;
+                        total_wbytes = b.code_length;
+                        total_sbytes = b.metadata_length;
                     }
                 }
                 _ => {}
@@ -3818,6 +3789,44 @@ fn tts_segment_kind(segment: &str) -> Option<SegmentKind> {
 }
 
 #[cfg(test)]
+/// Helper: default MatrixWeightBindingV1 with sensible zeros.
+fn default_v1_binding() -> MatrixWeightBindingV1 {
+    MatrixWeightBindingV1 {
+        binding_wire_version: 1u16,
+        matrix_id: 0,
+        tensor_id: [0u8; 16],
+        representation: 0,
+        representation_version: 1u16,
+        kernel_abi_digest: [0u8; 32],
+        in_features: 0,
+        out_features: 0,
+        reduction_tile_size: 640u16,
+        tiles_per_output_channel: 0,
+        tail_reduction_count: 0,
+        macro_layout: 1u8,
+        tail_handling: 1u8,
+        code_segment: 26,
+        code_offset: 0,
+        code_length: 0,
+        code_tile_stride_bytes: 0,
+        metadata_segment: 27,
+        metadata_offset: 0,
+        metadata_length: 0,
+        metadata_tile_stride_bytes: 0u16,
+        sidecar_segment: 0xFF,
+        sidecar_offset: 0,
+        sidecar_length: 0,
+        sidecar_kind: 0,
+        sidecar_element_format: 0,
+        sidecar_count: 0,
+        residual_segment: 0,
+        residual_offset: 0,
+        residual_length: 0,
+        required_alignment_bytes: 64u32,
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use tribunus_compute_core::nf4tile640::learn::{ProfileSelectionReceipt, SelectionReason};
@@ -3866,65 +3875,93 @@ mod tests {
     #[test]
     fn test_matrix_contract_roundtrip() {
         let bindings = vec![
-            MatrixWeightBinding {
-                weights_offset: 0,
-                weights_bytes: 7372800,
-                tile_metadata_offset: 0,
-                tile_metadata_bytes: 92160,
-                sidecar_offset: 0,
-                sidecar_count: 0,
-                sidecar_segment: 0xFF,
+            MatrixWeightBindingV1 {
+                binding_wire_version: 1u16,
                 matrix_id: 0,
-                format: 0,
-                weights_segment: 26,
-                tile_metadata_segment: 27,
+                tensor_id: [0u8; 16],
+                representation: 0,
+                representation_version: 1u16,
+                kernel_abi_digest: [0u8; 32],
+                in_features: 3840,
+                out_features: 4096,
+                reduction_tile_size: 640u16,
+                tiles_per_output_channel: 7,
+                tail_reduction_count: 0,
+                macro_layout: 1u8,
+                tail_handling: 1u8,
+                code_segment: 26,
+                code_offset: 0,
+                code_length: 7372800,
+                code_tile_stride_bytes: 160,
+                metadata_segment: 27,
+                metadata_offset: 0,
+                metadata_length: 92160,
+                metadata_tile_stride_bytes: 4u16,
+                sidecar_segment: 0xFF,
+                sidecar_offset: 0,
+                sidecar_length: 0,
                 sidecar_kind: 0,
                 sidecar_element_format: 0,
-                _pad: [0u8; 3],
-                rows: 3840,
-                cols: 4096,
-                tiles_per_row: 7,
+                sidecar_count: 0,
+                residual_segment: 0,
+                residual_offset: 0,
+                residual_length: 0,
+                required_alignment_bytes: 64u32,
             },
-            MatrixWeightBinding {
-                weights_offset: 7372800,
-                weights_bytes: 10076160,
-                tile_metadata_offset: 92160,
-                tile_metadata_bytes: 125952,
-                sidecar_offset: 0,
-                sidecar_count: 3840,
-                sidecar_segment: 40,
+            MatrixWeightBindingV1 {
+                binding_wire_version: 1u16,
                 matrix_id: 1,
-                format: 2,
-                weights_segment: 39,
-                tile_metadata_segment: 27,
+                tensor_id: [0u8; 16],
+                representation: 2,
+                representation_version: 1u16,
+                kernel_abi_digest: [0u8; 32],
+                in_features: 3840,
+                out_features: 3840,
+                reduction_tile_size: 640u16,
+                tiles_per_output_channel: 6,
+                tail_reduction_count: 0,
+                macro_layout: 1u8,
+                tail_handling: 1u8,
+                code_segment: 39,
+                code_offset: 7372800,
+                code_length: 10076160,
+                code_tile_stride_bytes: 640,
+                metadata_segment: 27,
+                metadata_offset: 92160,
+                metadata_length: 125952,
+                metadata_tile_stride_bytes: 4u16,
+                sidecar_segment: 40,
+                sidecar_offset: 0,
+                sidecar_length: 0,
                 sidecar_kind: 1,
                 sidecar_element_format: 1,
-                _pad: [0u8; 3],
-                rows: 3840,
-                cols: 3840,
-                tiles_per_row: 6,
+                sidecar_count: 3840,
+                residual_segment: 0,
+                residual_offset: 0,
+                residual_length: 0,
+                required_alignment_bytes: 64u32,
             },
         ];
 
         let blob = build_matrix_contract_blob(&bindings);
-        assert_eq!(blob.len(), 142);
+        assert_eq!(blob.len(), 4 + 2 * MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH);
         assert_eq!(blob[0..4], 2u32.to_le_bytes());
 
         let decoded = read_matrix_contract_blob(&blob);
         assert_eq!(decoded.len(), 2);
-        assert_eq!(decoded[0].weights_offset, 0);
-        assert_eq!(decoded[0].weights_bytes, 7372800);
-        assert_eq!(decoded[0].format, 0);
+        assert_eq!(decoded[0].code_offset, 0);
+        assert_eq!(decoded[0].code_length, 7372800);
+        assert_eq!(decoded[0].representation, 0);
         assert_eq!(decoded[0].sidecar_count, 0);
         assert_eq!(decoded[0].sidecar_segment, 0xFF);
 
-        assert_eq!(decoded[1].weights_offset, 7372800);
-        assert_eq!(decoded[1].format, 2);
+        assert_eq!(decoded[1].code_offset, 7372800);
+        assert_eq!(decoded[1].representation, 2);
         assert_eq!(decoded[1].sidecar_count, 3840);
         assert_eq!(decoded[1].sidecar_segment, 40);
-        assert_eq!(decoded[1].rows, 3840);
-        assert_eq!(decoded[1].cols, 3840);
-        assert_eq!(decoded[1].tiles_per_row, 6);
+        assert_eq!(decoded[1].in_features, 3840);
+        assert_eq!(decoded[1].out_features, 3840);
+        assert_eq!(decoded[1].tiles_per_output_channel, 6);
 
         let reblob = build_matrix_contract_blob(&decoded);
         assert_eq!(reblob, blob);
@@ -3933,19 +3970,19 @@ mod tests {
     #[test]
     fn test_sidecar_ambiguity() {
         let bindings = vec![
-            MatrixWeightBinding {
+            MatrixWeightBindingV1 {
                 sidecar_offset: 0,
                 sidecar_count: 0,
                 sidecar_segment: 0xFF,
-                ..MatrixWeightBinding::default()
+                ..default_v1_binding()
             },
-            MatrixWeightBinding {
+            MatrixWeightBindingV1 {
                 sidecar_offset: 0,
                 sidecar_count: 3840,
                 sidecar_segment: 40,
                 sidecar_kind: 1,
                 sidecar_element_format: 1,
-                ..MatrixWeightBinding::default()
+                ..default_v1_binding()
             },
         ];
         let blob = build_matrix_contract_blob(&bindings);
@@ -3982,47 +4019,47 @@ fn test_read_contract_absurd_count() {
 
 #[test]
 fn test_read_contract_invalid_format() {
-    let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
-        format: 1,
-        ..MatrixWeightBinding::default()
+    let mut valid = build_matrix_contract_blob(&[MatrixWeightBindingV1 {
+        representation: 1,
+        ..default_v1_binding()
     }]);
-    valid[4 + 48] = 99;
+    // Corrupt representation byte (wire offset 2 within the binding)
+    valid[4 + 2] = 99;
     assert!(read_matrix_contract_blob(&valid).is_empty());
 }
 
 #[test]
 fn test_read_contract_invalid_sidecar_segment() {
-    let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
-        format: 0,
-        sidecar_count: 0,
-        sidecar_segment: 0xFF,
-        ..MatrixWeightBinding::default()
+    // V1 reader validates reduction_tile_size == 640 for representation <= 2;
+    // corrupt tile size at wire offset 3 to trigger rejection.
+    let mut valid = build_matrix_contract_blob(&[MatrixWeightBindingV1 {
+        representation: 0,
+        ..default_v1_binding()
     }]);
-    valid[4 + 51] = 42;
+    valid[4 + 3] = 0; // reduction_tile_size = 0 (invalid for rep <= 2)
+    valid[4 + 4] = 0;
     assert!(read_matrix_contract_blob(&valid).is_empty());
 }
 
 #[test]
 fn test_read_contract_sidecar_count_segment_mismatch() {
-    let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
-        format: 0,
-        sidecar_count: 0,
-        sidecar_segment: 0xFF,
-        ..MatrixWeightBinding::default()
+    let mut valid = build_matrix_contract_blob(&[MatrixWeightBindingV1 {
+        representation: 0,
+        ..default_v1_binding()
     }]);
-    valid[4 + 40..4 + 44].copy_from_slice(&3840u32.to_le_bytes());
+    // Corrupt tail_reduction_count (wire offset 17) to mismatch in_features % 640
+    valid[4 + 17..4 + 19].copy_from_slice(&1u16.to_le_bytes());
     assert!(read_matrix_contract_blob(&valid).is_empty());
 }
 
 #[test]
 fn test_read_contract_invalid_reserved_nonzero() {
-    let mut valid = build_matrix_contract_blob(&[MatrixWeightBinding {
-        format: 0,
-        sidecar_count: 0,
-        sidecar_segment: 0xFF,
-        ..MatrixWeightBinding::default()
+    let mut valid = build_matrix_contract_blob(&[MatrixWeightBindingV1 {
+        representation: 0,
+        ..default_v1_binding()
     }]);
-    valid[4 + 54] = 1;
+    // Corrupt reduction_tile_size (wire offset 3) to 0 — fails rt == 640 check
+    valid[4 + 3..4 + 5].copy_from_slice(&0u16.to_le_bytes());
     assert!(read_matrix_contract_blob(&valid).is_empty());
 }
 
@@ -4033,7 +4070,7 @@ fn test_mixed_artifact_e2e() {
         pack_int8_weights, pack_nf4_weights, unpack_int8_weights, unpack_nf4_weights, TILE_ELEMENTS,
     };
     use tribunus_compute_core::quantization::admission::pack_candidate;
-    use tribunus_compute_core::quantization::contract::QuantizedMatrixFormat;
+    use tribunus_compute_core::quantization::contract::RuntimeRepresentationClass;
 
     const ROWS: usize = 128;
     const COLS: usize = TILE_ELEMENTS;
@@ -4050,7 +4087,7 @@ fn test_mixed_artifact_e2e() {
         &scaled_src,
         ROWS,
         COLS,
-        QuantizedMatrixFormat::Nf4Tile640Base,
+        RuntimeRepresentationClass::Nf4Tile640Base,
         None,
     );
     // Output-scaled NF4 is now folded into Nf4Tile640Base tile metadata.
@@ -4080,62 +4117,104 @@ fn test_mixed_artifact_e2e() {
     let int8_meta = (ROWS as u64) * 2 * 4;
     let sseg: Vec<u8> = Vec::new(); // no sidecar for output-scaled-folded NF4
     let bindings = vec![
-        MatrixWeightBinding {
-            weights_offset: nf4_wo,
-            weights_bytes: n4c.len() as u64,
-            tile_metadata_offset: int8_meta,
-            tile_metadata_bytes: nf4_meta,
-            sidecar_offset: 0,
-            sidecar_count: 0,
-            sidecar_segment: 0xFF,
+        MatrixWeightBindingV1 {
+            binding_wire_version: 1u16,
             matrix_id: 0,
-            format: 0,
-            rows: ROWS as u32,
-            cols: COLS as u32,
-            tiles_per_row: TILES_PER_ROW,
-            weights_segment: 26,
-            tile_metadata_segment: 27,
+            tensor_id: [0u8; 16],
+            representation: 0,
+            representation_version: 1u16,
+            kernel_abi_digest: [0u8; 32],
+            in_features: ROWS as u32,
+            out_features: COLS as u32,
+            reduction_tile_size: 640u16,
+            tiles_per_output_channel: TILES_PER_ROW,
+            tail_reduction_count: (ROWS % 640) as u16,
+            macro_layout: 1u8,
+            tail_handling: 1u8,
+            code_segment: 26,
+            code_offset: nf4_wo,
+            code_length: n4c.len() as u64,
+            code_tile_stride_bytes: 320,
+            metadata_segment: 27,
+            metadata_offset: int8_meta,
+            metadata_length: nf4_meta,
+            metadata_tile_stride_bytes: 8u16,
+            sidecar_segment: 0xFF,
+            sidecar_offset: 0,
+            sidecar_length: 0,
             sidecar_kind: 0,
             sidecar_element_format: 0,
-            _pad: [0u8; 3],
-        },
-        MatrixWeightBinding {
-            weights_offset: 0,
-            weights_bytes: i8c.len() as u64,
-            tile_metadata_offset: 0,
-            tile_metadata_bytes: int8_meta,
-            sidecar_offset: 0,
             sidecar_count: 0,
-            sidecar_segment: 0xFF,
+            residual_segment: 0,
+            residual_offset: 0,
+            residual_length: 0,
+            required_alignment_bytes: 64u32,
+        },
+        MatrixWeightBindingV1 {
+            binding_wire_version: 1u16,
             matrix_id: 1,
-            format: 2,
-            rows: ROWS as u32,
-            cols: COLS as u32,
-            tiles_per_row: TILES_PER_ROW,
-            weights_segment: 39,
-            tile_metadata_segment: 27,
-            sidecar_kind: 0,
-            sidecar_element_format: 0,
-            _pad: [0u8; 3],
-        },
-        MatrixWeightBinding {
-            weights_offset: sc_wo,
-            weights_bytes: scc.len() as u64,
-            tile_metadata_offset: int8_meta + nf4_meta,
-            tile_metadata_bytes: nf4_meta,
-            sidecar_offset: 0,
-            sidecar_count: 0,
+            tensor_id: [0u8; 16],
+            representation: 2,
+            representation_version: 1u16,
+            kernel_abi_digest: [0u8; 32],
+            in_features: ROWS as u32,
+            out_features: COLS as u32,
+            reduction_tile_size: 640u16,
+            tiles_per_output_channel: TILES_PER_ROW,
+            tail_reduction_count: (ROWS % 640) as u16,
+            macro_layout: 1u8,
+            tail_handling: 1u8,
+            code_segment: 39,
+            code_offset: 0,
+            code_length: i8c.len() as u64,
+            code_tile_stride_bytes: 640,
+            metadata_segment: 27,
+            metadata_offset: 0,
+            metadata_length: int8_meta,
+            metadata_tile_stride_bytes: 4u16,
             sidecar_segment: 0xFF,
-            matrix_id: 2,
-            format: 0, // Nf4Tile640Base (output-scaled-folded, no sidecar)
-            rows: ROWS as u32,
-            cols: COLS as u32,
-            tiles_per_row: TILES_PER_ROW,
-            weights_segment: 26,
-            tile_metadata_segment: 27,
+            sidecar_offset: 0,
+            sidecar_length: 0,
             sidecar_kind: 0,
             sidecar_element_format: 0,
-            _pad: [0u8; 3],
+            sidecar_count: 0,
+            residual_segment: 0,
+            residual_offset: 0,
+            residual_length: 0,
+            required_alignment_bytes: 64u32,
+        },
+        MatrixWeightBindingV1 {
+            binding_wire_version: 1u16,
+            matrix_id: 2,
+            tensor_id: [0u8; 16],
+            representation: 0,
+            representation_version: 1u16,
+            kernel_abi_digest: [0u8; 32],
+            in_features: ROWS as u32,
+            out_features: COLS as u32,
+            reduction_tile_size: 640u16,
+            tiles_per_output_channel: TILES_PER_ROW,
+            tail_reduction_count: (ROWS % 640) as u16,
+            macro_layout: 1u8,
+            tail_handling: 1u8,
+            code_segment: 26,
+            code_offset: sc_wo,
+            code_length: scc.len() as u64,
+            code_tile_stride_bytes: 320,
+            metadata_segment: 27,
+            metadata_offset: int8_meta + nf4_meta,
+            metadata_length: nf4_meta,
+            metadata_tile_stride_bytes: 8u16,
+            sidecar_segment: 0xFF,
+            sidecar_offset: 0,
+            sidecar_length: 0,
+            sidecar_kind: 0,
+            sidecar_element_format: 0,
+            sidecar_count: 0,
+            residual_segment: 0,
+            residual_offset: 0,
+            residual_length: 0,
+            required_alignment_bytes: 64u32,
         },
     ];
     let blob = build_matrix_contract_blob(&bindings);
@@ -4160,10 +4239,10 @@ fn test_mixed_artifact_e2e() {
         let orig = &bindings[i];
         let src = sources[i];
         let label = labels[i];
-        assert_eq!(b.format, orig.format, "{label}: format");
+        assert_eq!(b.representation, orig.representation, "{label}: format");
         assert_eq!(b.sidecar_count, orig.sidecar_count, "{label}: sc_count");
-        assert_eq!(b.rows, ROWS as u32, "{label}: rows");
-        assert_eq!(b.cols, COLS as u32, "{label}: cols");
+        assert_eq!(b.in_features, ROWS as u32, "{label}: rows");
+        assert_eq!(b.out_features, COLS as u32, "{label}: cols");
         if b.sidecar_count == 0 {
             assert_eq!(b.sidecar_segment, 0xFF, "{label}: no-sc seg");
         } else {
@@ -4171,9 +4250,9 @@ fn test_mixed_artifact_e2e() {
             assert_eq!(b.sidecar_offset, 0, "{label}: first sc offset 0");
         }
 
-        let w = &seg[&b.weights_segment][b.weights_offset as usize..][..b.weights_bytes as usize];
-        let m = &seg[&b.tile_metadata_segment][b.tile_metadata_offset as usize..]
-            [..b.tile_metadata_bytes as usize];
+        let w = &seg[&b.code_segment][b.code_offset as usize..][..b.code_length as usize];
+        let m =
+            &seg[&b.metadata_segment][b.metadata_offset as usize..][..b.metadata_length as usize];
         let sv: Vec<f32> = if b.sidecar_count > 0 {
             (0..b.sidecar_count as usize)
                 .map(|i| {
@@ -4186,12 +4265,12 @@ fn test_mixed_artifact_e2e() {
             Vec::new()
         };
 
-        let rows = b.rows as usize;
-        let cols = b.cols as usize;
+        let rows = b.in_features as usize;
+        let cols = b.out_features as usize;
 
-        let mut recon: Vec<f32> = match b.format {
+        let mut recon: Vec<f32> = match b.representation {
             0 | 1 => {
-                let total_tiles = rows * b.tiles_per_row as usize;
+                let total_tiles = rows * b.tiles_per_output_channel as usize;
                 let n_scales = total_tiles * 5;
                 let f32b = |off: usize, n: usize| -> Vec<f32> {
                     (0..n)
@@ -4207,7 +4286,7 @@ fn test_mixed_artifact_e2e() {
                 )
             }
             2 => {
-                let total_tiles = rows * b.tiles_per_row as usize;
+                let total_tiles = rows * b.tiles_per_output_channel as usize;
                 let scales: Vec<f32> = (0..total_tiles)
                     .map(|i| f32::from_le_bytes(m[i * 4..][..4].try_into().unwrap()))
                     .collect();
@@ -4234,8 +4313,8 @@ fn test_mixed_artifact_e2e() {
             .map(|(a, b)| (a - b) * (a - b))
             .sum();
         let nrmse = (diff / src.len() as f32).sqrt() / rms;
-        let ceil = if b.format == 2 { 0.02 } else { 0.05 };
-        let bound = if b.format == 2 { 0.03 } else { 0.15 };
+        let ceil = if b.representation == 2 { 0.02 } else { 0.05 };
+        let bound = if b.representation == 2 { 0.03 } else { 0.15 };
         assert!(nrmse < bound, "{label}: NRMSE {:.6} >= {bound}", nrmse);
 
         // 6. Reference matmul: y = x * W^T (batch=4)
@@ -4275,13 +4354,13 @@ fn test_bounds_weights_exceeds_segment() {
     let mut map = std::collections::HashMap::new();
     map.insert(26u8, 40960u64);
     map.insert(27u8, 5120u64);
-    let b = MatrixWeightBinding {
-        weights_offset: 0,
-        weights_bytes: 50000,
-        weights_segment: 26,
-        format: 0,
-        tile_metadata_segment: 27,
-        ..MatrixWeightBinding::default()
+    let b = MatrixWeightBindingV1 {
+        code_offset: 0,
+        code_length: 50000,
+        code_segment: 26,
+        representation: 0,
+        metadata_segment: 27,
+        ..default_v1_binding()
     };
     let errs = validate_binding_ranges(&[b], &map).unwrap_err();
     assert!(!errs.is_empty(), "expected errors");
@@ -4293,13 +4372,13 @@ fn test_bounds_tile_metadata_exceeds_segment() {
     let mut map = std::collections::HashMap::new();
     map.insert(26u8, 40960u64);
     map.insert(27u8, 5120u64);
-    let b = MatrixWeightBinding {
-        tile_metadata_offset: 0,
-        tile_metadata_bytes: 6000,
-        format: 0,
-        tile_metadata_segment: 27,
-        weights_segment: 26,
-        ..MatrixWeightBinding::default()
+    let b = MatrixWeightBindingV1 {
+        metadata_offset: 0,
+        metadata_length: 6000,
+        representation: 0,
+        metadata_segment: 27,
+        code_segment: 26,
+        ..default_v1_binding()
     };
     let errs = validate_binding_ranges(&[b], &map).unwrap_err();
     assert!(!errs.is_empty(), "expected errors");
@@ -4312,16 +4391,16 @@ fn test_bounds_sidecar_exceeds_segment() {
     map.insert(26u8, 40960u64);
     map.insert(27u8, 5120u64);
     map.insert(40u8, 2560u64);
-    let b = MatrixWeightBinding {
+    let b = MatrixWeightBindingV1 {
         sidecar_offset: 2000,
         sidecar_count: 640,
         sidecar_kind: 1,
         sidecar_element_format: 1,
         sidecar_segment: 40,
-        format: 1,
-        weights_segment: 26,
-        tile_metadata_segment: 27,
-        ..MatrixWeightBinding::default()
+        representation: 1,
+        code_segment: 26,
+        metadata_segment: 27,
+        ..default_v1_binding()
     };
     let errs = validate_binding_ranges(&[b], &map).unwrap_err();
     assert!(!errs.is_empty(), "expected errors");
@@ -4333,15 +4412,15 @@ fn test_bounds_valid_passes() {
     let mut map = std::collections::HashMap::new();
     map.insert(26u8, 40960u64);
     map.insert(27u8, 5120u64);
-    let b = MatrixWeightBinding {
-        weights_offset: 0,
-        weights_bytes: 40960,
-        tile_metadata_offset: 0,
-        tile_metadata_bytes: 5120,
-        weights_segment: 26,
-        tile_metadata_segment: 27,
-        format: 0,
-        ..MatrixWeightBinding::default()
+    let b = MatrixWeightBindingV1 {
+        code_offset: 0,
+        code_length: 40960,
+        metadata_offset: 0,
+        metadata_length: 5120,
+        code_segment: 26,
+        metadata_segment: 27,
+        representation: 0,
+        ..default_v1_binding()
     };
     assert!(validate_binding_ranges(&[b], &map).is_ok());
 }
@@ -4350,12 +4429,12 @@ fn test_bounds_valid_passes() {
 fn test_bounds_exact_edge_passes() {
     let mut map = std::collections::HashMap::new();
     map.insert(26u8, 40960u64);
-    let b = MatrixWeightBinding {
-        weights_offset: 0,
-        weights_bytes: 40960,
-        weights_segment: 26,
-        tile_metadata_segment: 26,
-        ..MatrixWeightBinding::default()
+    let b = MatrixWeightBindingV1 {
+        code_offset: 0,
+        code_length: 40960,
+        code_segment: 26,
+        metadata_segment: 26,
+        ..default_v1_binding()
     };
     assert!(validate_binding_ranges(&[b], &map).is_ok());
 }

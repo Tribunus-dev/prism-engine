@@ -32,8 +32,8 @@ use tribunus_compute_core::config::{
 use tribunus_compute_core::device::{
     self, BackendKind, DeviceKind, DeviceMemoryInfo, PcieLinkInfo,
 };
-use tribunus_compute_core::tts::pipeline::TtsPipeline;
 use tribunus_compute_core::tools;
+use tribunus_compute_core::tts::pipeline::TtsPipeline;
 
 /// Errors that can cross the UniFFI boundary.
 #[derive(Debug, Clone, uniffi::Error, thiserror::Error)]
@@ -368,7 +368,9 @@ pub fn prism_compile_nf4(
     if let Some(cb) = &callback {
         cb.on_log("nf4tile640 compilation not yet wired through bridge".into());
     }
-    Err(CompilerError::InvalidFormat { message: "use CLI: gemma4_ingest --nf4".into() })
+    Err(CompilerError::InvalidFormat {
+        message: "use CLI: gemma4_ingest --nf4".into(),
+    })
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -411,7 +413,8 @@ impl BridgeMultiplexer {
         // Load tokenizer
         let tokenizer = tribunus_compute_core::tokenizer::TribunusTokenizer::from_dir(
             std::path::Path::new(&model_dir),
-        ).ok();
+        )
+        .ok();
 
         Ok(Arc::new(Self {
             #[cfg(target_os = "macos")]
@@ -649,7 +652,10 @@ pub fn prism_infer_multimodal_stream(
         };
 
         // Prefill
-        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)].iter().enumerate() {
+        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)]
+            .iter()
+            .enumerate()
+        {
             let mut op = decode_op.clone();
             op.operation_id = OperationId(tok as u64);
             exec.operation_registry.insert(op.operation_id, op);
@@ -748,7 +754,8 @@ pub fn prism_generate_audio(
             Ok(chunks) => {
                 for chunk in chunks {
                     // Convert f32 PCM to 16-bit PCM bytes
-                    let pcm_bytes: Vec<u8> = chunk.iter()
+                    let pcm_bytes: Vec<u8> = chunk
+                        .iter()
                         .flat_map(|&s| {
                             let clamped = (s.max(-1.0).min(1.0) * 32767.0) as i16;
                             clamped.to_le_bytes().to_vec()

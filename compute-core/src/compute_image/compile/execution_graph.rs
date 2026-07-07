@@ -7,24 +7,6 @@
 /// Magic bytes: "PRMEXEC1"
 pub const EXECUTION_GRAPH_MAGIC: [u8; 8] = *b"PRMEXEC1";
 
-/// Discriminant of a quantized weight format.
-/// Determines which Metal kernel and tile stride to use.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QuantizedWeightFormat {
-    /// NF4 Tile640: 320-byte codes per tile, f32 scale + bias per tile (alpha/beta).
-    /// Supports multiple packing policies (MaxAbs, AWLS, OutputScaledFolded).
-    /// OutputScaledFolded folds per-output-channel scales into tile alpha/beta
-    /// at pack time \u2014 no runtime sidecar needed.
-    Nf4Tile640Base = 0,
-    /// INT8 Tile640: 640-byte codes per tile, f32 scale per tile, no bias.
-    Int8Tile640Base = 1,
-    /// Ternary Tile640: 64-byte nibble codes per 256-element block, FP16 scale per block.
-    TernaryTile640Base = 2,
-    /// Raw F16 passthrough.
-    RawF32 = 3,
-}
-
 /// Declares the per-element encoding of sidecar data payloads.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -77,7 +59,7 @@ pub struct MatrixWeightBinding {
     pub sidecar_count: u32,
     /// Index into the bindings array.
     pub matrix_id: u32,
-    /// QuantizedWeightFormat discriminant.
+    /// RuntimeRepresentationClass discriminant.
     pub format: u8,
     /// SegmentKind value for the packed codes.
     pub weights_segment: u8,
