@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use tribunus_compute_core::arena::Arena;
 use tribunus_compute_core::backend::ane_backend::AneBackend;
-use tribunus_compute_core::backend::completion::ComputationToken;
 use tribunus_compute_core::backend::metal::MetalBackend;
 use tribunus_compute_core::backend::{DType, QuantizedMatmulOp, TensorBackend};
 use tribunus_compute_core::nf4tile640::{
@@ -43,7 +42,8 @@ fn pack_small_weights(rows: usize, cols: usize) -> (Vec<u8>, Vec<f32>, Vec<f32>)
             }
         }
     }
-    pack_nf4_weights(&weights, rows, cols)
+    let (codes, scales, biases, _r, _c) = pack_nf4_weights(&weights, rows, cols);
+    (codes, scales, biases)
 }
 
 /// Create a small input matrix (m × k) with ramp values.

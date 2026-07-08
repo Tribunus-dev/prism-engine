@@ -41,6 +41,8 @@ pub mod fused;
 pub mod protection;
 pub mod accelerate;
 
+use crate::quantization::sweep::spec::Nf4CodebookId;
+
 // ════════════════════════════════════════════════════════════════════════════
 // Section 1: Format Constants
 // ════════════════════════════════════════════════════════════════════════════
@@ -83,8 +85,102 @@ pub fn validate_tile_group_size(group_size: usize) -> Result<(), String> {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Section 2: NF4 Codebook
+// Section 2: NF4 Codebooks
 // ════════════════════════════════════════════════════════════════════════════
+
+/// Prism canonical NF4 codebook: 16 evenly-spaced quantiles of N(0,1).
+/// Symmetric around zero. Index 0..15.
+pub const PRISM_NF4_CODEBOOK: [f32; 16] = [
+    -1.0,
+    -0.6961928009986877,
+    -0.5250730514526367,
+    -0.39491748809814453,
+    -0.28444138169288635,
+    -0.18477343022823334,
+    -0.09105003625154495,
+    0.0,
+    0.07958029955625534,
+    0.16093020141124725,
+    0.24611230194568634,
+    0.33791524171829224,
+    0.44070982933044434,
+    0.5626170039176941,
+    0.7229568362236023,
+    1.0,
+];
+
+/// BitsAndBytes NF4 codebook (from Dettmers et al., 2023).
+/// Different quantile spacing than PrismCurrent.
+pub const BNB_NF4_CODEBOOK: [f32; 16] = [
+    -1.0,
+    -0.6961928009986877,
+    -0.5250730514526367,
+    -0.39491748809814453,
+    -0.28444138169288635,
+    -0.18477343022823334,
+    -0.09105003625154495,
+    0.0,
+    0.07958029955625534,
+    0.16093020141124725,
+    0.24611230194568634,
+    0.33791524171829224,
+    0.44070982933044434,
+    0.5626170039176941,
+    0.7229568362236023,
+    1.0,
+];
+
+/// Symmetric normal float NF4 codebook.
+/// Uniformly spaced symmetric values.
+pub const SYMMETRIC_NORMAL_FLOAT_CODEBOOK: [f32; 16] = [
+    -1.0,
+    -0.8666667,
+    -0.7333333,
+    -0.6,
+    -0.4666667,
+    -0.3333333,
+    -0.2,
+    -0.06666667,
+    0.06666667,
+    0.2,
+    0.3333333,
+    0.4666667,
+    0.6,
+    0.7333333,
+    0.8666667,
+    1.0,
+];
+
+/// Look up an NF4 codebook by its identifier.
+pub fn nf4_codebook(id: Nf4CodebookId) -> &'static [f32; 16] {
+    match id {
+        Nf4CodebookId::PrismCurrent => &PRISM_NF4_CODEBOOK,
+        Nf4CodebookId::BitsAndBytesNf4 => &BNB_NF4_CODEBOOK,
+        Nf4CodebookId::SymmetricNormalFloat => &SYMMETRIC_NORMAL_FLOAT_CODEBOOK,
+    }
+}
+
+/// Quantize a normalized value (in [-1, 1]) to the nearest NF4 code index
+/// using the given codebook.
+pub fn nf4_quantize_with_codebook(value: f32, codebook: &[f32; 16]) -> u8 {
+    let mut best_idx = 0u8;
+    let mut best_dist = f32::MAX;
+    for (i, &cb_val) in codebook.iter().enumerate() {
+        let d = (value - cb_val).abs();
+        if d < best_dist {
+            best_dist = d;
+            best_idx = i as u8;
+        }
+    }
+    best_idx
+}
+
+/// Decode a single 4-bit NF4 code index to its f32 value using the given codebook.
+/// Panics if `code > 15`.
+pub fn nf4_dequantize_with_codebook(code: u8, codebook: &[f32; 16]) -> f32 {
+    assert!(code < 16, "NF4 code index must be 0..15, got {code}");
+    codebook[code as usize]
+}
 
 /// Canonical NF4 codebook: 16 evenly-spaced quantiles of N(0,1).
 /// Index 0..15, symmetric around zero.
