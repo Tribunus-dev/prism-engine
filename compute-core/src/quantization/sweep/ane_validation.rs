@@ -127,7 +127,7 @@ fn compile_or_load_model(
             &cache_path.to_string_lossy(),
             CoreAiComputeUnits::CpuAndNeuralEngine,
         )?;
-        let weight_arena = Arena::new(out_features, in_features, DataType::Float16)
+        let weight_arena = Arena::new(in_features, out_features, DataType::Float16)
             .map_err(|e| format!("weight arena: {}", e))?;
         let output_arena = Arena::new(1, out_features, DataType::Float16)
             .map_err(|e| format!("output arena: {}", e))?;
@@ -137,7 +137,7 @@ fn compile_or_load_model(
     // ── Build MIL program ──────────────────────────────────────────────
     let b = MilBuilder::new("main");
     let b = b.input(ACT_INPUT_NAME, mil_spec::DataType::Float16, &[1, in_features as i64]);
-    let b = b.input(WT_INPUT_NAME, mil_spec::DataType::Float16, &[out_features as i64, in_features as i64]);
+    let b = b.input(WT_INPUT_NAME, mil_spec::DataType::Float16, &[in_features as i64, out_features as i64]);
     let b = b.matmul(ACT_INPUT_NAME, WT_INPUT_NAME);
     let prog = b
         .output(OUTPUT_NAME)
@@ -153,7 +153,7 @@ fn compile_or_load_model(
         output_name: OUTPUT_NAME.into(),
         inputs: vec![
             (ACT_INPUT_NAME.into(), vec![1, in_features as i64]),
-            (WT_INPUT_NAME.into(), vec![out_features as i64, in_features as i64]),
+            (WT_INPUT_NAME.into(), vec![in_features as i64, out_features as i64]),
         ],
         outputs: vec![(OUTPUT_NAME.into(), vec![1, out_features as i64])],
     };
@@ -163,8 +163,14 @@ fn compile_or_load_model(
     let mlpackage_dir = model_dir.join("model.mlpackage");
     let compiled_dir = model_dir.join("compiled");
 
-    if !mlpackage_dir.exists() {
+    // Always try to compile (the mlpackage_dir guard is unsafe — a failed
+    // compile leaves mlpackage_dir in place and blocks retry)
+    if !cache_path.exists() {
         let _ = std::fs::create_dir_all(&compiled_dir);
+        // Clean stale mlpackage if present
+        if mlpackage_dir.exists() {
+            std::fs::remove_dir_all(&mlpackage_dir).ok();
+        }
         let written_package = write_mlpackage(prog, &mlpackage_dir, &meta)
             .map_err(|e| format!("mlpackage write: {}", e))?;
 
@@ -190,7 +196,7 @@ fn compile_or_load_model(
         CoreAiComputeUnits::CpuAndNeuralEngine,
     )?;
 
-    let weight_arena = Arena::new(out_features, in_features, DataType::Float16)
+    let weight_arena = Arena::new(in_features, out_features, DataType::Float16)
         .map_err(|e| format!("weight arena: {}", e))?;
     let output_arena = Arena::new(1, out_features, DataType::Float16)
         .map_err(|e| format!("output arena: {}", e))?;
@@ -304,8 +310,13 @@ pub fn validate_operator(
     weight_arena.lock().map_err(|e| format!("lock weights: {}", e))?;
     unsafe {
         let ptr = weight_arena.info.base_address as *mut u16;
-        for (i, &w) in reconstructed_weights.iter().enumerate() {
-            ptr.add(i).write(f32_to_f16_bits(w));
+        let in_f = in_features as usize;
+        let out_f = out_features as usize;
+        // Transpose: MIL weights are [in, out], data is [out, in]
+        for i in 0..in_f {
+            for j in 0..out_f {
+                ptr.add(i * out_f + j).write(f32_to_f16_bits(reconstructed_weights[j * in_f + i]));
+            }
         }
     }
     weight_arena.unlock().map_err(|e| format!("unlock weights: {}", e))?;
