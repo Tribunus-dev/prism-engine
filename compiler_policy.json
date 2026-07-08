@@ -1,7 +1,18 @@
 {
-  "policy_version": 1,
+  "policy_version": 2,
   "policy_created": "2026-07-08T06:40:00Z",
-  "generated_by": "QuantSweep with Metal GPU acceleration",
+  "policy_updated": "2026-07-08T07:45:00Z",
+  "generated_by": "QuantSweep with Metal GPU acceleration + ANE operator validation",
+  "evidence_model": {
+    "tiers": ["weight_space", "operator", "rollout"],
+    "promotion_gates": {
+      "operator_nrmse": 0.002,
+      "cosine_similarity": 0.999,
+      "norm_drift_min": 0.995,
+      "norm_drift_max": 1.005,
+      "max_abs_error_per_tensor_class": 0.5
+    }
+  },
   "model_policies": [
     {
       "scope": "Gemma4.DecoderAttentionProjection",
@@ -24,12 +35,26 @@
         "family": "INT8",
         "group_size": 128
       },
-      "stability": {
-        "status": "stable",
-        "avg_nrmse": 0.0928,
-        "worst_nrmse": 0.0949,
-        "depth_drift": "none"
-      }
+      "evidence": {
+        "weight_space": {
+          "avg_nrmse": 0.0928,
+          "worst_nrmse": 0.0949,
+          "max_abs_error": 0.076,
+          "zero_collapse_ratio": 0.0,
+          "status": "passed",
+          "depth_drift": "none"
+        },
+        "operator": {
+          "backend": "ANE",
+          "op_nrmse": 0.000607,
+          "cosine_similarity": 1.0,
+          "norm_drift": 0.999789,
+          "max_abs_error": 0.00515,
+          "status": "promotable",
+          "evidence_path": "/tmp/sweep-gemma-ane-v4/operator_validation.json"
+        }
+      },
+      "validation_status": "operator_validated"
     },
     {
       "scope": "Gemma4.DecoderMlpProjection",
@@ -52,12 +77,26 @@
         "family": "INT8",
         "group_size": 128
       },
-      "stability": {
-        "status": "stable",
-        "avg_nrmse": 0.0927,
-        "worst_nrmse": 0.0947,
-        "depth_drift": "none"
-      }
+      "evidence": {
+        "weight_space": {
+          "avg_nrmse": 0.0927,
+          "worst_nrmse": 0.0947,
+          "max_abs_error": 0.049,
+          "zero_collapse_ratio": 0.0,
+          "status": "passed",
+          "depth_drift": "none"
+        },
+        "operator": {
+          "backend": "ANE",
+          "op_nrmse": 0.000537,
+          "cosine_similarity": 1.0,
+          "norm_drift": 0.999524,
+          "max_abs_error": 0.01086,
+          "status": "promotable",
+          "evidence_path": "/tmp/sweep-gemma-ane-v4/operator_validation.json"
+        }
+      },
+      "validation_status": "operator_validated"
     },
     {
       "scope": "Qwen3TTS.Projection",
@@ -75,6 +114,13 @@
         "family": "RawF32"
       },
       "disallow": ["NF4", "SymInt4", "Ternary"],
+      "evidence": {
+        "weight_space": {
+          "avg_nrmse": 0.0068,
+          "status": "passed"
+        }
+      },
+      "validation_status": "weight_space_only",
       "notes": "4-bit formats produce ~13x worse NRMSE than INT8. No 4-bit candidate is safe for speech without operator/perceptual validation."
     },
     {
@@ -92,7 +138,25 @@
       "fallback": {
         "family": "RawF32"
       },
-      "notes": "NF4 on patch_dense produces max_abs_error=9.4 — isolated extreme misses. INT8 max_abs=0.58 is still high. Strong candidate for operator validation before promotion."
+      "evidence": {
+        "weight_space": {
+          "nrmse": 0.0065,
+          "max_abs_error": 0.578,
+          "status": "passed"
+        },
+        "operator": {
+          "backend": "ANE",
+          "op_nrmse": 0.001092,
+          "cosine_similarity": 1.0,
+          "norm_drift": 0.999393,
+          "max_abs_error": 3.896973,
+          "status": "rollout_required",
+          "reason": "operator NRMSE passes gate (0.001 < 0.002) but max_abs_error 3.9 exceeds 0.5 gate — rollout validation required before full promotion",
+          "evidence_path": "/tmp/sweep-bridge-ane/operator_validation.json"
+        }
+      },
+      "validation_status": "operator_validated_rollout_required",
+      "notes": "INT8 weight NRMSE good (0.0065). Operator NRMSE good (0.001). Cosine=1.0. But max_abs_error=3.9 exceeds promotion gate. Rollout validation required before full promotion. NF4 remains unusable (max_abs=9.4)."
     },
     {
       "scope": "Gemma4.CrossModalBridge",
@@ -108,18 +172,39 @@
       },
       "fallback": {
         "family": "RawF32"
-      }
+      },
+      "evidence": {
+        "weight_space": {
+          "avg_nrmse": 0.0085,
+          "max_abs_error": 0.0034,
+          "status": "passed"
+        }
+      },
+        },
+        "operator": {
+          "backend": "ANE",
+          "op_nrmse": 0.000594,
+          "cosine_similarity": 1.0,
+          "norm_drift": 0.999524,
+          "max_abs_error": 0.009568,
+          "status": "promotable"
+        }
+      },
+      "validation_status": "operator_validated"
     }
   ],
   "operator_validation_priority": [
     "Gemma4.VisionPatchProjection.patch_dense INT8 g128",
     "Gemma4.CrossModalBridge.embedding_projection INT8 g128",
     "Qwen3TTS.Projection.codec_head INT8 g128",
-    "Qwen3TTS.Projection.text_projection INT8 g128",
-    "Gemma4.Decoder NF4 BnB g32 ScaleOnly"
+    "Qwen3TTS.Projection.text_projection INT8 g128"
   ],
   "auto_promotion_rules": {
     "max_abs_error_gate": 0.5,
-    "description": "If selected_policy.max_abs_error > gate on any tensor: require operator validation before promoting. If operator_validation_missing: use fallback."
+    "description": "If selected_policy.max_abs_error > gate on any tensor: require operator validation before promoting. If operator_validation_missing: use fallback.",
+    "promotion_gates_met": {
+      "Gemma4.DecoderAttentionProjection": true,
+      "Gemma4.DecoderMlpProjection": true
+    }
   }
 }
