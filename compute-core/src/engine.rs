@@ -32,7 +32,7 @@ use crate::hybrid_profile::{HybridExecutor, HybridProfile};
 use crate::runtime::world::World;
 use crate::compute_image::compile::ternary::{CimageHeader, SegmentKind, CIMAGE_HEADER_WIRE_SIZE};
 use crate::compute_image::compile::execution_graph::{
-    ExecutionGraphDescriptor, EXECUTION_GRAPH_MAGIC, NodeKind, LayerExecutionNode,
+    ExecutionGraphDescriptor, EXECUTION_GRAPH_MAGIC, NodeKind,
 };
 use std::collections::HashMap;
 use crate::scheduling::{
@@ -59,21 +59,26 @@ const DEFAULT_BOS_TOKEN: u32 = 2;
 enum LoadedModel {
     /// Model loaded from the legacy model store path.
     Store {
+        #[allow(dead_code)]
         image_hash: String,
+        #[allow(dead_code)]
         model_path: PathBuf,
         vocab_size: u32,
     },
     /// Model loaded from an ECS-compiled sealed cimage (symbiotic with compiler).
     Cimage {
         /// Parsed execution graph driving the compute DAG.
-        graph: crate::compute_image::compile::execution_graph::ExecutionGraphDescriptor,
+        graph: ExecutionGraphDescriptor,
         /// Matrix contract — per-tensor format contracts.
+        #[allow(dead_code)]
         contract: Vec<crate::compute_image::compile::execution_graph::MatrixWeightBinding>,
         /// Raw weight segment data keyed by SegmentKind.
-        weight_segments: std::collections::HashMap<u32, Vec<u8>>,
+        weight_segments: HashMap<u32, Vec<u8>>,
         /// Metal shader library bytes (SegmentKind::MetalLib = 0).
+        #[allow(dead_code)]
         metal_lib: Option<Vec<u8>>,
         /// ANE archive bytes (SegmentKind::AneArchive = 5).
+        #[allow(dead_code)]
         ane_archive: Option<Vec<u8>>,
         /// Vocabulary size.
         vocab_size: u32,
@@ -87,6 +92,7 @@ impl LoadedModel {
             LoadedModel::Cimage { vocab_size, .. } => *vocab_size,
         }
     }
+    #[allow(dead_code)]
     fn image_hash(&self) -> &str {
         match self {
             LoadedModel::Store { image_hash, .. } => image_hash,

@@ -141,7 +141,7 @@ fn sealed_profiles_verify() {
     let c = F32MatmulContract::new(OperationId(0), 2, 4, 3);
     assert!(SealedExperimentProfile::mlx_control(&c).verify());
     assert!(SealedExperimentProfile::accelerate_cpu(&c).verify());
-    assert!(SealedExperimentProfile::coreml_ane(&c).verify());
+    assert!(SealedExperimentProfile::coreai_ane(&c).verify());
 }
 
 #[test]

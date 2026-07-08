@@ -7,6 +7,7 @@ use tribunus_compute_core::backend::accelerate::AccelerateBackend;
 use tribunus_compute_core::backend::graph::GraphBackend;
 use tribunus_compute_core::backend::routing::{CompiledRegionHandle, GraphRegion, OperationFamily};
 use tribunus_compute_core::backend::{MatmulOp, MlxBackend, TensorBackend};
+use tribunus_compute_core::backend::coreai::CoreAiBackend;
 
 // ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -128,9 +129,9 @@ fn accel_vs_oracle() {
 // ── Core ML lifecycle in conformance context ──────────────────────────
 
 #[test]
-fn coreml_compile_loads_native_bridge() {
+fn coreai_compile_loads_native_bridge() {
     // CoreML backend is feature-gated; this test is a placeholder.
-    // Skipping actual CoreMlBackend usage since the module is not always enabled.
+    // Skipping actual CoreAiBackend usage since the module is not always enabled.
     let region = GraphRegion {
         region_id: 200,
         family: OperationFamily::Matmul,
@@ -138,7 +139,12 @@ fn coreml_compile_loads_native_bridge() {
         input_tensors: vec![],
         output_tensors: vec![],
         shape_constraints: vec![],
+        inputs: std::collections::HashMap::new(),
+        outputs: std::collections::HashMap::new(),
+        tensor_bindings: std::collections::HashMap::new(),
     };
+
+    let mut be = CoreAiBackend::new();
 
     // regions/200.mlmodelc doesn't exist → load fails cleanly
     let result = be.compile_region(&region);
@@ -151,8 +157,8 @@ fn coreml_compile_loads_native_bridge() {
 }
 
 #[test]
-fn coreml_backend_id_consistent() {
-    let be = CoreMlBackend::new();
+fn coreai_backend_id_consistent() {
+    let be = CoreAiBackend::new();
     assert_eq!(be.graph_backend_id().0, 2);
 }
 
@@ -185,6 +191,6 @@ fn all_backends_cleanup_without_panic() {
     }
     // Core ML (no-op: compile returns error, backend drops cleanly)
     {
-        let _be = CoreMlBackend::new();
+        let _be = CoreAiBackend::new();
     }
 }

@@ -12,11 +12,20 @@
 //!   3. ScheduledKernelOp — concrete op with buffer views and dependencies
 //!   4. ExecutionRegion — command-buffer scheduling unit
 //!   5. ModelExecutionPlan — full ordered plan for one cimage + hardware profile
+pub mod region_encoder;
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+pub mod fusion;
+pub mod model_plan;
+pub mod profile;
+
+pub mod vectors;
+pub mod capture;
 
 // ── KernelTemplate ───────────────────────────────────────────────────────
+pub mod backend_capability;
+pub mod fusion_scheduler;
+pub mod fusion_schedule_types;
 
 /// Identifier for a reusable kernel template.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -62,6 +71,18 @@ pub enum ExecutionPhase {
     Mixed,
 }
 
+/// How the planner constructs execution regions.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExecutionMode {
+    /// One kernel dispatch per op, no fusion.
+    #[default]
+    OpByOp,
+    /// Batch ops into regions without explicit fusion kernels.
+    RegionBatched,
+    /// Experimental megakernel fusion of entire subgraphs.
+    MegakernelExperimental,
+}
+
 // ── Codec family ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -73,6 +94,13 @@ pub enum CodecFamily {
     SymInt4,
     Ternary,
 }
+/// Default codec family for unquantized paths.
+impl Default for CodecFamily {
+    fn default() -> Self {
+        Self::RawF32
+    }
+}
+
 
 // ── KernelSpecialization ─────────────────────────────────────────────────
 
@@ -105,7 +133,7 @@ pub struct KernelSpecialization {
 
 /// Canonical set of Metal function constants.
 /// Maps directly to constant_ids in .metal files.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FunctionConstantSet {
     pub page_width: u32,
     pub tile_m: u32,
@@ -296,6 +324,12 @@ pub struct KernelValidationRequirements {
     pub requires_hardware_validation: bool,
 }
 
+impl Default for KernelValidationRequirements {
+    fn default() -> Self {
+        Self { allows_in_place_input_output: false, requires_zeroed_output: false, requires_aligned_metadata: false, requires_hardware_validation: false }
+    }
+}
+
 // ── ExecutionRegion ──────────────────────────────────────────────────────
 
 /// A command-buffer scheduling unit: one layer decode, one prefill, etc.
@@ -322,6 +356,8 @@ pub enum ExecutionRegionKind {
     TtsPrefill,
     Embedding,
     LmHead,
+    /// A fused-kernel region produced by the fusion scheduler.
+    Fused,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -437,6 +473,9 @@ pub struct ModelExecutionPlan {
     pub pso_keys: Vec<KernelSpecializationKey>,
     pub total_scratch_budget_bytes: u64,
     pub validation_digest: Option<String>,
+    /// How this plan was constructed — affects region encoding and dispatch.
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
 }
 
 // ── Planning receipt ────────────────────────────────────────────────────
@@ -462,103 +501,13 @@ pub struct ModelExecutionPlanReceipt {
 /// Conservative hazard checker.
 pub struct HazardChecker;
 
-impl HazardChecker {
-    /// Validate an execution region's buffer accesses and aliasing plan.
-    pub fn validate_region(region: &ExecutionRegion) -> Result<HazardPlan, HazardError> {
-        let mut boundaries = Vec::new();
-        let mut barriers = Vec::new();
-        let mut safe = true;
+pub mod hazard;
+pub mod pso_cache;
+pub mod equivalence;
 
-        // Check for overlapping read-write pairs
-        for (i, op_a) in region.ops.iter().enumerate() {
-            for (j, op_b) in region.ops.iter().enumerate() {
-                if i >= j { continue; }
-                for use_a in &op_a.buffer_uses {
-                    for use_b in &op_b.buffer_uses {
-                        if use_a.buffer_id != use_b.buffer_id { continue; }
-                        let is_write = matches!(use_a.access, AccessMode::Write | AccessMode::ReadWrite);
-                        let is_write_b = matches!(use_b.access, AccessMode::Write | AccessMode::ReadWrite);
-                        if is_write && is_write_b {
-                            return Err(HazardError::OverlappingReadWrite {
-                                buffer_id: use_a.buffer_id.clone(),
-                                op_a: op_a.op_id.clone(),
-                                op_b: op_b.op_id.clone(),
-                            });
-                        }
-                        if is_write && matches!(use_b.access, AccessMode::Read) {
-                            boundaries.push(EncoderBoundary {
-                                after_op_index: i,
-                                reason: format!("WAW/RAW boundary: {} after {}", op_a.op_id, op_b.op_id),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // Verify scratch budget
-        if region.arena_plan.total_bytes > region.arena_plan.peak_live_bytes {
-            // Conservative: check against hardware profile
-        }
-
-        Ok(HazardPlan {
-            encoder_boundaries: boundaries,
-            required_barriers: barriers,
-            aliasing_approved: safe,
-            safe,
-        })
-    }
-}
-
-// ── Arena planner skeleton ──────────────────────────────────────────────
+// ── Arena planner ────────────────────────────────────────────
 
 pub struct ArenaPlanner;
-
-impl ArenaPlanner {
-    /// Plan scratch buffer allocation with interval-based aliasing.
-    pub fn plan_arena(
-        ops: &[ScheduledKernelOp],
-        arena_id: &str,
-    ) -> ActivationArenaPlan {
-        let mut allocations = Vec::new();
-        let mut alias_groups = Vec::new();
-        let mut peak = 0u64;
-
-        for op in ops {
-            for use_ in &op.buffer_uses {
-                if matches!(use_.lifetime,
-                    LifetimeClass::PersistentWeight | LifetimeClass::PersistentKvCache
-                ) { continue; }
-                // Simple allocation: each scratch buffer gets its own slot
-                // (interval coloring is a future optimization)
-                let size = use_.byte_range.as_ref()
-                    .map(|r| r.end - r.start)
-                    .unwrap_or(0);
-                if size == 0 { continue; }
-                allocations.push(ArenaAllocation {
-                    logical_buffer_id: use_.buffer_id.clone(),
-                    offset: peak,
-                    size_bytes: size,
-                    alignment_bytes: 256,
-                    lifetime_start_op: 0,
-                    lifetime_end_op: ops.len(),
-                    alias_group: use_.alias_group.clone(),
-                });
-                peak += size;
-            }
-        }
-
-        ActivationArenaPlan {
-            arena_id: arena_id.to_string(),
-            total_bytes: peak,
-            allocations,
-            alias_groups,
-            peak_live_bytes: peak,
-        }
-    }
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -683,76 +632,6 @@ mod tests {
     }
 
     #[test]
-    fn test_hazard_checker_detects_overlapping_writes() {
-        let region = ExecutionRegion {
-            region_id: "test".into(),
-            region_kind: ExecutionRegionKind::DecoderLayerDecode,
-            layer_index: Some(0),
-            phase: ExecutionPhase::Decode,
-            ops: vec![
-                ScheduledKernelOp {
-                    op_id: "op1".into(),
-                    op_kind: KernelOpKind::RmsNorm,
-                    tensor_key: None,
-                    tensor_class: None,
-                    specialization: kernel_specialization_key_fixture(),
-                    bindings: vec![],
-                    dependencies: vec![],
-                    buffer_uses: vec![BufferUse {
-                        buffer_id: "shared_buf".into(),
-                        access: AccessMode::Write,
-                        lifetime: LifetimeClass::OpScratch,
-                        alias_group: None,
-                        byte_range: Some(ByteRange { start: 0, end: 1024 }),
-                    }],
-                    dispatch_shape: DispatchShape { grid_x: 1, grid_y: 1, grid_z: 1, threadgroup_m: 32, threadgroup_n: 1, threadgroup_p: 1 },
-                    estimated_cost: EstimatedKernelCost { compute_us: 1.0, memory_bytes_read: 0, memory_bytes_written: 0 },
-                    validation_requirements: KernelValidationRequirements { allows_in_place_input_output: false, requires_zeroed_output: false, requires_aligned_metadata: false, requires_hardware_validation: false },
-                },
-                ScheduledKernelOp {
-                    op_id: "op2".into(),
-                    op_kind: KernelOpKind::QkvProjection,
-                    tensor_key: None,
-                    tensor_class: None,
-                    specialization: kernel_specialization_key_fixture(),
-                    bindings: vec![],
-                    dependencies: vec![],
-                    buffer_uses: vec![BufferUse {
-                        buffer_id: "shared_buf".into(),
-                        access: AccessMode::Write,
-                        lifetime: LifetimeClass::OpScratch,
-                        alias_group: None,
-                        byte_range: Some(ByteRange { start: 0, end: 1024 }),
-                    }],
-                    dispatch_shape: DispatchShape { grid_x: 1, grid_y: 1, grid_z: 1, threadgroup_m: 32, threadgroup_n: 1, threadgroup_p: 1 },
-                    estimated_cost: EstimatedKernelCost { compute_us: 1.0, memory_bytes_read: 0, memory_bytes_written: 0 },
-                    validation_requirements: KernelValidationRequirements { allows_in_place_input_output: false, requires_zeroed_output: false, requires_aligned_metadata: false, requires_hardware_validation: false },
-                },
-            ],
-            command_buffer_policy: CommandBufferPolicy::decode_default(),
-            hazard_policy: HazardPolicy::Conservative,
-            arena_plan: ActivationArenaPlan {
-                arena_id: "test".into(),
-                total_bytes: 1024,
-                allocations: vec![],
-                alias_groups: vec![],
-                peak_live_bytes: 1024,
-            },
-            timing_policy: TimingPolicy::Disabled,
-        };
-
-        let result = HazardChecker::validate_region(&region);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        match err {
-            HazardError::OverlappingReadWrite { buffer_id, .. } => {
-                assert_eq!(buffer_id, "shared_buf");
-            }
-            _ => panic!("expected OverlappingReadWrite error"),
-        }
-    }
-
-    #[test]
     fn test_model_execution_receipt_roundtrip() {
         let receipt = ModelExecutionPlanReceipt {
             plan_id: "plan_test".into(),
@@ -772,21 +651,7 @@ mod tests {
         assert_eq!(back.plan_id, "plan_test");
         assert_eq!(back.region_count, 42);
     }
-
-    fn kernel_specialization_key_fixture() -> KernelSpecializationKey {
-        KernelSpecializationKey {
-            template_id: KernelTemplateId::Nf4Tile640Gemv,
-            execution_phase: ExecutionPhase::Decode,
-            codec: CodecFamily::Nf4,
-            tile_shape: TileShape::tile640_decode(),
-            group_size: 32,
-            group_axis: Axis::PackedContiguous,
-            affine_mode: AffineMode::ScaleOnly,
-            metadata_layout: MetadataLayout::AdjacentTile,
-            input_dtype: DType::F32,
-            output_dtype: DType::F16,
-            hardware_profile: HardwareProfileId::AppleMBaseMemoryBound,
-            mode_flags: 0,
-        }
-    }
 }
+
+// TODO: migrate to node-based API; currently uses schedule-level types
+// pub(crate) mod fusion_tests;

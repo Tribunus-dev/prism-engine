@@ -264,6 +264,18 @@ pub struct MixedTileSweepGrid {
     pub recompute_after_each_round: bool,
 }
 
+/// Parameter grid for layout parameter sweep alongside a codec grid.
+///
+/// Sweeps tile shape, group axis, metadata placement, and execution lane
+/// so performance characteristics can be compared across hardware configs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutSweepGrid {
+    pub tile_shapes: Vec<String>,
+    pub group_axes: Vec<String>,
+    pub metadata_layouts: Vec<String>,
+    pub execution_lanes: Vec<String>,
+}
+
 /// Top-level family sweep selector — each variant carries one grid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum QuantFamilySweep {
@@ -272,6 +284,8 @@ pub enum QuantFamilySweep {
     Int8(Int8SweepGrid),
     Ternary(TernarySweepGrid),
     MixedTile(MixedTileSweepGrid),
+    /// Layout parameter sweep alongside the codec grid.
+    Layout(LayoutSweepGrid),
 }
 
 // ── Sweep configuration types ───────────────────────────────────────────────────

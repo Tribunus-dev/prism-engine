@@ -23,8 +23,8 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use tribunus_compute_core::backend::coreml_iosurface::{
-    CoreMlComputePolicy, CoreMlIOSurfaceBinding, CoreMlIOSurfaceExecutable,
+use tribunus_compute_core::backend::coreai_iosurface::{
+    CoreAiComputePolicy, CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable,
 };
 use tribunus_compute_core::backend::metal_consumer::MetalConsumer;
 use tribunus_compute_core::backend::placement::ExecutionLane;
@@ -34,14 +34,14 @@ use tribunus_compute_core::compilation::apple_installation::{
 use tribunus_compute_core::compilation::epoch_scheduler::EpochScheduler;
 use tribunus_compute_core::compilation::tri_lane::{
     AppleFallbackPlan, AppleHardwareSignature, AppleTriLaneExecutionPlan,
-    AppleTriLaneExecutionReceipt, CoreMlProgramBinding, CpuProgramBinding, EpochRouteOrigin,
+    AppleTriLaneExecutionReceipt, CoreAiProgramBinding, CpuProgramBinding, EpochRouteOrigin,
     LaneCostEstimate, MetalProgramBinding, NumericalPolicy, ShapeClass, TriLaneCostModel,
     TriLaneEvidenceRequirements,
 };
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
     AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, AppleTriLaneArtifactManifest,
-    CoreMlArtifactManifest, CpuArtifactManifest, IOSurfaceSlotManifest, MetalArtifactManifest,
+    CoreAiArtifactManifest, CpuArtifactManifest, IOSurfaceSlotManifest, MetalArtifactManifest,
 };
 use tribunus_compute_core::compute_image::apple_shared_arena::AppleSharedArena;
 
@@ -83,7 +83,7 @@ fn make_slots() -> Vec<IOSurfaceSlotManifest> {
             strides_bytes: vec![128],
             layout: "NHWC".into(),
             producer: ExecutionLane::AccelerateCpu,
-            consumer: ExecutionLane::CoreMlAne,
+            consumer: ExecutionLane::CoreAiAne,
             reuse_class: "ring_reuse".into(),
             required_alignment: 16384,
         },
@@ -97,7 +97,7 @@ fn make_slots() -> Vec<IOSurfaceSlotManifest> {
             physical_shape: vec![1, 64],
             strides_bytes: vec![128],
             layout: "NHWC".into(),
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
             consumer: ExecutionLane::MlxGpu,
             reuse_class: "ring_reuse".into(),
             required_alignment: 16384,
@@ -134,7 +134,7 @@ fn make_hardware_compatibility() -> AppleHardwareCompatibility {
     AppleHardwareCompatibility {
         min_soc_family: "M1".into(),
         min_macos_version: "14.0".into(),
-        min_coreml_version: "7.2.0".into(),
+        min_coreai_version: "7.2.0".into(),
         require_ane: true,
         required_metal_features: vec!["apple_family8".into()],
         supported_compute_policies: vec!["cpuAndNeuralEngine".into()],
@@ -148,9 +148,10 @@ fn make_manifest() -> AppleTriLaneArtifactManifest {
         hardware_compatibility: make_hardware_compatibility(),
         plan_digest: "latency-test-plan".into(),
         arena: make_arena_manifest(),
-        coreml_artifacts: vec![],
+        coreai_artifacts: vec![],
         metal_artifacts: vec![],
         cpu_artifacts: vec![],
+        shared_events: vec![],
         epochs: vec![],
         dependencies: vec![],
         fallback: AppleFallbackManifest {
@@ -178,7 +179,7 @@ fn make_manifest() -> AppleTriLaneArtifactManifest {
 
 fn make_fp16_manifest() -> AppleTriLaneArtifactManifest {
     let mut m = make_manifest();
-    m.coreml_artifacts = vec![CoreMlArtifactManifest {
+    m.coreai_artifacts = vec![CoreAiArtifactManifest {
         artifact_id: "latency_test".into(),
         mlmodelc_name: "latency_test.mlmodelc".into(),
         package_digest: "latency_test_digest".into(),
@@ -196,7 +197,7 @@ fn make_minimal_execution_plan() -> AppleTriLaneExecutionPlan {
         hardware_signature: AppleHardwareSignature {
             soc_family: "M1".into(),
             macos_version: "14.0".into(),
-            coreml_version: "7.2.0".into(),
+            coreai_version: "7.2.0".into(),
             p_core_count: 4,
             gpu_core_count: 8,
             ane_core_count: 16,
@@ -280,7 +281,7 @@ fn create_fp16_install() -> AppleInstallationResult {
     let mut result = install_apple_tri_lane(
         &manifest,
         model_dir,
-        CoreMlComputePolicy::CpuAndNeuralEngine,
+        CoreAiComputePolicy::CpuAndNeuralEngine,
     )
     .expect("FP16 install should succeed for latency test");
     result
@@ -321,13 +322,13 @@ fn test_single_sequence_latency_mode() {
 
     // Warm up the Core ML artifact against installed slots.
     let mut coreml_exec = install
-        .coreml_executables
+        .coreai_executables
         .remove("latency_test")
         .expect("install must have latency_test executable");
 
     // Warmup with a stub contract — marks the model as loaded so that
     // execute_epoch can exercise the full slot state machine.
-    let warmup_contract = tribunus_compute_core::compilation::tri_lane::CoreMlWarmupContract {
+    let warmup_contract = tribunus_compute_core::compilation::tri_lane::CoreAiWarmupContract {
         min_warmup_predictions: 3,
         max_warmup_latency_ms: 5000,
         tolerance: 0.01,
@@ -428,8 +429,8 @@ fn test_single_sequence_latency_mode() {
     for (i, receipt) in receipts.iter().enumerate() {
         assert_eq!(
             receipt.route_origin,
-            EpochRouteOrigin::CoreMlAne,
-            "epoch {} route_origin must be CoreMlAne",
+            EpochRouteOrigin::CoreAiAne,
+            "epoch {} route_origin must be CoreAiAne",
             i
         );
     }
@@ -462,11 +463,11 @@ fn test_single_sequence_stability() {
     let mut scheduler = EpochScheduler::new(plan);
 
     let mut coreml_exec = install
-        .coreml_executables
+        .coreai_executables
         .remove("latency_test")
         .expect("install must have latency_test executable");
 
-    let warmup_contract = tribunus_compute_core::compilation::tri_lane::CoreMlWarmupContract {
+    let warmup_contract = tribunus_compute_core::compilation::tri_lane::CoreAiWarmupContract {
         min_warmup_predictions: 3,
         max_warmup_latency_ms: 5000,
         tolerance: 0.01,
@@ -519,11 +520,11 @@ fn test_single_sequence_stability() {
     // Additionally verify that all lanes reported Core ML ANE route.
     let non_ane_route_count = receipts
         .iter()
-        .filter(|r| r.route_origin != EpochRouteOrigin::CoreMlAne)
+        .filter(|r| r.route_origin != EpochRouteOrigin::CoreAiAne)
         .count();
     assert_eq!(
         non_ane_route_count, 0,
-        "all {} epochs must use CoreMlAne route, got {} non-ane",
+        "all {} epochs must use CoreAiAne route, got {} non-ane",
         EPOCH_COUNT, non_ane_route_count
     );
 
@@ -550,8 +551,8 @@ fn test_single_sequence_stability() {
 // ── Test 3: Single-sequence receipt correctness ─────────────────────────
 
 /// Runs 1000 epochs and verifies every receipt's semantic fields:
-///   1. route_origin == EpochRouteOrigin::CoreMlAne
-///   2. coreml_prediction_completed == true
+///   1. route_origin == EpochRouteOrigin::CoreAiAne
+///   2. coreai_prediction_completed == true
 ///   3. fallback_used == false
 ///   4. Serializes all 1000 receipts to JSON and roundtrips back
 ///   5. Roundtripped receipts match origin field for field
@@ -566,11 +567,11 @@ fn test_single_sequence_receipt_correctness() {
     let mut scheduler = EpochScheduler::new(plan);
 
     let mut coreml_exec = install
-        .coreml_executables
+        .coreai_executables
         .remove("latency_test")
         .expect("install must have latency_test executable");
 
-    let warmup_contract = tribunus_compute_core::compilation::tri_lane::CoreMlWarmupContract {
+    let warmup_contract = tribunus_compute_core::compilation::tri_lane::CoreAiWarmupContract {
         min_warmup_predictions: 3,
         max_warmup_latency_ms: 5000,
         tolerance: 0.01,
@@ -588,8 +589,8 @@ fn test_single_sequence_receipt_correctness() {
         // Verify receipt fields per-epoch.
         assert_eq!(
             receipt.route_origin,
-            EpochRouteOrigin::CoreMlAne,
-            "epoch {}: route_origin must be CoreMlAne",
+            EpochRouteOrigin::CoreAiAne,
+            "epoch {}: route_origin must be CoreAiAne",
             epoch
         );
         assert!(
@@ -647,8 +648,8 @@ fn test_single_sequence_receipt_correctness() {
             i
         );
         assert_eq!(
-            original.coreml_prediction_completed, rt.coreml_prediction_completed,
-            "receipt {}: coreml_prediction_completed mismatch after roundtrip",
+            original.coreai_prediction_completed, rt.coreai_prediction_completed,
+            "receipt {}: coreai_prediction_completed mismatch after roundtrip",
             i
         );
         assert_eq!(

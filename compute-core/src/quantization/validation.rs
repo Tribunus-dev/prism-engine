@@ -17,10 +17,10 @@ use crate::backend::accelerate_ffi::{cblas_sgemm, CBLAS_NO_TRANS, CBLAS_ROW_MAJO
 use crate::nf4tile640::dequant_matmul_reference;
 use crate::nf4tile640::accelerate::{distance_sq, max_abs_error as accelerate_max_abs_error};
 #[cfg(any(
-    feature = "metal-dispatch",
     feature = "mlx-backend",
     feature = "prism-backend",
-    feature = "prism-backend-ios"
+    feature = "prism-backend-ios",
+    feature = "ffi"
 ))]
 use crate::nf4tile640::unpack_nf4_weights;
 
@@ -135,10 +135,10 @@ pub fn validate_operator_space_with_vectors(
 
     // Unpack NF4 weights to f32 once for the quantized path.
     #[cfg(any(
-        feature = "metal-dispatch",
         feature = "mlx-backend",
         feature = "prism-backend",
-        feature = "prism-backend-ios"
+        feature = "prism-backend-ios",
+        feature = "ffi"
     ))]
     let quant_weights: Vec<f32> = match pre_unpacked {
         Some(w) => w.to_vec(),
@@ -361,7 +361,12 @@ pub fn validate_operator_space_with_vectors(
 /// Both `refs_flat` and `quants_flat` are [num_vectors × out_features] row-major flat arrays.
 /// Returns the aggregate `OperatorValidationReport` (worst-case metrics across all
 /// vectors plus averages for cosine similarity, ref_output_rms, and sign agreement).
-#[cfg(feature = "metal-dispatch")]
+#[cfg(all(feature = "metal-dispatch", any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+)))]
 fn compute_operator_metrics(
     refs_flat: &[f32],
     quants_flat: &[f32],

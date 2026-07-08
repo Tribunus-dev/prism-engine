@@ -32,6 +32,9 @@ pub mod ane;
 pub mod ane_bridge;
 #[cfg(all(target_os = "macos", feature = "prism-backend"))]
 pub mod ane_compile;
+/// ANE runtime — planar engine program descriptor and lowering.
+#[cfg(target_os = "macos")]
+pub mod ane_runtime;
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend"),
@@ -289,6 +292,8 @@ pub mod memory;
 pub mod metal_capture;
 #[cfg(feature = "metal-dispatch")]
 pub mod metal_launcher;
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+pub mod metal_runtime;
 pub mod metrics;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod mil_builder;
@@ -383,6 +388,10 @@ pub mod receipt;
 pub mod receipts;
 /// Execution plan — kernel specialization, region batching, and plan data types.
 pub mod execution_plan;
+/// CPU fusion backend — Accelerate + Rayon as a first-class fusion candidate.
+pub mod cpu_runtime;
+/// Training-aware compilation — targets, gates, feedback, and receipts.
+pub mod training_target;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod registry;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack

@@ -163,3 +163,20 @@ fn default_validation_config_max_candidates() {
         "default maximum candidates per tensor should be 200"
     );
 }
+
+// ── Test 5: LayoutSweepGrid serialization ────────────────────────────────
+
+/// `LayoutSweepGrid` must roundtrip through serde JSON correctly.
+#[test]
+fn test_layout_sweep_grid_serialization() {
+    let grid = crate::quantization::sweep::spec::LayoutSweepGrid {
+        tile_shapes: vec!["640".into()],
+        group_axes: vec!["PackedContiguous".into(), "InputAxis".into()],
+        metadata_layouts: vec!["AdjacentTile".into()],
+        execution_lanes: vec!["MetalFusedGpu".into()],
+    };
+    let json = serde_json::to_string(&grid).unwrap();
+    let back: crate::quantization::sweep::spec::LayoutSweepGrid = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.tile_shapes, vec!["640"]);
+    assert_eq!(back.group_axes.len(), 2);
+}

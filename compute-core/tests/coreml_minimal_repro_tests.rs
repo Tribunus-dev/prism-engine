@@ -4,7 +4,7 @@
 //! the exact class of bugs it is designed to prevent.
 
 use coreml_proto::proto::mil_spec;
-use tribunus_compute_core::decode_attribution::coreml_minimal_repro::{
+use tribunus_compute_core::decode_attribution::coreai_minimal_repro::{
     all_diagnostic_graphs, verify_graph_contract, DiagnosticGraphContract, VerificationErrorCode,
 };
 use tribunus_compute_core::mil_builder::MilBuilder;

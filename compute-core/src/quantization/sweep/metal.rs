@@ -47,8 +47,8 @@ pub struct SweepCandidateMetrics {
 ///   * `group_size`: quantization group size (must divide 640; typically 128)
 ///   * `affine_mode`: 0 = ScaleOnly, 1 = ScaleBias
 /// * `num_candidates` — number of candidates to evaluate (1 for now)
-/// * `N` — rows (in_features)
-/// * `K` — cols (out_features)
+/// * `n` — rows (in_features)
+/// * `k` — cols (out_features)
 ///
 /// # Returns
 /// `SweepCandidateMetrics` for each candidate, in the same order as `candidate_params`.
@@ -56,14 +56,14 @@ pub fn evaluate_nf4_batch(
     source: &[f32],
     candidate_params: &[[u32; 4]],
     num_candidates: usize,
-    N: usize,
-    K: usize,
+    n: usize,
+    k: usize,
 ) -> Result<Vec<SweepCandidateMetrics>, String> {
     let device = Device::system_default().ok_or("no Metal device found")?;
     let command_queue = device.new_command_queue();
     let command_buffer = command_queue.new_command_buffer();
 
-    let total_elements = N * K;
+    let total_elements = n * k;
     const TILE_SIZE: usize = 640;
     let num_tiles = (total_elements + TILE_SIZE - 1) / TILE_SIZE;
 
@@ -241,9 +241,9 @@ mod tests {
     /// finite metrics.
     #[test]
     fn test_evaluate_nf4_batch_basic() {
-        let N = 128usize;
-        let K = 128usize;
-        let total = N * K;
+        let n = 128usize;
+        let k = 128usize;
+        let total = n * k;
 
         // Fill source with deterministic ramp values.
         let source: Vec<f32> = (0..total).map(|i| ((i % 128) as f32 - 64.0) * 0.01).collect();
@@ -252,7 +252,7 @@ mod tests {
         let params: [u32; 4] = [0, 128, 0, 0];
         let num_candidates = 1usize;
 
-        let metrics = evaluate_nf4_batch(&source, &[params], num_candidates, N, K)
+        let metrics = evaluate_nf4_batch(&source, &[params], num_candidates, n, k)
             .expect("Metal evaluation should succeed");
 
         assert_eq!(metrics.len(), num_candidates);
@@ -285,16 +285,16 @@ mod tests {
     /// Test with different codebook IDs.
     #[test]
     fn test_evaluate_nf4_batch_different_codebooks() {
-        let N = 128usize;
-        let K = 64usize;
-        let total = N * K;
+        let n = 128usize;
+        let k = 64usize;
+        let total = n * k;
 
         let source: Vec<f32> = (0..total).map(|i| ((i % 64) as f32 - 32.0) * 0.02).collect();
 
         for codebook_id in 0u32..3u32 {
             let params: [u32; 4] = [codebook_id, 128, 0, 0];
             let metrics =
-                evaluate_nf4_batch(&source, &[params], 1, N, K)
+                evaluate_nf4_batch(&source, &[params], 1, n, k)
                     .expect("should succeed for each codebook");
 
             let m = &metrics[0];
@@ -306,14 +306,14 @@ mod tests {
     /// Test with non-standard group_size (64).
     #[test]
     fn test_evaluate_nf4_batch_group_size_64() {
-        let N = 128usize;
-        let K = 64usize;
-        let total = N * K;
+        let n = 128usize;
+        let k = 64usize;
+        let total = n * k;
 
         let source: Vec<f32> = (0..total).map(|i| ((i % 64) as f32 - 32.0) * 0.01).collect();
 
         let params: [u32; 4] = [0, 64, 0, 0]; // group_size=64
-        let metrics = evaluate_nf4_batch(&source, &[params], 1, N, K)
+        let metrics = evaluate_nf4_batch(&source, &[params], 1, n, k)
             .expect("group_size=64 should work");
 
         let m = &metrics[0];
@@ -324,14 +324,14 @@ mod tests {
     /// Smoke test: ScaleBias affine mode.
     #[test]
     fn test_evaluate_nf4_batch_affine_bias() {
-        let N = 128usize;
-        let K = 64usize;
-        let total = N * K;
+        let n = 128usize;
+        let k = 64usize;
+        let total = n * k;
 
         let source: Vec<f32> = (0..total).map(|i| ((i % 64) as f32 - 32.0) * 0.01).collect();
 
         let params: [u32; 4] = [1, 128, 1, 0]; // BnB codebook, ScaleBias
-        let metrics = evaluate_nf4_batch(&source, &[params], 1, N, K)
+        let metrics = evaluate_nf4_batch(&source, &[params], 1, n, k)
             .expect("ScaleBias mode should work");
 
         let m = &metrics[0];

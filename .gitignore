@@ -5,3 +5,5 @@ target/
 /local/
 qwen3-tts-model/
 vision_bank/**/*.bin
+local/
+_insert_soc.py

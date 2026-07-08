@@ -18,7 +18,7 @@ use tribunus_compute_core::backend::placement::ExecutionLane;
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
     AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, AppleTriLaneArtifactManifest,
-    CoreMlArtifactManifest, CpuArtifactManifest, IOSurfaceSlotManifest, MetalArtifactManifest,
+    CoreAiArtifactManifest, CpuArtifactManifest, IOSurfaceSlotManifest, MetalArtifactManifest,
 };
 use tribunus_compute_core::compute_image::apple_shared_arena::{
     AppleSharedArena, SlotFailureReason, SlotState,
@@ -39,7 +39,7 @@ fn make_slots() -> Vec<IOSurfaceSlotManifest> {
             strides_bytes: vec![128],
             layout: "NHWC".into(),
             producer: ExecutionLane::AccelerateCpu,
-            consumer: ExecutionLane::CoreMlAne,
+            consumer: ExecutionLane::CoreAiAne,
             reuse_class: "ring_reuse".into(),
             required_alignment: 16384,
         },
@@ -53,7 +53,7 @@ fn make_slots() -> Vec<IOSurfaceSlotManifest> {
             physical_shape: vec![1, 64],
             strides_bytes: vec![128],
             layout: "NHWC".into(),
-            producer: ExecutionLane::CoreMlAne,
+            producer: ExecutionLane::CoreAiAne,
             consumer: ExecutionLane::MlxGpu,
             reuse_class: "ring_reuse".into(),
             required_alignment: 16384,
@@ -287,7 +287,7 @@ fn test_soak_state_machine_exhaustion() {
     );
 
     // Ready → Reading
-    slot.mark_reading(1, ExecutionLane::CoreMlAne).unwrap();
+    slot.mark_reading(1, ExecutionLane::CoreAiAne).unwrap();
     assert!(matches!(slot.state, SlotState::Reading { .. }));
 
     // Reading → Retired
@@ -308,6 +308,6 @@ fn test_soak_state_machine_exhaustion() {
     assert!(matches!(slot.state, SlotState::Poisoned { .. }));
 
     // Transition from Poisoned must fail.
-    let err = slot.mark_reading(2, ExecutionLane::CoreMlAne);
+    let err = slot.mark_reading(2, ExecutionLane::CoreAiAne);
     assert!(err.is_err(), "transition from Poisoned must be rejected");
 }

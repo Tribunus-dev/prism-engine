@@ -10,8 +10,9 @@ pub mod sym_int4;
 pub mod ternary;
 
 use serde_json::Value;
+use std::fmt;
 
-use crate::quantization::sweep::spec::QuantFamilySweep;
+use crate::quantization::sweep::spec::{LayoutSweepGrid, QuantFamilySweep};
 use crate::quantization::sweep::candidate::{PackedCandidate, QuantFamilyId, MatrixShape};
 
 // ── SweepScratch ────────────────────────────────────────────────────────────────
@@ -102,6 +103,46 @@ pub struct FamilyCandidate {
     pub metadata_bytes_fn:
         Box<dyn Fn(usize, usize) -> u64 + Send + Sync>,
 }
+impl fmt::Debug for FamilyCandidate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FamilyCandidate")
+            .field("label", &self.label)
+            .field("parameters", &self.parameters)
+            .finish_non_exhaustive()
+}
+}
+
+/// One fully-resolved parameter combination from a layout parameter sweep.
+///
+/// Wraps an existing codec-family candidate and augments it with layout
+/// parameters — tile shape, group axis, metadata placement, and execution
+/// lane — so the runner can compare hardware configuration trade-offs on
+/// the same quantized representation.
+pub struct LayoutFamilyCandidate {
+    /// Base codec-family candidate (label, parameters, packer/unpacker/etc.).
+    pub base: FamilyCandidate,
+    /// Tile shape identifier (e.g. "640", "256", "1024").
+    pub tile_shape: String,
+    /// Group axis policy (e.g. "PackedContiguous", "InputAxis").
+    pub group_axis: String,
+    /// Metadata placement (e.g. "AdjacentTile", "SeparatedManifest").
+    pub metadata_layout: String,
+    /// Execution lane (e.g. "MetalFusedGpu", "MetalTensorApi").
+    pub execution_lane: String,
+}
+
+impl std::fmt::Debug for LayoutFamilyCandidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayoutFamilyCandidate")
+            .field("label", &self.base.label)
+            .field("parameters", &self.base.parameters)
+            .field("tile_shape", &self.tile_shape)
+            .field("group_axis", &self.group_axis)
+            .field("metadata_layout", &self.metadata_layout)
+            .field("execution_lane", &self.execution_lane)
+            .finish()
+    }
+}
 
 // ── Dispatch ────────────────────────────────────────────────────────────────────
 
@@ -127,7 +168,44 @@ pub fn generate_all_candidates(families: &[QuantFamilySweep]) -> Vec<FamilyCandi
                     grid,
                 ));
             }
+            QuantFamilySweep::Layout(grid) => {
+                all.extend(generate_layout_candidates(grid));
+            }
         }
     }
     all
+}
+
+/// Generate candidates from a layout sweep grid.
+///
+/// Each candidate records one combination of tile shape, group axis,
+/// metadata placement, and execution lane. The closures are identity/no-op
+/// since layout candidates direct *how* an existing codec candidate runs
+/// rather than performing quantization themselves.
+fn generate_layout_candidates(grid: &LayoutSweepGrid) -> Vec<FamilyCandidate> {
+    let mut candidates = Vec::new();
+    for ts in &grid.tile_shapes {
+        for ga in &grid.group_axes {
+            for ml in &grid.metadata_layouts {
+                for el in &grid.execution_lanes {
+                    let label = format!("Layout::{}::{}::{}::{}", ts, ga, ml, el);
+                    let parameters = serde_json::json!({
+                        "tile_shape": ts,
+                        "group_axis": ga,
+                        "metadata_layout": ml,
+                        "execution_lane": el,
+                    });
+                    candidates.push(FamilyCandidate {
+                        label,
+                        parameters,
+                        packer: Box::new(|_, _, _| (Vec::new(), Vec::new(), Vec::new(), Vec::new())),
+                        unpacker: Box::new(|_, _, _, _, _, _| Vec::new()),
+                        code_bytes_fn: |_, _| 0,
+                        metadata_bytes_fn: Box::new(|_, _| 0),
+                    });
+                }
+            }
+        }
+    }
+    candidates
 }

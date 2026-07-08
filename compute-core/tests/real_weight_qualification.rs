@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
 use tribunus_compute_core::compute_image::megakernel::Megakernel;
+use tribunus_compute_core::compute_image::megakernel::TapMode;
 use tribunus_compute_core::compute_image::megakernel::MAX_CONTEXT;
 
 /// Find the cimage file.
@@ -47,7 +48,7 @@ fn run_tokens(deployment: &CimageDeployment, interleaved: bool, context_len: u32
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
 
-    let mut mk = Megakernel::new(&device, &queue, deployment, false).expect("Megakernel::new");
+    let mut mk = Megakernel::new(&device, &queue, deployment, false, TapMode::Untapped).expect("Megakernel::new");
 
     // Set interleave mode before launch
     mk.kv_prefetch_enabled = interleaved;

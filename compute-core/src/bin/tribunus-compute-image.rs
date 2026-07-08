@@ -25,7 +25,6 @@ use tribunus_compute_core::nf4tile640::{
     pack_nf4_weights, pack_nf4_weights_awls, pack_symmetric_int4_tile,
     unpack_int8_weights, unpack_nf4_weights,
 };
-use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
 use tribunus_compute_core::quantization::substitution::SubstitutionCandidate;
 use tribunus_compute_core::quantization::substitution::SubstitutionContext;
 use tribunus_compute_core::quantization::substitution_pass::try_all_candidates;
@@ -71,8 +70,8 @@ fn main() {
         "emit-v0" => cmd_emit_v0(&args[2..]),
         "verify-v0" => cmd_verify_v0(&args[2..]),
         "quant-sweep" => cmd_quant_sweep(&args[2..]),
-        other => {
-            tribunus_compute_core::log_error!("unknown command: {other}");
+        _other => {
+            tribunus_compute_core::log_error!("unknown command: {_other}");
             std::process::exit(1);
         }
     };
@@ -359,7 +358,7 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
                 fs::write(&diag_path, &diag_json)
                     .map_err(|e| format!("write diagnostic.json: {e}"))?;
 
-                let passed_str = if diag_report.passed {
+                let _passed_str = if diag_report.passed {
                     "PASSED"
                 } else {
                     "FAILED"
@@ -385,10 +384,10 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
                     "Max layer runtime: {} ms",
                     diag_report.global.max_runtime_ms
                 );
-                tribunus_compute_core::log_info!("Total: {passed_str}");
+                tribunus_compute_core::log_info!("Total: {_passed_str}");
             }
-            Err(e) => {
-                tribunus_compute_core::log_warn!("warning: diagnostics failed: {e}");
+            Err(_e) => {
+                tribunus_compute_core::log_warn!("warning: diagnostics failed: {_e}");
             }
         }
     }
@@ -421,7 +420,7 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         StageConfig, ComponentType, StageQuantizationConfig,
     };
     use tribunus_compute_core::compute_image::compile::capability_registry::CapabilityRegistry;
-    use tribunus_compute_core::quantization::contract::{CanonicalShape, BackendKind, WeightValidationReport};
+    use tribunus_compute_core::quantization::contract::{CanonicalShape, BackendKind};
     use tribunus_compute_core::quantization::contract::QuantizationValidationProfile;
     use tribunus_compute_core::quantization::validation::validate_weight_space;
     use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
@@ -553,7 +552,7 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     // ── Phase 1: Scan tensor metadata only (no weight data loaded) ──────
     let mut hidden_dim = 0u32;
     let mut num_layers = 0u32;
-    let mut num_heads = 0u32;
+    let num_heads = 0u32;
     let mut head_dim = 0u32;
     let mut intermediate_dim = 0u32;
     let mut vocab_size = 0u32;
@@ -661,7 +660,7 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
             if source_f32.is_some() { break; }
         }
         let source = source_f32.ok_or_else(|| format!("could not load tensor data for: {diag_key}"))?;
-        let total_elements = source.len() as f64;
+        let _total_elements = source.len() as f64;
 
         // Create a default profile for weight-space validation reporting.
         let diag_profile = QuantizationValidationProfile {
@@ -1651,11 +1650,11 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
     }
 
     use tribunus_compute_core::quantization::sweep::runner::{
-        default_resource_limits, default_scoring_config, default_validation_config,
+        default_resource_limits, default_scoring_config,
         run_weight_sweep, write_sweep_output,
     };
     use tribunus_compute_core::quantization::sweep::spec::{
-        QuantFamilySweep, QuantSweepSpec, SweepResourceLimits, SweepScoringConfig,
+        QuantFamilySweep, QuantSweepSpec,
         SweepValidationConfig, TensorSelector,
     };
     use tribunus_compute_core::quantization::sweep::families::{
@@ -1673,6 +1672,7 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
         QuantFamilySweep::Ternary(create_ternary_grid()),
     ];
 
+    #[allow(deprecated)]
     let validation = SweepValidationConfig {
         run_weight_validation: true,
         max_candidates: None,
@@ -1734,7 +1734,6 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
         any(feature = "mlx-backend", feature = "prism-backend"),
     ))]
     if has_flag(args, "--ane-validation") {
-        use std::collections::HashMap;
         use tribunus_compute_core::quantization::sweep::ane_validation::validate_operator;
 
         let opval_path = output_path.join("operator_validation.json");
@@ -1766,7 +1765,7 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
             // Reconstruct the weights — use pack_nf4_weights for NF4 preferred candidates
             // Determine codec parameters from the winning candidate
             let params = &r.parameters;
-            let (codes, scales, biases, extra_bytes, recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if matches!(r.family, tribunus_compute_core::quantization::sweep::QuantFamilyId::Nf4) {
+            let (_codes, _scales, _biases, _extra_bytes, recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if matches!(r.family, tribunus_compute_core::quantization::sweep::QuantFamilyId::Nf4) {
                 let codebook_str = params.get("codebook").and_then(|v| v.as_str()).unwrap_or("PrismCurrent");
                 use tribunus_compute_core::quantization::sweep::spec::Nf4CodebookId;
                 let cb_id = match codebook_str {
