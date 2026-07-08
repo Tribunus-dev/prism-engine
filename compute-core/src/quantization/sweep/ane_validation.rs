@@ -201,6 +201,71 @@ fn compile_or_load_model(
 // ── Public API ────────────────────────────────────────────────────────────
 
 /// Run ANE operator validation for a single candidate.
+/// Pack an NF4 weight matrix using an explicit codebook and group size.
+///
+/// Unlike `pack_nf4_weights` (which uses the default Prism codebook with
+/// group_size=128), this function accepts a codebook slice and group_size
+/// parameter, matching the sweep runner's configurable NF4 codecs.
+///
+/// Returns (packed_codes, scales, biases). Scales use MaxAbs per group.
+pub fn pack_nf4_weights_with_codebook(
+    weights: &[f32],
+    in_features: u32,
+    out_features: u32,
+    codebook: &[f32; 16],
+    group_size: usize,
+) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+    const TILE_SIZE: usize = 640;
+    let in_f = in_features as usize;
+    let out_f = out_features as usize;
+    let tiles_per_row = out_f.div_ceil(TILE_SIZE);
+    let total_tiles = in_f * tiles_per_row;
+    let num_groups = TILE_SIZE / group_size;
+    let bytes_per_group = group_size / 2;
+    let codes_per_tile = num_groups * bytes_per_group;
+
+    let mut packed = vec![0u8; total_tiles * codes_per_tile];
+    let mut scales = vec![0.0f32; total_tiles * num_groups];
+    let mut biases = vec![0.0f32; total_tiles * num_groups];
+
+    for tile_idx in 0..total_tiles {
+        let row = tile_idx / tiles_per_row;
+        let tile_col = tile_idx % tiles_per_row;
+        let col_base = tile_col * TILE_SIZE;
+        let code_off = tile_idx * codes_per_tile;
+        let scale_off = tile_idx * num_groups;
+
+        // Build tile from the weight matrix, padding with 0s beyond cols
+        let mut tile = [0.0f32; TILE_SIZE];
+        for j in 0..TILE_SIZE {
+            let c = col_base + j;
+            tile[j] = if c < out_f { weights[row * out_f + c] } else { 0.0 };
+        }
+
+        for g in 0..num_groups {
+            let base = g * group_size;
+            let max_abs = tile[base..base + group_size].iter()
+                .map(|v| v.abs())
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(0.0);
+            let scale = if max_abs < 1e-30 { 1.0 } else { max_abs };
+            scales[scale_off + g] = scale;
+            biases[scale_off + g] = 0.0;
+
+            for i in 0..(group_size / 2) {
+                let v0 = tile[base + 2 * i] / scale;
+                let v1 = tile[base + 2 * i + 1] / scale;
+                let c0 = crate::nf4tile640::nf4_quantize_with_codebook(v0, codebook);
+                let c1 = crate::nf4tile640::nf4_quantize_with_codebook(v1, codebook);
+                packed[code_off + g * bytes_per_group + i] = c0 | (c1 << 4);
+            }
+        }
+    }
+
+    (packed, scales, biases)
+}
+
+/// Run ANE operator validation for a single candidate.
 ///
 /// `reconstructed_weights` — f32 slice of `[out_features × in_features]`
 /// elements (row-major, Prism canonical layout).

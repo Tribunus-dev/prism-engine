@@ -1653,9 +1653,22 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
                 .map_err(|e| format!("load {}: {}", r.tensor_key, e))?;
 
             // Reconstruct the weights — use pack_nf4_weights for NF4 preferred candidates
+            // Determine codec parameters from the winning candidate
+            let params = &r.parameters;
             let (codes, scales, biases, extra_bytes, recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if matches!(r.family, tribunus_compute_core::quantization::sweep::QuantFamilyId::Nf4) {
-                let (c, s, b, _num_tiles, _num_groups) = pack_nf4_weights(&loaded, in_f, out_f);
-                let recon = unpack_nf4_weights(&c, &s, &b, in_f, out_f);
+                let codebook_str = params.get("codebook").and_then(|v| v.as_str()).unwrap_or("PrismCurrent");
+                use tribunus_compute_core::quantization::sweep::spec::Nf4CodebookId;
+                let cb_id = match codebook_str {
+                    "BitsAndBytesNf4" => Nf4CodebookId::BitsAndBytesNf4,
+                    "SymmetricNormalFloat" => Nf4CodebookId::SymmetricNormalFloat,
+                    _ => Nf4CodebookId::PrismCurrent,
+                };
+                let cb = tribunus_compute_core::nf4tile640::nf4_codebook(cb_id);
+                let gs = params.get("group_size").and_then(|v| v.as_u64()).unwrap_or(64) as usize;
+                let (c, s, b) = tribunus_compute_core::quantization::sweep::ane_validation::pack_nf4_weights_with_codebook(
+                    &loaded, in_f as u32, out_f as u32, cb, gs);
+                let recon = tribunus_compute_core::nf4tile640::unpack_nf4_weights_with_group_size_and_codebook(
+                    &c, &s, &b, in_f, out_f, gs, cb);
                 (c, s, b, vec![], recon)
             } else if matches!(r.family, tribunus_compute_core::quantization::sweep::QuantFamilyId::Int8) {
                 let (codes_i8, scales_i8, biases_i8) = pack_int8_weights(&loaded, in_f, out_f);
