@@ -178,8 +178,6 @@
           "avg_nrmse": 0.0085,
           "max_abs_error": 0.0034,
           "status": "passed"
-        }
-      },
         },
         "operator": {
           "backend": "ANE",
@@ -204,7 +202,9 @@
     "description": "If selected_policy.max_abs_error > gate on any tensor: require operator validation before promoting. If operator_validation_missing: use fallback.",
     "promotion_gates_met": {
       "Gemma4.DecoderAttentionProjection": true,
-      "Gemma4.DecoderMlpProjection": true
+      "Gemma4.DecoderMlpProjection": true,
+      "Gemma4.CrossModalBridge": true,
+      "Gemma4.VisionPatchProjection": false
     }
   }
 }
