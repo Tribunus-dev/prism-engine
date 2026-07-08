@@ -147,31 +147,28 @@
         "candidates": 100
       },
       "primary": {
-        "family": "INT8",
-        "group_size": 128
+        "family": "RawF32"
       },
       "fallback": {
         "family": "RawF32"
       },
       "evidence": {
         "weight_space": {
-          "nrmse": 0.0065,
-          "max_abs_error": 0.578,
-          "status": "passed"
+          "int8_g128_nrmse": 0.0065,
+          "int8_g128_max_abs_error": 0.578,
+          "status": "int8_rejected_for_max_abs"
         },
         "operator": {
           "backend": "ANE",
-          "op_nrmse": 0.001092,
-          "cosine_similarity": 1.0,
-          "norm_drift": 0.999393,
-          "max_abs_error": 3.896973,
-          "status": "rollout_required",
-          "reason": "operator NRMSE passes gate (0.001 < 0.002) but max_abs_error 3.9 exceeds 0.5 gate — rollout validation required before full promotion",
+          "int8_g128_op_nrmse": 0.001092,
+          "int8_g128_max_abs_error": 3.896973,
+          "status": "rawf32_required",
+          "reason": "INT8 relative error passes (nrmse=0.001, cosine=1.0) but absolute operator max_abs=3.9 exceeds 0.5 gate. Column rescue would require keeping 6862/6912 input columns as F32 to satisfy max_abs<=0.5, eliminating practical compression benefit — only 50 of 6912 columns can be INT8 before max_abs exceeds 0.5. RawF32 is the only safe first-build option.",
           "evidence_path": "/tmp/sweep-bridge-ane/operator_validation.json"
         }
       },
-      "validation_status": "operator_validated_rollout_required",
-      "notes": "INT8 weight NRMSE good (0.0065). Operator NRMSE good (0.001). Cosine=1.0. But max_abs_error=3.9 exceeds promotion gate. Rollout validation required before full promotion. NF4 remains unusable (max_abs=9.4)."
+      "validation_status": "rawf32_required",
+      "notes": "Vision patch embedding has 6912-wide input axis with extreme column weights (max_abs=147, median=64). INT8 quantization error accumulates across all 6912 input dimensions, producing max_abs=3.9 at the operator level. Column rescue is impractical: only 50 of 6912 columns can be INT8 before exceeding the 0.5 gate. RawF32 for first build. NF4 remains unusable (max_abs=9.4)."
     },
     {
       "scope": "Gemma4.CrossModalBridge",
@@ -219,7 +216,6 @@
       "Gemma4.DecoderAttentionProjection": true,
       "Gemma4.DecoderMlpProjection": true,
       "Gemma4.CrossModalBridge": true,
-      "Gemma4.VisionPatchProjection": false,
       "Qwen3TTS.Projection": true
     }
   }
