@@ -445,6 +445,7 @@ pub fn nf4_metadata_bytes_with_params(
 /// Tiles across the `out_features` axis: each row (in_features) of `out_features`
 /// elements is split into ceil(out_features / 640) tiles. Non-multiple trailing
 /// elements are zero-padded.
+#[allow(dead_code)]
 pub(crate) fn pack_nf4_matrix(
     weights: &[f32],
     in_features: usize,
