@@ -125,6 +125,8 @@ pub enum SubstitutionOutcome {
     Rejected,
     /// Candidate was not attempted.
     NotAttempted,
+    /// Candidate is not available (unimplemented codec, disallowed by policy, or HW unavailable).
+    Unavailable,
 }
 
 // ── Residual rescue ───────────────────────────────────────────────────────
@@ -138,6 +140,33 @@ pub struct ResidualRescueResult {
     pub max_abs_after_rescue: f64,
     pub gate_passed: bool,
     pub rescue_bytes: u64,
+}
+
+/// Context for a substitution attempt — carries policy constraints and environment state.
+#[derive(Debug, Clone)]
+pub struct SubstitutionContext {
+    /// Codecs disallowed by the current tensor's model policy.
+    pub disallowed_codecs: Vec<String>,
+    /// Whether this tensor requires RawF32 (no compression allowed).
+    pub rawf32_required: bool,
+    /// Whether ANE/hardware validation is available.
+    pub hardware_available: bool,
+    /// Whether rollout validation is available.
+    pub rollout_available: bool,
+    /// Operator backend label for evidence receipts.
+    pub operator_backend: String,
+}
+
+impl Default for SubstitutionContext {
+    fn default() -> Self {
+        Self {
+            disallowed_codecs: Vec::new(),
+            rawf32_required: false,
+            hardware_available: false,
+            rollout_available: false,
+            operator_backend: "synthetic_cpu_probe".into(),
+        }
+    }
 }
 
 // ── Gate profiles for each codec ──────────────────────────────────────────

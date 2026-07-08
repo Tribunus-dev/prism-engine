@@ -369,6 +369,8 @@ pub mod projection_tests;
 /// Always-available projection data types (see module docs).
 pub mod projection_types;
 pub mod quantization;
+/// Execution profiling — measures whether a codec policy is worth using.
+pub mod execution_profile;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod quantized;
 #[cfg(any(

@@ -27,6 +27,7 @@ use tribunus_compute_core::nf4tile640::{
 };
 use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
 use tribunus_compute_core::quantization::substitution::SubstitutionCandidate;
+use tribunus_compute_core::quantization::substitution::SubstitutionContext;
 use tribunus_compute_core::quantization::substitution_pass::try_all_candidates;
 use tribunus_compute_core::quantization::embed_cluster::{
     pack_ternary_weights, unpack_ternary_weights,
@@ -805,14 +806,30 @@ let mut receipt = serde_json::json!({
             variants.extend(sweep_variants);
         }
         // ── Substitution pass: ranked codec candidates ────────────────────
+        // Build substitution context from tensor metadata and policy hints
+        let is_audio_encoder = meta.group == TensorGroup::AudioEncoder;
+        let ctx = SubstitutionContext {
+            rawf32_required: is_audio_encoder,
+            disallowed_codecs: if is_audio_encoder {
+                vec!["Ternary".into(), "SymInt4".into(), "NF4".into()]
+            } else {
+                Vec::new()
+            },
+            hardware_available: false,
+            rollout_available: false,
+            operator_backend: "synthetic_cpu_probe".into(),
+        };
+
         if substitution_mode == Some("try") {
-            let candidates = vec![
+            let mut candidates = vec![
                 SubstitutionCandidate::ternary(),
                 SubstitutionCandidate::sym_int4_g32(),
                 SubstitutionCandidate::nf4_bnb_g32(),
                 SubstitutionCandidate::int8_g128(),
                 SubstitutionCandidate::fp16(),
             ];
+            // Filter out candidates disallowed by policy
+            candidates.retain(|c| !ctx.disallowed_codecs.contains(&c.name));
             let primary_bytes = (in_features as u64) * (out_features as u64) * 4;
             let attempts = try_all_candidates(
                 &source,
@@ -820,12 +837,15 @@ let mut receipt = serde_json::json!({
                 out_features as u32,
                 &candidates,
                 primary_bytes,
+                &ctx,
             );
             let attempt_jsons: Vec<serde_json::Value> = attempts.iter().map(|a| {
                 eprintln!("  substitution {}: {:?}", a.candidate, a.outcome);
                 serde_json::to_value(a).unwrap_or_else(|_| serde_json::Value::Null)
             }).collect();
             receipt["substitution_attempts"] = serde_json::json!(attempt_jsons);
+        } else {
+            receipt["substitution_attempts"] = serde_json::json!([]);
         }
         eprintln!("{}", serde_json::to_string_pretty(&receipt)
             .unwrap_or_else(|_| receipt.to_string()));

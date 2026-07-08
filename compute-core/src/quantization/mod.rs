@@ -42,3 +42,5 @@ pub use admission::quantize_tensor;
 pub use calibration::*;
 pub use contract::*;
 pub use validation::*;
+
+pub use substitution::SubstitutionContext;
