@@ -19,6 +19,17 @@ pub mod calibration;
 pub mod contract;
 pub mod sweep;
 pub mod validation;
+/// Ternary substitution pass — replaces primary codecs with ternary on eligible
+/// tensor classes when evidence gates are satisfied.
+pub mod ternary_substitution;
+/// Generalized substitution pipeline — tries ranked codec candidates against
+/// evidence gates and uses the most aggressive one that passes.
+pub mod substitution;
+
+
+
+/// Substitution pass — ranked trial of tile640 codec candidates.
+pub mod substitution_pass;
 
 // Pre-existing quantization submodules (preserved from original mod.rs).
 pub mod cimage;

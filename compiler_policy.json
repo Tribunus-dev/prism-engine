@@ -13,6 +13,98 @@
       "max_abs_error_per_tensor_class": 0.5
     }
   },
+  "ternary_substitution": {
+    "config": {
+      "enabled": false,
+      "eligible_classes": [
+        "DecoderAttentionProjection",
+        "TokenEmbedding"
+      ],
+      "eligible_matchers": [
+        {
+          "class": "DecoderAttentionProjection",
+          "name_suffix": "o_proj"
+        },
+        {
+          "class": "TokenEmbedding",
+          "name_suffix": null
+        }
+      ],
+      "gates": {
+        "weight_nrmse_max": 0.02,
+        "weight_zero_collapse_max": 0.85,
+        "operator_nrmse_max": 0.005,
+        "operator_cosine_min": 0.999,
+        "operator_max_abs_max": 2.0,
+        "rollout_logit_drift_max": 0.01,
+        "rollout_worst_token_cosine_min": 0.99
+      },
+      "rescue": {
+        "granularity": "InputColumn",
+        "format": "PrimaryCodec",
+        "selector": "ActivationWeightedContribution",
+        "max_rescue_fraction": 0.25,
+        "max_abs_gate_after_rescue": 0.5
+      }
+    },
+    "default_stale": "fallback",
+    "model_policies": []
+  },
+  "substitution": {
+    "enabled": false,
+    "default_candidates": ["FP16"],
+    "candidate_profiles": {
+      "FP16": {
+        "weight_nrmse_max": 0.001,
+        "weight_zero_collapse_max": 0.0,
+        "operator_nrmse_max": null,
+        "operator_cosine_min": null,
+        "operator_max_abs_max": null,
+        "requires_hardware_validation": false,
+        "requires_rollout_validation": false
+      },
+      "INT8": {
+        "weight_nrmse_max": 0.01,
+        "weight_zero_collapse_max": 0.0,
+        "operator_nrmse_max": 0.002,
+        "operator_cosine_min": 0.999,
+        "operator_max_abs_max": 0.5,
+        "requires_hardware_validation": false,
+        "requires_rollout_validation": false
+      },
+      "NF4": {
+        "weight_nrmse_max": 0.10,
+        "weight_zero_collapse_max": 0.001,
+        "operator_nrmse_max": 0.002,
+        "operator_cosine_min": 0.999,
+        "operator_max_abs_max": 0.5,
+        "requires_hardware_validation": true,
+        "requires_rollout_validation": false
+      },
+      "SymInt4": {
+        "weight_nrmse_max": 0.10,
+        "weight_zero_collapse_max": 0.001,
+        "operator_nrmse_max": 0.002,
+        "operator_cosine_min": 0.999,
+        "operator_max_abs_max": 0.5,
+        "requires_hardware_validation": true,
+        "requires_rollout_validation": false
+      },
+      "Ternary": {
+        "weight_nrmse_max": 0.020,
+        "weight_zero_collapse_max": 0.85,
+        "operator_nrmse_max": 0.005,
+        "operator_cosine_min": 0.999,
+        "operator_max_abs_max": 2.0,
+        "requires_hardware_validation": true,
+        "requires_rollout_validation": true
+      }
+    },
+    "rescue": {
+      "max_rescue_fraction": 0.25,
+      "max_abs_gate_after_rescue": 0.5
+    }
+  },
   "model_policies": [
     {
       "scope": "Gemma4.DecoderAttentionProjection",

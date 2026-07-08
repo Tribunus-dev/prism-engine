@@ -26,6 +26,8 @@ use tribunus_compute_core::nf4tile640::{
     unpack_int8_weights, unpack_nf4_weights,
 };
 use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
+use tribunus_compute_core::quantization::substitution::SubstitutionCandidate;
+use tribunus_compute_core::quantization::substitution_pass::try_all_candidates;
 use tribunus_compute_core::quantization::embed_cluster::{
     pack_ternary_weights, unpack_ternary_weights,
 };
@@ -54,6 +56,7 @@ fn main() {
         eprintln!("  tribunus-compute-image emit-v0 --output-dir <dir> [--allow-contract-only-kv]");
         eprintln!("  tribunus-compute-image verify-v0 --image <dir>");
         eprintln!("  tribunus-compute-image build-ecs --source <dir> [--draft-source <dir>] [--tts-source <dir>] --output <dir>");
+        eprintln!("       [--substitution <mode>]  (mode: try)");
         eprintln!("  tribunus-compute-image quant-sweep --source <dir> --output <out> [--tensor-regex <re>] [--max-candidates <n>]");
         std::process::exit(1);
     }
@@ -403,6 +406,7 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     let draft_source = get_opt(args, "--draft-source");
     let tts_source = get_opt(args, "--tts-source");
     let output = get_opt(args, "--output").ok_or_else(|| "--output is required".to_string())?;
+    let substitution_mode = get_opt(args, "--substitution");
 
     use std::path::Path;
     use std::fs;
@@ -799,6 +803,29 @@ let mut receipt = serde_json::json!({
         // Merge codec sweep variants into the output
         if let Some(variants) = receipt["variants"].as_array_mut() {
             variants.extend(sweep_variants);
+        }
+        // ── Substitution pass: ranked codec candidates ────────────────────
+        if substitution_mode == Some("try") {
+            let candidates = vec![
+                SubstitutionCandidate::ternary(),
+                SubstitutionCandidate::sym_int4_g32(),
+                SubstitutionCandidate::nf4_bnb_g32(),
+                SubstitutionCandidate::int8_g128(),
+                SubstitutionCandidate::fp16(),
+            ];
+            let primary_bytes = (in_features as u64) * (out_features as u64) * 4;
+            let attempts = try_all_candidates(
+                &source,
+                in_features as u32,
+                out_features as u32,
+                &candidates,
+                primary_bytes,
+            );
+            let attempt_jsons: Vec<serde_json::Value> = attempts.iter().map(|a| {
+                eprintln!("  substitution {}: {:?}", a.candidate, a.outcome);
+                serde_json::to_value(a).unwrap_or_else(|_| serde_json::Value::Null)
+            }).collect();
+            receipt["substitution_attempts"] = serde_json::json!(attempt_jsons);
         }
         eprintln!("{}", serde_json::to_string_pretty(&receipt)
             .unwrap_or_else(|_| receipt.to_string()));
