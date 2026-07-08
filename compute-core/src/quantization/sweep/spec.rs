@@ -8,6 +8,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::quantization::contract::TensorClass;
 
+// ── PolicyMode ────────────────────────────────────────────────────────────────
+
+/// Mode for candidate generation — exploratory (all candidates) or production-only.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum PolicyMode {
+    Exploratory,
+    ProductionCandidateOnly,
+}
+
 // ── Re-exports ─────────────────────────────────────────────────────────────────
 // SweepCandidateStatus is defined in the parent module (mod.rs).
 // Re-export it here so runner.rs and other dependents can reach it via `spec::`.
@@ -212,7 +221,12 @@ pub enum QuantFamilySweep {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SweepValidationConfig {
     pub run_weight_validation: bool,
-    pub max_candidates: usize,
+    /// Max candidates per tensor (deprecated — use max_candidates_per_tensor).
+    #[deprecated(note = "use max_candidates_per_tensor instead")]
+    pub max_candidates: Option<usize>,
+    pub max_candidates_per_tensor: usize,
+    pub max_total_candidates: Option<usize>,
+    pub policy_mode: PolicyMode,
 }
 
 /// Scoring configuration — controls how candidates are ranked.

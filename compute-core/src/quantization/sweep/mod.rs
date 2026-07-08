@@ -7,10 +7,13 @@ pub mod candidate;
 pub mod families;
 pub mod runner;
 pub mod spec;
+#[cfg(test)]
+pub mod tests;
 
 // Re-export commonly used types at the sweep module level.
 pub use candidate::*;
-pub use families::FamilyCandidate;
+pub use families::{FamilyCandidate, ParamError, QuantError, QuantFamily, SweepScratch};
+pub use crate::quantization::contract::SourceMatrixLayout;
 pub use spec::*;
 
 /// Admission status of a candidate after weight-space validation.

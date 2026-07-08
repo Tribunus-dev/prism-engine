@@ -77,7 +77,7 @@ pub fn generate_ternary_candidates(grid: &TernarySweepGrid) -> Vec<FamilyCandida
                         packer,
                         unpacker,
                         code_bytes_fn: ternary_code_bytes,
-                        metadata_bytes_fn: ternary_metadata_bytes,
+                        metadata_bytes_fn: Box::new(ternary_metadata_bytes),
                     });
                 }
             }

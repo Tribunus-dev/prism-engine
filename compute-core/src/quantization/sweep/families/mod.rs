@@ -12,10 +12,75 @@ pub mod ternary;
 use serde_json::Value;
 
 use crate::quantization::sweep::spec::QuantFamilySweep;
+use crate::quantization::sweep::candidate::{PackedCandidate, QuantFamilyId, MatrixShape};
+
+// ── SweepScratch ────────────────────────────────────────────────────────────────
+
+pub struct SweepScratch {
+    pub tile_f32: Vec<f32>,
+    pub recon_band: Vec<f32>,
+    pub error_band: Vec<f32>,
+    pub metrics_tmp: Vec<f32>,
+}
+
+impl SweepScratch {
+    pub fn new() -> Self {
+        Self {
+            tile_f32: Vec::with_capacity(640),
+            recon_band: Vec::new(),
+            error_band: Vec::new(),
+            metrics_tmp: Vec::new(),
+        }
+    }
+}
+
+// ── ParamError ──────────────────────────────────────────────────────────────────
+
+pub enum ParamError {
+    InvalidGroupSize { group_size: usize },
+    InvalidCodebook { codebook: String },
+    InvalidAffineMode { mode: String },
+    InvalidClippingPolicy { policy: String },
+}
+
+// ── QuantError ──────────────────────────────────────────────────────────────────
+
+pub enum QuantError {
+    InvalidDimensions { expected: usize, got: usize },
+    InvalidPayload { reason: String },
+    ParamError(ParamError),
+}
+
+// ── QuantFamily trait ───────────────────────────────────────────────────────────
+
+pub trait QuantFamily: Send + Sync {
+    type Params: Clone + serde::Serialize + for<'de> serde::Deserialize<'de>;
+    fn family_id(&self) -> QuantFamilyId;
+    fn enumerate(&self, grid: &crate::quantization::sweep::spec::Nf4SweepGrid) -> Vec<Self::Params>
+    where
+        Self::Params: 'static;
+    fn validate_params(&self, params: &Self::Params) -> Result<(), ParamError>;
+    fn pack(
+        &self,
+        source: &[f32],
+        logical_shape: &MatrixShape,
+        params: &Self::Params,
+        scratch: &mut SweepScratch,
+    ) -> Result<PackedCandidate, QuantError>;
+    fn unpack(
+        &self,
+        packed: &PackedCandidate,
+        logical_shape: &MatrixShape,
+        params: &Self::Params,
+        scratch: &mut SweepScratch,
+    ) -> Result<Vec<f32>, QuantError>;
+}
 
 // ── FamilyCandidate ─────────────────────────────────────────────────────────────
 
 /// One fully-resolved parameter combination from a codec family sweep grid.
+///
+/// Deprecated: This transitional type will be replaced by the QuantFamily trait.
 ///
 /// The packer/unpacker/codec-size closures are populated by the family's
 /// candidate generation loop; the runner invokes them without needing to know
@@ -32,8 +97,9 @@ pub struct FamilyCandidate {
         Box<dyn Fn(&[u8], &[f32], &[f32], &[u8], usize, usize) -> Vec<f32> + Send + Sync>,
     /// Compute code byte count for given dimensions.
     pub code_bytes_fn: fn(usize, usize) -> u64,
-    /// Compute metadata byte count for given dimensions.
-    pub metadata_bytes_fn: fn(usize, usize) -> u64,
+    /// Compute metadata byte count for given dimensions (closure may capture group_size).
+    pub metadata_bytes_fn:
+        Box<dyn Fn(usize, usize) -> u64 + Send + Sync>,
 }
 
 // ── Dispatch ────────────────────────────────────────────────────────────────────

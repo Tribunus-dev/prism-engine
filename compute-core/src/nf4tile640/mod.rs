@@ -72,6 +72,16 @@ pub const PACKED_BYTES_PER_TILE: usize = TILE_ELEMENTS / 2; // 320
 /// Number of f32 scale values per tile (one per group).
 pub const SCALES_F32_PER_TILE: usize = GROUPS_PER_TILE; // 5
 
+/// Validate that a group size is valid for Tile640 format.
+pub fn validate_tile_group_size(group_size: usize) -> Result<(), String> {
+    if group_size == 0 || TILE_ELEMENTS % group_size != 0 {
+        return Err(format!(
+            "group_size {group_size} must divide TILE_ELEMENTS {TILE_ELEMENTS} and be non-zero"
+        ));
+    }
+    Ok(())
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Section 2: NF4 Codebook
 // ════════════════════════════════════════════════════════════════════════════
@@ -517,6 +527,96 @@ pub fn unpack_nf4_weights(
     output
 }
 
+/// Unpack NF4 weights with configurable group size.
+///
+/// Unlike `unpack_nf4_weights`, this function does NOT assume 5 groups per tile.
+/// Instead, `groups_per_tile` is computed from `TILE_ELEMENTS / group_size`.
+///
+/// # Panics
+/// - If group_size does not divide TILE_ELEMENTS
+/// - If buffer lengths don't match expected sizes
+pub fn unpack_nf4_weights_with_group_size(
+    packed_codes: &[u8],
+    scales: &[f32],
+    biases: &[f32],
+    rows: usize,
+    cols: usize,
+    group_size: usize,
+) -> Vec<f32> {
+    assert!(
+        TILE_ELEMENTS % group_size == 0,
+        "group_size {group_size} must divide TILE_ELEMENTS {TILE_ELEMENTS}"
+    );
+    let groups_per_tile = TILE_ELEMENTS / group_size;
+    let bytes_per_group = group_size / 2;  // 4-bit codes
+    let packed_bytes_per_tile = groups_per_tile * bytes_per_group;
+
+    let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
+    let total_tiles = rows * tiles_per_row;
+
+    let expected_codes_len = total_tiles * packed_bytes_per_tile;
+    let expected_scales_len = total_tiles * groups_per_tile;
+
+    assert_eq!(
+        packed_codes.len(),
+        expected_codes_len,
+        "packed_codes length {} != {total_tiles} * {packed_bytes_per_tile} = {expected_codes_len}",
+        packed_codes.len(),
+    );
+    assert_eq!(
+        scales.len(),
+        expected_scales_len,
+        "scales length {} != {total_tiles} * {groups_per_tile} = {expected_scales_len}",
+        scales.len(),
+    );
+    assert_eq!(
+        biases.len(),
+        expected_scales_len,
+        "biases length {} != {total_tiles} * {groups_per_tile} = {expected_scales_len}",
+        biases.len(),
+    );
+
+    let mut output = vec![0.0f32; rows * cols];
+
+    for tile_idx in 0..total_tiles {
+        let codes_off = tile_idx * packed_bytes_per_tile;
+        let scale_off = tile_idx * groups_per_tile;
+
+        // Copy code bytes for this tile (not fixed-size slice since size varies)
+        let codes = &packed_codes[codes_off..codes_off + packed_bytes_per_tile];
+
+        let row = tile_idx / tiles_per_row;
+        let tile_in_row = tile_idx % tiles_per_row;
+        let col_base = tile_in_row * TILE_ELEMENTS;
+        let remaining = cols.saturating_sub(col_base);
+
+        // Reconstruct the tile group by group
+        for g in 0..groups_per_tile {
+            let scale = scales[scale_off + g];
+            let bias = biases[scale_off + g];
+            let codes_base = g * bytes_per_group;
+            let out_base = row * cols + col_base + g * group_size;
+            let copy_len = group_size.min(remaining.saturating_sub(g * group_size));
+
+            for i in 0..(group_size / 2) {
+                let packed = codes[codes_base + i];
+                let code0 = packed & 0x0F;
+                let code1 = (packed >> 4) & 0x0F;
+                let idx0 = out_base + 2 * i;
+                let idx1 = out_base + 2 * i + 1;
+                if idx0 < output.len() && (2 * i) < copy_len {
+                    output[idx0] = nf4_dequantize(code0) * scale + bias;
+                }
+                if idx1 < output.len() && (2 * i + 1) < copy_len {
+                    output[idx1] = nf4_dequantize(code1) * scale + bias;
+                }
+            }
+        }
+    }
+
+    output
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Section 6: Tile Metadata
 // ════════════════════════════════════════════════════════════════════════════
@@ -643,6 +743,49 @@ pub fn unpack_int8_weights(
                 let code_idx = i * tile_cols + t * TILE_ELEMENTS + (j - col_start);
                 let q = codes[code_idx] as i8;
                 result[i * cols + j] = (q as f32) * scale + bias;
+            }
+        }
+    }
+    result
+}
+
+/// Unpack INT8 weights with configurable group size.
+/// groups_per_tile = TILE_ELEMENTS / group_size scales per tile.
+pub fn unpack_int8_weights_with_group_size(
+    codes: &[u8],
+    scales: &[f32],
+    biases: &[f32],
+    rows: usize,
+    cols: usize,
+    group_size: usize,
+) -> Vec<f32> {
+    assert!(
+        TILE_ELEMENTS % group_size == 0,
+        "group_size {group_size} must divide TILE_ELEMENTS {TILE_ELEMENTS}"
+    );
+    let groups_per_tile = TILE_ELEMENTS / group_size;
+    let num_tiles = cols.div_ceil(TILE_ELEMENTS);
+    let tile_cols = num_tiles * TILE_ELEMENTS;
+
+    let mut result = vec![0.0f32; rows * cols];
+    for i in 0..rows {
+        for t in 0..num_tiles {
+            let col_start = t * TILE_ELEMENTS;
+            let col_end = (col_start + TILE_ELEMENTS).min(cols);
+
+            for g in 0..groups_per_tile {
+                let scale = scales[(i * num_tiles * groups_per_tile) + (t * groups_per_tile) + g];
+                let bias = biases[(i * num_tiles * groups_per_tile) + (t * groups_per_tile) + g];
+                let group_start = col_start + g * group_size;
+                let group_end = (group_start + group_size).min(col_end);
+
+                for j in group_start..group_end {
+                    let code_idx = i * tile_cols + j;
+                    if code_idx < codes.len() {
+                        let q = codes[code_idx] as i8;
+                        result[i * cols + j] = (q as f32) * scale + bias;
+                    }
+                }
             }
         }
     }

@@ -21,14 +21,16 @@ use crate::quantization::contract::{
 };
 use crate::quantization::sweep::SweepCandidateStatus;
 use crate::quantization::sweep::candidate::{
-    FamilyPolicyEntry, PerClassPolicy, QuantSweepReceipt,
+    FamilyPolicyEntry, PerClassPolicy, QuantSweepReceipt, QuantFamilyId, ByteAccounting, MatrixShape, PackedTileLayout,
+    quant_family_id_name,
 };
+use crate::quantization::contract::SourceMatrixLayout;
 use crate::quantization::sweep::families::{
     generate_all_candidates, FamilyCandidate,
 };
 use crate::quantization::sweep::spec::{
     QuantSweepSpec, SweepResourceLimits, SweepScoringConfig,
-    SweepValidationConfig, TensorSelector,
+    SweepValidationConfig, TensorSelector, PolicyMode,
 };
 use crate::quantization::validation::validate_weight_space;
 
@@ -220,10 +222,15 @@ pub fn default_scoring_config() -> SweepScoringConfig {
 }
 
 /// Default validation config.
+/// Default validation config.
+#[allow(deprecated)]
 pub fn default_validation_config() -> SweepValidationConfig {
     SweepValidationConfig {
         run_weight_validation: true,
-        max_candidates: 200,
+        max_candidates: None,
+        max_candidates_per_tensor: 200,
+       max_total_candidates: None,
+        policy_mode: PolicyMode::ProductionCandidateOnly,
     }
 }
 
@@ -232,19 +239,37 @@ pub fn default_resource_limits() -> SweepResourceLimits {
     SweepResourceLimits { max_workers: 4 }
 }
 
+/// Map a FamilyCandidate label prefix to a QuantFamilyId.
+fn family_id_from_label(label: &str) -> QuantFamilyId {
+    if label.starts_with("Nf4") {
+        QuantFamilyId::Nf4
+    } else if label.starts_with("SymInt4") || label.starts_with("SymInt") {
+        QuantFamilyId::SymInt4
+    } else if label.starts_with("Int8") {
+        QuantFamilyId::Int8
+    } else if label.starts_with("Ternary") {
+        QuantFamilyId::Ternary
+    } else if label.starts_with("MixedTile") || label.starts_with("Mixed") {
+        QuantFamilyId::MixedTile
+    } else {
+        // Default fallback — avoid panic
+        QuantFamilyId::Nf4
+    }
+}
+
 /// Score a candidate receipt according to the scoring config.
-/// Lower is better.
+/// Higher is better.
 fn score_receipt(receipt: &QuantSweepReceipt, config: &SweepScoringConfig) -> f64 {
     let max_nrmse = config
         .max_weight_nrmse_by_family
-        .get(&receipt.family)
+        .get(&quant_family_id_name(&receipt.family).to_string())
         .copied()
         .unwrap_or(1.0);
     let quality_score = 1.0 - (receipt.weight.nrmse / max_nrmse).min(1.0);
     // Normalize total bytes: roughly how many bytes per element
     let total_elements_f64 = receipt.source_shape.iter().product::<usize>() as f64;
     let bytes_per_elem = if total_elements_f64 > 0.0 {
-        receipt.total_bytes as f64 / total_elements_f64
+        receipt.bytes.total_bytes as f64 / total_elements_f64
     } else {
         4.0
     };
@@ -283,7 +308,8 @@ pub fn run_weight_sweep(
         &default_scoring_config()
     };
 
-    let max_candidates = spec.validation.max_candidates;
+    let max_candidates = spec.validation.max_candidates_per_tensor;
+    let max_total = spec.validation.max_total_candidates.unwrap_or(usize::MAX);
     let mut all_receipts: Vec<QuantSweepReceipt> = Vec::new();
     let tensor_count = Arc::new(AtomicU64::new(0));
     let total_tensors = selected.len();
@@ -301,8 +327,8 @@ pub fn run_weight_sweep(
             eprintln!("    skipping non-2D tensor: {:?}", tensor_entry.shape);
             continue;
         }
-        if all_receipts.len() >= max_candidates {
-            eprintln!("    reached max candidates ({max_candidates}), stopping");
+        if all_receipts.len() >= max_candidates || all_receipts.len() >= max_total {
+            eprintln!("    reached max candidates (per_tensor={max_candidates}, total={max_total}), stopping");
             break;
         }
 
@@ -320,7 +346,9 @@ pub fn run_weight_sweep(
         // Generate all candidates from all families
         let families = &spec.families;
         let family_candidates = generate_all_candidates(families);
-        let remaining = max_candidates.saturating_sub(all_receipts.len());
+        let per_tensor_remaining = max_candidates.saturating_sub(all_receipts.len() % (max_candidates.max(1)));
+        let total_remaining = max_total.saturating_sub(all_receipts.len());
+        let remaining = per_tensor_remaining.min(total_remaining);
         let candidates_slice: Vec<&FamilyCandidate> = family_candidates
             .iter()
             .take(remaining)
@@ -387,65 +415,50 @@ pub fn run_weight_sweep(
             };
 
             // Bytes
-            let code_bytes = (fc.code_bytes_fn)(in_features, out_features);
-            let metadata_bytes = (fc.metadata_bytes_fn)(in_features, out_features);
-            let total_bytes = code_bytes + metadata_bytes;
+            let family_id = family_id_from_label(&fc.label);
 
-            // Compression ratio vs f32
-            let f32_bytes = (in_features * out_features * 4) as u64;
-            let compression_ratio = if total_bytes > 0 {
-                f32_bytes as f64 / total_bytes as f64
-            } else {
-                1.0
-            };
+            // Bytes using estimator functions (transitional — will use actual payloads)
+            let estimated_code_bytes = (fc.code_bytes_fn)(in_features, out_features);
+            let estimated_metadata_bytes = (fc.metadata_bytes_fn)(in_features, out_features);
+            let elem_count = in_features * out_features;
+            let bytes = ByteAccounting::from_payloads(
+                &vec![0u8; estimated_code_bytes as usize],
+                &vec![0u8; estimated_metadata_bytes as usize],
+                &[],
+                &[],
+                elem_count,
+            );
 
-            let receipt = QuantSweepReceipt {
+            // Create a temporary receipt for scoring
+            let mut tmp_receipt = QuantSweepReceipt {
                 receipt_version: 1,
                 run_id: run_id.clone(),
                 tensor_key: tensor_entry.key.clone(),
                 tensor_class: tensor_entry.tensor_class,
                 source_shape: tensor_entry.shape.clone(),
-                family: fc.label.clone(),
+                family: family_id,
                 parameters: fc.parameters.clone(),
-                code_bytes,
-                metadata_bytes,
-                total_bytes,
-                compression_ratio_vs_f32: compression_ratio,
+                bytes,
+                source_layout: SourceMatrixLayout::CheckpointOutByIn,
+                logical_shape: MatrixShape { in_features, out_features },
+                packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
                 weight: wr.clone(),
                 status,
-                score: score_receipt(
-                    &QuantSweepReceipt {
-                        receipt_version: 1,
-                        run_id: run_id.clone(),
-                        tensor_key: tensor_entry.key.clone(),
-                        tensor_class: tensor_entry.tensor_class,
-                        source_shape: tensor_entry.shape.clone(),
-                        family: fc.label.clone(),
-                        parameters: fc.parameters.clone(),
-                        code_bytes,
-                        metadata_bytes,
-                        total_bytes,
-                        compression_ratio_vs_f32: compression_ratio,
-                        weight: wr,
-                        status: SweepCandidateStatus::Pending,
-                        score: 0.0,
-                        wall_ms: 0,
-                    },
-                    scoring_config,
-                ),
+                score: 0.0,
                 wall_ms: t1.elapsed().as_millis() as u64,
             };
+            let score = score_receipt(&tmp_receipt, scoring_config);
+            tmp_receipt.score = score;
 
-            // Eval status after score
-            all_receipts.push(receipt);
-        }
-    }
+            all_receipts.push(tmp_receipt);
+        } // end for fc
+    } // end for tensor_entry
 
     // Deduplicate per (tensor_key, family) — keep best score (lowest)
     // Group by (tensor_key, family)
-    let mut best_per_tensor_family: HashMap<(String, String), usize> = HashMap::new();
+    let mut best_per_tensor_family: HashMap<(String, QuantFamilyId), usize> = HashMap::new();
     for (i, r) in all_receipts.iter().enumerate() {
-        let key = (r.tensor_key.clone(), r.family.clone());
+        let key = (r.tensor_key.clone(), r.family);
         let best = best_per_tensor_family.entry(key).or_insert(i);
         if r.score > all_receipts[*best].score {
             *best = i;
@@ -465,16 +478,25 @@ pub fn run_weight_sweep(
     let per_class_policies: Vec<PerClassPolicy> = per_class
         .into_iter()
         .map(|(tc, mut receipts)| {
-            receipts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-            let preferred: Vec<FamilyPolicyEntry> = receipts
+            // Sort descending: higher score is better
+            receipts.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+            // In production mode, only include passed candidates
+            let policy_mode = spec.validation.policy_mode;
+            let filtered: Vec<(f64, QuantSweepReceipt)> = match policy_mode {
+                PolicyMode::ProductionCandidateOnly => {
+                    receipts.into_iter().filter(|(_, r)| matches!(r.status, SweepCandidateStatus::Passed)).collect()
+                }
+                PolicyMode::Exploratory => receipts,
+            };
+            let preferred: Vec<FamilyPolicyEntry> = filtered
                 .into_iter()
                 .take(3)
                 .map(|(_score, r)| FamilyPolicyEntry {
-                    family: r.family.clone(),
+                    family: format!("{:?}", r.family),
                     parameters: r.parameters.clone(),
                     weight_nrmse: r.weight.nrmse,
                     score: r.score,
-                    total_bytes: r.total_bytes,
+                    total_bytes: r.bytes.total_bytes,
                 })
                 .collect();
             PerClassPolicy {
@@ -532,12 +554,12 @@ pub fn write_sweep_output(out_dir: &Path, result: &SweepRunResult) -> Result<(),
             "tensor_key": r.tensor_key,
             "tensor_class": r.tensor_class as u8,
             "source_shape": r.source_shape,
-            "family": r.family,
+            "family": format!("{:?}", r.family),
             "parameters": r.parameters,
-            "code_bytes": r.code_bytes,
-            "metadata_bytes": r.metadata_bytes,
-            "total_bytes": r.total_bytes,
-            "compression_ratio_vs_f32": r.compression_ratio_vs_f32,
+            "code_bytes": r.bytes.code_bytes,
+            "metadata_bytes": r.bytes.metadata_bytes,
+            "total_bytes": r.bytes.total_bytes,
+            "compression_ratio_vs_f32": r.bytes.compression_ratio_vs_f32,
             "weight_nrmse": (r.weight.nrmse * 10000.0).round() / 10000.0,
             "weight_zero_collapse": (r.weight.zero_collapse_ratio * 10000.0).round() / 10000.0,
             "weight_rmse": (r.weight.rmse * 10000.0).round() / 10000.0,

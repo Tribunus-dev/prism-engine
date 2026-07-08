@@ -5,9 +5,126 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::quantization::contract::{TensorClass, WeightValidationReport};
-use crate::quantization::sweep::spec::{OverlayMode, QuantPolicy, RescueGranularity, RescueSchedule, RescueSelector, SweepScoringConfig};
+use crate::quantization::contract::{
+    TensorClass, WeightValidationReport,
+};
+use crate::quantization::contract::SourceMatrixLayout;
+use crate::quantization::sweep::spec::{
+    OverlayMode, QuantPolicy, RescueGranularity, RescueSchedule, RescueSelector,
+    SweepScoringConfig,
+};
 use crate::quantization::sweep::SweepCandidateStatus;
+
+// ── Endian ───────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endian {
+    Little,
+    Big,
+}
+
+// ── MatrixShape ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MatrixShape {
+    pub in_features: usize,
+    pub out_features: usize,
+}
+
+// ── PackedTileLayout ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackedTileLayout {
+    OutputChannelContiguousReductionTiles,
+    InputChannelContiguousOutputTiles,
+    ReductionTileInterleavedOutputs,
+}
+
+// ── ByteAccounting ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ByteAccounting {
+    pub code_bytes: u64,
+    pub metadata_bytes: u64,
+    pub residual_bytes: u64,
+    pub routing_bytes: u64,
+    pub total_bytes: u64,
+    pub f32_baseline_bytes: u64,
+    pub compression_ratio_vs_f32: f64,
+}
+
+impl ByteAccounting {
+    pub fn from_payloads(
+        code: &[u8],
+        meta: &[u8],
+        residual: &[u8],
+        routing: &[u8],
+        elem_count: usize,
+    ) -> Self {
+        let code_bytes = code.len() as u64;
+        let metadata_bytes = meta.len() as u64;
+        let residual_bytes = residual.len() as u64;
+        let routing_bytes = routing.len() as u64;
+        let total_bytes = code_bytes + metadata_bytes + residual_bytes + routing_bytes;
+        let f32_baseline_bytes = (elem_count * 4) as u64;
+        let compression_ratio_vs_f32 = if total_bytes > 0 {
+            f32_baseline_bytes as f64 / total_bytes as f64
+        } else {
+            1.0
+        };
+        Self {
+            code_bytes,
+            metadata_bytes,
+            residual_bytes,
+            routing_bytes,
+            total_bytes,
+            f32_baseline_bytes,
+            compression_ratio_vs_f32,
+        }
+    }
+}
+
+// ── QuantFamilyId ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum QuantFamilyId {
+    Nf4,
+    SymInt4,
+    Int8,
+    Ternary,
+    MixedTile,
+}
+
+// ── PackedCandidate ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct PackedCandidate {
+    pub family: QuantFamilyId,
+    pub params_digest: [u8; 32],
+    pub logical_shape: MatrixShape,
+    pub source_layout: SourceMatrixLayout,
+    pub packed_layout: PackedTileLayout,
+    pub code_bytes: Vec<u8>,
+    pub metadata_bytes: Vec<u8>,
+    pub residual_bytes: Vec<u8>,
+    pub routing_bytes: Vec<u8>,
+    pub tile_count: u64,
+    pub group_count: u64,
+    pub format_version: u16,
+    pub endian: Endian,
+}
+
+impl PackedCandidate {
+    pub fn byte_accounting(&self, elem_count: usize) -> ByteAccounting {
+        ByteAccounting::from_payloads(
+            &self.code_bytes,
+            &self.metadata_bytes,
+            &self.residual_bytes,
+            &self.routing_bytes,
+            elem_count,
+        )
+    }
+}
 
 // ── QuantSweepReceipt ───────────────────────────────────────────────────────────
 
@@ -19,12 +136,12 @@ pub struct QuantSweepReceipt {
     pub tensor_key: String,
     pub tensor_class: TensorClass,
     pub source_shape: Vec<usize>,
-    pub family: String,
+    pub family: QuantFamilyId,
     pub parameters: serde_json::Value,
-    pub code_bytes: u64,
-    pub metadata_bytes: u64,
-    pub total_bytes: u64,
-    pub compression_ratio_vs_f32: f64,
+    pub bytes: ByteAccounting,
+    pub source_layout: SourceMatrixLayout,
+    pub logical_shape: MatrixShape,
+    pub packed_layout: PackedTileLayout,
     pub weight: WeightValidationReport,
     pub status: SweepCandidateStatus,
     pub score: f64,
@@ -47,12 +164,12 @@ impl Serialize for QuantSweepReceipt {
         s.serialize_field("tensor_key", &self.tensor_key)?;
         s.serialize_field("tensor_class", &tensor_class_name(&self.tensor_class))?;
         s.serialize_field("source_shape", &self.source_shape)?;
-        s.serialize_field("family", &self.family)?;
+        s.serialize_field("family", &quant_family_id_name(&self.family))?;
         s.serialize_field("parameters", &self.parameters)?;
-        s.serialize_field("code_bytes", &self.code_bytes)?;
-        s.serialize_field("metadata_bytes", &self.metadata_bytes)?;
-        s.serialize_field("total_bytes", &self.total_bytes)?;
-        s.serialize_field("compression_ratio_vs_f32", &self.compression_ratio_vs_f32)?;
+        s.serialize_field("bytes", &self.bytes)?;
+        s.serialize_field("source_layout", &source_layout_name(&self.source_layout))?;
+        s.serialize_field("logical_shape", &self.logical_shape)?;
+        s.serialize_field("packed_layout", &packed_layout_name(&self.packed_layout))?;
         s.serialize_field("weight", &WeightReportHelper::from(&self.weight))?;
         s.serialize_field("status", &self.status)?;
         s.serialize_field("score", &self.score)?;
@@ -76,10 +193,10 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
             SourceShape,
             Family,
             Parameters,
-            CodeBytes,
-            MetadataBytes,
-            TotalBytes,
-            CompressionRatioVsF32,
+            Bytes,
+            SourceLayout,
+            LogicalShape,
+            PackedLayout,
             Weight,
             Status,
             Score,
@@ -106,12 +223,12 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                 let mut tensor_key = None::<String>;
                 let mut tensor_class = None::<TensorClass>;
                 let mut source_shape = None::<Vec<usize>>;
-                let mut family = None::<String>;
+                let mut family = None::<QuantFamilyId>;
                 let mut parameters = None::<serde_json::Value>;
-                let mut code_bytes = None::<u64>;
-                let mut metadata_bytes = None::<u64>;
-                let mut total_bytes = None::<u64>;
-                let mut compression_ratio_vs_f32 = None::<f64>;
+                let mut bytes = None::<ByteAccounting>;
+                let mut source_layout = None::<SourceMatrixLayout>;
+                let mut logical_shape = None::<MatrixShape>;
+                let mut packed_layout = None::<PackedTileLayout>;
                 let mut weight = None::<WeightValidationReport>;
                 let mut status = None::<SweepCandidateStatus>;
                 let mut score = None::<f64>;
@@ -137,22 +254,28 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                             source_shape = Some(map.next_value()?);
                         }
                         Field::Family => {
-                            family = Some(map.next_value()?);
+                            let name: String = map.next_value()?;
+                            family =
+                                Some(parse_quant_family_id(&name).map_err(de::Error::custom)?);
                         }
                         Field::Parameters => {
                             parameters = Some(map.next_value()?);
                         }
-                        Field::CodeBytes => {
-                            code_bytes = Some(map.next_value()?);
+                        Field::Bytes => {
+                            bytes = Some(map.next_value()?);
                         }
-                        Field::MetadataBytes => {
-                            metadata_bytes = Some(map.next_value()?);
+                        Field::SourceLayout => {
+                            let name: String = map.next_value()?;
+                            source_layout =
+                                Some(parse_source_layout(&name).map_err(de::Error::custom)?);
                         }
-                        Field::TotalBytes => {
-                            total_bytes = Some(map.next_value()?);
+                        Field::LogicalShape => {
+                            logical_shape = Some(map.next_value()?);
                         }
-                        Field::CompressionRatioVsF32 => {
-                            compression_ratio_vs_f32 = Some(map.next_value()?);
+                        Field::PackedLayout => {
+                            let name: String = map.next_value()?;
+                            packed_layout =
+                                Some(parse_packed_layout(&name).map_err(de::Error::custom)?);
                         }
                         Field::Weight => {
                             let helper: WeightReportHelper = map.next_value()?;
@@ -182,14 +305,14 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                 let family = family.ok_or_else(|| de::Error::missing_field("family"))?;
                 let parameters =
                     parameters.ok_or_else(|| de::Error::missing_field("parameters"))?;
-                let code_bytes =
-                    code_bytes.ok_or_else(|| de::Error::missing_field("code_bytes"))?;
-                let metadata_bytes =
-                    metadata_bytes.ok_or_else(|| de::Error::missing_field("metadata_bytes"))?;
-                let total_bytes =
-                    total_bytes.ok_or_else(|| de::Error::missing_field("total_bytes"))?;
-                let compression_ratio_vs_f32 = compression_ratio_vs_f32
-                    .ok_or_else(|| de::Error::missing_field("compression_ratio_vs_f32"))?;
+                let bytes =
+                    bytes.ok_or_else(|| de::Error::missing_field("bytes"))?;
+                let source_layout =
+                    source_layout.ok_or_else(|| de::Error::missing_field("source_layout"))?;
+                let logical_shape =
+                    logical_shape.ok_or_else(|| de::Error::missing_field("logical_shape"))?;
+                let packed_layout =
+                    packed_layout.ok_or_else(|| de::Error::missing_field("packed_layout"))?;
                 let weight = weight.ok_or_else(|| de::Error::missing_field("weight"))?;
                 let status = status.ok_or_else(|| de::Error::missing_field("status"))?;
                 let score = score.ok_or_else(|| de::Error::missing_field("score"))?;
@@ -203,10 +326,10 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                     source_shape,
                     family,
                     parameters,
-                    code_bytes,
-                    metadata_bytes,
-                    total_bytes,
-                    compression_ratio_vs_f32,
+                    bytes,
+                    source_layout,
+                    logical_shape,
+                    packed_layout,
                     weight,
                     status,
                     score,
@@ -225,10 +348,10 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                 "source_shape",
                 "family",
                 "parameters",
-                "code_bytes",
-                "metadata_bytes",
-                "total_bytes",
-                "compression_ratio_vs_f32",
+                "bytes",
+                "source_layout",
+                "logical_shape",
+                "packed_layout",
                 "weight",
                 "status",
                 "score",
@@ -413,14 +536,14 @@ impl Default for SweepScoringConfig {
 pub fn score_receipt(receipt: &QuantSweepReceipt, config: &SweepScoringConfig) -> f64 {
     let max_nrmse = config
         .max_weight_nrmse_by_family
-        .get(&receipt.family)
+        .get(quant_family_id_name(&receipt.family))
         .copied()
         .unwrap_or(1.0);
     let quality_score = 1.0 - (receipt.weight.nrmse / max_nrmse).min(1.0);
 
     let total_elements_f64: f64 = receipt.source_shape.iter().product::<usize>() as f64;
     let bytes_per_elem = if total_elements_f64 > 0.0 {
-        receipt.total_bytes as f64 / total_elements_f64
+        receipt.bytes.total_bytes as f64 / total_elements_f64
     } else {
         4.0
     };
@@ -455,6 +578,75 @@ fn parse_tensor_class(s: &str) -> Result<TensorClass, String> {
         "OutputHead" => Ok(TensorClass::OutputHead),
         "Unknown" => Ok(TensorClass::Unknown),
         other => Err(format!("unknown TensorClass variant: {other}")),
+    }
+}
+
+/// Convert a `QuantFamilyId` variant to its string name for serialization.
+pub fn quant_family_id_name(id: &QuantFamilyId) -> &'static str {
+    match id {
+        QuantFamilyId::Nf4 => "Nf4",
+        QuantFamilyId::SymInt4 => "SymInt4",
+        QuantFamilyId::Int8 => "Int8",
+        QuantFamilyId::Ternary => "Ternary",
+        QuantFamilyId::MixedTile => "MixedTile",
+    }
+}
+
+/// Parse a `QuantFamilyId` from its string name.
+fn parse_quant_family_id(s: &str) -> Result<QuantFamilyId, String> {
+    match s {
+        "Nf4" => Ok(QuantFamilyId::Nf4),
+        "SymInt4" => Ok(QuantFamilyId::SymInt4),
+        "Int8" => Ok(QuantFamilyId::Int8),
+        "Ternary" => Ok(QuantFamilyId::Ternary),
+        "MixedTile" => Ok(QuantFamilyId::MixedTile),
+        other => Err(format!("unknown QuantFamilyId variant: {other}")),
+    }
+}
+
+/// Convert a `SourceMatrixLayout` to its string name for serialization.
+fn source_layout_name(layout: &SourceMatrixLayout) -> &'static str {
+    match layout {
+        SourceMatrixLayout::PrismInByOut => "PrismInByOut",
+        SourceMatrixLayout::CheckpointOutByIn => "CheckpointOutByIn",
+    }
+}
+
+/// Parse a `SourceMatrixLayout` from its string name.
+fn parse_source_layout(s: &str) -> Result<SourceMatrixLayout, String> {
+    match s {
+        "PrismInByOut" => Ok(SourceMatrixLayout::PrismInByOut),
+        "CheckpointOutByIn" => Ok(SourceMatrixLayout::CheckpointOutByIn),
+        other => Err(format!("unknown SourceMatrixLayout variant: {other}")),
+    }
+}
+
+/// Convert a `PackedTileLayout` to its string name for serialization.
+fn packed_layout_name(layout: &PackedTileLayout) -> &'static str {
+    match layout {
+        PackedTileLayout::OutputChannelContiguousReductionTiles => {
+            "OutputChannelContiguousReductionTiles"
+        }
+        PackedTileLayout::InputChannelContiguousOutputTiles => {
+            "InputChannelContiguousOutputTiles"
+        }
+        PackedTileLayout::ReductionTileInterleavedOutputs => {
+            "ReductionTileInterleavedOutputs"
+        }
+    }
+}
+
+/// Parse a `PackedTileLayout` from its string name.
+fn parse_packed_layout(s: &str) -> Result<PackedTileLayout, String> {
+    match s {
+        "OutputChannelContiguousReductionTiles" => {
+            Ok(PackedTileLayout::OutputChannelContiguousReductionTiles)
+        }
+        "InputChannelContiguousOutputTiles" => {
+            Ok(PackedTileLayout::InputChannelContiguousOutputTiles)
+        }
+        "ReductionTileInterleavedOutputs" => Ok(PackedTileLayout::ReductionTileInterleavedOutputs),
+        other => Err(format!("unknown PackedTileLayout variant: {other}")),
     }
 }
 
