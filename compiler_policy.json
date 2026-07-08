@@ -1,0 +1,125 @@
+{
+  "policy_version": 1,
+  "policy_created": "2026-07-08T06:40:00Z",
+  "generated_by": "QuantSweep with Metal GPU acceleration",
+  "model_policies": [
+    {
+      "scope": "Gemma4.DecoderAttentionProjection",
+      "match": ["q_proj", "k_proj", "v_proj", "o_proj"],
+      "source": {
+        "sweep": "/tmp/sweep-gemma-decoder-depth",
+        "tensors": 41,
+        "candidates": 2050,
+        "depth_layers": [0, 10, 20, 30, 40, 47]
+      },
+      "primary": {
+        "family": "NF4",
+        "codebook": "BitsAndBytesNf4",
+        "group_size": 32,
+        "affine_mode": "ScaleOnly",
+        "clip_policy": "None",
+        "optimizer": "None"
+      },
+      "fallback": {
+        "family": "INT8",
+        "group_size": 128
+      },
+      "stability": {
+        "status": "stable",
+        "avg_nrmse": 0.0928,
+        "worst_nrmse": 0.0949,
+        "depth_drift": "none"
+      }
+    },
+    {
+      "scope": "Gemma4.DecoderMlpProjection",
+      "match": ["gate_proj", "up_proj", "down_proj"],
+      "source": {
+        "sweep": "/tmp/sweep-gemma-decoder-depth",
+        "tensors": 18,
+        "candidates": 900,
+        "depth_layers": [0, 10, 20, 30, 40, 47]
+      },
+      "primary": {
+        "family": "NF4",
+        "codebook": "BitsAndBytesNf4",
+        "group_size": 32,
+        "affine_mode": "ScaleOnly",
+        "clip_policy": "None",
+        "optimizer": "None"
+      },
+      "fallback": {
+        "family": "INT8",
+        "group_size": 128
+      },
+      "stability": {
+        "status": "stable",
+        "avg_nrmse": 0.0927,
+        "worst_nrmse": 0.0947,
+        "depth_drift": "none"
+      }
+    },
+    {
+      "scope": "Qwen3TTS.Projection",
+      "source": {
+        "sweep": "/tmp/sweep-qwen-tts-full",
+        "tensors": 40,
+        "candidates": 4000,
+        "modules": ["talker", "code_predictor", "codec_head", "codec_embedding", "text_projection", "small_to_mtp"]
+      },
+      "primary": {
+        "family": "INT8",
+        "group_size": 128
+      },
+      "fallback": {
+        "family": "RawF32"
+      },
+      "disallow": ["NF4", "SymInt4", "Ternary"],
+      "notes": "4-bit formats produce ~13x worse NRMSE than INT8. No 4-bit candidate is safe for speech without operator/perceptual validation."
+    },
+    {
+      "scope": "Gemma4.VisionPatchProjection",
+      "match": ["patch_dense"],
+      "source": {
+        "sweep": "/tmp/sweep-gemma-bridge",
+        "tensors": 1,
+        "candidates": 100
+      },
+      "primary": {
+        "family": "INT8",
+        "group_size": 128
+      },
+      "fallback": {
+        "family": "RawF32"
+      },
+      "notes": "NF4 on patch_dense produces max_abs_error=9.4 — isolated extreme misses. INT8 max_abs=0.58 is still high. Strong candidate for operator validation before promotion."
+    },
+    {
+      "scope": "Gemma4.CrossModalBridge",
+      "match": ["embedding_projection"],
+      "source": {
+        "sweep": "/tmp/sweep-gemma-bridge",
+        "tensors": 2,
+        "candidates": 200
+      },
+      "primary": {
+        "family": "INT8",
+        "group_size": 128
+      },
+      "fallback": {
+        "family": "RawF32"
+      }
+    }
+  ],
+  "operator_validation_priority": [
+    "Gemma4.VisionPatchProjection.patch_dense INT8 g128",
+    "Gemma4.CrossModalBridge.embedding_projection INT8 g128",
+    "Qwen3TTS.Projection.codec_head INT8 g128",
+    "Qwen3TTS.Projection.text_projection INT8 g128",
+    "Gemma4.Decoder NF4 BnB g32 ScaleOnly"
+  ],
+  "auto_promotion_rules": {
+    "max_abs_error_gate": 0.5,
+    "description": "If selected_policy.max_abs_error > gate on any tensor: require operator validation before promoting. If operator_validation_missing: use fallback."
+  }
+}
