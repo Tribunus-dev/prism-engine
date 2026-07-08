@@ -54,7 +54,7 @@ pub struct SweepCandidateMetrics {
 /// `SweepCandidateMetrics` for each candidate, in the same order as `candidate_params`.
 pub fn evaluate_nf4_batch(
     source: &[f32],
-    candidate_params: &[u32; 4],
+    candidate_params: &[[u32; 4]],
     num_candidates: usize,
     N: usize,
     K: usize,
@@ -91,7 +91,7 @@ pub fn evaluate_nf4_batch(
     // ── Metal buffer sizes ────────────────────────────────────────────────
     let source_bytes = (source.len() * std::mem::size_of::<f32>()) as u64;
     let sq_sums_bytes = (source_sq_sums.len() * std::mem::size_of::<f32>()) as u64;
-    let params_bytes = (std::mem::size_of::<[u32; 4]>()) as u64;
+    let params_bytes = (candidate_params.len() * std::mem::size_of::<[u32; 4]>()) as u64;
     let bank_bytes = (codebook_bank.len() * std::mem::size_of::<f32>()) as u64;
 
     // Output: [num_candidates × num_tiles × 3] f32 values
@@ -120,7 +120,7 @@ pub fn evaluate_nf4_batch(
     );
 
     let params_buffer = device.new_buffer_with_data(
-        candidate_params.as_ptr() as *const std::ffi::c_void,
+        candidate_params.as_ptr() as *const u32 as *const std::ffi::c_void,
         params_bytes,
         MTLResourceOptions::StorageModeShared,
     );
@@ -164,6 +164,7 @@ pub fn evaluate_nf4_batch(
     // ── Encode and dispatch ──────────────────────────────────────────────
     let encoder = command_buffer.new_compute_command_encoder();
     encoder.set_compute_pipeline_state(&pipeline_state);
+    encoder.set_buffer(0, Some(&src_buffer), 0);
     encoder.set_buffer(1, Some(&sq_sums_buffer), 0);
     encoder.set_buffer(2, Some(&params_buffer), 0);
     encoder.set_buffer(3, Some(&bank_buffer), 0);
@@ -251,7 +252,7 @@ mod tests {
         let params: [u32; 4] = [0, 128, 0, 0];
         let num_candidates = 1usize;
 
-        let metrics = evaluate_nf4_batch(&source, &params, num_candidates, N, K)
+        let metrics = evaluate_nf4_batch(&source, &[params], num_candidates, N, K)
             .expect("Metal evaluation should succeed");
 
         assert_eq!(metrics.len(), num_candidates);
@@ -293,7 +294,7 @@ mod tests {
         for codebook_id in 0u32..3u32 {
             let params: [u32; 4] = [codebook_id, 128, 0, 0];
             let metrics =
-                evaluate_nf4_batch(&source, &params, 1, N, K)
+                evaluate_nf4_batch(&source, &[params], 1, N, K)
                     .expect("should succeed for each codebook");
 
             let m = &metrics[0];
@@ -312,7 +313,7 @@ mod tests {
         let source: Vec<f32> = (0..total).map(|i| ((i % 64) as f32 - 32.0) * 0.01).collect();
 
         let params: [u32; 4] = [0, 64, 0, 0]; // group_size=64
-        let metrics = evaluate_nf4_batch(&source, &params, 1, N, K)
+        let metrics = evaluate_nf4_batch(&source, &[params], 1, N, K)
             .expect("group_size=64 should work");
 
         let m = &metrics[0];
@@ -330,7 +331,7 @@ mod tests {
         let source: Vec<f32> = (0..total).map(|i| ((i % 64) as f32 - 32.0) * 0.01).collect();
 
         let params: [u32; 4] = [1, 128, 1, 0]; // BnB codebook, ScaleBias
-        let metrics = evaluate_nf4_batch(&source, &params, 1, N, K)
+        let metrics = evaluate_nf4_batch(&source, &[params], 1, N, K)
             .expect("ScaleBias mode should work");
 
         let m = &metrics[0];

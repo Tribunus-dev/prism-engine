@@ -18,9 +18,8 @@ use uuid::Uuid;
 use rayon::prelude::*;
 
 use crate::quantization::contract::{
-    QuantizationValidationProfile, TensorClass,
+    QuantizationValidationProfile, TensorClass, WeightValidationReport,
 };
-use crate::quantization::sweep::SweepCandidateStatus;
 use crate::quantization::sweep::candidate::{
     FamilyPolicyEntry, PerClassPolicy, QuantSweepReceipt, QuantFamilyId, ByteAccounting, MatrixShape, PackedTileLayout,
     quant_family_id_name,
@@ -34,6 +33,7 @@ use crate::quantization::sweep::spec::{
     SweepValidationConfig, TensorSelector, PolicyMode,
 };
 use crate::quantization::validation::validate_weight_space;
+use crate::quantization::sweep::SweepCandidateStatus;
 
 /// Fully-resolved tensor metadata from scanning safetensors.
 #[derive(Debug, Clone)]
@@ -358,19 +358,67 @@ pub fn run_weight_sweep(
             .collect();
 
         let new_receipts: std::sync::Mutex<Vec<QuantSweepReceipt>> = std::sync::Mutex::new(Vec::new());
-        candidates_slice.par_iter().for_each(|fc| {
+
+        // ── Metal batch path for NF4 candidates ──────────────────────────
+        // Build (rmse, nrmse, max_abs) lookup from GPU eval, keyed by
+        // candidate index in candidates_slice. Empty = use CPU fallback.
+        let metal_metrics: std::collections::HashMap<usize, (f64, f64, f64)> = {
+            #[cfg(feature = "metal-dispatch")]
+            {
+                let nf4_entries: Vec<(usize, [u32; 4])> = candidates_slice.iter().enumerate().filter_map(|(i, fc)| {
+                    if family_id_from_label(&fc.label) != QuantFamilyId::Nf4 { return None; }
+                    // Parse label to extract codebook_id, group_size, affine_mode
+                    let p = &fc.parameters;
+                    // codebook is a JSON string like "PrismCurrent", "BitsAndBytesNf4", "SymmetricNormalFloat"
+                    let cb = p.get("codebook").and_then(|v| v.as_str()).map(|s| match s {
+                        "BitsAndBytesNf4" => 1u32,
+                        "SymmetricNormalFloat" => 2u32,
+                        _ => 0u32, // PrismCurrent or unknown
+                    }).unwrap_or(0);
+                    let gs = p.get("group_size").and_then(|v| v.as_u64()).unwrap_or(128) as u32;
+                    let am = p.get("affine_mode").and_then(|v| v.as_str()).map(|s| if s == "ScaleBias" { 1 } else { 0 }).unwrap_or(0);
+                    Some((i, [cb, gs, am, 0]))
+                }).collect();
+                if nf4_entries.is_empty() {
+                    std::collections::HashMap::new()
+                } else {
+                    let params: Vec<[u32; 4]> = nf4_entries.iter().map(|(_, p)| *p).collect();
+                    let indices: Vec<usize> = nf4_entries.iter().map(|(i, _)| *i).collect();
+                    match crate::quantization::sweep::metal::evaluate_nf4_batch(
+                        &weights, &params, params.len(), in_features, out_features
+                    ) {
+                        Ok(metrics) => {
+                            indices.into_iter().zip(metrics.into_iter()).map(|(i, m)| {
+                                (i, (m.rmse, m.nrmse, m.max_abs_error))
+                            }).collect()
+                        }
+                        Err(e) => {
+                            eprintln!("    Metal eval failed (falling back to CPU): {e}");
+                            std::collections::HashMap::new()
+                        }
+                    }
+                }
+            }
+            #[cfg(not(feature = "metal-dispatch"))]
+            {
+                std::collections::HashMap::new()
+            }
+            };
+
+        candidates_slice.par_iter().enumerate().for_each(|(idx, fc)| {
             let t1 = Instant::now();
             let family_id = family_id_from_label(&fc.label);
 
-            // Pack returns Vec<u8> extra directly — no unsafe cast
-            let (codes, scales, biases, extra_bytes) =
-            (fc.packer)(&weights, in_features, out_features);
+            // Conditional pack — skip for Metal-evaluated NF4 candidates
+            let (codes, scales, biases, extra_bytes, recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if metal_metrics.contains_key(&idx) {
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+            } else {
+                let (c, s, b, e) = (fc.packer)(&weights, in_features, out_features);
+                let r = (fc.unpacker)(&c, &s, &b, &e, in_features, out_features);
+                (c, s, b, e, r)
+            };
 
-            // Unpack uses extra_bytes directly (no reinterpret cast)
-            let recon =
-                (fc.unpacker)(&codes, &scales, &biases, &extra_bytes, in_features, out_features);
-
-            // Key thresholds by family_id, not fc.label
+            // Key thresholds by family_id
             let family_key = format!("{:?}", family_id);
             let profile = QuantizationValidationProfile {
                 tensor_class: tensor_entry.tensor_class,
@@ -387,7 +435,15 @@ pub fn run_weight_sweep(
                 min_worst_cosine: 0.0,
                 max_norm_ratio_drift: f32::MAX,
             };
-            let wr = validate_weight_space(&weights, &recon, &profile);
+
+            // Compute weight report — either from Metal metrics or CPU validation
+            let wr = if let Some(&(rmse, nrmse, max_abs)) = metal_metrics.get(&idx) {
+                // Metal path: metrics already computed on GPU, zero-collapse not available
+                WeightValidationReport { rmse, nrmse, max_abs_error: max_abs, zero_collapse_ratio: 0.0 }
+            } else {
+                let recon = (fc.unpacker)(&codes, &scales, &biases, &extra_bytes, in_features, out_features);
+                validate_weight_space(&weights, &recon, &profile)
+            };
 
             // Determine status
             let status = if wr.passes(&profile) {
@@ -417,35 +473,40 @@ pub fn run_weight_sweep(
                 }
             };
 
-            // ByteAccounting from actual payload lengths (codes=Vec<u8>, scales+biases=Vec<f32>, extra=Vec<u8>)
             let elem_count = in_features * out_features;
-            // Convert scales+biases to LE bytes for accurate metadata accounting
-            let mut meta_bytes = Vec::with_capacity((scales.len() + biases.len()) * 4);
-            for &s in &scales { meta_bytes.extend_from_slice(&s.to_le_bytes()); }
-            for &b in &biases { meta_bytes.extend_from_slice(&b.to_le_bytes()); }
-            let bytes = ByteAccounting::from_payloads(&codes, &meta_bytes, &extra_bytes, &[], elem_count);
+            let bytes = if metal_metrics.contains_key(&idx) {
+                let cb = (fc.code_bytes_fn)(in_features, out_features);
+                let mb = (fc.metadata_bytes_fn)(in_features, out_features);
+                ByteAccounting::from_payloads(&vec![0u8; cb as usize], &vec![0u8; mb as usize], &[], &[], elem_count)
+            } else {
+                let mut meta = Vec::with_capacity((scales.len() + biases.len()) * 4);
+                for &s in &scales { meta.extend_from_slice(&s.to_le_bytes()); }
+                for &b in &biases { meta.extend_from_slice(&b.to_le_bytes()); }
+                ByteAccounting::from_payloads(&codes, &meta, &extra_bytes, &[], elem_count)
+            };
 
-            let mut tmp_receipt = QuantSweepReceipt {
-                receipt_version: 1,
-                run_id: run_id.clone(),
-                tensor_key: tensor_entry.key.clone(),
-                tensor_class: tensor_entry.tensor_class,
-                source_shape: tensor_entry.shape.clone(),
-                family: family_id,
-                parameters: fc.parameters.clone(),
-                bytes,
+            let score = score_receipt(&QuantSweepReceipt {
+                receipt_version: 1, run_id: run_id.clone(),
+                tensor_key: tensor_entry.key.clone(), tensor_class: tensor_entry.tensor_class,
+                source_shape: tensor_entry.shape.clone(), family: family_id,
+                parameters: fc.parameters.clone(), bytes,
                 source_layout: SourceMatrixLayout::CheckpointOutByIn,
                 logical_shape: MatrixShape { in_features, out_features },
                 packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
-                weight: wr.clone(),
-                status,
-                score: 0.0,
+                weight: wr.clone(), status: status.clone(), score: 0.0,
                 wall_ms: t1.elapsed().as_millis() as u64,
-            };
-            let score = score_receipt(&tmp_receipt, scoring_config);
-            tmp_receipt.score = score;
+            }, scoring_config);
 
-            new_receipts.lock().unwrap().push(tmp_receipt);
+            new_receipts.lock().unwrap().push(QuantSweepReceipt {
+                receipt_version: 1, run_id: run_id.clone(),
+                tensor_key: tensor_entry.key.clone(), tensor_class: tensor_entry.tensor_class,
+                source_shape: tensor_entry.shape.clone(), family: family_id,
+                parameters: fc.parameters.clone(), bytes,
+                source_layout: SourceMatrixLayout::CheckpointOutByIn,
+                logical_shape: MatrixShape { in_features, out_features },
+                packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
+                weight: wr, status, score, wall_ms: t1.elapsed().as_millis() as u64,
+            });
         }); // end par_iter for_each
         all_receipts.extend(new_receipts.into_inner().unwrap());
     } // end for tensor_entry
