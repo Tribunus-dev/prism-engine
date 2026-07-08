@@ -12,7 +12,7 @@
 /// backend capability layer for unified import paths.
 pub use crate::cpu_runtime::capabilities::CpuProgramOp;
 
-use crate::execution_plan::fusion::FusedGroup;
+use crate::execution_plan::fusion::{FusedGroup, DataflowOpKind};
 use crate::execution_plan::CodecFamily;
 use crate::execution_plan::precision_plan::PrecisionScope;
 use serde::{Deserialize, Serialize};
@@ -80,6 +80,8 @@ pub enum UnsupportedFusionReason {
     NestedParallelismRisk,
     /// Huge dense materialization (size in bytes).
     HugeDenseMaterialization(u64),
+    /// No fusion rule matched the group operation sequence.
+    NoRuleMatched,
 }
 
 // ── PowerClass ────────────────────────────────────────────────────────────
@@ -157,7 +159,7 @@ pub struct FusionSupport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendFusionRule {
     /// Sequence of DataflowOp variant names that can be fused, in order.
-    pub pattern: Vec<String>,
+    pub pattern: Vec<DataflowOpKind>,
     /// All ops in the fused group must use the same codec.
     pub requires_same_codec: bool,
     /// All ops must use the same precision / dtype.
@@ -357,7 +359,7 @@ impl BackendCapabilityRegistry {
         }
 
         // Non-mixed path: check codec support.
-        let codec = group.codec_family;
+        let codec = semantics.codec_family.unwrap_or(group.codec_family);
         if !cap.supported_codecs.contains(&codec) {
             return some(UnsupportedFusionReason::UnsupportedCodec(codec));
         }
@@ -372,6 +374,18 @@ impl BackendCapabilityRegistry {
             return some(UnsupportedFusionReason::UnsupportedOp(
                 "role not supported".into(),
             ));
+        }
+
+        // Check fusion pattern matching.
+        let group_kinds: Vec<DataflowOpKind> = group.body.iter()
+            .map(|n| n.op.kind())
+            .collect();
+        let pattern_matched = cap.rules.iter().any(|rule| {
+            rule.pattern.len() == group_kinds.len()
+                && rule.pattern.iter().zip(group_kinds.iter()).all(|(a, b)| a == b)
+        });
+        if !pattern_matched {
+            return some(UnsupportedFusionReason::NoRuleMatched);
         }
 
         // Supported — return a positive assessment.
@@ -423,7 +437,14 @@ pub fn default_registry() -> BackendCapabilityRegistry {
         max_tile_elements: 640,
         rules: vec![
             BackendFusionRule {
-                pattern: vec!["MatMul".into(), "Add".into()],
+                pattern: vec![DataflowOpKind::MatMul, DataflowOpKind::Add],
+                requires_same_codec: true,
+                requires_same_precision: true,
+                max_tile_elements: None,
+                requires_same_lane: true,
+            },
+            BackendFusionRule {
+                pattern: vec![DataflowOpKind::LoadWeight, DataflowOpKind::MatMul, DataflowOpKind::SiLU],
                 requires_same_codec: true,
                 requires_same_precision: true,
                 max_tile_elements: None,
@@ -431,10 +452,10 @@ pub fn default_registry() -> BackendCapabilityRegistry {
             },
             BackendFusionRule {
                 pattern: vec![
-                    "MatMul".into(),
-                    "MatMul".into(),
-                    "SiLU".into(),
-                    "Mul".into(),
+                    DataflowOpKind::MatMul,
+                    DataflowOpKind::MatMul,
+                    DataflowOpKind::SiLU,
+                    DataflowOpKind::Mul,
                 ],
                 requires_same_codec: true,
                 requires_same_precision: true,
@@ -522,7 +543,7 @@ pub fn default_registry() -> BackendCapabilityRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_plan::fusion::FusedGroup;
+    use crate::execution_plan::fusion::{FusedGroup, DataflowOpKind};
     use crate::execution_plan::CodecFamily;
     use crate::execution_plan::fusion::{DataflowNode, DataflowOp};
     use BackendLoweringTarget::*;

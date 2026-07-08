@@ -188,7 +188,7 @@ fn single_node_graph(codec: CodecFamily) -> DataflowGraph {
 
 #[test]
 fn derive_semantics_from_loadweight() {
-    let group = single_codec_group(CodecFamily::Nf4);
+    let group = load_matmul_silu_group(CodecFamily::Nf4);
     let semantics = group.derive_semantics().expect("should derive semantics");
     assert_eq!(semantics.codec_family, Some(CodecFamily::Nf4));
     assert!(semantics.has_weight_load);
@@ -224,7 +224,7 @@ fn mixed_codec_without_precision_plan_rejected() {
 
 #[test]
 fn nf4_group_selects_metal_only() {
-    let group = single_codec_group(CodecFamily::Nf4);
+    let group = load_matmul_silu_group(CodecFamily::Nf4);
     let reg = default_registry();
 
     let ane =
