@@ -6,8 +6,8 @@
 use serde_json::json;
 
 use crate::nf4tile640::{
-    pack_nf4_tile_with_group_size, unpack_nf4_weights_with_group_size,
-    validate_tile_group_size, NF4_CODEBOOK, TILE_ELEMENTS,
+    pack_nf4_tile_with_group_size, unpack_nf4_weights_with_group_size_and_codebook,
+    validate_tile_group_size, nf4_codebook, nf4_quantize_with_codebook, TILE_ELEMENTS,
 };
 use crate::quantization::contract::NF4_TILE640_CODE_BYTES;
 use crate::quantization::sweep::candidate::PackedTileLayout;
@@ -15,43 +15,6 @@ use crate::quantization::sweep::families::FamilyCandidate;
 use crate::quantization::sweep::spec::{
     AffineMode, ClippingPolicy, GroupOptimizer, Nf4CodebookId, Nf4SweepGrid, ScalePolicy,
 };
-
-
-/// Resolve a codebook from its identifier.
-/// Currently all variants return the same canonical NF4 codebook.
-/// Future variants (BitsAndBytes, SymmetricNormalFloat) will return
-/// their respective codebooks once implemented.
-fn nf4_codebook(id: Nf4CodebookId) -> &'static [f32; 16] {
-    match id {
-        Nf4CodebookId::PrismCurrent
-        | Nf4CodebookId::BitsAndBytesNf4
-        | Nf4CodebookId::SymmetricNormalFloat => &NF4_CODEBOOK,
-    }
-}
-
-/// Quantize a value to the nearest codebook index.
-fn nf4_quantize_with_codebook(value: f32, codebook: &[f32; 16]) -> u8 {
-    if !value.is_finite() {
-        return 7; // zero index for NaN
-    }
-    let v = value.clamp(-1.0, 1.0);
-    let mut best_idx = 0u8;
-    let mut best_dist = f32::MAX;
-    for (i, &cb_val) in codebook.iter().enumerate() {
-        let d = (v - cb_val).abs();
-        if d < best_dist {
-            best_dist = d;
-            best_idx = i as u8;
-        }
-    }
-    best_idx
-}
-
-/// Dequantize a codebook index to its f32 value.
-#[allow(dead_code)]
-fn nf4_dequantize_with_codebook(code: u8, codebook: &[f32; 16]) -> f32 {
-    codebook[(code as usize).min(15)]
-}
 
 // ── Nf4Params ─────────────────────────────────────────────────────────────
 
@@ -264,55 +227,12 @@ fn pack_nf4_group(source_group: &[f32], params: &Nf4Params) -> Nf4GroupPack {
             }
         }
         (AffineMode::ScaleOnly, GroupOptimizer::AffineAlternating { .. }) => {
-            // Invalid combination — fall back to ScaleOnly None
-            let max_abs = fit_values
-                .iter()
-                .map(|v| v.abs())
-                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap_or(0.0);
-            let scale = if max_abs < 1e-30 {
-                1.0
-            } else {
-                max_abs / max_cb_abs
-            };
-            let mut codes = Vec::with_capacity(source_group.len());
-            for &v in &fit_values {
-                let norm = (v / scale).clamp(-1.0, 1.0);
-                codes.push(nf4_quantize_with_codebook(norm, codebook));
-            }
-            Nf4GroupPack {
-                codes,
-                scale,
-                bias: None,
-                mse: 0.0,
-            }
+            // Rejected by candidate generation. This arm is unreachable.
+            unreachable!("ScaleOnly + AffineAlternating is an invalid combination");
         }
         (_, GroupOptimizer::ActivationWeighted { .. }) => {
-            // Without activation trace, fall back to ScaleBias None
-            let max_abs = fit_values
-                .iter()
-                .map(|v| v.abs())
-                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap_or(0.0);
-            let scale = if max_abs < 1e-30 {
-                1.0
-            } else {
-                max_abs / max_cb_abs
-            };
-            let bias = 0.0f32;
-            let codes = fit_values
-                .iter()
-                .map(|&v| {
-                    let norm = ((v - bias) / scale).clamp(-1.0, 1.0);
-                    nf4_quantize_with_codebook(norm, codebook)
-                })
-                .collect();
-            Nf4GroupPack {
-                codes,
-                scale,
-                bias: Some(bias),
-                mse: 0.0,
-            }
+            // Without activation trace, this is unsupported. Candidate gen skips it.
+            unreachable!("ActivationWeighted optimizer requires activation trace");
         }
     }
 }
@@ -353,7 +273,9 @@ pub fn pack_nf4_matrix_with_params(
 
                 let result = pack_nf4_group(&buf, params);
                 scales.push(result.scale);
+                if params.affine_mode == AffineMode::ScaleBias {
                     biases.push(result.bias.unwrap_or(0.0));
+                }
 
                 // Pack codes: two 4-bit nibbles per byte
                 for pair in result.codes.chunks(2) {
@@ -528,12 +450,12 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
                         });
 
                         let pack_params = params.clone();
+                        let cb_array = nf4_codebook(pack_params.codebook);
                         let packer = Box::new(move |w: &[f32], r: usize, c: usize| {
                             pack_nf4_matrix_with_params(w, r, c, &pack_params)
                         });
-
                         let unpacker = Box::new(move |codes: &[u8], scales: &[f32], biases: &[f32], _extra: &[u8], rows: usize, cols: usize| {
-                            unpack_nf4_weights_with_group_size(codes, scales, biases, rows, cols, gs)
+                            unpack_nf4_weights_with_group_size_and_codebook(codes, scales, biases, rows, cols, gs, cb_array)
                         });
 
                         let meta_params = params.clone();
@@ -566,7 +488,8 @@ mod tests {
     use super::*;
     use crate::nf4tile640::{
         pack_nf4_tile_with_group_size, unpack_nf4_weights_with_group_size,
-        validate_tile_group_size, TILE_ELEMENTS,
+        unpack_nf4_weights_with_group_size_and_codebook,
+        validate_tile_group_size, PRISM_NF4_CODEBOOK, TILE_ELEMENTS,
     };
     use crate::quantization::contract::NF4_TILE640_CODE_BYTES;
     use crate::quantization::sweep::spec::Nf4SweepGrid;
@@ -719,6 +642,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn nf4_no_label_only_duplicate_codebooks() {
+        // Different codebooks MUST produce different packed results
+        // for the same input. If two codebook variants produce
+        // identical payloads, the sweep has label-only duplicates.
+        let weights = make_test_matrix(1, 640);
+        let pairs = [
+            (Nf4CodebookId::PrismCurrent, Nf4CodebookId::BitsAndBytesNf4),
+            (Nf4CodebookId::PrismCurrent, Nf4CodebookId::SymmetricNormalFloat),
+            (Nf4CodebookId::BitsAndBytesNf4, Nf4CodebookId::SymmetricNormalFloat),
+        ];
+        for &(cb_a, cb_b) in &pairs {
+            let make_params = |cb| Nf4Params {
+                group_size: 128, codebook: cb,
+                affine_mode: AffineMode::ScaleOnly,
+                clip_policy: ClippingPolicy::None,
+                scale_policy: ScalePolicy::MaxAbs,
+                optimizer: GroupOptimizer::None,
+                packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
+            };
+            let (codes_a, _, _, _) = pack_nf4_matrix_with_params(&weights, 1, 640, &make_params(cb_a));
+            let (codes_b, _, _, _) = pack_nf4_matrix_with_params(&weights, 1, 640, &make_params(cb_b));
+            assert_ne!(codes_a, codes_b,
+                "codebook variants {:?} and {:?} produce identical payloads — label-only duplicate",
+                cb_a, cb_b);
+        }
+    }
+
     // ── 5. NF4 code_bytes is always 320 per tile ───────────────────────────
 
     #[test]
@@ -861,12 +812,10 @@ mod tests {
             pack_nf4_matrix_with_params(&weights, rows, cols, &params);
 
         // ScaleOnly should produce zero biases (existing format always stores bias)
-        let expected_biases_len = rows * cols.div_ceil(TILE_ELEMENTS) * (TILE_ELEMENTS / 128);
-        assert_eq!(biases.len(), expected_biases_len, "ScaleOnly should produce one bias per group");
-        assert!(biases.iter().all(|&b| b == 0.0), "ScaleOnly biases must all be zero");
+        assert!(biases.is_empty(), "ScaleOnly should produce no biases");
 
         let reconstructed =
-            unpack_nf4_weights_with_group_size(&codes, &scales, &biases, rows, cols, 128);
+            unpack_nf4_weights_with_group_size_and_codebook(&codes, &scales, &biases, rows, cols, 128, &PRISM_NF4_CODEBOOK);
 
         assert_eq!(reconstructed.len(), weights.len());
         // Should not be all zeros

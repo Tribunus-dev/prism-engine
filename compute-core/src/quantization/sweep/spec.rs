@@ -53,7 +53,7 @@ pub enum Nf4CodebookId {
 }
 
 /// Affine quantization mode — whether bias is present alongside scale.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum AffineMode {
     /// Scale only, no bias.
     ScaleOnly,

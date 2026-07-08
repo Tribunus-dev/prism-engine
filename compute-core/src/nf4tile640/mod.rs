@@ -92,20 +92,20 @@ pub fn validate_tile_group_size(group_size: usize) -> Result<(), String> {
 /// Symmetric around zero. Index 0..15.
 pub const PRISM_NF4_CODEBOOK: [f32; 16] = [
     -1.0,
-    -0.6961928009986877,
-    -0.5250730514526367,
-    -0.39491748809814453,
-    -0.28444138169288635,
-    -0.18477343022823334,
-    -0.09105003625154495,
+    -0.8482084274291992,
+    -0.6356878280639648,
+    -0.46220311522483826,
+    -0.32028985023587036,
+    -0.19982607662677765,
+    -0.0961047038435936,
     0.0,
-    0.07958029955625534,
-    0.16093020141124725,
-    0.24611230194568634,
-    0.33791524171829224,
-    0.44070982933044434,
-    0.5626170039176941,
-    0.7229568362236023,
+    0.08384315651655197,
+    0.1694672405719757,
+    0.2574995458126068,
+    0.3491421937942505,
+    0.44636115431785583,
+    0.5527461171150208,
+    0.6738201389312744,
     1.0,
 ];
 
@@ -710,6 +710,56 @@ pub fn unpack_nf4_weights_with_group_size(
         }
     }
 
+    output
+}
+
+/// Unpack NF4 weights with configurable group size and codebook.
+pub fn unpack_nf4_weights_with_group_size_and_codebook(
+    packed_codes: &[u8], scales: &[f32], biases: &[f32],
+    rows: usize, cols: usize, group_size: usize,
+    codebook: &[f32; 16],
+) -> Vec<f32> {
+    assert!(TILE_ELEMENTS % group_size == 0);
+    let groups_per_tile = TILE_ELEMENTS / group_size;
+    let bytes_per_group = group_size / 2;
+    let packed_bytes_per_tile = groups_per_tile * bytes_per_group;
+    let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
+    let total_tiles = rows * tiles_per_row;
+    let expected_codes_len = total_tiles * packed_bytes_per_tile;
+    let expected_scales_len = total_tiles * groups_per_tile;
+    assert_eq!(packed_codes.len(), expected_codes_len);
+    assert_eq!(scales.len(), expected_scales_len);
+    if !biases.is_empty() { assert_eq!(biases.len(), expected_scales_len); }
+    let mut output = vec![0.0f32; rows * cols];
+    for tile_idx in 0..total_tiles {
+        let codes_off = tile_idx * packed_bytes_per_tile;
+        let scale_off = tile_idx * groups_per_tile;
+        let codes = &packed_codes[codes_off..codes_off + packed_bytes_per_tile];
+        let row = tile_idx / tiles_per_row;
+        let tile_in_row = tile_idx % tiles_per_row;
+        let col_base = tile_in_row * TILE_ELEMENTS;
+        let remaining = cols.saturating_sub(col_base);
+        for g in 0..groups_per_tile {
+            let scale = scales[scale_off + g];
+            let bias = if biases.is_empty() { 0.0 } else { biases[scale_off + g] };
+            let codes_base = g * bytes_per_group;
+            let out_base = row * cols + col_base + g * group_size;
+            let copy_len = group_size.min(remaining.saturating_sub(g * group_size));
+            for i in 0..(group_size / 2) {
+                let packed = codes[codes_base + i];
+                let code0 = packed & 0x0F;
+                let code1 = (packed >> 4) & 0x0F;
+                let idx0 = out_base + 2 * i;
+                let idx1 = out_base + 2 * i + 1;
+                if idx0 < output.len() && (2 * i) < copy_len {
+                    output[idx0] = codebook[code0 as usize] * scale + bias;
+                }
+                if idx1 < output.len() && (2 * i + 1) < copy_len {
+                    output[idx1] = codebook[code1 as usize] * scale + bias;
+                }
+            }
+        }
+    }
     output
 }
 
