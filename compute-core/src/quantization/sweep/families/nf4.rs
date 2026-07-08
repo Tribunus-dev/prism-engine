@@ -74,7 +74,7 @@ pub(crate) fn pack_nf4_matrix(
     in_features: usize,
     out_features: usize,
     group_size: usize,
-) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) {
     validate_tile_group_size(group_size)
         .expect("invalid NF4 tile group_size in pack_nf4_matrix");
     let tiles_per_row = out_features.div_ceil(TILE_ELEMENTS);
@@ -107,7 +107,7 @@ pub(crate) fn pack_nf4_matrix(
         }
     }
 
-    (codes, scales, biases, Vec::new())
+    (codes, scales, biases, Vec::<u8>::new())
 }
 
 // ── Candidate generation ──────────────────────────────────────────────────

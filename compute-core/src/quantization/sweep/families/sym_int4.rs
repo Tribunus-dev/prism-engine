@@ -95,7 +95,7 @@ fn pack_sym_int4_matrix_with_range(
     out_features: usize,
     group_size: usize,
     signed_range: SignedInt4Range,
-) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) {
     let tiles_per_row = out_features.div_ceil(TILE_ELEMENTS);
     let groups_per_tile = TILE_ELEMENTS / group_size;
     let codes_per_tile = TILE_ELEMENTS / 2;
@@ -125,7 +125,7 @@ fn pack_sym_int4_matrix_with_range(
         }
     }
 
-    (codes, scales, biases, Vec::new())
+    (codes, scales, biases, Vec::<u8>::new())
 }
 
 // ── Multi-tile unpacker for SymInt4 ──────────────────────────────────────

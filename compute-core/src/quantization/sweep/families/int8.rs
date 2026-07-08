@@ -36,7 +36,7 @@ fn pack_int8_matrix_with_group_size(
     in_features: usize,
     out_features: usize,
     group_size: usize,
-) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) {
     assert!(
         TILE_ELEMENTS % group_size == 0,
         "group_size must divide 640, got {}",
@@ -83,7 +83,7 @@ fn pack_int8_matrix_with_group_size(
             }
         }
     }
-    (codes, scales, biases, Vec::new())
+    (codes, scales, biases, Vec::<u8>::new())
 }
 // ── Candidate generation ──────────────────────────────────────────────────
 

@@ -91,7 +91,8 @@ pub struct FamilyCandidate {
     /// Resolved parameter set for this candidate, as JSON Value.
     pub parameters: Value,
     /// Pack weights into (codes, scales, biases, extra).
-    pub packer: Box<dyn Fn(&[f32], usize, usize) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<f32>) + Send + Sync>,
+    /// extra is already LE bytes (Vec<u8>), not Vec<f32>.
+    pub packer: Box<dyn Fn(&[f32], usize, usize) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) + Send + Sync>,
     /// Reconstruct weights from packed representation.
     pub unpacker:
         Box<dyn Fn(&[u8], &[f32], &[f32], &[u8], usize, usize) -> Vec<f32> + Send + Sync>,

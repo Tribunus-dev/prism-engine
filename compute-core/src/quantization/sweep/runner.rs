@@ -316,6 +316,7 @@ pub fn run_weight_sweep(
 
     // For each tensor, generate candidates and run them.
     for tensor_entry in &selected {
+        let mut tensor_candidate_count = 0usize;
         let tensor_count =
             tensor_count.fetch_add(1, Ordering::SeqCst) + 1;
         eprintln!(
@@ -327,8 +328,9 @@ pub fn run_weight_sweep(
             eprintln!("    skipping non-2D tensor: {:?}", tensor_entry.shape);
             continue;
         }
-        if all_receipts.len() >= max_candidates || all_receipts.len() >= max_total {
-            eprintln!("    reached max candidates (per_tensor={max_candidates}, total={max_total}), stopping");
+        // Check global candidate limit before generating for this tensor
+        if all_receipts.len() >= max_total {
+            eprintln!("    reached max total candidates ({max_total}), stopping");
             break;
         }
 
@@ -346,7 +348,7 @@ pub fn run_weight_sweep(
         // Generate all candidates from all families
         let families = &spec.families;
         let family_candidates = generate_all_candidates(families);
-        let per_tensor_remaining = max_candidates.saturating_sub(all_receipts.len() % (max_candidates.max(1)));
+        let per_tensor_remaining = max_candidates;
         let total_remaining = max_total.saturating_sub(all_receipts.len());
         let remaining = per_tensor_remaining.min(total_remaining);
         let candidates_slice: Vec<&FamilyCandidate> = family_candidates
@@ -356,25 +358,24 @@ pub fn run_weight_sweep(
 
         for fc in &candidates_slice {
             let t1 = Instant::now();
+            let family_id = family_id_from_label(&fc.label);
 
-            // Pack
-            let (codes, scales, biases, _extra) =
+            // Pack returns Vec<u8> extra directly — no unsafe cast
+            let (codes, scales, biases, extra_bytes) =
             (fc.packer)(&weights, in_features, out_features);
 
-            // Unpack / reconstruct
-            let extra_bytes: &[u8] = unsafe {
-                std::slice::from_raw_parts(_extra.as_ptr() as *const u8, _extra.len() * 4)
-            };
+            // Unpack uses extra_bytes directly (no reinterpret cast)
             let recon =
-                (fc.unpacker)(&codes, &scales, &biases, extra_bytes, in_features, out_features);
+                (fc.unpacker)(&codes, &scales, &biases, &extra_bytes, in_features, out_features);
 
-            // Validate weight-space
+            // Key thresholds by family_id, not fc.label
+            let family_key = format!("{:?}", family_id);
             let profile = QuantizationValidationProfile {
                 tensor_class: tensor_entry.tensor_class,
                 phase: crate::quantization::contract::ProfilePhase::Promotion,
                 max_weight_nrmse: scoring_config
                     .max_weight_nrmse_by_family
-                    .get(&fc.label)
+                    .get(&family_key)
                     .copied()
                     .unwrap_or(f64::MAX),
                 investigation_nrmse_ceiling: f64::MAX,
@@ -414,22 +415,14 @@ pub fn run_weight_sweep(
                 }
             };
 
-            // Bytes
-            let family_id = family_id_from_label(&fc.label);
-
-            // Bytes using estimator functions (transitional — will use actual payloads)
-            let estimated_code_bytes = (fc.code_bytes_fn)(in_features, out_features);
-            let estimated_metadata_bytes = (fc.metadata_bytes_fn)(in_features, out_features);
+            // ByteAccounting from actual payload lengths (codes=Vec<u8>, scales+biases=Vec<f32>, extra=Vec<u8>)
             let elem_count = in_features * out_features;
-            let bytes = ByteAccounting::from_payloads(
-                &vec![0u8; estimated_code_bytes as usize],
-                &vec![0u8; estimated_metadata_bytes as usize],
-                &[],
-                &[],
-                elem_count,
-            );
+            // Convert scales+biases to LE bytes for accurate metadata accounting
+            let mut meta_bytes = Vec::with_capacity((scales.len() + biases.len()) * 4);
+            for &s in &scales { meta_bytes.extend_from_slice(&s.to_le_bytes()); }
+            for &b in &biases { meta_bytes.extend_from_slice(&b.to_le_bytes()); }
+            let bytes = ByteAccounting::from_payloads(&codes, &meta_bytes, &extra_bytes, &[], elem_count);
 
-            // Create a temporary receipt for scoring
             let mut tmp_receipt = QuantSweepReceipt {
                 receipt_version: 1,
                 run_id: run_id.clone(),
@@ -451,6 +444,10 @@ pub fn run_weight_sweep(
             tmp_receipt.score = score;
 
             all_receipts.push(tmp_receipt);
+            tensor_candidate_count += 1;
+            if tensor_candidate_count >= max_candidates {
+                break; // per-tensor limit reached
+            }
         } // end for fc
     } // end for tensor_entry
 

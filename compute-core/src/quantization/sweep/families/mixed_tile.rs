@@ -23,18 +23,6 @@ use crate::quantization::sweep::families::FamilyCandidate;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Convert `Vec<f32>` extra (packer output) back to `Vec<u8>` for the
-    /// unpacker's `extra: &[u8]` parameter. The packer builds a byte buffer
-    /// and reinterprets each 4-byte LE chunk as an f32; this reverses that.
-    fn extra_f32_to_bytes(extra: &[f32]) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(extra.len() * 4);
-        for &f in extra {
-            bytes.extend_from_slice(&f.to_le_bytes());
-        }
-        bytes
-    }
-
     // ── Test 1: MixedTile routing table round-trip ──────────────────────
 
     #[test]
@@ -83,11 +71,8 @@ mod tests {
         let weights = vec![0.0f32; ROWS * COLS];
         let group_size: usize = 128;
         let rescue_fraction = 0.1;
-
-        let (codes, scales, biases, extra_f32) =
+        let (codes, scales, biases, extra_bytes) =
             pack_mixed_tile_matrix(&weights, ROWS, COLS, group_size, rescue_fraction);
-
-        let extra_bytes = extra_f32_to_bytes(&extra_f32);
 
         let reconstructed = unpack_mixed_tile(
             &codes,
@@ -135,10 +120,8 @@ mod tests {
             };
         }
 
-        let (codes, scales, biases, extra_f32) =
+        let (codes, scales, biases, extra_bytes) =
             pack_mixed_tile_matrix(&weights, ROWS, COLS, group_size, rescue_fraction);
-
-        let extra_bytes = extra_f32_to_bytes(&extra_f32);
 
         let reconstructed = unpack_mixed_tile(
             &codes,
@@ -356,7 +339,7 @@ fn pack_mixed_tile_matrix(
     out_features: usize,
     group_size: usize,
     rescue_fraction: f32,
-) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) {
     let tiles_per_row = out_features.div_ceil(TILE_ELEMENTS);
     let total_tiles = in_features * tiles_per_row;
     let groups_per_tile = TILE_ELEMENTS / group_size;
@@ -431,17 +414,7 @@ fn pack_mixed_tile_matrix(
     extra_bytes.extend_from_slice(&routing_bytes);
     extra_bytes.extend_from_slice(&payload_bytes);
 
-    // Step 5: Pad extra to multiple of 4 bytes and convert to Vec<f32>.
-    // The runner reinterprets these f32 values as raw LE bytes on the
-    // unpacker side.
-    let pad = (4 - extra_bytes.len() % 4) % 4;
-    extra_bytes.extend(std::iter::repeat(0u8).take(pad));
-    let extra: Vec<f32> = extra_bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
-
-    // Step 6: Build output buffers — all tiles keep their NF4 codes.
+    // Step 5: Build output buffers — all tiles keep their NF4 codes.
     // The routing table is the sole authority for rescued tiles, so
     // there is no need for sentinel values.
     let mut codes = Vec::with_capacity(total_tiles * codes_per_tile);
@@ -454,7 +427,7 @@ fn pack_mixed_tile_matrix(
         biases.extend(&all_biases[tile_idx]);
     }
 
-    (codes, scales, biases, extra)
+    (codes, scales, biases, extra_bytes)
 }
 
 // ── Mixed tile unpacker ──────────────────────────────────────────────────

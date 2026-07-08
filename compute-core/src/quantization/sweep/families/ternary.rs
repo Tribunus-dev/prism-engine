@@ -59,7 +59,7 @@ pub fn generate_ternary_candidates(grid: &TernarySweepGrid) -> Vec<FamilyCandida
 
                     let packer = Box::new(|w: &[f32], r: usize, c: usize| {
                         let (codes, scales, biases) = pack_ternary_weights(w, r, c);
-                        (codes, scales, biases, Vec::new())
+                        (codes, scales, biases, Vec::<u8>::new())
                     });
 
                     let unpacker = Box::new(
