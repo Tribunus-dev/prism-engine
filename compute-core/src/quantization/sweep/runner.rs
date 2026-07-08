@@ -206,12 +206,12 @@ pub fn load_tensor_f32(source_dir: &Path, target_key: &str) -> Result<Vec<f32>, 
 pub fn default_scoring_config() -> SweepScoringConfig {
     let mut max_weight_nrmse_by_family = HashMap::new();
     max_weight_nrmse_by_family
-        .insert("Nf4Tile640".to_string(), 0.15);
+        .insert("Nf4".to_string(), 0.15);
     max_weight_nrmse_by_family
-        .insert("SymInt4Tile640".to_string(), 0.15);
-    max_weight_nrmse_by_family.insert("Int8Tile640".to_string(), 0.02);
+        .insert("SymInt4".to_string(), 0.15);
+    max_weight_nrmse_by_family.insert("Int8".to_string(), 0.02);
     max_weight_nrmse_by_family
-        .insert("TernaryTile640".to_string(), 0.90);
+        .insert("Ternary".to_string(), 0.90);
     max_weight_nrmse_by_family
         .insert("MixedTile".to_string(), 0.10);
     SweepScoringConfig {

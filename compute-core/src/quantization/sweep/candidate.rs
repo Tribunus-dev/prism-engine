@@ -529,10 +529,12 @@ impl Default for SweepScoringConfig {
 
 /// Compute a scalar score for a candidate receipt.
 ///
-/// Lower is better. The score blends weight-space quality against byte cost:
+/// Higher is better. The score blends weight-space quality against byte cost:
 ///
 /// score = (1 - min(1, nrmse / max_nrmse_for_family))
 ///        - byte_weight * min(1, bytes_per_elem / 4.0)
+///
+/// A higher score means better quality-to-byte tradeoff.
 pub fn score_receipt(receipt: &QuantSweepReceipt, config: &SweepScoringConfig) -> f64 {
     let max_nrmse = config
         .max_weight_nrmse_by_family
