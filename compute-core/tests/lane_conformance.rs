@@ -1,4 +1,6 @@
 //! Lane conformance tests — prove the concurrency-modeling gate behaviors.
+#![cfg(feature = "mlx-backend")]
+//! Lane conformance tests — prove the concurrency-modeling gate behaviors.
 //!
 //! Tests use a fixture backend (a fake TensorBackend that records method calls
 //! and thread IDs) to verify: commands execute on the owning lane thread,

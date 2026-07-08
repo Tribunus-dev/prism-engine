@@ -19,18 +19,17 @@ use tribunus_compute_core::compute_image;
 use tribunus_compute_core::config::CompileQuantMode;
 use tribunus_compute_core::config::HardwareTarget;
 use tribunus_compute_core::kv_cache::KvCache;
-use tribunus_compute_core::profiled_executor::{LoadedProfiledModel, ProfiledInferenceSession};
 use tribunus_compute_core::nf4tile640::{
-    nf4_dequantize, pack_int8_weights, pack_nf4_tile_with_group_size,
-    pack_nf4_weights, pack_nf4_weights_awls, pack_symmetric_int4_tile,
-    unpack_int8_weights, unpack_nf4_weights,
+    nf4_dequantize, pack_int8_weights, pack_nf4_tile_with_group_size, pack_nf4_weights,
+    pack_nf4_weights_awls, pack_symmetric_int4_tile, unpack_int8_weights, unpack_nf4_weights,
+};
+use tribunus_compute_core::profiled_executor::{LoadedProfiledModel, ProfiledInferenceSession};
+use tribunus_compute_core::quantization::embed_cluster::{
+    pack_ternary_weights, unpack_ternary_weights,
 };
 use tribunus_compute_core::quantization::substitution::SubstitutionCandidate;
 use tribunus_compute_core::quantization::substitution::SubstitutionContext;
 use tribunus_compute_core::quantization::substitution_pass::try_all_candidates;
-use tribunus_compute_core::quantization::embed_cluster::{
-    pack_ternary_weights, unpack_ternary_weights,
-};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Entry point
@@ -58,6 +57,9 @@ fn main() {
         eprintln!("  tribunus-compute-image build-ecs --source <dir> [--draft-source <dir>] [--tts-source <dir>] --output <dir>");
         eprintln!("       [--substitution <mode>]  (mode: try)");
         eprintln!("  tribunus-compute-image quant-sweep --source <dir> --output <out> [--tensor-regex <re>] [--max-candidates <n>]");
+        eprintln!("  tribunus-compute-image cimage emit-synthetic-mlp --out <path> [--hidden-dim N] [--intermediate-dim N]");
+        eprintln!("       [--gate-codec nf4|int8|rawf32] [--up-codec ...] [--down-codec ...] [--seed N] [--json] [--no-validate]");
+        eprintln!("  tribunus-compute-image cimage validate --path <path> [--json]");
         std::process::exit(1);
     }
 
@@ -70,6 +72,18 @@ fn main() {
         "emit-v0" => cmd_emit_v0(&args[2..]),
         "verify-v0" => cmd_verify_v0(&args[2..]),
         "quant-sweep" => cmd_quant_sweep(&args[2..]),
+        "cimage" => match args.get(2).map(|s| s.as_str()) {
+            Some("emit-synthetic-mlp") => cmd_cimage_emit_synthetic_mlp(&args[3..]),
+            Some("validate") => cmd_cimage_validate(&args[3..]),
+            Some(other) => {
+                eprintln!("unknown cimage subcommand: {other}");
+                std::process::exit(1);
+            }
+            None => {
+                eprintln!("cimage requires a subcommand: emit-synthetic-mlp, validate");
+                std::process::exit(1);
+            }
+        },
         _other => {
             tribunus_compute_core::log_error!("unknown command: {_other}");
             std::process::exit(1);
@@ -408,22 +422,22 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     let output = get_opt(args, "--output").ok_or_else(|| "--output is required".to_string())?;
     let substitution_mode = get_opt(args, "--substitution");
 
-    use std::path::Path;
+    use memmap2::Mmap;
+    use safetensors::SafeTensors;
     use std::fs;
     use std::fs::File;
-    use safetensors::SafeTensors;
-    use memmap2::Mmap;
+    use std::path::Path;
+    use tribunus_compute_core::compute_image::compile::capability_registry::CapabilityRegistry;
+    use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
+    use tribunus_compute_core::quantization::contract::QuantizationValidationProfile;
+    use tribunus_compute_core::quantization::contract::{BackendKind, CanonicalShape};
+    use tribunus_compute_core::quantization::validation::validate_weight_space;
     use tribunus_compute_core::runtime::compilation_systems::{
-        compile_stage, TensorInput, ModelConfig,
+        compile_stage, ModelConfig, TensorInput,
     };
     use tribunus_compute_core::runtime::stage_graph::{
-        StageConfig, ComponentType, StageQuantizationConfig,
+        ComponentType, StageConfig, StageQuantizationConfig,
     };
-    use tribunus_compute_core::compute_image::compile::capability_registry::CapabilityRegistry;
-    use tribunus_compute_core::quantization::contract::{CanonicalShape, BackendKind};
-    use tribunus_compute_core::quantization::contract::QuantizationValidationProfile;
-    use tribunus_compute_core::quantization::validation::validate_weight_space;
-    use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
 
     let output_dir = Path::new(output);
     fs::create_dir_all(output_dir).map_err(|e| format!("create output dir: {e}"))?;
@@ -448,35 +462,78 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     // ── Types and helpers ─────────────────────────────────────────────────
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     enum TensorGroup {
-        Embedding, Decoder, LmHead, Norm, VisionEncoder, AudioEncoder, MtpDraft, Other,
+        Embedding,
+        Decoder,
+        LmHead,
+        Norm,
+        VisionEncoder,
+        AudioEncoder,
+        MtpDraft,
+        Other,
     }
     fn classify_key(name: &str) -> TensorGroup {
         let n = name;
-        if n.contains("optimizer") || n.contains("momentum") || n.contains("_cache")
-            || n.contains("adam_") || n.contains("rmsprop") { return TensorGroup::Other; }
-        if n.contains("mtp") || n.contains("draft") || n.contains("speculative")
-            || n.contains("proposal") || n.contains("dspark") || n.contains("confidence_head")
-            || n.contains("dflash") || n.contains("eagle") { return TensorGroup::MtpDraft; }
-        if n.contains("multimodal_image") || n.contains("mm_image")
-            || n.contains("vision_") || n.contains("vision.")
-            || n.contains("image_") || n.contains("image.")
-            || n.contains("patch") || (n.contains("projection") && n.contains("layers")) {
+        if n.contains("optimizer")
+            || n.contains("momentum")
+            || n.contains("_cache")
+            || n.contains("adam_")
+            || n.contains("rmsprop")
+        {
+            return TensorGroup::Other;
+        }
+        if n.contains("mtp")
+            || n.contains("draft")
+            || n.contains("speculative")
+            || n.contains("proposal")
+            || n.contains("dspark")
+            || n.contains("confidence_head")
+            || n.contains("dflash")
+            || n.contains("eagle")
+        {
+            return TensorGroup::MtpDraft;
+        }
+        if n.contains("multimodal_image")
+            || n.contains("mm_image")
+            || n.contains("vision_")
+            || n.contains("vision.")
+            || n.contains("image_")
+            || n.contains("image.")
+            || n.contains("patch")
+            || (n.contains("projection") && n.contains("layers"))
+        {
             return TensorGroup::VisionEncoder;
         }
-        if n.contains("multimodal_audio") || n.contains("mm_audio")
-            || n.contains("audio_") || n.contains("audio.")
-            || n.contains("waveform") || n.contains("speech") {
+        if n.contains("multimodal_audio")
+            || n.contains("mm_audio")
+            || n.contains("audio_")
+            || n.contains("audio.")
+            || n.contains("waveform")
+            || n.contains("speech")
+        {
             return TensorGroup::AudioEncoder;
         }
-        if n.contains("self_attn") || n.contains("mlp.")
-            || n.contains("input_layernorm") || n.contains("post_attention_layernorm")
-            || (n.contains(".layers.") && (n.ends_with(".weight") || n.ends_with(".bias"))) {
+        if n.contains("self_attn")
+            || n.contains("mlp.")
+            || n.contains("input_layernorm")
+            || n.contains("post_attention_layernorm")
+            || (n.contains(".layers.") && (n.ends_with(".weight") || n.ends_with(".bias")))
+        {
             return TensorGroup::Decoder;
         }
-        if n.contains("embed_tokens") || n.contains("embed.") || n.contains("wte")
-            || n.contains("tok_embeddings") { return TensorGroup::Embedding; }
-        if n.contains("lm_head") || n.contains("output.") || n.contains("embed_out")
-            || n.contains("head.") { return TensorGroup::LmHead; }
+        if n.contains("embed_tokens")
+            || n.contains("embed.")
+            || n.contains("wte")
+            || n.contains("tok_embeddings")
+        {
+            return TensorGroup::Embedding;
+        }
+        if n.contains("lm_head")
+            || n.contains("output.")
+            || n.contains("embed_out")
+            || n.contains("head.")
+        {
+            return TensorGroup::LmHead;
+        }
         if n.contains("norm.") || n.contains("final_layernorm") || n.contains("ln_f") {
             return TensorGroup::Norm;
         }
@@ -513,9 +570,9 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                         disallowed_codecs: disallow,
                         rawf32_required: false,
                     };
-    }
-    }
-    }
+                }
+            }
+        }
 
         // Gemma4 VisionPatchProjection.patch_dense: primary RawF32 ⇒ bypass substitution
         for policy in model_policies {
@@ -531,12 +588,12 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                                     disallowed_codecs: Vec::new(),
                                     rawf32_required: primary_family == "RawF32",
                                 };
-    }
-    }
-    }
-    }
-    }
-    }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         TensorPolicyMap::default()
     }
@@ -546,7 +603,7 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         key: String,
         shape: Vec<usize>,
         group: TensorGroup,
-        layer: u32,  // 0 for non-layer tensors
+        layer: u32, // 0 for non-layer tensors
     }
 
     // ── Phase 1: Scan tensor metadata only (no weight data loaded) ──────
@@ -559,15 +616,20 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     let mut tensor_meta: Vec<TensorMeta> = Vec::new();
 
     for (source_dir, group_override) in &source_dirs {
-        if source_dir.is_empty() { continue; }
+        if source_dir.is_empty() {
+            continue;
+        }
         let source_dir = Path::new(source_dir);
         for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
             let entry = entry.map_err(|e| format!("entry: {e}"))?;
             let path = entry.path();
-            if !path.extension().map_or(false, |e| e == "safetensors") { continue; }
+            if !path.extension().map_or(false, |e| e == "safetensors") {
+                continue;
+            }
             let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
             let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
-            let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+            let tensors =
+                SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
 
             for (key, view) in tensors.tensors() {
                 let shape: Vec<usize> = view.shape().to_vec();
@@ -577,7 +639,8 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                     _ => classify_key(&key),
                 };
                 // Extract layer number from "layers.N" in the key
-                let layer = key.split('.')
+                let layer = key
+                    .split('.')
                     .skip_while(|s| *s != "layers")
                     .nth(1)
                     .and_then(|s| s.parse::<u32>().ok())
@@ -604,7 +667,11 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                     intermediate_dim = shape[0] as u32;
                 }
                 if key.contains("layers.") {
-                    let n = key.split('.').filter_map(|s| s.parse::<u32>().ok()).next().unwrap_or(0);
+                    let n = key
+                        .split('.')
+                        .filter_map(|s| s.parse::<u32>().ok())
+                        .next()
+                        .unwrap_or(0);
                     num_layers = num_layers.max(n + 1);
                 }
             }
@@ -613,16 +680,26 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     if tensor_meta.is_empty() {
         return Err("No safetensor files found in source directory".into());
     }
-    eprintln!("scanned {} tensors, {} layers, hidden={}, vocab={}",
-        tensor_meta.len(), num_layers, hidden_dim, vocab_size);
+    eprintln!(
+        "scanned {} tensors, {} layers, hidden={}, vocab={}",
+        tensor_meta.len(),
+        num_layers,
+        hidden_dim,
+        vocab_size
+    );
 
     // ── Diagnose a single tensor ─────────────────────────────────────────
     if let Some(diag_key) = get_opt(args, "--diagnose-tensor") {
-        let meta = tensor_meta.iter().find(|m| m.key == diag_key)
+        let meta = tensor_meta
+            .iter()
+            .find(|m| m.key == diag_key)
             .ok_or_else(|| format!("tensor not found: {diag_key}"))?;
 
         if meta.shape.len() != 2 {
-            return Err(format!("diagnose-tensor requires a 2D tensor, got {:?} dims", meta.shape.len()));
+            return Err(format!(
+                "diagnose-tensor requires a 2D tensor, got {:?} dims",
+                meta.shape.len()
+            ));
         }
         let in_features = meta.shape[0];
         let out_features = meta.shape[1];
@@ -630,36 +707,53 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         // Reload safetensors to get the actual f32 data for this single tensor
         let mut source_f32: Option<Vec<f32>> = None;
         for (source_dir, _group_override) in &source_dirs {
-            if source_dir.is_empty() { continue; }
+            if source_dir.is_empty() {
+                continue;
+            }
             let source_dir = Path::new(source_dir);
             for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
                 let entry = entry.map_err(|e| format!("entry: {e}"))?;
                 let path = entry.path();
-                if !path.extension().map_or(false, |e| e == "safetensors") { continue; }
+                if !path.extension().map_or(false, |e| e == "safetensors") {
+                    continue;
+                }
                 let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
                 let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
-                let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+                let tensors =
+                    SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
                 for (key, view) in tensors.tensors() {
-                    if key != diag_key { continue; }
+                    if key != diag_key {
+                        continue;
+                    }
                     let dtype = view.dtype();
                     let data = view.data().to_vec();
                     source_f32 = Some(match dtype {
-                        safetensors::Dtype::F32 => data.chunks_exact(4)
+                        safetensors::Dtype::F32 => data
+                            .chunks_exact(4)
                             .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                             .collect(),
-                        safetensors::Dtype::BF16 => data.chunks_exact(2)
+                        safetensors::Dtype::BF16 => data
+                            .chunks_exact(2)
                             .map(|c| {
                                 let bits = ((c[0] as u32) << 16) | ((c[1] as u32) << 24);
                                 f32::from_bits(bits)
                             })
                             .collect(),
-                        _ => return Err(format!("unsupported dtype {:?} for diagnose-tensor", dtype)),
+                        _ => {
+                            return Err(format!(
+                                "unsupported dtype {:?} for diagnose-tensor",
+                                dtype
+                            ))
+                        }
                     });
                 }
             }
-            if source_f32.is_some() { break; }
+            if source_f32.is_some() {
+                break;
+            }
         }
-        let source = source_f32.ok_or_else(|| format!("could not load tensor data for: {diag_key}"))?;
+        let source =
+            source_f32.ok_or_else(|| format!("could not load tensor data for: {diag_key}"))?;
         let _total_elements = source.len() as f64;
 
         // Create a default profile for weight-space validation reporting.
@@ -682,7 +776,8 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         let nrmse1_legacy = compute_weight_nrmse(&source, &recon1);
 
         // Variant 2: NF4 AffineUniform (all-ones activation weights, 8 iters)
-        let (codes2, scales2, biases2, _, _) = pack_nf4_weights_awls(&source, in_features, out_features, None, 8);
+        let (codes2, scales2, biases2, _, _) =
+            pack_nf4_weights_awls(&source, in_features, out_features, None, 8);
         let recon2 = unpack_nf4_weights(&codes2, &scales2, &biases2, in_features, out_features);
         let wr2 = validate_weight_space(&source, &recon2, &diag_profile);
         let nrmse2_legacy = compute_weight_nrmse(&source, &recon2);
@@ -700,7 +795,6 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         let nrmse4_legacy = compute_weight_nrmse(&source, &recon4);
 
         let source_shape: Vec<usize> = meta.shape.clone();
-        
 
         // ── Codec Sweep: NF4 codebook × group sizes ────────────────────────
         const SWEEP_GROUP_SIZES: [usize; 3] = [32, 64, 128];
@@ -709,9 +803,13 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         // Helper closure: pack entire weight matrix at tile level with custom pack function.
         // Tiles are output-axis (contiguous row slices of 640).
         let do_sweep = |pack_tile: &dyn Fn(&[f32; 640], usize) -> (Vec<u8>, Vec<f32>, Vec<f32>),
-                        is_nf4: bool, gs: usize|
-        {
-            let padded_cols = if out_features % 640 == 0 { out_features } else { (out_features.div_ceil(640)) * 640 };
+                        is_nf4: bool,
+                        gs: usize| {
+            let padded_cols = if out_features % 640 == 0 {
+                out_features
+            } else {
+                (out_features.div_ceil(640)) * 640
+            };
             let tiles_per_row = padded_cols / 640;
             let total_tiles = in_features * tiles_per_row;
             let groups_per_tile = 640 / gs;
@@ -729,12 +827,17 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                     let mut tile_vals = [0.0f32; 640];
                     for i in 0..640 {
                         let c = col_start + i;
-                        tile_vals[i] = if c < out_features { source[row * out_features + c] } else { 0.0 };
+                        tile_vals[i] = if c < out_features {
+                            source[row * out_features + c]
+                        } else {
+                            0.0
+                        };
                     }
                     let (codes_tile, scale_tile, bias_tile) = pack_tile(&tile_vals, gs);
 
                     let codes_off = tile_idx * groups_per_tile * bpgs;
-                    packed[codes_off..codes_off + groups_per_tile * bpgs].copy_from_slice(&codes_tile);
+                    packed[codes_off..codes_off + groups_per_tile * bpgs]
+                        .copy_from_slice(&codes_tile);
 
                     let scale_off = tile_idx * groups_per_tile;
                     scales[scale_off..scale_off + groups_per_tile].copy_from_slice(&scale_tile);
@@ -753,11 +856,15 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                             let (v0, v1) = if is_nf4 {
                                 (nf4_dequantize(code0) * s + b, nf4_dequantize(code1) * s + b)
                             } else {
-                                let dq = |idx: u8| { ((idx as i8) - 7) as f32 * s + b };
+                                let dq = |idx: u8| ((idx as i8) - 7) as f32 * s + b;
                                 (dq(code0), dq(code1))
                             };
-                            if abs_col0 < out_features { recon[row * out_features + abs_col0] = v0; }
-                            if abs_col1 < out_features { recon[row * out_features + abs_col1] = v1; }
+                            if abs_col0 < out_features {
+                                recon[row * out_features + abs_col0] = v0;
+                            }
+                            if abs_col1 < out_features {
+                                recon[row * out_features + abs_col1] = v1;
+                            }
                         }
                     }
                 }
@@ -773,7 +880,11 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
             let (wr, rcon) = do_sweep(&pack_nf4, true, gs);
             let legacy = compute_weight_nrmse(&source, &rcon);
             let groups_per_tile = 640 / gs;
-            let padded_cols = if out_features % 640 == 0 { out_features } else { (out_features.div_ceil(640)) * 640 };
+            let padded_cols = if out_features % 640 == 0 {
+                out_features
+            } else {
+                (out_features.div_ceil(640)) * 640
+            };
             let tiles_per_row = padded_cols / 640;
             let total_tiles = in_features * tiles_per_row;
             sweep_variants.push(serde_json::json!({
@@ -796,7 +907,11 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
             let (wr, rcon) = do_sweep(&pack_sym, false, gs);
             let legacy = compute_weight_nrmse(&source, &rcon);
             let groups_per_tile = 640 / gs;
-            let padded_cols = if out_features % 640 == 0 { out_features } else { (out_features.div_ceil(640)) * 640 };
+            let padded_cols = if out_features % 640 == 0 {
+                out_features
+            } else {
+                (out_features.div_ceil(640)) * 640
+            };
             let tiles_per_row = padded_cols / 640;
             let total_tiles = in_features * tiles_per_row;
             sweep_variants.push(serde_json::json!({
@@ -812,7 +927,7 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                 "max_abs_error": (wr.max_abs_error * 10000.0).round() / 10000.0,
             }));
         }
-let mut receipt = serde_json::json!({
+        let mut receipt = serde_json::json!({
             "tensor_key": diag_key,
             "source_shape": source_shape,
             "in_features": in_features,
@@ -902,23 +1017,30 @@ let mut receipt = serde_json::json!({
                 primary_bytes,
                 &ctx,
             );
-            let attempt_jsons: Vec<serde_json::Value> = attempts.iter().map(|a| {
-                eprintln!("  substitution {}: {:?}", a.candidate, a.outcome);
-                serde_json::to_value(a).unwrap_or_else(|_| serde_json::Value::Null)
-            }).collect();
+            let attempt_jsons: Vec<serde_json::Value> = attempts
+                .iter()
+                .map(|a| {
+                    eprintln!("  substitution {}: {:?}", a.candidate, a.outcome);
+                    serde_json::to_value(a).unwrap_or_else(|_| serde_json::Value::Null)
+                })
+                .collect();
             receipt["substitution_attempts"] = serde_json::json!(attempt_jsons);
         } else {
             receipt["substitution_attempts"] = serde_json::json!([]);
         }
-        eprintln!("{}", serde_json::to_string_pretty(&receipt)
-            .unwrap_or_else(|_| receipt.to_string()));
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&receipt).unwrap_or_else(|_| receipt.to_string())
+        );
         return Ok(());
     }
 
     // Build group index from metadata (no weight data yet)
     let mut grouped: Vec<(TensorGroup, Vec<&TensorMeta>)> = Vec::new();
     for meta in &tensor_meta {
-        if meta.group == TensorGroup::Other { continue; }
+        if meta.group == TensorGroup::Other {
+            continue;
+        }
         match grouped.iter().position(|(g, _)| *g == meta.group) {
             Some(idx) => grouped[idx].1.push(meta),
             None => grouped.push((meta.group.clone(), vec![meta])),
@@ -957,8 +1079,11 @@ let mut receipt = serde_json::json!({
                 per_layer.entry(meta.layer).or_default().push(meta);
             }
             let layer_nums: Vec<u32> = per_layer.keys().copied().collect();
-            eprintln!("decoder: {} layers, processing in batches of {}",
-                layer_nums.len(), LAYERS_PER_BATCH);
+            eprintln!(
+                "decoder: {} layers, processing in batches of {}",
+                layer_nums.len(),
+                LAYERS_PER_BATCH
+            );
 
             for batch_chunk in layer_nums.chunks(LAYERS_PER_BATCH as usize) {
                 // Collect keys for this batch's layers
@@ -971,66 +1096,109 @@ let mut receipt = serde_json::json!({
                 let mut batch_tensors: Vec<TensorInput> = Vec::with_capacity(batch_keys.len());
                 // Load only tensors matching keys in this batch
                 for (_dir_idx, (sd, _)) in source_dirs.iter().enumerate() {
-                    if sd.is_empty() { continue; }
+                    if sd.is_empty() {
+                        continue;
+                    }
                     let source_dir = Path::new(sd);
-                    for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
+                    for entry in
+                        fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))?
+                    {
                         let entry = entry.map_err(|e| format!("entry: {e}"))?;
                         let path = entry.path();
-                        if !path.extension().map_or(false, |e| e == "safetensors") { continue; }
-                        eprintln!("  loading {} for decoder layers {:?}", path.display(), batch_chunk);
+                        if !path.extension().map_or(false, |e| e == "safetensors") {
+                            continue;
+                        }
+                        eprintln!(
+                            "  loading {} for decoder layers {:?}",
+                            path.display(),
+                            batch_chunk
+                        );
                         let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
                         let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
-                        let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+                        let tensors = SafeTensors::deserialize(&mmap)
+                            .map_err(|e| format!("deserialize: {e}"))?;
                         for (key, view) in tensors.tensors() {
-                            if !batch_keys.contains(&key) { continue; }
+                            if !batch_keys.contains(&key) {
+                                continue;
+                            }
                             let dtype = view.dtype();
                             let shape: Vec<usize> = view.shape().to_vec();
                             let data = view.data().to_vec();
                             let f32_data = match dtype {
-                                safetensors::Dtype::F32 => data.chunks_exact(4)
+                                safetensors::Dtype::F32 => data
+                                    .chunks_exact(4)
                                     .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                                     .collect(),
-                                safetensors::Dtype::BF16 => data.chunks_exact(2)
+                                safetensors::Dtype::BF16 => data
+                                    .chunks_exact(2)
                                     .map(|c| {
                                         let bits = ((c[0] as u32) << 16) | ((c[1] as u32) << 24);
                                         f32::from_bits(bits)
                                     })
                                     .collect(),
-                                _ => { continue; }
+                                _ => {
+                                    continue;
+                                }
                             };
                             let (in_f, out_f) = if shape.len() >= 2 {
                                 (shape[0] as u32, shape[1] as u32)
                             } else if shape.len() == 1 {
                                 (shape[0] as u32, 1u32)
-                            } else { continue; };
+                            } else {
+                                continue;
+                            };
                             batch_tensors.push(TensorInput {
                                 matrix_id,
                                 weights: f32_data,
-                                shape: CanonicalShape { in_features: in_f, out_features: out_f, rank: shape.len() as u16 },
+                                shape: CanonicalShape {
+                                    in_features: in_f,
+                                    out_features: out_f,
+                                    rank: shape.len() as u16,
+                                },
                             });
                             matrix_id += 1;
                         }
                     }
                 }
 
-                if batch_tensors.is_empty() { continue; }
+                if batch_tensors.is_empty() {
+                    continue;
+                }
 
                 let stage_config = StageConfig {
-                    stage_id: 1, component: ComponentType::DecoderLayer,
+                    stage_id: 1,
+                    component: ComponentType::DecoderLayer,
                     tensor_key_patterns: vec![],
                     quantization: StageQuantizationConfig::decoder_default(),
-                    backend: BackendKind::Metal, gpu_memory_utilization: 0.6, tensor_parallel_size: 1,
+                    backend: BackendKind::Metal,
+                    gpu_memory_utilization: 0.6,
+                    tensor_parallel_size: 1,
                 };
-                let batch_label = format!("decoder_layers_{}_{}", batch_chunk[0], batch_chunk.last().unwrap());
-                eprintln!("compiling {} with {} tensors...", batch_label, batch_tensors.len());
+                let batch_label = format!(
+                    "decoder_layers_{}_{}",
+                    batch_chunk[0],
+                    batch_chunk.last().unwrap()
+                );
+                eprintln!(
+                    "compiling {} with {} tensors...",
+                    batch_label,
+                    batch_tensors.len()
+                );
                 let (stage_result, bindings) = compile_stage(
-                    batch_tensors, stage_config, model_config, CapabilityRegistry::default_metal_v1(),
+                    batch_tensors,
+                    stage_config,
+                    model_config,
+                    CapabilityRegistry::default_metal_v1(),
                 );
                 let path = output_dir.join(format!("stage_1_{}.cimage", batch_label));
                 fs::write(&path, &stage_result.cimage)
                     .map_err(|e| format!("write {}: {e}", path.display()))?;
-                eprintln!("  wrote {}: {} bytes, {} bindings",
-                    path.display(), stage_result.cimage.len(), bindings.len());
+                eprintln!(
+                    "  wrote {}: {} bytes, {} bindings",
+                    path.display(),
+                    stage_result.cimage.len(),
+                    bindings.len()
+                );
             }
             continue;
         }
@@ -1039,35 +1207,46 @@ let mut receipt = serde_json::json!({
 
         // Re-open safetensors files and load only tensors matching this group
         for (_dir_idx, (sd, _)) in source_dirs.iter().enumerate() {
-            if sd.is_empty() { continue; }
+            if sd.is_empty() {
+                continue;
+            }
             let source_dir = Path::new(sd);
             for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
                 let entry = entry.map_err(|e| format!("entry: {e}"))?;
                 let path = entry.path();
-                if !path.extension().map_or(false, |e| e == "safetensors") { continue; }
+                if !path.extension().map_or(false, |e| e == "safetensors") {
+                    continue;
+                }
                 eprintln!("  loading {} for stage {:?}", path.display(), group);
                 let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
                 let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
-                let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+                let tensors =
+                    SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
 
                 for (key, view) in tensors.tensors() {
                     // Load only if the key matches a tensor in this group
-                    if !metas.iter().any(|m| m.key == key) { continue; }
+                    if !metas.iter().any(|m| m.key == key) {
+                        continue;
+                    }
 
                     let dtype = view.dtype();
                     let shape: Vec<usize> = view.shape().to_vec();
                     let data = view.data().to_vec();
                     let f32_data = match dtype {
-                        safetensors::Dtype::F32 => data.chunks_exact(4)
+                        safetensors::Dtype::F32 => data
+                            .chunks_exact(4)
                             .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                             .collect(),
-                        safetensors::Dtype::BF16 => data.chunks_exact(2)
+                        safetensors::Dtype::BF16 => data
+                            .chunks_exact(2)
                             .map(|c| {
                                 let bits = ((c[0] as u32) << 16) | ((c[1] as u32) << 24);
                                 f32::from_bits(bits)
                             })
                             .collect(),
-                        _ => { continue; }
+                        _ => {
+                            continue;
+                        }
                     };
                     let (in_f, out_f) = if shape.len() >= 2 {
                         (shape[0] as u32, shape[1] as u32)
@@ -1079,7 +1258,11 @@ let mut receipt = serde_json::json!({
                     group_tensors.push(TensorInput {
                         matrix_id,
                         weights: f32_data,
-                        shape: CanonicalShape { in_features: in_f, out_features: out_f, rank: shape.len() as u16 },
+                        shape: CanonicalShape {
+                            in_features: in_f,
+                            out_features: out_f,
+                            rank: shape.len() as u16,
+                        },
                     });
                     matrix_id += 1;
                 }
@@ -1093,57 +1276,82 @@ let mut receipt = serde_json::json!({
 
         let stage_config = match group {
             TensorGroup::Embedding => StageConfig {
-                stage_id: 0, component: ComponentType::TextEmbedding,
+                stage_id: 0,
+                component: ComponentType::TextEmbedding,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::projection_default(),
-                backend: BackendKind::Metal, gpu_memory_utilization: 0.3, tensor_parallel_size: 1,
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.3,
+                tensor_parallel_size: 1,
             },
             TensorGroup::Decoder => StageConfig {
-                stage_id: 1, component: ComponentType::DecoderLayer,
+                stage_id: 1,
+                component: ComponentType::DecoderLayer,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::decoder_default(),
-                backend: BackendKind::Metal, gpu_memory_utilization: 0.6, tensor_parallel_size: 1,
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.6,
+                tensor_parallel_size: 1,
             },
             TensorGroup::LmHead => StageConfig {
-                stage_id: 2, component: ComponentType::LmHead,
+                stage_id: 2,
+                component: ComponentType::LmHead,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::projection_default(),
-                backend: BackendKind::Metal, gpu_memory_utilization: 0.1, tensor_parallel_size: 1,
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.1,
+                tensor_parallel_size: 1,
             },
             TensorGroup::Norm => StageConfig {
-                stage_id: 3, component: ComponentType::Norm,
+                stage_id: 3,
+                component: ComponentType::Norm,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::projection_default(),
-                backend: BackendKind::Metal, gpu_memory_utilization: 0.1, tensor_parallel_size: 1,
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.1,
+                tensor_parallel_size: 1,
             },
             TensorGroup::VisionEncoder => StageConfig {
-                stage_id: 4, component: ComponentType::VisionEncoder,
+                stage_id: 4,
+                component: ComponentType::VisionEncoder,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::encoder_default(),
-                backend: BackendKind::Metal, gpu_memory_utilization: 0.4, tensor_parallel_size: 1,
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.4,
+                tensor_parallel_size: 1,
             },
             TensorGroup::AudioEncoder => StageConfig {
-                stage_id: 5, component: ComponentType::AudioEncoder,
+                stage_id: 5,
+                component: ComponentType::AudioEncoder,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::encoder_default(),
-                backend: BackendKind::Metal, gpu_memory_utilization: 0.4, tensor_parallel_size: 1,
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.4,
+                tensor_parallel_size: 1,
             },
             TensorGroup::MtpDraft => StageConfig {
-                stage_id: 6, component: ComponentType::MtpDraft,
+                stage_id: 6,
+                component: ComponentType::MtpDraft,
                 tensor_key_patterns: vec![],
                 quantization: StageQuantizationConfig::decoder_default(),
-                backend: BackendKind::Metal, gpu_memory_utilization: 0.3, tensor_parallel_size: 1,
+                backend: BackendKind::Metal,
+                gpu_memory_utilization: 0.3,
+                tensor_parallel_size: 1,
             },
             _ => continue,
         };
 
         let stage_id = stage_config.stage_id;
         let stage_label = stage_config.component.as_str().to_string();
-        eprintln!("compiling stage {} ({}) with {} tensors...",
-            stage_id, stage_label, group_tensors.len());
+        eprintln!(
+            "compiling stage {} ({}) with {} tensors...",
+            stage_id,
+            stage_label,
+            group_tensors.len()
+        );
 
         let (stage_result, bindings) = compile_stage(
-            group_tensors,  // moved — freed after compile
+            group_tensors, // moved — freed after compile
             stage_config,
             model_config,
             CapabilityRegistry::default_metal_v1(),
@@ -1152,8 +1360,12 @@ let mut receipt = serde_json::json!({
         let path = output_dir.join(format!("stage_{}_{}.cimage", stage_id, stage_label));
         fs::write(&path, &stage_result.cimage)
             .map_err(|e| format!("write {}: {e}", path.display()))?;
-        eprintln!("  wrote {}: {} bytes, {} bindings",
-            path.display(), stage_result.cimage.len(), bindings.len());
+        eprintln!(
+            "  wrote {}: {} bytes, {} bindings",
+            path.display(),
+            stage_result.cimage.len(),
+            bindings.len()
+        );
     }
 
     eprintln!("done — {} groups compiled", grouped.len());
@@ -1629,6 +1841,153 @@ fn cmd_verify_v0(args: &[String]) -> Result<(), String> {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// cimage commands — emit synthetic MLP shard and validate
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn cmd_cimage_emit_synthetic_mlp(args: &[String]) -> Result<(), String> {
+    let out = get_opt(args, "--out").unwrap_or("/tmp/gemma_mlp_shard_000.cimage");
+    let hidden_dim: usize = get_opt(args, "--hidden-dim")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(64);
+    let intermediate_dim: usize = get_opt(args, "--intermediate-dim")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(128);
+    let gate_codec = parse_codec(args, "--gate-codec")
+        .unwrap_or(tribunus_compute_core::execution_plan::CodecFamily::Nf4);
+    let up_codec = parse_codec(args, "--up-codec")
+        .unwrap_or(tribunus_compute_core::execution_plan::CodecFamily::Nf4);
+    let down_codec = parse_codec(args, "--down-codec")
+        .unwrap_or(tribunus_compute_core::execution_plan::CodecFamily::Int8);
+    let seed: u64 = get_opt(args, "--seed")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(42);
+    let no_validate = has_flag(args, "--no-validate");
+    let json_output = has_flag(args, "--json");
+
+    use tribunus_compute_core::cimage::*;
+
+    let config = SyntheticMlpShardConfig {
+        seed,
+        hidden_dim,
+        intermediate_dim,
+        policy: SyntheticShardPolicy {
+            gate_codec,
+            up_codec,
+            down_codec,
+            rmsnorm_codec: tribunus_compute_core::execution_plan::CodecFamily::RawF32,
+            allow_mixed_precision: false,
+        },
+    };
+
+    let (write_receipt, _load_receipt, shard_validation) =
+        emit_and_validate_synthetic_mlp(std::path::Path::new(out), config)
+            .map_err(|e| format!("cimage error: {e}"))?;
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "status": if shard_validation.passed { "valid" } else { "invalid" },
+            "path": out,
+            "cimage_digest": write_receipt.cimage_digest,
+            "tensor_count": write_receipt.tensor_count,
+            "payload_count": write_receipt.payload_count,
+            "output_nrmse": shard_validation.output_nrmse,
+            "output_cosine": shard_validation.output_cosine,
+            "max_abs_error": shard_validation.max_abs_error,
+            "evidence_kind": "Synthetic",
+        }))
+        .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("cimage written to: {out}");
+        println!("  digest:     {}", write_receipt.cimage_digest);
+        println!("  tensors:    {}", write_receipt.tensor_count);
+        println!("  payloads:   {}", write_receipt.payload_count);
+        println!(
+            "  validation: {}",
+            if shard_validation.passed {
+                "PASSED"
+            } else {
+                "FAILED"
+            }
+        );
+        println!("  NRMSE:  {:.6}", shard_validation.output_nrmse);
+        println!("  cosine: {:.6}", shard_validation.output_cosine);
+        println!("  max_abs_err: {:.6}", shard_validation.max_abs_error);
+    }
+
+    if !shard_validation.passed && !no_validate {
+        return Err("numerical validation failed".to_string());
+    }
+
+    Ok(())
+}
+
+fn cmd_cimage_validate(args: &[String]) -> Result<(), String> {
+    let path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let json_output = has_flag(args, "--json");
+
+    use tribunus_compute_core::cimage::*;
+
+    let loaded = CImageLoader::load_v0(std::path::Path::new(path))
+        .map_err(|e| format!("load error: {e}"))?;
+    let load_receipt =
+        CImageValidator::validate_loaded(&loaded).map_err(|e| format!("validate error: {e}"))?;
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "status": match load_receipt.validation_status {
+                CImageValidationStatus::Valid => "valid",
+                CImageValidationStatus::ValidWithWarnings => "valid_with_warnings",
+                CImageValidationStatus::Invalid => "invalid",
+            },
+            "path": path,
+            "cimage_digest": load_receipt.cimage_digest,
+            "tensor_count": load_receipt.tensor_count,
+            "payload_count": load_receipt.payload_count,
+            "errors": load_receipt.errors,
+            "warnings": load_receipt.warnings,
+        }))
+        .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("cimage validation: {:?}", load_receipt.validation_status);
+        println!("  path:      {path}");
+        println!("  digest:    {}", load_receipt.cimage_digest);
+        println!("  tensors:   {}", load_receipt.tensor_count);
+        println!("  payloads:  {}", load_receipt.payload_count);
+        if !load_receipt.errors.is_empty() {
+            for err in &load_receipt.errors {
+                println!("  ERROR: {err}");
+            }
+        }
+        if !load_receipt.warnings.is_empty() {
+            for warn in &load_receipt.warnings {
+                println!("  WARNING: {warn}");
+            }
+        }
+    }
+
+    if load_receipt.validation_status == CImageValidationStatus::Invalid {
+        return Err("cimage validation failed".to_string());
+    }
+    Ok(())
+}
+
+fn parse_codec(
+    args: &[String],
+    key: &str,
+) -> Option<tribunus_compute_core::execution_plan::CodecFamily> {
+    get_opt(args, key).and_then(|s| match s.to_lowercase().as_str() {
+        "nf4" => Some(tribunus_compute_core::execution_plan::CodecFamily::Nf4),
+        "int8" => Some(tribunus_compute_core::execution_plan::CodecFamily::Int8),
+        "rawf32" | "raw_f32" | "f32" => {
+            Some(tribunus_compute_core::execution_plan::CodecFamily::RawF32)
+        }
+        "fp16" => Some(tribunus_compute_core::execution_plan::CodecFamily::Fp16),
+        _ => None,
+    })
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // quant-sweep command — parametric quantization sweep
@@ -1649,17 +2008,15 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
         return Err(format!("source directory not found: {source}"));
     }
 
-    use tribunus_compute_core::quantization::sweep::runner::{
-        default_resource_limits, default_scoring_config,
-        run_weight_sweep, write_sweep_output,
-    };
-    use tribunus_compute_core::quantization::sweep::spec::{
-        QuantFamilySweep, QuantSweepSpec,
-        SweepValidationConfig, TensorSelector,
-    };
     use tribunus_compute_core::quantization::sweep::families::{
         int8::create_int8_grid, nf4::create_nf4_grid, sym_int4::create_sym_int4_grid,
         ternary::create_ternary_grid,
+    };
+    use tribunus_compute_core::quantization::sweep::runner::{
+        default_resource_limits, default_scoring_config, run_weight_sweep, write_sweep_output,
+    };
+    use tribunus_compute_core::quantization::sweep::spec::{
+        QuantFamilySweep, QuantSweepSpec, SweepValidationConfig, TensorSelector,
     };
 
     // Build the sweep spec
@@ -1678,7 +2035,8 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
         max_candidates: None,
         max_candidates_per_tensor: max_candidates,
         max_total_candidates: None,
-        policy_mode: tribunus_compute_core::quantization::sweep::spec::PolicyMode::ProductionCandidateOnly,
+        policy_mode:
+            tribunus_compute_core::quantization::sweep::spec::PolicyMode::ProductionCandidateOnly,
     };
     let scoring = default_scoring_config();
     let resource_limits = default_resource_limits();
@@ -1755,18 +2113,36 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
             let in_f = canonical.in_features;
             let out_f = canonical.out_features;
 
-            eprintln!("  [ANE] validating {:?} on {}...", policy.tensor_class, r.tensor_key);
+            eprintln!(
+                "  [ANE] validating {:?} on {}...",
+                policy.tensor_class, r.tensor_key
+            );
 
             // Load the tensor from safetensors
             let src_dir = std::path::Path::new(source);
-            let loaded = tribunus_compute_core::quantization::sweep::runner::load_tensor_f32(src_dir, &r.tensor_key)
-                .map_err(|e| format!("load {}: {}", r.tensor_key, e))?;
+            let loaded = tribunus_compute_core::quantization::sweep::runner::load_tensor_f32(
+                src_dir,
+                &r.tensor_key,
+            )
+            .map_err(|e| format!("load {}: {}", r.tensor_key, e))?;
 
             // Reconstruct the weights — use pack_nf4_weights for NF4 preferred candidates
             // Determine codec parameters from the winning candidate
             let params = &r.parameters;
-            let (_codes, _scales, _biases, _extra_bytes, recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if matches!(r.family, tribunus_compute_core::quantization::sweep::QuantFamilyId::Nf4) {
-                let codebook_str = params.get("codebook").and_then(|v| v.as_str()).unwrap_or("PrismCurrent");
+            let (_codes, _scales, _biases, _extra_bytes, recon): (
+                Vec<u8>,
+                Vec<f32>,
+                Vec<f32>,
+                Vec<u8>,
+                Vec<f32>,
+            ) = if matches!(
+                r.family,
+                tribunus_compute_core::quantization::sweep::QuantFamilyId::Nf4
+            ) {
+                let codebook_str = params
+                    .get("codebook")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("PrismCurrent");
                 use tribunus_compute_core::quantization::sweep::spec::Nf4CodebookId;
                 let cb_id = match codebook_str {
                     "BitsAndBytesNf4" => Nf4CodebookId::BitsAndBytesNf4,
@@ -1774,13 +2150,19 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
                     _ => Nf4CodebookId::PrismCurrent,
                 };
                 let cb = tribunus_compute_core::nf4tile640::nf4_codebook(cb_id);
-                let gs = params.get("group_size").and_then(|v| v.as_u64()).unwrap_or(64) as usize;
+                let gs = params
+                    .get("group_size")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(64) as usize;
                 let (c, s, b) = tribunus_compute_core::quantization::sweep::ane_validation::pack_nf4_weights_with_codebook(
                     &loaded, in_f as u32, out_f as u32, cb, gs);
                 let recon = tribunus_compute_core::nf4tile640::unpack_nf4_weights_with_group_size_and_codebook(
                     &c, &s, &b, in_f, out_f, gs, cb);
                 (c, s, b, vec![], recon)
-            } else if matches!(r.family, tribunus_compute_core::quantization::sweep::QuantFamilyId::Int8) {
+            } else if matches!(
+                r.family,
+                tribunus_compute_core::quantization::sweep::QuantFamilyId::Int8
+            ) {
                 let (codes_i8, scales_i8, biases_i8) = pack_int8_weights(&loaded, in_f, out_f);
                 let recon_i8 = unpack_int8_weights(&codes_i8, &scales_i8, &biases_i8, in_f, out_f);
                 (codes_i8, scales_i8, biases_i8, vec![], recon_i8)
@@ -1791,9 +2173,14 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
 
             match validate_operator(&recon, in_f as u32, out_f as u32) {
                 Ok(metrics) => {
-                    eprintln!("    op_rmse={:.6} op_nrmse={:.6} cosine={:.6} drift={:.6} max_abs={:.6}",
-                        metrics.operator_rmse, metrics.operator_nrmse,
-                        metrics.cosine_similarity, metrics.norm_ratio_drift, metrics.max_abs_error);
+                    eprintln!(
+                        "    op_rmse={:.6} op_nrmse={:.6} cosine={:.6} drift={:.6} max_abs={:.6}",
+                        metrics.operator_rmse,
+                        metrics.operator_nrmse,
+                        metrics.cosine_similarity,
+                        metrics.norm_ratio_drift,
+                        metrics.max_abs_error
+                    );
                     opval_results.push(serde_json::json!({
                         "tensor_class": format!("{:?}", policy.tensor_class),
                         "tensor_key": r.tensor_key,

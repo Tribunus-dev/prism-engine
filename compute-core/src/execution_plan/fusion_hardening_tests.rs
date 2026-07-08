@@ -7,19 +7,13 @@
 //! The suite is designed to be deterministic and backend-independent.
 
 use super::backend_capability::{
-    BackendCapabilityRegistry, BackendLoweringTarget, BackendRole, default_registry,
+    default_registry, BackendCapabilityRegistry, BackendLoweringTarget, BackendRole,
 };
-use super::fusion::{
-    DataflowGraph, DataflowNode, DataflowOp, FusedGroup, FusionSemanticError, MatMulContract,
-};
+use super::fusion::{DataflowGraph, DataflowNode, DataflowOp, FusedGroup, MatMulContract};
 use super::fusion_scheduler::{
-    FusionScheduler, FusionPolicy, FusionSelectionPolicy, FusionSchedule, FusionError,
+    FusionError, FusionPolicy, FusionSchedule, FusionScheduler, FusionSelectionPolicy,
 };
-use super::{CodecFamily, ExecutionMode, ScheduledKernelOp, KernelOpKind};
-use crate::execution_plan::precision_plan::{
-    PrecisionOverride, PrecisionOverrideReason, PrecisionPlan, PrecisionScope,
-    PrecisionSelectionBasis, PrecisionSelector,
-};
+use super::{CodecFamily, ExecutionMode};
 use crate::execution_profile::PhysicalTileLayout;
 use std::collections::HashMap;
 
@@ -28,6 +22,7 @@ use std::collections::HashMap;
 // ---------------------------------------------------------------------------
 
 /// Build a fused group with one LoadWeight op for the given codec.
+#[allow(dead_code)]
 fn single_codec_group(codec: CodecFamily) -> FusedGroup {
     FusedGroup {
         id: "test".into(),
@@ -227,16 +222,25 @@ fn nf4_group_selects_metal_only() {
     let group = load_matmul_silu_group(CodecFamily::Nf4);
     let reg = default_registry();
 
-    let ane =
-        reg.evaluate(BackendLoweringTarget::AnePlanarEngine, &group, BackendRole::ProductionHotPath);
+    let ane = reg.evaluate(
+        BackendLoweringTarget::AnePlanarEngine,
+        &group,
+        BackendRole::ProductionHotPath,
+    );
     assert!(!ane.supported, "ANE must reject NF4");
 
-    let cpu =
-        reg.evaluate(BackendLoweringTarget::AccelerateRayonCpu, &group, BackendRole::ProductionHotPath);
+    let cpu = reg.evaluate(
+        BackendLoweringTarget::AccelerateRayonCpu,
+        &group,
+        BackendRole::ProductionHotPath,
+    );
     assert!(!cpu.supported, "CPU must reject NF4");
 
-    let metal =
-        reg.evaluate(BackendLoweringTarget::MetalFusedGpu, &group, BackendRole::ProductionHotPath);
+    let metal = reg.evaluate(
+        BackendLoweringTarget::MetalFusedGpu,
+        &group,
+        BackendRole::ProductionHotPath,
+    );
     assert!(metal.supported, "Metal must accept NF4 group");
 }
 
@@ -247,7 +251,10 @@ fn compile_mode_fails_without_backend() {
     let reg = BackendCapabilityRegistry::new();
     let graph = single_node_graph(CodecFamily::Nf4);
     let result = schedule_with(reg, &graph, ExecutionMode::Compile);
-    assert!(result.is_err(), "Compile mode with empty registry should fail");
+    assert!(
+        result.is_err(),
+        "Compile mode with empty registry should fail"
+    );
     match result {
         Err(FusionError::NoViableBackend { .. }) => {} // expected
         other => panic!("Expected NoViableBackend error, got: {:?}", other),

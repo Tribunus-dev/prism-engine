@@ -1,3 +1,4 @@
+#![cfg(feature = "mlx-backend")]
 //! Synthetic qualification tests for Mission 0007 Phase 9.
 //!
 //! These tests prove the treatment infrastructure works with small synthetic

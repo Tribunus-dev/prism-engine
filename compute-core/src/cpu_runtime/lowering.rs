@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn lower_unsupported_op_fails() {
-        let cap = cpu_cap();
+        let _cap = cpu_cap();
         let result = build_lowered_group(99, &["BridgeProjection"], "RawF32", 4096);
         assert!(
             result.is_err(),

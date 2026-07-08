@@ -2883,6 +2883,7 @@ pub fn run_validation_results(device: &Device) -> Vec<ValidationResult> {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
     fn get_test_device() -> Option<Device> {
         Device::system_default()
     }

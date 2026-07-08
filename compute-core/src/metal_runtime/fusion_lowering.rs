@@ -6,17 +6,16 @@
 //! vs g128, INT8 g32 vs g128, and gate-up vs down-residual patterns produce
 //! distinct cache entries.
 
-
-use crate::execution_plan::fusion::{DataflowOp, FusedGroup};
 #[cfg(test)]
 use crate::execution_plan::fusion::DataflowNode;
+use crate::execution_plan::fusion::{DataflowOp, FusedGroup};
+use crate::execution_plan::receipts::LoweringReadiness;
 use crate::execution_plan::{
     Axis, CodecFamily, DType, DispatchShape, EstimatedKernelCost, ExecutionPhase,
     FunctionConstantSet, HardwareProfileId, KernelOpKind, KernelSpecializationKey,
     KernelTemplateId, MetadataLayout, ScheduledKernelOp, TileShape,
 };
 use crate::execution_profile::{GroupAxis, PhysicalTileLayout};
-use crate::execution_plan::receipts::LoweringReadiness;
 
 // ── Error type ───────────────────────────────────────────────────────────
 
@@ -128,9 +127,7 @@ fn group_axis_to_axis(ga: GroupAxis) -> Axis {
 
 /// Convert execution_profile::MetadataLayout to execution_plan::MetadataLayout.
 /// The two enums have identical variants but are distinct Rust types.
-fn convert_metadata_layout(
-    ml: crate::execution_profile::MetadataLayout,
-) -> MetadataLayout {
+fn convert_metadata_layout(ml: crate::execution_profile::MetadataLayout) -> MetadataLayout {
     use crate::execution_profile::MetadataLayout as ProfMd;
     match ml {
         ProfMd::AdjacentTile => MetadataLayout::AdjacentTile,
@@ -177,7 +174,10 @@ fn first_loadweight_codec_layout(group: &FusedGroup) -> Option<(CodecFamily, &Ph
 }
 
 /// Infer the fusion pattern from the `DataflowOp` variants in the group body.
-fn infer_fusion_pattern(group: &FusedGroup, codec: CodecFamily) -> Result<FusionPatternId, MetalLoweringError> {
+fn infer_fusion_pattern(
+    group: &FusedGroup,
+    codec: CodecFamily,
+) -> Result<FusionPatternId, MetalLoweringError> {
     use DataflowOp::*;
 
     if group.body.is_empty() {
@@ -187,14 +187,24 @@ fn infer_fusion_pattern(group: &FusedGroup, codec: CodecFamily) -> Result<Fusion
     let has_silu = group.body.iter().any(|n| matches!(n.op, SiLU { .. }));
     let has_mul = group.body.iter().any(|n| matches!(n.op, Mul { .. }));
     let has_add = group.body.iter().any(|n| matches!(n.op, Add { .. }));
-    let has_residual = group.body.iter().any(|n| matches!(n.op, ResidualAdd { .. }));
+    let has_residual = group
+        .body
+        .iter()
+        .any(|n| matches!(n.op, ResidualAdd { .. }));
     let matmul_count = group
         .body
         .iter()
         .filter(|n| matches!(n.op, MatMul { .. }))
         .count();
 
-    match (codec, has_silu, has_mul, has_add, has_residual, matmul_count) {
+    match (
+        codec,
+        has_silu,
+        has_mul,
+        has_add,
+        has_residual,
+        matmul_count,
+    ) {
         // NF4 gate-up + SiLU activation (2 matmuls, SiLU, Mul)
         (CodecFamily::Nf4, true, true, false, false, 2) => Ok(FusionPatternId::Nf4GateUpSilu),
 
@@ -253,12 +263,12 @@ fn infer_op_kind(group: &FusedGroup) -> KernelOpKind {
     use DataflowOp::*;
 
     let has_silu = group.body.iter().any(|n| matches!(n.op, SiLU { .. }));
-    let has_residual = group.body.iter().any(|n| matches!(n.op, ResidualAdd { .. }));
-    let has_rms = group.body.iter().any(|n| matches!(n.op, RmsNorm { .. }));
-    let has_qkv = group
+    let has_residual = group
         .body
         .iter()
-        .any(|n| matches!(n.op, MatMul { .. }));
+        .any(|n| matches!(n.op, ResidualAdd { .. }));
+    let has_rms = group.body.iter().any(|n| matches!(n.op, RmsNorm { .. }));
+    let has_qkv = group.body.iter().any(|n| matches!(n.op, MatMul { .. }));
 
     if has_residual {
         return KernelOpKind::MlpDownResidual;
@@ -346,8 +356,8 @@ pub fn metal_lower_fused_group(
     }
 
     // Extract layout params from the first LoadWeight node.
-    let (codec, layout) = first_loadweight_codec_layout(group)
-        .ok_or(MetalLoweringError::NoLoadWeightOp)?;
+    let (codec, layout) =
+        first_loadweight_codec_layout(group).ok_or(MetalLoweringError::NoLoadWeightOp)?;
 
     let group_size = layout.group_size;
     let group_axis = group_axis_to_axis(layout.group_axis);
@@ -436,7 +446,9 @@ pub fn metal_lower_fused_group(
 /// success, or an error if validation fails.
 pub fn validate_lowered(op: &ScheduledKernelOp) -> Result<LoweringReadiness, MetalLoweringError> {
     if op.op_id.is_empty() {
-        return Err(MetalLoweringError::ValidationFailed("op_id is empty".into()));
+        return Err(MetalLoweringError::ValidationFailed(
+            "op_id is empty".into(),
+        ));
     }
     if op.dispatch_shape.grid_x == 0
         || op.dispatch_shape.grid_y == 0
@@ -483,7 +495,10 @@ mod tests {
                     tile_family: TileFamily::tile640(),
                     logical_shape: [1, 640],
                     storage_order: StorageOrder::RowMajor,
-                    tile_shape: ProfileTileShape { rows: 640, cols: 640 },
+                    tile_shape: ProfileTileShape {
+                        rows: 640,
+                        cols: 640,
+                    },
                     group_size,
                     group_axis,
                     metadata_layout,
@@ -505,7 +520,9 @@ mod tests {
                 rhs: rhs.into(),
                 output: out.into(),
                 contract: MatMulContract {
-                    m: 1, n: 8192, k: 2048,
+                    m: 1,
+                    n: 8192,
+                    k: 2048,
                     lhs_transposed: false,
                     rhs_transposed: true,
                 },
@@ -566,6 +583,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn make_rms_node(id: usize, input: &str, weight: &str, output: &str) -> DataflowNode {
         DataflowNode {
             id,
@@ -583,12 +601,20 @@ mod tests {
     /// Build an NF4 gate-up + SiLU activation fused group (2 matmuls + SiLU + Mul).
     fn nf4_gate_up_silu_group(group_size: u32) -> FusedGroup {
         let load_gate = make_load_node(
-            0, "gate_proj.weight", CodecFamily::Nf4, group_size,
-            GroupAxis::PackedContiguous, ProfMetadataLayout::AdjacentTile,
+            0,
+            "gate_proj.weight",
+            CodecFamily::Nf4,
+            group_size,
+            GroupAxis::PackedContiguous,
+            ProfMetadataLayout::AdjacentTile,
         );
         let load_up = make_load_node(
-            1, "up_proj.weight", CodecFamily::Nf4, group_size,
-            GroupAxis::PackedContiguous, ProfMetadataLayout::AdjacentTile,
+            1,
+            "up_proj.weight",
+            CodecFamily::Nf4,
+            group_size,
+            GroupAxis::PackedContiguous,
+            ProfMetadataLayout::AdjacentTile,
         );
         let matmul_gate = make_matmul_node(2, "normalized", "gate_proj.weight", "gate_out");
         let matmul_up = make_matmul_node(3, "normalized", "up_proj.weight", "up_out");
@@ -609,8 +635,12 @@ mod tests {
     /// Build an INT8 down-projection + residual add fused group.
     fn int8_down_residual_group(group_size: u32) -> FusedGroup {
         let load = make_load_node(
-            0, "down_proj.weight", CodecFamily::Int8, group_size,
-            GroupAxis::PackedContiguous, ProfMetadataLayout::AdjacentTile,
+            0,
+            "down_proj.weight",
+            CodecFamily::Int8,
+            group_size,
+            GroupAxis::PackedContiguous,
+            ProfMetadataLayout::AdjacentTile,
         );
         let matmul = make_matmul_node(1, "activated", "down_proj.weight", "down_out");
         let residual = make_residual_node(2, "skip", "down_out", "output");
@@ -629,8 +659,12 @@ mod tests {
     /// Build an unsupported 3-op RmsNorm → MatMul → SiLU group (no residual/add).
     fn unsupported_group() -> FusedGroup {
         let load = make_load_node(
-            0, "w", CodecFamily::Nf4, 32,
-            GroupAxis::PackedContiguous, ProfMetadataLayout::AdjacentTile,
+            0,
+            "w",
+            CodecFamily::Nf4,
+            32,
+            GroupAxis::PackedContiguous,
+            ProfMetadataLayout::AdjacentTile,
         );
         let add = make_add_node(1, "a", "b", "c");
         // LoadWeight + Add with NF4: has_add=true, matmul_count=0, no SiLU/Mul/Residual
@@ -667,11 +701,15 @@ mod tests {
         let g128 = nf4_gate_up_silu_group(128);
 
         let op32 = metal_lower_fused_group(
-            &g32, HardwareProfileId::AppleMBaseMemoryBound, ExecutionPhase::Decode,
+            &g32,
+            HardwareProfileId::AppleMBaseMemoryBound,
+            ExecutionPhase::Decode,
         )
         .expect("nf4 g32 lowering");
         let op128 = metal_lower_fused_group(
-            &g128, HardwareProfileId::AppleMBaseMemoryBound, ExecutionPhase::Decode,
+            &g128,
+            HardwareProfileId::AppleMBaseMemoryBound,
+            ExecutionPhase::Decode,
         )
         .expect("nf4 g128 lowering");
 
@@ -711,11 +749,15 @@ mod tests {
         let g128 = int8_down_residual_group(128);
 
         let op32 = metal_lower_fused_group(
-            &g32, HardwareProfileId::AppleMBaseMemoryBound, ExecutionPhase::Decode,
+            &g32,
+            HardwareProfileId::AppleMBaseMemoryBound,
+            ExecutionPhase::Decode,
         )
         .expect("int8 g32 lowering");
         let op128 = metal_lower_fused_group(
-            &g128, HardwareProfileId::AppleMBaseMemoryBound, ExecutionPhase::Decode,
+            &g128,
+            HardwareProfileId::AppleMBaseMemoryBound,
+            ExecutionPhase::Decode,
         )
         .expect("int8 g128 lowering");
 
@@ -746,7 +788,10 @@ mod tests {
             pat128,
             op128.specialization.execution_phase,
         );
-        assert_ne!(key32, key128, "INT8 g32 and g128 PSO cache keys must differ");
+        assert_ne!(
+            key32, key128,
+            "INT8 g32 and g128 PSO cache keys must differ"
+        );
     }
 
     #[test]
@@ -755,17 +800,20 @@ mod tests {
         let down = int8_down_residual_group(32);
 
         let op_gate = metal_lower_fused_group(
-            &gate_up, HardwareProfileId::AppleMBaseMemoryBound, ExecutionPhase::Decode,
+            &gate_up,
+            HardwareProfileId::AppleMBaseMemoryBound,
+            ExecutionPhase::Decode,
         )
         .expect("gate_up lowering");
         let op_down = metal_lower_fused_group(
-            &down, HardwareProfileId::AppleMBaseMemoryBound, ExecutionPhase::Decode,
+            &down,
+            HardwareProfileId::AppleMBaseMemoryBound,
+            ExecutionPhase::Decode,
         )
         .expect("down residual lowering");
 
         assert_ne!(
-            op_gate.specialization.mode_flags,
-            op_down.specialization.mode_flags,
+            op_gate.specialization.mode_flags, op_down.specialization.mode_flags,
             "gate-up and down patterns must have distinct mode_flags"
         );
         assert_ne!(
@@ -786,7 +834,7 @@ mod tests {
         match &result {
             Err(MetalLoweringError::UnsupportedFusionPattern(detail)) => {
                 assert!(
-                detail.contains("add=true"),
+                    detail.contains("add=true"),
                     "error should describe the pattern, got: {}",
                     detail
                 );
@@ -814,7 +862,9 @@ mod tests {
     fn derive_function_constants_matches_specialization() {
         let group = nf4_gate_up_silu_group(32);
         let op = metal_lower_fused_group(
-            &group, HardwareProfileId::AppleMBaseMemoryBound, ExecutionPhase::Decode,
+            &group,
+            HardwareProfileId::AppleMBaseMemoryBound,
+            ExecutionPhase::Decode,
         )
         .expect("lowering");
 

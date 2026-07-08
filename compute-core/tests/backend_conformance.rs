@@ -1,3 +1,4 @@
+#![cfg(feature = "mlx-backend")]
 //! Backend contract conformance tests.
 //!
 //! These tests run the same operation sequences through MlxBackend

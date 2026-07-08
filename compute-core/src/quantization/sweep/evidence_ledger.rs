@@ -85,7 +85,7 @@ pub fn read_experiment_ledger(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    
 
     #[test]
     fn test_receipt_roundtrip() {

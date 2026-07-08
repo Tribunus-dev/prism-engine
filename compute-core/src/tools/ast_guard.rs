@@ -59,6 +59,25 @@ impl SecurityVisitor {
         }
     }
 
+    /// Resolve a callee expression to an identifier name, walking through
+    /// indirect-eval wrappers: `(0, eval)`, `window.eval`, `window["eval"]`,
+    /// `globalThis.eval`. Does not resolve dynamically computed property names
+    /// (e.g., `window[atob("ZXZhbA==")]`) — that requires runtime analysis.
+    fn callee_name(expr: &Expr) -> Option<&str> {
+        match expr {
+            Expr::Ident(ident) => Some(ident.sym.as_str()),
+            Expr::Paren(paren) => Self::callee_name(&paren.expr),
+            Expr::Seq(seq) => seq.exprs.last().and_then(|e| Self::callee_name(e)),
+            Expr::Member(member) => match &member.prop {
+                MemberProp::Ident(ident) => Some(ident.sym.as_str()),
+                MemberProp::Computed(computed) => Self::callee_name(&computed.expr),
+                _ => None,
+            },
+            Expr::Lit(Lit::Str(s)) => Some(s.value.as_str().unwrap_or_default()),
+            _ => None,
+        }
+    }
+
     fn visit_expr(&mut self, expr: &Expr) {
         if self.has_violation {
             return;
@@ -67,19 +86,15 @@ impl SecurityVisitor {
             // 1. Block eval() calls
             Expr::Call(call_expr) => {
                 if let Callee::Expr(callee) = &call_expr.callee {
-                    if let Expr::Ident(ident) = callee.as_ref() {
-                        if ident.sym.as_ref() == "eval" {
-                            return self.reject("eval() is not allowed".into());
-                        }
+                    if Self::callee_name(callee) == Some("eval") {
+                        return self.reject("eval() is not allowed".into());
                     }
                 }
             }
             // 2. Block new Function(...)
             Expr::New(new_expr) => {
-                if let Expr::Ident(ident) = new_expr.callee.as_ref() {
-                    if ident.sym.as_ref() == "Function" {
-                        return self.reject("new Function() is not allowed".into());
-                    }
+                if Self::callee_name(&new_expr.callee) == Some("Function") {
+                    return self.reject("new Function() is not allowed".into());
                 }
             }
             _ => {}
@@ -89,9 +104,8 @@ impl SecurityVisitor {
             Expr::Call(call) => {
                 // Check setTimeout/setInterval with string literal first arg
                 if let Callee::Expr(callee) = &call.callee {
-                    if let Expr::Ident(ident) = callee.as_ref() {
-                        let name = ident.sym.as_ref();
-                        if name == "setTimeout" || name == "setInterval" {
+                    if let Some(name) = Self::callee_name(callee) {
+                        if matches!(name, "setTimeout" | "setInterval") {
                             if let Some(first_arg) = call.args.first() {
                                 if matches!(&*first_arg.expr, Expr::Lit(Lit::Str(_))) {
                                     return self.reject(format!(
@@ -327,5 +341,73 @@ mod tests {
     fn test_fn_ref_settimeout_allowed() {
         assert!(validate_agent_script("setTimeout(fn, 100)").is_ok());
         assert!(validate_agent_script("setTimeout(() => {}, 100)").is_ok());
+    }
+
+    // ── Indirect eval bypasses ───────────────────────────────────────────
+    #[test]
+    fn blocks_indirect_eval_comma() {
+        assert!(validate_agent_script("(0, eval)('code')").is_err());
+    }
+
+    #[test]
+    fn blocks_indirect_eval_paren() {
+        assert!(validate_agent_script("(eval)('code')").is_err());
+    }
+
+    #[test]
+    fn blocks_member_eval_window() {
+        assert!(validate_agent_script("window.eval('code')").is_err());
+    }
+
+    #[test]
+    fn blocks_member_eval_global_this() {
+        assert!(validate_agent_script("globalThis.eval('code')").is_err());
+    }
+
+    // ── Indirect Function bypasses ───────────────────────────────────────
+    #[test]
+    fn blocks_indirect_new_function_comma() {
+        assert!(validate_agent_script("new (0, Function)('return 1')").is_err());
+    }
+
+    // ── Indirect setTimeout/setInterval bypasses ─────────────────────────
+    #[test]
+    fn blocks_member_settimeout_string() {
+        assert!(validate_agent_script("window.setTimeout('code', 100)").is_err());
+    }
+
+    #[test]
+    fn blocks_member_setinterval_string() {
+        assert!(validate_agent_script("globalThis.setInterval('code', 100)").is_err());
+    }
+
+    // ── Legitimate code passes ───────────────────────────────────────────
+    #[test]
+    fn allows_lambda_call() {
+        assert!(validate_agent_script("(() => 42)()").is_ok());
+    }
+
+    #[test]
+    fn allows_function_declaration() {
+        assert!(validate_agent_script("function add(a, b) { return a + b }").is_ok());
+    }
+
+    // ── Static computed property access ───────────────────────────────────
+    #[test]
+    fn blocks_static_computed_eval() {
+        assert!(validate_agent_script("window['eval']('code')").is_err());
+    }
+
+    #[test]
+    fn allows_dynamic_computed_property() {
+        assert!(validate_agent_script("window[x]('code')").is_ok());
+    }
+
+    /// This _should_ theoretically be blocked but static analysis cannot
+    /// resolve runtime-decoded strings like `atob`.  This test documents
+    /// the ceiling — future dynamic taint analysis could close this gap.
+    #[test]
+    fn allows_runtime_decoded_computed_eval() {
+        assert!(validate_agent_script("window[atob('ZXZhbA==')]('code')").is_ok());
     }
 }

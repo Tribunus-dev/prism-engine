@@ -1,3 +1,4 @@
+#![cfg(feature = "mlx-backend")]
 //! Synthetic lifecycle qualification tests for Mission 0007.
 //!
 //! These tests prove the mission-0007-run infrastructure invariants WITHOUT

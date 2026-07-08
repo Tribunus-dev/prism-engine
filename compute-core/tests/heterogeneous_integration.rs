@@ -9,6 +9,9 @@
 //! 6. Verifies the fused plan reduces MLModel predict calls
 //!
 //! Run: cargo test --test heterogeneous_integration -- --nocapture
+//!
+//! Note: requires mlx-backend for MlxBackend import.
+#![cfg(feature = "mlx-backend")]
 
 use std::collections::HashMap;
 use std::time::Instant;

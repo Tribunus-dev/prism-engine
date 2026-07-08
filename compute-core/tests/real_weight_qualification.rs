@@ -136,7 +136,7 @@ fn real_weight_qualification() {
 
         let t0 = Instant::now();
         let baseline = run_tokens(&deployment, false, ctx);
-        let t1 = Instant::now();
+        let _t1 = Instant::now();
         let interleaved = run_tokens(&deployment, true, ctx);
         let total_elapsed = t0.elapsed();
 

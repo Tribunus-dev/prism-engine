@@ -4110,7 +4110,7 @@ fn test_mixed_artifact_e2e() {
 
     // 3. Build MatrixContract bindings
     let mr = ROWS as u64;
-    let mb = mr * 4;
+    let _mb = mr * 4;
     let nf4_wo = i8c.len() as u64;
     let sc_wo = nf4_wo + n4c.len() as u64;
     let nf4_meta = (ROWS as u64) * 5 * 2 * 4;
@@ -4313,7 +4313,7 @@ fn test_mixed_artifact_e2e() {
             .map(|(a, b)| (a - b) * (a - b))
             .sum();
         let nrmse = (diff / src.len() as f32).sqrt() / rms;
-        let ceil = if b.representation == 2 { 0.02 } else { 0.05 };
+        let _ceil = if b.representation == 2 { 0.02 } else { 0.05 };
         let bound = if b.representation == 2 { 0.03 } else { 0.15 };
         assert!(nrmse < bound, "{label}: NRMSE {:.6} >= {bound}", nrmse);
 

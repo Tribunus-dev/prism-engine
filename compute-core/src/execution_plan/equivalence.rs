@@ -40,7 +40,7 @@ pub fn total_command_buffers(plan: &ModelExecutionPlan) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_plan::*;
+    
 
     fn make_plan(region_kind: ExecutionRegionKind, ops: Vec<ScheduledKernelOp>, single_cb: bool) -> ModelExecutionPlan {
         ModelExecutionPlan {

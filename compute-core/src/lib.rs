@@ -86,6 +86,7 @@ pub mod calibration;
     feature = "prism-backend-ios"
 ))]
 pub mod capability;
+pub mod cimage;
 pub mod cli;
 pub mod compilation;
 #[cfg(any(
@@ -267,8 +268,14 @@ pub mod parsing;
 pub mod video_provider;
 #[macro_use]
 pub mod logging;
+/// CPU fusion backend — Accelerate + Rayon as a first-class fusion candidate.
+pub mod cpu_runtime;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod editing;
+/// Execution plan — kernel specialization, region batching, and plan data types.
+pub mod execution_plan;
+/// Execution profiling — measures whether a codec policy is worth using.
+pub mod execution_profile;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod exo;
 /// Pure-data types for KV cache, usable without mlx dependency.
@@ -374,8 +381,6 @@ pub mod projection_tests;
 /// Always-available projection data types (see module docs).
 pub mod projection_types;
 pub mod quantization;
-/// Execution profiling — measures whether a codec policy is worth using.
-pub mod execution_profile;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod quantized;
 #[cfg(any(
@@ -386,12 +391,6 @@ pub mod quantized;
 pub mod readiness_gates;
 pub mod receipt;
 pub mod receipts;
-/// Execution plan — kernel specialization, region batching, and plan data types.
-pub mod execution_plan;
-/// CPU fusion backend — Accelerate + Rayon as a first-class fusion candidate.
-pub mod cpu_runtime;
-/// Training-aware compilation — targets, gates, feedback, and receipts.
-pub mod training_target;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod registry;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
@@ -442,6 +441,8 @@ pub mod scheduling;
 pub mod server;
 #[cfg(feature = "mlx-backend")]
 pub mod session;
+/// Training-aware compilation — targets, gates, feedback, and receipts.
+pub mod training_target;
 
 #[cfg(feature = "mlx-backend")]
 pub mod sidecar;

@@ -238,8 +238,8 @@ fn test_cimage_zero_copy() {
     corrupt_and_verify(original_bytes, 8, "payload_hash[0]", true);
     corrupt_and_verify(original_bytes, 39, "payload_hash[31]", true);
     // Corruption in phase_count field (offset 40–47) — field value changes.
-    corrupt_and_verify(original_bytes, 40, "phase_count", false);
-    corrupt_and_verify(original_bytes, 47, "phase_count[7]", false);
+    corrupt_and_verify(original_bytes, 44, "phase_count", false);
+    corrupt_and_verify(original_bytes, 47, "phase_count[3]", false);
     // Corruption in layout_offset field (offset 48–55).
     corrupt_and_verify(original_bytes, 48, "layout_offset", false);
     // Corruption in phase_offset field (offset 56–63).
@@ -282,10 +282,12 @@ fn test_cimage_zero_copy_serialize_deserialize_roundtrip() {
 #[test]
 fn test_cimage_zero_copy_struct_offsets() {
     // Verify expected field offsets for the binary layout.
-    // layout: magic(4) + version(4) + payload_hash(32) + phase_count(8)
-    //         + layout_offset(8) + phase_offset(8) = 64, padded to align(64).
-    assert_eq!(mem::size_of::<CImageHeader>(), 64);
-    assert_eq!(mem::align_of::<CImageHeader>(), 64);
+    // Current layout: magic(4) + version(4) + quantization_schema(4) + payload_hash(32)
+    //   + phase_count(4) + pad(4) + layout_offset(8) + phase_offset(8)
+    //   + ane_hidden_dim(4) + ane_ffn_dim(4) + ane_max_batch(4) + pad(4)
+    //   + ane_keepalive(8) + lane_isolation(1) + _pad(43) = 136, align 8
+    assert_eq!(mem::size_of::<CImageHeader>(), 136);
+    assert_eq!(mem::align_of::<CImageHeader>(), 8);
 
     // Use field-pointer arithmetic to validate offsets at runtime.
     let zeroed: CImageHeader = unsafe { mem::zeroed() };
@@ -293,20 +295,30 @@ fn test_cimage_zero_copy_struct_offsets() {
 
     let magic_off = (&zeroed.magic as *const u32) as usize - base;
     let ver_off = (&zeroed.version as *const u32) as usize - base;
-    let hash_off = (&zeroed.payload_hash as *const [u8; 32]) as usize - base;
+    let qs_off = (&zeroed.quantization_schema as *const u32) as usize - base;
     let count_off = (&zeroed.phase_count as *const u32) as usize - base;
     let lo_off = (&zeroed.layout_offset as *const u64) as usize - base;
     let po_off = (&zeroed.phase_offset as *const u64) as usize - base;
+    let hd_off = (&zeroed.ane_hidden_dim_limit as *const u32) as usize - base;
+    let fd_off = (&zeroed.ane_ffn_dim_limit as *const u32) as usize - base;
+    let mb_off = (&zeroed.ane_max_batch as *const u32) as usize - base;
+    let ki_off = (&zeroed.ane_keepalive_interval_us as *const u64) as usize - base;
+    let li_off = (&zeroed.lane_isolation as *const bool) as usize - base;
 
     assert_eq!(magic_off, 0, "magic at offset 0");
     assert_eq!(ver_off, 4, "version at offset 4");
-    assert_eq!(hash_off, 8, "payload_hash at offset 8");
-    assert_eq!(count_off, 40, "phase_count at offset 40");
+    assert_eq!(qs_off, 8, "quantization_schema at offset 8");
+    assert_eq!(count_off, 44, "phase_count at offset 44");
     assert_eq!(lo_off, 48, "layout_offset at offset 48");
     assert_eq!(po_off, 56, "phase_offset at offset 56");
+    assert_eq!(hd_off, 64, "ane_hidden_dim_limit at offset 64");
+    assert_eq!(fd_off, 68, "ane_ffn_dim_limit at offset 68");
+    assert_eq!(mb_off, 72, "ane_max_batch at offset 72");
+    assert_eq!(ki_off, 80, "ane_keepalive_interval_us at offset 80");
+    assert_eq!(li_off, 88, "lane_isolation at offset 88");
 
     eprintln!("PASS all field offsets verified");
     eprintln!(
-        "  struct offsets: magic=0 version=4 payload_hash=8 phase_count=40 layout_offset=48 phase_offset=56"
+        "  struct offsets: magic=0 version=4 quantization_schema=8 payload_hash=12 phase_count=44 layout_offset=48 phase_offset=56 ane_hidden_dim=64 ane_ffn_dim=68 ane_max_batch=72 lane_isolation=88"
     );
 }

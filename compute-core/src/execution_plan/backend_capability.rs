@@ -543,7 +543,7 @@ pub fn default_registry() -> BackendCapabilityRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_plan::fusion::{FusedGroup, DataflowOpKind};
+    use crate::execution_plan::fusion::FusedGroup;
     use crate::execution_plan::CodecFamily;
     use crate::execution_plan::fusion::{DataflowNode, DataflowOp};
     use BackendLoweringTarget::*;

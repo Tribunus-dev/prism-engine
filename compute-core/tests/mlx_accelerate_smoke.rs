@@ -1,3 +1,4 @@
+#![cfg(feature = "mlx-backend")]
 //! MLX vs Accelerate F32 matmul smoke comparison.
 //!
 //! Runs identical input tensors through both backends and verifies
