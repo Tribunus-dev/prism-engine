@@ -118,10 +118,25 @@
         "weight_space": {
           "avg_nrmse": 0.0068,
           "status": "passed"
+        },
+        "operator": {
+          "backend": "ANE",
+          "op_nrmse": 0.000795,
+          "cosine_similarity": 1.0,
+          "norm_drift": 0.999448,
+          "max_abs_error": 0.0033,
+          "status": "promotable",
+          "representative_tensors": [
+            {"class": "DecoderAttentionProjection", "op_nrmse": 0.000756, "max_abs": 0.001373},
+            {"class": "DecoderMlpProjection", "op_nrmse": 0.000845, "max_abs": 0.007637},
+            {"class": "TokenEmbedding (codec_embedding)", "op_nrmse": 0.000842, "max_abs": 0.001786},
+            {"class": "projection (text_projection.linear_fc1)", "op_nrmse": 0.000738, "max_abs": 0.002499}
+          ],
+          "evidence_path": "/tmp/sweep-qwen-tts-ane/operator_validation.json"
         }
       },
-      "validation_status": "weight_space_only",
-      "notes": "4-bit formats produce ~13x worse NRMSE than INT8. No 4-bit candidate is safe for speech without operator/perceptual validation."
+      "validation_status": "operator_validated",
+      "notes": "INT8 g128 is operator-validated across all Qwen3-TTS projection classes. NF4/SymInt4/Ternary remain disallowed because 4-bit weight NRMSE (~0.087) is 13x worse than INT8 (~0.007) — no evidence that operator-level error cancellation brings 4-bit into an acceptable range for speech. Keep INT8 for production until audio perceptual validation exists."
     },
     {
       "scope": "Gemma4.VisionPatchProjection",
@@ -204,7 +219,8 @@
       "Gemma4.DecoderAttentionProjection": true,
       "Gemma4.DecoderMlpProjection": true,
       "Gemma4.CrossModalBridge": true,
-      "Gemma4.VisionPatchProjection": false
+      "Gemma4.VisionPatchProjection": false,
+      "Qwen3TTS.Projection": true
     }
   }
 }
