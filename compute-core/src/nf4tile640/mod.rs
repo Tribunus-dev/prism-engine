@@ -271,8 +271,9 @@ pub fn pack_nf4_tile_awls(
 }
 
 /// Pack multiple tiles from a flat f32 array (shapes are M×K layout).
-/// Each contiguous K-length row is split into ceil(K / TILE_ELEMENTS) tiles.
-/// Non-multiple column dimensions are zero-padded to the next tile boundary.
+/// Tile across in_features (rows): each output channel has ceil(rows / TILE_ELEMENTS) tiles
+/// gathering strided elements from the row-major input.
+/// Non-multiple row dimensions are zero-padded to the next tile boundary.
 ///
 /// Returns `(packed_codes, scales, biases, rows, cols)` with data for all tiles stored
 /// contiguously per buffer (tile-major order).
@@ -282,8 +283,8 @@ pub fn pack_nf4_tile_awls(
 /// Panics if `weights.len()` does not equal `rows * cols`.
 pub fn pack_nf4_weights(
     weights: &[f32],
-    rows: usize,
-    cols: usize,
+    rows: usize,        // in_features
+    cols: usize,        // out_features
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, u32, u32) {
     let weights = if weights.len() >= rows * cols {
         &weights[..rows * cols]
@@ -291,8 +292,10 @@ pub fn pack_nf4_weights(
         weights
     };
 
-    // Round cols up to next multiple of 640 for tile-aligned packing.
-    // The original column count is preserved for matmul dimension.
+
+    // Tile across out_features (cols): contiguous row slices of 640 elements.
+    // This groups values from the same input channel, which have similar
+    // magnitudes and produce lower quantization error than strided gathering.
     let padded_cols = if cols % TILE_ELEMENTS == 0 {
         cols
     } else {
@@ -302,33 +305,20 @@ pub fn pack_nf4_weights(
     let tiles_per_row = padded_cols / TILE_ELEMENTS;
     let total_tiles = rows * tiles_per_row;
 
-    // Pad each row with zeros if cols is not a multiple of 640.
-    let padded_weights: Vec<f32> = if padded_cols > cols {
-        let mut padded = Vec::with_capacity(rows * padded_cols);
-        for row in 0..rows {
-            let start = row * cols;
-            padded.extend_from_slice(&weights[start..start + cols]);
-            padded.extend(std::iter::repeat(0.0f32).take(padded_cols - cols));
-        }
-        padded
-    } else {
-        weights.to_vec()
-    };
-
     let mut packed_codes = vec![0u8; total_tiles * PACKED_BYTES_PER_TILE];
     let mut scales = vec![0.0f32; total_tiles * SCALES_F32_PER_TILE];
     let mut biases = vec![0.0f32; total_tiles * SCALES_F32_PER_TILE];
 
     for row in 0..rows {
         for tile_in_row in 0..tiles_per_row {
-            let values_base = row * padded_cols + tile_in_row * TILE_ELEMENTS;
-            let values: &[f32; TILE_ELEMENTS] = padded_weights
-                [values_base..values_base + TILE_ELEMENTS]
-                .try_into()
-                .expect("tile slice fits exactly");
-
             let tile_idx = row * tiles_per_row + tile_in_row;
-            let (codes_tile, scale_tile, bias_tile) = pack_nf4_tile(values);
+            let col_start = tile_in_row * TILE_ELEMENTS;
+            let mut tile_vals = [0.0f32; TILE_ELEMENTS];
+            for i in 0..TILE_ELEMENTS {
+                let c = col_start + i;
+                tile_vals[i] = if c < cols { weights[row * cols + c] } else { 0.0 };
+            }
+            let (codes_tile, scale_tile, bias_tile) = pack_nf4_tile(&tile_vals);
 
             let codes_off = tile_idx * PACKED_BYTES_PER_TILE;
             packed_codes[codes_off..codes_off + PACKED_BYTES_PER_TILE].copy_from_slice(&codes_tile);
@@ -464,7 +454,7 @@ pub fn unpack_nf4_tile(
 ///
 /// # Panics
 ///
-/// Panics if the buffer lengths do not match `rows * tiles_per_row` tiles.
+/// Panics if the buffer lengths do not match `cols * tiles_per_ch` tiles.
 pub fn unpack_nf4_weights(
     packed_codes: &[u8],
     scales: &[f32],
@@ -518,14 +508,15 @@ pub fn unpack_nf4_weights(
 
         let row = tile_idx / tiles_per_row;
         let tile_in_row = tile_idx % tiles_per_row;
-        let out_base = row * cols + tile_in_row * TILE_ELEMENTS;
 
         let mut tile_out = [0.0f32; TILE_ELEMENTS];
         unpack_nf4_tile(codes_slice, scale_slice, bias_slice, &mut tile_out);
-        // Clamp copy to actual logical columns (last tile may be partial).
-        let remaining = cols.saturating_sub(tile_in_row * TILE_ELEMENTS);
+        let col_base = tile_in_row * TILE_ELEMENTS;
+        let remaining = cols.saturating_sub(col_base);
         let copy_len = TILE_ELEMENTS.min(remaining);
-        output[out_base..out_base + copy_len].copy_from_slice(&tile_out[..copy_len]);
+        for i in 0..copy_len {
+            output[row * cols + col_base + i] = tile_out[i];
+        }
     }
 
     output
@@ -547,7 +538,7 @@ pub struct Nf4Tile640Manifest {
     pub alignment: u32,
     pub rows: u32,
     pub cols: u32,
-    pub tiles_per_row: u32,
+    pub tiles_per_channel: u32,
     pub total_tiles: u32,
     pub required_kernel: String,
 }
@@ -558,8 +549,8 @@ pub struct Nf4Tile640Manifest {
 impl Nf4Tile640Manifest {
     /// Build a manifest for the given logical shape.
     pub fn new(rows: u32, cols: u32) -> Self {
-        let tiles_per_row = cols.div_ceil(TILE_ELEMENTS as u32);
-        let total_tiles = rows * tiles_per_row;
+        let tiles_per_ch = rows.div_ceil(TILE_ELEMENTS as u32);
+        let total_tiles = cols * tiles_per_ch;
         Self {
             format_version: FORMAT_VERSION,
             codebook_id: 0,
@@ -570,7 +561,7 @@ impl Nf4Tile640Manifest {
             alignment: PACKED_BYTES_PER_TILE as u32,
             rows,
             cols,
-            tiles_per_row,
+            tiles_per_channel: tiles_per_ch,
             total_tiles,
             required_kernel: "dequant_mul_nf4tile640".to_string(),
         }
@@ -672,8 +663,8 @@ pub fn unpack_int8_weights(
 /// This is the size of the packed_codes buffer (contiguous bytes of
 /// 4-bit NF4 indices, 8 codes per u32, LE byte order).
 pub fn packed_size(rows: usize, cols: usize) -> usize {
-    let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
-    let total_tiles = rows * tiles_per_row;
+    let tiles_per_ch = rows.div_ceil(TILE_ELEMENTS);
+    let total_tiles = cols * tiles_per_ch;
     total_tiles * PACKED_BYTES_PER_TILE
 }
 
@@ -756,8 +747,8 @@ pub fn dequant_matmul_reference(
             n
         ));
     }
-    let tiles_per_row = n.div_ceil(TILE_ELEMENTS);
-    let total_tiles = k * tiles_per_row;
+    let tiles_per_ch = k.div_ceil(TILE_ELEMENTS);
+    let total_tiles = n * tiles_per_ch;
     let expected_codes = total_tiles * PACKED_BYTES_PER_TILE;
     let expected_scales = total_tiles * SCALES_F32_PER_TILE;
     if packed_codes.len() != expected_codes {
@@ -785,9 +776,9 @@ pub fn dequant_matmul_reference(
         // Dequantize all tiles into a contiguous K×N f32 buffer.
         let mut w_dequant = vec![0.0f32; k * n];
         for tile_idx in 0..total_tiles {
-            let kr = tile_idx / tiles_per_row;
-            let tile_in_row = tile_idx % tiles_per_row;
-            let col_base = tile_in_row * TILE_ELEMENTS;
+            let out_ch = tile_idx / tiles_per_ch;
+            let in_tile = tile_idx % tiles_per_ch;
+            let row_base = in_tile * TILE_ELEMENTS;
 
             let codes_off = tile_idx * PACKED_BYTES_PER_TILE;
             let scale_off = tile_idx * SCALES_F32_PER_TILE;
@@ -809,9 +800,10 @@ pub fn dequant_matmul_reference(
             let mut tile_f32 = [0.0f32; TILE_ELEMENTS];
             unpack_nf4_tile(codes_slice, scale_slice, bias_slice, &mut tile_f32);
 
-            let weight_base = kr * n + col_base;
-            let limit = TILE_ELEMENTS.min(n - col_base);
-            w_dequant[weight_base..weight_base + limit].copy_from_slice(&tile_f32[..limit]);
+            let limit = TILE_ELEMENTS.min(k - row_base);
+            for i in 0..limit {
+                w_dequant[(row_base + i) * n + out_ch] = tile_f32[i];
+            }
         }
 
         // Single BLAS sgemm call: output = input @ dequant_weights.
@@ -845,7 +837,7 @@ pub fn dequant_matmul_reference(
         k,
         n,
         output,
-        tiles_per_row,
+        tiles_per_ch,
         total_tiles,
     );
 
@@ -864,7 +856,7 @@ fn dequant_matmul_scalar(
     k: usize,
     n: usize,
     output: &mut [f32],
-    tiles_per_row: usize,
+    tiles_per_ch: usize,
     total_tiles: usize,
 ) {
     // Zero the output buffer.
@@ -872,9 +864,9 @@ fn dequant_matmul_scalar(
 
     // Iterate tiles in packed order.
     for tile_idx in 0..total_tiles {
-        let kr = tile_idx / tiles_per_row;
-        let tile_in_row = tile_idx % tiles_per_row;
-        let col_base = tile_in_row * TILE_ELEMENTS;
+        let out_ch = tile_idx / tiles_per_ch;
+        let in_tile = tile_idx % tiles_per_ch;
+        let row_base = in_tile * TILE_ELEMENTS;
 
         let codes_off = tile_idx * PACKED_BYTES_PER_TILE;
         let scale_off = tile_idx * SCALES_F32_PER_TILE;
@@ -898,16 +890,18 @@ fn dequant_matmul_scalar(
         unpack_nf4_tile(codes_slice, scale_slice, bias_slice, &mut tile_f32);
 
         // Accumulate contribution across all M rows of the output.
+        // Each tile covers strided in_features for one output channel.
+        // output[row_m][out_ch] += Σ_i input[row_m][row_base + i] * tile[i]
+        let limit = TILE_ELEMENTS.min(k - row_base);
         for row_m in 0..m {
-            let x_val = input[row_m * k + kr];
-            if x_val == 0.0 {
-                continue;
+            let mut acc = 0.0f32;
+            for i in 0..limit {
+                let x_val = input[row_m * k + row_base + i];
+                if x_val != 0.0 {
+                    acc += x_val * tile_f32[i];
+                }
             }
-            let out_base = row_m * n + col_base;
-            let limit = TILE_ELEMENTS.min(n - col_base);
-            for j in 0..limit {
-                output[out_base + j] += x_val * tile_f32[j];
-            }
+            output[row_m * n + out_ch] += acc;
         }
     }
 }
@@ -1057,9 +1051,9 @@ mod tests {
 
     #[test]
     fn round_trip_identity_matrix() {
-        // A small 640×640 identity packed then unpacked.  Since TILE_ELEMENTS = 640,
-        // this is one row with one tile of an identity matrix -> 1.0 on diagonal,
-        // zeros elsewhere.
+        // A small 1×640 identity packed then unpacked.  With input-axis tiling and
+        // only 1 row (ceil(1/640) = 1 tile per channel), we get 640 tiles (one per
+        // output channel). Each tile holds 1 element (the rest zero-padded).
         let rows = 1usize;
         let cols = TILE_ELEMENTS;
         let mut identity = vec![0.0f32; rows * cols];
@@ -1068,7 +1062,7 @@ mod tests {
         let (packed_codes, scales, biases, _p_rows, _p_cols) =
             pack_nf4_weights(&identity, rows, cols);
 
-        let tile_count = 1;
+        let tile_count = cols * rows.div_ceil(TILE_ELEMENTS); // = 640
         assert_eq!(packed_codes.len(), tile_count * PACKED_BYTES_PER_TILE);
         assert_eq!(scales.len(), tile_count * SCALES_F32_PER_TILE);
         assert_eq!(biases.len(), tile_count * SCALES_F32_PER_TILE);
@@ -1368,7 +1362,8 @@ mod tests {
                 // Exact codebook entries with group-varying scale.
                 let group = j / GROUP_SIZE;
                 let scale = 0.1 + (group % 5) as f32 * 0.4;
-                let val = NF4_CODEBOOK[(i * 700 + j) % 16] * scale;
+                // Row 0 uses codebook[15] = 1.0 so max_abs = scale_j for each tile.
+                let val = if i == 0 { 1.0 * scale } else { NF4_CODEBOOK[(i * 700 + j) % 16] * scale };
                 if j < cols {
                     weights[i * cols + j] = val;
                 }
@@ -1383,9 +1378,8 @@ mod tests {
         let (control_codes, control_scales, control_biases, _, _) =
             pack_nf4_weights(&control, rows, control_cols);
 
-        // Both shapes should have 2 tiles per row (700 → 7040 padded → 2, 640 → 1).
-        assert_eq!(cols.div_ceil(TILE_ELEMENTS), 2);
-        assert_eq!(control_cols.div_ceil(TILE_ELEMENTS), 1);
+        // With input-axis tiling: both shapes have 1 tile per channel (rows=4 < 640).
+        assert_eq!(rows.div_ceil(TILE_ELEMENTS), 1);
 
         // Unpack both and verify element count matches logical shape.
         let unpacked = unpack_nf4_weights(&codes, &scales, &biases, rows, cols);
@@ -1904,7 +1898,8 @@ mod tests {
         let codes = vec![0u8; 640];
         let scales = vec![1.0f32; 10];
         let biases = vec![0.0f32; 10];
-        let result = structural_verify(&codes, &scales, &biases, 2, 640);
+        // (1, 2) → tiles_per_ch=1, total_tiles=2 → 320*2=640 codes, 5*2=10 scales/biases
+        let result = structural_verify(&codes, &scales, &biases, 1, 2);
         assert!(result.is_ok(), "{:?}", result.err());
     }
 
@@ -1914,7 +1909,8 @@ mod tests {
         let codes = vec![255u8; 640];
         let scales = vec![1.0f32; 10];
         let biases = vec![0.0f32; 10];
-        let result = structural_verify(&codes, &scales, &biases, 2, 640);
+        // (1, 2) → tiles_per_ch=1, total_tiles=2
+        let result = structural_verify(&codes, &scales, &biases, 1, 2);
         assert!(
             result.is_ok(),
             "0xFF should be valid codes (15 in each nibble)"
@@ -2023,8 +2019,8 @@ mod tests {
         .unwrap();
 
         // Scalar path.
-        let tiles_per_row = n.div_ceil(super::TILE_ELEMENTS);
-        let total_tiles = k * tiles_per_row;
+        let tiles_per_ch = k.div_ceil(super::TILE_ELEMENTS);
+        let total_tiles = n * tiles_per_ch;
         let mut scalar_output = vec![0.0f32; m * n];
         super::dequant_matmul_scalar(
             &input,
@@ -2035,7 +2031,7 @@ mod tests {
             k,
             n,
             &mut scalar_output,
-            tiles_per_row,
+            tiles_per_ch,
             total_tiles,
         );
 

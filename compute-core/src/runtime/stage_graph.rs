@@ -119,8 +119,8 @@ impl StageQuantizationConfig {
 
         Self {
             permitted_formats: vec![
-                RuntimeRepresentationClass::TernaryTile640Base,
                 RuntimeRepresentationClass::Nf4Tile640Base,
+                RuntimeRepresentationClass::TernaryTile640Base,
                 RuntimeRepresentationClass::Int8Tile640Base,
                 RuntimeRepresentationClass::RawF32,
             ],

@@ -20,6 +20,14 @@ use tribunus_compute_core::config::CompileQuantMode;
 use tribunus_compute_core::config::HardwareTarget;
 use tribunus_compute_core::kv_cache::KvCache;
 use tribunus_compute_core::profiled_executor::{LoadedProfiledModel, ProfiledInferenceSession};
+use tribunus_compute_core::nf4tile640::{
+    pack_int8_weights, pack_nf4_weights, pack_nf4_weights_awls,
+    unpack_int8_weights, unpack_nf4_weights,
+};
+use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
+use tribunus_compute_core::quantization::embed_cluster::{
+    pack_ternary_weights, unpack_ternary_weights,
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Entry point
@@ -529,6 +537,130 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     }
     eprintln!("scanned {} tensors, {} layers, hidden={}, vocab={}",
         tensor_meta.len(), num_layers, hidden_dim, vocab_size);
+
+    // ── Diagnose a single tensor ─────────────────────────────────────────
+    if let Some(diag_key) = get_opt(args, "--diagnose-tensor") {
+        let meta = tensor_meta.iter().find(|m| m.key == diag_key)
+            .ok_or_else(|| format!("tensor not found: {diag_key}"))?;
+
+        if meta.shape.len() != 2 {
+            return Err(format!("diagnose-tensor requires a 2D tensor, got {:?} dims", meta.shape.len()));
+        }
+        let in_features = meta.shape[0];
+        let out_features = meta.shape[1];
+
+        // Reload safetensors to get the actual f32 data for this single tensor
+        let mut source_f32: Option<Vec<f32>> = None;
+        for (source_dir, _group_override) in &source_dirs {
+            if source_dir.is_empty() { continue; }
+            let source_dir = Path::new(source_dir);
+            for entry in fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))? {
+                let entry = entry.map_err(|e| format!("entry: {e}"))?;
+                let path = entry.path();
+                if !path.extension().map_or(false, |e| e == "safetensors") { continue; }
+                let file = File::open(&path).map_err(|e| format!("open {path:?}: {e}"))?;
+                let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
+                let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+                for (key, view) in tensors.tensors() {
+                    if key != diag_key { continue; }
+                    let dtype = view.dtype();
+                    let data = view.data().to_vec();
+                    source_f32 = Some(match dtype {
+                        safetensors::Dtype::F32 => data.chunks_exact(4)
+                            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                            .collect(),
+                        safetensors::Dtype::BF16 => data.chunks_exact(2)
+                            .map(|c| {
+                                let bits = ((c[0] as u32) << 16) | ((c[1] as u32) << 24);
+                                f32::from_bits(bits)
+                            })
+                            .collect(),
+                        _ => return Err(format!("unsupported dtype {:?} for diagnose-tensor", dtype)),
+                    });
+                }
+            }
+            if source_f32.is_some() { break; }
+        }
+        let source = source_f32.ok_or_else(|| format!("could not load tensor data for: {diag_key}"))?;
+        let total_elements = source.len() as f64;
+
+        // Variant 1: NF4 max-abs
+        let (codes1, scales1, biases1, _, _) = pack_nf4_weights(&source, in_features, out_features);
+        let recon1 = unpack_nf4_weights(&codes1, &scales1, &biases1, in_features, out_features);
+        let nrmse1 = compute_weight_nrmse(&source, &recon1);
+        let zc1 = recon1.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / total_elements;
+
+        // Variant 2: NF4 AW-LS (uniform activation weights, 8 iters)
+        let (codes2, scales2, biases2, _, _) = pack_nf4_weights_awls(&source, in_features, out_features, None, 8);
+        let recon2 = unpack_nf4_weights(&codes2, &scales2, &biases2, in_features, out_features);
+        let nrmse2 = compute_weight_nrmse(&source, &recon2);
+        let zc2 = recon2.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / total_elements;
+
+        // Variant 3: INT8
+        let (codes3, scales3, biases3) = pack_int8_weights(&source, in_features, out_features);
+        let recon3 = unpack_int8_weights(&codes3, &scales3, &biases3, in_features, out_features);
+        let nrmse3 = compute_weight_nrmse(&source, &recon3);
+        let zc3 = recon3.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / total_elements;
+
+        // Variant 4: Ternary
+        let (codes4, scales4, biases4) = pack_ternary_weights(&source, in_features, out_features);
+        let recon4 = unpack_ternary_weights(&codes4, &scales4, &biases4, in_features, out_features);
+        let nrmse4 = compute_weight_nrmse(&source, &recon4);
+        let zc4 = recon4.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / total_elements;
+
+        let source_shape: Vec<usize> = meta.shape.clone();
+        let receipt = serde_json::json!({
+            "tensor_key": diag_key,
+            "source_shape": source_shape,
+            "in_features": in_features,
+            "out_features": out_features,
+            "variants": [
+                {
+                    "format": "Nf4Tile640Base",
+                    "policy": "MaxAbs",
+                    "code_bytes": codes1.len(),
+                    "scale_count": scales1.len(),
+                    "bias_count": biases1.len(),
+                    "weight_nrmse": (nrmse1 * 10000.0).round() / 10000.0,
+                    "zero_collapse_ratio": (zc1 * 10000.0).round() / 10000.0,
+                    "passes_weight_nrmse": nrmse1 <= 0.01,
+                },
+                {
+                    "format": "Nf4Tile640Base",
+                    "policy": "AWLS",
+                    "code_bytes": codes2.len(),
+                    "scale_count": scales2.len(),
+                    "bias_count": biases2.len(),
+                    "weight_nrmse": (nrmse2 * 10000.0).round() / 10000.0,
+                    "zero_collapse_ratio": (zc2 * 10000.0).round() / 10000.0,
+                    "passes_weight_nrmse": nrmse2 <= 0.01,
+                },
+                {
+                    "format": "Int8Tile640Base",
+                    "policy": "Symmetric",
+                    "code_bytes": codes3.len(),
+                    "scale_count": scales3.len(),
+                    "bias_count": biases3.len(),
+                    "weight_nrmse": (nrmse3 * 10000.0).round() / 10000.0,
+                    "zero_collapse_ratio": (zc3 * 10000.0).round() / 10000.0,
+                    "passes_weight_nrmse": nrmse3 <= 0.005,
+                },
+                {
+                    "format": "TernaryTile640Base",
+                    "policy": "BlockTernary",
+                    "code_bytes": codes4.len(),
+                    "scale_count": scales4.len(),
+                    "bias_count": biases4.len(),
+                    "weight_nrmse": (nrmse4 * 10000.0).round() / 10000.0,
+                    "zero_collapse_ratio": (zc4 * 10000.0).round() / 10000.0,
+                    "passes_weight_nrmse": nrmse4 <= 0.02,
+                },
+            ],
+        });
+        eprintln!("{}", serde_json::to_string_pretty(&receipt)
+            .unwrap_or_else(|_| receipt.to_string()));
+        return Ok(());
+    }
 
     // Build group index from metadata (no weight data yet)
     let mut grouped: Vec<(TensorGroup, Vec<&TensorMeta>)> = Vec::new();
