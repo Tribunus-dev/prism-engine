@@ -11,6 +11,12 @@ pub mod spec;
 pub mod metal;
 #[cfg(test)]
 pub mod tests;
+/// ANE operator validation — only on macOS with Core ML backend
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend"),
+))]
+pub mod ane_validation;
 
 // Re-export commonly used types at the sweep module level.
 pub use candidate::*;

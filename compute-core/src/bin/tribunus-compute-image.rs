@@ -1617,5 +1617,86 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
     write_sweep_output(&output_path, &result)?;
     eprintln!("Output written to {output}");
 
+    // ── Optional ANE operator validation for preferred candidates ──
+    #[cfg(all(
+        target_os = "macos",
+        any(feature = "mlx-backend", feature = "prism-backend"),
+    ))]
+    if has_flag(args, "--ane-validation") {
+        use std::collections::HashMap;
+        use tribunus_compute_core::quantization::sweep::ane_validation::validate_operator;
+
+        let opval_path = output_path.join("operator_validation.json");
+        let mut opval_results: Vec<serde_json::Value> = Vec::new();
+
+        for policy in &result.per_class_policies {
+            if policy.preferred.is_empty() {
+                continue;
+            }
+            // Find a receipt matching this class to get the tensor_key
+            let class_receipts: Vec<&_> = result.candidates.iter()
+                .filter(|r| r.tensor_class == policy.tensor_class && matches!(r.status, tribunus_compute_core::quantization::sweep::SweepCandidateStatus::Passed))
+                .collect();
+            if class_receipts.is_empty() {
+                continue;
+            }
+            let r = class_receipts[0];
+            let canonical = r.logical_shape;
+            let in_f = canonical.in_features;
+            let out_f = canonical.out_features;
+
+            eprintln!("  [ANE] validating {:?} on {}...", policy.tensor_class, r.tensor_key);
+
+            // Load the tensor from safetensors
+            let src_dir = std::path::Path::new(source);
+            let loaded = tribunus_compute_core::quantization::sweep::runner::load_tensor_f32(src_dir, &r.tensor_key)
+                .map_err(|e| format!("load {}: {}", r.tensor_key, e))?;
+
+            // Reconstruct the weights — use pack_nf4_weights for NF4 preferred candidates
+            let (codes, scales, biases, extra_bytes, recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if matches!(r.family, tribunus_compute_core::quantization::sweep::QuantFamilyId::Nf4) {
+                let (c, s, b, _num_tiles, _num_groups) = pack_nf4_weights(&loaded, in_f, out_f);
+                let recon = unpack_nf4_weights(&c, &s, &b, in_f, out_f);
+                (c, s, b, vec![], recon)
+            } else if matches!(r.family, tribunus_compute_core::quantization::sweep::QuantFamilyId::Int8) {
+                let (codes_i8, scales_i8, biases_i8) = pack_int8_weights(&loaded, in_f, out_f);
+                let recon_i8 = unpack_int8_weights(&codes_i8, &scales_i8, &biases_i8, in_f, out_f);
+                (codes_i8, scales_i8, biases_i8, vec![], recon_i8)
+            } else {
+                eprintln!("  [ANE] skipping non-NF4/INT8 family");
+                continue;
+            };
+
+            match validate_operator(&recon, in_f as u32, out_f as u32) {
+                Ok(metrics) => {
+                    eprintln!("    op_rmse={:.6} op_nrmse={:.6} cosine={:.6} drift={:.6} max_abs={:.6}",
+                        metrics.operator_rmse, metrics.operator_nrmse,
+                        metrics.cosine_similarity, metrics.norm_ratio_drift, metrics.max_abs_error);
+                    opval_results.push(serde_json::json!({
+                        "tensor_class": format!("{:?}", policy.tensor_class),
+                        "tensor_key": r.tensor_key,
+                        "family": format!("{:?}", r.family),
+                        "parameters": r.parameters,
+                        "operator_rmse": (metrics.operator_rmse * 10000.0).round() / 10000.0,
+                        "operator_nrmse": (metrics.operator_nrmse * 10000.0).round() / 10000.0,
+                        "cosine_similarity": (metrics.cosine_similarity * 10000.0).round() / 10000.0,
+                        "norm_ratio_drift": (metrics.norm_ratio_drift * 10000.0).round() / 10000.0,
+                        "max_abs_error": (metrics.max_abs_error * 10000.0).round() / 10000.0,
+                    }));
+                }
+                Err(e) => {
+                    eprintln!("    [ANE] validation FAILED: {}", e);
+                }
+            }
+        }
+
+        if !opval_results.is_empty() {
+            let opval_json = serde_json::to_string_pretty(&opval_results)
+                .map_err(|e| format!("serialize: {}", e))?;
+            std::fs::write(&opval_path, &opval_json)
+                .map_err(|e| format!("write operator_validation.json: {}", e))?;
+            eprintln!("Operator validation written to {}", opval_path.display());
+        }
+    }
+
     Ok(())
 }
