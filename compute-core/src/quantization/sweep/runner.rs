@@ -15,6 +15,7 @@ use memmap2::Mmap;
 use safetensors::SafeTensors;
 use serde_json::json;
 use uuid::Uuid;
+use rayon::prelude::*;
 
 use crate::quantization::contract::{
     QuantizationValidationProfile, TensorClass,
@@ -356,7 +357,8 @@ pub fn run_weight_sweep(
             .take(remaining)
             .collect();
 
-        for fc in &candidates_slice {
+        let new_receipts: std::sync::Mutex<Vec<QuantSweepReceipt>> = std::sync::Mutex::new(Vec::new());
+        candidates_slice.par_iter().for_each(|fc| {
             let t1 = Instant::now();
             let family_id = family_id_from_label(&fc.label);
 
@@ -443,12 +445,9 @@ pub fn run_weight_sweep(
             let score = score_receipt(&tmp_receipt, scoring_config);
             tmp_receipt.score = score;
 
-            all_receipts.push(tmp_receipt);
-            tensor_candidate_count += 1;
-            if tensor_candidate_count >= max_candidates {
-                break; // per-tensor limit reached
-            }
-        } // end for fc
+            new_receipts.lock().unwrap().push(tmp_receipt);
+        }); // end par_iter for_each
+        all_receipts.extend(new_receipts.into_inner().unwrap());
     } // end for tensor_entry
 
     // Deduplicate per (tensor_key, family) — keep best score (lowest)

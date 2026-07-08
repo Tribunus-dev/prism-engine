@@ -15,6 +15,7 @@ use super::contract::*;
 ))]
 use crate::backend::accelerate_ffi::{cblas_sgemm, CBLAS_NO_TRANS, CBLAS_ROW_MAJOR};
 use crate::nf4tile640::dequant_matmul_reference;
+use crate::nf4tile640::accelerate::{distance_sq, max_abs_error as accelerate_max_abs_error};
 #[cfg(any(
     feature = "metal-dispatch",
     feature = "mlx-backend",
@@ -34,22 +35,20 @@ pub fn validate_weight_space(
     _profile: &QuantizationValidationProfile,
 ) -> WeightValidationReport {
     let n = source.len();
-    let mut sq_err = 0.0f64;
-    let mut sq_source = 0.0f64;
-    let mut max_abs_err = 0.0f64;
+
+    // Accelerate-accelerated reductions
+    let sq_err = distance_sq(source, reconstructed) as f64;
+    let sq_source = distance_sq(source, &vec![0.0f32; n]) as f64;
+    let max_abs_err = accelerate_max_abs_error(source, reconstructed);
+
+    // Zero-collapse still needs a scalar pass (conditional count)
     let mut zero_collapsed = 0u64;
     let mut non_zero_source = 0u64;
     let src_threshold = 0.01f64;
     let recon_threshold = 0.001f64;
 
     for idx in 0..n {
-        let diff = (source[idx] as f64 - reconstructed[idx] as f64).abs();
         let src_abs = (source[idx] as f64).abs();
-        sq_err += diff * diff;
-        sq_source += (source[idx] as f64).powi(2);
-        if diff > max_abs_err {
-            max_abs_err = diff;
-        }
         if src_abs > src_threshold && (reconstructed[idx] as f64).abs() < recon_threshold {
             zero_collapsed += 1;
         }
@@ -332,7 +331,7 @@ pub fn validate_operator_space_with_vectors(
             norm_ratio_drift: worst_norm_drift,
             sign_agreement: total_sign_agreement / nf,
         })
-    } // #[cfg(not(feature = "metal-dispatch"))]
+    } // end batched path cfg-gated block
 
     // Pure-Rust fallback when neither Metal nor Accelerate is available.
     #[cfg(not(any(

@@ -1564,7 +1564,10 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
 
     let validation = SweepValidationConfig {
         run_weight_validation: true,
-        max_candidates,
+        max_candidates: None,
+        max_candidates_per_tensor: max_candidates,
+        max_total_candidates: None,
+        policy_mode: tribunus_compute_core::quantization::sweep::spec::PolicyMode::ProductionCandidateOnly,
     };
     let scoring = default_scoring_config();
     let resource_limits = default_resource_limits();

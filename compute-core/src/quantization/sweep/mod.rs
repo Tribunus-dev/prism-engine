@@ -7,6 +7,8 @@ pub mod candidate;
 pub mod families;
 pub mod runner;
 pub mod spec;
+#[cfg(feature = "metal-dispatch")]
+pub mod metal;
 #[cfg(test)]
 pub mod tests;
 

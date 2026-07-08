@@ -4,6 +4,7 @@
 //! group optimizers, producing a `FamilyCandidate` per combination.
 
 use serde_json::json;
+use rayon::prelude::*;
 
 use crate::nf4tile640::{
     pack_nf4_tile_with_group_size, unpack_nf4_weights_with_group_size_and_codebook,
@@ -256,35 +257,42 @@ pub fn pack_nf4_matrix_with_params(
     let mut scales = Vec::with_capacity(total_tiles * groups_per_tile);
     let mut biases = Vec::with_capacity(total_tiles * groups_per_tile);
 
-    for row in 0..in_features {
-        let row_base = row * out_features;
-        for t in 0..tiles_per_row {
-            let col_start = t * TILE_ELEMENTS;
-            for g in 0..groups_per_tile {
-                let group_start = col_start + g * params.group_size;
-                let end = (row_base + group_start + params.group_size).min(row_base + out_features);
-                let group = &weights[row_base + group_start..end];
-
-                // Pad short group if needed (trailing tile)
-                let mut buf = vec![0.0f32; params.group_size];
-                for (i, &v) in group.iter().enumerate() {
-                    buf[i] = v;
-                }
-
-                let result = pack_nf4_group(&buf, params);
-                scales.push(result.scale);
-                if params.affine_mode == AffineMode::ScaleBias {
-                    biases.push(result.bias.unwrap_or(0.0));
-                }
-
-                // Pack codes: two 4-bit nibbles per byte
-                for pair in result.codes.chunks(2) {
-                    let code0 = pair[0];
-                    let code1 = *pair.get(1).unwrap_or(&0);
-                    codes.push(code0 | (code1 << 4));
+    // Parallelize over rows — each row's tiles are independent
+    let row_results: Vec<(Vec<u8>, Vec<f32>, Vec<f32>)> = (0..in_features)
+        .into_par_iter()
+        .map(|row| {
+            let row_base = row * out_features;
+            let mut row_codes = Vec::with_capacity(tiles_per_row * codes_per_tile);
+            let mut row_scales = Vec::with_capacity(tiles_per_row * groups_per_tile);
+            let mut row_biases = Vec::new();
+            for t in 0..tiles_per_row {
+                let col_start = t * TILE_ELEMENTS;
+                for g in 0..groups_per_tile {
+                    let group_start = col_start + g * params.group_size;
+                    let end = (row_base + group_start + params.group_size).min(row_base + out_features);
+                    let group = &weights[row_base + group_start..end];
+                    let mut buf = vec![0.0f32; params.group_size];
+                    for (i, &v) in group.iter().enumerate() { buf[i] = v; }
+                    let result = pack_nf4_group(&buf, params);
+                    row_scales.push(result.scale);
+                    if params.affine_mode == AffineMode::ScaleBias {
+                        row_biases.push(result.bias.unwrap_or(0.0));
+                    }
+                    for pair in result.codes.chunks(2) {
+                        let code0 = pair[0];
+                        let code1 = *pair.get(1).unwrap_or(&0);
+                        row_codes.push(code0 | (code1 << 4));
+                    }
                 }
             }
-        }
+            (row_codes, row_scales, row_biases)
+        }).collect();
+
+    // Serial; concatenate row results into contiguous vecs
+    for (row_codes, row_scales, row_biases) in &row_results {
+        codes.extend(row_codes);
+        scales.extend(row_scales);
+        biases.extend(row_biases);
     }
 
     (codes, scales, biases, Vec::new())
