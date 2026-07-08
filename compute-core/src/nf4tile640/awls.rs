@@ -73,9 +73,8 @@ pub fn optimize_scale_bias(
     let mut best_codes = *code_indices;
     let mut best_mse = compute_weighted_mse(weights, &best_codes, best_s, best_b, activation_weights);
     let mut prev_mse = best_mse;
-    let mut code_stable = false;
 
-    for iter in 0..max_iters {
+    for _ in 0..max_iters {
         cancel_token.heartbeat().ok();
         // Step 1: Fix current codes and b, solve for s
         let (num_s, den_s) = weights
@@ -119,7 +118,7 @@ pub fn optimize_scale_bias(
         b = num_b2 / sum_a;
 
         // Step 5: Check if codes stabilized
-        code_stable = new_codes == best_codes;
+        let code_stable = new_codes == best_codes;
         best_codes = new_codes;
 
         let mse = compute_weighted_mse(weights, &best_codes, s, b, activation_weights);

@@ -17,6 +17,7 @@
 pub mod admission;
 pub mod calibration;
 pub mod contract;
+pub mod sweep;
 pub mod validation;
 
 // Pre-existing quantization submodules (preserved from original mod.rs).

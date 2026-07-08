@@ -6,7 +6,7 @@
 
 use std::fs;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -21,7 +21,8 @@ use tribunus_compute_core::config::HardwareTarget;
 use tribunus_compute_core::kv_cache::KvCache;
 use tribunus_compute_core::profiled_executor::{LoadedProfiledModel, ProfiledInferenceSession};
 use tribunus_compute_core::nf4tile640::{
-    pack_int8_weights, pack_nf4_weights, pack_nf4_weights_awls,
+    nf4_dequantize, pack_int8_weights, pack_nf4_tile_with_group_size,
+    pack_nf4_weights, pack_nf4_weights_awls, pack_symmetric_int4_tile,
     unpack_int8_weights, unpack_nf4_weights,
 };
 use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
@@ -53,6 +54,7 @@ fn main() {
         eprintln!("  tribunus-compute-image emit-v0 --output-dir <dir> [--allow-contract-only-kv]");
         eprintln!("  tribunus-compute-image verify-v0 --image <dir>");
         eprintln!("  tribunus-compute-image build-ecs --source <dir> [--draft-source <dir>] [--tts-source <dir>] --output <dir>");
+        eprintln!("  tribunus-compute-image quant-sweep --source <dir> --output <out> [--tensor-regex <re>] [--max-candidates <n>]");
         std::process::exit(1);
     }
 
@@ -64,6 +66,7 @@ fn main() {
         "decode-one" => cmd_decode_one(&args[2..]),
         "emit-v0" => cmd_emit_v0(&args[2..]),
         "verify-v0" => cmd_verify_v0(&args[2..]),
+        "quant-sweep" => cmd_quant_sweep(&args[2..]),
         other => {
             tribunus_compute_core::log_error!("unknown command: {other}");
             std::process::exit(1);
@@ -625,7 +628,119 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         let nrmse4_legacy = compute_weight_nrmse(&source, &recon4);
 
         let source_shape: Vec<usize> = meta.shape.clone();
-        let receipt = serde_json::json!({
+        
+
+        // ── Codec Sweep: NF4 codebook × group sizes ────────────────────────
+        const SWEEP_GROUP_SIZES: [usize; 3] = [32, 64, 128];
+        let mut sweep_variants: Vec<serde_json::Value> = Vec::new();
+
+        // Helper closure: pack entire weight matrix at tile level with custom pack function.
+        // Tiles are output-axis (contiguous row slices of 640).
+        let do_sweep = |pack_tile: &dyn Fn(&[f32; 640], usize) -> (Vec<u8>, Vec<f32>, Vec<f32>),
+                        is_nf4: bool, gs: usize|
+        {
+            let padded_cols = if out_features % 640 == 0 { out_features } else { (out_features.div_ceil(640)) * 640 };
+            let tiles_per_row = padded_cols / 640;
+            let total_tiles = in_features * tiles_per_row;
+            let groups_per_tile = 640 / gs;
+            let bpgs = gs / 2; // bytes per group of packed codes
+
+            let mut packed = vec![0u8; total_tiles * groups_per_tile * bpgs];
+            let mut scales = vec![0.0f32; total_tiles * groups_per_tile];
+            let mut biases = vec![0.0f32; total_tiles * groups_per_tile];
+            let mut recon = vec![0.0f32; in_features * out_features];
+
+            for row in 0..in_features {
+                for tile_in_row in 0..tiles_per_row {
+                    let tile_idx = row * tiles_per_row + tile_in_row;
+                    let col_start = tile_in_row * 640;
+                    let mut tile_vals = [0.0f32; 640];
+                    for i in 0..640 {
+                        let c = col_start + i;
+                        tile_vals[i] = if c < out_features { source[row * out_features + c] } else { 0.0 };
+                    }
+                    let (codes_tile, scale_tile, bias_tile) = pack_tile(&tile_vals, gs);
+
+                    let codes_off = tile_idx * groups_per_tile * bpgs;
+                    packed[codes_off..codes_off + groups_per_tile * bpgs].copy_from_slice(&codes_tile);
+
+                    let scale_off = tile_idx * groups_per_tile;
+                    scales[scale_off..scale_off + groups_per_tile].copy_from_slice(&scale_tile);
+                    biases[scale_off..scale_off + groups_per_tile].copy_from_slice(&bias_tile);
+
+                    // Dequantize tile for validation
+                    for g in 0..groups_per_tile {
+                        let s = scale_tile[g];
+                        let b = bias_tile[g];
+                        for j in 0..gs / 2 {
+                            let byte = codes_tile[g * bpgs + j];
+                            let code0 = byte & 0x0F;
+                            let code1 = byte >> 4;
+                            let abs_col0 = col_start + g * gs + 2 * j;
+                            let abs_col1 = abs_col0 + 1;
+                            let (v0, v1) = if is_nf4 {
+                                (nf4_dequantize(code0) * s + b, nf4_dequantize(code1) * s + b)
+                            } else {
+                                let dq = |idx: u8| { ((idx as i8) - 7) as f32 * s + b };
+                                (dq(code0), dq(code1))
+                            };
+                            if abs_col0 < out_features { recon[row * out_features + abs_col0] = v0; }
+                            if abs_col1 < out_features { recon[row * out_features + abs_col1] = v1; }
+                        }
+                    }
+                }
+            }
+
+            let wr = validate_weight_space(&source, &recon, &diag_profile);
+            (wr, recon)
+        };
+
+        // NF4 sweep
+        for &gs in &SWEEP_GROUP_SIZES {
+            let pack_nf4 = |vals: &[f32; 640], gs: usize| pack_nf4_tile_with_group_size(vals, gs);
+            let (wr, rcon) = do_sweep(&pack_nf4, true, gs);
+            let legacy = compute_weight_nrmse(&source, &rcon);
+            let groups_per_tile = 640 / gs;
+            let padded_cols = if out_features % 640 == 0 { out_features } else { (out_features.div_ceil(640)) * 640 };
+            let tiles_per_row = padded_cols / 640;
+            let total_tiles = in_features * tiles_per_row;
+            sweep_variants.push(serde_json::json!({
+                "format": "Nf4Tile640Base",
+                "policy": format!("MaxAbs_group{}", gs),
+                "code_bytes": total_tiles * groups_per_tile * (gs / 2),
+                "scale_count": total_tiles * groups_per_tile,
+                "bias_count": total_tiles * groups_per_tile,
+                "weight_nrmse": (wr.nrmse * 10000.0).round() / 10000.0,
+                "nrmse_legacy": (legacy * 10000.0).round() / 10000.0,
+                "zero_collapse_ratio": (wr.zero_collapse_ratio * 10000.0).round() / 10000.0,
+                "rmse": (wr.rmse * 10000.0).round() / 10000.0,
+                "max_abs_error": (wr.max_abs_error * 10000.0).round() / 10000.0,
+            }));
+        }
+
+        // SymmetricInt4 sweep
+        for &gs in &SWEEP_GROUP_SIZES {
+            let pack_sym = |vals: &[f32; 640], gs: usize| pack_symmetric_int4_tile(vals, gs);
+            let (wr, rcon) = do_sweep(&pack_sym, false, gs);
+            let legacy = compute_weight_nrmse(&source, &rcon);
+            let groups_per_tile = 640 / gs;
+            let padded_cols = if out_features % 640 == 0 { out_features } else { (out_features.div_ceil(640)) * 640 };
+            let tiles_per_row = padded_cols / 640;
+            let total_tiles = in_features * tiles_per_row;
+            sweep_variants.push(serde_json::json!({
+                "format": "SymInt4Tile640Base",
+                "policy": format!("Symmetric_group{}", gs),
+                "code_bytes": total_tiles * groups_per_tile * (gs / 2),
+                "scale_count": total_tiles * groups_per_tile,
+                "bias_count": total_tiles * groups_per_tile,
+                "weight_nrmse": (wr.nrmse * 10000.0).round() / 10000.0,
+                "nrmse_legacy": (legacy * 10000.0).round() / 10000.0,
+                "zero_collapse_ratio": (wr.zero_collapse_ratio * 10000.0).round() / 10000.0,
+                "rmse": (wr.rmse * 10000.0).round() / 10000.0,
+                "max_abs_error": (wr.max_abs_error * 10000.0).round() / 10000.0,
+            }));
+        }
+let mut receipt = serde_json::json!({
             "tensor_key": diag_key,
             "source_shape": source_shape,
             "in_features": in_features,
@@ -681,6 +796,10 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                 },
             ],
         });
+        // Merge codec sweep variants into the output
+        if let Some(variants) = receipt["variants"].as_array_mut() {
+            variants.extend(sweep_variants);
+        }
         eprintln!("{}", serde_json::to_string_pretty(&receipt)
             .unwrap_or_else(|_| receipt.to_string()));
         return Ok(());
@@ -1398,4 +1517,102 @@ fn cmd_verify_v0(args: &[String]) -> Result<(), String> {
             errors.join("\n  - ")
         )),
     }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// quant-sweep command — parametric quantization sweep
+// ═══════════════════════════════════════════════════════════════════════════
+/// Run a parametric quantization sweep across selected tensors.
+fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
+    let source = get_opt(args, "--source").ok_or_else(|| "--source is required".to_string())?;
+    let output = get_opt(args, "--output").ok_or_else(|| "--output is required".to_string())?;
+    let tensor_regex = get_opt(args, "--tensor-regex").unwrap_or(".*");
+    let max_candidates: usize = get_opt(args, "--max-candidates")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200);
+    let output_path = std::path::PathBuf::from(output);
+
+    use std::path::Path;
+    let source_path = Path::new(source);
+    if !source_path.is_dir() {
+        return Err(format!("source directory not found: {source}"));
+    }
+
+    use tribunus_compute_core::quantization::sweep::runner::{
+        default_resource_limits, default_scoring_config, default_validation_config,
+        run_weight_sweep, write_sweep_output,
+    };
+    use tribunus_compute_core::quantization::sweep::spec::{
+        QuantFamilySweep, QuantSweepSpec, SweepResourceLimits, SweepScoringConfig,
+        SweepValidationConfig, TensorSelector,
+    };
+    use tribunus_compute_core::quantization::sweep::families::{
+        int8::create_int8_grid, nf4::create_nf4_grid, sym_int4::create_sym_int4_grid,
+        ternary::create_ternary_grid,
+    };
+
+    // Build the sweep spec
+    let selectors = vec![TensorSelector::Regex(tensor_regex.to_string())];
+
+    let families: Vec<QuantFamilySweep> = vec![
+        QuantFamilySweep::Nf4(create_nf4_grid()),
+        QuantFamilySweep::SymInt4(create_sym_int4_grid()),
+        QuantFamilySweep::Int8(create_int8_grid()),
+        QuantFamilySweep::Ternary(create_ternary_grid()),
+    ];
+
+    let validation = SweepValidationConfig {
+        run_weight_validation: true,
+        max_candidates,
+    };
+    let scoring = default_scoring_config();
+    let resource_limits = default_resource_limits();
+
+    let spec = QuantSweepSpec {
+        spec_version: 1,
+        tensor_selectors: selectors,
+        families,
+        validation,
+        scoring,
+        resource_limits,
+        output_dir: output_path.clone(),
+    };
+
+    eprintln!("QuantSweep v{} starting...", spec.spec_version);
+    eprintln!("  source: {source}");
+    eprintln!("  regex: {tensor_regex}");
+    eprintln!("  families: {}", spec.families.len());
+    eprintln!("  max_candidates: {max_candidates}");
+    eprintln!("  output: {output}");
+
+    let result = run_weight_sweep(&spec, source_path)?;
+
+    writeln!(
+        std::io::stderr(),
+        "Sweep complete: {} tensors, {} candidates in {:.2}s",
+        result.num_tensors,
+        result.num_candidates,
+        result.wall_ms as f64 / 1000.0
+    )
+    .unwrap();
+
+    if result.per_class_policies.is_empty() {
+        eprintln!("  WARNING: no per-class policies generated");
+    } else {
+        eprintln!("  Per-class policies:");
+        for p in &result.per_class_policies {
+            eprintln!(
+                "    {:?}: {} preferred, fallback={}",
+                p.tensor_class,
+                p.preferred.len(),
+                p.fallback
+            );
+        }
+    }
+
+    write_sweep_output(&output_path, &result)?;
+    eprintln!("Output written to {output}");
+
+    Ok(())
 }

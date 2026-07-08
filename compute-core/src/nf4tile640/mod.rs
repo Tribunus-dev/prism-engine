@@ -150,39 +150,40 @@ pub fn nf4_quantize(value: f32) -> u8 {
 ///
 /// Panics if `values` is not exactly 640 elements.
 pub fn pack_nf4_tile(values: &[f32; TILE_ELEMENTS]) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
-    let mut packed_codes = vec![0u8; PACKED_BYTES_PER_TILE];
-    let mut scales = vec![0.0f32; SCALES_F32_PER_TILE];
-    let mut biases = vec![0.0f32; SCALES_F32_PER_TILE];
+    pack_nf4_tile_with_group_size(values, GROUP_SIZE)
+}
 
-    for group in 0..GROUPS_PER_TILE {
-        let base = group * GROUP_SIZE;
-        let group_slice = &values[base..base + GROUP_SIZE];
+/// Pack a single tile of 640 f32 values using configurable group size.
+/// Uses the same NF4 codebook but with `group_size` elements per group
+/// (must evenly divide 640).  Each group has its own scale and bias.
+pub fn pack_nf4_tile_with_group_size(
+    values: &[f32; TILE_ELEMENTS],
+    group_size: usize,
+) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+    let num_groups = TILE_ELEMENTS / group_size;
+    let bytes_per_group = group_size / 2;
+    let packed_codes_len = num_groups * bytes_per_group;
+    let mut packed_codes = vec![0u8; packed_codes_len];
+    let mut scales = vec![0.0f32; num_groups];
+    let mut biases = vec![0.0f32; num_groups];
 
-        // Compute scale: max absolute value in the group.
-        let max_abs = group_slice
+    for group in 0..num_groups {
+        let base = group * group_size;
+        let max_abs = values[base..base + group_size]
             .iter()
             .map(|v| v.abs())
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
-
-        let scale = if max_abs < 1e-30 {
-            // All zeros: use a scale of 1.0 and code 7 (0.0) for every element.
-            1.0f32
-        } else {
-            max_abs
-        };
-
+        let scale = if max_abs < 1e-30 { 1.0f32 } else { max_abs };
         scales[group] = scale;
-        biases[group] = 0.0; // NF4 bias is always zero
+        biases[group] = 0.0;
 
-        // Pack codes: 2 per byte (low nibble = even element, high = odd+1).
-        let codes_base = group * PACKED_BYTES_PER_GROUP;
-        for i in 0..(GROUP_SIZE / 2) {
-            let val0 = group_slice[2 * i] / scale;
-            let val1 = group_slice[2 * i + 1] / scale;
+        for i in 0..(group_size / 2) {
+            let val0 = values[base + 2 * i] / scale;
+            let val1 = values[base + 2 * i + 1] / scale;
             let code0 = nf4_quantize(val0);
             let code1 = nf4_quantize(val1);
-            packed_codes[codes_base + i] = code0 | (code1 << 4);
+            packed_codes[group * bytes_per_group + i] = code0 | (code1 << 4);
         }
     }
 
@@ -2127,3 +2128,42 @@ pub(crate) mod metal_test_module;
 #[cfg(test)]
 #[path = "hw_proof.rs"]
 pub(crate) mod hw_proof_module;
+/// Pack a single tile of 640 f32 values using symmetric int4 (q4_0 style).
+/// Quantizes to -7..7 with group_size elements per group.
+pub fn pack_symmetric_int4_tile(
+    values: &[f32; TILE_ELEMENTS],
+    group_size: usize,
+) -> (Vec<u8>, Vec<f32>, Vec<f32>) {
+    let num_groups = TILE_ELEMENTS / group_size;
+    let bytes_per_group = group_size / 2;
+    let packed_codes_len = num_groups * bytes_per_group;
+    let mut packed_codes = vec![0u8; packed_codes_len];
+    let mut scales = vec![0.0f32; num_groups];
+    let mut biases = vec![0.0f32; num_groups];
+    let max_code = 7.0f32;
+
+    for group in 0..num_groups {
+        let base = group * group_size;
+        let max_abs = values[base..base + group_size]
+            .iter()
+            .map(|v| v.abs())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0.0);
+        let scale = if max_abs < 1e-30 { 1.0f32 } else { max_abs / max_code };
+        scales[group] = scale;
+        biases[group] = 0.0;
+
+        for i in 0..(group_size / 2) {
+            let bit_idx = group * bytes_per_group + i;
+            let val0 = (values[base + 2 * i] / scale).round().clamp(-7.0, 7.0) as i8;
+            let val1 = (values[base + 2 * i + 1] / scale).round().clamp(-7.0, 7.0) as i8;
+            // Map -7..7 to 0..15 (unsigned 4-bit)
+            let code0 = (val0 + 7) as u8;
+            let code1 = (val1 + 7) as u8;
+            packed_codes[bit_idx] = code0 | (code1 << 4);
+        }
+    }
+
+    (packed_codes, scales, biases)
+}
+

@@ -192,7 +192,7 @@ pub enum ScaleAxis {
 }
 
 /// Tensor classification for validation profile selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TensorClass {
     DecoderAttentionProjection = 1,
