@@ -413,7 +413,10 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         StageConfig, ComponentType, StageQuantizationConfig,
     };
     use tribunus_compute_core::compute_image::compile::capability_registry::CapabilityRegistry;
-    use tribunus_compute_core::quantization::contract::{CanonicalShape, BackendKind};
+    use tribunus_compute_core::quantization::contract::{CanonicalShape, BackendKind, WeightValidationReport};
+    use tribunus_compute_core::quantization::contract::QuantizationValidationProfile;
+    use tribunus_compute_core::quantization::validation::validate_weight_space;
+    use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
 
     let output_dir = Path::new(output);
     fs::create_dir_all(output_dir).map_err(|e| format!("create output dir: {e}"))?;
@@ -584,29 +587,42 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         let source = source_f32.ok_or_else(|| format!("could not load tensor data for: {diag_key}"))?;
         let total_elements = source.len() as f64;
 
+        // Create a default profile for weight-space validation reporting.
+        let diag_profile = QuantizationValidationProfile {
+            tensor_class: tribunus_compute_core::quantization::contract::TensorClass::DecoderAttentionProjection,
+            phase: tribunus_compute_core::quantization::contract::ProfilePhase::Promotion,
+            max_weight_nrmse: f64::MAX,
+            investigation_nrmse_ceiling: f64::MAX,
+            max_zero_collapse_ratio: f64::MAX,
+            max_operator_nrmse: f32::MAX,
+            min_mean_cosine: 0.0,
+            min_worst_cosine: 0.0,
+            max_norm_ratio_drift: f32::MAX,
+        };
+
         // Variant 1: NF4 max-abs
         let (codes1, scales1, biases1, _, _) = pack_nf4_weights(&source, in_features, out_features);
         let recon1 = unpack_nf4_weights(&codes1, &scales1, &biases1, in_features, out_features);
-        let nrmse1 = compute_weight_nrmse(&source, &recon1);
-        let zc1 = recon1.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / total_elements;
+        let wr1 = validate_weight_space(&source, &recon1, &diag_profile);
+        let nrmse1_legacy = compute_weight_nrmse(&source, &recon1);
 
-        // Variant 2: NF4 AW-LS (uniform activation weights, 8 iters)
+        // Variant 2: NF4 AffineUniform (all-ones activation weights, 8 iters)
         let (codes2, scales2, biases2, _, _) = pack_nf4_weights_awls(&source, in_features, out_features, None, 8);
         let recon2 = unpack_nf4_weights(&codes2, &scales2, &biases2, in_features, out_features);
-        let nrmse2 = compute_weight_nrmse(&source, &recon2);
-        let zc2 = recon2.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / total_elements;
+        let wr2 = validate_weight_space(&source, &recon2, &diag_profile);
+        let nrmse2_legacy = compute_weight_nrmse(&source, &recon2);
 
         // Variant 3: INT8
         let (codes3, scales3, biases3) = pack_int8_weights(&source, in_features, out_features);
         let recon3 = unpack_int8_weights(&codes3, &scales3, &biases3, in_features, out_features);
-        let nrmse3 = compute_weight_nrmse(&source, &recon3);
-        let zc3 = recon3.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / total_elements;
+        let wr3 = validate_weight_space(&source, &recon3, &diag_profile);
+        let nrmse3_legacy = compute_weight_nrmse(&source, &recon3);
 
         // Variant 4: Ternary
         let (codes4, scales4, biases4) = pack_ternary_weights(&source, in_features, out_features);
         let recon4 = unpack_ternary_weights(&codes4, &scales4, &biases4, in_features, out_features);
-        let nrmse4 = compute_weight_nrmse(&source, &recon4);
-        let zc4 = recon4.iter().filter(|&&v| v.abs() < 1e-6).count() as f64 / total_elements;
+        let wr4 = validate_weight_space(&source, &recon4, &diag_profile);
+        let nrmse4_legacy = compute_weight_nrmse(&source, &recon4);
 
         let source_shape: Vec<usize> = meta.shape.clone();
         let receipt = serde_json::json!({
@@ -621,19 +637,23 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                     "code_bytes": codes1.len(),
                     "scale_count": scales1.len(),
                     "bias_count": biases1.len(),
-                    "weight_nrmse": (nrmse1 * 10000.0).round() / 10000.0,
-                    "zero_collapse_ratio": (zc1 * 10000.0).round() / 10000.0,
-                    "passes_weight_nrmse": nrmse1 <= 0.01,
+                    "weight_nrmse": (wr1.nrmse * 10000.0).round() / 10000.0,
+                    "nrmse_legacy": (nrmse1_legacy * 10000.0).round() / 10000.0,
+                    "zero_collapse_ratio": (wr1.zero_collapse_ratio * 10000.0).round() / 10000.0,
+                    "rmse": (wr1.rmse * 10000.0).round() / 10000.0,
+                    "max_abs_error": (wr1.max_abs_error * 10000.0).round() / 10000.0,
                 },
                 {
                     "format": "Nf4Tile640Base",
-                    "policy": "AWLS",
+                    "policy": "AffineUniform",
                     "code_bytes": codes2.len(),
                     "scale_count": scales2.len(),
                     "bias_count": biases2.len(),
-                    "weight_nrmse": (nrmse2 * 10000.0).round() / 10000.0,
-                    "zero_collapse_ratio": (zc2 * 10000.0).round() / 10000.0,
-                    "passes_weight_nrmse": nrmse2 <= 0.01,
+                    "weight_nrmse": (wr2.nrmse * 10000.0).round() / 10000.0,
+                    "nrmse_legacy": (nrmse2_legacy * 10000.0).round() / 10000.0,
+                    "zero_collapse_ratio": (wr2.zero_collapse_ratio * 10000.0).round() / 10000.0,
+                    "rmse": (wr2.rmse * 10000.0).round() / 10000.0,
+                    "max_abs_error": (wr2.max_abs_error * 10000.0).round() / 10000.0,
                 },
                 {
                     "format": "Int8Tile640Base",
@@ -641,9 +661,11 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                     "code_bytes": codes3.len(),
                     "scale_count": scales3.len(),
                     "bias_count": biases3.len(),
-                    "weight_nrmse": (nrmse3 * 10000.0).round() / 10000.0,
-                    "zero_collapse_ratio": (zc3 * 10000.0).round() / 10000.0,
-                    "passes_weight_nrmse": nrmse3 <= 0.005,
+                    "weight_nrmse": (wr3.nrmse * 10000.0).round() / 10000.0,
+                    "nrmse_legacy": (nrmse3_legacy * 10000.0).round() / 10000.0,
+                    "zero_collapse_ratio": (wr3.zero_collapse_ratio * 10000.0).round() / 10000.0,
+                    "rmse": (wr3.rmse * 10000.0).round() / 10000.0,
+                    "max_abs_error": (wr3.max_abs_error * 10000.0).round() / 10000.0,
                 },
                 {
                     "format": "TernaryTile640Base",
@@ -651,9 +673,11 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
                     "code_bytes": codes4.len(),
                     "scale_count": scales4.len(),
                     "bias_count": biases4.len(),
-                    "weight_nrmse": (nrmse4 * 10000.0).round() / 10000.0,
-                    "zero_collapse_ratio": (zc4 * 10000.0).round() / 10000.0,
-                    "passes_weight_nrmse": nrmse4 <= 0.02,
+                    "weight_nrmse": (wr4.nrmse * 10000.0).round() / 10000.0,
+                    "nrmse_legacy": (nrmse4_legacy * 10000.0).round() / 10000.0,
+                    "zero_collapse_ratio": (wr4.zero_collapse_ratio * 10000.0).round() / 10000.0,
+                    "rmse": (wr4.rmse * 10000.0).round() / 10000.0,
+                    "max_abs_error": (wr4.max_abs_error * 10000.0).round() / 10000.0,
                 },
             ],
         });

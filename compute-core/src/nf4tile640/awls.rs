@@ -21,6 +21,8 @@ use crate::nf4tile640::{
 pub struct GroupScaleBias {
     pub scale: f32,
     pub bias: f32,
+    #[serde(skip)]
+    pub codes: [u8; 128],
     pub aw_mse: f64, // Activation-weighted MSE after optimization
     pub iterations: u8,
 }
@@ -59,6 +61,7 @@ pub fn optimize_scale_bias(
         return GroupScaleBias {
             scale: s,
             bias: b,
+            codes: *code_indices,
             aw_mse: 0.0,
             iterations: 0,
         };
@@ -137,6 +140,7 @@ pub fn optimize_scale_bias(
     GroupScaleBias {
         scale: best_s,
         bias: best_b,
+        codes: best_codes,
         aw_mse: best_mse,
         iterations: max_iters,
     }

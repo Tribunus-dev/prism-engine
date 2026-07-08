@@ -240,18 +240,12 @@ pub fn pack_nf4_tile_awls(
                 max_awls_iters,
                 &crate::compilation::cancel::CancelToken::new(None),
             );
+            // Use the exact joint state from the optimizer
+            code_indices = result.codes;
             let s = result.scale;
             let b = result.bias;
 
-            // Step 3: Re-quantize with optimal scale/bias
-            if s > 0.0 {
-                for (i, &v) in chunk.iter().enumerate() {
-                    let normalized = (v - b) / s;
-                    code_indices[i] = nf4_quantize(normalized);
-                }
-            }
-
-            // Pack codes
+            // ... pack codes into tile ...
             for pair in code_indices.chunks_exact(2) {
                 codes.push(pair[0] | (pair[1] << 4));
             }
