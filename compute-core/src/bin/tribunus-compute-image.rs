@@ -436,6 +436,16 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
         (tts_source.unwrap_or(""), Some("AudioEncoder")),
     ];
 
+    // Load compiler policy for substitution decisions.
+    let compiler_policy_text = fs::read_to_string("compiler_policy.json")
+        .map_err(|e| format!("read compiler_policy.json: {e}"))?;
+    let policy_root: serde_json::Value = serde_json::from_str(&compiler_policy_text)
+        .map_err(|e| format!("parse compiler_policy.json: {e}"))?;
+    let model_policies: Vec<serde_json::Value> = policy_root["model_policies"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
     // ── Types and helpers ─────────────────────────────────────────────────
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     enum TensorGroup {
@@ -472,6 +482,64 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
             return TensorGroup::Norm;
         }
         TensorGroup::Other
+    }
+
+    /// Policy constraints resolved for a single tensor from compiler_policy.json.
+    #[derive(Debug, Clone, Default)]
+    struct TensorPolicyMap {
+        disallowed_codecs: Vec<String>,
+        rawf32_required: bool,
+    }
+
+    /// Look up the tensor in `model_policies` and return the applicable substitution constraints.
+    fn resolve_tensor_policy(
+        tensor_key: &str,
+        tensor_group: &TensorGroup,
+        model_policies: &[serde_json::Value],
+    ) -> TensorPolicyMap {
+        // Qwen3-TTS tensors (AudioEncoder group): use the explicit disallow list
+        if *tensor_group == TensorGroup::AudioEncoder {
+            for policy in model_policies {
+                let scope = policy["scope"].as_str().unwrap_or("");
+                if scope.contains("Qwen3TTS") {
+                    let disallow: Vec<String> = policy["disallow"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    return TensorPolicyMap {
+                        disallowed_codecs: disallow,
+                        rawf32_required: false,
+                    };
+    }
+    }
+    }
+
+        // Gemma4 VisionPatchProjection.patch_dense: primary RawF32 ⇒ bypass substitution
+        for policy in model_policies {
+            let scope = policy["scope"].as_str().unwrap_or("");
+            if scope.contains("VisionPatchProjection") {
+                if let Some(matches) = policy["match"].as_array() {
+                    for m in matches {
+                        if let Some(pattern) = m.as_str() {
+                            if tensor_key.contains(pattern) {
+                                let primary_family =
+                                    policy["primary"]["family"].as_str().unwrap_or("");
+                                return TensorPolicyMap {
+                                    disallowed_codecs: Vec::new(),
+                                    rawf32_required: primary_family == "RawF32",
+                                };
+    }
+    }
+    }
+    }
+    }
+    }
+
+        TensorPolicyMap::default()
     }
 
     /// Metadata-only tensor record (no weight data loaded).
@@ -807,14 +875,10 @@ let mut receipt = serde_json::json!({
         }
         // ── Substitution pass: ranked codec candidates ────────────────────
         // Build substitution context from tensor metadata and policy hints
-        let is_audio_encoder = meta.group == TensorGroup::AudioEncoder;
+        let tensor_policy = resolve_tensor_policy(&meta.key, &meta.group, &model_policies);
         let ctx = SubstitutionContext {
-            rawf32_required: is_audio_encoder,
-            disallowed_codecs: if is_audio_encoder {
-                vec!["Ternary".into(), "SymInt4".into(), "NF4".into()]
-            } else {
-                Vec::new()
-            },
+            rawf32_required: tensor_policy.rawf32_required,
+            disallowed_codecs: tensor_policy.disallowed_codecs,
             hardware_available: false,
             rollout_available: false,
             operator_backend: "synthetic_cpu_probe".into(),

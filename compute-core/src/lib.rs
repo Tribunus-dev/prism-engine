@@ -381,6 +381,8 @@ pub mod quantized;
 pub mod readiness_gates;
 pub mod receipt;
 pub mod receipts;
+/// Execution plan — kernel specialization, region batching, and plan data types.
+pub mod execution_plan;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub mod registry;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack

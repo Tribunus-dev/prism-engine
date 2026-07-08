@@ -5,7 +5,7 @@ use crate::quantization::sweep::runner::default_validation_config;
 use crate::quantization::sweep::spec::SweepScoringConfig;
 use crate::quantization::sweep::{
     ByteAccounting, FamilyPolicyEntry, MatrixShape, PackedTileLayout, PerClassPolicy,
-    QuantFamilyId, QuantSweepReceipt, SweepCandidateStatus, score_receipt,
+    QuantFamilyId, QuantSweepReceipt, SweepCandidateStatus, SweepFailureReason, score_receipt,
 };
 use crate::quantization::TensorClass;
 
@@ -55,6 +55,7 @@ fn score_ordering_lower_nrmse_higher_score() {
             ..Default::default()
         },
         status: SweepCandidateStatus::Passed,
+        failure_reason: SweepFailureReason::None,
         score: 0.0,
         wall_ms: 100,
     };

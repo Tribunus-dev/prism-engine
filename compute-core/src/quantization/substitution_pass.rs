@@ -161,29 +161,28 @@ fn pack_for_candidate(
             Some((codes, meta, unpacked))
         }
         "NF4" => {
-            // Read candidate parameters — pack_nf4_weights currently uses tile-level defaults
-            let _group_size_param = candidate.parameters.get("group_size")
+            let group_size = candidate.parameters.get("group_size")
                 .and_then(|v| v.as_u64()).unwrap_or(32) as usize;
-            let _codebook_param = candidate.parameters.get("codebook")
-                .and_then(|v| v.as_str()).unwrap_or("BitsAndBytesNf4");
-            let _affine_mode_param = candidate.parameters.get("affine_mode")
-                .and_then(|v| v.as_str()).unwrap_or("ScaleOnly");
-            let (codes, scales, biases, _num_tiles, _num_groups) =
-                crate::nf4tile640::pack_nf4_weights(weights, in_f as usize, out_f as usize);
+            let (codes, scales, biases, _extra) =
+                crate::quantization::sweep::families::nf4::pack_nf4_matrix(
+                    weights, in_f as usize, out_f as usize, group_size);
             let mut meta = Vec::with_capacity(scales.len() * 4 + biases.len() * 4);
             for &s in &scales { meta.extend_from_slice(&s.to_le_bytes()); }
             for &b in &biases { meta.extend_from_slice(&b.to_le_bytes()); }
-            let unpacked = crate::nf4tile640::unpack_nf4_weights(&codes, &scales, &biases, in_f as usize, out_f as usize);
+            let unpacked = crate::nf4tile640::unpack_nf4_weights_with_group_size(
+                &codes, &scales, &biases, in_f as usize, out_f as usize, group_size);
             Some((codes, meta, unpacked))
         }
         "INT8" => {
-            let _group_size_param = candidate.parameters.get("group_size")
+            let group_size = candidate.parameters.get("group_size")
                 .and_then(|v| v.as_u64()).unwrap_or(128) as usize;
-            let (codes, scales, biases) =
-                crate::nf4tile640::pack_int8_weights(weights, in_f as usize, out_f as usize);
+            let (codes, scales, biases, _extra) =
+                crate::quantization::sweep::families::int8::pack_int8_matrix_with_group_size(
+                    weights, in_f as usize, out_f as usize, group_size);
             let mut meta = Vec::with_capacity(scales.len() * 4);
             for &s in &scales { meta.extend_from_slice(&s.to_le_bytes()); }
-            let unpacked = crate::nf4tile640::unpack_int8_weights(&codes, &scales, &biases, in_f as usize, out_f as usize);
+            let unpacked = crate::nf4tile640::unpack_int8_weights_with_group_size(
+                &codes, &scales, &biases, in_f as usize, out_f as usize, group_size);
             Some((codes, meta, unpacked))
         }
         "FP16" => {

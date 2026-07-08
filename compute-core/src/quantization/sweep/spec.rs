@@ -17,10 +17,50 @@ pub enum PolicyMode {
     ProductionCandidateOnly,
 }
 
-// ── Re-exports ─────────────────────────────────────────────────────────────────
-// SweepCandidateStatus is defined in the parent module (mod.rs).
-// Re-export it here so runner.rs and other dependents can reach it via `spec::`.
-pub use super::SweepCandidateStatus;
+// ── SweepFailureReason ──────────────────────────────────────────────────────────
+
+/// Reason a sweep candidate was rejected.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SweepFailureReason {
+    /// Candidate passed all gates.
+    None,
+    /// Weight-space NRMSE exceeded the gate threshold.
+    WeightNrmse,
+    /// Weight-space zero-collapse ratio exceeded the gate threshold.
+    ZeroCollapse,
+    /// Operator NRMSE exceeded the gate threshold.
+    OperatorNrmse,
+    /// Operator max-absolute tail exceeded the gate threshold (e.g., patch_dense pattern).
+    OperatorMaxAbsTail,
+    /// Operator cosine dissimilarity below threshold.
+    OperatorCosine,
+    /// Operator norm drift too large.
+    NormDrift,
+    /// Byte savings below minimum useful threshold.
+    InsufficientByteSavings,
+    /// Hardware validation required but not available.
+    HardwareEvidenceMissing,
+    /// Rollout validation required but not available.
+    RolloutEvidenceMissing,
+    /// Candidate has unsupported parameters (wrong group_size, etc.).
+    UnsupportedParameter,
+    /// Candidate is disallowed by the current policy.
+    DisallowedByPolicy,
+    /// Candidate codec not implemented yet (e.g., SymInt4).
+    NotImplemented,
+    /// Quality drift exceeded acceptable threshold.
+    QualityDrift,
+    /// Health/stability failure.
+    HealthOrStability,
+    /// Catch-all for unexpected failures.
+    Other(String),
+}
+
+impl Default for SweepFailureReason {
+    fn default() -> Self {
+        Self::None
+    }
+}
 
 // ── Tensor selection ────────────────────────────────────────────────────────────
 
@@ -37,6 +77,21 @@ pub enum TensorSelector {
         class: TensorClass,
         max_tensors: usize,
     },
+    /// Depth-stratified sampling for efficient family validation.
+    DepthAware(DepthAwareSelector),
+}
+
+/// Select tensors by family, stratified by depth.
+/// Instead of testing every tensor, test representative samples
+/// from early, middle, and late layers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DepthAwareSelector {
+    /// Tensor class to filter by. If empty, apply to all.
+    pub tensor_class: String,
+    /// Depth ranges to sample: e.g. ["0-3", "20-25", "42-46"]
+    pub depth_ranges: Vec<String>,
+    /// Max total tensors to select.
+    pub max_tensors: usize,
 }
 
 // ── Codec parameter enums ───────────────────────────────────────────────────────
@@ -121,6 +176,10 @@ pub struct Nf4SweepGrid {
     pub affine_modes: Vec<AffineMode>,
     pub clip_policies: Vec<ClippingPolicy>,
     pub optimizers: Vec<GroupOptimizer>,
+    /// If true, generate both unweighted and activation-weighted variants
+    /// for each parameter combination.
+    #[serde(default)]
+    pub activation_weighted: bool,
 }
 
 /// Parameter grid for symmetric INT4 codec variants.

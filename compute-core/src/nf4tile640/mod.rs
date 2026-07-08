@@ -60,7 +60,37 @@ pub const GROUP_SIZE: usize = 128;
 pub const GROUPS_PER_TILE: usize = 5; // 640 / 128
 
 /// Total elements per tile.
+/// Default tile element count for the Tile640 family.
+/// This is the tuning target for GPU workgroup convergence.
+/// Other families (Tile256, Tile1024) may be added for different hardware targets.
 pub const TILE_ELEMENTS: usize = 640;
+
+/// Metadata for a tile family — shape and group defaults.
+///
+/// `tile_elements` is the number of scalar values packed into one tile.
+/// `tile_rows` and `tile_cols` describe the logical matrix-tile shape
+/// used by the execution-profile layer (these mirror
+/// `execution_profile::TileShape::tile640` for compositional consistency;
+/// the product rows × cols may exceed `tile_elements` since the two
+/// numbers live at different abstraction levels).
+#[derive(Debug, Clone, Copy)]
+pub struct TileFamilySpec {
+    pub name: &'static str,
+    pub tile_elements: usize,
+    pub tile_rows: usize,
+    pub tile_cols: usize,
+}
+
+impl TileFamilySpec {
+    pub const fn tile640() -> Self {
+        Self {
+            name: "Tile640",
+            tile_elements: 640,
+            tile_rows: 640,
+            tile_cols: 640,
+        }
+    }
+}
 
 /// Bytes per u32 word.
 pub const PACKED_WORD_BYTES: usize = 4;
@@ -1290,6 +1320,17 @@ mod tests {
             (max_val - 1.0).abs() < 1e-6,
             "max should be 1.0, got {max_val}"
         );
+    }
+
+    #[test]
+    fn tile_family_spec_tile640_is_correct() {
+        let spec = TileFamilySpec::tile640();
+        assert_eq!(spec.name, "Tile640");
+        assert_eq!(spec.tile_elements, 640);
+        assert_eq!(spec.tile_rows, 640);
+        assert_eq!(spec.tile_cols, 640);
+        assert_eq!(spec.tile_elements, TILE_ELEMENTS,
+            "TileFamilySpec::tile640() elements must match TILE_ELEMENTS constant");
     }
 
     #[test]

@@ -33,7 +33,9 @@ use crate::quantization::sweep::spec::{
     SweepValidationConfig, TensorSelector, PolicyMode,
 };
 use crate::quantization::validation::validate_weight_space;
-use crate::quantization::sweep::SweepCandidateStatus;
+use crate::quantization::sweep::{
+    SweepCandidateStatus, SweepFailureReason,
+};
 
 /// Fully-resolved tensor metadata from scanning safetensors.
 #[derive(Debug, Clone)]
@@ -155,11 +157,250 @@ pub fn select_tensors(
                     }
                 }
             }
+            TensorSelector::DepthAware(sel) => {
+                let ranges = match parse_depth_ranges(&sel.depth_ranges) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let class_filter = if sel.tensor_class.is_empty() {
+                    None
+                } else {
+                    Some(sel.tensor_class.as_str())
+                };
+                let mut count = 0;
+                for e in entries.iter() {
+                    if count >= sel.max_tensors {
+                        break;
+                    }
+                    // Filter by tensor class if specified
+                    if let Some(class_name) = class_filter {
+                        let entry_class = format!("{:?}", e.tensor_class);
+                        if entry_class != class_name {
+                            continue;
+                        }
+                    }
+                    // Filter by depth (layer index fast-path, then string fallback)
+                    if matches_depth_by_entry(e, &ranges) {
+                        selected.push(e.clone());
+                        count += 1;
+                    }
+                }
+            }
         }
     }
     selected
 }
 
+/// Parse "start-end" depth range strings into (usize, usize) pairs.
+fn parse_depth_ranges(ranges: &[String]) -> Result<Vec<(usize, usize)>, String> {
+    ranges.iter().map(|r| {
+        let parts: Vec<&str> = r.split('-').collect();
+        if parts.len() != 2 {
+            return Err(format!("Invalid range: {}", r));
+        }
+        let start: usize = parts[0].parse()
+            .map_err(|_| format!("Invalid start in range: {}", r))?;
+        let end: usize = parts[1].parse()
+            .map_err(|_| format!("Invalid end in range: {}", r))?;
+        Ok((start, end))
+    }).collect()
+}
+
+/// Check whether a tensor entry falls within any of the given depth ranges.
+/// Uses `layer_index` as a fast-path when available, falling back to string
+/// parsing of the "layers.N." pattern in the tensor key.
+fn matches_depth_by_entry(entry: &TensorEntry, depth_ranges: &[(usize, usize)]) -> bool {
+    let layer = match entry.layer_index {
+        Some(idx) => idx as usize,
+        None => {
+            // Fallback: try to extract layer number from "layers.N." pattern
+            let Some(dot_idx) = entry.key.find("layers.") else {
+                return false;
+            };
+            let remainder = &entry.key[dot_idx + 7..]; // skip "layers."
+            let num_str: String = remainder.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let Ok(n) = num_str.parse::<usize>() else {
+                return false;
+            };
+            n
+        }
+    };
+    depth_ranges.iter().any(|(start, end)| layer >= *start && layer <= *end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::quantization::sweep::spec::DepthAwareSelector;
+
+    #[test]
+    fn test_parse_depth_ranges() {
+        let ranges = vec!["0-3".to_string(), "20-25".to_string(), "42-46".to_string()];
+        let parsed = parse_depth_ranges(&ranges).unwrap();
+        assert_eq!(parsed, vec![(0, 3), (20, 25), (42, 46)]);
+    }
+
+    #[test]
+    fn test_parse_depth_ranges_invalid() {
+        assert!(parse_depth_ranges(&["abc".to_string()]).is_err());
+        assert!(parse_depth_ranges(&["5-3-2".to_string()]).is_err());
+        assert!(parse_depth_ranges(&["-3".to_string()]).is_err());
+    }
+
+    #[test]
+    fn test_matches_depth_by_entry_layer_index() {
+        let e = TensorEntry {
+            key: "model.layers.5.self_attn.q_proj.weight".into(),
+            dtype: "F32".into(),
+            shape: vec![4096, 4096],
+            tensor_class: TensorClass::DecoderAttentionProjection,
+            layer_index: Some(5),
+        };
+        let ranges = [(0, 3), (20, 25), (42, 46)];
+        assert!(!matches_depth_by_entry(&e, &ranges));
+        let ranges2 = [(4, 6), (20, 25)];
+        assert!(matches_depth_by_entry(&e, &ranges2));
+    }
+
+    #[test]
+    fn test_matches_depth_by_entry_fallback() {
+        // Key has "layers.N." pattern but layer_index is None
+        let e = TensorEntry {
+            key: "model.layers.12.self_attn.v_proj.weight".into(),
+            dtype: "F32".into(),
+            shape: vec![4096, 4096],
+            tensor_class: TensorClass::DecoderAttentionProjection,
+            layer_index: None, // fallback path
+        };
+        let ranges = [(10, 15)];
+        assert!(matches_depth_by_entry(&e, &ranges));
+        let ranges2 = [(0, 3)];
+        assert!(!matches_depth_by_entry(&e, &ranges2));
+    }
+
+    #[test]
+    fn test_matches_depth_by_entry_no_layer() {
+        // Key doesn't look like a layer at all
+        let e = TensorEntry {
+            key: "model.lm_head.weight".into(),
+            dtype: "F32".into(),
+            shape: vec![32000, 4096],
+            tensor_class: TensorClass::OutputHead,
+            layer_index: None,
+        };
+        let ranges = [(0, 100)];
+        assert!(!matches_depth_by_entry(&e, &ranges));
+    }
+
+    #[test]
+    fn test_depth_aware_selector_empty_class() {
+        // Empty tensor_class means select all classes
+        let entries = vec![
+            TensorEntry {
+                key: "model.layers.0.self_attn.q_proj.weight".into(),
+                dtype: "F32".into(),
+                shape: vec![4096, 4096],
+                tensor_class: TensorClass::DecoderAttentionProjection,
+                layer_index: Some(0),
+            },
+            TensorEntry {
+                key: "model.layers.25.self_attn.q_proj.weight".into(),
+                dtype: "F32".into(),
+                shape: vec![4096, 4096],
+                tensor_class: TensorClass::DecoderAttentionProjection,
+                layer_index: Some(25),
+            },
+        ];
+        let selector = TensorSelector::DepthAware(DepthAwareSelector {
+            tensor_class: String::new(),
+            depth_ranges: vec!["0-5".to_string()],
+            max_tensors: 10,
+        });
+        let selected = select_tensors(&entries, &[selector]);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].key, "model.layers.0.self_attn.q_proj.weight");
+    }
+
+    #[test]
+    fn test_depth_aware_selector_class_filter() {
+        let entries = vec![
+            TensorEntry {
+                key: "model.layers.0.self_attn.q_proj.weight".into(),
+                dtype: "F32".into(),
+                shape: vec![4096, 4096],
+                tensor_class: TensorClass::DecoderAttentionProjection,
+                layer_index: Some(0),
+            },
+            TensorEntry {
+                key: "model.layers.0.mlp.gate_proj.weight".into(),
+                dtype: "F32".into(),
+                shape: vec![4096, 11008],
+                tensor_class: TensorClass::DecoderMlpProjection,
+                layer_index: Some(0),
+            },
+        ];
+        // Filter only MLP projections
+        let selector = TensorSelector::DepthAware(DepthAwareSelector {
+            tensor_class: "DecoderMlpProjection".to_string(),
+            depth_ranges: vec!["0-5".to_string()],
+            max_tensors: 10,
+        });
+        let selected = select_tensors(&entries, &[selector]);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].tensor_class, TensorClass::DecoderMlpProjection);
+    }
+
+    #[test]
+    fn test_depth_aware_selector_max_tensors() {
+        let entries: Vec<TensorEntry> = (0..20).map(|i| TensorEntry {
+            key: format!("model.layers.{}.self_attn.q_proj.weight", i),
+            dtype: "F32".into(),
+            shape: vec![4096, 4096],
+            tensor_class: TensorClass::DecoderAttentionProjection,
+            layer_index: Some(i),
+        }).collect();
+        let selector = TensorSelector::DepthAware(DepthAwareSelector {
+            tensor_class: String::new(),
+            depth_ranges: vec!["0-30".to_string()],
+            max_tensors: 5,
+        });
+        let selected = select_tensors(&entries, &[selector]);
+        assert_eq!(selected.len(), 5);
+    }
+
+    #[test]
+    fn test_depth_aware_serde_roundtrip() {
+        let sel = DepthAwareSelector {
+            tensor_class: "DecoderAttentionProjection".to_string(),
+            depth_ranges: vec!["0-3".to_string(), "20-25".to_string()],
+            max_tensors: 50,
+        };
+        let json = serde_json::to_string(&sel).unwrap();
+        let back: DepthAwareSelector = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tensor_class, "DecoderAttentionProjection");
+        assert_eq!(back.depth_ranges, vec!["0-3", "20-25"]);
+        assert_eq!(back.max_tensors, 50);
+    }
+
+    #[test]
+    fn test_depth_aware_enum_serde_roundtrip() {
+        let sel = TensorSelector::DepthAware(DepthAwareSelector {
+            tensor_class: String::new(),
+            depth_ranges: vec!["0-3".to_string()],
+            max_tensors: 10,
+        });
+        let json = serde_json::to_string(&sel).unwrap();
+        let back: TensorSelector = serde_json::from_str(&json).unwrap();
+        match &back {
+            TensorSelector::DepthAware(d) => {
+                assert!(d.tensor_class.is_empty());
+                assert_eq!(d.depth_ranges, vec!["0-3"]);
+                assert_eq!(d.max_tensors, 10);
+            }
+            _ => panic!("expected DepthAware"),
+        }
+    }
+}
 /// Load a single tensor's f32 data from safetensors into a Vec<f32>.
 pub fn load_tensor_f32(source_dir: &Path, target_key: &str) -> Result<Vec<f32>, String> {
     let mut dir =
@@ -317,7 +558,7 @@ pub fn run_weight_sweep(
 
     // For each tensor, generate candidates and run them.
     for tensor_entry in &selected {
-        let mut tensor_candidate_count = 0usize;
+        let _tensor_candidate_count = 0usize;
         let tensor_count =
             tensor_count.fetch_add(1, Ordering::SeqCst) + 1;
         eprintln!(
@@ -410,9 +651,11 @@ pub fn run_weight_sweep(
             let family_id = family_id_from_label(&fc.label);
 
             // Conditional pack — skip for Metal-evaluated NF4 candidates
-            let (codes, scales, biases, extra_bytes, recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if metal_metrics.contains_key(&idx) {
+            let (codes, scales, biases, extra_bytes, _recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if metal_metrics.contains_key(&idx) {
                 (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
             } else {
+                // TODO(imatrix): load per-column quant_weights and pass to packer
+                // for activation-weighted candidates when imatrix data is available.
                 let (c, s, b, e) = (fc.packer)(&weights, in_features, out_features);
                 let r = (fc.unpacker)(&c, &s, &b, &e, in_features, out_features);
                 (c, s, b, e, r)
@@ -446,20 +689,22 @@ pub fn run_weight_sweep(
             };
 
             // Determine status
-            let status = if wr.passes(&profile) {
-                SweepCandidateStatus::Passed
+            let (status, failure_reason) = if wr.passes(&profile) {
+                (SweepCandidateStatus::Passed, SweepFailureReason::None)
             } else if wr.nrmse <= profile.investigation_nrmse_ceiling
                 && wr.zero_collapse_ratio <= profile.max_zero_collapse_ratio
             {
-                SweepCandidateStatus::InvestigationBand {
-                    warning: format!(
-                        "wNRMSE={:.4} exceeds target {:.4}, within ceiling",
-                        wr.nrmse, profile.max_weight_nrmse
-                    ),
-                }
+                (
+                    SweepCandidateStatus::InvestigationBand {
+                        warning: format!(
+                            "wNRMSE={:.4} exceeds target {:.4}, within ceiling",
+                            wr.nrmse, profile.max_weight_nrmse
+                        ),
+                    },
+                    SweepFailureReason::None,
+                )
             } else {
-                SweepCandidateStatus::Rejected {
-                    reason: if wr.zero_collapse_ratio > profile.max_zero_collapse_ratio {
+                let reason = if wr.zero_collapse_ratio > profile.max_zero_collapse_ratio {
                         format!(
                             "zeroCollapse={:.4} > max={:.4}",
                             wr.zero_collapse_ratio, profile.max_zero_collapse_ratio
@@ -469,8 +714,13 @@ pub fn run_weight_sweep(
                             "wNRMSE={:.4} > ceiling={:.4}",
                             wr.nrmse, profile.investigation_nrmse_ceiling
                         )
-                    },
-                }
+                    };
+                let fr = if wr.zero_collapse_ratio > profile.max_zero_collapse_ratio {
+                    SweepFailureReason::ZeroCollapse
+                } else {
+                    SweepFailureReason::WeightNrmse
+                };
+                (SweepCandidateStatus::Rejected { reason }, fr)
             };
 
             let elem_count = in_features * out_features;
@@ -493,7 +743,7 @@ pub fn run_weight_sweep(
                 source_layout: SourceMatrixLayout::CheckpointOutByIn,
                 logical_shape: MatrixShape { in_features, out_features },
                 packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
-                weight: wr.clone(), status: status.clone(), score: 0.0,
+                weight: wr.clone(), status: status.clone(), failure_reason: failure_reason.clone(), score: 0.0,
                 wall_ms: t1.elapsed().as_millis() as u64,
             }, scoring_config);
 
@@ -505,7 +755,7 @@ pub fn run_weight_sweep(
                 source_layout: SourceMatrixLayout::CheckpointOutByIn,
                 logical_shape: MatrixShape { in_features, out_features },
                 packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
-                weight: wr, status, score, wall_ms: t1.elapsed().as_millis() as u64,
+                weight: wr, status, failure_reason, score, wall_ms: t1.elapsed().as_millis() as u64,
             });
         }); // end par_iter for_each
         all_receipts.extend(new_receipts.into_inner().unwrap());
@@ -622,6 +872,7 @@ pub fn write_sweep_output(out_dir: &Path, result: &SweepRunResult) -> Result<(),
             "weight_rmse": (r.weight.rmse * 10000.0).round() / 10000.0,
             "weight_max_abs_error": (r.weight.max_abs_error * 10000.0).round() / 10000.0,
             "status": format!("{:?}", r.status),
+            "failure_reason": r.failure_reason,
             "score": (r.score * 10000.0).round() / 10000.0,
             "wall_ms": r.wall_ms,
         });

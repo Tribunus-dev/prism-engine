@@ -4,6 +4,7 @@
 //! receipts for analysis and policy selection.
 
 pub mod candidate;
+pub mod evidence_ledger;
 pub mod families;
 pub mod runner;
 pub mod spec;

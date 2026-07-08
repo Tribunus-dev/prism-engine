@@ -11,7 +11,7 @@ use crate::quantization::contract::{
 use crate::quantization::contract::SourceMatrixLayout;
 use crate::quantization::sweep::spec::{
     OverlayMode, QuantPolicy, RescueGranularity, RescueSchedule, RescueSelector,
-    SweepScoringConfig,
+    SweepFailureReason, SweepScoringConfig,
 };
 use crate::quantization::sweep::SweepCandidateStatus;
 
@@ -132,6 +132,7 @@ impl PackedCandidate {
 #[derive(Debug, Clone)]
 pub struct QuantSweepReceipt {
     pub receipt_version: u16,
+    pub failure_reason: SweepFailureReason,
     pub run_id: String,
     pub tensor_key: String,
     pub tensor_class: TensorClass,
@@ -158,8 +159,9 @@ impl Serialize for QuantSweepReceipt {
         S: Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut s = serializer.serialize_struct("QuantSweepReceipt", 15)?;
+        let mut s = serializer.serialize_struct("QuantSweepReceipt", 16)?;
         s.serialize_field("receipt_version", &self.receipt_version)?;
+        s.serialize_field("failure_reason", &self.failure_reason)?;
         s.serialize_field("run_id", &self.run_id)?;
         s.serialize_field("tensor_key", &self.tensor_key)?;
         s.serialize_field("tensor_class", &tensor_class_name(&self.tensor_class))?;
@@ -187,6 +189,7 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
         #[serde(field_identifier, rename_all = "snake_case")]
         enum Field {
             ReceiptVersion,
+            FailureReason,
             RunId,
             TensorKey,
             TensorClass,
@@ -233,6 +236,7 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                 let mut status = None::<SweepCandidateStatus>;
                 let mut score = None::<f64>;
                 let mut wall_ms = None::<u64>;
+                let mut failure_reason = None::<SweepFailureReason>;
 
                 while let Some(key) = map.next_key::<Field>()? {
                     match key {
@@ -290,6 +294,9 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                         Field::WallMs => {
                             wall_ms = Some(map.next_value()?);
                         }
+                        Field::FailureReason => {
+                            failure_reason = Some(map.next_value()?);
+                        }
                     }
                 }
 
@@ -318,6 +325,9 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                 let score = score.ok_or_else(|| de::Error::missing_field("score"))?;
                 let wall_ms = wall_ms.ok_or_else(|| de::Error::missing_field("wall_ms"))?;
 
+                let failure_reason =
+                    failure_reason.unwrap_or(SweepFailureReason::None);
+
                 Ok(QuantSweepReceipt {
                     receipt_version,
                     run_id,
@@ -327,6 +337,7 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                     family,
                     parameters,
                     bytes,
+                    failure_reason,
                     source_layout,
                     logical_shape,
                     packed_layout,
@@ -341,6 +352,7 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
         deserializer.deserialize_struct(
             "QuantSweepReceipt",
             &[
+                    "failure_reason",
                 "receipt_version",
                 "run_id",
                 "tensor_key",

@@ -16,6 +16,7 @@
 //! E — Research activation-weighted
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ── Profile definition ───────────────────────────────────────────────────
 
@@ -318,6 +319,176 @@ pub struct ProfileComparisonRow {
     pub overall_status: String,
 }
 
+// ── Cimage layout types ─────────────────────────────────────────────────
+
+/// How groups of values are arranged within a tile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GroupAxis {
+    /// Groups are contiguous in storage order (current behavior).
+    PackedContiguous,
+    /// Groups span output-index space.
+    OutputAxis,
+    /// Groups span input-index space (critical for patch_dense).
+    InputAxis,
+    /// Groups do not cross tile boundaries.
+    TileLocal,
+}
+
+/// Logical shape of a single tile in rows and columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TileShape {
+    pub rows: u32,
+    pub cols: u32,
+}
+
+impl TileShape {
+    pub const fn tile640() -> Self {
+        Self { rows: 640, cols: 640 }
+    }
+    pub const fn elements(&self) -> u32 {
+        self.rows * self.cols
+    }
+}
+
+/// A family of tiles sharing a shape and default group sizes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TileFamily {
+    pub name: String,
+    pub tile_shape: TileShape,
+    pub default_group_sizes: Vec<u32>,
+}
+
+impl TileFamily {
+    pub fn tile640() -> Self {
+        Self {
+            name: "Tile640".into(),
+            tile_shape: TileShape::tile640(),
+            default_group_sizes: vec![32, 64, 128],
+        }
+    }
+}
+
+/// Whether the storage is row-major or column-major.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StorageOrder {
+    RowMajor,
+    ColumnMajor,
+}
+
+/// How metadata (scales, offsets) is laid out relative to tile data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MetadataLayout {
+    AdjacentTile,
+    SeparatedManifest,
+    Interleaved,
+}
+
+/// Memory residency policy for a view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResidencyMode {
+    AlwaysMapped,
+    LazyMapped,
+    MaterializeOnFirstUse,
+    EphemeralScratch,
+    MutuallyExclusiveViewGroup,
+}
+
+/// Concrete tile layout describing how a tensor is physically stored.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhysicalTileLayout {
+    pub format: String,
+    pub tile_family: TileFamily,
+    pub logical_shape: [u32; 2],
+    pub storage_order: StorageOrder,
+    pub tile_shape: TileShape,
+    pub group_size: u32,
+    pub group_axis: GroupAxis,
+    pub metadata_layout: MetadataLayout,
+    pub padding_policy: String,
+    pub alignment_bytes: u32,
+    pub interleave: String,
+}
+
+impl Default for PhysicalTileLayout {
+    fn default() -> Self {
+        Self {
+            format: "NF4".into(),
+            tile_family: TileFamily::tile640(),
+            logical_shape: [0, 0],
+            storage_order: StorageOrder::RowMajor,
+            tile_shape: TileShape::tile640(),
+            group_size: 32,
+            group_axis: GroupAxis::PackedContiguous,
+            metadata_layout: MetadataLayout::AdjacentTile,
+            padding_policy: "ZeroPadToTile".into(),
+            alignment_bytes: 256,
+            interleave: "None".into(),
+        }
+    }
+}
+
+/// How an execution lane sees a tensor — offset, length, codec overrides.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionView {
+    pub lane: String,
+    pub data_offset: u64,
+    pub data_length: u64,
+    pub metadata_offset: Option<u64>,
+    pub metadata_length: Option<u64>,
+    pub codec_overrides: HashMap<String, String>,
+    pub repacking_required: bool,
+    pub residency: ResidencyMode,
+}
+
+/// Broad hardware class with bandwidth and budget estimates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HardwareTargetClass {
+    A18Neo,
+    MBase,
+    MPro,
+    MMax,
+    MUltra,
+}
+
+impl HardwareTargetClass {
+    pub fn memory_gb(&self) -> u32 {
+        match self {
+            HardwareTargetClass::A18Neo => 8,
+            HardwareTargetClass::MBase => 16,
+            HardwareTargetClass::MPro => 24,
+            HardwareTargetClass::MMax => 48,
+            HardwareTargetClass::MUltra => 96,
+        }
+    }
+    pub fn bandwidth_gbps(&self) -> u32 {
+        match self {
+            HardwareTargetClass::A18Neo => 60,
+            HardwareTargetClass::MBase => 120,
+            HardwareTargetClass::MPro => 273,
+            HardwareTargetClass::MMax => 546,
+            HardwareTargetClass::MUltra => 800,
+        }
+    }
+    pub fn scratch_budget_mb(&self) -> u32 {
+        match self {
+            HardwareTargetClass::A18Neo => 256,
+            HardwareTargetClass::MBase => 512,
+            HardwareTargetClass::MPro => 1024,
+            HardwareTargetClass::MMax => 2048,
+            HardwareTargetClass::MUltra => 4096,
+        }
+    }
+    pub fn max_views_per_tensor(&self) -> u32 {
+        match self {
+            HardwareTargetClass::A18Neo => 1,
+            HardwareTargetClass::MBase => 1,
+            HardwareTargetClass::MPro => 2,
+            HardwareTargetClass::MMax => 2,
+            HardwareTargetClass::MUltra => 3,
+        }
+    }
+}
+
 // ── Profile builders ─────────────────────────────────────────────────────
 
 impl ExecutionProfile {
@@ -390,7 +561,134 @@ impl ExecutionProfile {
     }
 }
 
-// ── Profile runner ──────────────────────────────────────────────────────
+// ── LayoutResolver ──────────────────────────────────────────────────────
+
+/// Layout resolution request for a single tensor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutRequest {
+    pub tensor_key: String,
+    pub tensor_class: String,
+    pub logical_shape: [u32; 2],
+    pub codec: String,
+    pub codec_params: HashMap<String, serde_json::Value>,
+    pub target_class: HardwareTargetClass,
+}
+
+/// Layout resolution result for a single tensor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutResolution {
+    pub tensor_key: String,
+    pub layout: PhysicalTileLayout,
+    pub execution_views: Vec<ExecutionView>,
+    pub reason: String,
+}
+
+/// LayoutResolver — selects tile shape, group axis, metadata placement,
+/// and execution views for a tensor given its codec and target hardware.
+///
+/// This is the middle stage of the compiler pipeline:
+///   PolicyResolver (codec) → LayoutResolver (arrangement) →
+///   ExecutionPlanner (lane + residency)
+pub struct LayoutResolver;
+
+impl LayoutResolver {
+    /// Resolve the physical layout for a single tensor.
+    pub fn resolve(
+        request: &LayoutRequest,
+    ) -> LayoutResolution {
+        // Default tile family from target class
+        let tile_family = match request.target_class {
+            HardwareTargetClass::A18Neo | HardwareTargetClass::MBase | HardwareTargetClass::MPro => {
+                TileFamily::tile640()
+            }
+            HardwareTargetClass::MMax | HardwareTargetClass::MUltra => {
+                TileFamily::tile640()
+            }
+        };
+
+        // Infer group_axis from tensor class patterns
+        let group_axis = if request.tensor_class.contains("VisionPatchProjection")
+            || request.tensor_class.contains("patch_dense")
+        {
+            GroupAxis::InputAxis
+        } else {
+            GroupAxis::PackedContiguous
+        };
+
+        // Group size from codec params or default
+        let group_size = request.codec_params.get("group_size")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(32) as u32;
+
+        let layout = PhysicalTileLayout {
+            format: request.codec.clone(),
+            tile_family,
+            logical_shape: request.logical_shape,
+            storage_order: StorageOrder::RowMajor,
+            tile_shape: TileShape::tile640(),
+            group_size,
+            group_axis,
+            metadata_layout: MetadataLayout::AdjacentTile,
+            padding_policy: "ZeroPadToTile".into(),
+            alignment_bytes: 256,
+            interleave: "None".into(),
+        };
+
+        // Build execution views based on target class
+        let max_views = request.target_class.max_views_per_tensor();
+        let mut execution_views = Vec::new();
+
+        // Primary view: metal fused decode (always available)
+        execution_views.push(ExecutionView {
+            lane: "metal_fused_decode".into(),
+            data_offset: 0,
+            data_length: 0,
+            metadata_offset: None,
+            metadata_length: None,
+            codec_overrides: HashMap::new(),
+            repacking_required: false,
+            residency: ResidencyMode::AlwaysMapped,
+        });
+
+        // Secondary view: A second metal view is available on targets with
+        // sufficient scratch budget, e.g., to allow tensor API or ANE path.
+        // The compiler will fill offsets once packing is done.
+        if max_views >= 2 {
+            execution_views.push(ExecutionView {
+                lane: "metal_tensor_api".into(),
+                data_offset: 0,
+                data_length: 0,
+                metadata_offset: None,
+                metadata_length: None,
+                codec_overrides: HashMap::new(),
+                repacking_required: true,
+                residency: if max_views >= 3 {
+                    ResidencyMode::AlwaysMapped
+                } else {
+                    ResidencyMode::MutuallyExclusiveViewGroup
+                },
+            });
+        }
+
+        let reason = format!(
+            "class={} codec={} target={:?} group_axis={:?} views={}",
+            request.tensor_class,
+            request.codec,
+            request.target_class,
+            group_axis,
+            execution_views.len(),
+        );
+
+        LayoutResolution {
+            tensor_key: request.tensor_key.clone(),
+            layout,
+            execution_views,
+            reason,
+        }
+    }
+}
+
+// ── Profile builders ─────────────────────────────────────────────────────
 
 /// Configuration for a profile benchmark run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -736,5 +1034,83 @@ mod tests {
         assert_eq!(matrix.len(), 2);
         assert!(matrix[0].speedup_vs_raw.is_none());
         assert!(matrix[1].speedup_vs_raw.is_some());
+    }
+
+    #[test]
+    fn test_group_axis_roundtrip() {
+        let v = vec![
+            GroupAxis::PackedContiguous,
+            GroupAxis::OutputAxis,
+            GroupAxis::InputAxis,
+            GroupAxis::TileLocal,
+        ];
+        for g in v {
+            let json = serde_json::to_string(&g).unwrap();
+            let back: GroupAxis = serde_json::from_str(&json).unwrap();
+            assert_eq!(g, back);
+        }
+    }
+
+    #[test]
+    fn test_tile_family_defaults() {
+        let t = TileFamily::tile640();
+        assert_eq!(t.name, "Tile640");
+        assert_eq!(t.tile_shape.elements(), 409600);
+        assert!(t.default_group_sizes.contains(&32));
+    }
+
+    #[test]
+    fn test_hardware_class_constants() {
+        assert_eq!(HardwareTargetClass::A18Neo.memory_gb(), 8);
+        assert_eq!(HardwareTargetClass::MMax.bandwidth_gbps(), 546);
+        assert_eq!(HardwareTargetClass::MUltra.scratch_budget_mb(), 4096);
+    }
+    #[test]
+    fn test_layout_resolver_decoder_projection() {
+        let req = LayoutRequest {
+            tensor_key: "model.layers.5.self_attn.q_proj.weight".into(),
+            tensor_class: "Gemma4.DecoderAttentionProjection".into(),
+            logical_shape: [4096, 3840],
+            codec: "NF4".into(),
+            codec_params: [("group_size".into(), serde_json::json!(32))].into(),
+            target_class: HardwareTargetClass::MBase,
+        };
+        let res = LayoutResolver::resolve(&req);
+        assert_eq!(res.layout.group_size, 32);
+        assert_eq!(res.layout.group_axis, GroupAxis::PackedContiguous);
+        assert_eq!(res.layout.format, "NF4");
+        assert!(res.reason.contains("group_axis=PackedContiguous"));
+    }
+
+    #[test]
+    fn test_layout_resolver_patch_dense() {
+        let req = LayoutRequest {
+            tensor_key: "patch_dense".into(),
+            tensor_class: "Gemma4.VisionPatchProjection".into(),
+            logical_shape: [2048, 6912],
+            codec: "RawF32".into(),
+            codec_params: HashMap::new(),
+            target_class: HardwareTargetClass::MBase,
+        };
+        let res = LayoutResolver::resolve(&req);
+        assert_eq!(res.layout.group_axis, GroupAxis::InputAxis);
+        assert_eq!(res.execution_views.len(), 1);
+    }
+
+    #[test]
+    fn test_layout_resolver_max_target_multiple_views() {
+        let req = LayoutRequest {
+            tensor_key: "model.layers.10.mlp.gate_proj.weight".into(),
+            tensor_class: "Gemma4.DecoderMlpProjection".into(),
+            logical_shape: [16384, 4096],
+            codec: "NF4".into(),
+            codec_params: [("group_size".into(), serde_json::json!(32))].into(),
+            target_class: HardwareTargetClass::MMax,
+        };
+        let res = LayoutResolver::resolve(&req);
+        // On MMax (max_views=2) we get 2 views
+        assert_eq!(res.execution_views.len(), 2);
+        assert_eq!(res.execution_views[0].lane, "metal_fused_decode");
+        assert_eq!(res.execution_views[1].lane, "metal_tensor_api");
     }
 }

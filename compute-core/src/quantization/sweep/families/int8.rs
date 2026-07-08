@@ -31,7 +31,7 @@ fn int8_metadata_bytes_with_group_size(in_features: usize, out_features: usize, 
 /// Pack INT8 weights with configurable group size.
 /// Each group of `group_size` elements gets its own f32 scale.
 /// groups_per_tile = 640 / group_size.
-fn pack_int8_matrix_with_group_size(
+pub(crate) fn pack_int8_matrix_with_group_size(
     weights: &[f32],
     in_features: usize,
     out_features: usize,

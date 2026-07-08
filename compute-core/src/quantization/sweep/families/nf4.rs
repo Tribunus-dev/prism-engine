@@ -3,7 +3,7 @@
 //! Sweeps over group sizes, codebooks, affine modes, clipping policies, and
 //! group optimizers, producing a `FamilyCandidate` per combination.
 
-use serde_json::json;
+use serde_json::{json, Value};
 use rayon::prelude::*;
 
 use crate::nf4tile640::{
@@ -296,6 +296,97 @@ pub fn pack_nf4_matrix_with_params(
     }
 
     (codes, scales, biases, Vec::new())
+
+
+}
+
+/// Activation-weighted group quantization helper.
+///
+/// Searches for the best scale, bias, and first-element codebook index
+/// minimizing weighted error:
+/// ```text
+/// weighted_error = sum(weight[i] * abs(original[i] - quantized[i]))
+/// ```
+/// When `weights` is `None`, each element has equal weight (unweighted path).
+/// When `weights` is `Some`, columns with higher importance scores bias the
+/// nearest-neighbor assignment.
+///
+/// `group_weight_sum` is reserved for future normalization when weights are
+/// propagated from an imatrix pipeline.
+#[allow(dead_code)]
+fn quantize_group_weighted(
+    group_values: &[f32],
+    codebook: &[f32],
+    weights: Option<&[f32]>,
+    group_weight_sum: f32,
+) -> (u8, f32, f32) {
+    let _ = group_weight_sum; // reserved for future normalization
+
+    let has_weights = weights.is_some();
+    let weights = weights.unwrap_or(&[]);
+
+    // Simple brute-force over candidate scale/bias to minimize weighted error.
+    let max_cb_abs = codebook.iter().fold(0.0f32, |a, &b| a.max(b.abs())).max(1e-10);
+    let max_abs = group_values
+        .iter()
+        .map(|v| v.abs())
+        .fold(0.0f32, |a, b| a.max(b))
+        .max(1e-10);
+
+    let candidate_factors = [0.25f32, 0.5, 1.0, 2.0, 4.0];
+    let candidate_bias = [-0.5f32, 0.0, 0.5];
+
+    let mut best_scale = max_abs / max_cb_abs;
+    let mut best_bias = 0.0f32;
+    let mut best_error = f32::MAX;
+
+    for &factor in &candidate_factors {
+        let scale_try = max_abs / max_cb_abs * factor;
+        for &bias_frac in &candidate_bias {
+            let bias_try = max_abs * bias_frac;
+            let mut total = 0.0f32;
+            for (i, &val) in group_values.iter().enumerate() {
+                let normalized = ((val - bias_try) / scale_try).clamp(-1.0, 1.0);
+                let (_, code_val) = codebook
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, a), (_, b)| {
+                        (**a - normalized)
+                            .abs()
+                            .partial_cmp(&(**b - normalized).abs())
+                            .unwrap()
+                    })
+                    .unwrap_or((0, &0.0));
+                let quantized = code_val * scale_try + bias_try;
+                let w = if has_weights && i < weights.len() {
+                    weights[i]
+                } else {
+                    1.0
+                };
+                total += w * (val - quantized).abs();
+            }
+            if total < best_error {
+                best_error = total;
+                best_scale = scale_try;
+                best_bias = bias_try;
+            }
+        }
+    }
+
+    // Re-evaluate codebook index for the first element with optimal scale/bias.
+    let best_code = group_values.first().map(|&first_val| {
+        let norm = ((first_val - best_bias) / best_scale).clamp(-1.0, 1.0);
+        codebook
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                (**a - norm).abs().partial_cmp(&(**b - norm).abs()).unwrap()
+            })
+            .map(|(i, _)| i as u8)
+            .unwrap_or(0)
+    }).unwrap_or(0);
+
+    (best_code, best_scale, best_bias)
 }
 
 /// Create the default NF4 sweep grid with standard parameter ranges.
@@ -317,6 +408,7 @@ pub fn create_nf4_grid() -> Nf4SweepGrid {
             GroupOptimizer::None,
             GroupOptimizer::AffineAlternating { max_iters: 3 },
         ],
+        activation_weighted: false,
     }
 }
 
@@ -476,12 +568,60 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
                                 "NF4_g{}_cb{:?}_aff{:?}_clip{:?}_opt{:?}",
                                 gs, codebook, affine, clip, opt,
                             ),
-                            parameters: params_json,
+                            parameters: params_json.clone(),
                             packer,
                             unpacker,
                             code_bytes_fn: nf4_code_bytes,
                             metadata_bytes_fn: metadata_fn,
                         });
+
+                        // Activation-weighted variant: generate an additional
+                        // candidate with a weight-aware packer closure.
+                        // The packer captures quant_weights = None for now;
+                        // the imatrix pipeline (separate PR) will supply
+                        // per-column importance scores.
+                        if grid.activation_weighted {
+                            let aw_params = params.clone();
+                            let _aw_cb = nf4_codebook(aw_params.codebook);
+                            let _quant_weights: Option<Vec<f32>> = None;
+                            let aw_packer: Box<
+                                dyn Fn(&[f32], usize, usize)
+                                    -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>)
+                                    + Send + Sync,
+                            > = Box::new(move |w: &[f32], r: usize, c: usize| {
+                                let _ = &_quant_weights;
+                                pack_nf4_matrix_with_params(w, r, c, &aw_params)
+                            });
+                            let aw_unpacker = Box::new(
+                                move |codes: &[u8], scales: &[f32], biases: &[f32],
+                                      _extra: &[u8], rows: usize, cols: usize| {
+                                    unpack_nf4_weights_with_group_size_and_codebook(
+                                        codes, scales, biases, rows, cols, gs, _aw_cb)
+                                },
+                            );
+                            let aw_meta = params.clone();
+                            let aw_meta_fn = Box::new(move |r: usize, c: usize| {
+                                nf4_metadata_bytes_with_params(r, c, &aw_meta)
+                            });
+                            let mut aw_json = params_json.clone();
+                            if let Some(obj) = aw_json.as_object_mut() {
+                                obj.insert(
+                                    "activation_weighted".to_string(),
+                                    Value::Bool(true),
+                                );
+                            }
+                            candidates.push(FamilyCandidate {
+                                label: format!(
+                                    "NF4_g{}_cb{:?}_aff{:?}_clip{:?}_opt{:?}_aw",
+                                    gs, codebook, affine, clip, opt,
+                                ),
+                                parameters: aw_json,
+                                packer: aw_packer,
+                                unpacker: aw_unpacker,
+                                code_bytes_fn: nf4_code_bytes,
+                                metadata_bytes_fn: aw_meta_fn,
+                            });
+                        }
                     }
                 }
             }
@@ -640,7 +780,17 @@ mod tests {
             affine_modes: vec![AffineMode::ScaleOnly],
             clip_policies: vec![ClippingPolicy::None],
             optimizers: vec![GroupOptimizer::None],
+            activation_weighted: false,
         };
+        // Verify serialization round-trip includes activation_weighted
+        let json = serde_json::to_value(&grid).unwrap();
+        assert_eq!(
+            json.get("activation_weighted"),
+            Some(&serde_json::Value::Bool(false)),
+            "Nf4SweepGrid must serialize activation_weighted"
+        );
+        let deserialized: Nf4SweepGrid = serde_json::from_value(json).unwrap();
+        assert!(!deserialized.activation_weighted);
         let candidates = generate_nf4_candidates(&grid);
         assert_eq!(
             candidates.len(),
@@ -895,6 +1045,7 @@ mod tests {
                 GroupOptimizer::None,
                 GroupOptimizer::AffineAlternating { max_iters: 3 },
             ],
+            activation_weighted: false,
         };
         let candidates = generate_nf4_candidates(&grid);
         // 1 group_size × 2 codebooks → 1 (only PrismCurrent) × 2 affine modes × 1 clip × 2 optimizers = 4
