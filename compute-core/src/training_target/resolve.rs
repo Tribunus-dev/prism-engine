@@ -64,6 +64,14 @@ pub enum TrainingTargetResolveError {
     /// required fields, etc.).
     #[error("Invalid policy structure: {0}")]
     InvalidPolicy(String),
+    /// An explicit layout field in the policy entry has an invalid value.
+    #[error("Invalid layout field '{field}': {detail}")]
+    InvalidLayoutField {
+        /// The field name that contains the invalid value.
+        field: String,
+        /// Details about why the value is invalid.
+        detail: String,
+    },
 }
 
 // ── Digest helper ──────────────────────────────────────────────────────────
@@ -128,11 +136,90 @@ fn get_bool(obj: &Value, key: &str, default: bool) -> bool {
 
 /// Build a `PhysicalTileLayout` from a policy entry, falling back to defaults
 /// for missing fields.
-fn build_layout(_entry: &Value) -> PhysicalTileLayout {
-    // For milestone 1, use default PhysicalTileLayout (no policy-driven
-    // tile-spec extraction yet — that requires TileFamilySpec type from a
-    // later milestone).
-    PhysicalTileLayout::default()
+fn build_layout(entry: &Value) -> Result<PhysicalTileLayout, TrainingTargetResolveError> {
+    // Start with defaults, then override from explicit policy fields.
+    let mut layout = PhysicalTileLayout::default();
+
+    // ── tile_family ──────────────────────────────────────────────────────
+    if let Some(val) = entry.get("tile_family").and_then(|v| v.as_str()) {
+        match val {
+            "Tile640" | "tile640" => {
+                layout.tile_family = crate::execution_profile::TileFamily::tile640();
+                layout.tile_shape = crate::execution_profile::TileShape::tile640();
+            }
+            _ => {
+                return Err(TrainingTargetResolveError::InvalidLayoutField {
+                    field: "tile_family".into(),
+                    detail: format!("unrecognized tile family: '{val}'; expected 'Tile640'"),
+                });
+            }
+        }
+    }
+
+    // ── group_size ───────────────────────────────────────────────────────
+    if let Some(val) = entry.get("group_size").and_then(|v| v.as_u64()) {
+        layout.group_size = val as u32;
+    }
+
+    // ── group_axis ───────────────────────────────────────────────────────
+    if let Some(val) = entry.get("group_axis").and_then(|v| v.as_str()) {
+        match val {
+            "PackedContiguous" | "packed_contiguous" => {
+                layout.group_axis = crate::execution_profile::GroupAxis::PackedContiguous;
+            }
+            "OutputAxis" | "output_axis" => {
+                layout.group_axis = crate::execution_profile::GroupAxis::OutputAxis;
+            }
+            "InputAxis" | "input_axis" => {
+                layout.group_axis = crate::execution_profile::GroupAxis::InputAxis;
+            }
+            "TileLocal" | "tile_local" => {
+                layout.group_axis = crate::execution_profile::GroupAxis::TileLocal;
+            }
+            _ => {
+                return Err(TrainingTargetResolveError::InvalidLayoutField {
+                    field: "group_axis".into(),
+                    detail: format!("unrecognized group_axis: '{val}'"),
+                });
+            }
+        }
+    }
+
+    // ── metadata_layout ──────────────────────────────────────────────────
+    if let Some(val) = entry.get("metadata_layout").and_then(|v| v.as_str()) {
+        match val {
+            "AdjacentTile" | "adjacent_tile" | "adjacent" => {
+                layout.metadata_layout = crate::execution_profile::MetadataLayout::AdjacentTile;
+            }
+            "SeparatedManifest" | "separated_manifest" | "manifest" => {
+                layout.metadata_layout = crate::execution_profile::MetadataLayout::SeparatedManifest;
+            }
+            "Interleaved" | "interleaved" => {
+                layout.metadata_layout = crate::execution_profile::MetadataLayout::Interleaved;
+            }
+            _ => {
+                return Err(TrainingTargetResolveError::InvalidLayoutField {
+                    field: "metadata_layout".into(),
+                    detail: format!("unrecognized metadata_layout: '{val}'"),
+                });
+            }
+        }
+    }
+
+    // ── format ───────────────────────────────────────────────────────────
+    if let Some(val) = entry.get("format").and_then(|v| v.as_str()) {
+        layout.format = val.to_string();
+    } else if let Some(val) = entry.get("codec").and_then(|v| v.as_str()) {
+        // Derive format from codec as a default when not explicitly set.
+        layout.format = val.to_string();
+    }
+
+    // ── alignment_bytes ──────────────────────────────────────────────────
+    if let Some(val) = entry.get("alignment_bytes").and_then(|v| v.as_u64()) {
+        layout.alignment_bytes = val as u32;
+    }
+
+    Ok(layout)
 }
 
 // ── Tensor key match generation ────────────────────────────────────────────
@@ -324,7 +411,7 @@ impl TrainingTargetResolver {
             }
 
             let tensor_key_match = build_tensor_key_matches(&tensor_class);
-            let physical_layout = build_layout(entry);
+            let physical_layout = build_layout(entry)?;
             let training_method = select_training_method(entry, codec);
             let gates = build_gates(entry);
             let priority = extract_priority(entry);
@@ -551,5 +638,46 @@ mod tests {
             "sha256 of 'hello world' should match known value"
         );
         assert_eq!(digest.len(), 64);
+    }
+
+    #[test]
+    fn training_layout_parses_from_policy() {
+        let resolver = TrainingTargetResolver;
+        let options = TrainingTargetResolveOptions {
+            experimental_raw_f32: true,
+            ..Default::default()
+        };
+
+        let policy = json!({
+            "model_family": "layout-test",
+            "target_cimage_profile": "test",
+            "entries": [
+                {
+                    "tensor_class": "test_weight",
+                    "codec": "RawF32",
+                    "tile_family": "Tile640",
+                    "group_size": 64,
+                    "group_axis": "PackedContiguous",
+                    "metadata_layout": "AdjacentTile",
+                    "alignment_bytes": 512
+                }
+            ]
+        });
+
+        let result = resolver.resolve(&policy, &options).unwrap();
+        let target = &result[0].weight_targets[0];
+
+        assert_eq!(target.physical_layout.tile_family.name, "Tile640");
+        assert_eq!(target.physical_layout.tile_shape.rows, 640);
+        assert_eq!(target.physical_layout.group_size, 64);
+        assert_eq!(
+            target.physical_layout.group_axis,
+            crate::execution_profile::GroupAxis::PackedContiguous
+        );
+        assert_eq!(
+            target.physical_layout.metadata_layout,
+            crate::execution_profile::MetadataLayout::AdjacentTile
+        );
+        assert_eq!(target.physical_layout.alignment_bytes, 512);
     }
 }

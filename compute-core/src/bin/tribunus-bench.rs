@@ -62,8 +62,8 @@ fn print_usage() {
 fn main() {
     // macOS workaround: suppress MallocStackLogging noise on stderr during exit.
     unsafe {
-        std::env::set_var("MallocStackLogging", "0");
-        std::env::set_var("MallocStackLoggingNoCompact", "0");
+        std::env::remove_var("MallocStackLogging");
+        std::env::remove_var("MallocStackLoggingNoCompact");
     }
 
     let args: Vec<String> = std::env::args().collect();

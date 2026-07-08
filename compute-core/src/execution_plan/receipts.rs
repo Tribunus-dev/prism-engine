@@ -87,11 +87,25 @@ pub struct FusionEvaluationReceipt {
 
 // ── BackendLoweringReceipt ────────────────────────────────────────────
 
+/// How ready a lowered kernel is for execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LoweringReadiness {
+    /// Only a descriptor / template — not yet compiled into an executable form.
+    DescriptorOnly,
+    /// Compilation validated — ready for execution (PSO cached, lowered).
+    Executable,
+}
+
+impl Default for LoweringReadiness {
+    fn default() -> Self {
+        Self::DescriptorOnly
+    }
+}
+
 /// Receipt for a backend lowering decision.
 ///
-/// Records which backend was chosen and the specialization key digest
-/// so pipeline audits can reconstruct which kernel template produced
-/// the final compiled artifact.
+/// Records which backend was chosen, the specialization key digest,
+/// and the readiness level for execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendLoweringReceipt {
     /// The backend target the fused group was lowered to.
@@ -101,6 +115,9 @@ pub struct BackendLoweringReceipt {
     /// Human-readable identifier for the fusion pattern, derived from
     /// the kernel template (e.g. `"FusedGateUpActivation"`).
     pub fusion_pattern_id: String,
+    /// Readiness level — whether the lowered kernel is compiled/executable.
+    #[serde(default)]
+    pub readiness: LoweringReadiness,
 }
 
 // ── RegionFusionReceipt ───────────────────────────────────────────────
@@ -184,6 +201,7 @@ pub fn collect_lowering_receipt(
         target,
         specialization_key_digest: digest,
         fusion_pattern_id,
+        readiness: LoweringReadiness::default(),
     }
 }
 
@@ -295,6 +313,8 @@ mod tests {
                             inputs: vec![],
                             outputs: vec![],
                             internal_values: vec![],
+                            codec_family: crate::execution_plan::CodecFamily::RawF32,
+                            precision_plan: None,
                         },
                         target: BackendTarget::MetalFusedGpu,
                         support: FusionSupportLevel::Full,

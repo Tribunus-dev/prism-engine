@@ -217,8 +217,8 @@ fn main() {
     // to suppress "can't turn off malloc stack logging because it was not enabled"
     // on stderr during process exit, which corrupts terminal output.
     unsafe {
-        std::env::set_var("MallocStackLogging", "0");
-        std::env::set_var("MallocStackLoggingNoCompact", "0");
+        std::env::remove_var("MallocStackLogging");
+        std::env::remove_var("MallocStackLoggingNoCompact");
     }
     // ── CLI argument parsing ──────────────────────────────────────────────
     let args: Vec<String> = std::env::args().collect();

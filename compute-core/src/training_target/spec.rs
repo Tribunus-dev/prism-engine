@@ -9,6 +9,7 @@ use crate::execution_plan::CodecFamily;
 use crate::execution_profile::PhysicalTileLayout;
 
 use super::gates::{QuantTrainingMethod, WeightTrainingGates};
+use super::gates::TargetedLossTerm;
 
 // ── TrainingTargetSpec ─────────────────────────────────────────────────
 
@@ -282,4 +283,26 @@ pub struct TrainingEvidenceGate {
     pub weight: f64,
     /// If true, this gate is mandatory; failure marks the target as Failed.
     pub required: bool,
+}
+
+// ── MixedPrecisionTrainingTarget ────────────────────────────────────────
+
+/// Describes a mixed-precision training target for a tensor class.
+///
+/// Mixed-precision targets specify a base codec and a set of allowed
+/// override codecs that can be selectively promoted during training.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MixedPrecisionTrainingTarget {
+    /// Tensor class label (e.g. "attention.q_proj", "mlp.gate_proj").
+    pub tensor_class: String,
+    /// The base codec used for non-promoted groups.
+    pub base_codec: CodecFamily,
+    /// Set of codecs that may be promoted to (rescue codecs).
+    pub allowed_override_codecs: Vec<CodecFamily>,
+    /// Maximum fraction of units that may be promoted (0.0 to 1.0).
+    pub max_override_fraction: f64,
+    /// Target fraction of units to promote — the planner aims for this.
+    pub target_override_fraction: f64,
+    /// Loss terms that apply to this target during training.
+    pub loss_terms: Vec<TargetedLossTerm>,
 }

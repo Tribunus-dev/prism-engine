@@ -26,6 +26,9 @@ pub mod capture;
 pub mod backend_capability;
 pub mod fusion_scheduler;
 pub mod fusion_schedule_types;
+pub mod precision_plan;
+pub mod mixed_precision;
+pub mod receipts;
 
 /// Identifier for a reusable kernel template.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -81,6 +84,10 @@ pub enum ExecutionMode {
     RegionBatched,
     /// Experimental megakernel fusion of entire subgraphs.
     MegakernelExperimental,
+    /// Fail-closed mode: schedule() returns NoViableBackend for unassignable groups.
+    Compile,
+    /// Best-effort mode: groups are emitted even when no backend is viable.
+    Explore,
 }
 
 // ── Codec family ─────────────────────────────────────────────────────────
@@ -93,6 +100,7 @@ pub enum CodecFamily {
     RawF32,
     SymInt4,
     Ternary,
+    Mixed,
 }
 /// Default codec family for unquantized paths.
 impl Default for CodecFamily {
@@ -241,6 +249,39 @@ pub struct ScheduledKernelOp {
     pub validation_requirements: KernelValidationRequirements,
 }
 
+impl ScheduledKernelOp {
+    /// Validate that the lowered op has all required fields populated.
+    ///
+    /// Returns an error if bindings are empty, buffer_uses are empty,
+    /// or the dispatch shape has a zero grid_x dimension.
+    pub fn validate_lowered(&self) -> Result<(), LoweredOpValidationError> {
+        if self.bindings.is_empty() {
+            return Err(LoweredOpValidationError::NoBindings);
+        }
+        if self.buffer_uses.is_empty() {
+            return Err(LoweredOpValidationError::NoBufferUses);
+        }
+        if self.dispatch_shape.grid_x == 0 {
+            return Err(LoweredOpValidationError::ZeroGridX);
+        }
+        Ok(())
+    }
+
+}
+
+
+
+/// Errors from validating a lowered ScheduledKernelOp.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoweredOpValidationError {
+    /// The op has no buffer bindings.
+    NoBindings,
+    /// The op has no buffer uses.
+    NoBufferUses,
+    /// The dispatch shape has a zero grid_x dimension.
+    ZeroGridX,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KernelOpKind {
     RmsNorm,
@@ -328,6 +369,7 @@ impl Default for KernelValidationRequirements {
     fn default() -> Self {
         Self { allows_in_place_input_output: false, requires_zeroed_output: false, requires_aligned_metadata: false, requires_hardware_validation: false }
     }
+
 }
 
 // ── ExecutionRegion ──────────────────────────────────────────────────────
@@ -655,3 +697,6 @@ mod tests {
 
 // TODO: migrate to node-based API; currently uses schedule-level types
 // pub(crate) mod fusion_tests;
+
+#[cfg(test)]
+pub(crate) mod fusion_hardening_tests;

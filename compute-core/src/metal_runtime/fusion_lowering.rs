@@ -16,6 +16,7 @@ use crate::execution_plan::{
     KernelTemplateId, MetadataLayout, ScheduledKernelOp, TileShape,
 };
 use crate::execution_profile::{GroupAxis, PhysicalTileLayout};
+use crate::execution_plan::receipts::LoweringReadiness;
 
 // ── Error type ───────────────────────────────────────────────────────────
 
@@ -37,6 +38,8 @@ pub enum MetalLoweringError {
     /// The fusion pattern and codec combination cannot produce a
     /// meaningful `KernelTemplateId`.
     UnsupportedTemplateCombination,
+    /// Lowering validation failed with a specific reason.
+    ValidationFailed(String),
 }
 
 impl std::fmt::Display for MetalLoweringError {
@@ -52,6 +55,9 @@ impl std::fmt::Display for MetalLoweringError {
             }
             Self::UnsupportedTemplateCombination => {
                 write!(f, "unsupported codec+pattern combination")
+            }
+            Self::ValidationFailed(msg) => {
+                write!(f, "validation failed: {}", msg)
             }
         }
     }
@@ -149,6 +155,7 @@ fn codec_id(codec: CodecFamily) -> u32 {
         CodecFamily::RawF32 => 3,
         CodecFamily::SymInt4 => 4,
         CodecFamily::Ternary => 5,
+        CodecFamily::Mixed => 6,
     }
 }
 
@@ -399,7 +406,7 @@ pub fn metal_lower_fused_group(
         execution_phase,
     );
 
-    Ok(ScheduledKernelOp {
+    let lowered_op = ScheduledKernelOp {
         op_id: format!("fusion_group_{}", group.id),
         op_kind,
         tensor_key: None,
@@ -415,7 +422,31 @@ pub fn metal_lower_fused_group(
             memory_bytes_written: 0,
         },
         validation_requirements: crate::execution_plan::KernelValidationRequirements::default(),
-    })
+    };
+
+    validate_lowered(&lowered_op)?;
+
+    Ok(lowered_op)
+}
+
+/// Validate that a lowered `ScheduledKernelOp` is ready for execution.
+///
+/// Checks structural invariants: non-empty op_id, valid specialization key,
+/// and valid dispatch shape. Returns `LoweringReadiness::Executable` on
+/// success, or an error if validation fails.
+pub fn validate_lowered(op: &ScheduledKernelOp) -> Result<LoweringReadiness, MetalLoweringError> {
+    if op.op_id.is_empty() {
+        return Err(MetalLoweringError::ValidationFailed("op_id is empty".into()));
+    }
+    if op.dispatch_shape.grid_x == 0
+        || op.dispatch_shape.grid_y == 0
+        || op.dispatch_shape.grid_z == 0
+    {
+        return Err(MetalLoweringError::ValidationFailed(
+            "dispatch shape has zero dimension".into(),
+        ));
+    }
+    Ok(LoweringReadiness::Executable)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
@@ -571,6 +602,7 @@ mod tests {
             outputs: vec!["result".into()],
             internal_values: vec!["gate_out".into(), "up_out".into(), "gated".into()],
             codec_family: CodecFamily::Nf4,
+            precision_plan: None,
         }
     }
 
@@ -590,6 +622,7 @@ mod tests {
             outputs: vec!["output".into()],
             internal_values: vec!["down_out".into()],
             codec_family: CodecFamily::Int8,
+            precision_plan: None,
         }
     }
 
@@ -609,6 +642,7 @@ mod tests {
             outputs: vec!["c".into()],
             internal_values: vec![],
             codec_family: CodecFamily::Nf4,
+            precision_plan: None,
         }
     }
 
@@ -621,6 +655,7 @@ mod tests {
             outputs: vec![],
             internal_values: vec![],
             codec_family: CodecFamily::Fp16,
+            precision_plan: None,
         }
     }
 

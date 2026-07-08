@@ -95,11 +95,11 @@ impl ExecutionPlanner {
                 _ => 8,
             },
             allow_materialization: true,
-            forbid_cross_lane: true,
             allow_research_fusions: matches!(
                 execution_mode,
                 ExecutionMode::MegakernelExperimental
             ),
+            execution_mode,
         };
 
         let selection_policy = FusionSelectionPolicy {
@@ -128,6 +128,7 @@ impl ExecutionPlanner {
                         outputs: node.outputs.clone(),
                         internal_values: vec![],
                         codec_family: CodecFamily::RawF32,
+                        precision_plan: None,
                     })
                     .collect(),
                 receipts: vec![],

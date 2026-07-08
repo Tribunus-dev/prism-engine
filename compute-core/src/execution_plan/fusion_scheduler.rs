@@ -13,6 +13,7 @@
 use crate::execution_plan::backend_capability::{
     BackendCapabilityRegistry, BackendLoweringTarget, BackendRole, FusionSupport,
 };
+use crate::execution_plan::ExecutionMode;
 use crate::execution_plan::fusion::{DataflowGraph, DataflowNode, FusedGroup};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -29,11 +30,18 @@ pub struct FusionPolicy {
     pub max_group_size: usize,
     pub allow_materialization: bool,
     pub allow_research_fusions: bool,
+    /// How the scheduler treats groups without a viable backend.
+    pub execution_mode: ExecutionMode,
 }
 
 impl Default for FusionPolicy {
     fn default() -> Self {
-        Self { max_group_size: 8, allow_materialization: true, allow_research_fusions: false }
+        Self {
+            max_group_size: 8,
+            allow_materialization: true,
+            allow_research_fusions: false,
+            execution_mode: ExecutionMode::Explore,
+        }
     }
 }
 
@@ -112,6 +120,7 @@ impl Default for FusionSelectionPolicy {
 pub enum FusionError {
     EmptyGraph,
     NoViableBackend { group_id: String, reason: String },
+    UnselectedGroupInCompileMode { group_id: String },
 }
 
 impl std::fmt::Display for FusionError {
@@ -120,6 +129,9 @@ impl std::fmt::Display for FusionError {
             FusionError::EmptyGraph => write!(f, "fusion schedule received an empty graph"),
             FusionError::NoViableBackend { group_id, reason } => {
                 write!(f, "no viable backend for group {group_id}: {reason}")
+            }
+            FusionError::UnselectedGroupInCompileMode { group_id } => {
+                write!(f, "unselected group {group_id} in Compile mode")
             }
         }
     }
@@ -181,6 +193,19 @@ impl FusionScheduler {
             } else {
                 Self::prod_select(&candidates)
             };
+
+            // In Compile mode, a group without any viable backend is a hard error.
+            if policy.execution_mode == ExecutionMode::Compile && selected.is_none() {
+                let reason = if candidates.is_empty() {
+                    "no backend supports this group".into()
+                } else {
+                    "no backend selected (all rejected)".into()
+                };
+                return Err(FusionError::NoViableBackend {
+                    group_id: group.id.clone(),
+                    reason,
+                });
+            }
 
             receipts.push(FusionEvaluation {
                 source_nodes: body_indices,
@@ -280,6 +305,7 @@ impl FusionScheduler {
             outputs,
             internal_values,
             codec_family: crate::execution_plan::CodecFamily::Fp16,
+            precision_plan: None,
         }
     }
 
@@ -374,6 +400,7 @@ mod tests {
     use super::*;
     use crate::execution_plan::backend_capability::default_registry;
     use crate::execution_plan::fusion::DataflowGraphBuilder;
+    use crate::execution_plan::ExecutionMode;
     use BackendLoweringTarget::*;
     use BackendRole::*;
 
@@ -403,7 +430,7 @@ mod tests {
         let reg = default_registry();
         let scheduler = FusionScheduler::new(reg);
         let graph = DataflowGraphBuilder::build_mlp();
-        let policy = FusionPolicy { max_group_size: 8, allow_materialization: true, allow_research_fusions: false };
+        let policy = FusionPolicy { max_group_size: 8, allow_materialization: true, allow_research_fusions: false, execution_mode: ExecutionMode::Explore };
         let sel_policy = FusionSelectionPolicy::default();
         let schedule = scheduler.schedule(&graph, &policy, &sel_policy, ProductionHotPath).unwrap();
 

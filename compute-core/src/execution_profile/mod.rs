@@ -313,6 +313,22 @@ pub enum StabilityStatus {
     Rejected,
 }
 
+// ── ReceiptEvidenceKind ─────────────────────────────────────────────────
+
+/// Classifies the evidence level of a profile run receipt.
+///
+/// Distinguishes template/synthetic placeholders from real hardware
+/// measurements so gate-eligible policies can reject non-measured results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ReceiptEvidenceKind {
+    /// Placeholder template result — no actual execution occurred.
+    Template,
+    /// Synthetic result derived from analytical models or interpolation.
+    Synthetic,
+    /// Result obtained from actual hardware execution with real measurements.
+    Measured,
+}
+
 // ── Profile comparison matrix ────────────────────────────────────────────
 
 /// One row in the profile comparison matrix.
@@ -942,6 +958,8 @@ impl ProfileRunConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthSamplerConfig {}
 
+
+
 /// Results of a single profile benchmark execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileRunResult {
@@ -949,6 +967,8 @@ pub struct ProfileRunResult {
     pub memory: MemoryReceipt,
     pub quality: Option<QualityDriftReceipt>,
     pub health: RuntimeHealthReceipt,
+    /// Classification of how this result was obtained.
+    pub evidence_kind: ReceiptEvidenceKind,
 }
 
 impl ProfileRunResult {
@@ -972,6 +992,14 @@ impl ProfileRunResult {
             return "demo_safe".into();
         }
         "admissible".into()
+    }
+
+    /// Returns true only when the evidence is based on real hardware measurements.
+    ///
+    /// Template or synthetic results are not eligible for promotion gates;
+    /// only `Measured` evidence can gate production deployment decisions.
+    pub fn can_promote_policy(&self) -> bool {
+        self.evidence_kind == ReceiptEvidenceKind::Measured
     }
 }
 
@@ -998,6 +1026,7 @@ pub fn run_profile(config: &ProfileRunConfig) -> ProfileRunResult {
             ..quality_template()
         }),
         health,
+        evidence_kind: ReceiptEvidenceKind::Synthetic,
     }
 }
 
@@ -1330,5 +1359,29 @@ mod tests {
         assert_eq!(res.execution_views.len(), 2);
         assert_eq!(res.execution_views[0].lane, "metal_fused_decode");
         assert_eq!(res.execution_views[1].lane, "metal_tensor_api");
+    }
+    #[test]
+    fn profile_template_not_gate_eligible() {
+        let template = ProfileRunResult {
+            execution: ExecutionProfileReceipt {
+                profile_id: "template-test".into(),
+                ..execution_template("template-test")
+            },
+            memory: memory_template(),
+            quality: None,
+            health: health_template("template-test"),
+            evidence_kind: ReceiptEvidenceKind::Template,
+        };
+        assert!(!template.can_promote_policy());
+        let synthetic = ProfileRunResult {
+            evidence_kind: ReceiptEvidenceKind::Synthetic,
+            ..template.clone()
+        };
+        assert!(!synthetic.can_promote_policy());
+        let measured = ProfileRunResult {
+            evidence_kind: ReceiptEvidenceKind::Measured,
+            ..template
+        };
+        assert!(measured.can_promote_policy());
     }
 }

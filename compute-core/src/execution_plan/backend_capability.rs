@@ -14,6 +14,7 @@ pub use crate::cpu_runtime::capabilities::CpuProgramOp;
 
 use crate::execution_plan::fusion::FusedGroup;
 use crate::execution_plan::CodecFamily;
+use crate::execution_plan::precision_plan::PrecisionScope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -167,6 +168,28 @@ pub struct BackendFusionRule {
     pub requires_same_lane: bool,
 }
 
+// ── MixedPrecisionCapability ────────────────────────────────────────────
+
+/// Describes whether and how a backend supports mixed-precision execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MixedPrecisionCapability {
+    /// Whether the backend can handle mixed-codec groups.
+    pub supports_mixed_precision: bool,
+    /// Which precision scopes the backend supports.
+    pub supported_scopes: Vec<PrecisionScope>,
+    /// Codec families that can serve as the base (default) precision.
+    pub supported_base_codecs: Vec<CodecFamily>,
+    /// Codec families that can serve as overrides.
+    pub supported_override_codecs: Vec<CodecFamily>,
+    /// Maximum fraction of weights that may use override codecs (None = unbounded).
+    pub max_override_fraction: Option<f64>,
+    /// Whether the backend requires separate sidecar buffers for override tiles.
+    pub requires_sidecar: bool,
+    /// Whether the backend supports inline mixed tiles (override data within
+    /// the same buffer).
+    pub supports_inline_mixed_tiles: bool,
+}
+
 // ── BackendCapability ─────────────────────────────────────────────────────
 
 /// Full capability declaration for one backend target.
@@ -184,6 +207,8 @@ pub struct BackendCapability {
     pub max_tile_elements: u64,
     /// Fusion rules describing supported op sequences.
     pub rules: Vec<BackendFusionRule>,
+    /// Mixed-precision capability for this backend.
+    pub mixed_precision: MixedPrecisionCapability,
 }
 
 // ── BackendCapabilityRegistry ─────────────────────────────────────────────
@@ -224,9 +249,9 @@ impl BackendCapabilityRegistry {
     ///
     /// Checks:
     /// 1. Backend is registered.
-    /// 2. Group's codec is in the backend's supported list.
-    /// 3. Group size doesn't exceed max_ops_per_group.
-    /// 4. Role is in the backend's supported role list.
+    /// 2. Derive group semantics; detect mixed-codec groups.
+    /// 3. If mixed_codec: route through mixed-precision checks.
+    /// 4. If not mixed: check codec support, max ops, role support.
     pub fn evaluate(
         &self,
         target: BackendLoweringTarget,
@@ -256,7 +281,82 @@ impl BackendCapabilityRegistry {
             }
         };
 
-        // Check codec support.
+        // Derive group semantics to detect mixed-codec groups.
+        let semantics = match group.derive_semantics() {
+            Ok(s) => s,
+            Err(e) => return some(UnsupportedFusionReason::UnsupportedOp(
+                format!("semantic error: {e:?}"),
+            )),
+        };
+
+        // If the group has mixed codecs, route through mixed-precision checks.
+        if semantics.mixed_codec {
+            // Mixed-codec group must have a PrecisionPlan.
+            let plan = match &semantics.precision_plan {
+                Some(p) => p,
+                None => return some(UnsupportedFusionReason::UnsupportedOp(
+                    "MissingPrecisionPlan".into(),
+                )),
+            };
+
+            let mp = &cap.mixed_precision;
+            if !mp.supports_mixed_precision {
+                return some(UnsupportedFusionReason::UnsupportedOp(
+                    format!("mixed precision not supported by {target:?}"),
+                ));
+            }
+
+            // Check scope support.
+            if !mp.supported_scopes.contains(&plan.scope) {
+                return some(UnsupportedFusionReason::UnsupportedOp(
+                    format!("precision scope {:?} not supported by {target:?}", plan.scope),
+                ));
+            }
+
+            // Check base codec support.
+            if !mp.supported_base_codecs.contains(&plan.default_codec) {
+                return some(UnsupportedFusionReason::UnsupportedCodec(plan.default_codec));
+            }
+
+            // Check each override codec and fraction.
+            for override_entry in &plan.overrides {
+                if !mp.supported_override_codecs.contains(&override_entry.codec) {
+                    return some(UnsupportedFusionReason::UnsupportedCodec(override_entry.codec));
+                }
+                if let Some(max_frac) = mp.max_override_fraction {
+                    let override_fraction = 1.0; // conservative: assume full override
+                    if override_fraction > max_frac {
+                        return some(UnsupportedFusionReason::UnsupportedOp(
+                            format!("override fraction {override_fraction} exceeds max {max_frac}"),
+                        ));
+                    }
+                }
+            }
+
+            // Check role support.
+            if !cap.supported_roles.contains(&role) {
+                return some(UnsupportedFusionReason::UnsupportedOp(
+                    "role not supported".into(),
+                ));
+            }
+
+            // Supported — return a positive assessment.
+            return FusionSupport {
+                supported: true,
+                target,
+                reason: None,
+                estimated_latency_us: None,
+                estimated_memory_bytes: None,
+                estimated_scratch_bytes: None,
+                estimated_power_class: PowerClass::Medium,
+                precision_class: PrecisionClass::F32,
+                requires_materialization: true,
+                supports_in_place: true,
+                supports_aliasing: true,
+            };
+        }
+
+        // Non-mixed path: check codec support.
         let codec = group.codec_family;
         if !cap.supported_codecs.contains(&codec) {
             return some(UnsupportedFusionReason::UnsupportedCodec(codec));
@@ -289,6 +389,8 @@ impl BackendCapabilityRegistry {
             supports_aliasing: true,
         }
     }
+
+    /// Return all registered backend targets.
 
     /// Return all registered backend targets.
     pub fn all_targets(&self) -> Vec<BackendLoweringTarget> {
@@ -340,6 +442,15 @@ pub fn default_registry() -> BackendCapabilityRegistry {
                 requires_same_lane: true,
             },
         ],
+        mixed_precision: MixedPrecisionCapability {
+            supports_mixed_precision: true,
+            supported_scopes: vec![PrecisionScope::Tile, PrecisionScope::Group, PrecisionScope::InputAxisSlice, PrecisionScope::OutputAxisSlice],
+            supported_base_codecs: vec![Nf4, Int8, Fp16],
+            supported_override_codecs: vec![Int8, Fp16, RawF32],
+            max_override_fraction: Some(0.10),
+            requires_sidecar: true,
+            supports_inline_mixed_tiles: true,
+        },
     });
 
     // ── AnePlanarEngine ──────────────────────────────────────────────────
@@ -350,6 +461,15 @@ pub fn default_registry() -> BackendCapabilityRegistry {
         max_ops_per_group: 4,
         max_tile_elements: 0,
         rules: vec![],
+        mixed_precision: MixedPrecisionCapability {
+            supports_mixed_precision: true,
+            supported_scopes: vec![PrecisionScope::WholeTensor, PrecisionScope::FusedGroup],
+            supported_base_codecs: vec![Fp16, Int8],
+            supported_override_codecs: vec![Fp16],
+            max_override_fraction: None,
+            requires_sidecar: false,
+            supports_inline_mixed_tiles: false,
+        },
     });
 
     // ── CoreMlHighLevel ──────────────────────────────────────────────────
@@ -360,6 +480,15 @@ pub fn default_registry() -> BackendCapabilityRegistry {
         max_ops_per_group: 1, // no fusion
         max_tile_elements: 0,
         rules: vec![],
+        mixed_precision: MixedPrecisionCapability {
+            supports_mixed_precision: false,
+            supported_scopes: vec![],
+            supported_base_codecs: vec![Fp16, Int8],
+            supported_override_codecs: vec![],
+            max_override_fraction: None,
+            requires_sidecar: false,
+            supports_inline_mixed_tiles: false,
+        },
     });
 
     // ── AccelerateRayonCpu ───────────────────────────────────────────────
@@ -376,6 +505,15 @@ pub fn default_registry() -> BackendCapabilityRegistry {
         max_ops_per_group: 3,
         max_tile_elements: 0,
         rules: vec![],
+        mixed_precision: MixedPrecisionCapability {
+            supports_mixed_precision: true,
+            supported_scopes: vec![PrecisionScope::Tile, PrecisionScope::Group, PrecisionScope::InputAxisSlice],
+            supported_base_codecs: vec![RawF32, Fp16, Int8],
+            supported_override_codecs: vec![RawF32, Fp16, Int8],
+            max_override_fraction: Some(0.25),
+            requires_sidecar: true,
+            supports_inline_mixed_tiles: true,
+        },
     });
 
     reg
@@ -411,6 +549,7 @@ mod tests {
             outputs: vec![],
             internal_values: vec![],
             codec_family: codec,
+            precision_plan: None,
         }
     }
 

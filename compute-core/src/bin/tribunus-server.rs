@@ -53,8 +53,8 @@ async fn main() {
     // Setting to "0" (rather than removing) prevents libsystem_malloc's
     // unconditional thread-cleanup message on macOS 26.5 Metal/OMP.
     unsafe {
-        std::env::set_var("MallocStackLogging", "0");
-        std::env::set_var("MallocStackLoggingNoCompact", "0");
+        std::env::remove_var("MallocStackLogging");
+        std::env::remove_var("MallocStackLoggingNoCompact");
     }
 
     // Pre-parse --config and --help before loading config

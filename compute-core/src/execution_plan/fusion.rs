@@ -12,8 +12,8 @@ use std::collections::{HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use crate::execution_plan::{CodecFamily, DType};
-use crate::execution_profile::PhysicalTileLayout;
+use crate::execution_plan::{CodecFamily, DType, precision_plan::PrecisionPlan};
+use crate::execution_profile::{GroupAxis, MetadataLayout, PhysicalTileLayout};
 
 // ---------------------------------------------------------------------------
 // Core type aliases
@@ -111,6 +111,25 @@ pub struct MatMulContract {
 // DataflowOp
 // ---------------------------------------------------------------------------
 
+/// Discriminant for DataflowOp variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DataflowOpKind {
+    LoadWeight,
+    LoadActivation,
+    Dequantize,
+    MatMul,
+    RmsNorm,
+    SiLU,
+    Gelu,
+    Mul,
+    Add,
+    ResidualAdd,
+    StoreActivation,
+    KvRead,
+    KvWrite,
+    EngramLookup,
+}
+
 /// The operation kind carried by a dataflow node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DataflowOp {
@@ -184,9 +203,147 @@ pub enum DataflowOp {
     },
 }
 
+impl DataflowOp {
+    /// Return the `DataflowOpKind` discriminant for this operation.
+    pub fn kind(&self) -> DataflowOpKind {
+        match self {
+            DataflowOp::LoadWeight { .. } => DataflowOpKind::LoadWeight,
+            DataflowOp::Dequantize { .. } => DataflowOpKind::Dequantize,
+            DataflowOp::MatMul { .. } => DataflowOpKind::MatMul,
+            DataflowOp::RmsNorm { .. } => DataflowOpKind::RmsNorm,
+            DataflowOp::SiLU { .. } => DataflowOpKind::SiLU,
+            DataflowOp::Gelu { .. } => DataflowOpKind::Gelu,
+            DataflowOp::Mul { .. } => DataflowOpKind::Mul,
+            DataflowOp::Add { .. } => DataflowOpKind::Add,
+            DataflowOp::ResidualAdd { .. } => DataflowOpKind::ResidualAdd,
+            DataflowOp::StoreActivation { .. } => DataflowOpKind::StoreActivation,
+            DataflowOp::KvRead { .. } => DataflowOpKind::KvRead,
+            DataflowOp::KvWrite { .. } => DataflowOpKind::KvWrite,
+            // LoadActivation and EngramLookup are not yet defined in DataflowOp.
+            // When added, update the match here.
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // FusedGroup
 // ---------------------------------------------------------------------------
+
+/// Derived semantics for a fused group, describing its codec, data types,
+/// physical layout, and mixed-precision plan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FusedGroupSemantics {
+    /// Codec family from the first LoadWeight node.
+    pub codec_family: Option<CodecFamily>,
+    /// Input dtype for the group.
+    pub input_dtype: Option<DType>,
+    /// Output dtype for the group.
+    pub output_dtype: Option<DType>,
+    /// Physical tile layout from the first LoadWeight node.
+    pub physical_layout: Option<PhysicalTileLayout>,
+    /// Group size from the first LoadWeight tile layout.
+    pub group_size: Option<u32>,
+    /// Group axis from the first LoadWeight tile layout.
+    pub group_axis: Option<GroupAxis>,
+    /// Metadata layout from the first LoadWeight tile layout.
+    pub metadata_layout: Option<MetadataLayout>,
+    /// Whether the group contains mixed codec families.
+    pub mixed_codec: bool,
+    /// Whether mixed precision is active.
+    pub mixed_precision: bool,
+    /// Whether the group contains a LoadWeight node.
+    pub has_weight_load: bool,
+    /// Whether the group has a materialization boundary node.
+    pub has_materialization_boundary: bool,
+    /// Optional PrecisionPlan for mixed-precision groups.
+    pub precision_plan: Option<PrecisionPlan>,
+}
+
+/// Errors that can arise when deriving semantics for a fused group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FusionSemanticError {
+    /// Group body is empty.
+    EmptyGroup,
+    /// No LoadWeight node found in group.
+    NoLoadWeightNode,
+    /// Multiple conflicting codec families found.
+    ConflictingCodecFamilies,
+    /// Mixed codec group is missing a PrecisionPlan.
+    MissingPrecisionPlan,
+}
+
+impl FusedGroup {
+    /// Derive semantics by scanning the group body.
+    ///
+    /// Collects codec family, layout parameters, and mixed-codec detection
+    /// from LoadWeight nodes. Returns errors when semantics cannot be derived
+    /// (empty group, no LoadWeight, conflicting codecs).
+    pub fn derive_semantics(&self) -> Result<FusedGroupSemantics, FusionSemanticError> {
+        if self.body.is_empty() {
+            return Err(FusionSemanticError::EmptyGroup);
+        }
+
+        let mut codec_family: Option<CodecFamily> = None;
+        let mut physical_layout: Option<PhysicalTileLayout> = None;
+        let mut has_weight_load = false;
+        let mut has_materialization_boundary = false;
+        let mut mixed_codec = false;
+
+        for node in &self.body {
+            match &node.op {
+                DataflowOp::LoadWeight { codec, layout, .. } => {
+                    if !has_weight_load {
+                        // First LoadWeight: capture codec and layout.
+                        codec_family = Some(*codec);
+                        physical_layout = Some(layout.clone());
+                    } else {
+                        // Subsequent LoadWeight: check for codec conflict.
+                        if let Some(prev_codec) = codec_family {
+                            if *codec != prev_codec {
+                                mixed_codec = true;
+                            }
+                        }
+                    }
+                    has_weight_load = true;
+                }
+                DataflowOp::StoreActivation { .. }
+                | DataflowOp::KvRead { .. }
+                | DataflowOp::KvWrite { .. } => {
+                    has_materialization_boundary = true;
+                }
+                _ => {}
+            }
+        }
+
+        // Extract group_size, group_axis, metadata_layout from physical layout.
+        let (group_size, group_axis, metadata_layout) = match &physical_layout {
+            Some(layout) => (
+                Some(layout.group_size),
+                Some(layout.group_axis),
+                Some(layout.metadata_layout),
+            ),
+            None => (None, None, None),
+        };
+
+        // A group is mixed-precision only if it has a mixed codec AND a PrecisionPlan.
+        let mixed_precision = mixed_codec && self.precision_plan.is_some();
+
+        Ok(FusedGroupSemantics {
+            codec_family,
+            input_dtype: None,
+            output_dtype: None,
+            physical_layout,
+            group_size,
+            group_axis,
+            metadata_layout,
+            mixed_codec,
+            mixed_precision,
+            has_weight_load,
+            has_materialization_boundary,
+            precision_plan: self.precision_plan.clone(),
+        })
+    }
+}
 
 /// A fused subgraph that can be lowered to a single backend kernel call.
 ///
@@ -202,7 +359,12 @@ pub struct FusedGroup {
     pub outputs: Vec<DataflowBufferId>,
     pub internal_values: Vec<DataflowBufferId>,
     pub codec_family: CodecFamily,
+    pub precision_plan: Option<PrecisionPlan>,
 }
+
+// ---------------------------------------------------------------------------
+// FusedGroupSemantics
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Legacy schedule-level types — used by fusion_scheduler.rs and planar_lowering.rs
@@ -210,7 +372,7 @@ pub struct FusedGroup {
 
 /// Discriminant for schedule-level operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum DataflowOpKind {
+pub enum ScheduledOpKind {
     RmsNorm,
     QkvProjection,
     AttentionScore,
@@ -246,7 +408,7 @@ pub struct DispatchInfo {
 pub struct ScheduledOp {
     pub op_index: usize,
     pub step_name: String,
-    pub op_kind: DataflowOpKind,
+    pub op_kind: ScheduledOpKind,
     pub execution_view: crate::execution_profile::ExecutionView,
     pub input_tensors: Vec<usize>,
     pub output_tensors: Vec<usize>,
@@ -274,7 +436,7 @@ pub enum FusionPattern {
     MlpGateActivation,
     AttentionFused,
     OProjectionResidual,
-    Custom([DataflowOpKind; 3]),
+    Custom([ScheduledOpKind; 3]),
 }
 
 /// A fused group at the schedule level.
@@ -335,13 +497,13 @@ pub fn fuse_and_schedule(
                     2 => {
                         let a = candidate[0].op_kind;
                         let b = candidate[1].op_kind;
-                        if a == DataflowOpKind::QkvProjection && b == DataflowOpKind::RmsNorm {
+                        if a == ScheduledOpKind::QkvProjection && b == ScheduledOpKind::RmsNorm {
                             FusionPattern::QkvFused
-                        } else if a == DataflowOpKind::AttentionScore && b == DataflowOpKind::AttentionApply {
+                        } else if a == ScheduledOpKind::AttentionScore && b == ScheduledOpKind::AttentionApply {
                             FusionPattern::AttentionFused
-                        } else if a == DataflowOpKind::MlpGateUp && b == DataflowOpKind::MlpActivation {
+                        } else if a == ScheduledOpKind::MlpGateUp && b == ScheduledOpKind::MlpActivation {
                             FusionPattern::MlpGateActivation
-                        } else if a == DataflowOpKind::OProjectionResidual && b == DataflowOpKind::MlpGateUp {
+                        } else if a == ScheduledOpKind::OProjectionResidual && b == ScheduledOpKind::MlpGateUp {
                             FusionPattern::OProjectionResidual
                         } else {
                             FusionPattern::Custom([a, b, a])
@@ -354,7 +516,7 @@ pub fn fuse_and_schedule(
                             candidate[2].op_kind,
                         ])
                     }
-                    _ => FusionPattern::Custom([DataflowOpKind::RmsNorm; 3]),
+                    _ => FusionPattern::Custom([ScheduledOpKind::RmsNorm; 3]),
                 };
                 if known_patterns.contains(&pattern) {
                     matched = true;
@@ -761,6 +923,7 @@ mod tests {
             outputs: vec!["gated_up".to_string()],
             internal_values: vec!["gate_out".to_string(), "up_out".to_string()],
             codec_family: CodecFamily::Nf4,
+            precision_plan: None,
         };
 
         let json = serde_json::to_string(&group).expect("serialize FusedGroup");

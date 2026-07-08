@@ -94,6 +94,7 @@ pub async fn run_profile_plan(
         memory,
         quality: None,
         health,
+        evidence_kind: ReceiptEvidenceKind::Synthetic,
     })
 }
 
@@ -164,6 +165,7 @@ impl<R: RegionEncoder<PipelineState = ComputePipelineState>> BackendProfileRunne
             memory: memory_template(),
             quality: None,
             health: health_template(&plan.plan_id),
+            evidence_kind: ReceiptEvidenceKind::Template,
         }
     }
 }
