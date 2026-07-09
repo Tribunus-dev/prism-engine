@@ -41,6 +41,13 @@ fn main() {
             "int8_tile640_gemv.metal",
             "nf4_tile640_scaled_reduction_gemv.metal",
             "fused_teacher_student_gemv.metal",
+            "cimage_rmsnorm_f32.metal",
+            "cimage_linear_rawf32.metal",
+            "cimage_linear_int8.metal",
+            "cimage_linear_nf4.metal",
+            "cimage_silu_f32.metal",
+            "cimage_mul_f32.metal",
+            "cimage_residual_add_f32.metal",
         ];
         for src in metal_sources {
             println!(

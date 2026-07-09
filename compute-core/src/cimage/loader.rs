@@ -11,8 +11,7 @@ use crate::cimage::{
     CImageReceiptDirectoryV0, CImageResult,
 };
 
-/// A loaded cimage V0 artifact, fully deserialized into memory.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LoadedCImageV0 {
     /// Original filesystem path.
     pub path: std::path::PathBuf,

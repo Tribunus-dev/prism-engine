@@ -60,6 +60,9 @@ fn main() {
         eprintln!("  tribunus-compute-image cimage emit-synthetic-mlp --out <path> [--hidden-dim N] [--intermediate-dim N]");
         eprintln!("       [--gate-codec nf4|int8|rawf32] [--up-codec ...] [--down-codec ...] [--seed N] [--json] [--no-validate]");
         eprintln!("  tribunus-compute-image cimage validate --path <path> [--json]");
+        eprintln!(
+            "  tribunus-compute-image cimage run-metal-mlp --path <path> [--seed N] [--json]"
+        );
         std::process::exit(1);
     }
 
@@ -75,12 +78,15 @@ fn main() {
         "cimage" => match args.get(2).map(|s| s.as_str()) {
             Some("emit-synthetic-mlp") => cmd_cimage_emit_synthetic_mlp(&args[3..]),
             Some("validate") => cmd_cimage_validate(&args[3..]),
+            Some("run-metal-mlp") => cmd_cimage_run_metal_mlp(&args[3..]),
             Some(other) => {
                 eprintln!("unknown cimage subcommand: {other}");
                 std::process::exit(1);
             }
             None => {
-                eprintln!("cimage requires a subcommand: emit-synthetic-mlp, validate");
+                eprintln!(
+                    "cimage requires a subcommand: emit-synthetic-mlp, validate, run-metal-mlp"
+                );
                 std::process::exit(1);
             }
         },
@@ -115,6 +121,20 @@ fn get_opt<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
 /// Return `true` if `--flag` appears anywhere in `args`.
 fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a == flag)
+}
+
+/// Generate deterministic f32 input from a seed using a LCG.
+fn generate_deterministic_input(seed: u64, n: usize) -> Vec<f32> {
+    let mut state = seed;
+    let mut data = Vec::with_capacity(n);
+    for _ in 0..n {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let val = ((state >> 11) as f64) / (1u64 << 53) as f64;
+        data.push((val * 2.0 - 1.0) as f32);
+    }
+    data
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1971,6 +1991,78 @@ fn cmd_cimage_validate(args: &[String]) -> Result<(), String> {
     if load_receipt.validation_status == CImageValidationStatus::Invalid {
         return Err("cimage validation failed".to_string());
     }
+    Ok(())
+}
+
+fn cmd_cimage_run_metal_mlp(args: &[String]) -> Result<(), String> {
+    let path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let seed: u64 = get_opt(args, "--seed")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(42);
+    let json_output = has_flag(args, "--json");
+
+    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+    {
+        use metal::Device as MetalDevice;
+        use tribunus_compute_core::cimage::*;
+        use tribunus_compute_core::cimage_runtime::*;
+
+        let loaded = CImageLoader::load_v0(std::path::Path::new(path))
+            .map_err(|e| format!("load error: {e}"))?;
+
+        let hidden_dim = loaded.manifest.tensors[0].logical_shape[0] as usize;
+        let input = generate_deterministic_input(seed, hidden_dim);
+
+        let device =
+            MetalDevice::system_default().ok_or_else(|| "no Metal device found".to_string())?;
+        let mut runner = CImageMetalRegionRunner::new(&device)
+            .map_err(|e| format!("runner creation error: {e}"))?;
+        let receipt = runner
+            .run_mlp_shard_region(&loaded, &input)
+            .map_err(|e| format!("runner error: {e}"))?;
+
+        if json_output {
+            let output = serde_json::to_string_pretty(&serde_json::json!({
+                "status": if receipt.validation_passed { "passed" } else { "failed" },
+                "backend": format!("{:?}", receipt.backend),
+                "evidence_kind": format!("{:?}", receipt.evidence_kind),
+                "kernel_count": receipt.kernel_count,
+                "metal_vs_cpu_nrmse": receipt.metal_vs_cpu_nrmse,
+                "metal_vs_cpu_cosine": receipt.metal_vs_cpu_cosine,
+                "command_buffer_ms": receipt.command_buffer_ms,
+                "cimage_digest": receipt.cimage_digest,
+                "validation_passed": receipt.validation_passed,
+            }))
+            .map_err(|e| e.to_string())?;
+            println!("{output}");
+        } else {
+            println!("Metal MLP region execution:");
+            println!(
+                "  status:      {}",
+                if receipt.validation_passed {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                }
+            );
+            println!("  backend:     {:?}", receipt.backend);
+            println!("  kernels:     {}", receipt.kernel_count);
+            println!("  metal_vs_cpu_nrmse:  {:.6}", receipt.metal_vs_cpu_nrmse);
+            println!("  metal_vs_cpu_cosine: {:.6}", receipt.metal_vs_cpu_cosine);
+            println!("  command_buffer_ms:   {:.3}", receipt.command_buffer_ms);
+            println!("  cimage_digest: {}", receipt.cimage_digest);
+        }
+
+        if !receipt.validation_passed {
+            return Err("Metal MLP region execution validation failed".to_string());
+        }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+    {
+        return Err("Metal execution requires macOS with metal-dispatch feature".to_string());
+    }
+
     Ok(())
 }
 

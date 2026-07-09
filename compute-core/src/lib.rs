@@ -87,6 +87,7 @@ pub mod calibration;
 ))]
 pub mod capability;
 pub mod cimage;
+pub mod cimage_runtime;
 pub mod cli;
 pub mod compilation;
 #[cfg(any(
