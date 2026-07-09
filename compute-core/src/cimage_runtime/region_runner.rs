@@ -28,8 +28,9 @@ use crate::cimage::{CImageValidator, LoadedCImageV0, ReceiptEvidenceKind};
 use crate::cimage_runtime::error::{CImageRuntimeError, CImageRuntimeResult};
 use crate::cimage_runtime::lower_mlp::{CImageMlpRegionPlan, MlpShardRegionBuilder};
 use crate::cimage_runtime::receipts::{
-    CImageLayerTiming, CImageLayerValidationReceipt, CImageModelExecutionReceipt,
-    CImageRegionExecutionReceipt,
+    BandwidthEstimate, CImageLayerTiming, CImageLayerValidationReceipt,
+    CImageModelExecutionReceipt, CImageRegionExecutionReceipt, DispatchSegmentTiming,
+    PerKernelFamilyTiming,
 };
 use crate::cimage_runtime::resolver::{CImageRuntimeResolver, ResolvedMlpShardRuntime};
 use crate::cimage_runtime::tensor_store::{MlpRegionExecutionMode, RuntimeTensorPayload};
@@ -1985,6 +1986,10 @@ impl CImageMetalRegionRunner {
         let mut layer_validations: Vec<CImageLayerValidationReceipt> = Vec::new();
         let mut total_command_buffer_ms = 0.0_f64;
         let mut validation_passed = true;
+        let mut first_divergent_layer: Option<usize> = None;
+
+        // Accumulate per-segment timing across all layers.
+        let mut seg_recorder = DispatchSegmentRecorder::new();
 
         // CPU hidden state — tracks reference output per layer for validation.
         let mut cpu_hidden: Vec<f32> = input.clone();
@@ -2078,6 +2083,7 @@ impl CImageMetalRegionRunner {
 
             // g. Encode and dispatch 18 ops.
             let encode_start = Instant::now();
+
             let queue = &self.queue;
 
             let dispatch_f32_segment = |start: usize, end: usize| -> CImageRuntimeResult<()> {
@@ -2227,26 +2233,98 @@ impl CImageMetalRegionRunner {
                 };
 
             // Dispatch in segments
-            dispatch_f32_segment(0, 0)?;
-            for ti in 1..=3 {
-                dispatch_ternary_proj(
-                    match ti {
-                        1 => "q_proj",
-                        2 => "k_proj",
-                        3 => "v_proj",
-                        _ => unreachable!(),
-                    },
-                    ti,
-                )?;
+            // Segment  0: rmsnorm
+            {
+                let s = Instant::now();
+                dispatch_f32_segment(0, 0)?;
+                seg_recorder.record(0, "rmsnorm", 1, s.elapsed().as_secs_f64() * 1000.0);
             }
-            dispatch_f32_segment(4, 8)?;
-            dispatch_ternary_proj("o_proj", 9)?;
-            dispatch_f32_segment(10, 11)?;
-            dispatch_ternary_proj("gate_proj", 12)?;
-            dispatch_ternary_proj("up_proj", 13)?;
-            dispatch_f32_segment(14, 15)?;
-            dispatch_ternary_proj("down_proj", 16)?;
-            dispatch_f32_segment(17, 17)?;
+
+            // Segments 1-3: ternary Q, K, V projections
+            {
+                let ti = 1;
+                let s = Instant::now();
+                dispatch_ternary_proj("q_proj", ti)?;
+                seg_recorder.record(ti, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
+            }
+            {
+                let ti = 2;
+                let s = Instant::now();
+                dispatch_ternary_proj("k_proj", ti)?;
+                seg_recorder.record(ti, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
+            }
+            {
+                let ti = 3;
+                let s = Instant::now();
+                dispatch_ternary_proj("v_proj", ti)?;
+                seg_recorder.record(ti, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
+            }
+
+            // Segment  4: attention subgraph (rope, kv_append, scores, softmax, apply)
+            {
+                let s = Instant::now();
+                dispatch_f32_segment(4, 8)?;
+                seg_recorder.record(
+                    4,
+                    "attention_subgraph",
+                    5,
+                    s.elapsed().as_secs_f64() * 1000.0,
+                );
+            }
+
+            // Segment  9: o_proj ternary
+            {
+                let s = Instant::now();
+                dispatch_ternary_proj("o_proj", 9)?;
+                seg_recorder.record(9, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
+            }
+
+            // Segment 10: residual_add + rmsnorm
+            {
+                let s = Instant::now();
+                dispatch_f32_segment(10, 11)?;
+                seg_recorder.record(
+                    10,
+                    "residual_add_rmsnorm",
+                    2,
+                    s.elapsed().as_secs_f64() * 1000.0,
+                );
+            }
+
+            // Segment 12: gate_proj ternary
+            {
+                let s = Instant::now();
+                dispatch_ternary_proj("gate_proj", 12)?;
+                seg_recorder.record(12, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
+            }
+
+            // Segment 13: up_proj ternary
+            {
+                let s = Instant::now();
+                dispatch_ternary_proj("up_proj", 13)?;
+                seg_recorder.record(13, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
+            }
+
+            // Segment 14: silu + mul
+            {
+                let s = Instant::now();
+                dispatch_f32_segment(14, 15)?;
+                seg_recorder.record(14, "silu_mul", 2, s.elapsed().as_secs_f64() * 1000.0);
+            }
+
+            // Segment 16: down_proj ternary
+            {
+                let s = Instant::now();
+                dispatch_ternary_proj("down_proj", 16)?;
+                seg_recorder.record(16, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
+            }
+
+            // Segment 17: residual_add (final)
+            {
+                let s = Instant::now();
+                dispatch_f32_segment(17, 17)?;
+                seg_recorder.record(17, "residual_add", 1, s.elapsed().as_secs_f64() * 1000.0);
+            }
 
             let command_buffer_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
             total_command_buffer_ms += command_buffer_ms;
@@ -2289,6 +2367,9 @@ impl CImageMetalRegionRunner {
 
                     if !passed {
                         validation_passed = false;
+                        if first_divergent_layer.is_none() {
+                            first_divergent_layer = Some(layer);
+                        }
                     }
 
                     layer_validations.push(CImageLayerValidationReceipt {
@@ -2333,8 +2414,149 @@ impl CImageMetalRegionRunner {
             layer_timings,
             total_command_buffer_ms,
             validation_passed,
+            model_id: manifest.model_family.clone(),
+            profile_id: format!("{:?}", manifest.layout_profile),
+            kernel_dispatch_count: 18 * num_layers,
+            per_kernel_family: seg_recorder.aggregate(),
+            bandwidth_estimate: {
+                let (bytes_read, bytes_written) = compute_per_layer_bandwidth(
+                    hidden_dim,
+                    num_heads,
+                    num_kv_heads,
+                    head_dim,
+                    intermediate_dim,
+                    seq_len,
+                );
+                let total_bandwidth_ms = total_command_buffer_ms.max(1e-9);
+                let effective_gbps = (bytes_read + bytes_written) as f64 * num_layers as f64
+                    / total_bandwidth_ms
+                    / 1_000_000.0;
+                BandwidthEstimate {
+                    bytes_read_estimate: bytes_read * num_layers as u64,
+                    bytes_written_estimate: bytes_written * num_layers as u64,
+                    effective_bandwidth_gbps: effective_gbps,
+                }
+            },
+            tokens_per_second_prefill: {
+                let total_sec = (total_command_buffer_ms / 1000.0).max(1e-9);
+                seq_len as f64 * num_layers as f64 / total_sec
+            },
+            tokens_per_second_decode: {
+                let avg_layer_sec =
+                    (total_command_buffer_ms / 1000.0 / num_layers as f64).max(1e-9);
+                1.0 / avg_layer_sec
+            },
+            first_divergent_layer,
+            validation_enabled: validate_every_n.is_some(),
+            fallback_used: false,
+            selected_kernel_variant_id: "default".into(),
         })
     }
+}
+
+// ── Dispatch segment recorder ────────────────────────────────────────────
+
+/// Tracks per-segment timing for the dispatch loop in
+/// [`run_bitnet_full_model_stack`]. Each call to `record()` stores a
+/// [`DispatchSegmentTiming`]; `aggregate()` folds them into
+/// per-kernel-family statistics.
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+struct DispatchSegmentRecorder {
+    segments: Vec<DispatchSegmentTiming>,
+}
+
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+impl DispatchSegmentRecorder {
+    fn new() -> Self {
+        Self {
+            segments: Vec::new(),
+        }
+    }
+
+    fn record(&mut self, segment_index: usize, kernel_family: &str, op_count: usize, ms: f64) {
+        self.segments.push(DispatchSegmentTiming {
+            segment_index,
+            kernel_family: kernel_family.to_string(),
+            op_count,
+            command_buffer_ms: ms,
+        });
+    }
+
+    /// Aggregate per-kernel-family statistics across all recorded segments.
+    fn aggregate(&self) -> Vec<PerKernelFamilyTiming> {
+        let mut families: std::collections::BTreeMap<String, (f64, usize)> =
+            std::collections::BTreeMap::new();
+        for s in &self.segments {
+            let entry = families.entry(s.kernel_family.clone()).or_insert((0.0, 0));
+            entry.0 += s.command_buffer_ms;
+            entry.1 += 1;
+        }
+        families
+            .into_iter()
+            .map(|(family, (total, count))| PerKernelFamilyTiming {
+                kernel_family: family,
+                total_command_buffer_ms: total,
+                dispatch_count: count,
+            })
+            .collect()
+    }
+}
+
+// ── Bandwidth estimation ─────────────────────────────────────────────────
+
+/// Estimate per-layer buffer bandwidth in bytes (read + write) for a single
+/// BitNet decoder layer using the same size formulas as the runner's
+/// persistent buffer allocation in [`run_bitnet_full_model_stack`].
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+fn compute_per_layer_bandwidth(
+    hidden_dim: usize,
+    num_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
+    intermediate_dim: usize,
+    seq_len: usize,
+) -> (u64, u64) {
+    let h4 = hidden_dim as u64 * 4;
+    let i4 = intermediate_dim as u64 * 4;
+    let q4 = num_heads as u64 * head_dim as u64 * 4;
+    let kv4 = num_kv_heads as u64 * head_dim as u64 * 4;
+    let s4 = num_heads as u64 * seq_len as u64 * 4;
+    let kv_cache = seq_len as u64 * num_kv_heads as u64 * head_dim as u64 * 4;
+
+    // Per-layer bytes read:
+    //   hidden_in + input_layernorm_weight + post_attn_layernorm_weight
+    //   + 7 projection codes/scales (estimated as q-sized reads)
+    //   + KV cache (existing + new append reads)
+    let read = h4                                     // hidden_in
+        + h4                                          // input_layernorm_weight
+        + h4                                          // post_attn_layernorm_weight
+        + 7 * q4                                      // codes + scales (est.)
+        + kv_cache                                    // existing KV cache
+        + kv4 * 2; // current-token KV read
+
+    // Per-layer bytes written:
+    //   hidden_out + all scratch buffers + KV cache append
+    let write = h4                                    // hidden_out
+        + h4                                          // scratch_normed
+        + q4                                          // scratch_q
+        + kv4                                         // scratch_k
+        + kv4                                         // scratch_v
+        + q4                                          // scratch_q_rope
+        + kv4                                         // scratch_k_rope
+        + s4                                          // scratch_scores
+        + s4                                          // scratch_scores_post_softmax
+        + q4                                          // scratch_attended
+        + h4                                          // scratch_o
+        + h4                                          // scratch_post_attn
+        + h4                                          // scratch_normed2
+        + i4                                          // scratch_gate
+        + i4                                          // scratch_up
+        + i4                                          // scratch_silu_gate
+        + i4                                          // scratch_mlp_hidden
+        + h4                                          // scratch_mlp_down
+        + kv4 * 2; // KV cache append (k, v)
+
+    (read, write)
 }
 
 // ── Tensor resolution helper ─────────────────────────────────────────────
@@ -3047,5 +3269,47 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_perf_receipt_fields_populated_on_5_layers() {
+        let cimage_path = std::path::Path::new("artifacts/bitnet-b1.58-2B-4T.cimage");
+        if !cimage_path.exists() {
+            eprintln!("Skipping: real cimage not found");
+            return;
+        }
+        let loaded = CImageLoader::load_v0(cimage_path).expect("load cimage");
+        let device = metal::Device::system_default().expect("Metal device");
+        let mut runner = CImageMetalRegionRunner::new(&device).expect("create runner");
+        let receipt = runner
+            .run_bitnet_full_model_stack(&loaded, None, Some(5))
+            .expect("run for 5 layers");
+
+        assert_eq!(receipt.num_layers, 5);
+        assert_eq!(receipt.kernel_dispatch_count, 90); // 18 × 5
+        assert!(receipt.per_kernel_family.len() >= 5); // at least 5 distinct families
+        assert!(receipt.bandwidth_estimate.bytes_read_estimate > 0);
+        assert!(receipt.bandwidth_estimate.effective_bandwidth_gbps > 0.0);
+        assert!(!receipt.model_id.is_empty());
+        assert!(!receipt.profile_id.is_empty());
+        assert!(receipt.total_command_buffer_ms > 0.0);
+        // Verify JSON roundtrip
+        let json = serde_json::to_string_pretty(&receipt).expect("serialize receipt");
+        let _deserialized: CImageModelExecutionReceipt =
+            serde_json::from_str(&json).expect("deserialize receipt");
+        eprintln!("Receipt JSON size: {} bytes", json.len());
+        eprintln!("Per-kernel families:");
+        for pf in &receipt.per_kernel_family {
+            eprintln!(
+                "  {}: {:.3}ms × {} dispatches",
+                pf.kernel_family, pf.total_command_buffer_ms, pf.dispatch_count
+            );
+        }
+        eprintln!(
+            "Bandwidth: read={}B write={}B bw={:.2}GB/s",
+            receipt.bandwidth_estimate.bytes_read_estimate,
+            receipt.bandwidth_estimate.bytes_written_estimate,
+            receipt.bandwidth_estimate.effective_bandwidth_gbps
+        );
     }
 }

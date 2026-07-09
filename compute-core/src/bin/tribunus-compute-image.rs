@@ -87,7 +87,7 @@ fn main() {
             "  tribunus-compute-image cimage bitnet run-metal-decoder --path <path> [--json]"
         );
         eprintln!("  tribunus-compute-image cimage bitnet text-smoke-test --path <path> --prompt <text> [--max-new-tokens N] [--json]");
-        eprintln!("  tribunus-compute-image cimage bitnet run-full-model --path <cimage> [--validate-every N] [--layers N] [--json]");
+        eprintln!("  tribunus-compute-image cimage bitnet run-full-model --path <cimage> [--validate-every N] [--layers N] [--emit-receipt <path>] [--json]");
         std::process::exit(1);
     }
 
@@ -3364,6 +3364,7 @@ fn cmd_cimage_bitnet_run_full_model(args: &[String]) -> Result<(), String> {
     let validate_every: Option<usize> =
         get_opt(args, "--validate-every").and_then(|s| s.parse().ok());
     let layer_limit: Option<usize> = get_opt(args, "--layers").and_then(|s| s.parse().ok());
+    let emit_receipt = get_opt(args, "--emit-receipt");
 
     #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
     {
@@ -3434,6 +3435,15 @@ fn cmd_cimage_bitnet_run_full_model(args: &[String]) -> Result<(), String> {
 
         if !receipt.validation_passed {
             return Err("Some layer validations failed".to_string());
+        }
+
+        if let Some(rp) = emit_receipt {
+            let json = serde_json::to_string_pretty(&receipt)
+                .map_err(|e| format!("serialize receipt: {e}"))?;
+            std::fs::write(&rp, &json).map_err(|e| format!("write receipt to {rp}: {e}"))?;
+            if !json_output {
+                println!("  receipt written to: {rp}");
+            }
         }
     }
 

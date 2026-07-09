@@ -77,6 +77,31 @@ pub struct CImageLayerTiming {
     pub command_buffer_ms: f64,
 }
 
+/// Timing for one dispatch group (f32 segment or ternary dispatch).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DispatchSegmentTiming {
+    pub segment_index: usize,
+    pub kernel_family: String,
+    pub op_count: usize,
+    pub command_buffer_ms: f64,
+}
+
+/// Aggregate timing for one kernel family across all layers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerKernelFamilyTiming {
+    pub kernel_family: String,
+    pub total_command_buffer_ms: f64,
+    pub dispatch_count: usize,
+}
+
+/// Bandwidth estimate for the full decode run.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BandwidthEstimate {
+    pub bytes_read_estimate: u64,
+    pub bytes_written_estimate: u64,
+    pub effective_bandwidth_gbps: f64,
+}
+
 /// Full model execution receipt — aggregate of all layer runs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CImageModelExecutionReceipt {
@@ -88,6 +113,28 @@ pub struct CImageModelExecutionReceipt {
     pub layer_timings: Vec<CImageLayerTiming>,
     pub total_command_buffer_ms: f64,
     pub validation_passed: bool,
+    #[serde(default)]
+    pub model_id: String,
+    #[serde(default)]
+    pub profile_id: String,
+    #[serde(default)]
+    pub kernel_dispatch_count: usize,
+    #[serde(default)]
+    pub per_kernel_family: Vec<PerKernelFamilyTiming>,
+    #[serde(default)]
+    pub bandwidth_estimate: BandwidthEstimate,
+    #[serde(default)]
+    pub tokens_per_second_prefill: f64,
+    #[serde(default)]
+    pub tokens_per_second_decode: f64,
+    #[serde(default)]
+    pub first_divergent_layer: Option<usize>,
+    #[serde(default)]
+    pub validation_enabled: bool,
+    #[serde(default)]
+    pub fallback_used: bool,
+    #[serde(default)]
+    pub selected_kernel_variant_id: String,
 }
 
 #[cfg(test)]
@@ -226,11 +273,44 @@ mod tests {
             ],
             total_command_buffer_ms: 99.0,
             validation_passed: true,
+            model_id: "BitNet-b1.58-2B".into(),
+            profile_id: "apple-m4-max".into(),
+            kernel_dispatch_count: 540,
+            per_kernel_family: vec![PerKernelFamilyTiming {
+                kernel_family: "rmsnorm".into(),
+                total_command_buffer_ms: 3.0,
+                dispatch_count: 90,
+            }],
+            bandwidth_estimate: BandwidthEstimate {
+                bytes_read_estimate: 100_000_000,
+                bytes_written_estimate: 50_000_000,
+                effective_bandwidth_gbps: 120.0,
+            },
+            tokens_per_second_prefill: 1280.0,
+            tokens_per_second_decode: 7.5,
+            first_divergent_layer: None,
+            validation_enabled: true,
+            fallback_used: false,
+            selected_kernel_variant_id: "default".into(),
         };
         let json = serde_json::to_string_pretty(&r).unwrap();
         let back: CImageModelExecutionReceipt = serde_json::from_str(&json).unwrap();
         assert_eq!(back.num_layers, 30);
         assert_eq!(back.layer_validations.len(), 2);
         assert!(back.validation_passed);
+        assert_eq!(back.model_id, "BitNet-b1.58-2B");
+        assert_eq!(back.kernel_dispatch_count, 540);
+        assert_eq!(back.per_kernel_family.len(), 1);
+        assert_eq!(back.per_kernel_family[0].kernel_family, "rmsnorm");
+        assert_eq!(back.per_kernel_family[0].total_command_buffer_ms, 3.0);
+        assert_eq!(back.bandwidth_estimate.bytes_read_estimate, 100_000_000);
+        assert_eq!(back.bandwidth_estimate.bytes_written_estimate, 50_000_000);
+        assert!((back.bandwidth_estimate.effective_bandwidth_gbps - 120.0).abs() < 1e-10);
+        assert!((back.tokens_per_second_prefill - 1280.0).abs() < 1e-10);
+        assert!((back.tokens_per_second_decode - 7.5).abs() < 1e-10);
+        assert!(back.first_divergent_layer.is_none());
+        assert!(back.validation_enabled);
+        assert!(!back.fallback_used);
+        assert_eq!(back.selected_kernel_variant_id, "default");
     }
 }

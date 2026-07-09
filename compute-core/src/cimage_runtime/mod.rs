@@ -25,8 +25,9 @@ pub mod region_runner;
 
 pub use error::{CImageRuntimeError, CImageRuntimeResult};
 pub use receipts::{
-    CImageBindingReceipt, CImageKernelBindingInfo, CImageLayerTiming, CImageLayerValidationReceipt,
-    CImageModelExecutionReceipt, CImageRegionExecutionReceipt,
+    BandwidthEstimate, CImageBindingReceipt, CImageKernelBindingInfo, CImageLayerTiming,
+    CImageLayerValidationReceipt, CImageModelExecutionReceipt, CImageRegionExecutionReceipt,
+    DispatchSegmentTiming, PerKernelFamilyTiming,
 };
 pub use resolver::{CImageRuntimeResolver, CpuReferenceBundle, ResolvedMlpShardRuntime};
 #[allow(unused_imports)]
