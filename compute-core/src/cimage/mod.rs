@@ -42,8 +42,8 @@ pub use receipts::{
     ReceiptEvidenceKind,
 };
 pub use shard_builder::{
-    DecoderLayerShardBuilder, MlpShardBuilder, SyntheticDecoderLayerConfig, SyntheticDecoderPolicy,
-    SyntheticMlpShardConfig, SyntheticShardPolicy,
+    DecoderLayerShardBuilder, MlpShardBuilder, PendingCImageShard, SyntheticDecoderLayerConfig,
+    SyntheticDecoderPolicy, SyntheticMlpShardConfig, SyntheticShardPolicy,
 };
 pub use validate::CImageValidator;
 pub use writer::CImageWriter;

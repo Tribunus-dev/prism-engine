@@ -41,7 +41,6 @@ use crate::cimage_runtime::lower_decoder::DecoderShardRegionBuilder;
 use crate::cimage_runtime::tensor_store::RuntimeTensor;
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 use crate::cimage_runtime::tensor_store::RuntimeTensorStore;
-
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 /// Map an op index in the 7-op MLP shard plan to a Metal kernel function name.
@@ -234,7 +233,7 @@ impl CImageMetalRegionRunner {
     /// kernel function lives in one library.
     pub fn new(device: &metal::Device) -> CImageRuntimeResult<Self> {
         let shader_source = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             include_str!("../compute_image/templates/cimage_rmsnorm_f32.metal"),
             include_str!("../compute_image/templates/cimage_linear_rawf32.metal"),
             include_str!("../compute_image/templates/cimage_linear_int8.metal"),
@@ -247,6 +246,7 @@ impl CImageMetalRegionRunner {
             include_str!("../compute_image/templates/cimage_attention_scores_f32.metal"),
             include_str!("../compute_image/templates/cimage_attention_softmax_f32.metal"),
             include_str!("../compute_image/templates/cimage_attention_apply_f32.metal"),
+            include_str!("../compute_image/templates/cimage_ternary_gemv_v1.metal"),
         );
 
         let library = device
@@ -1020,6 +1020,125 @@ impl CImageMetalRegionRunner {
             validation_passed: true,
             warnings: vec![],
         })
+    }
+
+    /// Run the ternary GEMV kernel on a loaded cimage.
+    ///
+    /// Finds the first Ternary1_58 tensor, extracts codes + scales from the
+    /// payload blob, dispatches `cimage_ternary_gemv_v1`, and returns the
+    /// Metal output as `Vec<f32>`.
+    pub fn run_ternary_gemv(&mut self, image: &LoadedCImageV0) -> CImageRuntimeResult<Vec<f32>> {
+        // 1. Find first Ternary1_58 tensor.
+        let tensor = image
+            .manifest
+            .tensors
+            .iter()
+            .find(|t| t.codec == crate::execution_plan::CodecFamily::Ternary1_58)
+            .ok_or_else(|| {
+                CImageRuntimeError::ValidationFailed("no Ternary1_58 tensor found in cimage".into())
+            })?;
+
+        let tensor_key = &tensor.tensor_key;
+        let rows = tensor.logical_shape[0] as usize;
+        let cols = tensor.logical_shape[1] as usize;
+        let layout = &tensor.physical_layout;
+        let group_size = layout.group_size as usize;
+        let groups_per_row = layout.groups_per_tile as usize;
+        let bytes_per_group = (group_size * 2 + 7) / 8;
+
+        // 2. Extract codes payload.
+        let codes_id = format!("p_{}_codes", tensor_key);
+        let codes_entry = image
+            .payload_directory
+            .payloads
+            .iter()
+            .find(|e| e.payload_id == codes_id)
+            .ok_or_else(|| CImageRuntimeError::MissingPayload(codes_id.clone()))?;
+        let codes = &image.payload_blob
+            [codes_entry.offset as usize..(codes_entry.offset + codes_entry.len) as usize];
+
+        // 3. Extract scales payload (stored as f16 LE bytes).
+        let scales_id = format!("p_{}_scales", tensor_key);
+        let scales_entry = image
+            .payload_directory
+            .payloads
+            .iter()
+            .find(|e| e.payload_id == scales_id)
+            .ok_or_else(|| CImageRuntimeError::MissingPayload(scales_id.clone()))?;
+        let scales_bytes = &image.payload_blob
+            [scales_entry.offset as usize..(scales_entry.offset + scales_entry.len) as usize];
+
+        // 4. Generate deterministic input.
+        let input = generate_deterministic_input(42, cols);
+
+        // 5. Build constants struct.
+        let mut const_bytes = vec![0u8; 36];
+        const_bytes[0..4].copy_from_slice(&(rows as u32).to_le_bytes());
+        const_bytes[4..8].copy_from_slice(&(cols as u32).to_le_bytes());
+        const_bytes[8..12].copy_from_slice(&(group_size as u32).to_le_bytes());
+        const_bytes[12..16].copy_from_slice(&(groups_per_row as u32).to_le_bytes());
+        const_bytes[16..20].copy_from_slice(&(bytes_per_group as u32).to_le_bytes());
+        const_bytes[20..24].copy_from_slice(&0u32.to_le_bytes()); // output_dtype = 0 (half)
+
+        // 6. Allocate Metal buffers.
+        let alloc_from_slice = |data: &[u8]| -> CImageRuntimeResult<metal::Buffer> {
+            let buf = self.device.new_buffer_with_data(
+                data.as_ptr() as *const std::ffi::c_void,
+                data.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 && !data.is_empty() {
+                return Err(CImageRuntimeError::BufferAllocationFailed(
+                    "ternary_gemv_input".into(),
+                ));
+            }
+            Ok(buf)
+        };
+
+        // Convert f32 input to half for Metal kernel.
+        let act_bytes: Vec<u8> = input
+            .iter()
+            .flat_map(|&v| half::f16::from_f32(v).to_le_bytes())
+            .collect();
+        let act_buf = alloc_from_slice(&act_bytes)?;
+        let codes_buf = alloc_from_slice(codes)?;
+        let scales_buf = alloc_from_slice(scales_bytes)?;
+
+        let out_size = (rows * 2) as u64; // half output
+        let out_buf = self
+            .device
+            .new_buffer(out_size, metal::MTLResourceOptions::StorageModeShared);
+
+        let const_buf = alloc_from_slice(&const_bytes)?;
+
+        // 7. Get PSO and dispatch.
+        let pso = self.get_or_create_pso("cimage_ternary_gemv_v1")?;
+        let cb = self.queue.new_command_buffer();
+        let enc = cb.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&pso);
+        enc.set_buffer(0, Some(&act_buf), 0);
+        enc.set_buffer(1, Some(&codes_buf), 0);
+        enc.set_buffer(2, Some(&scales_buf), 0);
+        enc.set_buffer(3, Some(&out_buf), 0);
+        enc.set_buffer(4, Some(&const_buf), 0);
+
+        let grid = metal::MTLSize::new(rows as u64, 1, 1);
+        let tg = metal::MTLSize::new(1, 1, 1);
+        enc.dispatch_thread_groups(grid, tg);
+        enc.end_encoding();
+
+        cb.commit();
+        cb.wait_until_completed();
+
+        // 8. Read back output (half -> f32).
+        let out_ptr = out_buf.contents() as *const u16;
+        let out_slice = unsafe { std::slice::from_raw_parts(out_ptr, rows) };
+        let metal_output: Vec<f32> = out_slice
+            .iter()
+            .map(|&bits| half::f16::from_bits(bits).to_f32())
+            .collect();
+
+        Ok(metal_output)
     }
 }
 

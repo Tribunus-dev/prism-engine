@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use crate::assistant_graph::{AssistantGraphManifest, AssistantGraphValidator};
 use crate::cimage::*;
 use crate::execution_plan::CodecFamily;
+use crate::ternary::pack::validate_no_reserved_codes;
 
 /// Hex SHA-256 digest helper.
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -332,6 +333,111 @@ impl CImageValidator {
                     "unresolved assistant graph payload ref {}",
                     ag_ref.graph_json_payload_id
                 ));
+            }
+        }
+
+        // ── Gate 16: Ternary codec validation ───────────────────────────
+        for tensor in &image.manifest.tensors {
+            if tensor.codec != CodecFamily::Ternary1_58 {
+                continue;
+            }
+
+            let tensor_key = &tensor.tensor_key;
+            let codes_id = format!("p_{tensor_key}_codes");
+            let scales_id = format!("p_{tensor_key}_scales");
+
+            // Find payload entries.
+            let codes_entry = image
+                .payload_directory
+                .payloads
+                .iter()
+                .find(|e| e.payload_id == codes_id);
+            let scales_entry = image
+                .payload_directory
+                .payloads
+                .iter()
+                .find(|e| e.payload_id == scales_id);
+
+            if codes_entry.is_none() {
+                errors.push(format!(
+                    "ternary tensor {} missing TernaryPackedCodes payload (expected {codes_id})",
+                    tensor.tensor_id
+                ));
+            }
+            if scales_entry.is_none() {
+                errors.push(format!(
+                    "ternary tensor {} missing TernaryScales payload (expected {scales_id})",
+                    tensor.tensor_id
+                ));
+            }
+
+            if let (Some(codes), Some(scales)) = (&codes_entry, &scales_entry) {
+                let layout = &tensor.physical_layout;
+                let rows = layout.total_tiles as usize; // tile_m=1 → total_tiles = rows
+                let groups_per_row = layout.groups_per_tile as usize;
+                let bytes_per_group = (layout.group_size as usize * 2 + 7) / 8;
+
+                // Validate codes payload length.
+                let expected_codes_len = rows * groups_per_row * bytes_per_group;
+                if codes.len as usize != expected_codes_len {
+                    errors.push(format!(
+                        "ternary tensor {} codes payload length mismatch: expected {expected_codes_len}, got {}",
+                        tensor.tensor_id, codes.len
+                    ));
+                }
+
+                // Validate scale count (f16 = 2 bytes each).
+                let expected_scales = rows * groups_per_row;
+                if (scales.len as usize) != expected_scales * 2 {
+                    errors.push(format!(
+                        "ternary tensor {} scales payload length mismatch: expected {} bytes ({} f16 scales), got {}",
+                        tensor.tensor_id, expected_scales * 2, expected_scales, scales.len
+                    ));
+                }
+
+                // Validate group_size is one of the allowed values.
+                let gs = layout.group_size;
+                if ![32u32, 64, 128, 256].contains(&gs) {
+                    errors.push(format!(
+                        "ternary tensor {} has invalid group_size {gs}; must be 32, 64, 128, or 256",
+                        tensor.tensor_id
+                    ));
+                }
+
+                // Check for reserved 11 codes in the packed data.
+                let start = codes.offset as usize;
+                let end = match start.checked_add(codes.len as usize) {
+                    Some(v) => v,
+                    None => {
+                        errors.push(format!(
+                            "ternary tensor {} codes payload range overflows",
+                            tensor.tensor_id
+                        ));
+                        continue;
+                    }
+                };
+                if end <= image.payload_blob.len() {
+                    let codes_bytes = &image.payload_blob[start..end];
+                    let expected_values = rows * layout.tile_n as usize;
+                    if let Err(e) = validate_no_reserved_codes(codes_bytes, expected_values) {
+                        errors.push(format!(
+                            "ternary tensor {} has invalid packed codes: {e}",
+                            tensor.tensor_id
+                        ));
+                    }
+                }
+
+                // Warn if effective_bits_per_weight > 2.5 (excessive overhead).
+                let total_weights = rows as f64 * layout.tile_n as f64;
+                let code_bytes_total = codes.len as f64;
+                let scale_bytes_total = scales.len as f64;
+                let effective_bpw = (code_bytes_total + scale_bytes_total) * 8.0 / total_weights;
+                if effective_bpw > 2.5 {
+                    warnings.push(format!(
+                        "ternary tensor {} effective_bits_per_weight {:.3} exceeds 2.5 (scales + padding overhead)",
+                        tensor.tensor_id, effective_bpw
+                    ));
+                }
             }
         }
 

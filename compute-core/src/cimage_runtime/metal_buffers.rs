@@ -388,7 +388,33 @@ impl MetalCImageBufferStore {
     }
 }
 
-// ── Codec family → shader enum mapping ────────────────────────────────────
+// ── Ternary GEMV constants ─────────────────────────────────────────
+
+/// Mirror of the Metal shader's TernaryGemvConstants constant buffer.
+///
+/// The shader reads this as a fixed-size struct at buffer index 4.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct TernaryGemvConstants {
+    pub rows: u32,
+    pub cols: u32,
+    pub group_size: u32,
+    pub groups_per_row: u32,
+    pub bytes_per_group: u32,
+    pub output_dtype: u32,
+    pub padding: [u32; 3],
+}
+
+// Safety: repr(C) and all fields are plain-old-data.
+unsafe impl Pod for TernaryGemvConstants {}
+unsafe impl Zeroable for TernaryGemvConstants {}
+
+impl TernaryGemvConstants {
+    /// Byte size of the constants struct as seen by the Metal shader.
+    pub const BYTE_SIZE: u64 = 36;
+}
+
+// ── Codec family → shader enum mapping ────────────────────────────────
 
 fn codec_family_to_id(codec: CodecFamily) -> u32 {
     match codec {
@@ -398,6 +424,7 @@ fn codec_family_to_id(codec: CodecFamily) -> u32 {
         CodecFamily::Fp16 => 3,
         CodecFamily::SymInt4 => 4,
         CodecFamily::Ternary => 5,
+        CodecFamily::Ternary1_58 => 7,
         CodecFamily::Mixed => 6,
     }
 }
@@ -666,6 +693,26 @@ mod tests {
         assert!(
             weight.iter().any(|&v| v != 0.0),
             "weight should not be all zeros"
+        );
+    }
+
+    #[cfg(feature = "metal-dispatch")]
+    #[test]
+    fn test_ternary_gemv_constants_byte_size() {
+        use bytemuck::bytes_of;
+        let c = TernaryGemvConstants {
+            rows: 128,
+            cols: 4096,
+            group_size: 32,
+            groups_per_row: 128,
+            bytes_per_group: 16,
+            output_dtype: 0,
+            padding: [0; 3],
+        };
+        assert_eq!(
+            bytes_of(&c).len(),
+            TernaryGemvConstants::BYTE_SIZE as usize,
+            "TernaryGemvConstants byte size mismatch"
         );
     }
 }

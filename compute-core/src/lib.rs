@@ -71,6 +71,7 @@ pub mod autopsy;
 pub mod backend;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod benchmark;
+pub mod bitnet;
 #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
 pub mod bridge;
 #[cfg(any(
@@ -266,6 +267,8 @@ pub mod loader;
     feature = "prism-backend-ios"
 ))]
 pub mod parsing;
+pub mod ternary;
+/// Ternary codec — 2-bit {-1, 0, +1} quantization.
 #[cfg(feature = "generation-video")]
 pub mod video_provider;
 #[macro_use]

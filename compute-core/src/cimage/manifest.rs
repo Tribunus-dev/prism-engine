@@ -51,7 +51,7 @@ pub struct CImageTensorEntry {
 }
 
 /// Reference into the payload directory.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CImagePayloadRef {
     Single {
         payload_id: String,

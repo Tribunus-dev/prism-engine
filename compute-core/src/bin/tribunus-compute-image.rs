@@ -75,6 +75,15 @@ fn main() {
             "  tribunus-compute-image cimage validate-assistant-graph --path <path> [--json]"
         );
         eprintln!("  tribunus-compute-image cimage run-metal-decoder-layer --path <path> [--seed N] [--json]");
+        eprintln!("  tribunus-compute-image cimage ternary pack-synthetic-linear --out <path> --rows N --cols N [--group-size N] [--seed N] [--json]");
+        eprintln!("  tribunus-compute-image cimage ternary validate --path <path> [--json]");
+        eprintln!(
+            "  tribunus-compute-image cimage ternary run-metal-gemv --path <path> [--json]"
+        );
+        eprintln!(
+            "  tribunus-compute-image cimage ternary sweep-synthetic-mlp --out-dir <path> --group-sizes N,N,N [--json]"
+        );
+        eprintln!("  tribunus-compute-image cimage bitnet emit-linear --out <path> --rows N --cols N [--seed N]");
         std::process::exit(1);
     }
 
@@ -96,13 +105,46 @@ fn main() {
             }
             Some("validate-assistant-graph") => cmd_cimage_validate_assistant_graph(&args[3..]),
             Some("run-metal-decoder-layer") => cmd_cimage_run_metal_decoder_layer(&args[3..]),
+            Some("ternary") => match args.get(3).map(|s| s.as_str()) {
+                Some("pack-synthetic-linear") => {
+                    cmd_cimage_ternary_pack_synthetic_linear(&args[4..])
+                }
+                Some("validate") => cmd_cimage_ternary_validate(&args[4..]),
+                Some("run-metal-gemv") => cmd_cimage_ternary_run_metal_gemv(&args[4..]),
+                Some("sweep-synthetic-mlp") => {
+                    cmd_cimage_ternary_sweep_synthetic_mlp(&args[4..])
+                }
+                Some(other) => {
+                    eprintln!("unknown cimage ternary subcommand: {other}");
+                    std::process::exit(1);
+                }
+                None => {
+                    eprintln!(
+                        "cimage ternary requires a subcommand: pack-synthetic-linear, validate, run-metal-gemv, sweep-synthetic-mlp"
+                    );
+                    std::process::exit(1);
+                }
+            },
+            Some("bitnet") => match args.get(3).map(|s| s.as_str()) {
+                Some("emit-linear") => cmd_cimage_bitnet_emit_linear(&args[4..]),
+                Some(other) => {
+                    eprintln!("unknown cimage bitnet subcommand: {other}");
+                    std::process::exit(1);
+                }
+                None => {
+                    eprintln!(
+                        "cimage bitnet requires a subcommand: emit-linear"
+                    );
+                    std::process::exit(1);
+                }
+            },
             Some(other) => {
                 eprintln!("unknown cimage subcommand: {other}");
                 std::process::exit(1);
             }
             None => {
                 eprintln!(
-                    "cimage requires a subcommand: emit-synthetic-mlp, validate, run-metal-mlp, emit-synthetic-decoder-layer, validate-assistant-graph, run-metal-decoder-layer"
+                    "cimage requires a subcommand: emit-synthetic-mlp, validate, run-metal-mlp, emit-synthetic-decoder-layer, validate-assistant-graph, run-metal-decoder-layer, ternary, bitnet"
                 );
                 std::process::exit(1);
             }
@@ -2541,5 +2583,439 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
         }
     }
 
+    Ok(())
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cimage ternary commands — pack, validate, run-metal, sweep
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn cmd_cimage_ternary_pack_synthetic_linear(args: &[String]) -> Result<(), String> {
+    let out = get_opt(args, "--out").ok_or_else(|| "--out is required".to_string())?;
+    let rows: usize = get_opt(args, "--rows")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "--rows is required".to_string())?;
+    let cols: usize = get_opt(args, "--cols")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "--cols is required".to_string())?;
+    let group_size: usize = get_opt(args, "--group-size")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(32);
+    let seed: u64 = get_opt(args, "--seed")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(42);
+    let json_output = has_flag(args, "--json");
+
+    use tribunus_compute_core::cimage::*;
+
+    let pending = MlpShardBuilder::build_single_ternary_linear(rows, cols, group_size, seed)
+        .map_err(|e| format!("build error: {e}"))?;
+
+    let write_receipt = CImageWriter::write_v0(
+        std::path::Path::new(out),
+        pending.manifest,
+        pending.payloads,
+        pending.receipts,
+    )
+    .map_err(|e| format!("write error: {e}"))?;
+
+    let loaded = CImageLoader::load_v0(std::path::Path::new(out))
+        .map_err(|e| format!("load error: {e}"))?;
+    let load_receipt =
+        CImageValidator::validate_loaded(&loaded).map_err(|e| format!("validate error: {e}"))?;
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "status": match load_receipt.validation_status {
+                CImageValidationStatus::Valid => "valid",
+                CImageValidationStatus::ValidWithWarnings => "valid_with_warnings",
+                CImageValidationStatus::Invalid => "invalid",
+            },
+            "path": out,
+            "cimage_digest": write_receipt.cimage_digest,
+            "tensor_count": write_receipt.tensor_count,
+            "payload_count": write_receipt.payload_count,
+            "rows": rows,
+            "cols": cols,
+            "group_size": group_size,
+        }))
+        .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("ternary linear cimage written to: {out}");
+        println!("  digest:       {}", write_receipt.cimage_digest);
+        println!("  tensors:      {}", write_receipt.tensor_count);
+        println!("  payloads:     {}", write_receipt.payload_count);
+        println!("  rows:         {rows}");
+        println!("  cols:         {cols}");
+        println!("  group_size:   {group_size}");
+        println!("  validation:   {:?}", load_receipt.validation_status);
+        if !load_receipt.errors.is_empty() {
+            for err in &load_receipt.errors {
+                println!("  ERROR: {err}");
+            }
+        }
+        if !load_receipt.warnings.is_empty() {
+            for warn in &load_receipt.warnings {
+                println!("  WARNING: {warn}");
+            }
+        }
+    }
+
+    if load_receipt.validation_status == CImageValidationStatus::Invalid {
+        return Err("cimage validation failed".to_string());
+    }
+    Ok(())
+}
+
+fn cmd_cimage_ternary_validate(args: &[String]) -> Result<(), String> {
+    let path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let json_output = has_flag(args, "--json");
+
+    use tribunus_compute_core::cimage::*;
+
+    let loaded = CImageLoader::load_v0(std::path::Path::new(path))
+        .map_err(|e| format!("load error: {e}"))?;
+    let load_receipt =
+        CImageValidator::validate_loaded(&loaded).map_err(|e| format!("validate error: {e}"))?;
+
+    let ternary_tensors: Vec<_> = loaded
+        .manifest
+        .tensors
+        .iter()
+        .filter(|t| t.codec == tribunus_compute_core::execution_plan::CodecFamily::Ternary1_58)
+        .collect();
+
+    let ternary_errors: Vec<_> = load_receipt
+        .errors
+        .iter()
+        .filter(|e| e.contains("ternary"))
+        .cloned()
+        .collect();
+    let ternary_warnings: Vec<_> = load_receipt
+        .warnings
+        .iter()
+        .filter(|w| w.contains("ternary"))
+        .cloned()
+        .collect();
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "status": match load_receipt.validation_status {
+                CImageValidationStatus::Valid => "valid",
+                CImageValidationStatus::ValidWithWarnings => "valid_with_warnings",
+                CImageValidationStatus::Invalid => "invalid",
+            },
+            "path": path,
+            "cimage_digest": load_receipt.cimage_digest,
+            "tensor_count": load_receipt.tensor_count,
+            "payload_count": load_receipt.payload_count,
+            "ternary_tensor_count": ternary_tensors.len(),
+            "ternary_errors": ternary_errors,
+            "ternary_warnings": ternary_warnings,
+        }))
+        .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("ternary cimage validation: {:?}", load_receipt.validation_status);
+        println!("  path:              {path}");
+        println!("  digest:            {}", load_receipt.cimage_digest);
+        println!("  tensors:           {}", load_receipt.tensor_count);
+        println!("  payloads:          {}", load_receipt.payload_count);
+        println!("  ternary tensors:   {}", ternary_tensors.len());
+        if !ternary_errors.is_empty() {
+            println!("  ternary errors:");
+            for err in &ternary_errors {
+                println!("    ERROR: {err}");
+            }
+        }
+        if !ternary_warnings.is_empty() {
+            println!("  ternary warnings:");
+            for warn in &ternary_warnings {
+                println!("    WARNING: {warn}");
+            }
+        }
+        if !load_receipt.errors.is_empty() {
+            println!("  all errors:");
+            for err in &load_receipt.errors {
+                println!("    ERROR: {err}");
+            }
+        }
+    }
+
+    if load_receipt.validation_status == CImageValidationStatus::Invalid {
+        return Err("ternary cimage validation failed".to_string());
+    }
+    Ok(())
+}
+
+fn cmd_cimage_ternary_run_metal_gemv(args: &[String]) -> Result<(), String> {
+    let path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let json_output = has_flag(args, "--json");
+
+    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+    {
+        use metal::Device as MetalDevice;
+        use tribunus_compute_core::cimage::*;
+        use tribunus_compute_core::cimage::mlp_reference::{
+            compute_cosine_similarity, compute_max_abs_error, compute_nrmse,
+        };
+        use tribunus_compute_core::cimage_runtime::*;
+        use tribunus_compute_core::ternary::reference::ternary_gemv_reference;
+        use half::f16;
+
+        let loaded = CImageLoader::load_v0(std::path::Path::new(path))
+            .map_err(|e| format!("load error: {e}"))?;
+
+        let tensor = loaded
+            .manifest
+            .tensors
+            .iter()
+            .find(|t| t.codec == tribunus_compute_core::execution_plan::CodecFamily::Ternary1_58)
+            .ok_or_else(|| "no Ternary1_58 tensor found".to_string())?;
+
+        let rows = tensor.logical_shape[0] as usize;
+        let cols = tensor.logical_shape[1] as usize;
+        let layout = &tensor.physical_layout;
+        let group_size = layout.group_size as usize;
+
+        let codes_id = format!("p_{}_codes", tensor.tensor_key);
+        let codes_entry = loaded
+            .payload_directory
+            .payloads
+            .iter()
+            .find(|e| e.payload_id == codes_id)
+            .ok_or_else(|| format!("missing payload: {codes_id}"))?;
+        let codes = &loaded.payload_blob
+            [codes_entry.offset as usize..(codes_entry.offset + codes_entry.len) as usize];
+
+        let scales_id = format!("p_{}_scales", tensor.tensor_key);
+        let scales_entry = loaded
+            .payload_directory
+            .payloads
+            .iter()
+            .find(|e| e.payload_id == scales_id)
+            .ok_or_else(|| format!("missing payload: {scales_id}"))?;
+        let scales_bytes = &loaded.payload_blob
+            [scales_entry.offset as usize..(scales_entry.offset + scales_entry.len) as usize];
+        let scales_f32: Vec<f32> = scales_bytes
+            .chunks_exact(2)
+            .map(|b| half::f16::from_bits(u16::from_le_bytes([b[0], b[1]])).to_f32())
+            .collect();
+
+        let input = generate_deterministic_input(42, cols);
+
+        let cpu_output = ternary_gemv_reference(&input, codes, &scales_f32, rows, cols, group_size)
+            .map_err(|e| format!("CPU reference error: {e}"))?;
+
+        let device =
+            MetalDevice::system_default().ok_or_else(|| "no Metal device found".to_string())?;
+        let mut runner = CImageMetalRegionRunner::new(&device)
+            .map_err(|e| format!("runner creation error: {e}"))?;
+
+        let start = std::time::Instant::now();
+        let metal_output = runner
+            .run_ternary_gemv(&loaded)
+            .map_err(|e| format!("runner error: {e}"))?;
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        let nrmse = compute_nrmse(&cpu_output, &metal_output);
+        let cosine = compute_cosine_similarity(&cpu_output, &metal_output);
+        let max_abs = compute_max_abs_error(&cpu_output, &metal_output);
+
+        if json_output {
+            let output = serde_json::to_string_pretty(&serde_json::json!({
+                "status": if max_abs < 1e-3 { "passed" } else { "failed" },
+                "rows": rows,
+                "cols": cols,
+                "group_size": group_size,
+                "metal_vs_cpu_nrmse": nrmse,
+                "metal_vs_cpu_cosine": cosine,
+                "metal_vs_cpu_max_abs_error": max_abs,
+                "command_buffer_ms": elapsed_ms,
+            }))
+            .map_err(|e| e.to_string())?;
+            println!("{output}");
+        } else {
+            println!("ternary GEMV Metal execution:");
+            println!("  rows:        {rows}");
+            println!("  cols:        {cols}");
+            println!("  group_size:  {group_size}");
+            println!("  status:      {}", if max_abs < 1e-3 { "PASSED" } else { "FAILED" });
+            println!("  metal_vs_cpu_nrmse:      {:.6}", nrmse);
+            println!("  metal_vs_cpu_cosine:     {:.6}", cosine);
+            println!("  metal_vs_cpu_max_abs_err:{:.6}", max_abs);
+            println!("  command_buffer_ms:       {:.3}", elapsed_ms);
+        }
+
+        if max_abs > 1e-3 {
+            return Err("ternary GEMV numerical validation failed".to_string());
+        }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+    {
+        return Err("Metal execution requires macOS with metal-dispatch feature".to_string());
+    }
+
+    Ok(())
+}
+
+fn cmd_cimage_ternary_sweep_synthetic_mlp(args: &[String]) -> Result<(), String> {
+    let out_dir = get_opt(args, "--out-dir").ok_or_else(|| "--out-dir is required".to_string())?;
+    let group_sizes_str =
+        get_opt(args, "--group-sizes").ok_or_else(|| "--group-sizes is required".to_string())?;
+    let json_output = has_flag(args, "--json");
+
+    let group_sizes: Vec<usize> = group_sizes_str
+        .split(',')
+        .map(|s| s.trim().parse::<usize>().map_err(|e| format!("invalid group-size: {e}")))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if group_sizes.is_empty() {
+        return Err("--group-sizes must contain at least one value".to_string());
+    }
+
+    let out_dir_path = std::path::Path::new(out_dir);
+    std::fs::create_dir_all(out_dir_path)
+        .map_err(|e| format!("cannot create out-dir: {e}"))?;
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+
+    for &gs in &group_sizes {
+        let cimage_path = out_dir_path.join(format!("ternary_mlp_g{gs}.cimage"));
+        let path_str = cimage_path.to_string_lossy().to_string();
+
+        use tribunus_compute_core::cimage::*;
+        use tribunus_compute_core::execution_plan::CodecFamily;
+
+        let config = SyntheticMlpShardConfig {
+            seed: 42,
+            hidden_dim: 64,
+            intermediate_dim: 128,
+            policy: SyntheticShardPolicy {
+                gate_codec: CodecFamily::Ternary1_58,
+                up_codec: CodecFamily::Ternary1_58,
+                down_codec: CodecFamily::Ternary1_58,
+                rmsnorm_codec: CodecFamily::RawF32,
+                allow_mixed_precision: false,
+            },
+        };
+
+        let (write_receipt, load_receipt, shard_validation) =
+            emit_and_validate_synthetic_mlp(&cimage_path, config)
+                .map_err(|e| format!("emit/validate error for gs={gs}: {e}"))?;
+
+        #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+        let metal_result: Option<serde_json::Value> = {
+            use metal::Device as MetalDevice;
+            use tribunus_compute_core::cimage::*;
+            use tribunus_compute_core::cimage_runtime::*;
+            match CImageMetalRegionRunner::new(
+                &MetalDevice::system_default().ok_or_else(|| "no Metal device".to_string())?,
+            ) {
+                Ok(mut runner) => {
+                    match CImageLoader::load_v0(&cimage_path)
+                        .map_err(|e| format!("load error: {e}"))
+                        .and_then(|loaded| {
+                            runner.run_mlp_shard_region(&loaded, &[])
+                                .map_err(|e| format!("metal error: {e}"))
+                        }) {
+                        Ok(receipt) => Some(serde_json::json!({
+                            "metal_vs_cpu_nrmse": receipt.metal_vs_cpu_nrmse,
+                            "metal_vs_cpu_cosine": receipt.metal_vs_cpu_cosine,
+                            "metal_vs_cpu_max_abs_error": receipt.metal_vs_cpu_max_abs_error,
+                            "command_buffer_ms": receipt.command_buffer_ms,
+                        })),
+                        Err(e) => {
+                            eprintln!("  metal error for gs={gs}: {e}");
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  runner error for gs={gs}: {e}");
+                    None
+                }
+            }
+        };
+        #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+        let metal_result: Option<serde_json::Value> = None;
+
+        let entry = serde_json::json!({
+            "group_size": gs,
+            "path": path_str,
+            "cimage_digest": write_receipt.cimage_digest,
+            "tensor_count": write_receipt.tensor_count,
+            "validation": if shard_validation.passed { "PASSED" } else { "FAILED" },
+            "output_nrmse": shard_validation.output_nrmse,
+            "output_cosine": shard_validation.output_cosine,
+            "max_abs_error": shard_validation.max_abs_error,
+            "metal": metal_result,
+        });
+        results.push(entry);
+    }
+
+    if json_output {
+        let output =
+            serde_json::to_string_pretty(&serde_json::json!({ "results": results }))
+                .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("ternary MLP sweep ({} group sizes):", results.len());
+        for entry in &results {
+            let gs = entry["group_size"].as_u64().unwrap_or(0);
+            let valid = entry["validation"].as_str().unwrap_or("?");
+            let nrmse = entry["output_nrmse"].as_f64().unwrap_or(0.0);
+            println!("  gs={gs:>4}  valid={valid}  nrmse={nrmse:.6}");
+            if let Some(metal) = entry["metal"].as_object() {
+                let mn = metal["metal_vs_cpu_nrmse"].as_f64().unwrap_or(0.0);
+                println!("           metal nrmse={mn:.6}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cimage bitnet commands — stubs for future BitNet importer
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn cmd_cimage_bitnet_emit_linear(args: &[String]) -> Result<(), String> {
+    let out = get_opt(args, "--out").ok_or_else(|| "--out is required".to_string())?;
+    let rows: usize = get_opt(args, "--rows")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "--rows is required".to_string())?;
+    let cols: usize = get_opt(args, "--cols")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "--cols is required".to_string())?;
+    let seed: u64 = get_opt(args, "--seed")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(42);
+
+    // Stub: create a synthetic ternary cimage as placeholder for future
+    // BitNet importer integration.
+    use tribunus_compute_core::cimage::*;
+
+    let pending = MlpShardBuilder::build_single_ternary_linear(rows, cols, 32, seed)
+        .map_err(|e| format!("build error: {e}"))?;
+
+    let write_receipt = CImageWriter::write_v0(
+        std::path::Path::new(out),
+        pending.manifest,
+        pending.payloads,
+        pending.receipts,
+    )
+    .map_err(|e| format!("write error: {e}"))?;
+
+    println!("bitnet linear cimage written to: {out}");
+    println!("  digest:     {}", write_receipt.cimage_digest);
+    println!("  tensors:    {}", write_receipt.tensor_count);
+    println!("  payloads:   {}", write_receipt.payload_count);
+    println!("  rows:       {rows}");
+    println!("  cols:       {cols}");
+    println!("  note:       placeholder for future BitNet importer");
     Ok(())
 }

@@ -153,6 +153,7 @@ fn codec_id(codec: CodecFamily) -> u32 {
         CodecFamily::SymInt4 => 4,
         CodecFamily::Ternary => 5,
         CodecFamily::Mixed => 6,
+        CodecFamily::Ternary1_58 => 7,
     }
 }
 

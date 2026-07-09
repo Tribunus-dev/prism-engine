@@ -19,15 +19,15 @@ pub mod fusion;
 pub mod model_plan;
 pub mod profile;
 
-pub mod vectors;
 pub mod capture;
+pub mod vectors;
 
 // ── KernelTemplate ───────────────────────────────────────────────────────
 pub mod backend_capability;
-pub mod fusion_scheduler;
 pub mod fusion_schedule_types;
-pub mod precision_plan;
+pub mod fusion_scheduler;
 pub mod mixed_precision;
+pub mod precision_plan;
 pub mod receipts;
 
 /// Identifier for a reusable kernel template.
@@ -100,6 +100,7 @@ pub enum CodecFamily {
     RawF32,
     SymInt4,
     Ternary,
+    Ternary1_58,
     Mixed,
 }
 /// Default codec family for unquantized paths.
@@ -108,7 +109,6 @@ impl Default for CodecFamily {
         Self::RawF32
     }
 }
-
 
 // ── KernelSpecialization ─────────────────────────────────────────────────
 
@@ -167,13 +167,28 @@ pub struct TileShape {
 
 impl TileShape {
     pub const fn tile640_decode() -> Self {
-        Self { m: 1, n: 640, k: 0, elements: 640 }
+        Self {
+            m: 1,
+            n: 640,
+            k: 0,
+            elements: 640,
+        }
     }
     pub const fn tile256_decode() -> Self {
-        Self { m: 1, n: 256, k: 0, elements: 256 }
+        Self {
+            m: 1,
+            n: 256,
+            k: 0,
+            elements: 256,
+        }
     }
     pub const fn tile1024_decode() -> Self {
-        Self { m: 1, n: 1024, k: 0, elements: 1024 }
+        Self {
+            m: 1,
+            n: 1024,
+            k: 0,
+            elements: 1024,
+        }
     }
 }
 
@@ -266,10 +281,7 @@ impl ScheduledKernelOp {
         }
         Ok(())
     }
-
 }
-
-
 
 /// Errors from validating a lowered ScheduledKernelOp.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -367,9 +379,13 @@ pub struct KernelValidationRequirements {
 
 impl Default for KernelValidationRequirements {
     fn default() -> Self {
-        Self { allows_in_place_input_output: false, requires_zeroed_output: false, requires_aligned_metadata: false, requires_hardware_validation: false }
+        Self {
+            allows_in_place_input_output: false,
+            requires_zeroed_output: false,
+            requires_aligned_metadata: false,
+            requires_hardware_validation: false,
+        }
     }
-
 }
 
 // ── ExecutionRegion ──────────────────────────────────────────────────────
@@ -494,10 +510,22 @@ pub struct MemoryBarrier {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HazardError {
-    UnsafeAliasing { group_id: String, reason: String },
-    OverlappingReadWrite { buffer_id: String, op_a: String, op_b: String },
-    ScratchBudgetExceeded { requested: u64, budget: u64 },
-    CyclicDependency { ops: Vec<String> },
+    UnsafeAliasing {
+        group_id: String,
+        reason: String,
+    },
+    OverlappingReadWrite {
+        buffer_id: String,
+        op_a: String,
+        op_b: String,
+    },
+    ScratchBudgetExceeded {
+        requested: u64,
+        budget: u64,
+    },
+    CyclicDependency {
+        ops: Vec<String>,
+    },
     Unknown,
 }
 
@@ -543,9 +571,9 @@ pub struct ModelExecutionPlanReceipt {
 /// Conservative hazard checker.
 pub struct HazardChecker;
 
+pub mod equivalence;
 pub mod hazard;
 pub mod pso_cache;
-pub mod equivalence;
 
 // ── Arena planner ────────────────────────────────────────────
 
@@ -662,8 +690,14 @@ mod tests {
 
     #[test]
     fn test_hardware_profile_budgets() {
-        assert_eq!(HardwareProfileId::AppleA18Tiny.scratch_budget_bytes(), 256 * 1024 * 1024);
-        assert_eq!(HardwareProfileId::AppleMMaxBandwidth.scratch_budget_bytes(), 2 * 1024 * 1024 * 1024);
+        assert_eq!(
+            HardwareProfileId::AppleA18Tiny.scratch_budget_bytes(),
+            256 * 1024 * 1024
+        );
+        assert_eq!(
+            HardwareProfileId::AppleMMaxBandwidth.scratch_budget_bytes(),
+            2 * 1024 * 1024 * 1024
+        );
     }
 
     #[test]

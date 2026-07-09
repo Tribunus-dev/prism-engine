@@ -35,6 +35,10 @@ pub enum CImagePayloadKind {
     ReceiptJson,
     AssistantGraphJson,
     StateStoreSchemaJson,
+    TernaryPackedCodes,
+    TernaryScales,
+    TernaryCalibrationMetadata,
+    TernaryAdmissionReceiptJson,
 }
 
 /// A pending payload ready to be written.

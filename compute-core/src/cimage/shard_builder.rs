@@ -36,6 +36,8 @@ use crate::nf4tile640::{
     pack_int8_weights, pack_nf4_weights, GROUPS_PER_TILE, GROUP_SIZE, PACKED_BYTES_PER_TILE,
     SCALES_F32_PER_TILE, TILE_ELEMENTS,
 };
+use crate::ternary::pack::pack_ternary_codes;
+use half::f16;
 
 // ─── Data structures ──────────────────────────────────────────────────────
 
@@ -211,6 +213,32 @@ fn rawf32_tile_layout(tensor_len: usize) -> PhysicalTileLayout {
         groups_per_tile: 0,
         packed_bytes_per_tile: (tensor_len * 4) as u32,
         metadata_f32_per_tile: 0,
+    }
+}
+
+/// Tile layout for the Ternary1_58 codec — one tile per row, grouped by group_size.
+fn ternary_grouped_layout(
+    pack_rows: usize,
+    pack_cols: usize,
+    group_size: usize,
+    dtype: DType,
+) -> PhysicalTileLayout {
+    let groups_per_row = pack_cols.div_ceil(group_size);
+    let bytes_per_group = (group_size * 2 + 7) / 8;
+    let scale_bytes_per_group = match dtype {
+        DType::F16 => 2,
+        _ => 4, // f32 fallback
+    };
+    PhysicalTileLayout {
+        tile_m: 1,
+        tile_n: pack_cols as u32,
+        tiles_per_row: 1,
+        total_tiles: pack_rows as u32,
+        padded_cols: pack_cols as u32,
+        group_size: group_size as u32,
+        groups_per_tile: groups_per_row as u32,
+        packed_bytes_per_tile: (groups_per_row * bytes_per_group) as u32,
+        metadata_f32_per_tile: (groups_per_row * scale_bytes_per_group) as u32,
     }
 }
 
@@ -438,6 +466,90 @@ impl MlpShardBuilder {
                         }),
                     )
                 }
+                CodecFamily::Ternary1_58 => {
+                    let group_size: usize = 32;
+                    let groups_per_row = pack_cols.div_ceil(group_size);
+
+                    // 1. Quantize weights to {-1, 0, +1}.
+                    let quantized: Vec<i8> = stored
+                        .iter()
+                        .map(|&w| {
+                            if w > 0.01f32 {
+                                1i8
+                            } else if w < -0.01f32 {
+                                -1i8
+                            } else {
+                                0i8
+                            }
+                        })
+                        .collect();
+
+                    // 2. Pack ternary codes.
+                    let codes = pack_ternary_codes(&quantized)
+                        .map_err(|e| CImageError::Other(format!("ternary pack failed: {e}")))?;
+
+                    // 3. Compute per-group scales: sum(|w|) / group_size.
+                    let mut scales_f32 = Vec::with_capacity(pack_rows * groups_per_row);
+                    for r in 0..pack_rows {
+                        for g in 0..groups_per_row {
+                            let start = g * group_size;
+                            let end = (start + group_size).min(pack_cols);
+                            let mut sum_abs = 0.0f32;
+                            for c in start..end {
+                                sum_abs += stored[r * pack_cols + c].abs();
+                            }
+                            scales_f32.push(sum_abs / group_size as f32);
+                        }
+                    }
+                    let scale_bytes: Vec<u8> = scales_f32
+                        .iter()
+                        .flat_map(|&s| f16::from_f32(s).to_le_bytes())
+                        .collect();
+
+                    // 4. Emit TernaryPackedCodes payload.
+                    let codes_payload = PendingPayload {
+                        payload_id: format!("p_{}_codes", tensor_key),
+                        payload_kind: CImagePayloadKind::TernaryPackedCodes,
+                        codec: Some("Ternary1_58".into()),
+                        alignment_bytes: 64,
+                        bytes: codes,
+                    };
+
+                    // 5. Emit TernaryScales payload.
+                    let scales_payload = PendingPayload {
+                        payload_id: format!("p_{}_scales", tensor_key),
+                        payload_kind: CImagePayloadKind::TernaryScales,
+                        codec: Some("Ternary1_58".into()),
+                        alignment_bytes: 64,
+                        bytes: scale_bytes,
+                    };
+
+                    // 6. Emit RawF32Reference alongside.
+                    let raw_f32_payload = PendingPayload {
+                        payload_id: format!("p_{}_rawf32", tensor_key),
+                        payload_kind: CImagePayloadKind::RawF32Reference,
+                        codec: Some("RawF32".into()),
+                        alignment_bytes: 64,
+                        bytes: f32_slice_to_le_bytes(stored),
+                    };
+
+                    all_payloads.push(codes_payload);
+                    all_payloads.push(scales_payload);
+                    all_payloads.push(raw_f32_payload);
+
+                    let layout =
+                        ternary_grouped_layout(pack_rows, pack_cols, group_size, DType::F16);
+
+                    (
+                        CImagePayloadRef::Single {
+                            payload_id: format!("p_{}_codes", tensor_key),
+                        },
+                        layout,
+                        Some(CImagePayloadRef::Single {
+                            payload_id: format!("p_{}_rawf32", tensor_key),
+                        }),
+                    )
+                }
                 other => {
                     return Err(CImageError::Other(format!(
                         "unsupported codec {:?} for tensor {}",
@@ -496,8 +608,151 @@ impl MlpShardBuilder {
             receipts: Vec::new(),
         })
     }
-}
+    /// Build a single ternary linear layer cimage shard.
+    ///
+    /// Generates one weight matrix of shape [rows, cols], quantizes to
+    /// Ternary1_58 with the given group_size, and returns a pending shard
+    /// with a single tensor entry and its codes / scales / raw-f32 payloads.
+    pub fn build_single_ternary_linear(
+        rows: usize,
+        cols: usize,
+        group_size: usize,
+        seed: u64,
+    ) -> CImageResult<PendingCImageShard> {
+        let tensor_key = "linear_weight";
+        let tensor_id = "t0";
 
+        // Generate as [cols, rows] then transpose to stored [rows, cols].
+        let raw = deterministic_f32_tensor(seed, &[cols, rows]);
+        let stored = transpose_matrix(&raw, cols, rows);
+
+        let pack_rows = rows;
+        let pack_cols = cols;
+        let groups_per_row = pack_cols.div_ceil(group_size);
+
+        // 1. Quantize weights to {-1, 0, +1}.
+        let quantized: Vec<i8> = stored
+            .iter()
+            .map(|&w| {
+                if w > 0.01f32 {
+                    1i8
+                } else if w < -0.01f32 {
+                    -1i8
+                } else {
+                    0i8
+                }
+            })
+            .collect();
+
+        // 2. Pack ternary codes.
+        let codes = pack_ternary_codes(&quantized)
+            .map_err(|e| CImageError::Other(format!("ternary pack failed: {e}")))?;
+
+        // 3. Compute per-group scales: sum(|w|) / group_size.
+        let mut scales_f32 = Vec::with_capacity(pack_rows * groups_per_row);
+        for r in 0..pack_rows {
+            for g in 0..groups_per_row {
+                let start = g * group_size;
+                let end = (start + group_size).min(pack_cols);
+                let mut sum_abs = 0.0f32;
+                for c in start..end {
+                    sum_abs += stored[r * pack_cols + c].abs();
+                }
+                scales_f32.push(sum_abs / group_size as f32);
+            }
+        }
+        let scale_bytes: Vec<u8> = scales_f32
+            .iter()
+            .flat_map(|&s| f16::from_f32(s).to_le_bytes())
+            .collect();
+
+        let tensor_sha256 = sha256_of_f32_slice(&stored);
+
+        // 4. Build payloads.
+        let mut all_payloads: Vec<PendingPayload> = Vec::new();
+
+        let codes_payload = PendingPayload {
+            payload_id: format!("p_{}_codes", tensor_key),
+            payload_kind: CImagePayloadKind::TernaryPackedCodes,
+            codec: Some("Ternary1_58".into()),
+            alignment_bytes: 64,
+            bytes: codes,
+        };
+        let scales_payload = PendingPayload {
+            payload_id: format!("p_{}_scales", tensor_key),
+            payload_kind: CImagePayloadKind::TernaryScales,
+            codec: Some("Ternary1_58".into()),
+            alignment_bytes: 64,
+            bytes: scale_bytes,
+        };
+        let raw_f32_payload = PendingPayload {
+            payload_id: format!("p_{}_rawf32", tensor_key),
+            payload_kind: CImagePayloadKind::RawF32Reference,
+            codec: Some("RawF32".into()),
+            alignment_bytes: 64,
+            bytes: f32_slice_to_le_bytes(&stored),
+        };
+        all_payloads.push(codes_payload);
+        all_payloads.push(scales_payload);
+        all_payloads.push(raw_f32_payload);
+
+        // 5. Build tensor entry.
+        let layout = ternary_grouped_layout(pack_rows, pack_cols, group_size, DType::F16);
+
+        let entry = CImageTensorEntry {
+            tensor_id: tensor_id.to_string(),
+            tensor_key: tensor_key.to_string(),
+            tensor_class: "TernaryLinear".to_string(),
+            logical_shape: vec![rows as u32, cols as u32],
+            source_dtype: DType::F32,
+            codec: CodecFamily::Ternary1_58,
+            precision_plan: None,
+            physical_layout: layout,
+            payload_ref: CImagePayloadRef::Single {
+                payload_id: format!("p_{}_codes", tensor_key),
+            },
+            raw_f32_reference_ref: Some(CImagePayloadRef::Single {
+                payload_id: format!("p_{}_rawf32", tensor_key),
+            }),
+            tensor_sha256,
+            validation_digest: None,
+        };
+
+        // 6. Build execution plan summary.
+        let plan_id = format!("synth_ternary_linear_{:016x}", seed);
+        let execution_plan = ModelExecutionPlanSummary {
+            plan_id: plan_id.clone(),
+            region_count: 1,
+            total_kernel_ops: 1,
+            total_input_bytes: (cols * 4) as u64,
+            total_output_bytes: (rows * 4) as u64,
+            tensor_refs: vec!["t0".into()],
+        };
+
+        // 7. Build manifest.
+        let manifest = CImageManifestV0 {
+            schema_version: 0,
+            model_family: "SyntheticTernaryLinear".into(),
+            artifact_kind: CImageArtifactKind::SyntheticShard,
+            source_model_digest: None,
+            compiler_policy_digest: "synthetic-ternary".into(),
+            layout_profile: HardwareProfileId::AppleMProBalanced,
+            tensors: vec![entry],
+            execution_plan,
+            receipts: Vec::new(),
+            assistant_graph: None,
+            state_store_schema: None,
+        };
+
+        Ok(PendingCImageShard {
+            manifest,
+            payloads: all_payloads,
+            receipts: Vec::new(),
+        })
+    }
+
+
+}
 // ─── Decoder layer builder ─────────────────────────────────────────────────
 
 /// Builder for constructing synthetic decoder layer cimage shards.
@@ -792,10 +1047,14 @@ impl DecoderLayerShardBuilder {
                         }),
                     )
                 }
-                other => {
+                CodecFamily::Fp16
+                | CodecFamily::SymInt4
+                | CodecFamily::Ternary
+                | CodecFamily::Ternary1_58
+                | CodecFamily::Mixed => {
                     return Err(CImageError::Other(format!(
                         "unsupported codec {:?} for tensor {}",
-                        other, tensor.key
+                        tensor.codec, tensor.key
                     )));
                 }
             };

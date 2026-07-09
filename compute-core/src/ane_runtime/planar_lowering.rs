@@ -225,7 +225,11 @@ pub fn ane_planar_lower(group: &FusedGroup) -> Result<PlanarProgramDescriptor, A
 
     match group.codec_family {
         CodecFamily::Fp16 | CodecFamily::Int8 | CodecFamily::RawF32 => {}
-        CodecFamily::Mixed | CodecFamily::Nf4 | CodecFamily::SymInt4 | CodecFamily::Ternary => {
+        CodecFamily::Mixed
+        | CodecFamily::Nf4
+        | CodecFamily::SymInt4
+        | CodecFamily::Ternary
+        | CodecFamily::Ternary1_58 => {
             return Err(AneLoweringError::UnsupportedCodec {
                 codec: format!("{:?}", group.codec_family),
             });
@@ -277,7 +281,7 @@ pub fn ane_planar_lower(group: &FusedGroup) -> Result<PlanarProgramDescriptor, A
                 lhs,
                 rhs,
                 output,
-                    contract,
+                contract,
             } => {
                 let _lhs_idx = record_input(lhs, shape.clone(), dtype);
                 let _rhs_idx = record_input(rhs, shape.clone(), dtype);
@@ -394,7 +398,11 @@ pub fn ane_planar_lower(group: &FusedGroup) -> Result<PlanarProgramDescriptor, A
             }
 
             // ── LoadWeight — just track the buffer ────────────────────
-            DataflowOp::LoadWeight { tensor, codec: _, layout: _ } => {
+            DataflowOp::LoadWeight {
+                tensor,
+                codec: _,
+                layout: _,
+            } => {
                 // LoadWeight is an ANE-internal operation. The weight is
                 // bound through the MIL program graph inputs at compile
                 // time. We record the tensor as a program input.
@@ -539,7 +547,16 @@ mod tests {
 
     #[test]
     fn fp16_matmul_planar() {
-        let group = matmul_group("g0", CodecFamily::Fp16, "act", "w0", "out", 4096, 4096, 4096);
+        let group = matmul_group(
+            "g0",
+            CodecFamily::Fp16,
+            "act",
+            "w0",
+            "out",
+            4096,
+            4096,
+            4096,
+        );
         let desc = ane_planar_lower(&group).expect("fp16 matmul should lower");
 
         assert_eq!(desc.group_id, "g0");
@@ -564,11 +581,23 @@ mod tests {
 
     #[test]
     fn int8_bridge_projection_accepted() {
-        let group = matmul_group("g1", CodecFamily::Int8, "act_i8", "w_i8", "out_i8", 1024, 2048, 512);
+        let group = matmul_group(
+            "g1",
+            CodecFamily::Int8,
+            "act_i8",
+            "w_i8",
+            "out_i8",
+            1024,
+            2048,
+            512,
+        );
         // Should succeed because Int8 is supported.
         let desc = ane_planar_lower(&group).expect("int8 matmul should be accepted");
 
-        let has_matmul = desc.operations.iter().any(|op| matches!(op, PlanarOp::MatMul(_)));
+        let has_matmul = desc
+            .operations
+            .iter()
+            .any(|op| matches!(op, PlanarOp::MatMul(_)));
         assert!(has_matmul, "int8 should produce a MatMul op");
     }
 
@@ -577,7 +606,16 @@ mod tests {
     #[test]
     #[allow(non_snake_case)]
     fn nf4_rejected_with_UnsupportedCodec() {
-        let group = matmul_group("g2", CodecFamily::Nf4, "act", "w_nf4", "out", 1024, 1024, 1024);
+        let group = matmul_group(
+            "g2",
+            CodecFamily::Nf4,
+            "act",
+            "w_nf4",
+            "out",
+            1024,
+            1024,
+            1024,
+        );
 
         let err = ane_planar_lower(&group).expect_err("nf4 should be rejected");
         match err {
