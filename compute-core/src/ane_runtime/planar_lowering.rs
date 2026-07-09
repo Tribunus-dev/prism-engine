@@ -225,7 +225,8 @@ pub fn ane_planar_lower(group: &FusedGroup) -> Result<PlanarProgramDescriptor, A
 
     match group.codec_family {
         CodecFamily::Fp16 | CodecFamily::Int8 | CodecFamily::RawF32 | CodecFamily::Ternary1_58 => {}
-        CodecFamily::Mixed | CodecFamily::Nf4 | CodecFamily::SymInt4 | CodecFamily::Ternary => {
+        CodecFamily::Mixed | CodecFamily::Nf4 | CodecFamily::SymInt4 | CodecFamily::Ternary
+        | CodecFamily::Q8_0 | CodecFamily::Q4_K | CodecFamily::Q2_K | CodecFamily::IQ2_XXS => {
             return Err(AneLoweringError::UnsupportedCodec {
                 codec: format!("{:?}", group.codec_family),
             });

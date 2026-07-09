@@ -13,6 +13,22 @@ pub enum KernelFamily {
     GemvInt8Tile,
     GemvNf4Tile,
     GemvTernaryTile,
+    /// Q8_0 block-f32 scale + int8 GEMV (32-element blocks)
+    GemvQ8_0,
+    /// Q4_K K-quant 4-bit GEMV (256-element super-blocks)
+    GemvQ4_K,
+    /// Q2_K K-quant 2-bit GEMV (256-element super-blocks)
+    GemvQ2_K,
+    /// IQ2_XXS importance-weighted 2-bit GEMV with codebook
+    GemvIQ2_XXS,
+    /// MoE expert router (top-k gating)
+    MoeRouter,
+    /// MoE sparse matmul (selected expert forward)
+    MoeSparseMatmul,
+    /// Shared expert MLP (dense MLP shared across tokens)
+    SharedExpertMlp,
+    /// Compressed attention (grouped-query with latent compression)
+    CompressedAttention,
     RmsNorm,
     Rope,
     AttentionScores,
@@ -27,6 +43,14 @@ impl KernelFamily {
             Self::GemvInt8Tile => "gemv_int8_tile",
             Self::GemvNf4Tile => "gemv_nf4_tile",
             Self::GemvTernaryTile => "gemv_ternary_tile",
+            Self::GemvQ8_0 => "gemv_q8_0",
+            Self::GemvQ4_K => "gemv_q4_k",
+            Self::GemvQ2_K => "gemv_q2_k",
+            Self::GemvIQ2_XXS => "gemv_iq2_xxs",
+            Self::MoeRouter => "moe_router",
+            Self::MoeSparseMatmul => "moe_sparse_matmul",
+            Self::SharedExpertMlp => "shared_expert_mlp",
+            Self::CompressedAttention => "compressed_attention",
             Self::RmsNorm => "rms_norm",
             Self::Rope => "rope",
             Self::AttentionScores => "attention_scores",

@@ -1,13 +1,15 @@
-//! Device profile matching — maps a runtime Metal device to the
-//! nearest known Apple Silicon profile ID.
+//! Device profile matching — maps a runtime device to the
+//! nearest known Apple Silicon or AMD GPU profile ID.
 //!
-//! Uses name matching first, then falls back to compute-unit proximity,
-//! then to the generic unknown fallback.
+//! Apple Silicon: uses name matching first, then compute-unit proximity,
+//! then the generic unknown fallback.
+//! AMD GPU: uses compute-unit proximity with a 20% threshold, preferring
+//! datacenter profiles when matches are close.
 
 use serde::{Deserialize, Serialize};
 
-use super::profile_db::AppleSiliconProfileDb;
-use super::profile_id::AppleSiliconProfileId;
+use super::profile_db::{AmdProfileDb, AppleSiliconProfileDb};
+use super::profile_id::{AmdGpuProfileId, AppleSiliconProfileId};
 
 /// Device profile extracted from the live Metal device at runtime.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +28,19 @@ pub struct RuntimeMetalDeviceProfile {
     pub recommended_max_working_set: Option<u64>,
     /// Whether the device supports SIMD-group operations.
     pub supports_simdgroup: bool,
+}
+
+/// Device profile extracted from a live AMD GPU (ROCr/HIP) at runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeAmdDeviceProfile {
+    /// Raw device name (e.g. "AMD Instinct MI300X").
+    pub device_name: String,
+    /// Number of compute units (CUs).
+    pub compute_units: u32,
+    /// Memory in GB.
+    pub memory_gb: f64,
+    /// Whether this is a datacenter-class GPU (Instinct series).
+    pub is_datacenter: bool,
 }
 
 /// Match a runtime device against the profile DB and return the
@@ -104,6 +119,40 @@ fn try_match_by_cu_count(
     }
 
     best_id
+}
+
+/// Match a runtime AMD device against the AMD profile DB and return the
+/// best profile ID.
+///
+/// Uses compute-unit proximity with a 20% threshold. When multiple profiles
+/// are within the threshold, datacenter-class GPUs (Instinct) are preferred
+/// over consumer GPUs.
+pub fn match_amd_device_to_profile(
+    device: &RuntimeAmdDeviceProfile,
+    db: &AmdProfileDb,
+) -> AmdGpuProfileId {
+    let cu = device.compute_units;
+    let mut candidates: Vec<(AmdGpuProfileId, i64)> = Vec::new();
+
+    for profile in &db.profiles {
+        // Skip the unknown fallback during matching.
+        if matches!(profile.profile_id, AmdGpuProfileId::UnknownAmd) {
+            continue;
+        }
+        let diff = (profile.gpu.compute_units as i64 - cu as i64).abs();
+        let threshold = (profile.gpu.compute_units as f64 * 0.2) as i64;
+        if diff <= threshold {
+            candidates.push((profile.profile_id, diff));
+        }
+    }
+
+    // Sort: datacenter first, then by diff ascending.
+    candidates.sort_by(|a, b| (!a.0.is_datacenter(), a.1).cmp(&(!b.0.is_datacenter(), b.1)));
+
+    candidates
+        .first()
+        .map(|(id, _)| *id)
+        .unwrap_or(AmdGpuProfileId::UnknownAmd)
 }
 
 impl AppleSiliconProfileId {

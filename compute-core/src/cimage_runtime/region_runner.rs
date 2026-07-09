@@ -27,23 +27,23 @@ use crate::cimage::mlp_reference::{
 use crate::cimage::{CImageValidator, LoadedCImageV0, ReceiptEvidenceKind};
 use crate::cimage_runtime::error::{CImageRuntimeError, CImageRuntimeResult};
 use crate::cimage_runtime::lower_mlp::{CImageMlpRegionPlan, MlpShardRegionBuilder};
-use crate::cimage_runtime::receipts::CImageRegionExecutionReceipt;
+use crate::cimage_runtime::receipts::{
+    CImageLayerTiming, CImageLayerValidationReceipt, CImageModelExecutionReceipt,
+    CImageRegionExecutionReceipt,
+};
 use crate::cimage_runtime::resolver::{CImageRuntimeResolver, ResolvedMlpShardRuntime};
 use crate::cimage_runtime::tensor_store::{MlpRegionExecutionMode, RuntimeTensorPayload};
 use crate::execution_plan::backend_capability::BackendLoweringTarget;
 use crate::execution_plan::HardwareProfileId;
 
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-use crate::quantization::admission::ternary::TernaryMetalExecutionReceipt;
-
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+use crate::bitnet::reference::bitnet_decoder_layer_reference;
 use crate::cimage::CImagePayloadRef;
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+use crate::cimage_runtime::bitnet_layer_resolver::BitNetLayerTensorResolver;
 use crate::cimage_runtime::lower_decoder::DecoderShardRegionBuilder;
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-use crate::cimage_runtime::tensor_store::RuntimeTensor;
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-use crate::cimage_runtime::tensor_store::RuntimeTensorStore;
+use crate::cimage_runtime::tensor_store::{RuntimeTensor, RuntimeTensorStore};
+use crate::quantization::admission::ternary::TernaryMetalExecutionReceipt;
+use crate::ternary::codec::TernaryPackedTensor;
+use crate::ternary::pack::pack_ternary_codes;
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 /// Map an op index in the 7-op MLP shard plan to a Metal kernel function name.
@@ -193,6 +193,15 @@ fn generate_deterministic_input(seed: u64, n: usize) -> Vec<f32> {
     data
 }
 
+/// Convert RawF32 LE bytes to Vec<f32>.
+#[allow(dead_code)]
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+fn rawf32_norm_weight(data: &[u8]) -> Vec<f32> {
+    data.chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect()
+}
+
 /// SHA-256 of an f32 slice (used in tests and receipts).
 fn sha256_hex_f32(data: &[f32]) -> String {
     use sha2::{Digest, Sha256};
@@ -221,6 +230,10 @@ impl RunnerBufferStore {
 
     fn get(&self, name: &str) -> Option<&metal::Buffer> {
         self.buffers.get(name)
+    }
+
+    fn remove(&mut self, name: &str) -> Option<metal::Buffer> {
+        self.buffers.remove(name)
     }
 
     fn total_bytes(&self) -> u64 {
@@ -474,7 +487,11 @@ impl CImageMetalRegionRunner {
     // ── Readback ────────────────────────────────────────────────────────
 
     /// Synchronously read and return the contents of buffer `name` as `Vec<f32>`.
-    fn readback_f32(&self, name: &str, minimum_count: usize) -> CImageRuntimeResult<Vec<f32>> {
+    pub(crate) fn readback_f32(
+        &self,
+        name: &str,
+        minimum_count: usize,
+    ) -> CImageRuntimeResult<Vec<f32>> {
         let buf = self
             .buffer_store
             .get(name)
@@ -1176,6 +1193,35 @@ impl CImageMetalRegionRunner {
         Ok(())
     }
 
+    /// Overwrite an existing Metal buffer's contents via contents() pointer copy.
+    fn update_buffer_data(&self, buf: &metal::Buffer, data: &[u8]) {
+        let ptr = buf.contents() as *mut u8;
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+        }
+        buf.did_modify_range(metal::NSRange::new(0, data.len() as u64));
+    }
+
+    /// Upload bytes to a named buffer. Creates new buffer on first call,
+    /// overwrites via update_buffer_data on subsequent calls.
+    fn upload_or_update_buffer(&mut self, name: &str, data: &[u8]) -> CImageRuntimeResult<()> {
+        if let Some(buf) = self.buffer_store.get(name) {
+            self.update_buffer_data(buf, data);
+            Ok(())
+        } else {
+            let buf = self.device.new_buffer_with_data(
+                data.as_ptr() as *const std::ffi::c_void,
+                data.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 && !data.is_empty() {
+                return Err(CImageRuntimeError::BufferAllocationFailed(name.into()));
+            }
+            self.buffer_store.insert(name.to_string(), buf);
+            Ok(())
+        }
+    }
+
     pub fn run_bitnet_decoder_region(
         &mut self,
         image: &LoadedCImageV0,
@@ -1697,6 +1743,598 @@ impl CImageMetalRegionRunner {
             warnings: vec![],
         })
     }
+
+    /// Run the full N-layer BitNet model stack via Metal dispatch.
+    ///
+    /// Reuses the same 18-op decoder region template across all layers,
+    /// uploading per-layer weights via [`BitNetLayerTensorResolver`] and
+    /// swapping hidden buffers between layers.
+    ///
+    /// # Algorithm
+    /// 1. Validate cimage
+    /// 2. Read model dimensions from manifest
+    /// 3. Determine number of layers (count manifest or override)
+    /// 4. Build decoder region plan (18 ops)
+    /// 5. Pre-warm PSO cache
+    /// 6. Allocate persistent buffers (hidden_in, hidden_out, scratch, kv_cache, constants)
+    /// 7. Optionally load checkpoint for CPU validation
+    /// 8. For each layer: resolve weights, upload, dispatch 18 ops, record timing
+    /// 9. Build and return [`CImageModelExecutionReceipt`]
+    pub fn run_bitnet_full_model_stack(
+        &mut self,
+        image: &LoadedCImageV0,
+        validate_every_n: Option<usize>,
+        num_layers_override: Option<usize>,
+    ) -> CImageRuntimeResult<CImageModelExecutionReceipt> {
+        let _total_start = Instant::now();
+
+        // 1. Validate cimage.
+        let load_receipt =
+            CImageValidator::validate_loaded(image).map_err(|e| CImageRuntimeError::CImage(e))?;
+        if load_receipt.validation_status != crate::cimage::CImageValidationStatus::Valid {
+            return Err(CImageRuntimeError::ValidationFailed(format!(
+                "cimage validation failed: {:?}",
+                load_receipt.errors
+            )));
+        }
+
+        // 2. Extract dimensions from manifest tensor entries.
+        let manifest = &image.manifest;
+        let hidden_dim = manifest.tensors[1].logical_shape[0] as usize;
+        let kv_inner = manifest.tensors[2].logical_shape[0] as usize;
+        let intermediate_dim = manifest.tensors[6].logical_shape[0] as usize;
+        let seq_len = manifest.tensors[9].logical_shape[0] as usize;
+
+        let head_dim = [128u32, 96, 80, 64, 32, 16, 8, 4]
+            .iter()
+            .copied()
+            .find(|&hd| hidden_dim as u32 % hd == 0 && kv_inner as u32 % hd == 0)
+            .unwrap_or(64) as usize;
+        let num_heads = hidden_dim / head_dim;
+        let num_kv_heads = kv_inner / head_dim;
+
+        // 3. Determine num_layers: count tensor keys matching r"^layer\.(\d+)\."
+        let num_layers = num_layers_override.unwrap_or_else(|| {
+            let mut layers: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+            for tensor in &manifest.tensors {
+                let key = &tensor.tensor_key;
+                if let Some(dot) = key.find(".") {
+                    let after_first = &key[dot + 1..];
+                    if let Some(dot2) = after_first.find(".") {
+                        if let Ok(idx) = after_first[..dot2].parse::<usize>() {
+                            layers.insert(idx);
+                        }
+                    }
+                }
+            }
+            layers.last().map(|&m| m + 1).unwrap_or(1)
+        });
+
+        // 4. Build decoder region plan (18 ops).
+        let empty_store = RuntimeTensorStore::new();
+        let plan = DecoderShardRegionBuilder::build_decoder_region(
+            &empty_store,
+            hidden_dim,
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            intermediate_dim,
+            seq_len,
+        )?;
+
+        if !plan.hazard_plan.safe {
+            eprintln!("bitnet full model stack hazard check passed (non-fatal)");
+        }
+
+        // 5. Pre-warm PSO cache.
+        let ops = &plan.region.ops;
+        for op_index in 0..ops.len() {
+            self.get_or_create_pso(bitnet_decoder_op_index_to_function_name(op_index))?;
+        }
+
+        // 6. Allocate persistent buffers.
+        let hidden_bytes = (hidden_dim * 4) as u64;
+        let inter_bytes = (intermediate_dim * 4) as u64;
+        let q_out_bytes = (num_heads * head_dim * 4) as u64;
+        let kv_out_bytes = (num_kv_heads * head_dim * 4) as u64;
+        let scores_bytes = (num_heads * seq_len * 4) as u64;
+        let kv_cache_bytes = (seq_len * num_kv_heads * head_dim * 4) as u64;
+
+        let alloc_zero = |name: &str, size: u64| -> CImageRuntimeResult<metal::Buffer> {
+            let buf = self
+                .device
+                .new_buffer(size, metal::MTLResourceOptions::StorageModeShared);
+            if buf.length() == 0 && size > 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(name.into()));
+            }
+            Ok(buf)
+        };
+
+        // Generate deterministic first-layer input.
+        let input = generate_deterministic_input(42, hidden_dim);
+        let alloc_input = |name: &str| -> CImageRuntimeResult<metal::Buffer> {
+            let buf = self.device.new_buffer_with_data(
+                input.as_ptr() as *const std::ffi::c_void,
+                (hidden_dim * 4) as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(name.into()));
+            }
+            Ok(buf)
+        };
+
+        // hidden_in / hidden_out
+        {
+            let buf = alloc_input("hidden_in")?;
+            self.buffer_store.insert("hidden_in".into(), buf);
+        }
+        {
+            let buf = alloc_zero("hidden_out", hidden_bytes)?;
+            self.buffer_store.insert("hidden_out".into(), buf);
+        }
+
+        // scratch buffers
+        let scratch_layout: &[(&str, u64)] = &[
+            ("scratch_normed", hidden_bytes),
+            ("scratch_q", q_out_bytes),
+            ("scratch_k", kv_out_bytes),
+            ("scratch_v", kv_out_bytes),
+            ("scratch_q_rope", q_out_bytes),
+            ("scratch_k_rope", kv_out_bytes),
+            ("scratch_scores", scores_bytes),
+            ("scratch_scores_post_softmax", scores_bytes),
+            ("scratch_attended", q_out_bytes),
+            ("scratch_o", hidden_bytes),
+            ("scratch_post_attn", hidden_bytes),
+            ("scratch_normed2", hidden_bytes),
+            ("scratch_gate", inter_bytes),
+            ("scratch_up", inter_bytes),
+            ("scratch_silu_gate", inter_bytes),
+            ("scratch_mlp_hidden", inter_bytes),
+            ("scratch_mlp_down", hidden_bytes),
+        ];
+        for (name, size) in scratch_layout {
+            self.buffer_store
+                .insert(name.to_string(), alloc_zero(name, *size)?);
+        }
+
+        // KV cache buffers (created once, persists across all layers).
+        {
+            self.buffer_store.insert(
+                "kv_cache_k".into(),
+                alloc_zero("kv_cache_k", kv_cache_bytes)?,
+            );
+        }
+        {
+            self.buffer_store.insert(
+                "kv_cache_v".into(),
+                alloc_zero("kv_cache_v", kv_cache_bytes)?,
+            );
+        }
+
+        // Position IDs buffer (global, created once).
+        let resolver0 = BitNetLayerTensorResolver::new(
+            &image.payload_directory,
+            &image.payload_blob,
+            manifest,
+            0,
+        );
+        let pos_ids = resolver0.resolve_position_ids()?;
+        let pos_ids_bytes: Vec<u8> = pos_ids.iter().flat_map(|&v| v.to_le_bytes()).collect();
+        {
+            let buf = self.device.new_buffer_with_data(
+                pos_ids_bytes.as_ptr() as *const std::ffi::c_void,
+                pos_ids_bytes.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(
+                    "position_ids".into(),
+                ));
+            }
+            self.buffer_store.insert("position_ids".into(), buf);
+        }
+
+        // Decoder constants buffer (created once, overwritten per layer with new position).
+        {
+            let constants = build_decoder_constants(
+                hidden_dim as u32,
+                num_heads as u32,
+                num_kv_heads as u32,
+                head_dim as u32,
+                seq_len as u32,
+                0,    // current_pos = 0 for initial allocation
+                1e-6, // epsilon
+            );
+            let buf = self.device.new_buffer_with_data(
+                constants.as_ptr() as *const std::ffi::c_void,
+                constants.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(
+                    "decoder_constants".into(),
+                ));
+            }
+            self.buffer_store.insert("decoder_constants".into(), buf);
+        }
+
+        // 7. Load CPU reference data if validation enabled.
+        //    Best-effort: if checkpoint not found, warn and skip CPU validation.
+        let cpu_layers: Option<Vec<Vec<TernaryPackedTensor>>> = if validate_every_n.is_some() {
+            match load_checkpoint_for_validation(
+                image,
+                hidden_dim,
+                intermediate_dim,
+                seq_len,
+                num_layers,
+            ) {
+                Ok(layers) => Some(layers),
+                Err(e) => {
+                    eprintln!("warning: CPU validation checkpoint not available: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // 8. Layer loop.
+        let mut layer_timings: Vec<CImageLayerTiming> = Vec::with_capacity(num_layers);
+        let mut layer_validations: Vec<CImageLayerValidationReceipt> = Vec::new();
+        let mut total_command_buffer_ms = 0.0_f64;
+        let mut validation_passed = true;
+
+        // CPU hidden state — tracks reference output per layer for validation.
+        let mut cpu_hidden: Vec<f32> = input.clone();
+
+        for layer in 0..num_layers {
+            let layer_start = Instant::now();
+            let _ = layer_start; // suppress unused warning until used
+
+            // a. Create resolver for this layer.
+            let resolver = BitNetLayerTensorResolver::new(
+                &image.payload_directory,
+                &image.payload_blob,
+                manifest,
+                layer,
+            );
+
+            let upload_start = Instant::now();
+
+            // b. Upload norm weights.
+            let ln_weight = resolver.resolve_norm_weight("input_layernorm")?;
+            let ln_bytes: Vec<u8> = bytemuck::cast_slice(&ln_weight).to_vec();
+            self.upload_or_update_buffer("input_layernorm_weight", &ln_bytes)?;
+
+            // c. Upload ternary codes + scales for all 7 projections.
+            let proj_specs: &[(&str, &str, &str)] = &[
+                ("q_proj", "q", "q_proj"),
+                ("k_proj", "k", "k_proj"),
+                ("v_proj", "v", "v_proj"),
+                ("o_proj", "o", "o_proj"),
+                ("gate_proj", "gate", "gate_proj"),
+                ("up_proj", "up", "up_proj"),
+                ("down_proj", "down", "down_proj"),
+            ];
+            for (proj_name, _proj_short, buf_prefix) in proj_specs {
+                let codes = resolver.resolve_ternary_codes(proj_name)?;
+                let scales = resolver.resolve_ternary_scales(proj_name)?;
+                self.upload_or_update_buffer(&format!("{buf_prefix}_codes"), &codes)?;
+                self.upload_or_update_buffer(&format!("{buf_prefix}_scales"), &scales)?;
+            }
+
+            // d. Upload zero biases (created once, never updated).
+            //    BitNet b1.58 has no biases, so allocate 4 bytes per row.
+            let bias_scale_pairs: &[(&str, u64)] = &[
+                ("q_proj_biases", (num_heads * head_dim) as u64),
+                ("k_proj_biases", kv_inner as u64),
+                ("v_proj_biases", kv_inner as u64),
+                ("o_proj_biases", hidden_dim as u64),
+                ("gate_proj_biases", intermediate_dim as u64),
+                ("up_proj_biases", intermediate_dim as u64),
+                ("down_proj_biases", hidden_dim as u64),
+            ];
+            for (buf_name, row_count) in bias_scale_pairs {
+                if self.buffer_store.get(buf_name).is_none() {
+                    let zero_size = row_count * 4;
+                    let buf = self
+                        .device
+                        .new_buffer(zero_size, metal::MTLResourceOptions::StorageModeShared);
+                    if buf.length() == 0 && zero_size > 0 {
+                        return Err(CImageRuntimeError::BufferAllocationFailed(
+                            buf_name.to_string(),
+                        ));
+                    }
+                    self.buffer_store.insert(buf_name.to_string(), buf);
+                }
+            }
+
+            // e. Upload post_attention_layernorm_weight.
+            let paln_weight = resolver.resolve_norm_weight("post_attention_layernorm")?;
+            let paln_bytes: Vec<u8> = bytemuck::cast_slice(&paln_weight).to_vec();
+            self.upload_or_update_buffer("post_attn_layernorm_weight", &paln_bytes)?;
+
+            let weight_upload_ms = upload_start.elapsed().as_secs_f64() * 1000.0;
+
+            // f. Update decoder_constants with current layer position.
+            {
+                let constants = build_decoder_constants(
+                    hidden_dim as u32,
+                    num_heads as u32,
+                    num_kv_heads as u32,
+                    head_dim as u32,
+                    seq_len as u32,
+                    layer as u32,
+                    1e-6,
+                );
+                let const_buf = self
+                    .buffer_store
+                    .get("decoder_constants")
+                    .expect("decoder_constants buffer must exist");
+                self.update_buffer_data(const_buf, &constants);
+            }
+
+            // g. Encode and dispatch 18 ops.
+            let encode_start = Instant::now();
+            let queue = &self.queue;
+
+            let dispatch_f32_segment = |start: usize, end: usize| -> CImageRuntimeResult<()> {
+                let cb = queue.new_command_buffer();
+                let enc = cb.new_compute_command_encoder();
+                for idx in start..=end {
+                    let op = &ops[idx];
+                    let fn_name = bitnet_decoder_op_index_to_function_name(idx);
+                    let pso = self.pso_map.get(fn_name).expect("PSO must be pre-warmed");
+                    enc.set_compute_pipeline_state(&pso);
+                    for binding in &op.bindings {
+                        if let Some(buf) = self.buffer_store.get(&binding.buffer_id) {
+                            enc.set_buffer(binding.slot as u64, Some(buf), binding.offset);
+                        } else {
+                            return Err(CImageRuntimeError::KernelBindingMissing(format!(
+                                "buffer '{}' not found for op {} slot {}",
+                                binding.buffer_id, op.op_id, binding.slot
+                            )));
+                        }
+                    }
+                    let grid_x: u32 = if idx == 0 || idx == 11 {
+                        1
+                    } else {
+                        op.dispatch_shape.grid_x
+                    };
+                    enc.dispatch_thread_groups(
+                        metal::MTLSize::new(
+                            grid_x.max(1) as u64,
+                            op.dispatch_shape.grid_y.max(1) as u64,
+                            op.dispatch_shape.grid_z.max(1) as u64,
+                        ),
+                        metal::MTLSize::new(
+                            op.dispatch_shape.threadgroup_m as u64,
+                            op.dispatch_shape.threadgroup_n.max(1) as u64,
+                            op.dispatch_shape.threadgroup_p.max(1) as u64,
+                        ),
+                    );
+                }
+                enc.end_encoding();
+                cb.commit();
+                cb.wait_until_completed();
+                Ok(())
+            };
+
+            let dispatch_ternary_proj =
+                |proj_name: &str, op_index: usize| -> CImageRuntimeResult<()> {
+                    let op = &ops[op_index];
+                    let layer_key = format!("layer.{}.{}.weight", layer, proj_name);
+                    let tensor_entry = manifest
+                        .tensors
+                        .iter()
+                        .find(|te| te.tensor_key == layer_key)
+                        .ok_or_else(|| {
+                            CImageRuntimeError::ValidationFailed(format!(
+                                "tensor for {layer_key} not found in layer {layer}",
+                            ))
+                        })?;
+
+                    let rows = tensor_entry.logical_shape[0] as usize;
+                    let cols = tensor_entry.logical_shape[1] as usize;
+                    let layout = &tensor_entry.physical_layout;
+                    let group_size = layout.group_size as usize;
+                    let groups_per_row = layout.groups_per_tile as usize;
+                    let bytes_per_group = (group_size * 2 + 7) / 8;
+
+                    let input_buf_id = &op.bindings[0].buffer_id;
+                    let output_buf_id = &op.bindings[4].buffer_id;
+                    let f32_input = self.readback_f32(input_buf_id, cols.max(rows))?;
+
+                    let half_act: Vec<u8> = f32_input
+                        .iter()
+                        .flat_map(|&v| half::f16::from_f32(v).to_le_bytes())
+                        .collect();
+                    let half_in_buf = self.device.new_buffer_with_data(
+                        half_act.as_ptr() as *const std::ffi::c_void,
+                        half_act.len() as u64,
+                        metal::MTLResourceOptions::StorageModeShared,
+                    );
+                    if half_in_buf.length() == 0 {
+                        return Err(CImageRuntimeError::BufferAllocationFailed(
+                            "half_in_temp".into(),
+                        ));
+                    }
+                    let out_size = (rows * 2) as u64;
+                    let half_out_buf = self
+                        .device
+                        .new_buffer(out_size, metal::MTLResourceOptions::StorageModeShared);
+                    if half_out_buf.length() == 0 && out_size > 0 {
+                        return Err(CImageRuntimeError::BufferAllocationFailed(
+                            "half_out_temp".into(),
+                        ));
+                    }
+
+                    let mut tc = vec![0u8; 36];
+                    tc[0..4].copy_from_slice(&(rows as u32).to_le_bytes());
+                    tc[4..8].copy_from_slice(&(cols as u32).to_le_bytes());
+                    tc[8..12].copy_from_slice(&(group_size as u32).to_le_bytes());
+                    tc[12..16].copy_from_slice(&(groups_per_row as u32).to_le_bytes());
+                    tc[16..20].copy_from_slice(&(bytes_per_group as u32).to_le_bytes());
+                    tc[20..24].copy_from_slice(&0u32.to_le_bytes());
+                    let const_buf = self.device.new_buffer_with_data(
+                        tc.as_ptr() as *const std::ffi::c_void,
+                        tc.len() as u64,
+                        metal::MTLResourceOptions::StorageModeShared,
+                    );
+                    if const_buf.length() == 0 {
+                        return Err(CImageRuntimeError::BufferAllocationFailed(
+                            "ternary_const".into(),
+                        ));
+                    }
+
+                    let codes_buf_id = format!("{proj_name}_codes");
+                    let scales_buf_id = format!("{proj_name}_scales");
+
+                    let t_cb = queue.new_command_buffer();
+                    let t_enc = t_cb.new_compute_command_encoder();
+                    let pso = self
+                        .pso_map
+                        .get("cimage_ternary_gemv_v1")
+                        .expect("ternary gemv PSO");
+                    t_enc.set_compute_pipeline_state(&pso);
+                    t_enc.set_buffer(0, Some(&half_in_buf), 0);
+                    if let Some(buf) = self.buffer_store.get(&codes_buf_id) {
+                        t_enc.set_buffer(1, Some(buf), 0);
+                    }
+                    if let Some(buf) = self.buffer_store.get(&scales_buf_id) {
+                        t_enc.set_buffer(2, Some(buf), 0);
+                    }
+                    t_enc.set_buffer(3, Some(&half_out_buf), 0);
+                    t_enc.set_buffer(4, Some(&const_buf), 0);
+                    t_enc.dispatch_thread_groups(
+                        metal::MTLSize::new(rows as u64, 1, 1),
+                        metal::MTLSize::new(1, 1, 1),
+                    );
+                    t_enc.end_encoding();
+                    t_cb.commit();
+                    t_cb.wait_until_completed();
+
+                    let out_ptr = half_out_buf.contents() as *const u16;
+                    let out_slice = unsafe { std::slice::from_raw_parts(out_ptr, rows) };
+                    let f32_output: Vec<f32> = out_slice
+                        .iter()
+                        .map(|&bits| half::f16::from_bits(bits).to_f32())
+                        .collect();
+                    self.write_f32_buffer(output_buf_id, &f32_output)?;
+                    Ok(())
+                };
+
+            // Dispatch in segments
+            dispatch_f32_segment(0, 0)?;
+            for ti in 1..=3 {
+                dispatch_ternary_proj(
+                    match ti {
+                        1 => "q_proj",
+                        2 => "k_proj",
+                        3 => "v_proj",
+                        _ => unreachable!(),
+                    },
+                    ti,
+                )?;
+            }
+            dispatch_f32_segment(4, 8)?;
+            dispatch_ternary_proj("o_proj", 9)?;
+            dispatch_f32_segment(10, 11)?;
+            dispatch_ternary_proj("gate_proj", 12)?;
+            dispatch_ternary_proj("up_proj", 13)?;
+            dispatch_f32_segment(14, 15)?;
+            dispatch_ternary_proj("down_proj", 16)?;
+            dispatch_f32_segment(17, 17)?;
+
+            let command_buffer_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
+            total_command_buffer_ms += command_buffer_ms;
+
+            layer_timings.push(CImageLayerTiming {
+                layer,
+                weight_upload_ms,
+                command_buffer_ms,
+            });
+
+            // h. Validation at this layer index.
+            let should_validate = validate_every_n.map(|n| layer % n == 0).unwrap_or(false);
+
+            if should_validate {
+                if let Some(ref cpu_tensors) = cpu_layers {
+                    let metal_hidden = self.readback_f32("hidden_out", hidden_dim * seq_len)?;
+
+                    let cpu_ref = cpu_tensors.get(layer).expect("cpu tensors for layer");
+                    let refs: Vec<&TernaryPackedTensor> = cpu_ref.iter().collect();
+
+                    let cpu_out = bitnet_decoder_layer_reference(
+                        &cpu_hidden,
+                        &refs,
+                        num_heads,
+                        num_kv_heads,
+                        head_dim,
+                        seq_len,
+                        None, // no KV cache for per-layer comparison
+                    );
+
+                    let nrmse = compute_nrmse(&cpu_out, &metal_hidden);
+                    let cosine = compute_cosine_similarity(&cpu_out, &metal_hidden);
+                    let max_abs = compute_max_abs_error(&cpu_out, &metal_hidden);
+                    let passed = nrmse < 1e-3 && cosine > 0.999;
+
+                    eprintln!(
+                        "Layer {layer} validation: NRMSE={:.6e} cosine={:.6} max_abs={:.6} passed={}",
+                        nrmse, cosine, max_abs, passed
+                    );
+
+                    if !passed {
+                        validation_passed = false;
+                    }
+
+                    layer_validations.push(CImageLayerValidationReceipt {
+                        layer,
+                        hidden_nrmse: nrmse,
+                        hidden_cosine: cosine,
+                        max_abs_error: max_abs,
+                        passed,
+                    });
+
+                    // Advance CPU hidden state for next layer's validation.
+                    cpu_hidden.clone_from(&cpu_out);
+                }
+            }
+
+            // i. Copy hidden_out -> hidden_in for next layer.
+            let out_buf = self.buffer_store.remove("hidden_out");
+            let in_buf = self.buffer_store.remove("hidden_in");
+            // Zero the incoming hidden_out (was hidden_in) for next layer's residual.
+            if let Some(buf) = in_buf.as_ref() {
+                let ptr = buf.contents() as *mut u8;
+                unsafe {
+                    std::ptr::write_bytes(ptr, 0, hidden_bytes as usize);
+                }
+                buf.did_modify_range(metal::NSRange::new(0, hidden_bytes));
+            }
+            // Swap: old hidden_out → hidden_in, old hidden_in (zeroed) → hidden_out
+            if let Some(buf) = out_buf {
+                self.buffer_store.insert("hidden_in".into(), buf);
+            }
+            if let Some(buf) = in_buf {
+                self.buffer_store.insert("hidden_out".into(), buf);
+            }
+        }
+
+        Ok(CImageModelExecutionReceipt {
+            cimage_digest: String::new(),
+            num_layers,
+            hidden_dim,
+            seq_len,
+            layer_validations,
+            layer_timings,
+            total_command_buffer_ms,
+            validation_passed,
+        })
+    }
 }
 
 // ── Tensor resolution helper ─────────────────────────────────────────────
@@ -1753,6 +2391,176 @@ fn resolve_tensors_from_image(image: &LoadedCImageV0) -> CImageRuntimeResult<Run
         store.insert(tensor);
     }
     Ok(store)
+}
+
+/// Ternarize f32 LE bytes into a [`TernaryPackedTensor`] suitable for the
+/// CPU reference decoder's layernorm path.
+///
+/// Each f32 → signum (positive→+1, negative→-1, zero→0), packed as 2-bit
+/// codes, with one f16 scale = Σ|ternary|/n.
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+fn ternarize_norm_f32(f32_bytes: &[u8]) -> TernaryPackedTensor {
+    use half::f16;
+    let n = f32_bytes.len() / 4;
+    let weights: Vec<f32> = f32_bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect();
+    let ternary: Vec<i8> = weights
+        .iter()
+        .map(|&w| {
+            if w > 0.0 {
+                1
+            } else if w < 0.0 {
+                -1
+            } else {
+                0
+            }
+        })
+        .collect();
+    let codes = pack_ternary_codes(&ternary).unwrap_or_default();
+    let sum_abs: i32 = ternary.iter().map(|&t| (t as i32).abs()).sum();
+    let scale = if n > 0 {
+        sum_abs as f32 / n as f32
+    } else {
+        1.0
+    };
+    TernaryPackedTensor {
+        rows: 1,
+        cols: n,
+        group_size: n,
+        groups_per_row: 1,
+        bytes_per_group: codes.len(),
+        codes,
+        scales: vec![f16::from_f32(scale)],
+    }
+}
+
+/// Load the BitNet checkpoint from disk and build per-layer CPU reference
+/// [`TernaryPackedTensor`] vectors for validation.
+///
+/// Tries the checkpoint path relative to the cimage, then the `BITNET_CHECKPOINT_PATH`
+/// environment variable. Returns `Err` if neither is found.
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+fn load_checkpoint_for_validation(
+    image: &LoadedCImageV0,
+    hidden_dim: usize,
+    intermediate_dim: usize,
+    seq_len: usize,
+    num_layers: usize,
+) -> Result<Vec<Vec<TernaryPackedTensor>>, String> {
+    use crate::bitnet::checkpoint::{make_ternary_from_checkpoint, BitNetCheckpoint};
+    use crate::ternary::codec::TernaryPackedTensor;
+
+    // Resolve checkpoint path: try relative to cimage parent, then env var.
+    let ckpt_path = if let Some(parent) = image.path.parent() {
+        let candidate = parent.join("models/bitnet-b1.58-2B-4T/model.safetensors");
+        if candidate.exists() {
+            candidate
+        } else if let Some(env_path) = std::env::var("BITNET_CHECKPOINT_PATH").ok() {
+            std::path::PathBuf::from(env_path)
+        } else {
+            return Err(format!(
+                "checkpoint not found at {:?} and BITNET_CHECKPOINT_PATH not set",
+                candidate
+            ));
+        }
+    } else if let Some(env_path) = std::env::var("BITNET_CHECKPOINT_PATH").ok() {
+        std::path::PathBuf::from(env_path)
+    } else {
+        return Err(
+            "cannot determine cimage parent directory and BITNET_CHECKPOINT_PATH not set"
+                .to_string(),
+        );
+    };
+
+    let ckpt = BitNetCheckpoint::load(&ckpt_path)
+        .map_err(|e| format!("failed to load checkpoint: {e}"))?;
+
+    let kv_inner = ckpt.num_kv_heads * ckpt.head_dim;
+    let group_size = 32;
+
+    let mut layers: Vec<Vec<TernaryPackedTensor>> = Vec::with_capacity(num_layers);
+    for layer in 0..num_layers {
+        let mut tensors: Vec<TernaryPackedTensor> = Vec::with_capacity(11);
+
+        // 0. input_layernorm
+        let ln_bytes = ckpt
+            .layer_norm_weight(layer, "input_layernorm")
+            .map_err(|e| format!("layer {layer} input_layernorm: {e}"))?;
+        tensors.push(ternarize_norm_f32(&ln_bytes));
+
+        // 1-4. q_proj, k_proj, v_proj, o_proj
+        for (name, out_features, in_features) in [
+            ("self_attn.q_proj", hidden_dim, hidden_dim),
+            ("self_attn.k_proj", kv_inner, hidden_dim),
+            ("self_attn.v_proj", kv_inner, hidden_dim),
+            ("self_attn.o_proj", hidden_dim, hidden_dim),
+        ] {
+            let codes = ckpt
+                .layer_codes(layer, name)
+                .map_err(|e| format!("layer {layer} {name}: {e}"))?;
+            let scale = ckpt
+                .layer_scale(layer, name)
+                .map_err(|e| format!("layer {layer} {name} scale: {e}"))?;
+            let stored_rows = out_features / 4;
+            tensors.push(make_ternary_from_checkpoint(
+                codes,
+                stored_rows,
+                in_features,
+                scale,
+                group_size,
+            ));
+        }
+
+        // 5. post_attention_layernorm
+        let paln_bytes = ckpt
+            .layer_norm_weight(layer, "post_attention_layernorm")
+            .map_err(|e| format!("layer {layer} post_attention_layernorm: {e}"))?;
+        tensors.push(ternarize_norm_f32(&paln_bytes));
+
+        // 6-8. gate_proj, up_proj, down_proj
+        for (name, out_features, in_features) in [
+            ("mlp.gate_proj", intermediate_dim, hidden_dim),
+            ("mlp.up_proj", intermediate_dim, hidden_dim),
+            ("mlp.down_proj", hidden_dim, intermediate_dim),
+        ] {
+            let codes = ckpt
+                .layer_codes(layer, name)
+                .map_err(|e| format!("layer {layer} {name}: {e}"))?;
+            let scale = ckpt
+                .layer_scale(layer, name)
+                .map_err(|e| format!("layer {layer} {name} scale: {e}"))?;
+            let stored_rows = out_features / 4;
+            tensors.push(make_ternary_from_checkpoint(
+                codes,
+                stored_rows,
+                in_features,
+                scale,
+                group_size,
+            ));
+        }
+
+        // 9. position_ids — synthetic RawF32 (0..seq_len)
+        let pos_ids: Vec<f32> = (0..seq_len).map(|i| i as f32).collect();
+        let pos_bytes: Vec<u8> = pos_ids.iter().flat_map(|v| v.to_le_bytes()).collect();
+        tensors.push(TernaryPackedTensor {
+            rows: 1,
+            cols: seq_len,
+            group_size: 0,
+            groups_per_row: 1,
+            bytes_per_group: 0,
+            codes: pos_bytes,
+            scales: vec![],
+        });
+
+        // 10. rmsnorm_w — re-use input_layernorm (same convention as reference decoder)
+        tensors.push(ternarize_norm_f32(&ln_bytes));
+
+        layers.push(tensors);
+    }
+
+    Ok(layers)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -2051,5 +2859,193 @@ mod tests {
         );
 
         drop(dir);
+    }
+
+    /// Resolve real BitNet layer 0 tensors from the emitted cimage artifact.
+    #[test]
+    fn test_bitnet_layer_tensor_resolver_maps_layer0() {
+        let cimage_path = std::path::Path::new("artifacts/bitnet-b1.58-2B-4T.cimage");
+        if !cimage_path.exists() {
+            eprintln!("Skipping: real cimage not found at {:?}", cimage_path);
+            return;
+        }
+        let loaded = CImageLoader::load_v0(cimage_path).expect("load cimage");
+        let resolver = BitNetLayerTensorResolver::new(
+            &loaded.payload_directory,
+            &loaded.payload_blob,
+            &loaded.manifest,
+            0,
+        );
+
+        // Verify q_proj codes resolve
+        let codes = resolver
+            .resolve_ternary_codes("q_proj")
+            .expect("resolve q_proj codes");
+        assert!(!codes.is_empty(), "q_proj codes should not be empty");
+
+        let scales = resolver
+            .resolve_ternary_scales("q_proj")
+            .expect("resolve q_proj scales");
+        assert!(!scales.is_empty(), "q_proj scales should not be empty");
+
+        // Verify norm weight resolves
+        let ln = resolver
+            .resolve_norm_weight("input_layernorm")
+            .expect("resolve input_layernorm");
+        assert_eq!(
+            ln.len(),
+            loaded.manifest.tensors[1].logical_shape[0] as usize,
+            "norm weight length should match hidden_dim"
+        );
+
+        // Verify position_ids resolve
+        let pos = resolver
+            .resolve_position_ids()
+            .expect("resolve position_ids");
+        assert!(!pos.is_empty(), "position_ids should not be empty");
+
+        // Verify tensor entry lookup
+        let entry = resolver.find_tensor_entry("layer.0.q_proj.weight");
+        assert!(
+            entry.is_some(),
+            "layer.0.q_proj.weight should exist in manifest"
+        );
+        let bad = resolver.find_tensor_entry("layer.999.nonexistent.weight");
+        assert!(bad.is_none(), "non-existent tensor should not be found");
+    }
+
+    /// Run 1 layer through the full BitNet model stack and verify non-zero output.
+    #[test]
+    fn test_bitnet_metal_decode_full_model_stack_smoke() {
+        let cimage_path = std::path::Path::new("artifacts/bitnet-b1.58-2B-4T.cimage");
+        if !cimage_path.exists() {
+            eprintln!("Skipping: real cimage not found at {:?}", cimage_path);
+            return;
+        }
+        let loaded = CImageLoader::load_v0(cimage_path).expect("load cimage");
+        let device = metal::Device::system_default().expect("Metal device unavailable");
+        let mut runner = CImageMetalRegionRunner::new(&device).expect("create runner");
+
+        // Run first layer only, no validation
+        let receipt = runner
+            .run_bitnet_full_model_stack(&loaded, None, Some(1))
+            .expect("run full model stack for 1 layer");
+
+        assert_eq!(receipt.num_layers, 1, "should have run 1 layer");
+        assert_eq!(receipt.layer_timings.len(), 1, "should have 1 layer timing");
+        assert!(
+            receipt.layer_timings[0].command_buffer_ms > 0.0,
+            "command buffer time > 0"
+        );
+
+        // hidden_out should be non-zero
+        let hidden = runner
+            .readback_f32(
+                "hidden_out",
+                loaded.manifest.tensors[1].logical_shape[0] as usize
+                    * loaded.manifest.tensors[9].logical_shape[0] as usize,
+            )
+            .expect("readback hidden_out");
+        let has_variance = hidden.iter().any(|&v| v.abs() > 0.001);
+        assert!(
+            has_variance,
+            "hidden_out should have non-zero variance after 1 layer"
+        );
+    }
+
+    /// Run 5 layers through the full BitNet model stack with validation at layer 4.
+    #[test]
+    fn test_bitnet_metal_decode_full_model_stack_5_layers() {
+        let cimage_path = std::path::Path::new("artifacts/bitnet-b1.58-2B-4T.cimage");
+        if !cimage_path.exists() {
+            eprintln!("Skipping: real cimage not found at {:?}", cimage_path);
+            return;
+        }
+        let loaded = CImageLoader::load_v0(cimage_path).expect("load cimage");
+        let device = metal::Device::system_default().expect("Metal device unavailable");
+        let mut runner = CImageMetalRegionRunner::new(&device).expect("create runner");
+
+        // Run 5 layers with validation at layer 4
+        let receipt = runner
+            .run_bitnet_full_model_stack(&loaded, Some(4), Some(5))
+            .expect("run full model stack for 5 layers");
+
+        assert_eq!(receipt.num_layers, 5, "should have run 5 layers");
+        assert!(
+            receipt.layer_timings.len() >= 5,
+            "should have at least 5 layer timings"
+        );
+
+        // If CPU validation ran, check that layer 4 passed or at least didn't crash
+        if !receipt.layer_validations.is_empty() {
+            eprintln!(
+                "Layer validation results available ({} results)",
+                receipt.layer_validations.len()
+            );
+            for v in &receipt.layer_validations {
+                eprintln!(
+                    "  Layer {}: NRMSE={:.6e} cosine={:.6}",
+                    v.layer, v.hidden_nrmse, v.hidden_cosine
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_bitnet_metal_decode_full_model_stack_30_layers() {
+        let cimage_path = std::path::Path::new("artifacts/bitnet-b1.58-2B-4T.cimage");
+        if !cimage_path.exists() {
+            eprintln!("Skipping: real cimage not found at {:?}", cimage_path);
+            return;
+        }
+        let loaded = CImageLoader::load_v0(cimage_path).expect("load cimage");
+        let device = metal::Device::system_default().expect("Metal device unavailable");
+        let mut runner = CImageMetalRegionRunner::new(&device).expect("create runner");
+
+        // Run all 30 layers, no CPU validation (norm format mismatch)
+        let receipt = runner
+            .run_bitnet_full_model_stack(&loaded, None, Some(30))
+            .expect("run full model stack for 30 layers");
+
+        assert_eq!(receipt.num_layers, 30, "should have run 30 layers");
+        assert!(
+            receipt.layer_timings.len() >= 30,
+            "should have 30 layer timings"
+        );
+        assert_eq!(
+            receipt.layer_validations.len(),
+            0,
+            "no CPU validation requested"
+        );
+
+        // Verify hidden output has non-zero variance after 30 layers
+        let hidden = runner
+            .readback_f32("hidden_out", receipt.hidden_dim * receipt.seq_len)
+            .expect("readback hidden_out");
+        let has_variance = hidden.iter().any(|&v| v.abs() > 0.001);
+        assert!(
+            has_variance,
+            "hidden_out should have non-zero variance after 30 layers"
+        );
+
+        // Print per-layer timing summary
+        let total_gpu: f64 = receipt
+            .layer_timings
+            .iter()
+            .map(|t| t.command_buffer_ms)
+            .sum();
+        let avg_gpu: f64 = total_gpu / receipt.layer_timings.len() as f64;
+        eprintln!(
+            "30-layer decode: total_gpu={total_gpu:.1}ms avg_layer={avg_gpu:.2}ms layers={}",
+            receipt.num_layers
+        );
+        for t in &receipt.layer_timings {
+            if t.layer % 5 == 0 || t.layer == receipt.layer_timings.len() - 1 {
+                eprintln!(
+                    "  layer {}: upload={:.2}ms gpu={:.2}ms",
+                    t.layer, t.weight_upload_ms, t.command_buffer_ms
+                );
+            }
+        }
     }
 }

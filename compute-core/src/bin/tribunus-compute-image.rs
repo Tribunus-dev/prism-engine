@@ -87,6 +87,7 @@ fn main() {
             "  tribunus-compute-image cimage bitnet run-metal-decoder --path <path> [--json]"
         );
         eprintln!("  tribunus-compute-image cimage bitnet text-smoke-test --path <path> --prompt <text> [--max-new-tokens N] [--json]");
+        eprintln!("  tribunus-compute-image cimage bitnet run-full-model --path <cimage> [--validate-every N] [--layers N] [--json]");
         std::process::exit(1);
     }
 
@@ -131,12 +132,13 @@ fn main() {
                 Some("emit-checkpoint") => cmd_cimage_bitnet_emit_checkpoint(&args[4..]),
                 Some("run-metal-decoder") => cmd_cimage_bitnet_run_metal_decoder(&args[4..]),
                 Some("text-smoke-test") => cmd_cimage_bitnet_text_smoke_test(&args[4..]),
+                Some("run-full-model") => cmd_cimage_bitnet_run_full_model(&args[4..]),
                 Some(other) => {
                     eprintln!("unknown cimage bitnet subcommand: {other}");
                     std::process::exit(1);
                 }
                 None => {
-                    eprintln!("cimage bitnet requires a subcommand: emit-linear, emit-checkpoint, run-metal-decoder, text-smoke-test");
+                    eprintln!("cimage bitnet requires a subcommand: emit-linear, emit-checkpoint, run-metal-decoder, text-smoke-test, run-full-model");
                     std::process::exit(1);
                 }
             },
@@ -2138,6 +2140,10 @@ fn parse_codec(
             Some(tribunus_compute_core::execution_plan::CodecFamily::RawF32)
         }
         "fp16" => Some(tribunus_compute_core::execution_plan::CodecFamily::Fp16),
+        "q8_0" | "q8" => Some(tribunus_compute_core::execution_plan::CodecFamily::Q8_0),
+        "q4_k" | "q4k" => Some(tribunus_compute_core::execution_plan::CodecFamily::Q4_K),
+        "q2_k" | "q2k" => Some(tribunus_compute_core::execution_plan::CodecFamily::Q2_K),
+        "iq2_xxs" | "iq2xxs" => Some(tribunus_compute_core::execution_plan::CodecFamily::IQ2_XXS),
         _ => None,
     })
 }
@@ -3042,16 +3048,13 @@ fn cmd_cimage_bitnet_emit_checkpoint(args: &[String]) -> Result<(), String> {
     use tribunus_compute_core::bitnet::phases::emit_bitnet_from_checkpoint;
     use tribunus_compute_core::cimage::*;
 
-    let pending = emit_bitnet_from_checkpoint(std::path::Path::new(checkpoint_path), group_size)
-        .map_err(|e| format!("emit from checkpoint: {e}"))?;
-
-    let write_receipt = CImageWriter::write_v0(
+    // Streaming write: processes one tensor at a time, writes directly to disk
+    let write_receipt = emit_bitnet_from_checkpoint(
+        std::path::Path::new(checkpoint_path),
         std::path::Path::new(out),
-        pending.manifest,
-        pending.payloads,
-        pending.receipts,
+        group_size,
     )
-    .map_err(|e| format!("write error: {e}"))?;
+    .map_err(|e| format!("emit from checkpoint: {e}"))?;
 
     let loaded =
         CImageLoader::load_v0(std::path::Path::new(out)).map_err(|e| format!("load error: {e}"))?;
@@ -3102,22 +3105,390 @@ fn cmd_cimage_bitnet_emit_checkpoint(args: &[String]) -> Result<(), String> {
 
 /// Run the Metal decoder region on a loaded BitNet decoder layer cimage.
 fn cmd_cimage_bitnet_run_metal_decoder(args: &[String]) -> Result<(), String> {
-    let _path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
-    let _json_output = has_flag(args, "--json");
+    let path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let json_output = has_flag(args, "--json");
 
-    // Stub: wire when CImageMetalRegionRunner::run_bitnet_decoder_region exists.
-    todo!("run-metal-decoder: wire run_bitnet_decoder_region (BitNet decoder Metal runner)")
+    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+    {
+        use metal::Device as MetalDevice;
+        use tribunus_compute_core::cimage::*;
+        use tribunus_compute_core::cimage_runtime::*;
+
+        let loaded = CImageLoader::load_v0(std::path::Path::new(path))
+            .map_err(|e| format!("load error: {e}"))?;
+
+        let device =
+            MetalDevice::system_default().ok_or_else(|| "no Metal device found".to_string())?;
+        let mut runner = CImageMetalRegionRunner::new(&device)
+            .map_err(|e| format!("runner creation error: {e}"))?;
+        let receipt = runner
+            .run_bitnet_decoder_region(&loaded, &[])
+            .map_err(|e| format!("runner error: {e}"))?;
+
+        let bandwidth_gbps = if receipt.command_buffer_ms > 0.0 {
+            (receipt.total_bound_bytes as f64 / (receipt.command_buffer_ms / 1000.0)) / 1e9
+        } else {
+            0.0
+        };
+
+        if json_output {
+            let output = serde_json::to_string_pretty(&serde_json::json!({
+                "status": if receipt.validation_passed { "passed" } else { "failed" },
+                "tensor_count": receipt.tensor_count,
+                "metal_vs_cpu_nrmse": receipt.metal_vs_cpu_nrmse,
+                "bandwidth_gbps": bandwidth_gbps,
+                "command_buffer_ms": receipt.command_buffer_ms,
+                "kernel_count": receipt.kernel_count,
+                "buffer_count": receipt.buffer_count,
+                "total_bound_bytes": receipt.total_bound_bytes,
+                "cimage_digest": receipt.cimage_digest,
+                "validation_passed": receipt.validation_passed,
+            }))
+            .map_err(|e| e.to_string())?;
+            println!("{output}");
+        } else {
+            println!("BitNet decoder Metal region execution:");
+            println!(
+                "  status:              {}",
+                if receipt.validation_passed {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                }
+            );
+            println!("  tensor_count:        {}", receipt.tensor_count);
+            println!("  metal_vs_cpu_nrmse:  {:.6}", receipt.metal_vs_cpu_nrmse);
+            println!("  bandwidth_gbps:      {:.3}", bandwidth_gbps);
+            println!("  command_buffer_ms:   {:.3}", receipt.command_buffer_ms);
+            println!("  kernel_count:        {}", receipt.kernel_count);
+            println!("  buffer_count:        {}", receipt.buffer_count);
+            println!("  total_bound_bytes:   {}", receipt.total_bound_bytes);
+            println!("  cimage_digest:       {}", receipt.cimage_digest);
+        }
+
+        if !receipt.validation_passed {
+            return Err("BitNet decoder Metal region execution validation failed".to_string());
+        }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+    {
+        return Err("Metal execution requires macOS with metal-dispatch feature".to_string());
+    }
+
+    Ok(())
 }
 
 /// Run a full text inference smoke test on a loaded BitNet cimage.
 fn cmd_cimage_bitnet_text_smoke_test(args: &[String]) -> Result<(), String> {
-    let _path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
-    let _prompt = get_opt(args, "--prompt").unwrap_or("Hello");
-    let _max_new_tokens: u32 = get_opt(args, "--max-new-tokens")
+    let checkpoint_path =
+        get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let prompt_text = get_opt(args, "--prompt").unwrap_or("Hello");
+    let max_new_tokens: usize = get_opt(args, "--max-new-tokens")
         .and_then(|s| s.parse().ok())
         .unwrap_or(10);
-    let _json_output = has_flag(args, "--json");
+    let json_output = has_flag(args, "--json");
 
-    // Stub: wire when bitnet::text::run_text exists.
-    todo!("text-smoke-test: wire bitnet::text::run_text (full inference pipeline)")
+    use tribunus_compute_core::bitnet::checkpoint::{
+        make_ternary_from_checkpoint, BitNetCheckpoint,
+    };
+    use tribunus_compute_core::bitnet::phases::BitNetDecoderLayerShardConfig;
+    use tribunus_compute_core::bitnet::text::{run_text, BitNetTokenizer};
+    use tribunus_compute_core::ternary::codec::TernaryPackedTensor;
+
+    // 1. Load checkpoint
+    let ckpt = BitNetCheckpoint::load(std::path::Path::new(checkpoint_path))
+        .map_err(|e| format!("failed to load checkpoint: {e}"))?;
+
+    let kv_inner = ckpt.num_kv_heads * ckpt.head_dim;
+
+    // 2. Build config
+    let config = BitNetDecoderLayerShardConfig {
+        seed: 0,
+        hidden_dim: ckpt.hidden_dim,
+        num_heads: ckpt.num_heads,
+        num_kv_heads: ckpt.num_kv_heads,
+        head_dim: ckpt.head_dim,
+        intermediate_dim: ckpt.intermediate_dim,
+        seq_len: 1, // updated by prefill to match prompt length
+        group_size: 32,
+        num_layers: ckpt.num_layers,
+    };
+
+    // 3. Build per-layer tensors (11 per layer, in reference-decoder order)
+    let mut layers: Vec<Vec<TernaryPackedTensor>> = Vec::with_capacity(ckpt.num_layers);
+
+    for layer in 0..ckpt.num_layers {
+        let mut tensors: Vec<TernaryPackedTensor> = Vec::with_capacity(11);
+
+        // 0. input_layernorm
+        let ln_bytes = ckpt
+            .layer_norm_weight(layer, "input_layernorm")
+            .map_err(|e| format!("layer {layer} input_layernorm: {e}"))?;
+        tensors.push(ternarize_norm_f32(&ln_bytes));
+
+        // 1-4. q_proj, k_proj, v_proj, o_proj
+        for (name, out_features, in_features) in [
+            ("self_attn.q_proj", ckpt.hidden_dim, ckpt.hidden_dim),
+            ("self_attn.k_proj", kv_inner, ckpt.hidden_dim),
+            ("self_attn.v_proj", kv_inner, ckpt.hidden_dim),
+            ("self_attn.o_proj", ckpt.hidden_dim, ckpt.hidden_dim),
+        ] {
+            let codes = ckpt
+                .layer_codes(layer, name)
+                .map_err(|e| format!("layer {layer} {name}: {e}"))?;
+            let scale = ckpt
+                .layer_scale(layer, name)
+                .map_err(|e| format!("layer {layer} {name} scale: {e}"))?;
+            let stored_rows = out_features / 4;
+            tensors.push(make_ternary_from_checkpoint(
+                codes,
+                stored_rows,
+                in_features,
+                scale,
+                config.group_size,
+            ));
+        }
+
+        // 5. post_attention_layernorm
+        let paln_bytes = ckpt
+            .layer_norm_weight(layer, "post_attention_layernorm")
+            .map_err(|e| format!("layer {layer} post_attention_layernorm: {e}"))?;
+        tensors.push(ternarize_norm_f32(&paln_bytes));
+
+        // 6-8. gate_proj, up_proj, down_proj
+        for (name, out_features, in_features) in [
+            ("mlp.gate_proj", ckpt.intermediate_dim, ckpt.hidden_dim),
+            ("mlp.up_proj", ckpt.intermediate_dim, ckpt.hidden_dim),
+            ("mlp.down_proj", ckpt.hidden_dim, ckpt.intermediate_dim),
+        ] {
+            let codes = ckpt
+                .layer_codes(layer, name)
+                .map_err(|e| format!("layer {layer} {name}: {e}"))?;
+            let scale = ckpt
+                .layer_scale(layer, name)
+                .map_err(|e| format!("layer {layer} {name} scale: {e}"))?;
+            let stored_rows = out_features / 4;
+            tensors.push(make_ternary_from_checkpoint(
+                codes,
+                stored_rows,
+                in_features,
+                scale,
+                config.group_size,
+            ));
+        }
+
+        // 9. position_ids — synthetic RawF32 (0..seq_len)
+        let seq_len = config.seq_len;
+        let pos_ids: Vec<f32> = (0..seq_len).map(|i| i as f32).collect();
+        let pos_bytes: Vec<u8> = pos_ids.iter().flat_map(|v| v.to_le_bytes()).collect();
+        tensors.push(TernaryPackedTensor {
+            rows: 1,
+            cols: 1,
+            group_size: 0,
+            groups_per_row: 1,
+            bytes_per_group: 0,
+            codes: pos_bytes,
+            scales: vec![],
+        });
+
+        // 10. rmsnorm_w — reuse input_layernorm (same as synthetic decoder layer convention)
+        tensors.push(ternarize_norm_f32(&ln_bytes));
+
+        layers.push(tensors);
+    }
+
+    // 4. Build lm_head from embed_tokens (RawF32 convention)
+    let embed_bytes = ckpt
+        .embed_tokens()
+        .map_err(|e| format!("embed_tokens: {e}"))?;
+    let lm_head = TernaryPackedTensor {
+        rows: ckpt.hidden_dim,
+        cols: ckpt.vocab_size,
+        group_size: 0,
+        groups_per_row: 1,
+        bytes_per_group: 0,
+        codes: embed_bytes,
+        scales: vec![],
+    };
+
+    // 5. Tokenize prompt
+    let tokenizer = BitNetTokenizer::default_test();
+    let prompt_tokens = tokenizer.encode(prompt_text);
+
+    // 6. Build slice refs for run_text
+    let layer_refs: Vec<&[TernaryPackedTensor]> = layers.iter().map(|v| v.as_slice()).collect();
+
+    // 7. Run text inference (CPU reference path)
+    let generated = run_text(
+        &prompt_tokens,
+        &layer_refs,
+        &lm_head,
+        &config,
+        max_new_tokens,
+    );
+
+    // 8. Output
+    let decoded = tokenizer.decode(&generated);
+    if json_output {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "prompt": prompt_text,
+            "prompt_tokens": prompt_tokens,
+            "generated_tokens": generated,
+            "generated_text": decoded,
+            "num_layers": ckpt.num_layers,
+            "hidden_dim": ckpt.hidden_dim,
+            "vocab_size": ckpt.vocab_size,
+        }))
+        .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("BitNet text smoke test:");
+        println!("  layers:       {}", ckpt.num_layers);
+        println!("  hidden_dim:   {}", ckpt.hidden_dim);
+        println!("  vocab_size:   {}", ckpt.vocab_size);
+        println!("  prompt:       \"{prompt_text}\"");
+        println!("  prompt_tokens: {:?}", prompt_tokens);
+        println!("  generated:    {:?}", generated);
+        println!("  text:         \"{decoded}\"");
+    }
+
+    Ok(())
+}
+
+/// Run the full BitNet model stack (all layers) on Metal.
+fn cmd_cimage_bitnet_run_full_model(args: &[String]) -> Result<(), String> {
+    let path =
+        get_opt(args, "--path").ok_or_else(|| "--path is required (cimage path)".to_string())?;
+    let json_output = has_flag(args, "--json");
+    let validate_every: Option<usize> =
+        get_opt(args, "--validate-every").and_then(|s| s.parse().ok());
+    let layer_limit: Option<usize> = get_opt(args, "--layers").and_then(|s| s.parse().ok());
+
+    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+    {
+        use metal::Device as MetalDevice;
+        use tribunus_compute_core::cimage::*;
+        use tribunus_compute_core::cimage_runtime::*;
+
+        let loaded = CImageLoader::load_v0(std::path::Path::new(path))
+            .map_err(|e| format!("load error: {e}"))?;
+        let device =
+            MetalDevice::system_default().ok_or_else(|| "no Metal device found".to_string())?;
+        let mut runner = CImageMetalRegionRunner::new(&device)
+            .map_err(|e| format!("runner creation error: {e}"))?;
+
+        let receipt = runner
+            .run_bitnet_full_model_stack(&loaded, validate_every, layer_limit)
+            .map_err(|e| format!("runner error: {e}"))?;
+
+        if json_output {
+            let output = serde_json::to_string_pretty(&serde_json::json!({
+                "num_layers": receipt.num_layers,
+                "hidden_dim": receipt.hidden_dim,
+                "seq_len": receipt.seq_len,
+                "total_command_buffer_ms": receipt.total_command_buffer_ms,
+                "validation_passed": receipt.validation_passed,
+                "layer_validations": receipt.layer_validations.iter().map(|v| serde_json::json!({
+                    "layer": v.layer,
+                    "hidden_nrmse": v.hidden_nrmse,
+                    "hidden_cosine": v.hidden_cosine,
+                    "max_abs_error": v.max_abs_error,
+                    "passed": v.passed,
+                })).collect::<Vec<_>>(),
+                "layer_timings": receipt.layer_timings.iter().map(|t| serde_json::json!({
+                    "layer": t.layer,
+                    "weight_upload_ms": t.weight_upload_ms,
+                    "command_buffer_ms": t.command_buffer_ms,
+                })).collect::<Vec<_>>(),
+            }))
+            .map_err(|e| e.to_string())?;
+            println!("{output}");
+        } else {
+            println!("BitNet full model stack execution:");
+            println!("  layers:              {}", receipt.num_layers);
+            println!("  hidden_dim:          {}", receipt.hidden_dim);
+            println!("  seq_len:             {}", receipt.seq_len);
+            println!(
+                "  total_gpu_ms:        {:.3}",
+                receipt.total_command_buffer_ms
+            );
+            println!("  validation_passed:   {}", receipt.validation_passed);
+            for v in &receipt.layer_validations {
+                println!(
+                    "  layer {} validation: NRMSE={:.6e} cosine={:.6} max_abs={:.6} {}",
+                    v.layer,
+                    v.hidden_nrmse,
+                    v.hidden_cosine,
+                    v.max_abs_error,
+                    if v.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            for t in &receipt.layer_timings {
+                println!(
+                    "  layer {}: upload={:.3}ms gpu={:.3}ms",
+                    t.layer, t.weight_upload_ms, t.command_buffer_ms
+                );
+            }
+        }
+
+        if !receipt.validation_passed {
+            return Err("Some layer validations failed".to_string());
+        }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+    {
+        return Err("Metal execution requires macOS with metal-dispatch feature".to_string());
+    }
+
+    Ok(())
+}
+
+/// Convert f32 norm-weight bytes (little-endian) into a TernaryPackedTensor
+/// suitable for the CPU reference decoder's layernorm path.
+///
+/// Ternarizes each f32 value via signum (positive -> 1, negative -> -1, zero -> 0),
+/// packs into 2-bit codes, and computes a single f16 scale = sum(|ternary|) / n.
+fn ternarize_norm_f32(
+    f32_bytes: &[u8],
+) -> tribunus_compute_core::ternary::codec::TernaryPackedTensor {
+    use half::f16;
+    use tribunus_compute_core::ternary::codec::TernaryPackedTensor;
+    use tribunus_compute_core::ternary::pack::pack_ternary_codes;
+
+    let n = f32_bytes.len() / 4;
+    let weights: Vec<f32> = f32_bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect();
+    let ternary: Vec<i8> = weights
+        .iter()
+        .map(|&w| {
+            if w > 0.0 {
+                1
+            } else if w < 0.0 {
+                -1
+            } else {
+                0
+            }
+        })
+        .collect();
+    let codes = pack_ternary_codes(&ternary).unwrap_or_else(|_| vec![0u8; (n + 3) / 4]);
+    let sum_abs: i32 = ternary.iter().map(|&w| (w as i32).abs()).sum();
+    let scale = if n > 0 {
+        sum_abs as f32 / n as f32
+    } else {
+        1.0f32
+    };
+
+    TernaryPackedTensor {
+        rows: 1,
+        cols: n,
+        group_size: n,
+        groups_per_row: 1,
+        bytes_per_group: codes.len(),
+        codes,
+        scales: vec![f16::from_f32(scale)],
+    }
 }

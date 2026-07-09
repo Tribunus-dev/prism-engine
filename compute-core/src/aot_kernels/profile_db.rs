@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::profile_id::{AppleSiliconProfileId, ProfileEvidenceStatus};
+use super::profile_id::{AmdGpuProfileId, AppleSiliconProfileId, ProfileEvidenceStatus};
 
 // ── Static capabilities ──────────────────────────────────────────────────
 
@@ -809,6 +809,238 @@ impl AppleSiliconProfileDb {
                 max_threadgroup_memory_bytes: 16 * 1024,
             },
             ane: None,
+            measured: None,
+            evidence_status: ProfileEvidenceStatus::StaticOnly,
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AMD
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Complete hardware profile for one AMD GPU variant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AmdGpuProfile {
+    pub profile_id: AmdGpuProfileId,
+    pub arch_name: String,
+    pub marketing_name: String,
+    pub gpu: GpuProfile,
+    pub memory: MemoryProfile,
+    pub measured: Option<MeasuredKernelProfile>,
+    pub evidence_status: ProfileEvidenceStatus,
+}
+
+/// Versioned collection of known AMD GPU hardware profiles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AmdProfileDb {
+    pub db_version: u32,
+    pub generated_at: String,
+    pub profiles: Vec<AmdGpuProfile>,
+    pub source_receipts: Vec<ProfileSourceReceipt>,
+}
+
+impl AmdProfileDb {
+    pub fn by_id(&self, id: AmdGpuProfileId) -> Option<&AmdGpuProfile> {
+        self.profiles.iter().find(|p| p.profile_id == id)
+    }
+
+    /// Build a default profile database with static specs for all known
+    /// AMD GPU variants. Marked StaticOnly — measurements come from
+    /// lab runs or local profiling.
+    pub fn default_static() -> Self {
+        Self {
+            db_version: 1,
+            generated_at: String::new(),
+            profiles: vec![
+                Self::mi300x_profile(),
+                Self::mi300a_profile(),
+                Self::mi350_profile(),
+                Self::rx7900xtx_profile(),
+                Self::rx7900xt_profile(),
+                Self::rx7800xt_profile(),
+                Self::ryzenai_hx370_profile(),
+                Self::unknown_fallback(),
+            ],
+            source_receipts: vec![ProfileSourceReceipt {
+                source_id: "builtin-amd-default".into(),
+                source_type: "static-spec".into(),
+                timestamp: String::new(),
+                notes: "Default static AMD profile database — replace with lab-measured data for production AOT use.".into(),
+            }],
+        }
+    }
+
+    fn profile(id: AmdGpuProfileId, memory: MemoryProfile, gpu: GpuProfile) -> AmdGpuProfile {
+        let arch_name: String = if id.is_datacenter() {
+            format!("CDNA {}", id.arch_generation())
+        } else if id == AmdGpuProfileId::RyzenAi9Hx370 {
+            "RDNA 3.5".into()
+        } else {
+            format!("RDNA {}", id.arch_generation())
+        };
+        AmdGpuProfile {
+            profile_id: id,
+            arch_name,
+            marketing_name: id.marketing_name().to_string(),
+            memory,
+            gpu,
+            measured: None,
+            evidence_status: ProfileEvidenceStatus::StaticOnly,
+        }
+    }
+
+    fn mi300x_profile() -> AmdGpuProfile {
+        Self::profile(
+            AmdGpuProfileId::InstinctMi300X,
+            MemoryProfile {
+                unified_memory_gb: 192.0,
+                memory_bus_width_bits: 8192,
+                memory_bandwidth_gbs: 5300.0,
+                l1_cache_per_cu_kb: 64,
+                l2_cache_mb: 256.0,
+            },
+            GpuProfile {
+                compute_units: AmdGpuProfileId::InstinctMi300X.compute_units(),
+                max_threads_per_threadgroup: 1024,
+                simd_width: 64,
+                max_threadgroup_memory_bytes: 64 * 1024,
+            },
+        )
+    }
+
+    fn mi300a_profile() -> AmdGpuProfile {
+        Self::profile(
+            AmdGpuProfileId::InstinctMi300A,
+            MemoryProfile {
+                unified_memory_gb: 128.0,
+                memory_bus_width_bits: 8192,
+                memory_bandwidth_gbs: 5300.0,
+                l1_cache_per_cu_kb: 64,
+                l2_cache_mb: 256.0,
+            },
+            GpuProfile {
+                compute_units: AmdGpuProfileId::InstinctMi300A.compute_units(),
+                max_threads_per_threadgroup: 1024,
+                simd_width: 64,
+                max_threadgroup_memory_bytes: 64 * 1024,
+            },
+        )
+    }
+
+    fn mi350_profile() -> AmdGpuProfile {
+        Self::profile(
+            AmdGpuProfileId::InstinctMi350,
+            MemoryProfile {
+                unified_memory_gb: 288.0,
+                memory_bus_width_bits: 8192,
+                memory_bandwidth_gbs: 6500.0,
+                l1_cache_per_cu_kb: 64,
+                l2_cache_mb: 256.0,
+            },
+            GpuProfile {
+                compute_units: AmdGpuProfileId::InstinctMi350.compute_units(),
+                max_threads_per_threadgroup: 1024,
+                simd_width: 64,
+                max_threadgroup_memory_bytes: 64 * 1024,
+            },
+        )
+    }
+
+    fn rx7900xtx_profile() -> AmdGpuProfile {
+        Self::profile(
+            AmdGpuProfileId::RadeonRx7900Xtx,
+            MemoryProfile {
+                unified_memory_gb: 24.0,
+                memory_bus_width_bits: 384,
+                memory_bandwidth_gbs: 960.0,
+                l1_cache_per_cu_kb: 128,
+                l2_cache_mb: 6.0,
+            },
+            GpuProfile {
+                compute_units: AmdGpuProfileId::RadeonRx7900Xtx.compute_units(),
+                max_threads_per_threadgroup: 1024,
+                simd_width: 64,
+                max_threadgroup_memory_bytes: 64 * 1024,
+            },
+        )
+    }
+
+    fn rx7900xt_profile() -> AmdGpuProfile {
+        Self::profile(
+            AmdGpuProfileId::RadeonRx7900Xt,
+            MemoryProfile {
+                unified_memory_gb: 20.0,
+                memory_bus_width_bits: 320,
+                memory_bandwidth_gbs: 800.0,
+                l1_cache_per_cu_kb: 128,
+                l2_cache_mb: 6.0,
+            },
+            GpuProfile {
+                compute_units: AmdGpuProfileId::RadeonRx7900Xt.compute_units(),
+                max_threads_per_threadgroup: 1024,
+                simd_width: 64,
+                max_threadgroup_memory_bytes: 64 * 1024,
+            },
+        )
+    }
+
+    fn rx7800xt_profile() -> AmdGpuProfile {
+        Self::profile(
+            AmdGpuProfileId::RadeonRx7800Xt,
+            MemoryProfile {
+                unified_memory_gb: 16.0,
+                memory_bus_width_bits: 256,
+                memory_bandwidth_gbs: 624.0,
+                l1_cache_per_cu_kb: 128,
+                l2_cache_mb: 4.0,
+            },
+            GpuProfile {
+                compute_units: AmdGpuProfileId::RadeonRx7800Xt.compute_units(),
+                max_threads_per_threadgroup: 1024,
+                simd_width: 64,
+                max_threadgroup_memory_bytes: 64 * 1024,
+            },
+        )
+    }
+
+    fn ryzenai_hx370_profile() -> AmdGpuProfile {
+        Self::profile(
+            AmdGpuProfileId::RyzenAi9Hx370,
+            MemoryProfile {
+                unified_memory_gb: 32.0,
+                memory_bus_width_bits: 256,
+                memory_bandwidth_gbs: 150.0,
+                l1_cache_per_cu_kb: 128,
+                l2_cache_mb: 4.0,
+            },
+            GpuProfile {
+                compute_units: AmdGpuProfileId::RyzenAi9Hx370.compute_units(),
+                max_threads_per_threadgroup: 1024,
+                simd_width: 32,
+                max_threadgroup_memory_bytes: 64 * 1024,
+            },
+        )
+    }
+
+    fn unknown_fallback() -> AmdGpuProfile {
+        AmdGpuProfile {
+            profile_id: AmdGpuProfileId::UnknownAmd,
+            arch_name: "Unknown AMD".into(),
+            marketing_name: "Unknown AMD GPU".into(),
+            memory: MemoryProfile {
+                unified_memory_gb: 0.0,
+                memory_bus_width_bits: 0,
+                memory_bandwidth_gbs: 0.0,
+                l1_cache_per_cu_kb: 0,
+                l2_cache_mb: 0.0,
+            },
+            gpu: GpuProfile {
+                compute_units: 0,
+                max_threads_per_threadgroup: 256,
+                simd_width: 64,
+                max_threadgroup_memory_bytes: 32 * 1024,
+            },
             measured: None,
             evidence_status: ProfileEvidenceStatus::StaticOnly,
         }

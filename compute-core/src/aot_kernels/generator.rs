@@ -49,6 +49,9 @@ impl Default for AotTargetMatrix {
                 KernelFamily::GemvNf4Tile,
                 KernelFamily::GemvInt8Tile,
                 KernelFamily::GemvTernaryTile,
+                KernelFamily::GemvQ4_K,
+                KernelFamily::GemvQ2_K,
+                KernelFamily::GemvIQ2_XXS,
             ],
             group_sizes: Some(vec![128, 256]),
             tile_widths: Some(vec![512, 640, 768, 1024]),
@@ -97,6 +100,11 @@ fn family_to_codec(family: KernelFamily) -> crate::execution_plan::CodecFamily {
         KernelFamily::GemvInt8Tile => CodecFamily::Int8,
         KernelFamily::GemvNf4Tile => CodecFamily::Nf4,
         KernelFamily::GemvTernaryTile => CodecFamily::Ternary1_58,
+        KernelFamily::GemvQ8_0 => CodecFamily::Q8_0,
+        KernelFamily::GemvQ4_K => CodecFamily::Q4_K,
+        KernelFamily::GemvQ2_K => CodecFamily::Q2_K,
+        KernelFamily::GemvIQ2_XXS => CodecFamily::IQ2_XXS,
+        KernelFamily::CompressedAttention => CodecFamily::RawF32,
         _ => CodecFamily::Nf4,
     }
 }

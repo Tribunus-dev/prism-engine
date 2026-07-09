@@ -397,25 +397,27 @@ fn bf16_bytes_to_f32_bytes(bf16_bytes: &[u8]) -> Vec<u8> {
 /// - `stored_cols` — the second dimension of the stored weight tensor
 ///   (`in_features`).
 /// - `scale_bf16` — the per-tensor scale as a single f32.
+/// - `group_size` — number of ternary values per quantization group.
 ///
 /// The returned tensor has:
 /// - `rows = stored_cols` (in_features)
 /// - `cols = stored_rows * 4` (out_features)
-/// - `group_size = cols` (one group per row)
-/// - `groups_per_row = 1`
-/// - `bytes_per_group = stored_rows`
-/// - `scales = [scale_f16; rows]`
+/// - `group_size` as given
+/// - `groups_per_row = cols.div_ceil(group_size)`
+/// - `bytes_per_group = (group_size + 3) / 4`
+/// - `scales = [scale_f16; rows * groups_per_row]`
 pub fn make_ternary_from_checkpoint(
     codes: &[u8],
     stored_rows: usize,
     stored_cols: usize,
     scale_bf16: f32,
+    group_size: usize,
 ) -> TernaryPackedTensor {
     let rows = stored_cols; // in_features
     let cols = stored_rows * 4; // out_features
-    let group_size = cols; // one group per row
-    let groups_per_row = 1;
-    let bytes_per_group = codes.len() / rows;
+    let groups_per_row = cols.div_ceil(group_size);
+    let bytes_per_group = (group_size + 3) / 4;
+    let num_groups = rows * groups_per_row;
     TernaryPackedTensor {
         rows,
         cols,
@@ -423,7 +425,7 @@ pub fn make_ternary_from_checkpoint(
         groups_per_row,
         bytes_per_group,
         codes: codes.to_vec(),
-        scales: vec![f16::from_f32(scale_bf16); rows],
+        scales: vec![f16::from_f32(scale_bf16); num_groups],
     }
 }
 
@@ -460,14 +462,14 @@ mod tests {
         let codes = vec![0u8; num_codes];
         let scale = 0.5f32;
 
-        let tensor = make_ternary_from_checkpoint(&codes, stored_rows, stored_cols, scale);
+        let tensor = make_ternary_from_checkpoint(&codes, stored_rows, stored_cols, scale, 256);
 
         assert_eq!(tensor.rows, stored_cols); // in_features = 2560
         assert_eq!(tensor.cols, stored_rows * 4); // out_features = 2048
-        assert_eq!(tensor.group_size, tensor.cols);
-        assert_eq!(tensor.groups_per_row, 1);
-        assert_eq!(tensor.bytes_per_group, stored_rows);
-        assert_eq!(tensor.scales.len(), tensor.rows);
+        assert_eq!(tensor.group_size, 256);
+        assert_eq!(tensor.groups_per_row, 8); // 2048 / 256
+        assert_eq!(tensor.bytes_per_group, 64); // 256 / 4
+        assert_eq!(tensor.scales.len(), tensor.rows * 8);
         for s in &tensor.scales {
             let f: f32 = (*s).into();
             assert!((f - 0.5).abs() < 1e-3);
@@ -482,13 +484,13 @@ mod tests {
         let codes = vec![0xABu8; stored_rows * stored_cols];
         let scale = 0.25f32;
 
-        let tensor = make_ternary_from_checkpoint(&codes, stored_rows, stored_cols, scale);
+        let tensor = make_ternary_from_checkpoint(&codes, stored_rows, stored_cols, scale, 256);
 
         assert_eq!(tensor.rows, stored_cols); // 2560
         assert_eq!(tensor.cols, stored_rows * 4); // 6912
-        assert_eq!(tensor.group_size, tensor.cols);
-        assert_eq!(tensor.groups_per_row, 1);
-        assert_eq!(tensor.bytes_per_group, stored_rows);
+        assert_eq!(tensor.group_size, 256);
+        assert_eq!(tensor.groups_per_row, 27); // 6912 / 256 = 27.0
+        assert_eq!(tensor.bytes_per_group, 64); // 256 / 4
         assert_eq!(tensor.codes.len(), stored_rows * stored_cols);
     }
 

@@ -15,6 +15,7 @@ pub mod receipts;
 // Implementation modules — written after type definitions.
 pub mod loader;
 pub mod shard_builder;
+pub mod streaming_writer;
 pub mod validate;
 pub mod writer;
 

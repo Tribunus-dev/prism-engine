@@ -10,6 +10,9 @@ pub mod receipts;
 pub mod resolver;
 pub mod tensor_store;
 
+#[cfg(feature = "metal-dispatch")]
+pub mod bitnet_layer_resolver;
+
 // Implementation modules — gated behind macos + metal-dispatch.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub mod lower_decoder;
@@ -21,12 +24,18 @@ pub mod metal_buffers;
 pub mod region_runner;
 
 pub use error::{CImageRuntimeError, CImageRuntimeResult};
-pub use receipts::{CImageBindingReceipt, CImageKernelBindingInfo, CImageRegionExecutionReceipt};
+pub use receipts::{
+    CImageBindingReceipt, CImageKernelBindingInfo, CImageLayerTiming, CImageLayerValidationReceipt,
+    CImageModelExecutionReceipt, CImageRegionExecutionReceipt,
+};
 pub use resolver::{CImageRuntimeResolver, CpuReferenceBundle, ResolvedMlpShardRuntime};
 #[allow(unused_imports)]
 pub use tensor_store::{
     MlpRegionExecutionMode, RuntimeTensor, RuntimeTensorPayload, RuntimeTensorStore,
 };
+
+#[cfg(feature = "metal-dispatch")]
+pub use bitnet_layer_resolver::BitNetLayerTensorResolver;
 
 // Re-export platform-specific items only when available.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]

@@ -426,6 +426,10 @@ fn codec_family_to_id(codec: CodecFamily) -> u32 {
         CodecFamily::Ternary => 5,
         CodecFamily::Ternary1_58 => 7,
         CodecFamily::Mixed => 6,
+        CodecFamily::Q8_0 => 8,
+        CodecFamily::Q4_K => 9,
+        CodecFamily::Q2_K => 10,
+        CodecFamily::IQ2_XXS => 11,
     }
 }
 

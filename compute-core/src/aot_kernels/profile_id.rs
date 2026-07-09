@@ -1,11 +1,15 @@
-//! Apple Silicon profile identifiers — stable, coarse-grained profile keys
-//! used for AOT kernel variant selection in CImage kernel catalogs.
+//! Profile identifiers for supported GPU families — Apple Silicon and AMD.
 //!
-//! Each enum variant corresponds to a known Apple Silicon generation + GPU tier.
-//! Unknown variants use the conservative `UnknownAppleSilicon` fallback.
+//! Each family has its own enum of stable, coarse-grained profile keys
+//! used for AOT kernel variant selection in CImage kernel catalogs.
+//! Unknown variants use the conservative fallback for their family.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Apple Silicon
+// ═══════════════════════════════════════════════════════════════════════════
 
 /// Stable profile identifier for Apple Silicon hardware.
 ///
@@ -98,6 +102,115 @@ impl fmt::Display for AppleSiliconProfileId {
         )
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AMD
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Stable profile identifier for AMD GPU hardware.
+///
+/// Coarse enough for kernel variant selection. Groups GPUs by architecture
+/// generation and performance tier (compute unit count, memory bandwidth).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum AmdGpuProfileId {
+    // ── CDNA 3 (Instinct MI300) ────────────────────────────────────────
+    /// AMD Instinct MI300X — 304 CU, 192 GB HBM3, 5.2 TB/s
+    InstinctMi300X,
+    /// AMD Instinct MI300A — 228 CU, 128 GB HBM3, 5.2 TB/s (APU)
+    InstinctMi300A,
+    // ── CDNA 4 (Instinct MI350) ────────────────────────────────────────
+    /// AMD Instinct MI350 — next-gen CDNA 4 (placeholder, TBD specs)
+    InstinctMi350,
+    // ── RDNA 3 (consumer) ──────────────────────────────────────────────
+    /// AMD Radeon RX 7900 XTX — 96 CU, 24 GB GDDR6, 960 GB/s
+    RadeonRx7900Xtx,
+    /// AMD Radeon RX 7900 XT — 84 CU, 20 GB GDDR6, 800 GB/s
+    RadeonRx7900Xt,
+    /// AMD Radeon RX 7800 XT — 60 CU, 16 GB GDDR6, 624 GB/s
+    RadeonRx7800Xt,
+    // ── RDNA 3.5 (integrated / Strix Point) ────────────────────────────
+    /// AMD Ryzen AI 9 HX 370 (RDNA 3.5 iGPU) — 16 CU
+    RyzenAi9Hx370,
+    /// Fallback for unrecognized AMD GPUs.
+    UnknownAmd,
+}
+
+impl AmdGpuProfileId {
+    /// Architecture generation (for fallback matching).
+    pub fn arch_generation(self) -> u32 {
+        match self {
+            Self::InstinctMi300X | Self::InstinctMi300A => 3, // CDNA 3
+            Self::InstinctMi350 => 4,                         // CDNA 4
+            Self::RadeonRx7900Xtx | Self::RadeonRx7900Xt | Self::RadeonRx7800Xt => 3, // RDNA 3
+            Self::RyzenAi9Hx370 => 35,                        // RDNA 3.5
+            Self::UnknownAmd => 0,
+        }
+    }
+
+    /// Performance tier within architecture: 1=entry, 2=mid, 3=high, 4/5=flagship.
+    pub fn perf_tier(self) -> u32 {
+        match self {
+            Self::InstinctMi350 => 5, // datacenter flagship
+            Self::InstinctMi300X => 4,
+            Self::InstinctMi300A => 4,
+            Self::RadeonRx7900Xtx => 3,
+            Self::RadeonRx7900Xt => 2,
+            Self::RadeonRx7800Xt => 2,
+            Self::RyzenAi9Hx370 => 1,
+            Self::UnknownAmd => 0,
+        }
+    }
+
+    /// Human-readable marketing name.
+    pub fn marketing_name(self) -> &'static str {
+        match self {
+            Self::InstinctMi300X => "AMD Instinct MI300X",
+            Self::InstinctMi300A => "AMD Instinct MI300A",
+            Self::InstinctMi350 => "AMD Instinct MI350",
+            Self::RadeonRx7900Xtx => "AMD Radeon RX 7900 XTX",
+            Self::RadeonRx7900Xt => "AMD Radeon RX 7900 XT",
+            Self::RadeonRx7800Xt => "AMD Radeon RX 7800 XT",
+            Self::RyzenAi9Hx370 => "AMD Ryzen AI 9 HX 370",
+            Self::UnknownAmd => "Unknown AMD GPU",
+        }
+    }
+
+    /// Number of compute units for this GPU.
+    pub fn compute_units(self) -> u32 {
+        match self {
+            Self::InstinctMi300X => 304,
+            Self::InstinctMi300A => 228,
+            Self::InstinctMi350 => 344,
+            Self::RadeonRx7900Xtx => 96,
+            Self::RadeonRx7900Xt => 84,
+            Self::RadeonRx7800Xt => 60,
+            Self::RyzenAi9Hx370 => 16,
+            Self::UnknownAmd => 0,
+        }
+    }
+
+    /// Whether profile is a datacenter-class GPU (Instinct series).
+    pub fn is_datacenter(self) -> bool {
+        matches!(
+            self,
+            Self::InstinctMi300X | Self::InstinctMi300A | Self::InstinctMi350
+        )
+    }
+}
+
+impl fmt::Display for AmdGpuProfileId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.marketing_name().to_lowercase().replace(' ', "_")
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared types
+// ═══════════════════════════════════════════════════════════════════════════
 
 /// Evidence quality for profile and receipt data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

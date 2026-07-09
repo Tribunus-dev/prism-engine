@@ -59,6 +59,37 @@ pub struct CImageKernelBindingInfo {
     pub resolved: bool,
 }
 
+/// Per-layer validation comparison between Metal and CPU reference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CImageLayerValidationReceipt {
+    pub layer: usize,
+    pub hidden_nrmse: f64,
+    pub hidden_cosine: f64,
+    pub max_abs_error: f64,
+    pub passed: bool,
+}
+
+/// Per-layer timing statistics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CImageLayerTiming {
+    pub layer: usize,
+    pub weight_upload_ms: f64,
+    pub command_buffer_ms: f64,
+}
+
+/// Full model execution receipt — aggregate of all layer runs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CImageModelExecutionReceipt {
+    pub cimage_digest: String,
+    pub num_layers: usize,
+    pub hidden_dim: usize,
+    pub seq_len: usize,
+    pub layer_validations: Vec<CImageLayerValidationReceipt>,
+    pub layer_timings: Vec<CImageLayerTiming>,
+    pub total_command_buffer_ms: f64,
+    pub validation_passed: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,5 +159,78 @@ mod tests {
         let back: CImageBindingReceipt = serde_json::from_str(&json).unwrap();
         assert_eq!(back.bindings.len(), 2);
         assert!(back.all_bindings_resolved);
+    }
+
+    #[test]
+    fn test_layer_validation_receipt_serde() {
+        let r = CImageLayerValidationReceipt {
+            layer: 0,
+            hidden_nrmse: 0.0002,
+            hidden_cosine: 0.99998,
+            max_abs_error: 0.001,
+            passed: true,
+        };
+        let json = serde_json::to_string_pretty(&r).unwrap();
+        let back: CImageLayerValidationReceipt = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.layer, 0);
+        assert!(back.passed);
+    }
+
+    #[test]
+    fn test_layer_timing_serde() {
+        let r = CImageLayerTiming {
+            layer: 5,
+            weight_upload_ms: 1.2,
+            command_buffer_ms: 3.4,
+        };
+        let json = serde_json::to_string_pretty(&r).unwrap();
+        let back: CImageLayerTiming = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.layer, 5);
+        assert!((back.command_buffer_ms - 3.4).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_model_execution_receipt_serde() {
+        let r = CImageModelExecutionReceipt {
+            cimage_digest: "abc123".into(),
+            num_layers: 30,
+            hidden_dim: 2560,
+            seq_len: 128,
+            layer_validations: vec![
+                CImageLayerValidationReceipt {
+                    layer: 0,
+                    hidden_nrmse: 0.0002,
+                    hidden_cosine: 0.99998,
+                    max_abs_error: 0.001,
+                    passed: true,
+                },
+                CImageLayerValidationReceipt {
+                    layer: 29,
+                    hidden_nrmse: 0.005,
+                    hidden_cosine: 0.9995,
+                    max_abs_error: 0.01,
+                    passed: true,
+                },
+            ],
+            layer_timings: vec![
+                CImageLayerTiming {
+                    layer: 0,
+                    weight_upload_ms: 1.2,
+                    command_buffer_ms: 3.4,
+                },
+                CImageLayerTiming {
+                    layer: 29,
+                    weight_upload_ms: 1.1,
+                    command_buffer_ms: 3.2,
+                },
+            ],
+            total_command_buffer_ms: 99.0,
+            validation_passed: true,
+        };
+        let json = serde_json::to_string_pretty(&r).unwrap();
+        let back: CImageModelExecutionReceipt = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.num_layers, 30);
+        assert_eq!(back.layer_validations.len(), 2);
+        assert!(back.validation_passed);
     }
 }

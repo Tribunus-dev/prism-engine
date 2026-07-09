@@ -63,6 +63,11 @@ use tribunus_compute_core::server::state::MemoryAllocationBroker;
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
 use tribunus_compute_core::tts::pipeline::{pcm_chunk_to_wav, pcm_to_wav, TtsPipeline};
 
+#[cfg(feature = "server-dashboard")]
+use tribunus_compute_core::server::dashboard::api::*;
+#[cfg(feature = "server-dashboard")]
+use tribunus_compute_core::server::dashboard::indexer::EvidenceIndexer;
+
 // ── BitNet runtime ─────────────────────────────────────────────────────────
 
 /// Placeholder stub — will be replaced by
@@ -73,6 +78,39 @@ impl BitNetRuntime {
     fn from_cimage(_path: &std::path::Path) -> Result<Self, String> {
         println!("[prism-server] BitNet runtime initialization (stub)");
         Ok(Self)
+    }
+}
+
+// ── Dashboard stub handlers (until full indexer is wired) ─────────────────
+
+#[cfg(feature = "server-dashboard")]
+mod dashboard_stubs {
+    use axum::extract::Path;
+    use axum::response::{Html, Json};
+    use serde_json::{json, Value};
+
+    pub async fn list_cimages() -> Json<Value> {
+        Json(json!({"status": "not yet indexed", "cimages": []}))
+    }
+
+    pub async fn get_cimage(Path(digest): Path<String>) -> Json<Value> {
+        Json(json!({"status": "not yet indexed", "digest": digest}))
+    }
+
+    pub async fn get_cimage_tensors(Path(digest): Path<String>) -> Json<Value> {
+        Json(json!({"status": "not yet indexed", "digest": digest, "tensors": []}))
+    }
+
+    pub async fn openapi_schema() -> Json<Value> {
+        Json(json!({
+            "openapi": "3.0.0",
+            "info": {"title": "Prism Engine API", "version": "0.1.0"},
+            "paths": {}
+        }))
+    }
+
+    pub async fn dashboard_spa() -> impl axum::response::IntoResponse {
+        Html(tribunus_compute_core::server::dashboard::DASHBOARD_HTML)
     }
 }
 
@@ -1953,7 +1991,8 @@ async fn main() -> Result<(), String> {
     let addr = format!("{}:{}", host, args.port);
 
     let drain_state = state.clone();
-    let app = Router::new()
+    #[allow(unused_mut)]
+    let mut app = Router::new()
         .route("/v1/models", get(list_models))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/completions", post(completions))
@@ -1971,6 +2010,19 @@ async fn main() -> Result<(), String> {
             auth_middleware,
         ))
         .with_state(state);
+
+    #[cfg(feature = "server-dashboard")]
+    {
+        app = app
+            .route("/v1/openapi.json", get(dashboard_stubs::openapi_schema))
+            .route("/v1/cimages", get(dashboard_stubs::list_cimages))
+            .route(
+                "/v1/cimages/{digest}/tensors",
+                get(dashboard_stubs::get_cimage_tensors),
+            )
+            .route("/v1/cimages/{digest}", get(dashboard_stubs::get_cimage))
+            .route("/", get(dashboard_stubs::dashboard_spa));
+    }
 
     println!("[prism-server] Listening on http://{}", addr);
     println!("  [prism-server] Ready (press Ctrl+C to stop)");

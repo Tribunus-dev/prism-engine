@@ -18,20 +18,24 @@ pub mod profile_id;
 pub mod receipts;
 pub mod selector;
 pub mod template;
-pub mod validate;
 #[cfg(test)]
 pub mod tests;
+pub mod validate;
 
 pub use catalog::{CImageKernelCatalog, KernelMetallibPayloadRef, KernelVariantEntry};
 pub use compiler::{AotMetalCompiler, CompileError, CompiledKernelVariant};
-pub use device_match::{match_device_to_profile, RuntimeMetalDeviceProfile};
+pub use device_match::{
+    match_amd_device_to_profile, match_device_to_profile, RuntimeAmdDeviceProfile,
+    RuntimeMetalDeviceProfile,
+};
 pub use generator::{AotTargetMatrix, KernelVariantGenerator};
 pub use parameters::{DType, KernelFamily, KernelParameters};
 pub use profile_db::{
-    AneProfile, AppleSiliconProfile, AppleSiliconProfileDb, GpuProfile, KernelMicrobenchReceipt,
-    MeasuredKernelProfile, MemoryProfile, MetalGpuFamily, ProfileSourceReceipt, StaticMetalCaps,
+    AmdGpuProfile, AmdProfileDb, AneProfile, AppleSiliconProfile, AppleSiliconProfileDb,
+    GpuProfile, KernelMicrobenchReceipt, MeasuredKernelProfile, MemoryProfile, MetalGpuFamily,
+    ProfileSourceReceipt, StaticMetalCaps,
 };
-pub use profile_id::{AppleSiliconProfileId, ProfileEvidenceStatus};
+pub use profile_id::{AmdGpuProfileId, AppleSiliconProfileId, ProfileEvidenceStatus};
 pub use receipts::{
     HeldOutShapeResult, KernelCompileReceipt, KernelPerformanceReceipt, KernelValidationReceipt,
     QualityPerformanceScore,

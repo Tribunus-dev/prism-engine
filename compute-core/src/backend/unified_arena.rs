@@ -51,6 +51,7 @@ impl ArenaView {
     /// - `base` must point to a valid, page-aligned memory region of at
     ///   least `byte_length` bytes.
     /// - The memory must remain valid for the lifetime of this view.
+    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
     pub unsafe fn from_mmap_slice(
         base: *const u8,
         byte_length: u64,

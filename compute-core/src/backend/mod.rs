@@ -30,6 +30,9 @@ pub mod accelerate_ffi;
     feature = "prism-backend-ios"
 ))]
 pub mod accelerate_lane;
+/// AMD ROCm backend — HIP-based GPU compute for Linux/AMD hardware.
+#[cfg(feature = "amd-rocm")]
+pub mod amd_rocm;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 #[cfg(any(
     feature = "mlx-backend",
@@ -100,7 +103,7 @@ pub mod npu;
     feature = "prism-backend-ios",
     feature = "candle-cpu",
     feature = "intel",
-    feature = "tensix"
+    feature = "tensix",
 ))]
 pub mod placement;
 /// Tensor residency tracking — auditable contract for where a tensor lives.
@@ -115,7 +118,7 @@ pub mod tensor_registry;
     feature = "prism-backend-ios",
     feature = "candle-cpu",
     feature = "intel",
-    feature = "tensix"
+    feature = "tensix",
 ))]
 pub mod unified_arena;
 
@@ -404,7 +407,7 @@ pub trait TensorBackend {
     // ── Async submission ────────────────────────────────────────────
 
     /// Submit pending compute work to the backend, returning a
-    /// [`ComellationToken`] the caller can use to block until GPU work
+    /// [`ComputationToken`] the caller can use to block until GPU work
     /// completes. The default implementation evaluates synchronously
     /// and immediately completes the token.
     ///
@@ -446,7 +449,8 @@ pub trait TensorBackend {
         feature = "prism-backend",
         feature = "candle-cpu",
         feature = "intel",
-        feature = "tensix"
+        feature = "tensix",
+        feature = "amd-rocm",
     ))]
     fn residency(&self, _handle: TensorHandle) -> Result<residency::TensorResidency, String> {
         Err("residency tracking not yet implemented".into())
@@ -458,7 +462,8 @@ pub trait TensorBackend {
         feature = "prism-backend",
         feature = "candle-cpu",
         feature = "intel",
-        feature = "tensix"
+        feature = "tensix",
+        feature = "amd-rocm",
     ))]
     fn record_transfer(
         &mut self,
@@ -505,7 +510,8 @@ pub trait CompiledRegionBackend: TensorBackend {
     feature = "mlx-backend",
     feature = "candle-cpu",
     feature = "intel",
-    feature = "tensix"
+    feature = "tensix",
+    feature = "amd-rocm",
 ))]
 pub fn check_transfer<T: TensorBackend>(
     from: &T,

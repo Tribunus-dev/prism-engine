@@ -19,6 +19,8 @@ pub mod coreai;
 pub mod draft_loader;
 pub mod execution_graph;
 pub mod hardware;
+#[cfg(feature = "amd-rocm")]
+pub mod hip_dispatch;
 pub mod int4_pack;
 #[cfg(feature = "prism-backend")]
 pub mod kernel_dispatch;

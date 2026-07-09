@@ -5,7 +5,7 @@
 
 use crate::bitnet::checkpoint::BitNetCheckpoint;
 use crate::bitnet::importer::BitNetImporter;
-use crate::cimage::shard_builder::PendingCImageShard;
+use crate::cimage::streaming_writer::StreamingCImageWriter;
 use crate::cimage::*;
 use crate::execution_plan::{CodecFamily, DType, HardwareProfileId};
 use crate::ternary::codec::TernaryPackedTensor;
@@ -581,6 +581,8 @@ pub fn emit_bitnet_full_model(
         )?;
 
         // 4. v_proj.weight
+
+        // 4. v_proj.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -592,8 +594,6 @@ pub fn emit_bitnet_full_model(
             kv_inner,
             config.group_size,
         )?;
-
-        // 5. o_proj.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -726,22 +726,33 @@ pub fn emit_bitnet_full_model(
 /// - 7 ternary weights: q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj,
 ///   down_proj
 ///
-/// Global tensors: embed_tokens, final_layernorm.
+/// Global tensors: embed_tokens, position_ids, final_layernorm.
 pub fn emit_bitnet_from_checkpoint(
-    path: &Path,
-    _group_size: usize,
-) -> CImageResult<PendingCImageShard> {
-    let path_str = path.display();
-    let ckpt = BitNetCheckpoint::load(path)
-        .map_err(|e| CImageError::Other(format!("failed to load checkpoint {path_str}: {e}")))?;
+    checkpoint_path: &Path,
+    output_path: &Path,
+    group_size: usize,
+) -> CImageResult<CImageWriteReceipt> {
+    let resolved_checkpoint = if checkpoint_path.is_dir() {
+        checkpoint_path.join("model.safetensors")
+    } else {
+        checkpoint_path.to_path_buf()
+    };
+    let path_str = resolved_checkpoint.display();
+    // Read the entire checkpoint into memory for fast random access
+    let buffer = std::fs::read(&resolved_checkpoint)
+        .map_err(|e| CImageError::Other(format!("failed to read {path_str}: {e}")))?;
+    let ckpt = BitNetCheckpoint::from_buffer(buffer)
+        .map_err(|e| CImageError::Other(format!("failed to parse checkpoint {path_str}: {e}")))?;
 
     let num_layers = ckpt.num_layers;
     let hidden_dim = ckpt.hidden_dim;
     let intermediate_dim = ckpt.intermediate_dim;
     let kv_inner = ckpt.num_kv_heads * ckpt.head_dim;
 
-    let mut all_payloads: Vec<PendingPayload> = Vec::new();
-    let mut entries: Vec<CImageTensorEntry> = Vec::with_capacity(num_layers * 11 + 2);
+    // Create streaming writer — tensors go directly to disk, no memory accumulation
+    let mut writer = StreamingCImageWriter::new(output_path)?;
+
+    let mut entries: Vec<CImageTensorEntry> = Vec::with_capacity(num_layers * 11 + 3);
     let mut tensor_idx = 0usize;
 
     // ── Global tensors ─────────────────────────────────────────────────
@@ -750,8 +761,8 @@ pub fn emit_bitnet_from_checkpoint(
     let embed_bytes = ckpt
         .embed_tokens()
         .map_err(|e| CImageError::Other(format!("embed_tokens: {e}")))?;
-    emit_rawf32_norm_tensor(
-        &mut all_payloads,
+    stream_rawf32_norm_tensor(
+        &mut writer,
         &mut entries,
         &mut tensor_idx,
         "embed_tokens.weight",
@@ -759,17 +770,33 @@ pub fn emit_bitnet_from_checkpoint(
         &embed_bytes,
     )?;
 
+    // ── position_ids ────────────────────────────────────────────
+    const SEQ_LEN: usize = 4096;
+    let pos_ids: Vec<f32> = (0..SEQ_LEN).map(|i| i as f32).collect();
+    let mut pos_bytes = Vec::with_capacity(SEQ_LEN * 4);
+    for f in &pos_ids {
+        pos_bytes.extend_from_slice(&f.to_le_bytes());
+    }
+    stream_rawf32_norm_tensor(
+        &mut writer,
+        &mut entries,
+        &mut tensor_idx,
+        "position_ids",
+        "PositionIds",
+        &pos_bytes,
+    )?;
+
     // ── Decoder layers ─────────────────────────────────────────────────
 
     for layer in 0..num_layers {
         let prefix = format!("layer.{layer}.");
 
-        // 1. input_layernorm.weight — RawF32 norm
+        // 1. input_layernorm.weight — RawF32
         let ln_bytes = ckpt
             .layer_norm_weight(layer, "input_layernorm")
             .map_err(|e| CImageError::Other(format!("layer {layer} input_layernorm: {e}")))?;
-        emit_rawf32_norm_tensor(
-            &mut all_payloads,
+        stream_rawf32_norm_tensor(
+            &mut writer,
             &mut entries,
             &mut tensor_idx,
             &format!("{}input_layernorm.weight", prefix),
@@ -777,68 +804,36 @@ pub fn emit_bitnet_from_checkpoint(
             &ln_bytes,
         )?;
 
-        // 2. q_proj.weight — ternary weight
-        emit_checkpoint_ternary_tensor(
-            &ckpt,
-            &mut all_payloads,
-            &mut entries,
-            &mut tensor_idx,
-            layer,
-            &format!("{}q_proj.weight", prefix),
-            "self_attn.q_proj",
-            "AttentionProjection",
-            hidden_dim, // out_features
-            hidden_dim, // in_features
-        )?;
+        // 2-5. Attention projections (ternary)
+        for (name, ckpt_key, rows, cols) in &[
+            ("q_proj", "self_attn.q_proj", hidden_dim, hidden_dim),
+            ("k_proj", "self_attn.k_proj", kv_inner, hidden_dim),
+            ("v_proj", "self_attn.v_proj", kv_inner, hidden_dim),
+            ("o_proj", "self_attn.o_proj", hidden_dim, hidden_dim),
+        ] {
+            stream_checkpoint_ternary_tensor(
+                &mut writer,
+                &mut entries,
+                &mut tensor_idx,
+                &ckpt,
+                layer,
+                &format!("{prefix}{name}.weight"),
+                ckpt_key,
+                "AttentionProjection",
+                *rows,
+                *cols,
+                group_size,
+            )?;
+        }
 
-        // 3. k_proj.weight — ternary weight
-        emit_checkpoint_ternary_tensor(
-            &ckpt,
-            &mut all_payloads,
-            &mut entries,
-            &mut tensor_idx,
-            layer,
-            &format!("{}k_proj.weight", prefix),
-            "self_attn.k_proj",
-            "AttentionProjection",
-            kv_inner,   // out_features = num_kv_heads * head_dim
-            hidden_dim, // in_features = hidden_dim
-        )?;
-
-        // 4. v_proj.weight — ternary weight
-        emit_checkpoint_ternary_tensor(
-            &ckpt,
-            &mut all_payloads,
-            &mut entries,
-            &mut tensor_idx,
-            layer,
-            &format!("{}v_proj.weight", prefix),
-            "self_attn.v_proj",
-            "AttentionProjection",
-            kv_inner,   // out_features = num_kv_heads * head_dim
-            hidden_dim, // in_features = hidden_dim
-        )?;
-        // 5. o_proj.weight — ternary weight
-        emit_checkpoint_ternary_tensor(
-            &ckpt,
-            &mut all_payloads,
-            &mut entries,
-            &mut tensor_idx,
-            layer,
-            &format!("{}o_proj.weight", prefix),
-            "self_attn.o_proj",
-            "AttentionProjection",
-            hidden_dim, // out_features = hidden_dim
-            hidden_dim, // in_features = hidden_dim
-        )?;
-        // 6. post_attention_layernorm.weight — RawF32 norm
+        // 6. post_attention_layernorm.weight — RawF32
         let paln_bytes = ckpt
             .layer_norm_weight(layer, "post_attention_layernorm")
             .map_err(|e| {
                 CImageError::Other(format!("layer {layer} post_attention_layernorm: {e}"))
             })?;
-        emit_rawf32_norm_tensor(
-            &mut all_payloads,
+        stream_rawf32_norm_tensor(
+            &mut writer,
             &mut entries,
             &mut tensor_idx,
             &format!("{}post_attention_layernorm.weight", prefix),
@@ -846,93 +841,88 @@ pub fn emit_bitnet_from_checkpoint(
             &paln_bytes,
         )?;
 
-        // 7. gate_proj.weight — ternary weight
-        emit_checkpoint_ternary_tensor(
-            &ckpt,
-            &mut all_payloads,
+        // 7-9. MLP projections (ternary)
+        stream_checkpoint_ternary_tensor(
+            &mut writer,
             &mut entries,
             &mut tensor_idx,
+            &ckpt,
             layer,
             &format!("{}gate_proj.weight", prefix),
             "mlp.gate_proj",
             "DecoderMlpProjection",
             intermediate_dim,
             hidden_dim,
+            group_size,
         )?;
-
-        // 8. up_proj.weight — ternary weight
-        emit_checkpoint_ternary_tensor(
-            &ckpt,
-            &mut all_payloads,
+        stream_checkpoint_ternary_tensor(
+            &mut writer,
             &mut entries,
             &mut tensor_idx,
+            &ckpt,
             layer,
             &format!("{}up_proj.weight", prefix),
             "mlp.up_proj",
             "DecoderMlpProjection",
             intermediate_dim,
             hidden_dim,
+            group_size,
         )?;
-
-        // 9. down_proj.weight — ternary weight
-        emit_checkpoint_ternary_tensor(
-            &ckpt,
-            &mut all_payloads,
+        stream_checkpoint_ternary_tensor(
+            &mut writer,
             &mut entries,
             &mut tensor_idx,
+            &ckpt,
             layer,
             &format!("{}down_proj.weight", prefix),
             "mlp.down_proj",
             "DecoderMlpProjection",
             hidden_dim,
             intermediate_dim,
+            group_size,
         )?;
 
-        // 10. ffn_sub_norm.weight — RawF32 norm (checkpoint key: mlp.ffn_sub_norm)
-        let ffn_sub_bytes = ckpt
+        // 10. ffn_sub_norm.weight — RawF32
+        let ffn_sub = ckpt
             .layer_ffn_sub_norm(layer)
             .map_err(|e| CImageError::Other(format!("layer {layer} ffn_sub_norm: {e}")))?;
-        emit_rawf32_norm_tensor(
-            &mut all_payloads,
+        stream_rawf32_norm_tensor(
+            &mut writer,
             &mut entries,
             &mut tensor_idx,
             &format!("{}ffn_sub_norm.weight", prefix),
             "RmsNormWeight",
-            &ffn_sub_bytes,
+            &ffn_sub,
         )?;
 
-        // 11. attn_sub_norm.weight — RawF32 norm (checkpoint key: self_attn.attn_sub_norm)
-        let attn_sub_bytes = ckpt
+        // 11. attn_sub_norm.weight — RawF32
+        let attn_sub = ckpt
             .layer_attn_sub_norm(layer)
             .map_err(|e| CImageError::Other(format!("layer {layer} attn_sub_norm: {e}")))?;
-        emit_rawf32_norm_tensor(
-            &mut all_payloads,
+        stream_rawf32_norm_tensor(
+            &mut writer,
             &mut entries,
             &mut tensor_idx,
             &format!("{}attn_sub_norm.weight", prefix),
             "RmsNormWeight",
-            &attn_sub_bytes,
+            &attn_sub,
         )?;
     }
 
     // ── Global norm ────────────────────────────────────────────────────
-
-    // final_layernorm.weight — RawF32
-    let final_ln_bytes = ckpt
-        .final_layernorm()
-        .map_err(|e| CImageError::Other(format!("final_layernorm: {e}")))?;
-    emit_rawf32_norm_tensor(
-        &mut all_payloads,
-        &mut entries,
-        &mut tensor_idx,
-        "final_layernorm.weight",
-        "RmsNormWeight",
-        &final_ln_bytes,
-    )?;
+    if let Ok(final_ln_bytes) = ckpt.final_layernorm() {
+        stream_rawf32_norm_tensor(
+            &mut writer,
+            &mut entries,
+            &mut tensor_idx,
+            "final_layernorm.weight",
+            "RmsNormWeight",
+            &final_ln_bytes,
+        )?;
+    }
 
     // ── Manifest ───────────────────────────────────────────────────────
-
-    let total_tensors = num_layers * 11 + 2;
+    let total_tensors = entries.len();
     let plan_id = format!("bitnet_from_checkpoint_{:016x}", rand_positive_u64());
     let manifest = CImageManifestV0 {
         schema_version: 0,
@@ -955,13 +945,11 @@ pub fn emit_bitnet_from_checkpoint(
         state_store_schema: None,
     };
 
-    Ok(PendingCImageShard {
-        manifest,
-        payloads: all_payloads,
-        receipts: Vec::new(),
-    })
+    // Finalize: writes manifest + directories + footer, atomic rename
+    writer.finalize(manifest)
 }
 
+#[allow(dead_code)]
 /// Emit a RawF32 norm tensor from BF16 checkpoint data (already converted to
 /// f32 LE bytes).
 fn emit_rawf32_norm_tensor(
@@ -1016,6 +1004,7 @@ fn emit_rawf32_norm_tensor(
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Emit a ternary weight tensor from checkpoint data.
 ///
 /// Loads U8 codes + BF16 scale from the checkpoint for the given layer and
@@ -1033,6 +1022,7 @@ fn emit_checkpoint_ternary_tensor(
     tensor_class: &str,
     out_features: usize,
     in_features: usize,
+    group_size: usize,
 ) -> CImageResult<()> {
     use crate::bitnet::checkpoint::make_ternary_from_checkpoint;
 
@@ -1046,7 +1036,7 @@ fn emit_checkpoint_ternary_tensor(
         .layer_scale(layer, checkpoint_name)
         .map_err(|e| CImageError::Other(format!("{tensor_key} scale: {e}")))?;
 
-    let tensor = make_ternary_from_checkpoint(codes, stored_rows, stored_cols, scale);
+    let tensor = make_ternary_from_checkpoint(codes, stored_rows, stored_cols, scale, group_size);
 
     // Codes payload.
     let codes_payload = PendingPayload {
@@ -1115,6 +1105,136 @@ fn rand_positive_u64() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos() as u64
+}
+
+/// Write a ternary tensor payload to a streaming writer directly to disk.
+fn stream_checkpoint_ternary_tensor(
+    writer: &mut StreamingCImageWriter,
+    entries: &mut Vec<CImageTensorEntry>,
+    tensor_idx: &mut usize,
+    ckpt: &BitNetCheckpoint,
+    layer: usize,
+    tensor_key: &str,
+    ckpt_proj_name: &str,
+    tensor_class: &str,
+    out_features: usize,
+    in_features: usize,
+    group_size: usize,
+) -> CImageResult<()> {
+    use crate::bitnet::checkpoint::make_ternary_from_checkpoint;
+
+    let codes = ckpt
+        .layer_codes(layer, ckpt_proj_name)
+        .map_err(|e| CImageError::Other(format!("{tensor_key} codes: {e}")))?;
+    let scale = ckpt
+        .layer_scale(layer, ckpt_proj_name)
+        .map_err(|e| CImageError::Other(format!("{tensor_key} scale: {e}")))?;
+
+    let stored_rows = out_features / 4;
+    let stored_cols = in_features;
+    let tensor = make_ternary_from_checkpoint(codes, stored_rows, stored_cols, scale, group_size);
+
+    // Write codes payload directly to disk
+    let codes_payload_id = format!("p_{}_codes", tensor_key);
+    writer.append_payload(
+        codes_payload_id.clone(),
+        CImagePayloadKind::TernaryPackedCodes,
+        Some("Ternary1_58".into()),
+        64,
+        &tensor.codes,
+    )?;
+
+    // Write scales payload directly to disk
+    let scales_payload_id = format!("p_{}_scales", tensor_key);
+    let scale_bytes: Vec<u8> = tensor.scales.iter().flat_map(|s| s.to_le_bytes()).collect();
+    writer.append_payload(
+        scales_payload_id.clone(),
+        CImagePayloadKind::TernaryScales,
+        Some("Ternary1_58".into()),
+        64,
+        &scale_bytes,
+    )?;
+
+    let groups_per_row = in_features.div_ceil(group_size);
+    let bytes_per_group = (group_size + 3) / 4;
+    let tid = format!("t{}", *tensor_idx);
+    let entry = CImageTensorEntry {
+        tensor_id: tid,
+        tensor_key: tensor_key.to_string(),
+        tensor_class: tensor_class.to_string(),
+        logical_shape: vec![out_features as u32, in_features as u32],
+        source_dtype: DType::F32,
+        codec: CodecFamily::Ternary1_58,
+        precision_plan: None,
+        physical_layout: PhysicalTileLayout {
+            tile_m: 1,
+            tile_n: in_features as u32,
+            tiles_per_row: 1,
+            total_tiles: out_features as u32,
+            padded_cols: (groups_per_row * group_size) as u32,
+            group_size: group_size as u32,
+            groups_per_tile: groups_per_row as u32,
+            packed_bytes_per_tile: (groups_per_row * bytes_per_group) as u32,
+            metadata_f32_per_tile: groups_per_row as u32 / 2,
+        },
+        payload_ref: CImagePayloadRef::Single {
+            payload_id: codes_payload_id,
+        },
+        raw_f32_reference_ref: None,
+        tensor_sha256: sha256_of_bytes(&tensor.codes),
+        validation_digest: None,
+    };
+    entries.push(entry);
+    *tensor_idx = tensor_idx.wrapping_add(1);
+    Ok(())
+}
+
+/// Write a RawF32 norm tensor payload to a streaming writer.
+fn stream_rawf32_norm_tensor(
+    writer: &mut StreamingCImageWriter,
+    entries: &mut Vec<CImageTensorEntry>,
+    tensor_idx: &mut usize,
+    tensor_key: &str,
+    tensor_class: &str,
+    data: &[u8],
+) -> CImageResult<()> {
+    let elements = data.len() / 4;
+    let payload_id = format!("p_{}", tensor_key.replace('.', "_"));
+    writer.append_payload(
+        payload_id.clone(),
+        CImagePayloadKind::RawF32Reference,
+        None,
+        64,
+        data,
+    )?;
+    let tid = format!("t{}", *tensor_idx);
+    let entry = CImageTensorEntry {
+        tensor_id: tid,
+        tensor_key: tensor_key.to_string(),
+        tensor_class: tensor_class.to_string(),
+        logical_shape: vec![elements as u32],
+        source_dtype: DType::F32,
+        codec: CodecFamily::RawF32,
+        precision_plan: None,
+        physical_layout: PhysicalTileLayout {
+            tile_m: 1,
+            tile_n: elements as u32,
+            tiles_per_row: 1,
+            total_tiles: 1,
+            padded_cols: elements as u32,
+            group_size: elements as u32,
+            groups_per_tile: 1,
+            packed_bytes_per_tile: data.len() as u32,
+            metadata_f32_per_tile: 0,
+        },
+        payload_ref: CImagePayloadRef::Single { payload_id },
+        raw_f32_reference_ref: None,
+        tensor_sha256: sha256_of_bytes(data),
+        validation_digest: None,
+    };
+    entries.push(entry);
+    *tensor_idx = tensor_idx.wrapping_add(1);
+    Ok(())
 }
 
 #[cfg(test)]

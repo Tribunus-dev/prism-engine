@@ -102,6 +102,10 @@ pub enum CodecFamily {
     Ternary,
     Ternary1_58,
     Mixed,
+    Q8_0,
+    Q4_K,
+    Q2_K,
+    IQ2_XXS,
 }
 /// Default codec family for unquantized paths.
 impl Default for CodecFamily {

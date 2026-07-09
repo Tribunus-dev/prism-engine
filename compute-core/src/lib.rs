@@ -9,6 +9,7 @@
     feature = "candle-cpu",
     feature = "intel",
     feature = "tensix",
+    feature = "amd-rocm",
     feature = "stub-backend",
     feature = "storage-adapters",
 )))]
@@ -47,7 +48,7 @@ pub mod tts;
 // Pure Rust (atomics + uuid) — must stay unconditional: `errors.rs` (an
 // unconditional module) imports `arena_lifecycle::LifecycleState`, so gating
 // this to macOS broke every non-mac build.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", feature = "amd-rocm"))]
 pub mod aot_kernels;
 pub mod arena_lifecycle;
 #[cfg(all(
@@ -275,6 +276,9 @@ pub mod ternary;
 pub mod video_provider;
 #[macro_use]
 pub mod logging;
+/// AMD ROCm backend — multi-die GPU compute module for AMD hardware.
+#[cfg(feature = "amd-rocm")]
+pub mod amd_rocm;
 /// CPU fusion backend — Accelerate + Rayon as a first-class fusion candidate.
 pub mod cpu_runtime;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack

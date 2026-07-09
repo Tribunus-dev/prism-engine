@@ -1051,7 +1051,11 @@ impl DecoderLayerShardBuilder {
                 | CodecFamily::SymInt4
                 | CodecFamily::Ternary
                 | CodecFamily::Ternary1_58
-                | CodecFamily::Mixed => {
+                | CodecFamily::Mixed
+                | CodecFamily::Q8_0
+                | CodecFamily::Q4_K
+                | CodecFamily::Q2_K
+                | CodecFamily::IQ2_XXS => {
                     return Err(CImageError::Other(format!(
                         "unsupported codec {:?} for tensor {}",
                         tensor.codec, tensor.key
