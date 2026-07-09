@@ -16,6 +16,8 @@
 #include <metal_stdlib>
 using namespace metal;
 
+#ifndef MLP_CONSTANTS_DEFINED
+#define MLP_CONSTANTS_DEFINED
 struct MlpConstants {
     uint32_t hidden_dim;
     uint32_t intermediate_dim;
@@ -24,6 +26,7 @@ struct MlpConstants {
     float    epsilon;
     uint32_t _pad[3];
 };
+#endif
 
 kernel void cimage_linear_int8(
     device const float*     input   [[buffer(0)]],

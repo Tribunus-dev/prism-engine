@@ -31,7 +31,7 @@ pub struct MlpKernelConstants {
     pub group_size: u32,
     pub codec_id: u32,
     pub epsilon: f32,
-    pub _pad0: [u32; 3],
+    pub _pad0: [u32; 11],
 }
 
 // Safety: repr(C) and all fields are plain-old-data.
@@ -129,7 +129,7 @@ impl MetalCImageBufferStore {
             group_size,
             codec_id,
             epsilon: 1e-6,
-            _pad0: [0, 0, 0],
+            _pad0: [0u32; 11],
         };
 
         let constants_bytes: &[u8] = bytemuck::bytes_of(&constants);

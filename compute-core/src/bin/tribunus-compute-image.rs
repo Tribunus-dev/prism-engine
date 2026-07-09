@@ -63,6 +63,18 @@ fn main() {
         eprintln!(
             "  tribunus-compute-image cimage run-metal-mlp --path <path> [--seed N] [--json]"
         );
+        eprintln!("  tribunus-compute-image cimage emit-synthetic-decoder-layer --out <path> [--hidden-dim N]");
+        eprintln!(
+            "       [--num-heads N] [--num-kv-heads N] [--head-dim N] [--intermediate-dim N]"
+        );
+        eprintln!("       [--seq-len N] [--projection-codec nf4|int8|rawf32] [--mlp-codec ...]");
+        eprintln!(
+            "       [--norm-codec ...] [--attention-codec ...] [--seed N] [--json] [--no-validate]"
+        );
+        eprintln!(
+            "  tribunus-compute-image cimage validate-assistant-graph --path <path> [--json]"
+        );
+        eprintln!("  tribunus-compute-image cimage run-metal-decoder-layer --path <path> [--seed N] [--json]");
         std::process::exit(1);
     }
 
@@ -79,13 +91,18 @@ fn main() {
             Some("emit-synthetic-mlp") => cmd_cimage_emit_synthetic_mlp(&args[3..]),
             Some("validate") => cmd_cimage_validate(&args[3..]),
             Some("run-metal-mlp") => cmd_cimage_run_metal_mlp(&args[3..]),
+            Some("emit-synthetic-decoder-layer") => {
+                cmd_cimage_emit_synthetic_decoder_layer(&args[3..])
+            }
+            Some("validate-assistant-graph") => cmd_cimage_validate_assistant_graph(&args[3..]),
+            Some("run-metal-decoder-layer") => cmd_cimage_run_metal_decoder_layer(&args[3..]),
             Some(other) => {
                 eprintln!("unknown cimage subcommand: {other}");
                 std::process::exit(1);
             }
             None => {
                 eprintln!(
-                    "cimage requires a subcommand: emit-synthetic-mlp, validate, run-metal-mlp"
+                    "cimage requires a subcommand: emit-synthetic-mlp, validate, run-metal-mlp, emit-synthetic-decoder-layer, validate-assistant-graph, run-metal-decoder-layer"
                 );
                 std::process::exit(1);
             }
@@ -2082,8 +2099,232 @@ fn parse_codec(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// quant-sweep command — parametric quantization sweep
 // ═══════════════════════════════════════════════════════════════════════════
+// cimage decoder layer commands — emit, validate assistant graph, run metal
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emit a synthetic decoder layer cimage and validate it.
+fn cmd_cimage_emit_synthetic_decoder_layer(args: &[String]) -> Result<(), String> {
+    let out = get_opt(args, "--out").unwrap_or("/tmp/gemma_decoder_layer_000.cimage");
+    let hidden_dim: usize = get_opt(args, "--hidden-dim")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(64);
+    let num_heads: usize = get_opt(args, "--num-heads")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4);
+    let num_kv_heads: usize = get_opt(args, "--num-kv-heads")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4);
+    let head_dim: usize = get_opt(args, "--head-dim")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(16);
+    let intermediate_dim: usize = get_opt(args, "--intermediate-dim")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(128);
+    let seq_len: usize = get_opt(args, "--seq-len")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let projection_codec = parse_codec(args, "--projection-codec")
+        .unwrap_or(tribunus_compute_core::execution_plan::CodecFamily::Nf4);
+    let mlp_codec = parse_codec(args, "--mlp-codec")
+        .unwrap_or(tribunus_compute_core::execution_plan::CodecFamily::Nf4);
+    let norm_codec = parse_codec(args, "--norm-codec")
+        .unwrap_or(tribunus_compute_core::execution_plan::CodecFamily::RawF32);
+    let attention_codec = parse_codec(args, "--attention-codec")
+        .unwrap_or(tribunus_compute_core::execution_plan::CodecFamily::Nf4);
+    let seed: u64 = get_opt(args, "--seed")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(42);
+    let no_validate = has_flag(args, "--no-validate");
+    let json_output = has_flag(args, "--json");
+
+    use tribunus_compute_core::cimage::*;
+
+    let config = SyntheticDecoderLayerConfig {
+        seed,
+        hidden_dim,
+        num_heads,
+        num_kv_heads,
+        head_dim,
+        intermediate_dim,
+        seq_len,
+        policy: SyntheticDecoderPolicy {
+            projection_codec,
+            mlp_codec,
+            norm_codec,
+            attention_codec,
+        },
+    };
+
+    // Build the synthetic decoder layer.
+    let pending = DecoderLayerShardBuilder::build_synthetic_decoder_layer(config)
+        .map_err(|e| format!("build error: {e}"))?;
+
+    // Write cimage to disk.
+    let write_receipt = CImageWriter::write_v0(
+        std::path::Path::new(out),
+        pending.manifest,
+        pending.payloads,
+        pending.receipts,
+    )
+    .map_err(|e| format!("write error: {e}"))?;
+
+    // Load it back.
+    let loaded =
+        CImageLoader::load_v0(std::path::Path::new(out)).map_err(|e| format!("load error: {e}"))?;
+
+    // Validate structural integrity.
+    let load_receipt =
+        CImageValidator::validate_loaded(&loaded).map_err(|e| format!("validate error: {e}"))?;
+
+    // Run numerical validation — decoder reference math.
+    let shard_validation = validate_decoder_layer_shard(&loaded, &write_receipt.cimage_digest)
+        .map_err(|e| format!("numerical validation error: {e}"))?;
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "status": if shard_validation.passed { "valid" } else { "invalid" },
+            "path": out,
+            "cimage_digest": write_receipt.cimage_digest,
+            "tensor_count": write_receipt.tensor_count,
+            "payload_count": write_receipt.payload_count,
+            "output_nrmse": shard_validation.output_nrmse,
+            "output_cosine": shard_validation.output_cosine,
+            "max_abs_error": shard_validation.max_abs_error,
+            "evidence_kind": "Synthetic",
+        }))
+        .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("cimage written to: {out}");
+        println!("  digest:     {}", write_receipt.cimage_digest);
+        println!("  tensors:    {}", write_receipt.tensor_count);
+        println!("  payloads:   {}", write_receipt.payload_count);
+        println!(
+            "  validation: {}",
+            if shard_validation.passed {
+                "PASSED"
+            } else {
+                "FAILED"
+            }
+        );
+        println!("  NRMSE:  {:.6}", shard_validation.output_nrmse);
+        println!("  cosine: {:.6}", shard_validation.output_cosine);
+        println!("  max_abs_err: {:.6}", shard_validation.max_abs_error);
+    }
+
+    if !shard_validation.passed && !no_validate {
+        return Err("numerical validation failed".to_string());
+    }
+
+    if load_receipt.validation_status == CImageValidationStatus::Invalid {
+        return Err("cimage validation failed".to_string());
+    }
+
+    Ok(())
+}
+
+/// Validate the assistant graph manifest embedded in a cimage.
+fn cmd_cimage_validate_assistant_graph(args: &[String]) -> Result<(), String> {
+    let path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let json_output = has_flag(args, "--json");
+
+    use tribunus_compute_core::assistant_graph::{
+        AssistantGraphManifest, AssistantGraphValidationStatus, AssistantGraphValidator,
+    };
+    use tribunus_compute_core::cimage::*;
+
+    // Load the cimage.
+    let loaded = CImageLoader::load_v0(std::path::Path::new(path))
+        .map_err(|e| format!("load error: {e}"))?;
+
+    // Extract assistant graph ref from manifest.
+    let ag_ref = loaded
+        .manifest
+        .assistant_graph
+        .as_ref()
+        .ok_or_else(|| "no assistant graph found in cimage".to_string())?;
+
+    // Find the payload entry by graph_json_payload_id.
+    let entry = loaded
+        .payload_directory
+        .payloads
+        .iter()
+        .find(|e| e.payload_id == ag_ref.graph_json_payload_id)
+        .ok_or_else(|| format!("payload '{}' not found", ag_ref.graph_json_payload_id))?;
+
+    let start = entry.offset as usize;
+    let end = start
+        .checked_add(entry.len as usize)
+        .ok_or_else(|| "payload offset overflow".to_string())?;
+    if end > loaded.payload_blob.len() {
+        return Err("assistant graph payload out of bounds".to_string());
+    }
+
+    let ag_manifest: AssistantGraphManifest =
+        serde_json::from_slice(&loaded.payload_blob[start..end])
+            .map_err(|e| format!("failed to deserialize assistant graph: {e}"))?;
+
+    let receipt = AssistantGraphValidator::validate(&ag_manifest);
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "graph_id": receipt.graph_id,
+            "validation_status": match receipt.validation_status {
+                AssistantGraphValidationStatus::Valid => "valid",
+                AssistantGraphValidationStatus::ValidWithWarnings => "valid_with_warnings",
+                AssistantGraphValidationStatus::Invalid => "invalid",
+            },
+            "contract_valid": receipt.contract_valid,
+            "region_count": receipt.region_count,
+            "bridge_count": receipt.bridge_count,
+            "route_edges": receipt.route_edges,
+            "errors": receipt.errors,
+            "warnings": receipt.warnings,
+        }))
+        .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("Assistant graph validation:");
+        println!("  graph_id: {}", receipt.graph_id);
+        println!("  status:   {:?}", receipt.validation_status);
+        println!("  regions:  {}", receipt.region_count);
+        println!("  bridges:  {}", receipt.bridge_count);
+        println!("  routes:   {}", receipt.route_edges);
+        println!("  contract_valid: {}", receipt.contract_valid);
+        if !receipt.errors.is_empty() {
+            for err in &receipt.errors {
+                println!("  ERROR: {err}");
+            }
+        }
+        if !receipt.warnings.is_empty() {
+            for warn in &receipt.warnings {
+                println!("  WARNING: {warn}");
+            }
+        }
+    }
+
+    if receipt.validation_status == AssistantGraphValidationStatus::Invalid {
+        return Err("assistant graph validation failed".to_string());
+    }
+
+    Ok(())
+}
+
+/// Run the Metal decoder layer region on a loaded decoder cimage.
+///
+/// TODO: Wire `run_decoder_shard_region` (Task A) once the method exists on
+/// CImageMetalRegionRunner. Currently a stub.
+fn cmd_cimage_run_metal_decoder_layer(args: &[String]) -> Result<(), String> {
+    let _path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let _seed: u64 = get_opt(args, "--seed")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(42);
+    let _json_output = has_flag(args, "--json");
+
+    // Stub: implement when CImageMetalRegionRunner::run_decoder_shard_region exists.
+    todo!("run-metal-decoder-layer: wire run_decoder_shard_region (Task A)")
+}
 /// Run a parametric quantization sweep across selected tensors.
 fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
     let source = get_opt(args, "--source").ok_or_else(|| "--source is required".to_string())?;

@@ -69,8 +69,8 @@ impl MlpShardRegionBuilder {
     ) -> CImageRuntimeResult<CImageMlpRegionPlan> {
         // ── Buffer definitions ─────────────────────────────────────────────
         // We define the logical buffers and their uses.
-        let hidden_bytes = (hidden_dim * 4) as u64;
-        let inter_bytes = (intermediate_dim * 4) as u64;
+        let _hidden_bytes = (hidden_dim * 4) as u64;
+        let _inter_bytes = (intermediate_dim * 4) as u64;
 
         // Persistent buffers (from cimage payloads)
         let persistent_buffers = define_persistent_buffers(store, hidden_dim, intermediate_dim);
@@ -210,6 +210,7 @@ impl MlpShardRegionBuilder {
 // ── Buffer definitions ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct PersistentBufferDef {
     buffer_id: String,
     byte_size: u64,
@@ -303,6 +304,7 @@ fn define_persistent_buffers(
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ScratchBufferDef {
     buffer_id: String,
     byte_size: u64,
@@ -366,7 +368,7 @@ fn build_rmsnorm_op(
     idx: usize,
     hidden_dim: usize,
     _intermediate_dim: usize,
-    persistent: &[PersistentBufferDef],
+    _persistent: &[PersistentBufferDef],
     _scratch: &[ScratchBufferInfo],
 ) -> ScheduledKernelOp {
     let op_id = format!("op_{idx}_rmsnorm");
@@ -866,6 +868,7 @@ fn basic_specialization() -> KernelSpecializationKey {
     }
 }
 
+#[allow(dead_code)]
 fn collect_all_buffer_uses(ops: &[ScheduledKernelOp]) -> Vec<BufferUse> {
     let mut all = Vec::new();
     let mut seen = std::collections::HashSet::new();

@@ -48,6 +48,11 @@ fn main() {
             "cimage_silu_f32.metal",
             "cimage_mul_f32.metal",
             "cimage_residual_add_f32.metal",
+            "cimage_rope_f32.metal",
+            "cimage_attention_scores_f32.metal",
+            "cimage_attention_softmax_f32.metal",
+            "cimage_attention_apply_f32.metal",
+            "cimage_kv_append_f32.metal",
         ];
         for src in metal_sources {
             println!(

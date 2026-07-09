@@ -20,6 +20,8 @@
 #include <metal_stdlib>
 using namespace metal;
 
+#ifndef MLP_CONSTANTS_DEFINED
+#define MLP_CONSTANTS_DEFINED
 struct MlpConstants {
     uint32_t hidden_dim;
     uint32_t intermediate_dim;
@@ -28,6 +30,7 @@ struct MlpConstants {
     float    epsilon;
     uint32_t _pad[3];
 };
+#endif
 
 constant float nf4_codebook[16] = {
     -1.0f, -0.6961928009986877f, -0.5250730514526367f, -0.39491748809814453f,

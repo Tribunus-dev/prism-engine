@@ -53,6 +53,7 @@ pub mod arena_lifecycle;
     any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
 pub mod arena_pool;
+pub mod assistant_graph;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod attention;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
@@ -390,6 +391,7 @@ pub mod quantized;
     feature = "prism-backend-ios"
 ))]
 pub mod readiness_gates;
+pub mod reasoning_evidence;
 pub mod receipt;
 pub mod receipts;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
@@ -453,6 +455,7 @@ pub mod sidecar;
     feature = "prism-backend-ios"
 ))]
 pub mod speculative;
+pub mod state_store;
 
 #[cfg(any(
     feature = "mlx-backend",

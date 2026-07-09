@@ -14,8 +14,8 @@ use super::contract::*;
     )
 ))]
 use crate::backend::accelerate_ffi::{cblas_sgemm, CBLAS_NO_TRANS, CBLAS_ROW_MAJOR};
-use crate::nf4tile640::dequant_matmul_reference;
 use crate::nf4tile640::accelerate::{distance_sq, max_abs_error as accelerate_max_abs_error};
+use crate::nf4tile640::dequant_matmul_reference;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
@@ -120,17 +120,15 @@ pub fn validate_operator_space_with_vectors(
     }
 
     // Check deadline before the batched matmul (can't be interrupted mid-kernel).
-    if let Some(dl) = deadline {
-        if std::time::Instant::now() >= dl {
-            return ValidationOutcome::Interrupted(InterruptedValidationReport {
-                phase: "batched".to_string(),
-                processed_vectors: 0,
-                partial_rmse: 0.0,
-                partial_nrmse: 0.0,
-                partial_cosine: 0.0,
-                partial_ref_rms: 0.0,
-            });
-        }
+    if deadline.is_some_and(|dl| std::time::Instant::now() >= dl) {
+        return ValidationOutcome::Interrupted(InterruptedValidationReport {
+            phase: "batched".to_string(),
+            processed_vectors: 0,
+            partial_rmse: 0.0,
+            partial_nrmse: 0.0,
+            partial_cosine: 0.0,
+            partial_ref_rms: 0.0,
+        });
     }
 
     // Unpack NF4 weights to f32 once for the quantized path.
@@ -334,11 +332,13 @@ pub fn validate_operator_space_with_vectors(
     } // end batched path cfg-gated block
 
     // Pure-Rust fallback when neither Metal nor Accelerate is available.
+    // Also covers `metal-dispatch` without mlx/prism/ffi backend (GPU path gated out).
+    // Fires when no backend feature is enabled (including metal-dispatch alone without mlx/prism/ffi).
     #[cfg(not(any(
-        feature = "metal-dispatch",
         feature = "mlx-backend",
         feature = "prism-backend",
-        feature = "prism-backend-ios"
+        feature = "prism-backend-ios",
+        feature = "ffi"
     )))]
     {
         return validate_operator_space_single(
@@ -361,12 +361,15 @@ pub fn validate_operator_space_with_vectors(
 /// Both `refs_flat` and `quants_flat` are [num_vectors × out_features] row-major flat arrays.
 /// Returns the aggregate `OperatorValidationReport` (worst-case metrics across all
 /// vectors plus averages for cosine similarity, ref_output_rms, and sign agreement).
-#[cfg(all(feature = "metal-dispatch", any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios",
-    feature = "ffi"
-)))]
+#[cfg(all(
+    feature = "metal-dispatch",
+    any(
+        feature = "mlx-backend",
+        feature = "prism-backend",
+        feature = "prism-backend-ios",
+        feature = "ffi"
+    )
+))]
 fn compute_operator_metrics(
     refs_flat: &[f32],
     quants_flat: &[f32],

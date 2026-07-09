@@ -208,6 +208,8 @@ mod tests {
                 tensor_refs: vec![],
             },
             receipts: vec![],
+            assistant_graph: None,
+            state_store_schema: None,
         };
 
         let payload_dir = CImagePayloadDirectoryV0 {
@@ -351,6 +353,8 @@ mod tests {
                 tensor_refs: vec![],
             },
             receipts: vec![],
+            assistant_graph: None,
+            state_store_schema: None,
         };
         let payload_dir = CImagePayloadDirectoryV0 { payloads: vec![] };
         let receipt_dir = CImageReceiptDirectoryV0 { receipts: vec![] };
@@ -440,6 +444,8 @@ mod tests {
                 tensor_refs: vec![],
             },
             receipts: vec![],
+            assistant_graph: None,
+            state_store_schema: None,
         };
         let payload_dir = CImagePayloadDirectoryV0 { payloads: vec![] };
         let receipt_dir = CImageReceiptDirectoryV0 { receipts: vec![] };

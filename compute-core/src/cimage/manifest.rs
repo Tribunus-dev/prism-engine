@@ -20,6 +20,8 @@ pub struct CImageManifestV0 {
     pub tensors: Vec<CImageTensorEntry>,
     pub execution_plan: ModelExecutionPlanSummary,
     pub receipts: Vec<CImageReceiptRef>,
+    pub assistant_graph: Option<AssistantGraphPayloadRef>,
+    pub state_store_schema: Option<StateStoreSchemaPayloadRef>,
 }
 
 /// Classification of a cimage artifact.
@@ -28,6 +30,7 @@ pub enum CImageArtifactKind {
     SyntheticShard,
     ModelShard,
     FullModel,
+    AssistantGraphProof,
 }
 
 /// One tensor entry in the manifest.
@@ -113,6 +116,18 @@ pub struct CImageReceiptRef {
     pub receipt_kind: String,
 }
 
+/// Reference to an assistant graph JSON payload in the payload directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantGraphPayloadRef {
+    pub graph_json_payload_id: String,
+}
+
+/// Reference to a state-store schema JSON payload in the payload directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateStoreSchemaPayloadRef {
+    pub schema_json_payload_id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,6 +182,8 @@ mod tests {
                 receipt_id: "r0".into(),
                 receipt_kind: "LoadReceipt".into(),
             }],
+            assistant_graph: None,
+            state_store_schema: None,
         };
         let json = serde_json::to_string_pretty(&manifest).unwrap();
         let deserialized: CImageManifestV0 = serde_json::from_str(&json).unwrap();
@@ -213,6 +230,7 @@ mod tests {
             CImageArtifactKind::SyntheticShard,
             CImageArtifactKind::ModelShard,
             CImageArtifactKind::FullModel,
+            CImageArtifactKind::AssistantGraphProof,
         ] {
             let json = serde_json::to_string(kind).unwrap();
             let back: CImageArtifactKind = serde_json::from_str(&json).unwrap();
@@ -237,5 +255,54 @@ mod tests {
         let json = serde_json::to_string(&mixed).unwrap();
         let back: CImagePayloadRef = serde_json::from_str(&json).unwrap();
         assert!(matches!(back, CImagePayloadRef::MixedPrecision { .. }));
+    }
+
+    #[test]
+    fn test_manifest_assistant_graph_roundtrip() {
+        let manifest = CImageManifestV0 {
+            schema_version: 0,
+            model_family: "gpt-4o-assistant".into(),
+            artifact_kind: CImageArtifactKind::AssistantGraphProof,
+            source_model_digest: Some("digest-abc".into()),
+            compiler_policy_digest: "policy-xyz".into(),
+            layout_profile: HardwareProfileId::AppleMBaseMemoryBound,
+            tensors: vec![],
+            execution_plan: ModelExecutionPlanSummary {
+                plan_id: "assistant_graph_plan_000".into(),
+                region_count: 0,
+                total_kernel_ops: 0,
+                total_input_bytes: 0,
+                total_output_bytes: 0,
+                tensor_refs: vec![],
+            },
+            receipts: vec![],
+            assistant_graph: Some(AssistantGraphPayloadRef {
+                graph_json_payload_id: "ag_001".into(),
+            }),
+            state_store_schema: Some(StateStoreSchemaPayloadRef {
+                schema_json_payload_id: "ss_001".into(),
+            }),
+        };
+        let json = serde_json::to_string_pretty(&manifest).unwrap();
+        let deserialized: CImageManifestV0 = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            deserialized.artifact_kind,
+            CImageArtifactKind::AssistantGraphProof
+        );
+        assert!(deserialized.assistant_graph.is_some());
+        assert_eq!(
+            deserialized.assistant_graph.unwrap().graph_json_payload_id,
+            "ag_001"
+        );
+        assert!(deserialized.state_store_schema.is_some());
+        assert_eq!(
+            deserialized
+                .state_store_schema
+                .unwrap()
+                .schema_json_payload_id,
+            "ss_001"
+        );
+        assert!(deserialized.receipts.is_empty());
+        assert!(deserialized.tensors.is_empty());
     }
 }

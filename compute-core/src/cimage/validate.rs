@@ -1,4 +1,4 @@
-//! CImage validation — checks all 14 gates to verify cimage integrity.
+//! CImage validation — checks all 15 gates to verify cimage integrity.
 //!
 //! The validator operates on a [`LoadedCImageV0`] and returns a
 //! [`CImageLoadReceipt`] summarising all found errors and warnings.
@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 use sha2::{Digest, Sha256};
 
+use crate::assistant_graph::{AssistantGraphManifest, AssistantGraphValidator};
 use crate::cimage::*;
 use crate::execution_plan::CodecFamily;
 
@@ -27,7 +28,7 @@ impl CImageValidator {
     /// picture.
     pub fn validate_loaded(image: &LoadedCImageV0) -> CImageResult<CImageLoadReceipt> {
         let mut errors: Vec<String> = Vec::new();
-        let warnings: Vec<String> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
 
         let file_size = image.raw_file_bytes.len() as u64;
         let header = &image.header;
@@ -288,6 +289,52 @@ impl CImageValidator {
             }
         }
 
+        // ── Gate 15: Assistant graph validation (if present) ─────────
+        if let Some(ag_ref) = &image.manifest.assistant_graph {
+            if let Some(entry) = image
+                .payload_directory
+                .payloads
+                .iter()
+                .find(|e| e.payload_id == ag_ref.graph_json_payload_id)
+            {
+                let start = entry.offset as usize;
+                if let Some(end) = start.checked_add(entry.len as usize) {
+                    if end <= image.payload_blob.len() {
+                        match serde_json::from_slice::<AssistantGraphManifest>(
+                            &image.payload_blob[start..end],
+                        ) {
+                            Ok(ag_manifest) => {
+                                let ag_receipt = AssistantGraphValidator::validate(&ag_manifest);
+                                errors.extend(ag_receipt.errors);
+                                warnings.extend(ag_receipt.warnings);
+                            }
+                            Err(e) => {
+                                errors.push(format!(
+                                    "failed to deserialize assistant graph payload {}: {e}",
+                                    ag_ref.graph_json_payload_id
+                                ));
+                            }
+                        }
+                    } else {
+                        errors.push(format!(
+                            "assistant graph payload {} out of bounds in payload blob",
+                            ag_ref.graph_json_payload_id
+                        ));
+                    }
+                } else {
+                    errors.push(format!(
+                        "assistant graph payload {} offset {} + len {} overflows",
+                        ag_ref.graph_json_payload_id, entry.offset, entry.len
+                    ));
+                }
+            } else {
+                errors.push(format!(
+                    "unresolved assistant graph payload ref {}",
+                    ag_ref.graph_json_payload_id
+                ));
+            }
+        }
+
         // ── Build receipt ──────────────────────────────────────────────
         let cimage_digest = sha256_hex(&image.raw_file_bytes);
         let validation_status = if !errors.is_empty() {
@@ -515,6 +562,8 @@ mod tests {
                 receipt_id: "r1".to_string(),
                 receipt_kind: "validation".to_string(),
             }],
+            assistant_graph: None,
+            state_store_schema: None,
         };
 
         // ── Serialize sections ─────────────────────────────────────────

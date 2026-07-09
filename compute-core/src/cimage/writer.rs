@@ -315,6 +315,8 @@ mod tests {
                 tensor_refs: vec![],
             },
             receipts: vec![],
+            assistant_graph: None,
+            state_store_schema: None,
         }
     }
 

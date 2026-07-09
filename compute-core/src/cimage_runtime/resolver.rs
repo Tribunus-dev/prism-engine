@@ -3,19 +3,12 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::cimage::mlp_reference::{
-    load_mlp_shard_tensors, run_mlp_reconstructed_reference, LoadedMlpShardTensors,
-};
-use crate::cimage::{
-    CImageManifestV0, CImagePayloadRef, CImageTensorEntry, LoadedCImageV0, PhysicalTileLayout,
-};
+use crate::cimage::mlp_reference::{load_mlp_shard_tensors, run_mlp_reconstructed_reference};
+use crate::cimage::{CImageManifestV0, CImagePayloadRef, CImageTensorEntry, LoadedCImageV0};
 use crate::execution_plan::CodecFamily;
-use crate::execution_plan::DType;
 
 use super::error::{CImageRuntimeError, CImageRuntimeResult};
-use super::tensor_store::{
-    MlpRegionExecutionMode, RuntimeTensor, RuntimeTensorPayload, RuntimeTensorStore,
-};
+use super::tensor_store::{RuntimeTensor, RuntimeTensorPayload, RuntimeTensorStore};
 
 /// The resolved runtime bundle for an MLP shard.
 #[derive(Debug, Clone)]

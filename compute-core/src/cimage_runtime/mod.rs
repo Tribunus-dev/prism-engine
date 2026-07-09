@@ -12,6 +12,8 @@ pub mod tensor_store;
 
 // Implementation modules — gated behind macos + metal-dispatch.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+pub mod lower_decoder;
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub mod lower_mlp;
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub mod metal_buffers;
@@ -21,11 +23,14 @@ pub mod region_runner;
 pub use error::{CImageRuntimeError, CImageRuntimeResult};
 pub use receipts::{CImageBindingReceipt, CImageKernelBindingInfo, CImageRegionExecutionReceipt};
 pub use resolver::{CImageRuntimeResolver, CpuReferenceBundle, ResolvedMlpShardRuntime};
+#[allow(unused_imports)]
 pub use tensor_store::{
     MlpRegionExecutionMode, RuntimeTensor, RuntimeTensorPayload, RuntimeTensorStore,
 };
 
 // Re-export platform-specific items only when available.
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+pub use lower_decoder::{CImageDecoderRegionPlan, DecoderShardRegionBuilder};
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub use lower_mlp::{CImageMlpRegionPlan, MlpShardRegionBuilder};
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]

@@ -24,12 +24,14 @@ pub use error::{CImageError, CImageResult};
 pub use header::{CImageFooterV0, CImageHeaderV0, CIMAGE_FORMAT_VERSION, CIMAGE_MAGIC};
 pub use loader::{CImageLoader, LoadedCImageV0};
 pub use manifest::{
-    CImageArtifactKind, CImageManifestV0, CImagePayloadRef, CImageReceiptRef, CImageTensorEntry,
-    ModelExecutionPlanSummary, PhysicalTileLayout,
+    AssistantGraphPayloadRef, CImageArtifactKind, CImageManifestV0, CImagePayloadRef,
+    CImageReceiptRef, CImageTensorEntry, ModelExecutionPlanSummary, PhysicalTileLayout,
+    StateStoreSchemaPayloadRef,
 };
 pub use mlp_reference::{
-    compute_cosine_similarity, compute_max_abs_error, compute_nrmse, run_mlp_rawf32_reference,
-    run_mlp_reconstructed_reference, LoadedMlpShardTensors,
+    compute_cosine_similarity, compute_max_abs_error, compute_nrmse,
+    run_decoder_layer_rawf32_reference, run_mlp_rawf32_reference, run_mlp_reconstructed_reference,
+    validate_decoder_layer_shard, LoadedMlpShardTensors,
 };
 pub use payload::{
     CImagePayloadDirectoryV0, CImagePayloadEntry, CImagePayloadKind, PendingPayload, PendingReceipt,
@@ -39,7 +41,10 @@ pub use receipts::{
     CImageShardValidationReceipt, CImageValidationStatus, CImageWriteReceipt, EvidenceReceiptV0,
     ReceiptEvidenceKind,
 };
-pub use shard_builder::{MlpShardBuilder, SyntheticMlpShardConfig, SyntheticShardPolicy};
+pub use shard_builder::{
+    DecoderLayerShardBuilder, MlpShardBuilder, SyntheticDecoderLayerConfig, SyntheticDecoderPolicy,
+    SyntheticMlpShardConfig, SyntheticShardPolicy,
+};
 pub use validate::CImageValidator;
 pub use writer::CImageWriter;
 

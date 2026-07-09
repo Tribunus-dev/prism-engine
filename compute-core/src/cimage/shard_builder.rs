@@ -74,6 +74,43 @@ pub struct PendingCImageShard {
 /// Builder for constructing synthetic MLP cimage shards.
 pub struct MlpShardBuilder;
 
+// ─── Decoder layer data structures ────────────────────────────────────────
+
+/// Configuration for generating a synthetic decoder layer shard.
+#[derive(Debug, Clone)]
+pub struct SyntheticDecoderLayerConfig {
+    /// Seed for the deterministic pseudo-random tensor generator.
+    /// Each tensor uses a different seed offset.
+    pub seed: u64,
+    /// Hidden dimension (input/output channels for the decoder layer).
+    pub hidden_dim: usize,
+    /// Number of query attention heads.
+    pub num_heads: usize,
+    /// Number of key/value attention heads (GQA).
+    pub num_kv_heads: usize,
+    /// Dimension per attention head.
+    pub head_dim: usize,
+    /// Intermediate dimension for the MLP sub-layer.
+    pub intermediate_dim: usize,
+    /// Sequence length (number of tokens).
+    pub seq_len: usize,
+    /// Per-tensor codec policy.
+    pub policy: SyntheticDecoderPolicy,
+}
+
+/// Per-tensor codec policy for a synthetic decoder layer shard.
+#[derive(Debug, Clone)]
+pub struct SyntheticDecoderPolicy {
+    /// Codec for Q/K/V/O projection weights.
+    pub projection_codec: CodecFamily,
+    /// Codec for MLP gate/up/down projection weights.
+    pub mlp_codec: CodecFamily,
+    /// Codec for layer norm weights.
+    pub norm_codec: CodecFamily,
+    /// Codec for attention projection weights.
+    pub attention_codec: CodecFamily,
+}
+
 // ─── Tensor generation ────────────────────────────────────────────────────
 
 /// Generate a deterministic pseudo-random f32 tensor using a simple LCG.
@@ -449,6 +486,362 @@ impl MlpShardBuilder {
             tensors: tensor_entries,
             execution_plan,
             receipts: Vec::new(),
+            assistant_graph: None,
+            state_store_schema: None,
+        };
+
+        Ok(PendingCImageShard {
+            manifest,
+            payloads: all_payloads,
+            receipts: Vec::new(),
+        })
+    }
+}
+
+// ─── Decoder layer builder ─────────────────────────────────────────────────
+
+/// Builder for constructing synthetic decoder layer cimage shards.
+pub struct DecoderLayerShardBuilder;
+
+impl DecoderLayerShardBuilder {
+    /// Build a synthetic decoder layer shard from the given configuration.
+    ///
+    /// Generates 10 deterministic tensors (9 weights + position_ids),
+    /// transposes projections to [in_features, out_features] storage layout,
+    /// packs each according to the per-tensor codec policy, and returns a
+    /// `PendingCImageShard` with manifest, payloads, and empty receipts.
+    pub fn build_synthetic_decoder_layer(
+        config: SyntheticDecoderLayerConfig,
+    ) -> CImageResult<PendingCImageShard> {
+        let SyntheticDecoderLayerConfig {
+            seed,
+            hidden_dim,
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            intermediate_dim,
+            seq_len,
+            policy,
+        } = config;
+
+        // Validate dimensions.
+        assert!(
+            hidden_dim == num_heads * head_dim,
+            "hidden_dim ({}) must equal num_heads ({}) * head_dim ({})",
+            hidden_dim,
+            num_heads,
+            head_dim
+        );
+
+        let kv_inner = head_dim * num_kv_heads;
+
+        // 1. Generate deterministic tensors in conventional [out, in] layout.
+        let input_layernorm = deterministic_f32_tensor(seed, &[hidden_dim]);
+        let q_proj = deterministic_f32_tensor(seed.wrapping_add(1), &[hidden_dim, hidden_dim]);
+        let k_proj = deterministic_f32_tensor(seed.wrapping_add(2), &[kv_inner, hidden_dim]);
+        let v_proj = deterministic_f32_tensor(seed.wrapping_add(3), &[kv_inner, hidden_dim]);
+        let o_proj = deterministic_f32_tensor(seed.wrapping_add(4), &[hidden_dim, hidden_dim]);
+        let post_attention_layernorm =
+            deterministic_f32_tensor(seed.wrapping_add(5), &[hidden_dim]);
+        let gate_proj =
+            deterministic_f32_tensor(seed.wrapping_add(6), &[intermediate_dim, hidden_dim]);
+        let up_proj =
+            deterministic_f32_tensor(seed.wrapping_add(7), &[intermediate_dim, hidden_dim]);
+        let down_proj =
+            deterministic_f32_tensor(seed.wrapping_add(8), &[hidden_dim, intermediate_dim]);
+
+        // 2. Transpose projections into [in_features, out_features] layout.
+        let q_proj_stored = transpose_matrix(&q_proj, hidden_dim, hidden_dim);
+        let k_proj_stored = transpose_matrix(&k_proj, kv_inner, hidden_dim);
+        let v_proj_stored = transpose_matrix(&v_proj, kv_inner, hidden_dim);
+        let o_proj_stored = transpose_matrix(&o_proj, hidden_dim, hidden_dim);
+        let gate_proj_stored = transpose_matrix(&gate_proj, intermediate_dim, hidden_dim);
+        let up_proj_stored = transpose_matrix(&up_proj, intermediate_dim, hidden_dim);
+        let down_proj_stored = transpose_matrix(&down_proj, hidden_dim, intermediate_dim);
+
+        // 3. Position IDs: sequential values 0..seq_len stored as f32.
+        let position_ids: Vec<f32> = (0..seq_len).map(|i| i as f32).collect();
+
+        // 4. Define each tensor.
+        // Each tuple: (tensor_key, stored_data, conventional_shape, codec, class).
+        struct TensorDef<'a> {
+            key: &'a str,
+            data: &'a [f32],
+            conv_shape: &'a [usize],
+            codec: CodecFamily,
+            class: &'a str,
+        }
+
+        let tensor_defs = [
+            TensorDef {
+                key: "input_layernorm.weight",
+                data: &input_layernorm,
+                conv_shape: &[hidden_dim],
+                codec: policy.norm_codec,
+                class: "RmsNormWeight",
+            },
+            TensorDef {
+                key: "q_proj.weight",
+                data: &q_proj_stored,
+                conv_shape: &[hidden_dim, hidden_dim],
+                codec: policy.projection_codec,
+                class: "AttentionProjection",
+            },
+            TensorDef {
+                key: "k_proj.weight",
+                data: &k_proj_stored,
+                conv_shape: &[kv_inner, hidden_dim],
+                codec: policy.projection_codec,
+                class: "AttentionProjection",
+            },
+            TensorDef {
+                key: "v_proj.weight",
+                data: &v_proj_stored,
+                conv_shape: &[kv_inner, hidden_dim],
+                codec: policy.projection_codec,
+                class: "AttentionProjection",
+            },
+            TensorDef {
+                key: "o_proj.weight",
+                data: &o_proj_stored,
+                conv_shape: &[hidden_dim, hidden_dim],
+                codec: policy.projection_codec,
+                class: "AttentionProjection",
+            },
+            TensorDef {
+                key: "post_attention_layernorm.weight",
+                data: &post_attention_layernorm,
+                conv_shape: &[hidden_dim],
+                codec: policy.norm_codec,
+                class: "RmsNormWeight",
+            },
+            TensorDef {
+                key: "gate_proj.weight",
+                data: &gate_proj_stored,
+                conv_shape: &[intermediate_dim, hidden_dim],
+                codec: policy.mlp_codec,
+                class: "DecoderMlpProjection",
+            },
+            TensorDef {
+                key: "up_proj.weight",
+                data: &up_proj_stored,
+                conv_shape: &[intermediate_dim, hidden_dim],
+                codec: policy.mlp_codec,
+                class: "DecoderMlpProjection",
+            },
+            TensorDef {
+                key: "down_proj.weight",
+                data: &down_proj_stored,
+                conv_shape: &[hidden_dim, intermediate_dim],
+                codec: policy.mlp_codec,
+                class: "DecoderMlpProjection",
+            },
+            TensorDef {
+                key: "position_ids",
+                data: &position_ids,
+                conv_shape: &[seq_len],
+                codec: CodecFamily::RawF32,
+                class: "PositionIds",
+            },
+        ];
+
+        let mut all_payloads: Vec<PendingPayload> = Vec::new();
+        let mut tensor_entries: Vec<CImageTensorEntry> = Vec::with_capacity(10);
+
+        for (idx, tensor) in tensor_defs.iter().enumerate() {
+            let tensor_id = format!("t{}", idx);
+
+            // Logical shape is the conventional shape; for 1-D use [dim, 1].
+            let logical_shape: Vec<u32> = if tensor.conv_shape.len() == 1 {
+                vec![tensor.conv_shape[0] as u32, 1u32]
+            } else {
+                tensor.conv_shape.iter().map(|&d| d as u32).collect()
+            };
+
+            // Pack dimensions: [in_features, out_features] = stored layout.
+            let (pack_rows, pack_cols) = if tensor.conv_shape.len() == 1 {
+                (1usize, tensor.conv_shape[0])
+            } else {
+                (tensor.conv_shape[1], tensor.conv_shape[0])
+            };
+
+            // SHA-256 over the stored f32 values.
+            let tensor_sha256 = sha256_of_f32_slice(tensor.data);
+
+            let (payload_ref, phy_layout, raw_ref) = match tensor.codec {
+                CodecFamily::RawF32 => {
+                    let raw_bytes = f32_slice_to_le_bytes(tensor.data);
+                    let codes_payload = PendingPayload {
+                        payload_id: format!("p_{}_codes", tensor.key),
+                        payload_kind: CImagePayloadKind::PackedTensorCodes,
+                        codec: Some("RawF32".into()),
+                        alignment_bytes: 64,
+                        bytes: raw_bytes.clone(),
+                    };
+                    let raw_ref_payload = PendingPayload {
+                        payload_id: format!("p_{}_rawf32", tensor.key),
+                        payload_kind: CImagePayloadKind::RawF32Reference,
+                        codec: Some("RawF32".into()),
+                        alignment_bytes: 64,
+                        bytes: raw_bytes,
+                    };
+                    all_payloads.push(codes_payload);
+                    all_payloads.push(raw_ref_payload);
+
+                    (
+                        CImagePayloadRef::Single {
+                            payload_id: format!("p_{}_codes", tensor.key),
+                        },
+                        rawf32_tile_layout(tensor.data.len()),
+                        Some(CImagePayloadRef::Single {
+                            payload_id: format!("p_{}_rawf32", tensor.key),
+                        }),
+                    )
+                }
+                CodecFamily::Nf4 => {
+                    let (codes, scales, biases, _packed_rows, _packed_cols) =
+                        pack_nf4_weights(tensor.data, pack_rows, pack_cols);
+
+                    let codes_payload = PendingPayload {
+                        payload_id: format!("p_{}_codes", tensor.key),
+                        payload_kind: CImagePayloadKind::PackedTensorCodes,
+                        codec: Some("NF4".into()),
+                        alignment_bytes: 64,
+                        bytes: codes,
+                    };
+
+                    let mut meta_bytes = Vec::with_capacity((scales.len() + biases.len()) * 4);
+                    meta_bytes.extend_from_slice(&f32_slice_to_le_bytes(&scales));
+                    meta_bytes.extend_from_slice(&f32_slice_to_le_bytes(&biases));
+
+                    let meta_payload = PendingPayload {
+                        payload_id: format!("p_{}_codes_metadata", tensor.key),
+                        payload_kind: CImagePayloadKind::TensorMetadata,
+                        codec: Some("NF4".into()),
+                        alignment_bytes: 64,
+                        bytes: meta_bytes,
+                    };
+
+                    let raw_f32_payload = PendingPayload {
+                        payload_id: format!("p_{}_rawf32", tensor.key),
+                        payload_kind: CImagePayloadKind::RawF32Reference,
+                        codec: Some("RawF32".into()),
+                        alignment_bytes: 64,
+                        bytes: f32_slice_to_le_bytes(tensor.data),
+                    };
+
+                    all_payloads.push(codes_payload);
+                    all_payloads.push(meta_payload);
+                    all_payloads.push(raw_f32_payload);
+
+                    let layout = nf4_tile_layout(pack_rows, pack_cols);
+                    (
+                        CImagePayloadRef::Single {
+                            payload_id: format!("p_{}_codes", tensor.key),
+                        },
+                        layout,
+                        Some(CImagePayloadRef::Single {
+                            payload_id: format!("p_{}_rawf32", tensor.key),
+                        }),
+                    )
+                }
+                CodecFamily::Int8 => {
+                    let (codes, scales, biases) =
+                        pack_int8_weights(tensor.data, pack_rows, pack_cols);
+
+                    let codes_payload = PendingPayload {
+                        payload_id: format!("p_{}_codes", tensor.key),
+                        payload_kind: CImagePayloadKind::PackedTensorCodes,
+                        codec: Some("INT8".into()),
+                        alignment_bytes: 64,
+                        bytes: codes,
+                    };
+
+                    let mut meta_bytes = Vec::with_capacity((scales.len() + biases.len()) * 4);
+                    meta_bytes.extend_from_slice(&f32_slice_to_le_bytes(&scales));
+                    meta_bytes.extend_from_slice(&f32_slice_to_le_bytes(&biases));
+
+                    let meta_payload = PendingPayload {
+                        payload_id: format!("p_{}_codes_metadata", tensor.key),
+                        payload_kind: CImagePayloadKind::TensorMetadata,
+                        codec: Some("INT8".into()),
+                        alignment_bytes: 64,
+                        bytes: meta_bytes,
+                    };
+
+                    let raw_f32_payload = PendingPayload {
+                        payload_id: format!("p_{}_rawf32", tensor.key),
+                        payload_kind: CImagePayloadKind::RawF32Reference,
+                        codec: Some("RawF32".into()),
+                        alignment_bytes: 64,
+                        bytes: f32_slice_to_le_bytes(tensor.data),
+                    };
+
+                    all_payloads.push(codes_payload);
+                    all_payloads.push(meta_payload);
+                    all_payloads.push(raw_f32_payload);
+
+                    let layout = int8_tile_layout(pack_rows, pack_cols);
+                    (
+                        CImagePayloadRef::Single {
+                            payload_id: format!("p_{}_codes", tensor.key),
+                        },
+                        layout,
+                        Some(CImagePayloadRef::Single {
+                            payload_id: format!("p_{}_rawf32", tensor.key),
+                        }),
+                    )
+                }
+                other => {
+                    return Err(CImageError::Other(format!(
+                        "unsupported codec {:?} for tensor {}",
+                        other, tensor.key
+                    )));
+                }
+            };
+
+            let entry = CImageTensorEntry {
+                tensor_id,
+                tensor_key: tensor.key.to_string(),
+                tensor_class: tensor.class.to_string(),
+                logical_shape,
+                source_dtype: DType::F32,
+                codec: tensor.codec,
+                precision_plan: None,
+                physical_layout: phy_layout,
+                payload_ref,
+                raw_f32_reference_ref: raw_ref,
+                tensor_sha256,
+                validation_digest: None,
+            };
+
+            tensor_entries.push(entry);
+        }
+
+        // 5. Build the execution plan summary.
+        let plan_id = format!("synth_decoder_shard_{:016x}", seed);
+        let execution_plan = ModelExecutionPlanSummary {
+            plan_id: plan_id.clone(),
+            region_count: 1,
+            total_kernel_ops: 10,
+            total_input_bytes: (hidden_dim * 4) as u64,
+            total_output_bytes: (hidden_dim * 4) as u64,
+            tensor_refs: (0..10u32).map(|i| format!("t{}", i)).collect(),
+        };
+
+        // 6. Build manifest.
+        let manifest = CImageManifestV0 {
+            schema_version: 0,
+            model_family: "SyntheticDecoder".into(),
+            artifact_kind: CImageArtifactKind::SyntheticShard,
+            source_model_digest: None,
+            compiler_policy_digest: "synthetic".into(),
+            layout_profile: HardwareProfileId::AppleMProBalanced,
+            tensors: tensor_entries,
+            execution_plan,
+            receipts: Vec::new(),
+            assistant_graph: None,
+            state_store_schema: None,
         };
 
         Ok(PendingCImageShard {
@@ -928,6 +1321,151 @@ mod tests {
             "INT8 round-trip max diff too large: {}",
             max_diff
         );
+    }
+
+    // ── Decoder layer shard builder tests ───────────────────────────────────
+
+    fn decoder_rawf32_policy() -> SyntheticDecoderPolicy {
+        SyntheticDecoderPolicy {
+            projection_codec: CodecFamily::RawF32,
+            mlp_codec: CodecFamily::RawF32,
+            norm_codec: CodecFamily::RawF32,
+            attention_codec: CodecFamily::RawF32,
+        }
+    }
+
+    fn default_decoder_config() -> SyntheticDecoderLayerConfig {
+        SyntheticDecoderLayerConfig {
+            seed: 42,
+            hidden_dim: 64,
+            num_heads: 4,
+            num_kv_heads: 4,
+            head_dim: 16,
+            intermediate_dim: 128,
+            seq_len: 8,
+            policy: decoder_rawf32_policy(),
+        }
+    }
+
+    #[test]
+    fn test_synthetic_decoder_cimage_builds_valid() {
+        let config = default_decoder_config();
+        let shard = DecoderLayerShardBuilder::build_synthetic_decoder_layer(config).unwrap();
+
+        assert_eq!(shard.manifest.schema_version, 0);
+        assert_eq!(shard.manifest.model_family, "SyntheticDecoder");
+        assert_eq!(
+            shard.manifest.artifact_kind,
+            CImageArtifactKind::SyntheticShard
+        );
+        assert_eq!(shard.manifest.tensors.len(), 10);
+
+        // Check each tensor entry.
+        let tensors = &shard.manifest.tensors;
+
+        // t0: input_layernorm.weight — 1-D
+        assert_eq!(tensors[0].tensor_id, "t0");
+        assert_eq!(tensors[0].tensor_key, "input_layernorm.weight");
+        assert_eq!(tensors[0].logical_shape, vec![64, 1]);
+        assert_eq!(tensors[0].codec, CodecFamily::RawF32);
+        assert_eq!(tensors[0].tensor_class, "RmsNormWeight");
+
+        // t1: q_proj.weight — [hidden_dim, hidden_dim]
+        assert_eq!(tensors[1].tensor_id, "t1");
+        assert_eq!(tensors[1].tensor_key, "q_proj.weight");
+        assert_eq!(tensors[1].logical_shape, vec![64, 64]);
+        assert_eq!(tensors[1].codec, CodecFamily::RawF32);
+        assert_eq!(tensors[1].tensor_class, "AttentionProjection");
+
+        // t2: k_proj.weight — [hidden_dim, head_dim * num_kv_heads]
+        assert_eq!(tensors[2].tensor_key, "k_proj.weight");
+        assert_eq!(tensors[2].logical_shape, vec![64, 64]);
+
+        // t3: v_proj.weight — same shape as k
+        assert_eq!(tensors[3].tensor_key, "v_proj.weight");
+        assert_eq!(tensors[3].logical_shape, vec![64, 64]);
+
+        // t4: o_proj.weight — [hidden_dim, hidden_dim]
+        assert_eq!(tensors[4].tensor_key, "o_proj.weight");
+        assert_eq!(tensors[4].logical_shape, vec![64, 64]);
+
+        // t5: post_attention_layernorm.weight — 1-D
+        assert_eq!(tensors[5].tensor_key, "post_attention_layernorm.weight");
+        assert_eq!(tensors[5].logical_shape, vec![64, 1]);
+        assert_eq!(tensors[5].tensor_class, "RmsNormWeight");
+
+        // t6: gate_proj.weight — [intermediate_dim, hidden_dim]
+        assert_eq!(tensors[6].tensor_key, "gate_proj.weight");
+        assert_eq!(tensors[6].logical_shape, vec![128, 64]);
+        assert_eq!(tensors[6].tensor_class, "DecoderMlpProjection");
+
+        // t7: up_proj.weight — [intermediate_dim, hidden_dim]
+        assert_eq!(tensors[7].tensor_key, "up_proj.weight");
+        assert_eq!(tensors[7].logical_shape, vec![128, 64]);
+
+        // t8: down_proj.weight — [hidden_dim, intermediate_dim]
+        assert_eq!(tensors[8].tensor_key, "down_proj.weight");
+        assert_eq!(tensors[8].logical_shape, vec![64, 128]);
+
+        // t9: position_ids — [seq_len, 1]
+        assert_eq!(tensors[9].tensor_key, "position_ids");
+        assert_eq!(tensors[9].logical_shape, vec![8, 1]);
+        assert_eq!(tensors[9].codec, CodecFamily::RawF32);
+        assert_eq!(tensors[9].tensor_class, "PositionIds");
+
+        // Each RawF32 tensor produces 2 payloads (codes + rawf32) → 10 * 2 = 20
+        assert_eq!(shard.payloads.len(), 20);
+
+        // Payload IDs must be unique.
+        let mut ids = std::collections::HashSet::new();
+        for p in &shard.payloads {
+            assert!(
+                ids.insert(&p.payload_id),
+                "duplicate payload ID: {}",
+                p.payload_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_decoder_shard_deterministic() {
+        let s1 = DecoderLayerShardBuilder::build_synthetic_decoder_layer(default_decoder_config())
+            .unwrap();
+        let s2 = DecoderLayerShardBuilder::build_synthetic_decoder_layer(default_decoder_config())
+            .unwrap();
+
+        for (e1, e2) in s1.manifest.tensors.iter().zip(s2.manifest.tensors.iter()) {
+            assert_eq!(
+                e1.tensor_sha256, e2.tensor_sha256,
+                "SHA-256 must be deterministic for {}",
+                e1.tensor_key
+            );
+        }
+    }
+
+    #[test]
+    fn test_decoder_shard_payload_count_mixed() {
+        let config = SyntheticDecoderLayerConfig {
+            seed: 99,
+            hidden_dim: 64,
+            num_heads: 4,
+            num_kv_heads: 4,
+            head_dim: 16,
+            intermediate_dim: 128,
+            seq_len: 1,
+            policy: SyntheticDecoderPolicy {
+                projection_codec: CodecFamily::Nf4,
+                mlp_codec: CodecFamily::Int8,
+                norm_codec: CodecFamily::RawF32,
+                attention_codec: CodecFamily::Nf4,
+            },
+        };
+        let shard = DecoderLayerShardBuilder::build_synthetic_decoder_layer(config).unwrap();
+        assert_eq!(shard.manifest.tensors.len(), 10);
+
+        // Count payloads: 2 norm weights (RawF32 → 2 each) + 4 projection (NF4 → 3 each) + 3 MLP (INT8 → 3 each) + 1 position_ids (RawF32 → 2)
+        // = 2*2 + 4*3 + 3*3 + 1*2 = 4 + 12 + 9 + 2 = 27
+        assert_eq!(shard.payloads.len(), 27);
     }
 
     use crate::nf4tile640::{unpack_int8_weights, unpack_nf4_weights};

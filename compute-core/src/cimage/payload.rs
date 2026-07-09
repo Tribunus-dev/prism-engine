@@ -33,6 +33,8 @@ pub enum CImagePayloadKind {
     MixedPrecisionSidecar,
     ExecutionPlanJson,
     ReceiptJson,
+    AssistantGraphJson,
+    StateStoreSchemaJson,
 }
 
 /// A pending payload ready to be written.
@@ -101,6 +103,8 @@ mod tests {
             CImagePayloadKind::MixedPrecisionSidecar,
             CImagePayloadKind::ExecutionPlanJson,
             CImagePayloadKind::ReceiptJson,
+            CImagePayloadKind::AssistantGraphJson,
+            CImagePayloadKind::StateStoreSchemaJson,
         ] {
             let json = serde_json::to_string(kind).unwrap();
             let back: CImagePayloadKind = serde_json::from_str(&json).unwrap();
