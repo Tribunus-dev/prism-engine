@@ -8,8 +8,12 @@
 //! packs them into 2-bit codes via `crate::ternary::pack::pack_ternary_codes`,
 //! and emits cimage shards through the phased builder system.
 
+pub mod checkpoint;
 pub mod importer;
+pub mod kv;
 pub mod phases;
+pub mod reference;
+pub mod text;
 
 #[cfg(test)]
 pub mod tests;

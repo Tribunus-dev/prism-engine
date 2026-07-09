@@ -77,13 +77,16 @@ fn main() {
         eprintln!("  tribunus-compute-image cimage run-metal-decoder-layer --path <path> [--seed N] [--json]");
         eprintln!("  tribunus-compute-image cimage ternary pack-synthetic-linear --out <path> --rows N --cols N [--group-size N] [--seed N] [--json]");
         eprintln!("  tribunus-compute-image cimage ternary validate --path <path> [--json]");
-        eprintln!(
-            "  tribunus-compute-image cimage ternary run-metal-gemv --path <path> [--json]"
-        );
+        eprintln!("  tribunus-compute-image cimage ternary run-metal-gemv --path <path> [--json]");
         eprintln!(
             "  tribunus-compute-image cimage ternary sweep-synthetic-mlp --out-dir <path> --group-sizes N,N,N [--json]"
         );
         eprintln!("  tribunus-compute-image cimage bitnet emit-linear --out <path> --rows N --cols N [--seed N]");
+        eprintln!("  tribunus-compute-image cimage bitnet emit-checkpoint --path <checkpoint_dir> --out <path> [--group-size N] [--json]");
+        eprintln!(
+            "  tribunus-compute-image cimage bitnet run-metal-decoder --path <path> [--json]"
+        );
+        eprintln!("  tribunus-compute-image cimage bitnet text-smoke-test --path <path> --prompt <text> [--max-new-tokens N] [--json]");
         std::process::exit(1);
     }
 
@@ -111,9 +114,7 @@ fn main() {
                 }
                 Some("validate") => cmd_cimage_ternary_validate(&args[4..]),
                 Some("run-metal-gemv") => cmd_cimage_ternary_run_metal_gemv(&args[4..]),
-                Some("sweep-synthetic-mlp") => {
-                    cmd_cimage_ternary_sweep_synthetic_mlp(&args[4..])
-                }
+                Some("sweep-synthetic-mlp") => cmd_cimage_ternary_sweep_synthetic_mlp(&args[4..]),
                 Some(other) => {
                     eprintln!("unknown cimage ternary subcommand: {other}");
                     std::process::exit(1);
@@ -127,14 +128,15 @@ fn main() {
             },
             Some("bitnet") => match args.get(3).map(|s| s.as_str()) {
                 Some("emit-linear") => cmd_cimage_bitnet_emit_linear(&args[4..]),
+                Some("emit-checkpoint") => cmd_cimage_bitnet_emit_checkpoint(&args[4..]),
+                Some("run-metal-decoder") => cmd_cimage_bitnet_run_metal_decoder(&args[4..]),
+                Some("text-smoke-test") => cmd_cimage_bitnet_text_smoke_test(&args[4..]),
                 Some(other) => {
                     eprintln!("unknown cimage bitnet subcommand: {other}");
                     std::process::exit(1);
                 }
                 None => {
-                    eprintln!(
-                        "cimage bitnet requires a subcommand: emit-linear"
-                    );
+                    eprintln!("cimage bitnet requires a subcommand: emit-linear, emit-checkpoint, run-metal-decoder, text-smoke-test");
                     std::process::exit(1);
                 }
             },
@@ -2586,7 +2588,6 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-
 // ═══════════════════════════════════════════════════════════════════════════
 // cimage ternary commands — pack, validate, run-metal, sweep
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2620,8 +2621,8 @@ fn cmd_cimage_ternary_pack_synthetic_linear(args: &[String]) -> Result<(), Strin
     )
     .map_err(|e| format!("write error: {e}"))?;
 
-    let loaded = CImageLoader::load_v0(std::path::Path::new(out))
-        .map_err(|e| format!("load error: {e}"))?;
+    let loaded =
+        CImageLoader::load_v0(std::path::Path::new(out)).map_err(|e| format!("load error: {e}"))?;
     let load_receipt =
         CImageValidator::validate_loaded(&loaded).map_err(|e| format!("validate error: {e}"))?;
 
@@ -2718,7 +2719,10 @@ fn cmd_cimage_ternary_validate(args: &[String]) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         println!("{output}");
     } else {
-        println!("ternary cimage validation: {:?}", load_receipt.validation_status);
+        println!(
+            "ternary cimage validation: {:?}",
+            load_receipt.validation_status
+        );
         println!("  path:              {path}");
         println!("  digest:            {}", load_receipt.cimage_digest);
         println!("  tensors:           {}", load_receipt.tensor_count);
@@ -2756,14 +2760,14 @@ fn cmd_cimage_ternary_run_metal_gemv(args: &[String]) -> Result<(), String> {
 
     #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
     {
+        use half::f16;
         use metal::Device as MetalDevice;
-        use tribunus_compute_core::cimage::*;
         use tribunus_compute_core::cimage::mlp_reference::{
             compute_cosine_similarity, compute_max_abs_error, compute_nrmse,
         };
+        use tribunus_compute_core::cimage::*;
         use tribunus_compute_core::cimage_runtime::*;
         use tribunus_compute_core::ternary::reference::ternary_gemv_reference;
-        use half::f16;
 
         let loaded = CImageLoader::load_v0(std::path::Path::new(path))
             .map_err(|e| format!("load error: {e}"))?;
@@ -2842,7 +2846,10 @@ fn cmd_cimage_ternary_run_metal_gemv(args: &[String]) -> Result<(), String> {
             println!("  rows:        {rows}");
             println!("  cols:        {cols}");
             println!("  group_size:  {group_size}");
-            println!("  status:      {}", if max_abs < 1e-3 { "PASSED" } else { "FAILED" });
+            println!(
+                "  status:      {}",
+                if max_abs < 1e-3 { "PASSED" } else { "FAILED" }
+            );
             println!("  metal_vs_cpu_nrmse:      {:.6}", nrmse);
             println!("  metal_vs_cpu_cosine:     {:.6}", cosine);
             println!("  metal_vs_cpu_max_abs_err:{:.6}", max_abs);
@@ -2870,7 +2877,11 @@ fn cmd_cimage_ternary_sweep_synthetic_mlp(args: &[String]) -> Result<(), String>
 
     let group_sizes: Vec<usize> = group_sizes_str
         .split(',')
-        .map(|s| s.trim().parse::<usize>().map_err(|e| format!("invalid group-size: {e}")))
+        .map(|s| {
+            s.trim()
+                .parse::<usize>()
+                .map_err(|e| format!("invalid group-size: {e}"))
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     if group_sizes.is_empty() {
@@ -2878,8 +2889,7 @@ fn cmd_cimage_ternary_sweep_synthetic_mlp(args: &[String]) -> Result<(), String>
     }
 
     let out_dir_path = std::path::Path::new(out_dir);
-    std::fs::create_dir_all(out_dir_path)
-        .map_err(|e| format!("cannot create out-dir: {e}"))?;
+    std::fs::create_dir_all(out_dir_path).map_err(|e| format!("cannot create out-dir: {e}"))?;
 
     let mut results: Vec<serde_json::Value> = Vec::new();
 
@@ -2919,7 +2929,8 @@ fn cmd_cimage_ternary_sweep_synthetic_mlp(args: &[String]) -> Result<(), String>
                     match CImageLoader::load_v0(&cimage_path)
                         .map_err(|e| format!("load error: {e}"))
                         .and_then(|loaded| {
-                            runner.run_mlp_shard_region(&loaded, &[])
+                            runner
+                                .run_mlp_shard_region(&loaded, &[])
                                 .map_err(|e| format!("metal error: {e}"))
                         }) {
                         Ok(receipt) => Some(serde_json::json!({
@@ -2958,9 +2969,8 @@ fn cmd_cimage_ternary_sweep_synthetic_mlp(args: &[String]) -> Result<(), String>
     }
 
     if json_output {
-        let output =
-            serde_json::to_string_pretty(&serde_json::json!({ "results": results }))
-                .map_err(|e| e.to_string())?;
+        let output = serde_json::to_string_pretty(&serde_json::json!({ "results": results }))
+            .map_err(|e| e.to_string())?;
         println!("{output}");
     } else {
         println!("ternary MLP sweep ({} group sizes):", results.len());
@@ -3018,4 +3028,96 @@ fn cmd_cimage_bitnet_emit_linear(args: &[String]) -> Result<(), String> {
     println!("  cols:       {cols}");
     println!("  note:       placeholder for future BitNet importer");
     Ok(())
+}
+/// Emit a full BitNet checkpoint cimage from real safetensors.
+fn cmd_cimage_bitnet_emit_checkpoint(args: &[String]) -> Result<(), String> {
+    let checkpoint_path = get_opt(args, "--path")
+        .ok_or_else(|| "--path is required (checkpoint safetensors file or dir)".to_string())?;
+    let out = get_opt(args, "--out").ok_or_else(|| "--out is required".to_string())?;
+    let group_size: usize = get_opt(args, "--group-size")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(32);
+    let json_output = has_flag(args, "--json");
+
+    use tribunus_compute_core::bitnet::phases::emit_bitnet_from_checkpoint;
+    use tribunus_compute_core::cimage::*;
+
+    let pending = emit_bitnet_from_checkpoint(std::path::Path::new(checkpoint_path), group_size)
+        .map_err(|e| format!("emit from checkpoint: {e}"))?;
+
+    let write_receipt = CImageWriter::write_v0(
+        std::path::Path::new(out),
+        pending.manifest,
+        pending.payloads,
+        pending.receipts,
+    )
+    .map_err(|e| format!("write error: {e}"))?;
+
+    let loaded =
+        CImageLoader::load_v0(std::path::Path::new(out)).map_err(|e| format!("load error: {e}"))?;
+    let load_receipt =
+        CImageValidator::validate_loaded(&loaded).map_err(|e| format!("validate error: {e}"))?;
+
+    if json_output {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "status": match load_receipt.validation_status {
+                CImageValidationStatus::Valid => "valid",
+                CImageValidationStatus::ValidWithWarnings => "valid_with_warnings",
+                CImageValidationStatus::Invalid => "invalid",
+            },
+            "path": out,
+            "cimage_digest": write_receipt.cimage_digest,
+            "tensor_count": write_receipt.tensor_count,
+            "payload_count": write_receipt.payload_count,
+            "checkpoint_path": checkpoint_path,
+            "group_size": group_size,
+        }))
+        .map_err(|e| e.to_string())?;
+        println!("{output}");
+    } else {
+        println!("bitnet checkpoint cimage written to: {out}");
+        println!("  digest:       {}", write_receipt.cimage_digest);
+        println!("  tensors:      {}", write_receipt.tensor_count);
+        println!("  payloads:     {}", write_receipt.payload_count);
+        println!("  checkpoint:   {checkpoint_path}");
+        println!("  group_size:   {group_size}");
+        println!("  validation:   {:?}", load_receipt.validation_status);
+        if !load_receipt.errors.is_empty() {
+            for err in &load_receipt.errors {
+                println!("  ERROR: {err}");
+            }
+        }
+        if !load_receipt.warnings.is_empty() {
+            for warn in &load_receipt.warnings {
+                println!("  WARNING: {warn}");
+            }
+        }
+    }
+
+    if load_receipt.validation_status == CImageValidationStatus::Invalid {
+        return Err("cimage validation failed".to_string());
+    }
+    Ok(())
+}
+
+/// Run the Metal decoder region on a loaded BitNet decoder layer cimage.
+fn cmd_cimage_bitnet_run_metal_decoder(args: &[String]) -> Result<(), String> {
+    let _path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let _json_output = has_flag(args, "--json");
+
+    // Stub: wire when CImageMetalRegionRunner::run_bitnet_decoder_region exists.
+    todo!("run-metal-decoder: wire run_bitnet_decoder_region (BitNet decoder Metal runner)")
+}
+
+/// Run a full text inference smoke test on a loaded BitNet cimage.
+fn cmd_cimage_bitnet_text_smoke_test(args: &[String]) -> Result<(), String> {
+    let _path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
+    let _prompt = get_opt(args, "--prompt").unwrap_or("Hello");
+    let _max_new_tokens: u32 = get_opt(args, "--max-new-tokens")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    let _json_output = has_flag(args, "--json");
+
+    // Stub: wire when bitnet::text::run_text exists.
+    todo!("text-smoke-test: wire bitnet::text::run_text (full inference pipeline)")
 }

@@ -51,6 +51,9 @@ use tribunus_compute_core::backend::flex_dispatch::{
 };
 use tribunus_compute_core::backend::heterogeneous_executor::HeterogeneousExecutor;
 use tribunus_compute_core::backend::routing::*;
+use tribunus_compute_core::cimage::header::CIMAGE_MAGIC;
+use tribunus_compute_core::cimage::loader::CImageLoader;
+use tribunus_compute_core::cimage::validate::CImageValidator;
 use tribunus_compute_core::compilation::cancel::CancelToken;
 use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
 use tribunus_compute_core::server::distill_worker::{
@@ -59,6 +62,19 @@ use tribunus_compute_core::server::distill_worker::{
 use tribunus_compute_core::server::state::MemoryAllocationBroker;
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
 use tribunus_compute_core::tts::pipeline::{pcm_chunk_to_wav, pcm_to_wav, TtsPipeline};
+
+// ── BitNet runtime ─────────────────────────────────────────────────────────
+
+/// Placeholder stub — will be replaced by
+/// `tribunus_compute_core::bitnet::text::BitNetRuntime` when the module is
+/// merged upstream.
+struct BitNetRuntime;
+impl BitNetRuntime {
+    fn from_cimage(_path: &std::path::Path) -> Result<Self, String> {
+        println!("[prism-server] BitNet runtime initialization (stub)");
+        Ok(Self)
+    }
+}
 
 // ── CLI ─────────────────────────────────────────────────────────────────
 
@@ -80,6 +96,10 @@ struct Args {
     /// Server port.
     #[arg(long, default_value = "8080")]
     port: u16,
+
+    /// Cimage format: auto-detect, old (compute_image), or new (cimage).
+    #[arg(long, default_value = "auto")]
+    cimage_format: String,
 }
 
 // ── Config ────────────────────────────────────────────────────────────────
@@ -307,6 +327,10 @@ struct AppState {
     /// Optional TTS pipeline loaded when the cimage contains TTS segments.
     #[allow(dead_code)]
     tts_pipeline: Option<TtsPipeline>,
+    /// Whether cimage uses new format (versus legacy compute_image).
+    cimage_format: String,
+    /// BitNet runtime for new-format cimages (None when using legacy format).
+    bitnet_runtime: Option<ParkingMutex<BitNetRuntime>>,
     /// Model content digest for receipt tracking.
     model_digest: Option<String>,
     stream_tracker: ParkingMutex<StreamTracker>,
@@ -713,6 +737,13 @@ async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Response, ApiError> {
+    if state.bitnet_runtime.is_some() {
+        return Ok((
+            StatusCode::NOT_IMPLEMENTED,
+            "BitNet generation not yet implemented",
+        )
+            .into_response());
+    }
     let request_id = Uuid::new_v4().to_string();
     let start_time = Instant::now();
 
@@ -1774,6 +1805,20 @@ fn validate_config(config: &ServerConfig) -> Result<(), String> {
 
 // ── Main
 
+/// Detect cimage format by reading the magic bytes.
+fn detect_cimage_format(path: &std::path::Path) -> Result<String, String> {
+    let mut buf = [0u8; 8];
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    f.read_exact(&mut buf)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    if buf == CIMAGE_MAGIC {
+        Ok("new".into())
+    } else {
+        Ok("old".into())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let args = Args::parse();
@@ -1819,8 +1864,29 @@ async fn main() -> Result<(), String> {
         "[prism-server] Loading cimage from {}...",
         args.cimage.display()
     );
-    let executor = create_inference_executor(&args.cimage, 1, false)
-        .map_err(|e| format!("cimage load failed: {e}"))?;
+
+    let effective_format = if args.cimage_format == "auto" {
+        detect_cimage_format(&args.cimage)?
+    } else {
+        args.cimage_format.clone()
+    };
+
+    let executor = if effective_format == "new" {
+        use tribunus_compute_core::backend::ane_backend::AneBackend;
+        use tribunus_compute_core::backend::metal::MetalBackend;
+        let mut exec = HeterogeneousExecutor::new();
+        let ane = AneBackend::new();
+        exec.register(Box::new(ane));
+        let metal = MetalBackend::new()?;
+        exec.register(Box::new(metal));
+        println!("[prism-server] Loaded new-format cimage");
+        exec
+    } else {
+        let exec = create_inference_executor(&args.cimage, 1, false)
+            .map_err(|e| format!("cimage load failed: {e}"))?;
+        println!("[prism-server] Loaded old-format cimage");
+        exec
+    };
 
     println!(
         "[prism-server] Loading tokenizer from {}...",
@@ -1861,6 +1927,18 @@ async fn main() -> Result<(), String> {
         config,
         auth_verifier,
         tts_pipeline,
+        cimage_format: effective_format.clone(),
+        bitnet_runtime: if effective_format == "new" {
+            match BitNetRuntime::from_cimage(&args.cimage) {
+                Ok(rt) => Some(ParkingMutex::new(rt)),
+                Err(e) => {
+                    eprintln!("[prism-server] BitNet runtime init failed: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        },
         model_digest: Some(
             blake3::hash(&std::fs::read(&args.cimage).unwrap_or_default()).to_hex()[..16]
                 .to_string(),

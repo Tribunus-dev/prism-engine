@@ -136,6 +136,114 @@ impl BitNetImporter {
 
         Ok((gate, up, down))
     }
+
+    /// Import Q/K/V/O attention projection tensors for a BitNet decoder layer.
+    ///
+    /// Q,O shapes: stored [hidden_dim, hidden_dim]
+    /// K,V shapes: stored [hidden_dim, kv_inner] where kv_inner = num_kv_heads * head_dim
+    pub fn import_attention_tensors(
+        seed: u64,
+        hidden_dim: usize,
+        _num_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+        group_size: usize,
+    ) -> Result<
+        (
+            TernaryPackedTensor,
+            TernaryPackedTensor,
+            TernaryPackedTensor,
+            TernaryPackedTensor,
+        ),
+        TernaryCodecError,
+    > {
+        let kv_inner = num_kv_heads * head_dim;
+        let q =
+            Self::import_ternary_tensor(seed.wrapping_add(1), hidden_dim, hidden_dim, group_size)?;
+        let k =
+            Self::import_ternary_tensor(seed.wrapping_add(2), hidden_dim, kv_inner, group_size)?;
+        let v =
+            Self::import_ternary_tensor(seed.wrapping_add(3), hidden_dim, kv_inner, group_size)?;
+        let o =
+            Self::import_ternary_tensor(seed.wrapping_add(4), hidden_dim, hidden_dim, group_size)?;
+        Ok((q, k, v, o))
+    }
+
+    /// Import a 1-D layernorm weight tensor.
+    pub fn import_layernorm_tensor(seed: u64, dim: usize) -> TernaryPackedTensor {
+        let weights = Self::generate_ternary_weights(seed, dim);
+        // Layernorm: single group, each weight is its own "scale" value
+        let group_size = dim;
+        let groups_per_row = 1;
+        let bytes_per_group = (dim + 3) / 4;
+        let _num_weights = dim;
+        let codes = pack_ternary_codes(&weights).unwrap_or_default();
+        // Scale: sum(|w|) / dim per group
+        let sum_abs: i32 = weights.iter().map(|&w| (w as i32).abs()).sum();
+        let scale_f32 = sum_abs as f32 / dim as f32;
+        let scales = vec![half::f16::from_f32(scale_f32)];
+        TernaryPackedTensor {
+            rows: 1,
+            cols: dim,
+            group_size,
+            groups_per_row,
+            bytes_per_group,
+            codes,
+            scales,
+        }
+    }
+
+    /// Import a full decoder layer: 11 tensors.
+    pub fn import_full_decoder_layer(
+        seed: u64,
+        hidden_dim: usize,
+        num_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+        intermediate_dim: usize,
+        seq_len: usize,
+        group_size: usize,
+    ) -> Result<Vec<TernaryPackedTensor>, TernaryCodecError> {
+        let input_ln = Self::import_layernorm_tensor(seed, hidden_dim);
+        let (q, k, v, o) = Self::import_attention_tensors(
+            seed,
+            hidden_dim,
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            group_size,
+        )?;
+        let post_attn_ln = Self::import_layernorm_tensor(seed.wrapping_add(5), hidden_dim);
+        let (gate, up, down) =
+            Self::import_mlp_block(seed, hidden_dim, intermediate_dim, group_size)?;
+        // Position IDs: sequential 0..seq_len as f32. Not ternary — store codes as raw f32 le bytes.
+        let pos_data: Vec<u8> = (0..seq_len)
+            .flat_map(|i| (i as f32).to_le_bytes())
+            .collect();
+        let position_ids = TernaryPackedTensor {
+            rows: seq_len,
+            cols: 1,
+            group_size: 0,
+            groups_per_row: 1,
+            bytes_per_group: 0,
+            codes: pos_data,
+            scales: vec![],
+        };
+        let rmsnorm_extra = Self::import_layernorm_tensor(seed.wrapping_add(10), hidden_dim);
+        Ok(vec![
+            input_ln,      // 0
+            q,             // 1
+            k,             // 2
+            v,             // 3
+            o,             // 4
+            post_attn_ln,  // 5
+            gate,          // 6
+            up,            // 7
+            down,          // 8
+            position_ids,  // 9
+            rmsnorm_extra, // 10
+        ])
+    }
 }
 
 #[cfg(test)]

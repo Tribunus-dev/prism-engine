@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tribunus Dashboard</title>
+<style>
+:root {
+  --bg: #1a1b26;
+  --surface: #24283b;
+  --surface2: #1f2335;
+  --text: #c0caf5;
+  --text-dim: #9aa5ce;
+  --accent: #7aa2f7;
+  --accent-dim: #4e6eb3;
+  --green: #9ece6a;
+  --green-bg: #2a3a1a;
+  --yellow: #e0af68;
+  --yellow-bg: #3a2e1a;
+  --red: #f7768e;
+  --red-bg: #3a1a24;
+  --border: #3b4261;
+  --radius: 8px;
+  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+/* Nav */
+nav {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+nav .brand {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent);
+  margin-right: 24px;
+  white-space: nowrap;
+  letter-spacing: -0.5px;
+}
+nav button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  padding: 14px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+nav button:hover { color: var(--text); }
+nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Main */
+main { padding: 20px 16px; max-width: 1200px; margin: 0 auto; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Cards */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+}
+.card h3 { font-family: var(--mono); font-size: 14px; color: var(--accent); margin-bottom: 10px; word-break: break-all; }
+.card .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 13px; }
+.card .meta dt { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.card .meta dd { font-family: var(--mono); font-size: 13px; }
+.card .badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px; margin-top: 12px;
+}
+.badge.valid { background: var(--green-bg); color: var(--green); }
+.badge.warn { background: var(--yellow-bg); color: var(--yellow); }
+.badge.invalid { background: var(--red-bg); color: var(--red); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--border); border-radius: var(--radius); }
+table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+th {
+  background: var(--surface2); color: var(--text-dim); font-weight: 600;
+  padding: 10px 12px; text-align: left; white-space: nowrap;
+  position: sticky; top: 0; z-index: 1;
+  cursor: pointer; user-select: none;
+  border-bottom: 2px solid var(--border);
+}
+th:hover { color: var(--text); }
+th .sort-arrow { margin-left: 4px; font-size: 10px; }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:hover td { background: var(--surface2); }
+tr.prod td { background: rgba(158,206,106,0.06); }
+tr.research td { background: rgba(224,175,104,0.06); }
+tr.rejected td { background: rgba(247,118,142,0.06); }
+tr.expanded td { background: var(--surface2); border-bottom: none; }
+.json-receipt {
+  background: var(--surface2); padding: 12px 16px; font-family: var(--mono);
+  font-size: 11px; white-space: pre-wrap; word-break: break-all;
+  max-height: 300px; overflow-y: auto; border-top: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.clickable { cursor: pointer; color: var(--accent); }
+.clickable:hover { text-decoration: underline; }
+
+/* Status dots */
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.status-dot.prod { background: var(--green); }
+.status-dot.research { background: var(--yellow); }
+.status-dot.rejected { background: var(--red); }
+
+/* Timeline */
+.timeline { position: relative; padding-left: 28px; }
+.timeline::before {
+  content: ''; position: absolute; left: 11px; top: 0; bottom: 0;
+  width: 2px; background: var(--border);
+}
+.timeline-entry {
+  position: relative; margin-bottom: 20px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 18px;
+}
+.timeline-entry::before {
+  content: ''; position: absolute; left: -21px; top: 16px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg);
+}
+.timeline-entry .ts { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+.timeline-entry .kind { font-weight: 600; color: var(--accent); font-size: 13px; margin: 2px 0; }
+.timeline-entry .detail { font-size: 12px; color: var(--text-dim); font-family: var(--mono); word-break: break-all; }
+
+/* Select */
+select, input, button.primary {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 12px; font-size: 13px;
+  font-family: inherit;
+}
+select:focus, input:focus { outline: none; border-color: var(--accent); }
+button.primary {
+  background: var(--accent); color: #fff; border: none; cursor: pointer;
+  font-weight: 600; padding: 9px 20px;
+}
+button.primary:hover { background: var(--accent-dim); }
+button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Chat */
+.chat-container { display: flex; flex-direction: column; height: calc(100vh - 140px); min-height: 400px; }
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 12px;
+}
+.chat-msg { margin-bottom: 14px; }
+.chat-msg .role { font-size: 11px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 2px; }
+.chat-msg.user .role { color: var(--accent); }
+.chat-msg.assistant .role { color: var(--green); }
+.chat-msg .content { white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+.chat-input-row { display: flex; gap: 8px; }
+.chat-input-row input {
+  flex: 1; font-family: var(--mono); font-size: 13px;
+  padding: 10px 14px;
+}
+.chat-input-row input:disabled { opacity: 0.5; }
+
+/* Spinner */
+.spinner {
+  display: inline-block; width: 18px; height: 18px;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin .6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Loading / empty / error states */
+.loading-state, .empty-state, .error-state {
+  text-align: center; padding: 48px 16px; color: var(--text-dim);
+}
+.error-state { color: var(--red); }
+.loading-state .spinner { margin-bottom: 12px; display: block; margin-left: auto; margin-right: auto; }
+
+/* Toolbar */
+.toolbar {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.toolbar label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Responsive */
+@media (max-width: 640px) {
+  nav { padding: 0 8px; }
+  nav button { padding: 12px 10px; font-size: 12px; }
+  nav .brand { font-size: 13px; margin-right: 8px; }
+  main { padding: 12px 8px; }
+  .card-grid { grid-template-columns: 1fr; }
+  .toolbar { flex-direction: column; align-items: stretch; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">&#9889; Tribunus</span>
+  <button data-tab="models" class="active">Models</button>
+  <button data-tab="tensors">Tensors</button>
+  <button data-tab="evidence">Evidence</button>
+  <button data-tab="chat">Chat</button>
+</nav>
+
+<main>
+  <!-- Models Tab -->
+  <section id="tab-models" class="tab-content active">
+    <div id="models-content" class="loading-state"><span class="spinner"></span>Loading cimages&hellip;</div>
+  </section>
+
+  <!-- Tensors Tab -->
+  <section id="tab-tensors" class="tab-content">
+    <div class="toolbar">
+      <label for="cimage-select">CImage:</label>
+      <select id="cimage-select"><option value="">-- select a cimage --</option></select>
+    </div>
+    <div id="tensors-content" class="empty-state">Select a cimage above to inspect its tensors.</div>
+  </section>
+
+  <!-- Evidence Tab -->
+  <section id="tab-evidence" class="tab-content">
+    <div id="evidence-content" class="loading-state"><span class="spinner"></span>Loading evidence&hellip;</div>
+  </section>
+
+  <!-- Chat Tab -->
+  <section id="tab-chat" class="tab-content">
+    <div class="chat-container">
+      <div id="chat-messages" class="chat-messages">
+        <div class="empty-state" style="padding:48px 0;">Send a message to start inference.</div>
+      </div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="Type a message&hellip;" autofocus>
+        <button class="primary" id="chat-send">Send</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// -- Tab navigation --------------------------------------------------------
+const navButtons = document.querySelectorAll('nav button[data-tab]');
+const tabContents = document.querySelectorAll('.tab-content');
+
+navButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    navButtons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    tabContents.forEach(tc => tc.classList.remove('active'));
+    const target = document.getElementById('tab-' + btn.dataset.tab);
+    if (target) target.classList.add('active');
+    // Trigger data load when switching to a tab
+    if (btn.dataset.tab === 'models') loadModels();
+    if (btn.dataset.tab === 'evidence') loadEvidence();
+    if (btn.dataset.tab === 'tensors') populateCimageSelect();
+    if (btn.dataset.tab === 'chat') focusChat();
+  });
+});
+
+// -- API helpers -----------------------------------------------------------
+async function apiGet(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + res.statusText);
+  return res.json();
+}
+
+function formatTs(iso) {
+  if (!iso) return '\u2014';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+// -- Models Tab -----------------------------------------------------------
+async function loadModels() {
+  const el = document.getElementById('models-content');
+  el.className = 'loading-state';
+  el.innerHTML = '<span class="spinner"></span>Loading cimages\u2026';
+  try {
+    const data = await apiGet('/v1/cimages');
+    if (!Array.isArray(data) || data.length === 0) {
+      el.className = 'empty-state';
+      el.innerHTML = 'No cimages loaded.';
+      return;
+    }
+    el.className = 'card-grid';
+    el.innerHTML = data.map(c => {
+      const vs = (c.validation_status || '').toLowerCase();
+      let badgeClass = 'badge invalid', badgeText = vs || 'unknown';
+      if (vs === 'valid') { badgeClass = 'badge valid'; badgeText = '\u2713 valid'; }
+      else if (vs === 'validwithwarnings' || vs === 'valid_with_warnings') { badgeClass = 'badge warn'; badgeText = '\u26a0 valid w/ warnings'; }
+      return '<div class="card">'
+        + '<h3>' + esc(c.model_family || 'unknown') + '</h3>'
+        + '<dl class="meta">'
+        + '<dt>Layers</dt><dd>' + (c.layer_count ?? c.num_layers ?? '\u2014') + '</dd>'
+        + '<dt>Tensors</dt><dd>' + (c.tensor_count ?? '\u2014') + '</dd>'
+        + '<dt>Digest</dt><dd style="word-break:break-all;font-size:11px;">' + esc((c.digest || c.cimage_digest || '\u2014').slice(0, 16)) + '\u2026</dd>'
+        + '<dt>Path</dt><dd style="word-break:break-all;font-size:11px;">' + esc(c.path || '\u2014') + '</dd>'
+        + '</dl>'
+        + '<span class="' + badgeClass + '">' + badgeText + '</span>'
+        + '</div>';
+    }).join('');
+  } catch (err) {
+    el.className = 'error-state';
+    el.innerHTML = 'Failed to load cimages: ' + esc(err.message);
+  }
+}
+
+// -- Tensors Tab ----------------------------------------------------------
+async function populateCimageSelect() {
+  const sel = document.getElementById('cimage-select');
+  try {
+    const data = await apiGet('/v1/cimages');
+    if (!Array.isArray(data)) return;
+    let html = '<option value="">-- select a cimage --</option>';
+    data.forEach(c => {
+      const digest = c.digest || c.cimage_digest || '';
+      const label = (c.model_family || 'unknown') + ' (' + digest.slice(0, 12) + '\u2026)';
+      html += '<option value="' + esc(digest) + '">' + esc(label) + '</option>';
+    });
+    sel.innerHTML = html;
+  } catch { /* keep existing options */ }
+}
+
+document.getElementById('cimage-select').addEventListener('change', async function() {
+  const digest = this.value;
+  const el = document.getElementById('tensors-content');
+  if (!digest) {
+    el.className = 'empty-state';
+    el.innerHTML = 'Select a cimage above to inspect its tensors.';
+    return;
+  }
+  el.className = 'loading-state';
+  el.innerHTML = '<span class="spinner"></span>Loading tensors\u2026';
+  try {
+    const data = await apiGet('/v1/cimages/' + encodeURIComponent(digest) + '/tensors');
+    if (!Array.isArray(data) || data.length === 0) {
+      el.className = 'empty-state';
+      el.innerHTML = 'No tensors found for this cimage.';
+      return;
+    }
+    renderTensorTable(el, data);
+  } catch (err) {
+    el.className = 'error-state';
+    el.innerHTML = 'Failed to load tensors: ' + esc(err.message);
+  }
+});
+
+let tensorSortCol = -1, tensorSortAsc = true;
+
+function renderTensorTable(container, rows) {
+  const cols = [
+    { key: 'tensor_key', label: 'Tensor Key' },
+    { key: 'codec', label: 'Codec' },
+    { key: 'group_size', label: 'Group Size' },
+    { key: 'operator_nrmse', label: 'NRMSE' },
+    { key: 'output_cosine', label: 'Cosine' },
+    { key: 'zero_fraction', label: 'Zero Fraction' },
+    { key: 'promotion_status', label: 'Promotion Status' },
+  ];
+
+  function rowClass(r) {
+    const s = (r.promotion_status || '').toLowerCase();
+    if (s === 'productioneligible' || s === 'production_eligible') return 'prod';
+    if (s === 'researchonly' || s === 'research_only') return 'research';
+    if (s === 'rejected') return 'rejected';
+    return '';
+  }
+
+  function statusDot(r) {
+    const s = (r.promotion_status || '').toLowerCase();
+    if (s === 'productioneligible' || s === 'production_eligible') return '<span class="status-dot prod"></span>';
+    if (s === 'researchonly' || s === 'research_only') return '<span class="status-dot research"></span>';
+    if (s === 'rejected') return '<span class="status-dot rejected"></span>';
+    return '';
+  }
+
+  function buildTable(sorted) {
+    let html = '<div class="table-wrap"><table><thead><tr>';
+    cols.forEach((c, i) => {
+      const arrow = tensorSortCol === i ? (tensorSortAsc ? '\u25b2' : '\u25bc') : '';
+      html += '<th data-col="' + i + '">' + c.label + '<span class="sort-arrow">' + arrow + '</span></th>';
+    });
+    html += '</tr></thead><tbody>';
+    sorted.forEach((r, ri) => {
+      html += '<tr class="' + rowClass(r) + '" data-idx="' + ri + '">';
+      cols.forEach(c => {
+        let val = r[c.key];
+        if (val == null) val = '\u2014';
+        else if (typeof val === 'number') {
+          if (c.key === 'operator_nrmse' || c.key === 'output_cosine') val = val.toFixed(6);
+          else if (c.key === 'zero_fraction') val = (val * 100).toFixed(2) + '%';
+        } else if (c.key === 'promotion_status') {
+          val = statusDot(r) + esc(String(val));
+        }
+        if (c.key === 'tensor_key' || c.key === 'promotion_status') {
+          html += '<td>' + val + '</td>';
+        } else {
+          html += '<td>' + (typeof val === 'number' ? val : esc(String(val))) + '</td>';
+        }
+      });
+      html += '</tr>';
+      // Expandable JSON row
+      html += '<tr class="json-row" data-idx="' + ri + '" style="display:none;"><td colspan="' + cols.length + '"><div class="json-receipt">' + esc(JSON.stringify(r, null, 2)) + '</div></td></tr>';
+    });
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  container.className = '';
+  container.innerHTML = buildTable(rows);
+
+  // Sort handlers
+  container.querySelectorAll('th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = parseInt(th.dataset.col);
+      if (tensorSortCol === col) tensorSortAsc = !tensorSortAsc;
+      else { tensorSortCol = col; tensorSortAsc = true; }
+      const key = cols[col].key;
+      const sorted = [...rows].sort((a, b) => {
+        let va = a[key], vb = b[key];
+        if (va == null) va = '';
+        if (vb == null) vb = '';
+        if (typeof va === 'number' && typeof vb === 'number') return tensorSortAsc ? va - vb : vb - va;
+        va = String(va); vb = String(vb);
+        return tensorSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      });
+      container.innerHTML = buildTable(sorted);
+      rebindExpand(container, sorted);
+    });
+  });
+
+  // Expand/collapse
+  rebindExpand(container, rows);
+}
+
+function rebindExpand(container, rows) {
+  container.querySelectorAll('tr[data-idx] td:first-child').forEach(td => {
+    td.addEventListener('click', () => {
+      const tr = td.parentElement;
+      const idx = tr.dataset.idx;
+      const jsonRow = container.querySelector('tr.json-row[data-idx="' + idx + '"]');
+      if (jsonRow) {
+        const visible = jsonRow.style.display !== 'none';
+        jsonRow.style.display = visible ? 'none' : 'table-row';
+        if (!visible) tr.classList.add('expanded');
+        else tr.classList.remove('expanded');
+      }
+    });
+    td.style.cursor = 'pointer';
+    td.style.color = 'var(--accent)';
+  });
+}
+
+// -- Evidence Tab ----------------------------------------------------------
+async function loadEvidence() {
+  const el = document.getElementById('evidence-content');
+  el.className = 'loading-state';
+  el.innerHTML = '<span class="spinner"></span>Loading evidence\u2026';
+  try {
+    const data = await apiGet('/v1/evidence');
+    if (!Array.isArray(data) || data.length === 0) {
+      el.className = 'empty-state';
+      el.innerHTML = 'No evidence entries yet.';
+      return;
+    }
+    el.className = 'timeline';
+    el.innerHTML = data.map(e => {
+      const ts = e.timestamp || e.created_at || e.ts || '';
+      const kind = e.receipt_kind || e.kind || e.event || 'entry';
+      const passed = e.passed != null ? (e.passed ? '\u2713 PASS' : '\u2717 FAIL') : '';
+      const digest = (e.manifest_digest || e.cimage_digest || e.digest || '').slice(0, 16);
+      return '<div class="timeline-entry">'
+        + '<div class="ts">' + formatTs(ts) + '</div>'
+        + '<div class="kind">' + esc(kind) + ' ' + passed + '</div>'
+        + '<div class="detail">digest: ' + esc(digest || '\u2014') + ' &middot; receipt: ' + esc((e.receipt_id || '\u2014').slice(0, 24)) + '</div>'
+        + '</div>';
+    }).join('');
+  } catch (err) {
+    el.className = 'error-state';
+    el.innerHTML = 'Failed to load evidence: ' + esc(err.message);
+  }
+}
+
+// -- Chat Tab --------------------------------------------------------------
+function focusChat() {
+  const inp = document.getElementById('chat-input');
+  if (inp) setTimeout(() => inp.focus(), 100);
+}
+
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+let chatStreaming = false;
+
+chatSend.addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+
+async function sendChat() {
+  if (chatStreaming) return;
+  const content = chatInput.value.trim();
+  if (!content) return;
+  chatInput.value = '';
+  chatStreaming = true;
+  chatSend.disabled = true;
+  chatInput.disabled = true;
+
+  // Remove empty-state
+  const empty = chatMessages.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  // Add user message
+  addChatMsg('user', content);
+
+  // Add assistant placeholder
+  const assistantDiv = addChatMsg('assistant', '');
+  const assistantContent = assistantDiv.querySelector('.content');
+
+  try {
+    const res = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gemma4',
+        messages: [{ role: 'user', content }],
+        stream: true,
+      }),
+    });
+
+    if (!res.ok) {
+      assistantContent.textContent = 'Error: HTTP ' + res.status;
+      chatStreaming = false;
+      chatSend.disabled = false;
+      chatInput.disabled = false;
+      focusChat();
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE lines
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = line.slice(6);
+          if (payload === '[DONE]') continue;
+          try {
+            const json = JSON.parse(payload);
+            const delta = json.choices?.[0]?.delta?.content;
+            if (delta) assistantContent.textContent += delta;
+          } catch { /* skip unparseable chunks */ }
+        }
+      }
+    }
+  } catch (err) {
+    assistantContent.textContent += '\n\n[Error: ' + err.message + ']';
+  }
+
+  chatStreaming = false;
+  chatSend.disabled = false;
+  chatInput.disabled = false;
+  focusChat();
+}
+
+function addChatMsg(role, text) {
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  div.innerHTML = '<div class="role">' + role + '</div><div class="content">' + esc(text) + '</div>';
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return div;
+}
+
+// -- Utilities ------------------------------------------------------------
+function esc(s) {
+  if (typeof s !== 'string') return String(s);
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return s.replace(/[&<>"']/g, c => map[c] || c);
+}
+
+// -- Initial load ----------------------------------------------------------
+loadModels();
+populateCimageSelect();
+</script>
+</body>
+</html>

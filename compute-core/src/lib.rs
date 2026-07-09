@@ -47,6 +47,8 @@ pub mod tts;
 // Pure Rust (atomics + uuid) — must stay unconditional: `errors.rs` (an
 // unconditional module) imports `arena_lifecycle::LifecycleState`, so gating
 // this to macOS broke every non-mac build.
+#[cfg(target_os = "macos")]
+pub mod aot_kernels;
 pub mod arena_lifecycle;
 #[cfg(all(
     target_os = "macos",

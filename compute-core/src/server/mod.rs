@@ -1,6 +1,8 @@
 pub mod auth;
 pub mod benchmark;
 pub mod cpu;
+#[cfg(feature = "server-dashboard")]
+pub mod dashboard;
 pub mod models;
 pub mod rate_limiter;
 

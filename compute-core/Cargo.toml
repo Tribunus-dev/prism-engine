@@ -17,10 +17,6 @@ block = { version = "0.1", optional = true }
 mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"
 tribunus-evidence-schema = { path = "../evidence-schema" }
-# MLX is the RESEARCH surface, not the production runtime. Both crates are
-# optional and activated only by `mlx-backend`: the production `prism-backend`
-# build must compile from a clean checkout (Xcode CLT + Rust + this repo)
-# without the out-of-repo MLX source tree that mlx-sys's cmake build fetches.
 mlx-rs = { path = "../mlx-rs-fork/mlx-rs", optional = true }
 mlx-sys = { path = "../mlx-rs-fork/mlx-sys", optional = true }
 safetensors = "0.5"
@@ -45,7 +41,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 axum = { version = "0.8", optional = true }
- futures = "0.3"
+futures = "0.3"
 tower-http = { version = "0.6", optional = true, features = ["cors"] }
 async-trait = "0.1"
 thiserror = "2"
@@ -69,42 +65,28 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 content_inspector = "0.2"
 encoding_rs = "0.8"
-sqlite = "0.37"
+sqlite = { version = "0.37", optional = true }
 deno_core = { version = "0.405", optional = true }
 deno_core_icudata = { version = "0.77", optional = true }
 anyhow = "1.0.102"
+sqlx-postgres = { version = "0.7", optional = true, default-features = false, features = ["uuid", "json"] }
+duckdb = { version = "1.1", optional = true }
+fred = { version = "10", optional = true, features = ["i-client"] }
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 
 [features]
 default = []
-# ── The three build surfaces (PRODUCTION_CONTRACT.md) ──────────────────────
-# 1. PRODUCTION RUNTIME — Metal dispatch, CoreML, orchestrator, distill
-#    worker, taps, fused decode. Hermetic: compiles from a clean checkout
-#    with Xcode CLT + Rust only. Does NOT imply mlx-backend.
-prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal", "dep:image"]
-# iOS variant — Metal + TTS + inference but no CoreML/server/ANE/arena.
+prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal", "dep:image", "dep:sqlite"]
 prism-backend-ios = ["prism-backend", "metal-dispatch", "backend-metal", "dep:image"]
-# 2. RESEARCH — the MLX executor/model stack and everything built on it.
-#    Requires the MLX source tree (see mlx-rs-fork/mlx-sys/build.rs).
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
-# Convenience alias for the pre-split meaning of prism-backend (both surfaces).
 research = ["prism-backend", "mlx-backend"]
-# 3. TOOLING — packers, reference harnesses, admission tools ride whichever
-#    surface they need via per-bin required-features; std-only tools ride none.
 ffi = ["prism-backend"]
 ane = []
 metal-dispatch = ["dep:metal", "dep:objc", "dep:block"]
 server = ["dep:axum", "dep:tower-http"]
-
-# Opt-in vendor GPU probes. Each links a vendor runtime (`libamdhip64`,
-# `libze_loader`) that only exists on machines with that SDK installed, so
-# they MUST stay off by default — an unconditional `#[link]` in either probe
-# breaks the link step of every Linux build on machines without the SDK.
+server-dashboard = ["server", "dep:sqlx-postgres", "dep:duckdb", "dep:fred"]
 rocm-probe = []
 level-zero-probe = []
-
-# Features referenced in cfg attributes throughout the codebase.
-# These are declared as inactive features so `unexpected_cfgs` lint is clean.
 candle-cpu = []
 intel = []
 tensix = []
@@ -116,13 +98,8 @@ image = []
 msgpack = []
 coreai-backend = []
 apple-coreml = []
-
 flux-klein-mlx = []
 backend-metal = ["dep:mpsgraph"]
-
-# Positive capability gates — independent of execution path.
-# Each gates a generation module. Enable with the backend of your choice.
-# No feature here removes modules that another feature enabled.
 generation-features-moved-to-separate-crates = []
 
 [[bin]]
@@ -160,8 +137,6 @@ required-features = ["prism-backend"]
 [[bin]]
 name = "q8-scale-dump"
 path = "src/bin/q8_scale_dump.rs"
-# Imports crate::gguf, which is gated behind these backends (pre-existing
-# breakage under plain backend-cpu, surfaced by the hermetic-build split).
 required-features = ["prism-backend"]
 
 [[bin]]

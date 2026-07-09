@@ -8,6 +8,8 @@
 //! This replaces ad-hoc per-matrix packing loops with a structured,
 //! fail-closed qualification system.
 
+pub mod ternary;
+
 /// Tiered vector budgets per validation phase.
 ///
 /// Probe/stress gate uses the smallest budget (32-64) so bad candidates fail
@@ -232,9 +234,7 @@ pub fn reconstruct_candidate(
         }
     };
     match scale_vector {
-        Some(sv) => {
-            scale_columns_vdsp(&unpacked, out_features, sv)
-        }
+        Some(sv) => scale_columns_vdsp(&unpacked, out_features, sv),
         None => unpacked,
     }
 }
@@ -866,10 +866,7 @@ pub fn fused_teacher_student_forward(
 }
 
 /// Compute OperatorValidationReport for a single pair of activation vectors.
-fn compute_operator_report_single(
-    teacher: &[f32],
-    student: &[f32],
-) -> OperatorValidationReport {
+fn compute_operator_report_single(teacher: &[f32], student: &[f32]) -> OperatorValidationReport {
     if teacher.is_empty() || teacher.len() != student.len() {
         return OperatorValidationReport::default();
     }
@@ -921,7 +918,8 @@ pub fn run_teacher_forward(
     out_features: usize,
     vectors: &[Vec<f32>],
 ) -> Vec<Vec<f32>> {
-    vectors.iter()
+    vectors
+        .iter()
         .map(|input| matmul_vec(input, weights, in_features, out_features))
         .collect()
 }
@@ -938,7 +936,8 @@ pub fn run_student_forward(
     out_features: usize,
     vectors: &[Vec<f32>],
 ) -> Vec<Vec<f32>> {
-    vectors.iter()
+    vectors
+        .iter()
         .map(|input| matmul_vec(input, reconstructed, in_features, out_features))
         .collect()
 }
@@ -1041,7 +1040,11 @@ pub fn evaluate_tensor(
             let n = vectors.len() as f32;
             for input in vectors {
                 let (_, _, report) = fused_teacher_student_forward(
-                    input, source, &reconstructed, in_features, out_features,
+                    input,
+                    source,
+                    &reconstructed,
+                    in_features,
+                    out_features,
                 );
                 avg_nrmse += report.operator_nrmse;
                 avg_cosine += report.cosine_similarity;
