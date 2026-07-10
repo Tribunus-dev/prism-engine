@@ -393,8 +393,8 @@ impl CompilerSystem for CimageLoadSystem {
                     as *const crate::ecs::compute_image::compile::ternary::CimageHeader)
             };
             let magic = &header.magic;
-            if &magic[..4] != b"PRISM" {
-                let msg = format!("bad cimage magic: {:?}", &magic[..4]);
+            if *magic != [b'P', b'R', b'I', b'S', b'M', b'C', b'I', b'M'] {
+                let msg = format!("bad cimage magic: {:?}", &magic[..]);
                 if let Some(tx) = &result_tx {
                     let _ = tx.send(Err(msg));
                 }
