@@ -269,7 +269,7 @@ mod tests {
     }
 }
 
-#[cfg(feature = "prism-backend")]
+#[cfg(feature = "mlx-backend")]
 pub mod compute_scheduler {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;

@@ -26,7 +26,7 @@ curl http://localhost:8080/v1/chat/completions \
 | `prism pull <repo>` | Download + compile from HuggingFace |
 | `prism run <model>` | Start OpenAI-compatible server |
 | `prism list` | List compiled models |
-| `prism compile <name>` | Recompile without re-downloading |
+| `prism compile <source>` | Compile a model name, local dir, or `.gguf` file |
 
 ## Features
 
@@ -35,6 +35,7 @@ Cargo feature flags (compose as needed):
 - `server` — OpenAI-compatible HTTP server (`/v1/chat/completions`)
 - `ane` — Apple Neural Engine backend (macOS only)
 - `metal-dispatch` — Metal GPU GEMV acceleration for the root LUT engine (macOS only; requires the Xcode toolchain)
+- `gguf-compile` — enable `prism compile <file.gguf>` support
 - `prism-backend` — full compute-core execution path (Metal + ANE + Accelerate)
 - `full` — `server` + `ane`
 - `full-apple` — `prism-backend` + `ane` + `server` (the complete Apple-Silicon runtime)

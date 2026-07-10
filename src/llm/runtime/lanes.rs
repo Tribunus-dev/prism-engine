@@ -203,7 +203,7 @@ impl Default for LaneRouter {
     }
 }
 
-#[cfg(feature = "prism-backend")]
+#[cfg(feature = "mlx-backend")]
 pub mod prism_backend {
     use std::collections::HashMap;
     use std::sync::Mutex;

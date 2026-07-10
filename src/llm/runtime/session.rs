@@ -203,7 +203,7 @@ impl Default for SessionManager {
 /// When the `prism-backend` feature is enabled, delegates session
 /// lifecycle to tribunal compute-core's `GenerationControlSession`.
 ///
-#[cfg(feature = "prism-backend")]
+#[cfg(feature = "mlx-backend")]
 mod compute_session {
     use super::*;
     use crate::llm::server::InferenceSessionState;

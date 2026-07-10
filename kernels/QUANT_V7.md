@@ -73,7 +73,7 @@ lanes to minimize *activation* error (not per-weight L2).
 
 ```bash
 # 1. Baseline vs candidate compile (feature flags select the pipeline)
-cd compute-core && cargo run --release --features prism-backend --bin gemma4-ingest -- \
+cd compute-core && cargo run --release --features prism-backend --bin tribunus-ecs-compile -- \
     --local-dir ~/models/gemma4-12b-it --output ~/models/g4-v7.cimage
 # (add --features quant-awq once calibration is wired)
 

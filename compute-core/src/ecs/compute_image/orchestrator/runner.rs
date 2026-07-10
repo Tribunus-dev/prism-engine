@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Main inference orchestrator — loading, decode, compaction, agent management.
 //!
 //! Owns a loaded `.cimage` deployment, the full-transformer GPU megakernel
@@ -12,6 +16,7 @@ use super::{
 };
 use crate::arena::Arena;
 use crate::arena::DataType;
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use crate::ecs::compute_image::cimage_loader::CimageDeployment;
 use crate::ecs::compute_image::compaction;
 use crate::ecs::compute_image::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
@@ -27,7 +32,6 @@ use crate::ecs::compute_image::multimodal::binding::SealedMultimodalBindings;
 use crate::ecs::compute_image::multimodal::descriptor::ProjectionTensorRecord;
 use crate::ecs::compute_image::tree_attention::TreeAttention;
 use crate::ecs::compute_image::vm_manager::VmManager;
-use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use half::f16;
 use metal::*;
 use parking_lot::Mutex;
@@ -97,7 +101,7 @@ pub struct Orchestrator {
     /// Current multi-pass compaction index.
     pub compaction_pass: u32,
     /// Pre-compiled ANE prefill layer model loaded from embedded
-    /// model bytes. Built at ingest time by gemma4_ingest via
+    /// model bytes. Built at compile time by the ECS packer path via
     /// coremlcompiler. One model instance per work queue slot.
     pub prefill_model: Option<CoreAiModel>,
     /// How this orchestrator was built with respect to Stage 0 activation

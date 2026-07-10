@@ -148,7 +148,7 @@ impl ToolEngine {
     /// unescape+parse, validation+type-coercion, fuzzy name correction).
     ///
     /// On non-`prism-backend` builds it falls back to a simple JSON parse.
-    #[cfg(not(feature = "prism-backend"))]
+    #[cfg(not(feature = "mlx-backend"))]
     pub fn parse_call(&self, raw: &str, tool_name: &str) -> Result<ToolCallOutcome, ToolError> {
         let _tool = self
             .tools
@@ -180,7 +180,7 @@ impl ToolEngine {
     }
 
     /// Parse raw model-generated text into a tool call.
-    #[cfg(feature = "prism-backend")]
+    #[cfg(feature = "mlx-backend")]
     pub fn parse_call(&self, raw: &str, tool_name: &str) -> Result<ToolCallOutcome, ToolError> {
         use tribunus_compute_core::tools::parse_and_repair;
         use tribunus_compute_core::tools::ToolDefinition;
@@ -238,7 +238,7 @@ impl ToolEngine {
     /// The `dispatcher` is an optional closure `Fn(&str, &serde_json::Value)
     /// -> Result<serde_json::Value, String>` that receives the tool name
     /// and parsed arguments. When `None`, a simple acknowledgment is returned.
-    #[cfg(not(feature = "prism-backend"))]
+    #[cfg(not(feature = "mlx-backend"))]
     pub fn execute_tool<F>(
         &self,
         call: &ParsedCall,
@@ -259,7 +259,7 @@ impl ToolEngine {
     }
 
     /// Execute a parsed tool call.
-    #[cfg(feature = "prism-backend")]
+    #[cfg(feature = "mlx-backend")]
     pub fn execute_tool<F>(
         &self,
         call: &ParsedCall,
@@ -289,7 +289,7 @@ impl ToolEngine {
     /// The returned GBNF grammar constrains generation so the model can only
     /// produce valid JSON matching the schema. On `prism-backend` builds this
     /// delegates to `tribunus_compute_core::grammar::Grammar::from_json_schema`.
-    #[cfg(not(feature = "prism-backend"))]
+    #[cfg(not(feature = "mlx-backend"))]
     pub fn json_schema_to_grammar(
         _name: &str,
         _schema: &serde_json::Value,
@@ -299,7 +299,7 @@ impl ToolEngine {
     }
 
     /// Build a GBNF grammar string from a JSON Schema for structured output.
-    #[cfg(feature = "prism-backend")]
+    #[cfg(feature = "mlx-backend")]
     pub fn json_schema_to_grammar(
         name: &str,
         schema: &serde_json::Value,
@@ -321,7 +321,7 @@ impl ToolEngine {
     /// The output is a self-consistent GBNF grammar that constrains generation
     /// to valid JSON matching the schema. This function is the "hand-crafted"
     /// replacement for reconstructing GBNF from the compile-core Grammar AST.
-    #[cfg(feature = "prism-backend")]
+    #[cfg(feature = "mlx-backend")]
     fn schema_to_gbnf(name: &str, schema: &serde_json::Value) -> Result<String, ToolError> {
         let mut out = String::new();
         out.push_str(&format!("root ::= {}\n", name));
@@ -333,7 +333,7 @@ impl ToolEngine {
     }
 
     /// Recursively emit a single named GBNF rule for a JSON Schema sub-schema.
-    #[cfg(feature = "prism-backend")]
+    #[cfg(feature = "mlx-backend")]
     fn emit_schema_rule(
         name: &str,
         schema: &serde_json::Value,
@@ -488,7 +488,7 @@ impl Default for ToolEngine {
 
 /// Format a `GrammarNode` back into GBNF text.
 #[allow(dead_code)]
-#[cfg(feature = "prism-backend")]
+#[cfg(feature = "mlx-backend")]
 fn format_node(node: &tribunus_compute_core::grammar::GrammarNode) -> String {
     format_node_ctx(node, false)
 }
@@ -498,7 +498,7 @@ fn format_node(node: &tribunus_compute_core::grammar::GrammarNode) -> String {
 /// - `parent_is_seq`: true when the parent is a Seq, so `Alt` children
 ///   need wrapping in `( ... )` for correct GBNF precedence.
 #[allow(dead_code)]
-#[cfg(feature = "prism-backend")]
+#[cfg(feature = "mlx-backend")]
 fn format_node_ctx(
     node: &tribunus_compute_core::grammar::GrammarNode,
     parent_is_seq: bool,

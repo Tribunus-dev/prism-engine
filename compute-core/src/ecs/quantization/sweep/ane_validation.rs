@@ -1,10 +1,12 @@
 //! ANE operator validation for QuantSweep candidates.
-//!
 //! Takes a candidate's reconstructed weights, compiles a MIL matmul graph
 //! with activation and weights as dual IOSurface-backed inputs, executes on
 //! the ANE via Core ML, and compares the output against a CPU float reference.
-//! Returns operator-level metrics (operator NRMSE, cosine similarity, norm
-//! ratio drift) that weight-space validation alone cannot provide.
+//! Returns operator-level metrics against two references:
+//! - **f32 reference**: ideal CPU float matmul (no quantization effects)
+//! - **f16 reference**: CPU float matmul with f16 rounding on both activation
+//!   and weights, matching ANE hardware precision
+//!
 //!
 //! # Compilation cost
 //!
@@ -62,13 +64,21 @@ fn f16_bits_to_f32(h: u16) -> f32 {
     let mant = (h & 0x3FF) as u32;
     if exp == 0 {
         let value = (mant as f32) * 2.0f32.powi(-24);
-        if sign != 0 { -value } else { value }
+        if sign != 0 {
+            -value
+        } else {
+            value
+        }
     } else if exp == 31 {
         f32::INFINITY
     } else {
         let normalized = 1.0f32 + (mant as f32) / 1024.0f32;
         let value = normalized * 2.0f32.powi((exp as i32) - 15);
-        if sign != 0 { -value } else { value }
+        if sign != 0 {
+            -value
+        } else {
+            value
+        }
     }
 }
 
@@ -76,7 +86,12 @@ fn f16_bits_to_f32(h: u16) -> f32 {
 
 /// CPU float reference: `output[j] = sum_i activation[i] * weights[j * in + i]`
 /// Weights are row-major [out_features, in_features].
-fn cpu_matmul(activation: &[f32], weights: &[f32], in_features: usize, out_features: usize) -> Vec<f32> {
+fn cpu_matmul(
+    activation: &[f32],
+    weights: &[f32],
+    in_features: usize,
+    out_features: usize,
+) -> Vec<f32> {
     let mut output = vec![0.0f32; out_features];
     for j in 0..out_features {
         let base = j * in_features;
@@ -92,19 +107,31 @@ fn cpu_matmul(activation: &[f32], weights: &[f32], in_features: usize, out_featu
 // ── Metrics type ──────────────────────────────────────────────────────────
 
 /// Metrics from ANE operator validation, comparing ANE output against
-/// a CPU float reference matmul.
+/// CPU float (f32) and f16-rounded references.
 #[derive(Debug, Clone, Copy)]
 pub struct OperatorValidationMetrics {
-    /// RMSE of the output activation vector (ANE vs reference).
+    /// RMSE of the output activation vector (ANE vs f32 reference).
     pub operator_rmse: f64,
-    /// NRMSE = sqrt(SSE) / ||reference||.
+    /// NRMSE = sqrt(SSE) / ||reference|| (f32 reference).
     pub operator_nrmse: f64,
-    /// Cosine similarity between ANE output and reference.
+    /// Cosine similarity between ANE output and f32 reference.
     pub cosine_similarity: f64,
-    /// Ratio of output norms: ||ANE|| / ||reference||.
+    /// Ratio of output norms: ||ANE|| / ||reference|| (f32 reference).
     pub norm_ratio_drift: f64,
-    /// Maximum absolute element-wise error.
+    /// Maximum absolute element-wise error (ANE vs f32 reference).
     pub max_abs_error: f64,
+
+    // ── f16-rounded reference metrics ────────────────────────────────────
+    /// RMSE of the output activation vector (ANE vs f16 reference).
+    pub operator_rmse_f16_ref: f64,
+    /// NRMSE = sqrt(SSE) / ||reference|| (f16 reference).
+    pub operator_nrmse_f16_ref: f64,
+    /// Cosine similarity between ANE output and f16 reference.
+    pub cosine_similarity_f16_ref: f64,
+    /// Ratio of output norms: ||ANE|| / ||reference|| (f16 reference).
+    pub norm_ratio_drift_f16_ref: f64,
+    /// Maximum absolute element-wise error (ANE vs f16 reference).
+    pub max_abs_error_f16_ref: f64,
 }
 
 // ── Model compilation and caching ─────────────────────────────────────────
@@ -113,7 +140,10 @@ fn model_cache_path(in_features: u32, out_features: u32) -> PathBuf {
     PathBuf::from(std::env::temp_dir())
         .join(format!("ane_opval_{}x{}", in_features, out_features))
         .join("compiled")
-        .join(format!("ane_opval_{}x{}.mlmodelc", in_features, out_features))
+        .join(format!(
+            "ane_opval_{}x{}.mlmodelc",
+            in_features, out_features
+        ))
 }
 
 fn compile_or_load_model(
@@ -127,7 +157,7 @@ fn compile_or_load_model(
             &cache_path.to_string_lossy(),
             CoreAiComputeUnits::CpuAndNeuralEngine,
         )?;
-        let weight_arena = Arena::new(in_features, out_features, DataType::Float16)
+        let weight_arena = Arena::new(out_features, in_features, DataType::Float16)
             .map_err(|e| format!("weight arena: {}", e))?;
         let output_arena = Arena::new(1, out_features, DataType::Float16)
             .map_err(|e| format!("output arena: {}", e))?;
@@ -136,9 +166,17 @@ fn compile_or_load_model(
 
     // ── Build MIL program ──────────────────────────────────────────────
     let b = MilBuilder::new("main");
-    let b = b.input(ACT_INPUT_NAME, mil_spec::DataType::Float16, &[1, in_features as i64]);
-    let b = b.input(WT_INPUT_NAME, mil_spec::DataType::Float16, &[in_features as i64, out_features as i64]);
-    let b = b.matmul(ACT_INPUT_NAME, WT_INPUT_NAME);
+    let b = b.input(
+        ACT_INPUT_NAME,
+        mil_spec::DataType::Float16,
+        &[1, in_features as i64],
+    );
+    let b = b.input(
+        WT_INPUT_NAME,
+        mil_spec::DataType::Float16,
+        &[out_features as i64, in_features as i64],
+    );
+    let b = b.matmul_transpose_y(ACT_INPUT_NAME, WT_INPUT_NAME);
     let prog = b
         .output(OUTPUT_NAME)
         .build()
@@ -147,13 +185,19 @@ fn compile_or_load_model(
     let meta = ModelMeta {
         model_name: format!("ane_opval_{}x{}", in_features, out_features),
         function_name: "main".into(),
-        short_description: format!("Operator validation matmul {}x{}", in_features, out_features),
+        short_description: format!(
+            "Operator validation matmul {}x{}",
+            in_features, out_features
+        ),
         version: "1.0.0".into(),
         author: "tribunus-sweep".into(),
         output_name: OUTPUT_NAME.into(),
         inputs: vec![
             (ACT_INPUT_NAME.into(), vec![1, in_features as i64]),
-            (WT_INPUT_NAME.into(), vec![in_features as i64, out_features as i64]),
+            (
+                WT_INPUT_NAME.into(),
+                vec![out_features as i64, in_features as i64],
+            ),
         ],
         outputs: vec![(OUTPUT_NAME.into(), vec![1, out_features as i64])],
     };
@@ -196,7 +240,7 @@ fn compile_or_load_model(
         CoreAiComputeUnits::CpuAndNeuralEngine,
     )?;
 
-    let weight_arena = Arena::new(in_features, out_features, DataType::Float16)
+    let weight_arena = Arena::new(out_features, in_features, DataType::Float16)
         .map_err(|e| format!("weight arena: {}", e))?;
     let output_arena = Arena::new(1, out_features, DataType::Float16)
         .map_err(|e| format!("output arena: {}", e))?;
@@ -245,12 +289,17 @@ pub fn pack_nf4_weights_with_codebook(
         let mut tile = [0.0f32; TILE_SIZE];
         for j in 0..TILE_SIZE {
             let c = col_base + j;
-            tile[j] = if c < out_f { weights[row * out_f + c] } else { 0.0 };
+            tile[j] = if c < out_f {
+                weights[row * out_f + c]
+            } else {
+                0.0
+            };
         }
 
         for g in 0..num_groups {
             let base = g * group_size;
-            let max_abs = tile[base..base + group_size].iter()
+            let max_abs = tile[base..base + group_size]
+                .iter()
                 .map(|v| v.abs())
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .unwrap_or(0.0);
@@ -278,7 +327,13 @@ pub fn pack_nf4_weights_with_codebook(
 ///
 /// Compiles a MIL matmul graph once per unique shape (cached on disk),
 /// then runs inference with a synthetic activation vector, comparing the
-/// ANE output against a CPU float reference matmul.
+/// ANE output against two CPU references:
+/// - **f32 reference**: ideal float matmul (no precision loss)
+/// - **f16 reference**: matmul with f16 rounding applied to both activation
+///   and weights, matching ANE hardware precision
+///
+/// The two-reference scheme separates quantization error from fp16
+/// truncation error — the f16 reference captures ANE-native behavior.
 pub fn validate_operator(
     reconstructed_weights: &[f32],
     in_features: u32,
@@ -300,51 +355,89 @@ pub fn validate_operator(
         .collect();
 
     // ── CPU reference ──────────────────────────────────────────────────
-    let reference = cpu_matmul(&activation, reconstructed_weights, in_features as usize, out_features as usize);
-    let ref_norm: f64 = reference.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>().sqrt();
+    let reference = cpu_matmul(
+        &activation,
+        reconstructed_weights,
+        in_features as usize,
+        out_features as usize,
+    );
+    let ref_norm: f64 = reference
+        .iter()
+        .map(|v| (*v as f64) * (*v as f64))
+        .sum::<f64>()
+        .sqrt();
+
+    // ── f16-rounded reference (ANE hardware precision parity) ──────────
+    let act_f16: Vec<f32> = activation
+        .iter()
+        .map(|&v| f16_bits_to_f32(f32_to_f16_bits(v)))
+        .collect();
+    let w_f16: Vec<f32> = reconstructed_weights
+        .iter()
+        .map(|&v| f16_bits_to_f32(f32_to_f16_bits(v)))
+        .collect();
+    let reference_f16 = cpu_matmul(
+        &act_f16,
+        &w_f16,
+        in_features as usize,
+        out_features as usize,
+    );
+    let ref_norm_f16: f64 = reference_f16
+        .iter()
+        .map(|v| (*v as f64) * (*v as f64))
+        .sum::<f64>()
+        .sqrt();
 
     // ── Compile or load model ──────────────────────────────────────────
     let (model, weight_arena, output_arena) = compile_or_load_model(in_features, out_features)?;
 
     // ── Write FP16 weights into IOSurface arena ────────────────────────
-    weight_arena.lock().map_err(|e| format!("lock weights: {}", e))?;
+    weight_arena
+        .lock()
+        .map_err(|e| format!("lock weights: {}", e))?;
     unsafe {
         let ptr = weight_arena.info.base_address as *mut u16;
-        let in_f = in_features as usize;
-        let out_f = out_features as usize;
-        // Transpose: MIL weights are [in, out], data is [out, in]
-        for i in 0..in_f {
-            for j in 0..out_f {
-                ptr.add(i * out_f + j).write(f32_to_f16_bits(reconstructed_weights[j * in_f + i]));
-            }
+        // MIL expects weights in [out, in] row-major, matching our canonical layout
+        for (i, &w) in reconstructed_weights.iter().enumerate() {
+            ptr.add(i).write(f32_to_f16_bits(w));
         }
     }
-    weight_arena.unlock().map_err(|e| format!("unlock weights: {}", e))?;
+    weight_arena
+        .unlock()
+        .map_err(|e| format!("unlock weights: {}", e))?;
 
     // ── Create and fill activation arena ───────────────────────────────
     let act_arena = Arena::new(1, in_features, DataType::Float16)
         .map_err(|e| format!("activation arena: {}", e))?;
-    act_arena.lock().map_err(|e| format!("lock activation: {}", e))?;
+    act_arena
+        .lock()
+        .map_err(|e| format!("lock activation: {}", e))?;
     unsafe {
         let ptr = act_arena.info.base_address as *mut u16;
         for (i, &a) in activation.iter().enumerate() {
             ptr.add(i).write(f32_to_f16_bits(a));
         }
     }
-    act_arena.unlock().map_err(|e| format!("unlock activation: {}", e))?;
+    act_arena
+        .unlock()
+        .map_err(|e| format!("unlock activation: {}", e))?;
 
     // ── Run ANE prediction with dual inputs ────────────────────────────
     // We need &mut ArenaInfo for outputs. Create a mutable reference.
     let mut out_info = output_arena.info;
-    model.predict_multi(
-        &[ACT_INPUT_NAME, WT_INPUT_NAME],
-        &[&act_arena.info, &weight_arena.info],
-        &[OUTPUT_NAME],
-        &mut [&mut out_info],
-    ).map_err(|e| format!("predict_multi: {}", e))?;
+    model
+        .predict_multi(
+            &[ACT_INPUT_NAME, WT_INPUT_NAME],
+            &[&act_arena.info, &weight_arena.info],
+            &[OUTPUT_NAME],
+            &mut [&mut out_info],
+        )
+        .map_err(|e| format!("predict_multi: {}", e))?;
 
     // ── Read back output ───────────────────────────────────────────────
-    output_arena.lock().map_err(|e| format!("lock output: {}", e))?;
+    output_arena
+        .lock()
+        .map_err(|e| format!("lock output: {}", e))?;
     let mut ane_output = vec![0.0f32; out_features as usize];
     unsafe {
         let ptr = out_info.base_address as *const u16;
@@ -352,26 +445,46 @@ pub fn validate_operator(
             ane_output[i] = f16_bits_to_f32(ptr.add(i).read());
         }
     }
-    output_arena.unlock().map_err(|e| format!("unlock output: {}", e))?;
+    output_arena
+        .unlock()
+        .map_err(|e| format!("unlock output: {}", e))?;
 
     // ── Compute metrics ────────────────────────────────────────────────
+    // Metrics vs f32 reference
     let mut sq_err = 0.0f64;
     let mut max_abs = 0.0f64;
     let mut dot_product = 0.0f64;
     let mut ane_norm_sq = 0.0f64;
+    // Metrics vs f16 reference
+    let mut sq_err_f16 = 0.0f64;
+    let mut max_abs_f16 = 0.0f64;
+    let mut dot_product_f16 = 0.0f64;
 
     for j in 0..out_features as usize {
         let a = ane_output[j] as f64;
         let r = reference[j] as f64;
+        let r16 = reference_f16[j] as f64;
+        // f32 metrics
         let diff = a - r;
         sq_err += diff * diff;
         let abs_diff = diff.abs();
-        if abs_diff > max_abs { max_abs = abs_diff; }
+        if abs_diff > max_abs {
+            max_abs = abs_diff;
+        }
         dot_product += a * r;
         ane_norm_sq += a * a;
+        // f16 metrics
+        let diff16 = a - r16;
+        sq_err_f16 += diff16 * diff16;
+        let abs_diff16 = diff16.abs();
+        if abs_diff16 > max_abs_f16 {
+            max_abs_f16 = abs_diff16;
+        }
+        dot_product_f16 += a * r16;
     }
     let ane_norm = ane_norm_sq.sqrt();
 
+    // f32-derived values
     let rmse = (sq_err / out_features as f64).sqrt();
     let nrmse = if ref_norm > 1e-30 {
         sq_err.sqrt() / ref_norm
@@ -389,12 +502,35 @@ pub fn validate_operator(
         1.0
     };
 
+    // f16-derived values
+    let rmse_f16 = (sq_err_f16 / out_features as f64).sqrt();
+    let nrmse_f16 = if ref_norm_f16 > 1e-30 {
+        sq_err_f16.sqrt() / ref_norm_f16
+    } else {
+        0.0
+    };
+    let cosine_f16 = if ane_norm > 1e-30 && ref_norm_f16 > 1e-30 {
+        dot_product_f16 / (ane_norm * ref_norm_f16)
+    } else {
+        1.0
+    };
+    let norm_drift_f16 = if ref_norm_f16 > 1e-30 {
+        ane_norm / ref_norm_f16
+    } else {
+        1.0
+    };
+
     Ok(OperatorValidationMetrics {
         operator_rmse: rmse,
         operator_nrmse: nrmse,
         cosine_similarity: cosine,
         norm_ratio_drift: norm_drift,
         max_abs_error: max_abs,
+        operator_rmse_f16_ref: rmse_f16,
+        operator_nrmse_f16_ref: nrmse_f16,
+        cosine_similarity_f16_ref: cosine_f16,
+        norm_ratio_drift_f16_ref: norm_drift_f16,
+        max_abs_error_f16_ref: max_abs_f16,
     })
 }
 
@@ -404,14 +540,26 @@ mod tests {
 
     #[test]
     fn test_fp16_roundtrip() {
-        let cases = [0.0f32, 1.0, -1.0, 0.5, -0.5, 65504.0, -65504.0, 0.000061, -0.000061];
+        let cases = [
+            0.0f32, 1.0, -1.0, 0.5, -0.5, 65504.0, -65504.0, 0.000061, -0.000061,
+        ];
         for &v in &cases {
             let bits = f32_to_f16_bits(v);
             let back = f16_bits_to_f32(bits);
             let diff = (back - v).abs();
-            let rel = if v.abs() > 1e-10 { diff / v.abs() } else { diff };
-            assert!(diff < 0.001 || rel < 0.01,
-                "fp16 roundtrip: {} -> {:#06x} -> {}, diff={}", v, bits, back, diff);
+            let rel = if v.abs() > 1e-10 {
+                diff / v.abs()
+            } else {
+                diff
+            };
+            assert!(
+                diff < 0.001 || rel < 0.01,
+                "fp16 roundtrip: {} -> {:#06x} -> {}, diff={}",
+                v,
+                bits,
+                back,
+                diff
+            );
         }
     }
 
@@ -459,12 +607,22 @@ mod tests {
             .map(|idx| ((idx % 64) as f32 - 32.0) * 0.01)
             .collect();
 
-        let metrics = validate_operator(&w, in_f, out_f)
-            .expect("operator validation should succeed");
+        let metrics =
+            validate_operator(&w, in_f, out_f).expect("operator validation should succeed");
         assert!(metrics.operator_rmse >= 0.0);
         assert!(metrics.cosine_similarity >= -1.0 && metrics.cosine_similarity <= 1.0);
-        eprintln!("operator metrics: rmse={:.6} nrmse={:.6} cosine={:.6} drift={:.6} max_abs={:.6}",
-            metrics.operator_rmse, metrics.operator_nrmse,
-            metrics.cosine_similarity, metrics.norm_ratio_drift, metrics.max_abs_error);
+        eprintln!(
+            "operator metrics (f32): rmse={:.6} nrmse={:.6} cosine={:.6} drift={:.6} max_abs={:.6}\n              (f16): rmse={:.6} nrmse={:.6} cosine={:.6} drift={:.6} max_abs={:.6}",
+            metrics.operator_rmse,
+            metrics.operator_nrmse,
+            metrics.cosine_similarity,
+            metrics.norm_ratio_drift,
+            metrics.max_abs_error,
+            metrics.operator_rmse_f16_ref,
+            metrics.operator_nrmse_f16_ref,
+            metrics.cosine_similarity_f16_ref,
+            metrics.norm_ratio_drift_f16_ref,
+            metrics.max_abs_error_f16_ref,
+        );
     }
 }

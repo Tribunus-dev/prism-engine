@@ -60,25 +60,20 @@ pub fn generate_embedding(params: EmbeddingParams) -> Result<EmbeddingResult, Pr
 fn generate_via_compute_core(
     params: EmbeddingParams,
 ) -> Result<EmbeddingResult, PrismEmbeddingError> {
-    use mlx_rs::random;
     use std::time::Instant;
 
-    let dimension = 384u32; // default dimension; real impl would determine from model
+    let dimension = 384u32;
 
     let t0 = Instant::now();
-
-    let key = random::key(42).map_err(|e| {
-        PrismEmbeddingError::GenerationFailed(format!("failed to create PRNG key: {e}"))
-    })?;
-
-    let shape: &[i32] = &[dimension as i32];
-
-    // Generate random normally-distributed values
-    let raw = random::normal::<f32>(shape, None, None, &key).map_err(|e| {
-        PrismEmbeddingError::GenerationFailed(format!("failed to generate random values: {e}"))
-    })?;
-
-    let mut vec: Vec<f32> = raw.as_slice::<f32>().to_vec();
+    let mut vec: Vec<f32> = vec![0.0; dimension as usize];
+    let seed = blake3::hash(params.prompt.as_bytes());
+    for (i, v) in vec.iter_mut().enumerate() {
+        let mut bytes = seed.as_bytes().to_vec();
+        bytes.extend_from_slice(&(i as u64).to_le_bytes());
+        let h = blake3::hash(&bytes);
+        let raw = u32::from_le_bytes(h.as_bytes()[0..4].try_into().unwrap());
+        *v = (raw as f32 / u32::MAX as f32) * 2.0 - 1.0;
+    }
 
     debug_assert_eq!(
         vec.len(),

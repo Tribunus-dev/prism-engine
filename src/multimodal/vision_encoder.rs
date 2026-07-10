@@ -36,65 +36,20 @@ impl VisionEncoderConfig {
 
     #[cfg(feature = "prism-backend")]
     fn encode_via_compute_core(&self, image: &ImageInput) -> Vec<u16> {
-        use mlx_rs::Array;
-        use tribunus_compute_core::config::VisionArchitecture;
-        use tribunus_compute_core::vision::encoder::VisionEncoder;
-
-        // Map Prism VisionArch to compute-core VisionArchitecture.
-        let vision_arch = VisionArchitecture {
-            image_size: self.input_size.0,
-            patch_size: self.patch_size,
-            num_channels: 3,
-            hidden_size: self.hidden_dim,
-            projection_dim: projection_dim_for_arch(&self.arch),
-            num_attention_heads: self.num_heads,
-            num_hidden_layers: self.num_layers,
-            intermediate_size: self.hidden_dim * 4,
-        };
-
-        // Convert Prism ImageInput ([width*height*3 f32]) to MLX Array [1, 3, H, W].
-        let h = image.height as i32;
-        let w = image.width as i32;
-        let c = 3i32;
-        let array = Array::from_slice(&image.data, &[1, c, h, w]);
-
-        // Attempt to load the vision encoder using a tensor-loader callback.
-        // In a real deployment the tensors would come from a compiled model's
-        // tensor registry; here we demonstrate the wiring.
-        let encoder_result = VisionEncoder::load(vision_arch, &mut |name: &str| {
-            Err(format!(
-                "vision tensor '{}' not reachable from Prism facade; \
-                 requires a loaded compute-core ProfiledModel",
-                name
-            ))
-        });
-
-        match encoder_result {
-            Ok(encoder) => {
-                match encoder.encode(&array) {
-                    Ok(projected) => {
-                        // Convert the f32 output Array to Vec<u16> by
-                        // interpreting the f32 data bytes as u16 slices.
-                        if let Ok(slice) = projected.try_as_slice::<f32>() {
-                            bytemuck::cast_slice(slice).to_vec()
-                        } else {
-                            Vec::new()
-                        }
-                    }
-                    Err(_) => Vec::new(),
-                }
-            }
-            Err(_) => {
-                // Fallback: encode via raw pixel cast when encoder loading
-                // fails (e.g. no compiled model in test environments).
-                bytemuck::cast_slice(&image.data).to_vec()
-            }
-        }
+        // MLX-backed vision encoding has been retired from the canonical
+        // build. Keep the legacy facade as a deterministic reshape/cast.
+        let _ = (
+            self.input_size,
+            self.patch_size,
+            self.num_layers,
+            self.hidden_dim,
+            self.num_heads,
+        );
+        bytemuck::cast_slice(&image.data).to_vec()
     }
 }
 
 /// Return the projection dimension for each vision architecture variant.
-#[cfg(feature = "prism-backend")]
 fn projection_dim_for_arch(arch: &VisionArch) -> u32 {
     match arch {
         VisionArch::ClipVitL => 768,

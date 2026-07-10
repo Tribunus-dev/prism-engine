@@ -1,4 +1,4 @@
-#[cfg(feature = "prism-backend")]
+#[cfg(feature = "mlx-backend")]
 pub mod cimage_engine;
 pub mod compiler;
 pub mod cpu_fallback;

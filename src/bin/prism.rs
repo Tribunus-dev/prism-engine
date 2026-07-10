@@ -4,7 +4,7 @@
 //!   run <model>       Start OpenAI-compatible server with a compiled model
 //!   list              Show available models in ~/.prism/models/
 //!   pull <repo>       Download + compile a model from HuggingFace to .cimage
-//!   compile <name>    Recompile an existing source model without re-downloading
+//!   compile <source>   Compile a local model dir, saved model, or .gguf file
 //!
 //! Model directory structure (~/.prism/models/<name>/):
 //!   model.cimage       Compiled palettized weights
@@ -13,7 +13,10 @@
 //!   tokenizer_config.json
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+#[cfg(feature = "gguf-compile")]
+use tribunus_compute_core::lut::compiler::compile_gguf_to_cimage;
 /// Detect if Metal GPU is available.
 fn has_metal() -> bool {
     #[cfg(feature = "metal-dispatch")]
@@ -80,10 +83,10 @@ enum Commands {
         /// HuggingFace repo ID (e.g. "Qwen/Qwen2.5-0.5B").
         repo: String,
     },
-    /// Recompile an existing model's safetensors without re-downloading.
+    /// Compile a local model directory, saved model, or GGUF file.
     Compile {
-        /// Model name (must exist in ~/.prism/models/<name>/ with safetensors).
-        model: String,
+        /// Model name, local model directory, or .gguf file path.
+        source: PathBuf,
     },
 }
 
@@ -99,7 +102,7 @@ fn main() {
         }
         Commands::List => list(),
         Commands::Pull { repo } => pull(&repo),
-        Commands::Compile { model } => compile_model(&model),
+        Commands::Compile { source } => compile(&source),
     }
 }
 
@@ -437,9 +440,46 @@ fn pull(repo: &str) {
     eprintln!("  Run: prism run {name}");
 }
 
-/// Recompile an existing model's safetensors (already downloaded) to .cimage.
-fn compile_model(name: &str) {
-    let dir = model_dir(name);
+fn compile(source: &Path) {
+    if source.exists() {
+        if source.is_dir() {
+            let label = source.display().to_string();
+            compile_model_dir(source, &label);
+            return;
+        }
+
+        if source.extension().is_some_and(|ext| ext == "gguf") {
+            let output = source.with_extension("cimage");
+            compile_gguf(source, &output);
+            return;
+        }
+
+        eprintln!(
+            "Unsupported compile input: {}. Use a model directory or .gguf file.",
+            source.display()
+        );
+        std::process::exit(1);
+    }
+
+    if source.parent().is_none() && source.extension().is_none() {
+        let dir = model_dir(&source.to_string_lossy());
+        if dir.exists() {
+            let label = source.to_string_lossy().to_string();
+            compile_model_dir(&dir, &label);
+            return;
+        }
+    }
+
+    if source.extension().is_some_and(|ext| ext == "gguf") {
+        eprintln!("GGUF file not found: {}", source.display());
+    } else {
+        eprintln!("Model or path not found: {}", source.display());
+        eprintln!("  For HuggingFace models, use: prism pull <repo>");
+    }
+    std::process::exit(1);
+}
+
+fn compile_model_dir(dir: &Path, label: &str) {
     if !dir.join("config.json").exists() {
         eprintln!(
             "No config.json in {}. First: prism pull <repo>",
@@ -451,7 +491,7 @@ fn compile_model(name: &str) {
     let safetensors_dir = if dir.join("weights").exists() {
         dir.join("weights")
     } else {
-        dir.clone()
+        dir.to_path_buf()
     };
 
     if !safetensors_dir
@@ -467,7 +507,7 @@ fn compile_model(name: &str) {
         .unwrap_or(false)
     {
         eprintln!(
-            "No safetensors found in {}. Re-pull the model.",
+            "No safetensors found in {}. Re-pull or point prism compile at a .gguf file.",
             safetensors_dir.display()
         );
         std::process::exit(1);
@@ -485,7 +525,7 @@ fn compile_model(name: &str) {
     let graph = prism_engine::lut::graph::ModelGraph::build(&cfg);
     eprintln!("{} layers, {} nodes", graph.num_layers, graph.nodes.len());
 
-    let out = cimage_path(name);
+    let out = dir.join("model.cimage");
     eprintln!("[prism:compile] Compiling to {}...", out.display());
     match prism_engine::lut::compiler::compile_to_cimage(
         &graph,
@@ -497,9 +537,36 @@ fn compile_model(name: &str) {
             let size = std::fs::metadata(&out)
                 .map(|m| m.len() / (1024 * 1024))
                 .unwrap_or(0);
-            eprintln!("[prism:compile] Done — {name} ({size} MB)");
-            eprintln!("  Run: prism run {name}");
+            eprintln!("[prism:compile] Done — {label} ({size} MB)");
+            eprintln!("  Run: prism run {label}");
         }
         Err(e) => eprintln!("Compilation failed: {e}"),
+    }
+}
+
+fn compile_gguf(gguf_path: &Path, output_path: &Path) {
+    #[cfg(feature = "gguf-compile")]
+    {
+        eprintln!(
+            "[prism:compile] Compiling GGUF {} -> {}",
+            gguf_path.display(),
+            output_path.display()
+        );
+        if let Err(e) = compile_gguf_to_cimage(gguf_path, output_path) {
+            eprintln!("Compilation failed: {e}");
+            std::process::exit(1);
+        }
+        let size = std::fs::metadata(output_path)
+            .map(|m| m.len() / (1024 * 1024))
+            .unwrap_or(0);
+        eprintln!("[prism:compile] Done — {} MB", size);
+        return;
+    }
+
+    #[cfg(not(feature = "gguf-compile"))]
+    {
+        let _ = (gguf_path, output_path);
+        eprintln!("GGUF compilation requires `--features gguf-compile`.");
+        std::process::exit(1);
     }
 }

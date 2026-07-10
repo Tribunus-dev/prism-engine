@@ -46,7 +46,7 @@ cargo build -p tribunus-compute-core --features prism-backend --lib
 echo "[mac-gate]     cargo build --features prism-backend: OK"
 
 # The production bins must build hermetically too.
-cargo build -p tribunus-compute-core --features prism-backend \
+cargo build -p tribunus-compute-core --features prism-backend,server-dashboard \
     --bin prism-server \
     --bin prism-bench-ab \
     --bin check-gguf-meta \
@@ -54,7 +54,6 @@ cargo build -p tribunus-compute-core --features prism-backend \
     --bin q8-scale-dump \
     --bin tribunus-pack-nf4tile640 \
     --bin gemma4-inspect \
-    --bin gemma4-ingest \
     --bin qwen25-omni-ingest
 echo "[mac-gate]     production bins: OK"
 

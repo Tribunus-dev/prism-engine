@@ -2472,7 +2472,7 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
     eprintln!("  max_candidates: {max_candidates}");
     eprintln!("  output: {output}");
 
-    let result = run_weight_sweep(&spec, source_path)?;
+    let mut result = run_weight_sweep(&spec, source_path)?;
 
     writeln!(
         std::io::stderr(),
@@ -2508,8 +2508,62 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
     if has_flag(args, "--ane-validation") {
         use tribunus_compute_core::quantization::sweep::ane_validation::validate_operator;
 
+        // ── Operator gate thresholds ──
+        const OPVAL_MAX_NRMSE: f64 = 0.002;
+        const OPVAL_MIN_COSINE: f64 = 0.999;
+        const OPVAL_MAX_ABS_ERROR: f64 = 0.5;
+        const OPVAL_NORM_DRIFT_MIN: f64 = 0.995;
+        const OPVAL_NORM_DRIFT_MAX: f64 = 1.005;
+
+        #[derive(serde::Serialize)]
+        struct OperatorValidationReceipt {
+            tensor_class: String,
+            tensor_key: String,
+            family: String,
+            parameters: serde_json::Value,
+            // f32 ref metrics
+            operator_rmse: f64,
+            operator_nrmse: f64,
+            cosine_similarity: f64,
+            norm_ratio_drift: f64,
+            max_abs_error: f64,
+            // f16 ref metrics (ANE hardware parity)
+            operator_rmse_f16_ref: f64,
+            operator_nrmse_f16_ref: f64,
+            cosine_similarity_f16_ref: f64,
+            norm_ratio_drift_f16_ref: f64,
+            max_abs_error_f16_ref: f64,
+            // runtime evidence
+            backend: String,
+            requested_compute_units: String,
+            compiled_model_path: String,
+            os_version: String,
+            timing_ms: u64,
+            status: String,
+            gate_nrmse_passed: bool,
+            gate_cosine_passed: bool,
+            gate_norm_drift_passed: bool,
+            gate_max_abs_passed: bool,
+        }
+
         let opval_path = output_path.join("operator_validation.json");
-        let mut opval_results: Vec<serde_json::Value> = Vec::new();
+        let mut opval_results: Vec<OperatorValidationReceipt> = Vec::new();
+
+        // Collect os_version once
+        let os_version = std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
 
         for policy in &result.per_class_policies {
             if policy.preferred.is_empty() {
@@ -2543,13 +2597,7 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
             // Reconstruct the weights — use pack_nf4_weights for NF4 preferred candidates
             // Determine codec parameters from the winning candidate
             let params = &r.parameters;
-            let (_codes, _scales, _biases, _extra_bytes, recon): (
-                Vec<u8>,
-                Vec<f32>,
-                Vec<f32>,
-                Vec<u8>,
-                Vec<f32>,
-            ) = if matches!(
+            let recon: Vec<f32> = if matches!(
                 r.family,
                 tribunus_compute_core::quantization::sweep::QuantFamilyId::Nf4
             ) {
@@ -2572,54 +2620,155 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
                     &loaded, in_f as u32, out_f as u32, cb, gs);
                 let recon = tribunus_compute_core::nf4tile640::unpack_nf4_weights_with_group_size_and_codebook(
                     &c, &s, &b, in_f, out_f, gs, cb);
-                (c, s, b, vec![], recon)
+                recon
             } else if matches!(
                 r.family,
                 tribunus_compute_core::quantization::sweep::QuantFamilyId::Int8
             ) {
                 let (codes_i8, scales_i8, biases_i8) = pack_int8_weights(&loaded, in_f, out_f);
                 let recon_i8 = unpack_int8_weights(&codes_i8, &scales_i8, &biases_i8, in_f, out_f);
-                (codes_i8, scales_i8, biases_i8, vec![], recon_i8)
+                recon_i8
             } else {
                 eprintln!("  [ANE] skipping non-NF4/INT8 family");
                 continue;
             };
 
-            match validate_operator(&recon, in_f as u32, out_f as u32) {
+            let op_start = Instant::now();
+            let op_result = validate_operator(&recon, in_f as u32, out_f as u32);
+            let timing_ms = op_start.elapsed().as_millis() as u64;
+
+            let compiled_model_path = format!(
+                "/tmp/ane_opval_{}x{}/compiled/ane_opval_{}x{}.mlmodelc",
+                in_f, out_f, in_f, out_f
+            );
+
+            match op_result {
                 Ok(metrics) => {
                     eprintln!(
-                        "    op_rmse={:.6} op_nrmse={:.6} cosine={:.6} drift={:.6} max_abs={:.6}",
+                        "    op_rmse={:.6} op_nrmse={:.6} cosine={:.6} drift={:.6} max_abs={:.6} timing={}ms",
                         metrics.operator_rmse,
                         metrics.operator_nrmse,
                         metrics.cosine_similarity,
                         metrics.norm_ratio_drift,
-                        metrics.max_abs_error
+                        metrics.max_abs_error,
+                        timing_ms,
                     );
-                    opval_results.push(serde_json::json!({
-                        "tensor_class": format!("{:?}", policy.tensor_class),
-                        "tensor_key": r.tensor_key,
-                        "family": format!("{:?}", r.family),
-                        "parameters": r.parameters,
-                        "operator_rmse": (metrics.operator_rmse * 10000.0).round() / 10000.0,
-                        "operator_nrmse": (metrics.operator_nrmse * 10000.0).round() / 10000.0,
-                        "cosine_similarity": (metrics.cosine_similarity * 10000.0).round() / 10000.0,
-                        "norm_ratio_drift": (metrics.norm_ratio_drift * 10000.0).round() / 10000.0,
-                        "max_abs_error": (metrics.max_abs_error * 10000.0).round() / 10000.0,
-                    }));
+
+                    let gate_nrmse_passed = (metrics.operator_nrmse as f64) <= OPVAL_MAX_NRMSE;
+                    let gate_cosine_passed = (metrics.cosine_similarity as f64) >= OPVAL_MIN_COSINE;
+                    let gate_norm_drift_passed = {
+                        let d = metrics.norm_ratio_drift as f64;
+                        d >= OPVAL_NORM_DRIFT_MIN && d <= OPVAL_NORM_DRIFT_MAX
+                    };
+                    let gate_max_abs_passed = (metrics.max_abs_error as f64) <= OPVAL_MAX_ABS_ERROR;
+                    let gates_passed = gate_nrmse_passed
+                        && gate_cosine_passed
+                        && gate_norm_drift_passed
+                        && gate_max_abs_passed;
+                    let status = if gates_passed { "passed" } else { "failed" };
+
+                    eprintln!(
+                        "      gates: nrmse={} cosine={} drift={} max_abs={} → {}",
+                        gate_nrmse_passed,
+                        gate_cosine_passed,
+                        gate_norm_drift_passed,
+                        gate_max_abs_passed,
+                        status
+                    );
+
+                    opval_results.push(OperatorValidationReceipt {
+                        tensor_class: format!("{:?}", policy.tensor_class),
+                        tensor_key: r.tensor_key.clone(),
+                        family: format!("{:?}", r.family),
+                        parameters: r.parameters.clone(),
+                        operator_rmse: (metrics.operator_rmse * 10000.0).round() / 10000.0,
+                        operator_nrmse: (metrics.operator_nrmse * 10000.0).round() / 10000.0,
+                        cosine_similarity: (metrics.cosine_similarity * 10000.0).round() / 10000.0,
+                        norm_ratio_drift: (metrics.norm_ratio_drift * 10000.0).round() / 10000.0,
+                        max_abs_error: (metrics.max_abs_error * 10000.0).round() / 10000.0,
+                        operator_rmse_f16_ref: (metrics.operator_rmse_f16_ref * 10000.0).round()
+                            / 10000.0,
+                        operator_nrmse_f16_ref: (metrics.operator_nrmse_f16_ref * 10000.0).round()
+                            / 10000.0,
+                        cosine_similarity_f16_ref: (metrics.cosine_similarity_f16_ref * 10000.0)
+                            .round()
+                            / 10000.0,
+                        norm_ratio_drift_f16_ref: (metrics.norm_ratio_drift_f16_ref * 10000.0)
+                            .round()
+                            / 10000.0,
+                        max_abs_error_f16_ref: (metrics.max_abs_error_f16_ref * 10000.0).round()
+                            / 10000.0,
+                        backend: "ANE".to_string(),
+                        requested_compute_units: "all".to_string(),
+                        compiled_model_path,
+                        os_version: os_version.clone(),
+                        timing_ms,
+                        status: status.to_string(),
+                        gate_nrmse_passed,
+                        gate_cosine_passed,
+                        gate_norm_drift_passed,
+                        gate_max_abs_passed,
+                    });
                 }
                 Err(e) => {
                     eprintln!("    [ANE] validation FAILED: {}", e);
+                    opval_results.push(OperatorValidationReceipt {
+                        tensor_class: format!("{:?}", policy.tensor_class),
+                        tensor_key: r.tensor_key.clone(),
+                        family: format!("{:?}", r.family),
+                        parameters: r.parameters.clone(),
+                        operator_rmse: f64::NAN,
+                        operator_nrmse: f64::NAN,
+                        cosine_similarity: f64::NAN,
+                        norm_ratio_drift: f64::NAN,
+                        max_abs_error: f64::NAN,
+                        operator_rmse_f16_ref: f64::NAN,
+                        operator_nrmse_f16_ref: f64::NAN,
+                        cosine_similarity_f16_ref: f64::NAN,
+                        norm_ratio_drift_f16_ref: f64::NAN,
+                        max_abs_error_f16_ref: f64::NAN,
+                        backend: "ANE".to_string(),
+                        requested_compute_units: "all".to_string(),
+                        compiled_model_path,
+                        os_version: os_version.clone(),
+                        timing_ms,
+                        status: "error".to_string(),
+                        gate_nrmse_passed: false,
+                        gate_cosine_passed: false,
+                        gate_norm_drift_passed: false,
+                        gate_max_abs_passed: false,
+                    });
                 }
             }
         }
 
-        if !opval_results.is_empty() {
-            let opval_json = serde_json::to_string_pretty(&opval_results)
-                .map_err(|e| format!("serialize: {}", e))?;
-            std::fs::write(&opval_path, &opval_json)
-                .map_err(|e| format!("write operator_validation.json: {}", e))?;
-            eprintln!("Operator validation written to {}", opval_path.display());
+        // Force fallback for any class whose operator validation did not pass
+        for receipt in &opval_results {
+            if receipt.status != "passed" {
+                if let Some(policy) = result
+                    .per_class_policies
+                    .iter_mut()
+                    .find(|p| format!("{:?}", p.tensor_class) == receipt.tensor_class)
+                {
+                    policy.fallback = "RawF32".to_string();
+                    eprintln!(
+                        "  [ANE] forced fallback for {:?} (ANE status: {})",
+                        policy.tensor_class, receipt.status
+                    );
+                }
+            }
         }
+
+        // Always write operator_validation.json (even if empty array)
+        let opval_json = serde_json::to_string_pretty(&opval_results)
+            .map_err(|e| format!("serialize: {}", e))?;
+        std::fs::write(&opval_path, &opval_json)
+            .map_err(|e| format!("write operator_validation.json: {}", e))?;
+        eprintln!(
+            "Operator validation written to {} ({} receipts)",
+            opval_path.display(),
+            opval_results.len()
+        );
     }
 
     Ok(())

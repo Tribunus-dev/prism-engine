@@ -17,8 +17,8 @@ Mechanics: `mlx-rs`/`mlx-sys` are **optional dependencies** activated only by
 (`compute-core/Cargo.toml`). ~30 modules and ~25 submodules of the legacy MLX
 stack are gated behind `mlx-backend` (grep marker: `// research surface`).
 Shared modules gate at item level. `prism-server` serves `/v1/chat/completions`
-on the Orchestrator (megakernel) and is hermetic; the profiled-MLX serving
-stack (`server::{engine, routes}`) is research.
+and the dashboard UI on the Orchestrator (megakernel) and is hermetic; the
+profiled-MLX serving stack (`server::{engine, routes}`) is research.
 
 **Hermeticity is CI-enforced**, not aspirational: `tools/ci/mac_runtime_gate.sh`
 fails if `cargo tree --features prism-backend` contains `mlx-rs|mlx-sys`, then
@@ -145,8 +145,8 @@ which budgets — no prose required.
   decouple. The research surface remains Linux-checkable via
   `tools/mlx_harness.sh` (79 known off-target artifacts, 0 real).
 - **Mac**: `tools/ci/mac_runtime_gate.sh` — dependency-graph assert →
-  clean-checkout production build (lib + `prism-server`, `prism-bench-ab`,
-  `gemma4-ingest`) → untapped/tapped smokes when `TRIBUNUS_TEST_CIMAGE` is
+  clean-checkout production build (lib + `prism-server` with `server-dashboard`, `prism-bench-ab`,
+  `tribunus-pack-nf4tile640`) → untapped/tapped smokes when `TRIBUNUS_TEST_CIMAGE` is
   provided.
 - Workflow file: `.github/workflows/ci.yml` (integration tokens cannot push
   workflow paths — the PR carries the patch in a comment; apply manually).

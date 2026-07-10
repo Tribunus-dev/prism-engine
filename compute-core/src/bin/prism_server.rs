@@ -53,8 +53,6 @@ use tribunus_compute_core::backend::flex_dispatch::{
 use tribunus_compute_core::backend::heterogeneous_executor::HeterogeneousExecutor;
 use tribunus_compute_core::backend::routing::*;
 use tribunus_compute_core::cimage::header::CIMAGE_MAGIC;
-use tribunus_compute_core::cimage::loader::CImageLoader;
-use tribunus_compute_core::cimage::validate::CImageValidator;
 use tribunus_compute_core::compilation::cancel::CancelToken;
 use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
 use tribunus_compute_core::server::distill_worker::{
@@ -63,11 +61,6 @@ use tribunus_compute_core::server::distill_worker::{
 use tribunus_compute_core::server::state::MemoryAllocationBroker;
 use tribunus_compute_core::tokenizer::TribunusTokenizer;
 use tribunus_compute_core::tts::pipeline::{pcm_chunk_to_wav, pcm_to_wav, TtsPipeline};
-
-#[cfg(feature = "server-dashboard")]
-use tribunus_compute_core::server::dashboard::api::*;
-#[cfg(feature = "server-dashboard")]
-use tribunus_compute_core::server::dashboard::indexer::EvidenceIndexer;
 
 // ── BitNet runtime ─────────────────────────────────────────────────────────
 
@@ -112,6 +105,10 @@ mod dashboard_stubs {
 
     pub async fn dashboard_spa() -> impl axum::response::IntoResponse {
         Html(tribunus_compute_core::server::dashboard::DASHBOARD_HTML)
+    }
+
+    pub async fn dashboard_root() -> axum::response::Redirect {
+        axum::response::Redirect::temporary("/dashboard")
     }
 }
 
@@ -2024,7 +2021,8 @@ async fn main() -> Result<(), String> {
                 get(dashboard_stubs::get_cimage_tensors),
             )
             .route("/v1/cimages/{digest}", get(dashboard_stubs::get_cimage))
-            .route("/", get(dashboard_stubs::dashboard_spa));
+            .route("/dashboard", get(dashboard_stubs::dashboard_spa))
+            .route("/", get(dashboard_stubs::dashboard_root));
     }
 
     println!("[prism-server] Listening on http://{}", addr);

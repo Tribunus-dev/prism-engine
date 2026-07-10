@@ -3,6 +3,7 @@
 use std::fmt;
 use std::path::Path;
 
+use fred::prelude::*;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -16,7 +17,7 @@ use crate::ecs::server::dashboard::models::DashboardCImageSummary;
 // ---------------------------------------------------------------------------
 // PostgreSQL DDL — executed at connection time to ensure tables exist.
 // These match the schema_design.md PostgreSQL types (not the SQLite version in
-// schema.rs) since EvidenceIndexer uses sqlx_postgres::PgPool.
+// schema.rs) since EvidenceIndexer uses sqlx::PgPool.
 // ---------------------------------------------------------------------------
 
 /// `cimage_artifacts` — one row per scanned `.cimage` file.
@@ -96,7 +97,7 @@ pub const CREATE_EXECUTION: &str = "CREATE TABLE IF NOT EXISTS execution_receipt
 );";
 
 /// Run all CREATE TABLE statements in dependency order.
-pub async fn ensure_tables(pool: &sqlx_postgres::PgPool) -> Result<(), sqlx_postgres::Error> {
+pub async fn ensure_tables(pool: &sqlx::PgPool) -> Result<(), sqlx::Error> {
     let statements = [
         CREATE_ARTIFACTS,
         CREATE_TENSORS,
@@ -104,7 +105,7 @@ pub async fn ensure_tables(pool: &sqlx_postgres::PgPool) -> Result<(), sqlx_post
         CREATE_EXECUTION,
     ];
     for stmt in &statements {
-        sqlx_postgres::raw_sql(stmt).execute(pool).await?;
+        sqlx::query(stmt).execute(pool).await?;
     }
     Ok(())
 }
@@ -135,8 +136,8 @@ impl fmt::Display for DashboardError {
 
 impl std::error::Error for DashboardError {}
 
-impl From<sqlx_postgres::Error> for DashboardError {
-    fn from(e: sqlx_postgres::Error) -> Self {
+impl From<sqlx::Error> for DashboardError {
+    fn from(e: sqlx::Error) -> Self {
         DashboardError::Db(e.to_string())
     }
 }
@@ -166,9 +167,9 @@ impl From<serde_json::Error> for DashboardError {
 /// The evidence indexer ties together PostgreSQL (persistence), DuckDB
 /// (analytical queries), and Valkey (caching) for the dashboard backend.
 pub struct EvidenceIndexer {
-    pub pool: sqlx_postgres::PgPool,
+    pub pool: sqlx::PgPool,
     pub duckdb: duckdb::Connection,
-    pub valkey: Option<fred::clients::RedisClient>,
+    pub valkey: Option<Client>,
 }
 
 impl EvidenceIndexer {
@@ -178,10 +179,12 @@ impl EvidenceIndexer {
         pg_conn_str: &str,
         valkey_url: Option<&str>,
     ) -> Result<Self, DashboardError> {
-        let pool = sqlx_postgres::PgPool::connect(pg_conn_str).await?;
+        let pool = sqlx::PgPool::connect(pg_conn_str).await?;
 
         // Ensure all dashboard tables exist.
-        ensure_tables(&pool).await.map_err(DashboardError::Db)?;
+        ensure_tables(&pool)
+            .await
+            .map_err(|e| DashboardError::Db(e.to_string()))?;
 
         // In-memory DuckDB for analytical views.
         let duckdb = duckdb::Connection::open_in_memory()
@@ -189,17 +192,15 @@ impl EvidenceIndexer {
 
         // Optional Valkey connection.
         let valkey = if let Some(url) = valkey_url {
-            let config = fred::types::RedisConfig::from_url(url)
+            let config = Config::from_url(url)
                 .map_err(|e| DashboardError::Db(format!("valkey config: {e}")))?;
-            let client = fred::clients::RedisClient::new(config, None, None, None);
+            let client: Client = Builder::from_config(config)
+                .build()
+                .map_err(|e| DashboardError::Db(format!("valkey build: {e}")))?;
             client
-                .connect()
+                .init()
                 .await
-                .map_err(|e| DashboardError::Db(format!("valkey connect: {e}")))?;
-            client
-                .wait_for_connect()
-                .await
-                .map_err(|e| DashboardError::Db(format!("valkey wait: {e}")))?;
+                .map_err(|e| DashboardError::Db(format!("valkey init: {e}")))?;
             Some(client)
         } else {
             None
@@ -264,11 +265,11 @@ impl EvidenceIndexer {
         let digest = format!("{:x}", Sha256::digest(header_bytes));
 
         // ── Insert into cimage_artifacts ──────────────────────────────
-        let manifest_json =
-            serde_json::to_value(&loaded.manifest).map_err(DashboardError::Parse)?;
+        let manifest_json = serde_json::to_value(&loaded.manifest)
+            .map_err(|e| DashboardError::Parse(e.to_string()))?;
         let artifact_kind_str = artifact_kind_to_str(loaded.manifest.artifact_kind);
 
-        sqlx_postgres::query(
+        sqlx::query(
             r#"INSERT INTO cimage_artifacts
                (digest, path, artifact_kind, model_family, schema_version,
                 tensor_count, receipt_count, compiler_policy_digest,
@@ -302,7 +303,7 @@ impl EvidenceIndexer {
             // Compute payload_size by looking up the payload entry.
             let payload_size = resolve_payload_size(&loaded, tensor);
 
-            sqlx_postgres::query(
+            sqlx::query(
                 r#"INSERT INTO cimage_tensors
                    (artifact_digest, tensor_key, tensor_class, codec, group_size,
                     logical_shape, payload_size)
@@ -341,8 +342,8 @@ impl EvidenceIndexer {
             let start = entry.offset as usize;
             let end = start + entry.len as usize;
             let receipt_bytes = &loaded.payload_blob[start..end];
-            let receipt_json: serde_json::Value =
-                serde_json::from_slice(receipt_bytes).map_err(DashboardError::Parse)?;
+            let receipt_json: serde_json::Value = serde_json::from_slice(receipt_bytes)
+                .map_err(|e| DashboardError::Parse(e.to_string()))?;
 
             if is_admission_receipt(&receipt_json) {
                 insert_admission_receipt(&self.pool, &digest, &receipt_json).await?;
@@ -373,7 +374,7 @@ impl EvidenceIndexer {
 
 /// Insert an admission receipt row from its JSON value.
 async fn insert_admission_receipt(
-    pool: &sqlx_postgres::PgPool,
+    pool: &sqlx::PgPool,
     artifact_digest: &str,
     json: &serde_json::Value,
 ) -> Result<(), DashboardError> {
@@ -418,7 +419,7 @@ async fn insert_admission_receipt(
         .and_then(|v| v.as_str())
         .unwrap_or("ResearchOnly");
 
-    sqlx_postgres::query(
+    sqlx::query(
         r#"INSERT INTO admission_receipts
            (receipt_id, artifact_digest, tensor_key, codec, group_size,
             effective_bpw, zero_fraction, neg_fraction, pos_fraction,
@@ -458,7 +459,7 @@ async fn insert_admission_receipt(
 
 /// Insert an execution receipt row from its JSON value.
 async fn insert_execution_receipt(
-    pool: &sqlx_postgres::PgPool,
+    pool: &sqlx::PgPool,
     artifact_digest: &str,
     json: &serde_json::Value,
 ) -> Result<(), DashboardError> {
@@ -493,7 +494,7 @@ async fn insert_execution_receipt(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    sqlx_postgres::query(
+    sqlx::query(
         r#"INSERT INTO execution_receipts
            (receipt_id, artifact_digest, tensor_key, kernel_name, backend,
             command_buffer_ms, effective_bandwidth_gbps, metal_vs_cpu_nrmse,

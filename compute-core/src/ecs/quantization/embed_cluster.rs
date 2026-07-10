@@ -3,7 +3,7 @@
 //! Pure-Rust implementation of k-means++ initialization, iterative lloyd
 //! refinement, centroid reordering, and 2-bit nibble quantization.
 //!
-//! Extracted from `gemma4_ingest.rs` to be independently testable.
+//! Extracted from the legacy Gemma 4 ingest pipeline to be independently testable.
 //!
 //! ## Reconstruction formula (design decision)
 //!

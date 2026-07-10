@@ -70,9 +70,10 @@ deno_core = { version = "0.405", optional = true }
 deno_core_icudata = { version = "0.77", optional = true }
 anyhow = "1.0.102"
 tracing = "0.1"
+sqlx = { version = "0.7", optional = true, default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
 sqlx-postgres = { version = "0.7", optional = true, default-features = false, features = ["uuid", "json"] }
 duckdb = { version = "1.1", optional = true }
-fred = { version = "10", optional = true, features = ["i-client"] }
+fred = { version = "10", optional = true, features = ["i-client", "i-keys", "i-scripts"] }
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 
 [features]
@@ -86,7 +87,7 @@ ane = []
 ane-executor = ["prism-backend"]
 metal-dispatch = ["dep:metal", "dep:objc", "dep:block"]
 server = ["dep:axum", "dep:tower-http"]
-server-dashboard = ["server", "dep:sqlx-postgres", "dep:duckdb", "dep:fred"]
+server-dashboard = ["server"]
 rocm-probe = []
 amd-rocm = []
 level-zero-probe = []
@@ -112,7 +113,7 @@ path = "src/bin/prism.rs"
 [[bin]]
 name = "prism-server"
 path = "src/bin/prism_server.rs"
-required-features = ["prism-backend"]
+required-features = ["prism-backend", "server-dashboard"]
 
 [[bin]]
 name = "prism-alpha"
@@ -153,11 +154,6 @@ path = "src/bin/gemma4_inspect.rs"
 required-features = ["prism-backend"]
 
 [[bin]]
-name = "gemma4-ingest"
-path = "src/bin/gemma4_ingest.rs"
-required-features = ["prism-backend"]
-
-[[bin]]
 name = "diagnose-nf4-roundtrip"
 path = "src/bin/diagnose_nf4_roundtrip.rs"
 required-features = ["prism-backend"]
@@ -174,3 +170,7 @@ required-features = ["research"]
 [[bin]]
 name = "tribunus-ecs-compile"
 path = "src/bin/tribunus_ecs_compile.rs"
+[[bin]]
+name = "bitnet-ecs-test"
+path = "src/bin/bitnet_ecs_test.rs"
+required-features = ["prism-backend"]

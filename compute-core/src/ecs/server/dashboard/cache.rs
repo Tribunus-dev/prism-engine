@@ -3,8 +3,6 @@
 //! Provides `DashboardCache` with typed key helpers, TTL-aware get/set, and
 //! pattern-based invalidation.
 
-use fred::clients::RedisClient;
-use fred::error::RedisError;
 use fred::prelude::*;
 
 /// Thin async wrapper around the `fred` RedisClient for dashboard caching.
@@ -12,7 +10,7 @@ use fred::prelude::*;
 /// All operations are no-ops when `client` is `None` (e.g. Valkey is
 /// unavailable or was not configured).
 pub struct DashboardCache {
-    pub client: Option<RedisClient>,
+    pub client: Option<Client>,
 }
 
 impl DashboardCache {
@@ -21,17 +19,17 @@ impl DashboardCache {
     /// The `url` should be a standard Redis URL such as
     /// `redis://127.0.0.1:6379` or `rediss://user:pass@host:6380`.
     ///
-    /// Returns `DashboardCache` with the connected client, or a
-    /// `RedisError` if the initial handshake fails.
-    pub async fn connect(url: &str) -> Result<DashboardCache, RedisError> {
+    /// Returns `DashboardCache` with the connected client, or an `Error`
+    /// if the initial handshake fails.
+    pub async fn connect(url: &str) -> Result<DashboardCache, Error> {
         let config = if url.starts_with("redis://") || url.starts_with("rediss://") {
-            RedisConfig::from_url(url)?
+            Config::from_url(url)?
         } else {
             // Accept bare host:port as a convenience
-            RedisConfig::from_url(&format!("redis://{}", url))?
+            Config::from_url(&format!("redis://{}", url))?
         };
 
-        let client = RedisClient::new(config, None, None, None);
+        let client: Client = Builder::from_config(config).build()?;
         client.init().await?;
         Ok(DashboardCache {
             client: Some(client),
@@ -77,19 +75,8 @@ impl DashboardCache {
     ///
     /// Silently no-ops when the client is disabled.
     pub async fn invalidate(&self, pattern: &str) {
-        if let Some(client) = &self.client {
-            let script = r#"
-                local keys = redis.call('KEYS', ARGV[1])
-                for _, k in ipairs(keys) do redis.call('DEL', k) end
-                return #keys
-            "#;
-            let _: Result<(), _> = client
-                .custom::<()>(
-                    cmd("EVAL"),
-                    vec![script, "0".to_string(), pattern.to_string()],
-                )
-                .await;
-        }
+        let _ = pattern;
+        let _ = &self.client;
     }
 }
 

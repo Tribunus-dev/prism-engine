@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::ecs::kv_cache::KvCache;
+use crate::ecs::scheduling::{Request, RequestState, Scheduler, SchedulerConfig};
 use crate::memory::allocator::PagedIosurfaceAllocator;
 use crate::profiled_executor::{LoadedProfiledModel, ProfiledInferenceSession};
-use crate::ecs::scheduling::{Request, RequestState, Scheduler, SchedulerConfig};
 
 // ---------------------------------------------------------------------------
 // Public types

@@ -748,6 +748,66 @@ impl MilBuilder {
         self
     }
 
+    /// Add a matmul with transpose_y=true.
+    /// A is [M, K], B is [N, K] (transposed to [K, N] internally).
+    /// Output is [M, N].
+    pub fn matmul_transpose_y(mut self, a: &str, b: &str) -> Self {
+        let name = self.fresh_name("matmul");
+        let dtype = self.require_dtype(a).expect("SSA: unknown value");
+        let _ = self.require_dtype(b).expect("SSA: unknown value");
+
+        // With transpose_y=true: A[M,K] × B^T[K,N] where K = B.cols, N = B.rows.
+        // B is declared as [N, K], so B.rows = N, B.cols = K.
+        // Output dims are [A.rows, B.rows] = [M, N].
+        let output_dims = {
+            fn get_dims(
+                types: &HashMap<String, mil_spec::ValueType>,
+                key: &str,
+            ) -> Option<(i64, i64)> {
+                let vt = types.get(key)?;
+                let tt = vt.r#type.as_ref()?;
+                if let mil_spec::value_type::Type::TensorType(ref tensor) = tt {
+                    let dims: Vec<i64> = tensor
+                        .dimensions
+                        .iter()
+                        .filter_map(|d| match d.dimension.as_ref()? {
+                            dimension::Dimension::Constant(c) => Some(c.size as i64),
+                            _ => None,
+                        })
+                        .collect();
+                    if dims.len() >= 2 {
+                        Some((dims[0], dims[1]))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            match (
+                get_dims(&self.value_types, a),
+                get_dims(&self.value_types, b),
+            ) {
+                // For matmul with transpose_y=true, output is [A.rows, B.rows]
+                (Some((m, _)), Some((n, _))) => vec![m, n],
+                _ => vec![1, 1],
+            }
+        };
+        let vt = value_type_tensor(tensor_type(dtype, &output_dims));
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("x".to_string(), named_arg(a));
+        inputs_map.insert("y".to_string(), named_arg(b));
+        inputs_map.insert("transpose_x".to_string(), bool_arg(false));
+        inputs_map.insert("transpose_y".to_string(), bool_arg(true));
+
+        let op = make_operation("matmul", &name, inputs_map, &[(&name, &vt)], HashMap::new());
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
     /// Add an element-wise add operation.
     pub fn add(mut self, a: &str, b: &str) -> Self {
         let name = self.fresh_name("add");

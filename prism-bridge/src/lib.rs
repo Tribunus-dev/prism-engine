@@ -16,6 +16,7 @@
 //! ```
 //!
 //! Drag the generated `.swift` and `.h` files into your Xcode project.
+use std::fs;
 use std::sync::Arc;
 use tribunus_compute_core::agent;
 #[cfg(target_os = "macos")]
@@ -32,6 +33,7 @@ use tribunus_compute_core::config::{
 use tribunus_compute_core::device::{
     self, BackendKind, DeviceKind, DeviceMemoryInfo, PcieLinkInfo,
 };
+use tribunus_compute_core::ecs::compile_session::CompileSession;
 use tribunus_compute_core::tools;
 use tribunus_compute_core::tts::pipeline::TtsPipeline;
 
@@ -351,10 +353,7 @@ pub fn prism_compile_gguf(
     }
 }
 
-/// Compile nf4-tile-640 weights into a .cimage using the CLI binary.
-///
-/// For now this defers to the CLI; the direct bridge path will be wired
-/// once the nf4 cimage path is stabilised.
+/// Compile nf4-tile-640 weights into a .cimage using the ECS compile session.
 #[uniffi::export]
 pub fn prism_compile_nf4(
     safetensors_dir: String,
@@ -362,15 +361,50 @@ pub fn prism_compile_nf4(
     tts_repo: Option<String>,
     callback: Option<Box<dyn CompilerProgressCallback>>,
 ) -> Result<String, CompilerError> {
-    let _ = safetensors_dir;
-    let _ = output_cimage_path;
     let _ = tts_repo;
     if let Some(cb) = &callback {
-        cb.on_log("nf4tile640 compilation not yet wired through bridge".into());
+        cb.on_log(format!(
+            "Starting nf4tile640 compilation for {}",
+            safetensors_dir
+        ));
+        cb.on_progress(0.0);
     }
-    Err(CompilerError::InvalidFormat {
-        message: "use CLI: gemma4_ingest --nf4".into(),
-    })
+
+    let source = std::path::Path::new(&safetensors_dir);
+    if !source.is_dir() {
+        return Err(CompilerError::InvalidFormat {
+            message: format!("source dir not found: {}", safetensors_dir),
+        });
+    }
+
+    let output = std::path::Path::new(&output_cimage_path);
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent).map_err(|e| CompilerError::IOError {
+            message: format!("create output dir: {e}"),
+        })?;
+    }
+
+    let mut session = CompileSession::new();
+    session.set_output_path(output_cimage_path.clone());
+    session.register_builtin_systems();
+    session
+        .load_model(&safetensors_dir)
+        .map_err(|e| CompilerError::QuantizationFailed {
+            message: e.to_string(),
+        })?;
+
+    let result = session
+        .compile()
+        .map_err(|e| CompilerError::QuantizationFailed {
+            message: e.to_string(),
+        })?;
+
+    if let Some(cb) = &callback {
+        cb.on_log("nf4tile640 compilation complete".into());
+        cb.on_progress(100.0);
+    }
+
+    Ok(result.unwrap_or_else(|| output_cimage_path.clone()))
 }
 
 // ═══════════════════════════════════════════════════════════════════════

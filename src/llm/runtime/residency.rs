@@ -408,7 +408,7 @@ mod tests {
     }
 }
 
-#[cfg(feature = "prism-backend")]
+#[cfg(feature = "mlx-backend")]
 mod prism_backend {
     use std::collections::HashSet;
     use std::path::Path;

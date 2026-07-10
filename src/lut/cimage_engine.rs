@@ -1,4 +1,4 @@
-#[cfg(feature = "prism-backend")]
+#[cfg(feature = "mlx-backend")]
 pub mod cimage_engine {
     use mlx_rs::ops::indexing::argmax_axis_device;
     use mlx_rs::ops::{

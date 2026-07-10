@@ -50,11 +50,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::exo::ExoNode;
 #[cfg(feature = "generation-tts")]
 use crate::ecs::generation::text_to_speech::pcm_to_wav;
 use crate::ecs::generation::video_generation::{TextToImageGenerator, VideoGenerator};
 use crate::ecs::kv_cache::KvCache;
+use crate::ecs::server::auth::ApiKeyValidator;
+use crate::ecs::server::benchmark::SystemBenchmark;
+use crate::ecs::server::models::{ModelEntry, ModelRegistry};
+use crate::exo::ExoNode;
 use crate::parsing::Grammar;
 use crate::parsing::GrammarTokenizer;
 use crate::profiled_executor::{
@@ -62,13 +65,12 @@ use crate::profiled_executor::{
 };
 use crate::profiled_executor::{ImageInput, MultiModalInput, VideoInput};
 use crate::readiness_gates::ReadinessGates;
-use crate::ecs::server::auth::ApiKeyValidator;
-use crate::ecs::server::benchmark::SystemBenchmark;
-use crate::ecs::server::models::{ModelEntry, ModelRegistry};
 use crate::session::SamplerConfig;
 use crate::tokenizer::TribunusTokenizer;
 use std::time::Instant;
 //use std::path::Path; (removed - use FilePath alias from above)
+use crate::ecs::server::admin::ActiveRequestInfo;
+use crate::ecs::server::rate_limiter::RateLimiter;
 use crate::editing::{
     self, AuditItem, AuditRequest, EditBatchRequest, EditRequest, KnowledgeEditor,
 };
@@ -77,8 +79,6 @@ use crate::lora::{AdapterInfo, LoraAdapter};
 use crate::metrics::InferenceTelemetry;
 use crate::model_cache::{ModelCache, ModelType};
 use crate::profiled_executor::StreamConfig;
-use crate::ecs::server::admin::ActiveRequestInfo;
-use crate::ecs::server::rate_limiter::RateLimiter;
 use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::sse::Event;
@@ -1058,7 +1058,8 @@ async fn v1_chat_completions(
         ModelType::Diffusion => {
             // Route to DiffusionGemma diffusion model for parallel text gen.
             let image_dir = model_arc.image_dir.to_string_lossy().to_string();
-            let dg = match crate::ecs::generation::diffusiongemma::DiffusionModel::load(&image_dir) {
+            let dg = match crate::ecs::generation::diffusiongemma::DiffusionModel::load(&image_dir)
+            {
                 Ok(m) => m,
                 Err(e) => {
                     return JsonResponse(serde_json::json!({
@@ -1529,14 +1530,13 @@ async fn audio_speech(
         }
     };
 
-    let tts = crate::ecs::generation::text_to_speech::TextToSpeechGenerator::load(&model_path).map_err(
-        |e| {
+    let tts = crate::ecs::generation::text_to_speech::TextToSpeechGenerator::load(&model_path)
+        .map_err(|e| {
             (
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("load TTS model: {e}"),
             )
-        },
-    )?;
+        })?;
 
     let (sample_rate, samples) = tts
         .synthesize(input, voice)
@@ -1632,8 +1632,8 @@ async fn audio_transcriptions(
         }
     };
 
-    let asr =
-        crate::ecs::generation::audio_to_text::AudioToTextGenerator::load(&model_path).map_err(|e| {
+    let asr = crate::ecs::generation::audio_to_text::AudioToTextGenerator::load(&model_path)
+        .map_err(|e| {
             (
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("load ASR model: {e}"),
@@ -1955,13 +1955,14 @@ async fn image_generations(
                     ));
                 }
             };
-            let t2i = crate::ecs::generation::text_to_image::TextToImageGenerator::load(&model_path)
-                .map_err(|e| {
-                    (
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        format!("load T2I model: {e}"),
-                    )
-                })?;
+            let t2i =
+                crate::ecs::generation::text_to_image::TextToImageGenerator::load(&model_path)
+                    .map_err(|e| {
+                        (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            format!("load T2I model: {e}"),
+                        )
+                    })?;
 
             let mut images = Vec::with_capacity(n);
             for _ in 0..n {
