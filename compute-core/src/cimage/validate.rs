@@ -571,6 +571,9 @@ mod tests {
     ) -> LoadedCImageV0 {
         LoadedCImageV0 {
             path: std::path::PathBuf::from("test.cimage"),
+            _mmap: None,
+            payload_mmap_offset: 0,
+            payload_mmap_len: 0,
             raw_file_bytes,
             header,
             manifest,

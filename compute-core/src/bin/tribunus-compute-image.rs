@@ -43,6 +43,7 @@ fn main() {
         eprintln!("       source can be a local path or hf:org/model[@revision]");
         eprintln!("       [--draft-model <dir>] [--diagnostic] [--quantize <mode>]");
         eprintln!("       [--diff <manifest.json>]");
+        eprintln!("       [--ecs]");
         eprintln!("       [--target <target>]");
         eprintln!("    quantize modes: nf4, nf4-128, nf4tile640, 8bit");
         eprintln!("    quantize modes: nf4, nf4-128, nf4tile640, 8bit, none (default: hardware auto-detect)");
@@ -237,6 +238,36 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
             )),
         })
         .transpose()?;
+
+    let use_ecs = has_flag(args, "--ecs");
+
+    if use_ecs {
+        use tribunus_compute_core::ecs::compile_session::CompileSession;
+        let mut session = CompileSession::new();
+        session.set_output_path(output);
+        session.register_builtin_systems();
+        match session.load_model(source) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("ECS compile error: {e}");
+                std::process::exit(1);
+            }
+        }
+        match session.compile() {
+            Ok(Some(path)) => {
+                println!("ECS compile completed: {path}");
+                return Ok(());
+            }
+            Ok(None) => {
+                println!("ECS compile completed (no output path configured)");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("ECS compile error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
 
     let output_path = Path::new(output);
 
@@ -3380,7 +3411,7 @@ fn cmd_cimage_bitnet_run_full_model(args: &[String]) -> Result<(), String> {
             .map_err(|e| format!("runner creation error: {e}"))?;
 
         let receipt = runner
-            .run_bitnet_full_model_stack(&loaded, validate_every, layer_limit)
+            .run_bitnet_full_model_stack(&loaded, validate_every, layer_limit, None, 0, 0, None)
             .map_err(|e| format!("runner error: {e}"))?;
 
         if json_output {

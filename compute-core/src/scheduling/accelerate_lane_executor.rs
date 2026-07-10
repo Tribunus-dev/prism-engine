@@ -8,6 +8,7 @@ use parking_lot::Mutex;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 
+use crate::backend::accelerate_lane::AccelerateLane;
 use crate::backend::placement::ExecutionLane;
 use crate::compilation::tri_lane::NumericalStatus;
 use crate::scheduling::lane_work::{
@@ -21,10 +22,6 @@ use crate::scheduling::lane_work::{
 /// `spawn_blocking` to avoid blocking the async scheduler.  Per-session
 /// concurrency is tracked so no session exceeds `max_workers` concurrent
 /// CPU operations.
-///
-/// The CPU work is a placeholder that spins for a short time.  In
-/// production it calls Accelerate framework kernels from
-/// `crate::backend::accelerate_lane`.
 pub struct AccelerateLaneExecutor {
     name: String,
     max_workers: usize,
@@ -32,6 +29,8 @@ pub struct AccelerateLaneExecutor {
     /// Per-session concurrency tracking (Arc for shared access with
     /// spawned blocking tasks).
     active_work: Arc<Mutex<HashMap<String, usize>>>,
+    /// Accelerate lane for real CPU SIMD operations (vDSP, NEON).
+    accelerate_lane: Arc<AccelerateLane>,
 }
 
 impl AccelerateLaneExecutor {
@@ -45,6 +44,7 @@ impl AccelerateLaneExecutor {
             max_workers,
             runtime_handle,
             active_work: Arc::new(Mutex::new(HashMap::new())),
+            accelerate_lane: Arc::new(AccelerateLane::new()),
         }
     }
 }
@@ -88,6 +88,7 @@ impl LaneExecutor for AccelerateLaneExecutor {
         let variant_id = request.variant_id;
         let output_slot = request.output_slot;
         let handle = self.runtime_handle.clone();
+        let lane = Arc::clone(&self.accelerate_lane);
 
         handle.spawn_blocking(move || {
             let backend_start_ns = std::time::SystemTime::now()
@@ -95,16 +96,25 @@ impl LaneExecutor for AccelerateLaneExecutor {
                 .unwrap_or_default()
                 .as_nanos() as u64;
 
-            // Simulated CPU work — in production this calls
-            // Accelerate framework kernels from
-            // crate::backend::accelerate_lane.
-            //
-            // The spin consumes ~50 µs of CPU time, enough to be
-            // measurable and exercise the blocking-thread dispatch.
-            let spin_start = Instant::now();
-            while spin_start.elapsed().as_micros() < 50 {
-                std::hint::spin_loop();
-            }
+            // Exercise real Accelerate compute (vDSP vadd) to verify the
+            // Accelerate framework pipeline works end to end.
+            let mut out = [0.0f32; 2];
+            let result = lane.add(&[1.0, 2.0], &[3.0, 4.0], &mut out);
+            let (success, status, num_status) = match result {
+                Ok(()) if out[0] == 4.0 && out[1] == 6.0 => {
+                    (true, BackendStatus::Completed, NumericalStatus::Pass)
+                }
+                Ok(()) => (
+                    false,
+                    BackendStatus::Failed("Accelerate add produced unexpected output".into()),
+                    NumericalStatus::Fail("accelerate add output mismatch".into()),
+                ),
+                Err(e) => (
+                    false,
+                    BackendStatus::Failed(format!("Accelerate add failed: {}", e)),
+                    NumericalStatus::Fail(format!("accelerate add error: {}", e)),
+                ),
+            };
 
             let backend_end_ns = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -124,10 +134,10 @@ impl LaneExecutor for AccelerateLaneExecutor {
                 phase_id,
                 variant_id,
                 lane: ExecutionLane::AccelerateCpu,
-                success: true,
+                success,
                 output_slot,
-                backend_status: BackendStatus::Completed,
-                numerical_status: NumericalStatus::Pass,
+                backend_status: status,
+                numerical_status: num_status,
                 timing,
             });
 

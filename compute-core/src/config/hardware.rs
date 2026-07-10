@@ -46,6 +46,10 @@ pub struct TextArchitecture {
     /// Diffusion model configuration, if applicable.
     #[serde(default)]
     pub diffusion_config: Option<DiffusionConfig>,
+
+    /// Whether the model supports thinking/reasoning mode (e.g. Qwen3 dual-mode).
+    #[serde(default)]
+    pub thinking_mode: bool,
 }
 
 impl TextArchitecture {
@@ -169,6 +173,7 @@ impl Default for AudioArchitecture {
 pub enum AttentionKind {
     SlidingAttention,
     FullAttention,
+    MiniMaxSparseAttention,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

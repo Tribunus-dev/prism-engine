@@ -4,6 +4,8 @@
 //! variant selection, receipts/scoring, and held-out validation.
 
 use crate::aot_kernels::{AppleSiliconProfileDb, AppleSiliconProfileId, ProfileEvidenceStatus};
+use crate::ecs::aot::template::{MetalKernelTemplate, TemplateError};
+use crate::ecs::system::kernel_gen::TemplateExpander;
 
 use super::*;
 
@@ -73,7 +75,7 @@ fn template_expander_rejects_unknown_placeholder() {
         source: "const uint X = {{UNKNOWN_VAR}};".into(),
         required_placeholders: vec![],
     };
-    let result = KernelTemplateExpander::expand(&template, &dummy_params());
+    let result = TemplateExpander.expand(&template, &dummy_params());
     assert!(result.is_err());
     match result.unwrap_err() {
         TemplateError::UnknownPlaceholder { placeholder, .. } => {
@@ -90,7 +92,7 @@ fn generated_source_contains_expected_constexprs() {
         source: "const uint TW = {{TILE_WIDTH}};\nconst uint GS = {{GROUP_SIZE}};".into(),
         required_placeholders: vec!["TILE_WIDTH".into(), "GROUP_SIZE".into()],
     };
-    let result = KernelTemplateExpander::expand(&template, &dummy_params()).unwrap();
+    let result = TemplateExpander.expand(&template, &dummy_params()).unwrap();
     assert!(result.contains("TW = 640;"));
     assert!(result.contains("GS = 128;"));
 }

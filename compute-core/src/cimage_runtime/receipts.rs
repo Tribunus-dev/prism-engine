@@ -135,6 +135,40 @@ pub struct CImageModelExecutionReceipt {
     pub fallback_used: bool,
     #[serde(default)]
     pub selected_kernel_variant_id: String,
+    #[serde(default)]
+    pub q_len: usize,
+    #[serde(default)]
+    pub kv_len: usize,
+    #[serde(default)]
+    pub warmup_runs: usize,
+    #[serde(default)]
+    pub bench_runs: usize,
+    #[serde(default)]
+    pub host_upload_ms_total: f64,
+    #[serde(default)]
+    pub host_encode_ms_total: f64,
+    #[serde(default)]
+    pub host_allocate_ms_total: f64,
+    #[serde(default)]
+    pub host_overhead_ms_total: f64,
+    #[serde(default)]
+    pub attention_ms_total: f64,
+    #[serde(default)]
+    pub ternary_gemv_ms_total: f64,
+    #[serde(default)]
+    pub other_ms_total: f64,
+    #[serde(default)]
+    pub attention_share: f64,
+    #[serde(default)]
+    pub gemv_share: f64,
+    #[serde(default)]
+    pub effective_prefill_tok_s: f64,
+    #[serde(default)]
+    pub wall_prefill_tok_s: f64,
+    #[serde(default)]
+    pub effective_decode_tok_s: f64,
+    #[serde(default)]
+    pub wall_decode_tok_s: f64,
 }
 
 #[cfg(test)]
@@ -292,6 +326,23 @@ mod tests {
             validation_enabled: true,
             fallback_used: false,
             selected_kernel_variant_id: "default".into(),
+            q_len: 128,
+            kv_len: 128,
+            warmup_runs: 3,
+            bench_runs: 10,
+            host_upload_ms_total: 15.2,
+            host_encode_ms_total: 8.1,
+            host_allocate_ms_total: 5.3,
+            host_overhead_ms_total: 2.4,
+            attention_ms_total: 45.0,
+            ternary_gemv_ms_total: 30.0,
+            other_ms_total: 12.0,
+            attention_share: 0.45,
+            gemv_share: 0.30,
+            effective_prefill_tok_s: 2560.0,
+            wall_prefill_tok_s: 2400.0,
+            effective_decode_tok_s: 8.5,
+            wall_decode_tok_s: 7.2,
         };
         let json = serde_json::to_string_pretty(&r).unwrap();
         let back: CImageModelExecutionReceipt = serde_json::from_str(&json).unwrap();
@@ -312,5 +363,22 @@ mod tests {
         assert!(back.validation_enabled);
         assert!(!back.fallback_used);
         assert_eq!(back.selected_kernel_variant_id, "default");
+        assert_eq!(back.q_len, 128);
+        assert_eq!(back.kv_len, 128);
+        assert_eq!(back.warmup_runs, 3);
+        assert_eq!(back.bench_runs, 10);
+        assert!((back.host_upload_ms_total - 15.2).abs() < 1e-10);
+        assert!((back.host_encode_ms_total - 8.1).abs() < 1e-10);
+        assert!((back.host_allocate_ms_total - 5.3).abs() < 1e-10);
+        assert!((back.host_overhead_ms_total - 2.4).abs() < 1e-10);
+        assert!((back.attention_ms_total - 45.0).abs() < 1e-10);
+        assert!((back.ternary_gemv_ms_total - 30.0).abs() < 1e-10);
+        assert!((back.other_ms_total - 12.0).abs() < 1e-10);
+        assert!((back.attention_share - 0.45).abs() < 1e-10);
+        assert!((back.gemv_share - 0.30).abs() < 1e-10);
+        assert!((back.effective_prefill_tok_s - 2560.0).abs() < 1e-10);
+        assert!((back.wall_prefill_tok_s - 2400.0).abs() < 1e-10);
+        assert!((back.effective_decode_tok_s - 8.5).abs() < 1e-10);
+        assert!((back.wall_decode_tok_s - 7.2).abs() < 1e-10);
     }
 }

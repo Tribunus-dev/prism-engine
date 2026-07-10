@@ -321,6 +321,7 @@ fn extract_architecture_from_config(
         model_type,
         moe_config: None,
         diffusion_config: None,
+        thinking_mode: false,
     })
 }
 

@@ -12,7 +12,7 @@
 //!
 
 use crate::bridge::ARRAY_REGISTRY;
-use crate::config::AttentionKind::{self, FullAttention, SlidingAttention};
+use crate::config::AttentionKind::{self, FullAttention, MiniMaxSparseAttention, SlidingAttention};
 use mlx_rs::ops::indexing::IndexOp;
 use mlx_rs::Array;
 use mlx_rs::{error::Result as MlxResult, ops};
@@ -76,7 +76,7 @@ impl GemmaConfig {
     pub fn layer_is_sliding(&self, layer: u32) -> bool {
         match self.layer_types.get(layer as usize) {
             Some(SlidingAttention) => true,
-            Some(FullAttention) => false,
+            Some(FullAttention) | Some(MiniMaxSparseAttention) => false,
             None => true, // default sliding for unknown
         }
     }

@@ -587,6 +587,7 @@ pub fn extract_architecture(
         model_type,
         moe_config: None,
         diffusion_config: None,
+        thinking_mode: false,
     })
 }
 

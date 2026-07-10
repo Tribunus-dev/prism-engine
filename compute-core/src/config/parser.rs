@@ -328,6 +328,7 @@ pub fn parse_config(
             .clone()
             .unwrap_or_else(|| "gemma4_unified_text".into()),
         moe_config,
+        thinking_mode: false,
     };
 
     let q_bits = raw.quantization.as_ref().and_then(|q| q.bits);

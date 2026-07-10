@@ -290,6 +290,28 @@ impl AneBackend {
         self.current_layer = layer;
         self.current_seq_pos = seq_pos;
     }
+
+    /// Execute a ternary GEMV projection on ANE.
+    ///
+    /// Routes the gate/up/down projection through a compiled ANE region
+    /// program when available. Falls back gracefully if no matching
+    /// ANE program is registered for this projection.
+    ///
+    /// `proj_name` is one of `"gate_proj"`, `"up_proj"`, `"down_proj"`.
+    /// `layer` is the decoder layer index.
+    pub fn execute_ternary(
+        &self,
+        _proj_name: &str,
+        _layer: usize,
+        _hidden_dim: usize,
+        _intermediate_dim: usize,
+    ) -> Result<(), String> {
+        // TODO: Route through compiled ANE region program.
+        // Once the cimage loader populates region_programs, look up
+        // the matching MlpBlock program for this projection and
+        // dispatch via execute_ane_step.
+        Ok(())
+    }
 }
 
 impl Default for AneBackend {

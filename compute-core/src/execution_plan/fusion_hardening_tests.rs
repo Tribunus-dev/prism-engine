@@ -11,7 +11,7 @@ use super::backend_capability::{
 };
 use super::fusion::{DataflowGraph, DataflowNode, DataflowOp, FusedGroup, MatMulContract};
 use super::fusion_scheduler::{
-    FusionError, FusionPolicy, FusionSchedule, FusionScheduler, FusionSelectionPolicy,
+    schedule_groups, FusionError, FusionPolicy, FusionSchedule, FusionSelectionPolicy,
 };
 use super::{CodecFamily, ExecutionMode};
 use crate::execution_profile::PhysicalTileLayout;
@@ -137,7 +137,6 @@ fn schedule_with(
     graph: &DataflowGraph,
     mode: ExecutionMode,
 ) -> Result<FusionSchedule, FusionError> {
-    let scheduler = FusionScheduler::new(reg);
     let policy = FusionPolicy {
         max_group_size: 8,
         allow_materialization: true,
@@ -145,7 +144,13 @@ fn schedule_with(
         execution_mode: mode,
     };
     let sel_policy = FusionSelectionPolicy::default();
-    scheduler.schedule(graph, &policy, &sel_policy, BackendRole::ProductionHotPath)
+    schedule_groups(
+        &reg,
+        graph,
+        &policy,
+        &sel_policy,
+        BackendRole::ProductionHotPath,
+    )
 }
 
 /// Build an empty DataflowGraph for testing schedule error paths.

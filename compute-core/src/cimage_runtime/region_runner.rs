@@ -24,7 +24,7 @@ use std::time::Instant;
 use crate::cimage::mlp_reference::{
     compute_cosine_similarity, compute_max_abs_error, compute_nrmse,
 };
-use crate::cimage::{CImageValidator, LoadedCImageV0, ReceiptEvidenceKind};
+use crate::cimage::{CImageTensorEntry, CImageValidator, LoadedCImageV0, ReceiptEvidenceKind};
 use crate::cimage_runtime::error::{CImageRuntimeError, CImageRuntimeResult};
 use crate::cimage_runtime::lower_mlp::{CImageMlpRegionPlan, MlpShardRegionBuilder};
 use crate::cimage_runtime::receipts::{
@@ -225,6 +225,42 @@ impl RunnerBufferStore {
         }
     }
 
+    /// Create a Metal buffer from byte data using no-copy when the data
+    /// pointer is page-aligned (64 KB on Apple Silicon). Falls back to
+    /// `new_buffer_with_data` (explicit copy) when unaligned.
+    fn new_buffer_no_copy_or_fallback(
+        &mut self,
+        device: &metal::Device,
+        name: &str,
+        data: &[u8],
+    ) -> CImageRuntimeResult<metal::Buffer> {
+        let ptr = data.as_ptr() as usize;
+        let len = data.len() as u64;
+        let buf = if ptr % 16384 == 0 && len > 0 {
+            // Page-aligned: use zero-copy.
+            // Safety: caller guarantees the backing memory outlives the buffer.
+            unsafe {
+                device.new_buffer_with_bytes_no_copy(
+                    data.as_ptr() as *const std::ffi::c_void,
+                    len,
+                    metal::MTLResourceOptions::StorageModeShared,
+                    None,
+                )
+            }
+        } else {
+            device.new_buffer_with_data(
+                data.as_ptr() as *const std::ffi::c_void,
+                len,
+                metal::MTLResourceOptions::StorageModeShared,
+            )
+        };
+        if buf.length() == 0 && !data.is_empty() {
+            return Err(CImageRuntimeError::BufferAllocationFailed(name.to_string()));
+        }
+        buf.set_label(name);
+        Ok(buf)
+    }
+
     fn insert(&mut self, name: String, buf: metal::Buffer) {
         self.buffers.insert(name, buf);
     }
@@ -269,7 +305,7 @@ impl CImageMetalRegionRunner {
     /// kernel function lives in one library.
     pub fn new(device: &metal::Device) -> CImageRuntimeResult<Self> {
         let shader_source = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             include_str!("../compute_image/templates/cimage_rmsnorm_f32.metal"),
             include_str!("../compute_image/templates/cimage_linear_rawf32.metal"),
             include_str!("../compute_image/templates/cimage_linear_int8.metal"),
@@ -283,6 +319,7 @@ impl CImageMetalRegionRunner {
             include_str!("../compute_image/templates/cimage_attention_softmax_f32.metal"),
             include_str!("../compute_image/templates/cimage_attention_apply_f32.metal"),
             include_str!("../compute_image/templates/cimage_ternary_gemv_v1.metal"),
+            include_str!("../cimage/kernels/f32_to_half.metal"),
         );
 
         let library = device
@@ -298,6 +335,11 @@ impl CImageMetalRegionRunner {
             pso_map: HashMap::new(),
             buffer_store: RunnerBufferStore::new(),
         })
+    }
+
+    /// Return a reference to the Metal device.
+    pub fn device(&self) -> &metal::Device {
+        &self.device
     }
 
     // ── PSO cache ───────────────────────────────────────────────────────
@@ -1242,10 +1284,27 @@ impl CImageMetalRegionRunner {
 
         // 2. Extract dimensions from manifest tensor entries.
         let manifest = &image.manifest;
-        let hidden_dim = manifest.tensors[1].logical_shape[0] as usize;
-        let kv_inner = manifest.tensors[2].logical_shape[0] as usize;
-        let intermediate_dim = manifest.tensors[6].logical_shape[0] as usize;
-        let seq_len = manifest.tensors[9].logical_shape[0] as usize;
+        // Find dimensions by tensor_key pattern, not hardcoded index.
+        // Full cimage: tensor[0]=embed_tokens, tensor[1]=position_ids,
+        // then per-layer tensors: layer.0.input_layernorm, layer.0.q_proj, ...
+        fn find_dim(tensors: &[CImageTensorEntry], key_suffix: &str) -> Option<usize> {
+            tensors
+                .iter()
+                .find(|t| t.tensor_key.contains(key_suffix))
+                .map(|t| t.logical_shape[0] as usize)
+        }
+        let hidden_dim = find_dim(&manifest.tensors, "layer.0.q_proj.weight")
+            .or_else(|| find_dim(&manifest.tensors, "q_proj.weight"))
+            .unwrap_or(2560);
+        let kv_inner = find_dim(&manifest.tensors, "layer.0.k_proj.weight")
+            .or_else(|| find_dim(&manifest.tensors, "k_proj.weight"))
+            .unwrap_or(640);
+        let intermediate_dim = find_dim(&manifest.tensors, "layer.0.gate_proj.weight")
+            .or_else(|| find_dim(&manifest.tensors, "gate_proj.weight"))
+            .unwrap_or(6912);
+        let seq_len = find_dim(&manifest.tensors, "position_ids").unwrap_or(4096);
+
+        eprintln!("DEBUG: hidden_dim={hidden_dim} kv_inner={kv_inner} intermediate_dim={intermediate_dim} seq_len={seq_len}");
 
         let head_dim = [128u32, 96, 80, 64, 32, 16, 8, 4]
             .iter()
@@ -1498,6 +1557,8 @@ impl CImageMetalRegionRunner {
             self.get_or_create_pso(bitnet_decoder_op_index_to_function_name(op_index))?;
         }
 
+        self.get_or_create_pso("cimage_f32_to_half")?;
+        self.get_or_create_pso("cimage_half_to_f32")?;
         // 14. Encode and dispatch.
         let encode_start = Instant::now();
         let queue = &self.queue;
@@ -1573,22 +1634,26 @@ impl CImageMetalRegionRunner {
             let groups_per_row = layout.groups_per_tile as usize;
             let bytes_per_group = (group_size * 2 + 7) / 8;
 
-            // Read f32 input from scratch.
+            // Read f32 input from scratch — now via GPU f32→half kernel.
             let input_buf_id = &op.bindings[0].buffer_id;
             let output_buf_id = &op.bindings[4].buffer_id;
-            let f32_input = self.readback_f32(input_buf_id, cols.max(rows))?;
+            let input_buf = self.buffer_store.get(input_buf_id).ok_or_else(|| {
+                CImageRuntimeError::KernelBindingMissing(format!(
+                    "f32_to_half input: {input_buf_id}"
+                ))
+            })?;
+            let output_buf = self.buffer_store.get(output_buf_id).ok_or_else(|| {
+                CImageRuntimeError::KernelBindingMissing(format!(
+                    "half_to_f32 output: {output_buf_id}"
+                ))
+            })?;
 
-            // f32 -> half conversion (inline alloc_bytes).
-            let half_act: Vec<u8> = f32_input
-                .iter()
-                .flat_map(|&v| half::f16::from_f32(v).to_le_bytes())
-                .collect();
-            let half_in_buf = self.device.new_buffer_with_data(
-                half_act.as_ptr() as *const std::ffi::c_void,
-                half_act.len() as u64,
-                metal::MTLResourceOptions::StorageModeShared,
-            );
-            if half_in_buf.length() == 0 {
+            // Allocate half intermediate buffers (zero-filled by Metal; GPU overwrites).
+            let half_in_size = (cols * 2) as u64;
+            let half_in_buf = self
+                .device
+                .new_buffer(half_in_size, metal::MTLResourceOptions::StorageModeShared);
+            if half_in_buf.length() == 0 && half_in_size > 0 {
                 return Err(CImageRuntimeError::BufferAllocationFailed(
                     "half_in_temp".into(),
                 ));
@@ -1627,6 +1692,21 @@ impl CImageMetalRegionRunner {
 
             let t_cb = queue.new_command_buffer();
             let t_enc = t_cb.new_compute_command_encoder();
+
+            // 1. f32 → half (GPU).
+            let f2h_pso = self
+                .pso_map
+                .get("cimage_f32_to_half")
+                .expect("f32_to_half PSO pre-warmed");
+            t_enc.set_compute_pipeline_state(&f2h_pso);
+            t_enc.set_buffer(0, Some(input_buf), 0);
+            t_enc.set_buffer(1, Some(&half_in_buf), 0);
+            t_enc.dispatch_thread_groups(
+                metal::MTLSize::new(cols as u64, 1, 1),
+                metal::MTLSize::new(1, 1, 1),
+            );
+
+            // 2. Ternary gemv.
             let pso = self
                 .pso_map
                 .get("cimage_ternary_gemv_v1")
@@ -1645,18 +1725,23 @@ impl CImageMetalRegionRunner {
                 metal::MTLSize::new(rows as u64, 1, 1),
                 metal::MTLSize::new(1, 1, 1),
             );
+
+            // 3. half → f32 (GPU, writes directly to output buffer).
+            let h2f_pso = self
+                .pso_map
+                .get("cimage_half_to_f32")
+                .expect("half_to_f32 PSO pre-warmed");
+            t_enc.set_compute_pipeline_state(&h2f_pso);
+            t_enc.set_buffer(0, Some(&half_out_buf), 0);
+            t_enc.set_buffer(1, Some(output_buf), 0);
+            t_enc.dispatch_thread_groups(
+                metal::MTLSize::new(rows as u64, 1, 1),
+                metal::MTLSize::new(1, 1, 1),
+            );
+
             t_enc.end_encoding();
             t_cb.commit();
             t_cb.wait_until_completed();
-
-            // half -> f32 conversion, write to output scratch.
-            let out_ptr = half_out_buf.contents() as *const u16;
-            let out_slice = unsafe { std::slice::from_raw_parts(out_ptr, rows) };
-            let f32_output: Vec<f32> = out_slice
-                .iter()
-                .map(|&bits| half::f16::from_bits(bits).to_f32())
-                .collect();
-            self.write_f32_buffer(output_buf_id, &f32_output)?;
             Ok(())
         };
 
@@ -1766,8 +1851,12 @@ impl CImageMetalRegionRunner {
         image: &LoadedCImageV0,
         validate_every_n: Option<usize>,
         num_layers_override: Option<usize>,
+        seq_len_override: Option<usize>,
+        warmup_runs: usize,
+        bench_runs: usize,
+        max_new_tokens: Option<usize>,
     ) -> CImageRuntimeResult<CImageModelExecutionReceipt> {
-        let _total_start = Instant::now();
+        let total_start = Instant::now();
 
         // 1. Validate cimage.
         let load_receipt =
@@ -1779,12 +1868,31 @@ impl CImageMetalRegionRunner {
             )));
         }
 
+        // 1b. Detect Metal device for receipt metadata.
+        let device_name = self.device().name();
+
         // 2. Extract dimensions from manifest tensor entries.
         let manifest = &image.manifest;
-        let hidden_dim = manifest.tensors[1].logical_shape[0] as usize;
-        let kv_inner = manifest.tensors[2].logical_shape[0] as usize;
-        let intermediate_dim = manifest.tensors[6].logical_shape[0] as usize;
-        let seq_len = manifest.tensors[9].logical_shape[0] as usize;
+        // Find dimensions by tensor_key pattern (full cimage has globals before per-layer tensors).
+        fn find_dim(tensors: &[CImageTensorEntry], key_suffix: &str) -> Option<usize> {
+            tensors
+                .iter()
+                .find(|t| t.tensor_key.contains(key_suffix))
+                .map(|t| t.logical_shape[0] as usize)
+        }
+        let hidden_dim = find_dim(&manifest.tensors, "layer.0.q_proj.weight")
+            .or_else(|| find_dim(&manifest.tensors, "q_proj.weight"))
+            .unwrap_or(2560);
+        let kv_inner = find_dim(&manifest.tensors, "layer.0.k_proj.weight")
+            .or_else(|| find_dim(&manifest.tensors, "k_proj.weight"))
+            .unwrap_or(640);
+        let intermediate_dim = find_dim(&manifest.tensors, "layer.0.gate_proj.weight")
+            .or_else(|| find_dim(&manifest.tensors, "gate_proj.weight"))
+            .unwrap_or(6912);
+        let seq_len = find_dim(&manifest.tensors, "position_ids").unwrap_or(4096);
+        // Apply seq_len override if provided (for variable-length profiling).
+        let seq_len = seq_len_override.unwrap_or(seq_len);
+        let max_seq_len = seq_len + max_new_tokens.unwrap_or(0);
 
         let head_dim = [128u32, 96, 80, 64, 32, 16, 8, 4]
             .iter()
@@ -1833,13 +1941,15 @@ impl CImageMetalRegionRunner {
             self.get_or_create_pso(bitnet_decoder_op_index_to_function_name(op_index))?;
         }
 
+        self.get_or_create_pso("cimage_f32_to_half")?;
+        self.get_or_create_pso("cimage_half_to_f32")?;
         // 6. Allocate persistent buffers.
         let hidden_bytes = (hidden_dim * 4) as u64;
         let inter_bytes = (intermediate_dim * 4) as u64;
         let q_out_bytes = (num_heads * head_dim * 4) as u64;
         let kv_out_bytes = (num_kv_heads * head_dim * 4) as u64;
         let scores_bytes = (num_heads * seq_len * 4) as u64;
-        let kv_cache_bytes = (seq_len * num_kv_heads * head_dim * 4) as u64;
+        let kv_cache_bytes = (max_seq_len * num_kv_heads * head_dim * 4) as u64;
 
         let alloc_zero = |name: &str, size: u64| -> CImageRuntimeResult<metal::Buffer> {
             let buf = self
@@ -1980,430 +2090,706 @@ impl CImageMetalRegionRunner {
         } else {
             None
         };
-
-        // 8. Layer loop.
-        let mut layer_timings: Vec<CImageLayerTiming> = Vec::with_capacity(num_layers);
-        let mut layer_validations: Vec<CImageLayerValidationReceipt> = Vec::new();
-        let mut total_command_buffer_ms = 0.0_f64;
-        let mut validation_passed = true;
-        let mut first_divergent_layer: Option<usize> = None;
-
-        // Accumulate per-segment timing across all layers.
-        let mut seg_recorder = DispatchSegmentRecorder::new();
-
-        // CPU hidden state — tracks reference output per layer for validation.
-        let mut cpu_hidden: Vec<f32> = input.clone();
-
+        // 7.5. Pre-load all layer weights into Metal buffers (zero-copy on Apple Silicon).
+        let preload_start = Instant::now();
+        let proj_specs: &[(&str, &str)] = &[
+            ("q_proj", "q_proj"),
+            ("k_proj", "k_proj"),
+            ("v_proj", "v_proj"),
+            ("o_proj", "o_proj"),
+            ("gate_proj", "gate_proj"),
+            ("up_proj", "up_proj"),
+            ("down_proj", "down_proj"),
+        ];
+        let mut all_layer_weights: Vec<HashMap<String, metal::Buffer>> =
+            Vec::with_capacity(num_layers);
         for layer in 0..num_layers {
-            let layer_start = Instant::now();
-            let _ = layer_start; // suppress unused warning until used
-
-            // a. Create resolver for this layer.
             let resolver = BitNetLayerTensorResolver::new(
                 &image.payload_directory,
                 &image.payload_blob,
                 manifest,
                 layer,
             );
+            let mut layer_bufs = HashMap::new();
 
-            let upload_start = Instant::now();
-
-            // b. Upload norm weights.
+            // input_layernorm weight (f32)
             let ln_weight = resolver.resolve_norm_weight("input_layernorm")?;
-            let ln_bytes: Vec<u8> = bytemuck::cast_slice(&ln_weight).to_vec();
-            self.upload_or_update_buffer("input_layernorm_weight", &ln_bytes)?;
+            let ln_bytes: &[u8] = bytemuck::cast_slice(&ln_weight);
+            let buf = self.device.new_buffer_with_data(
+                ln_bytes.as_ptr() as *const std::ffi::c_void,
+                ln_bytes.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            buf.set_label(&format!("input_layernorm_weight_layer_{layer}"));
+            layer_bufs.insert("input_layernorm_weight".into(), buf);
 
-            // c. Upload ternary codes + scales for all 7 projections.
-            let proj_specs: &[(&str, &str, &str)] = &[
-                ("q_proj", "q", "q_proj"),
-                ("k_proj", "k", "k_proj"),
-                ("v_proj", "v", "v_proj"),
-                ("o_proj", "o", "o_proj"),
-                ("gate_proj", "gate", "gate_proj"),
-                ("up_proj", "up", "up_proj"),
-                ("down_proj", "down", "down_proj"),
-            ];
-            for (proj_name, _proj_short, buf_prefix) in proj_specs {
+            // post_attention_layernorm weight (f32)
+            let paln_weight = resolver.resolve_norm_weight("post_attention_layernorm")?;
+            let paln_bytes: &[u8] = bytemuck::cast_slice(&paln_weight);
+            let buf = self.device.new_buffer_with_data(
+                paln_bytes.as_ptr() as *const std::ffi::c_void,
+                paln_bytes.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            buf.set_label(&format!("post_attn_layernorm_weight_layer_{layer}"));
+            layer_bufs.insert("post_attn_layernorm_weight".into(), buf);
+
+            // ternary codes + scales for all 7 projections
+            for (proj_name, buf_prefix) in proj_specs {
                 let codes = resolver.resolve_ternary_codes(proj_name)?;
                 let scales = resolver.resolve_ternary_scales(proj_name)?;
-                self.upload_or_update_buffer(&format!("{buf_prefix}_codes"), &codes)?;
-                self.upload_or_update_buffer(&format!("{buf_prefix}_scales"), &scales)?;
-            }
 
-            // d. Upload zero biases (created once, never updated).
-            //    BitNet b1.58 has no biases, so allocate 4 bytes per row.
-            let bias_scale_pairs: &[(&str, u64)] = &[
-                ("q_proj_biases", (num_heads * head_dim) as u64),
-                ("k_proj_biases", kv_inner as u64),
-                ("v_proj_biases", kv_inner as u64),
-                ("o_proj_biases", hidden_dim as u64),
-                ("gate_proj_biases", intermediate_dim as u64),
-                ("up_proj_biases", intermediate_dim as u64),
-                ("down_proj_biases", hidden_dim as u64),
-            ];
-            for (buf_name, row_count) in bias_scale_pairs {
-                if self.buffer_store.get(buf_name).is_none() {
-                    let zero_size = row_count * 4;
-                    let buf = self
-                        .device
-                        .new_buffer(zero_size, metal::MTLResourceOptions::StorageModeShared);
-                    if buf.length() == 0 && zero_size > 0 {
-                        return Err(CImageRuntimeError::BufferAllocationFailed(
-                            buf_name.to_string(),
-                        ));
-                    }
-                    self.buffer_store.insert(buf_name.to_string(), buf);
-                }
-            }
-
-            // e. Upload post_attention_layernorm_weight.
-            let paln_weight = resolver.resolve_norm_weight("post_attention_layernorm")?;
-            let paln_bytes: Vec<u8> = bytemuck::cast_slice(&paln_weight).to_vec();
-            self.upload_or_update_buffer("post_attn_layernorm_weight", &paln_bytes)?;
-
-            let weight_upload_ms = upload_start.elapsed().as_secs_f64() * 1000.0;
-
-            // f. Update decoder_constants with current layer position.
-            {
-                let constants = build_decoder_constants(
-                    hidden_dim as u32,
-                    num_heads as u32,
-                    num_kv_heads as u32,
-                    head_dim as u32,
-                    seq_len as u32,
-                    layer as u32,
-                    1e-6,
+                let buf = self.device.new_buffer_with_data(
+                    codes.as_ptr() as *const std::ffi::c_void,
+                    codes.len() as u64,
+                    metal::MTLResourceOptions::StorageModeShared,
                 );
-                let const_buf = self
-                    .buffer_store
-                    .get("decoder_constants")
-                    .expect("decoder_constants buffer must exist");
-                self.update_buffer_data(const_buf, &constants);
+                buf.set_label(&format!("{buf_prefix}_codes_layer_{layer}"));
+                layer_bufs.insert(format!("{buf_prefix}_codes"), buf);
+
+                let buf = self.device.new_buffer_with_data(
+                    scales.as_ptr() as *const std::ffi::c_void,
+                    scales.len() as u64,
+                    metal::MTLResourceOptions::StorageModeShared,
+                );
+                buf.set_label(&format!("{buf_prefix}_scales_layer_{layer}"));
+                layer_bufs.insert(format!("{buf_prefix}_scales"), buf);
             }
 
-            // g. Encode and dispatch 18 ops.
-            let encode_start = Instant::now();
+            all_layer_weights.push(layer_bufs);
+        }
 
-            let queue = &self.queue;
+        // Pre-create zero bias buffers (same across all layers, never updated).
+        let bias_entries: &[(&str, u64)] = &[
+            ("q_proj_biases", (num_heads * head_dim) as u64),
+            ("k_proj_biases", kv_inner as u64),
+            ("v_proj_biases", kv_inner as u64),
+            ("o_proj_biases", hidden_dim as u64),
+            ("gate_proj_biases", intermediate_dim as u64),
+            ("up_proj_biases", intermediate_dim as u64),
+            ("down_proj_biases", hidden_dim as u64),
+        ];
+        for (buf_name, row_count) in bias_entries {
+            let zero_size = row_count * 4;
+            let buf = self
+                .device
+                .new_buffer(zero_size, metal::MTLResourceOptions::StorageModeShared);
+            if buf.length() == 0 && zero_size > 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(
+                    buf_name.to_string(),
+                ));
+            }
+            self.buffer_store.insert(buf_name.to_string(), buf);
+        }
 
-            let dispatch_f32_segment = |start: usize, end: usize| -> CImageRuntimeResult<()> {
-                let cb = queue.new_command_buffer();
-                let enc = cb.new_compute_command_encoder();
-                for idx in start..=end {
-                    let op = &ops[idx];
-                    let fn_name = bitnet_decoder_op_index_to_function_name(idx);
-                    let pso = self.pso_map.get(fn_name).expect("PSO must be pre-warmed");
-                    enc.set_compute_pipeline_state(&pso);
-                    for binding in &op.bindings {
-                        if let Some(buf) = self.buffer_store.get(&binding.buffer_id) {
-                            enc.set_buffer(binding.slot as u64, Some(buf), binding.offset);
-                        } else {
-                            return Err(CImageRuntimeError::KernelBindingMissing(format!(
-                                "buffer '{}' not found for op {} slot {}",
-                                binding.buffer_id, op.op_id, binding.slot
-                            )));
-                        }
+        let host_upload_ms_total = preload_start.elapsed().as_secs_f64() * 1000.0;
+
+        // 8. Layer loop.
+        // Backward compat: if both warmup and bench are 0, default to 1 bench run.
+        let bench_runs = if warmup_runs == 0 && bench_runs == 0 {
+            1
+        } else {
+            bench_runs
+        };
+        let total_runs = warmup_runs + bench_runs;
+
+        let mut layer_validations: Vec<CImageLayerValidationReceipt> = Vec::new();
+        let mut validation_passed = true;
+        let mut first_divergent_layer: Option<usize> = None;
+        let mut bench_timings: Vec<f64> = Vec::with_capacity(bench_runs);
+
+        // Accumulate per-segment timing across bench runs only.
+        let mut seg_recorder = DispatchSegmentRecorder::new();
+        let mut layer_timings: Vec<CImageLayerTiming> = Vec::new();
+        let mut total_command_buffer_ms = 0.0_f64;
+
+        // ANE backend (optional, behind feature gate).
+        #[cfg(feature = "ane-executor")]
+        let ane_backend = crate::backend::ane_backend::AneBackend::new();
+        #[cfg(feature = "ane-executor")]
+        let ane_backend = Some(ane_backend);
+        #[cfg(not(feature = "ane-executor"))]
+        #[allow(unused_variables)]
+        let ane_backend: Option<()> = None;
+
+        for run_idx in 0..total_runs {
+            let is_warmup = run_idx < warmup_runs;
+            let run_start = Instant::now();
+
+            // Between runs: reset hidden_in to original input, zero hidden_out and KV caches.
+            if run_idx > 0 {
+                // Reset hidden_in to original deterministic input.
+                self.write_f32_buffer("hidden_in", &input)?;
+                // Zero hidden_out.
+                if let Some(buf) = self.buffer_store.get("hidden_out") {
+                    let ptr = buf.contents() as *mut u8;
+                    unsafe {
+                        std::ptr::write_bytes(ptr, 0, hidden_bytes as usize);
                     }
-                    let grid_x: u32 = if idx == 0 || idx == 11 {
-                        1
-                    } else {
-                        op.dispatch_shape.grid_x
-                    };
-                    enc.dispatch_thread_groups(
-                        metal::MTLSize::new(
-                            grid_x.max(1) as u64,
-                            op.dispatch_shape.grid_y.max(1) as u64,
-                            op.dispatch_shape.grid_z.max(1) as u64,
-                        ),
-                        metal::MTLSize::new(
-                            op.dispatch_shape.threadgroup_m as u64,
-                            op.dispatch_shape.threadgroup_n.max(1) as u64,
-                            op.dispatch_shape.threadgroup_p.max(1) as u64,
-                        ),
-                    );
+                    buf.did_modify_range(metal::NSRange::new(0, hidden_bytes));
                 }
-                enc.end_encoding();
-                cb.commit();
-                cb.wait_until_completed();
-                Ok(())
-            };
+                // Zero KV caches.
+                for kv_name in &["kv_cache_k", "kv_cache_v"] {
+                    if let Some(buf) = self.buffer_store.get(kv_name) {
+                        let ptr = buf.contents() as *mut u8;
+                        unsafe {
+                            std::ptr::write_bytes(ptr, 0, kv_cache_bytes as usize);
+                        }
+                        buf.did_modify_range(metal::NSRange::new(0, kv_cache_bytes));
+                    }
+                }
+                // Ensure hidden_in/hidden_out roles are correct.
+                // After the layer loop, hidden_in has the output (was swapped).
+                // Re-insert hidden_in with the original input.
+                self.write_f32_buffer("hidden_in", &input)?;
+            }
 
-            let dispatch_ternary_proj =
-                |proj_name: &str, op_index: usize| -> CImageRuntimeResult<()> {
-                    let op = &ops[op_index];
-                    let layer_key = format!("layer.{}.{}.weight", layer, proj_name);
-                    let tensor_entry = manifest
-                        .tensors
-                        .iter()
-                        .find(|te| te.tensor_key == layer_key)
-                        .ok_or_else(|| {
-                            CImageRuntimeError::ValidationFailed(format!(
-                                "tensor for {layer_key} not found in layer {layer}",
-                            ))
-                        })?;
+            // Per-run layer loop.
+            let mut cpu_hidden: Vec<f32> = input.clone();
 
-                    let rows = tensor_entry.logical_shape[0] as usize;
-                    let cols = tensor_entry.logical_shape[1] as usize;
-                    let layout = &tensor_entry.physical_layout;
-                    let group_size = layout.group_size as usize;
-                    let groups_per_row = layout.groups_per_tile as usize;
-                    let bytes_per_group = (group_size * 2 + 7) / 8;
+            for layer in 0..num_layers {
+                let layer_start = Instant::now();
+                let _ = layer_start;
 
-                    let input_buf_id = &op.bindings[0].buffer_id;
-                    let output_buf_id = &op.bindings[4].buffer_id;
-                    let f32_input = self.readback_f32(input_buf_id, cols.max(rows))?;
+                // a. Swap in pre-loaded weight buffers for this layer.
+                let swap_start = Instant::now();
+                for (name, buf) in all_layer_weights[layer].iter() {
+                    self.buffer_store.insert(name.clone(), buf.clone());
+                }
+                let weight_upload_ms = swap_start.elapsed().as_secs_f64() * 1000.0;
 
-                    let half_act: Vec<u8> = f32_input
-                        .iter()
-                        .flat_map(|&v| half::f16::from_f32(v).to_le_bytes())
-                        .collect();
-                    let half_in_buf = self.device.new_buffer_with_data(
-                        half_act.as_ptr() as *const std::ffi::c_void,
-                        half_act.len() as u64,
-                        metal::MTLResourceOptions::StorageModeShared,
+                // f. Update decoder_constants with current layer position.
+                {
+                    let constants = build_decoder_constants(
+                        hidden_dim as u32,
+                        num_heads as u32,
+                        num_kv_heads as u32,
+                        head_dim as u32,
+                        seq_len as u32,
+                        layer as u32,
+                        1e-6,
                     );
-                    if half_in_buf.length() == 0 {
-                        return Err(CImageRuntimeError::BufferAllocationFailed(
-                            "half_in_temp".into(),
-                        ));
-                    }
-                    let out_size = (rows * 2) as u64;
-                    let half_out_buf = self
-                        .device
-                        .new_buffer(out_size, metal::MTLResourceOptions::StorageModeShared);
-                    if half_out_buf.length() == 0 && out_size > 0 {
-                        return Err(CImageRuntimeError::BufferAllocationFailed(
-                            "half_out_temp".into(),
-                        ));
-                    }
+                    let const_buf = self
+                        .buffer_store
+                        .get("decoder_constants")
+                        .expect("decoder_constants buffer must exist");
+                    self.update_buffer_data(const_buf, &constants);
+                }
 
-                    let mut tc = vec![0u8; 36];
-                    tc[0..4].copy_from_slice(&(rows as u32).to_le_bytes());
-                    tc[4..8].copy_from_slice(&(cols as u32).to_le_bytes());
-                    tc[8..12].copy_from_slice(&(group_size as u32).to_le_bytes());
-                    tc[12..16].copy_from_slice(&(groups_per_row as u32).to_le_bytes());
-                    tc[16..20].copy_from_slice(&(bytes_per_group as u32).to_le_bytes());
-                    tc[20..24].copy_from_slice(&0u32.to_le_bytes());
-                    let const_buf = self.device.new_buffer_with_data(
-                        tc.as_ptr() as *const std::ffi::c_void,
-                        tc.len() as u64,
-                        metal::MTLResourceOptions::StorageModeShared,
-                    );
-                    if const_buf.length() == 0 {
-                        return Err(CImageRuntimeError::BufferAllocationFailed(
-                            "ternary_const".into(),
-                        ));
-                    }
+                // g. Encode and dispatch 18 ops.
+                let encode_start = Instant::now();
 
-                    let codes_buf_id = format!("{proj_name}_codes");
-                    let scales_buf_id = format!("{proj_name}_scales");
+                let queue = &self.queue;
 
-                    let t_cb = queue.new_command_buffer();
-                    let t_enc = t_cb.new_compute_command_encoder();
-                    let pso = self
-                        .pso_map
-                        .get("cimage_ternary_gemv_v1")
-                        .expect("ternary gemv PSO");
-                    t_enc.set_compute_pipeline_state(&pso);
-                    t_enc.set_buffer(0, Some(&half_in_buf), 0);
-                    if let Some(buf) = self.buffer_store.get(&codes_buf_id) {
-                        t_enc.set_buffer(1, Some(buf), 0);
+                let dispatch_f32_segment = |start: usize, end: usize| -> CImageRuntimeResult<()> {
+                    let cb = queue.new_command_buffer();
+                    let enc = cb.new_compute_command_encoder();
+                    for idx in start..=end {
+                        let op = &ops[idx];
+                        let fn_name = bitnet_decoder_op_index_to_function_name(idx);
+                        let pso = self.pso_map.get(fn_name).expect("PSO must be pre-warmed");
+                        enc.set_compute_pipeline_state(&pso);
+                        for binding in &op.bindings {
+                            if let Some(buf) = self.buffer_store.get(&binding.buffer_id) {
+                                enc.set_buffer(binding.slot as u64, Some(buf), binding.offset);
+                            } else {
+                                return Err(CImageRuntimeError::KernelBindingMissing(format!(
+                                    "buffer '{}' not found for op {} slot {}",
+                                    binding.buffer_id, op.op_id, binding.slot
+                                )));
+                            }
+                        }
+                        let grid_x: u32 = if idx == 0 || idx == 11 {
+                            1
+                        } else {
+                            op.dispatch_shape.grid_x
+                        };
+                        enc.dispatch_thread_groups(
+                            metal::MTLSize::new(
+                                grid_x.max(1) as u64,
+                                op.dispatch_shape.grid_y.max(1) as u64,
+                                op.dispatch_shape.grid_z.max(1) as u64,
+                            ),
+                            metal::MTLSize::new(
+                                op.dispatch_shape.threadgroup_m as u64,
+                                op.dispatch_shape.threadgroup_n.max(1) as u64,
+                                op.dispatch_shape.threadgroup_p.max(1) as u64,
+                            ),
+                        );
                     }
-                    if let Some(buf) = self.buffer_store.get(&scales_buf_id) {
-                        t_enc.set_buffer(2, Some(buf), 0);
-                    }
-                    t_enc.set_buffer(3, Some(&half_out_buf), 0);
-                    t_enc.set_buffer(4, Some(&const_buf), 0);
-                    t_enc.dispatch_thread_groups(
-                        metal::MTLSize::new(rows as u64, 1, 1),
-                        metal::MTLSize::new(1, 1, 1),
-                    );
-                    t_enc.end_encoding();
-                    t_cb.commit();
-                    t_cb.wait_until_completed();
-
-                    let out_ptr = half_out_buf.contents() as *const u16;
-                    let out_slice = unsafe { std::slice::from_raw_parts(out_ptr, rows) };
-                    let f32_output: Vec<f32> = out_slice
-                        .iter()
-                        .map(|&bits| half::f16::from_bits(bits).to_f32())
-                        .collect();
-                    self.write_f32_buffer(output_buf_id, &f32_output)?;
+                    enc.end_encoding();
+                    cb.commit();
+                    cb.wait_until_completed();
                     Ok(())
                 };
 
-            // Dispatch in segments
-            // Segment  0: rmsnorm
-            {
-                let s = Instant::now();
-                dispatch_f32_segment(0, 0)?;
-                seg_recorder.record(0, "rmsnorm", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
+                let dispatch_ternary_proj =
+                    |proj_name: &str, op_index: usize| -> CImageRuntimeResult<()> {
+                        let op = &ops[op_index];
+                        let layer_key = format!("layer.{}.{}.weight", layer, proj_name);
+                        let tensor_entry = manifest
+                            .tensors
+                            .iter()
+                            .find(|te| te.tensor_key == layer_key)
+                            .ok_or_else(|| {
+                                CImageRuntimeError::ValidationFailed(format!(
+                                    "tensor for {layer_key} not found in layer {layer}",
+                                ))
+                            })?;
 
-            // Segments 1-3: ternary Q, K, V projections
-            {
-                let ti = 1;
-                let s = Instant::now();
-                dispatch_ternary_proj("q_proj", ti)?;
-                seg_recorder.record(ti, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
-            {
-                let ti = 2;
-                let s = Instant::now();
-                dispatch_ternary_proj("k_proj", ti)?;
-                seg_recorder.record(ti, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
-            {
-                let ti = 3;
-                let s = Instant::now();
-                dispatch_ternary_proj("v_proj", ti)?;
-                seg_recorder.record(ti, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
+                        let rows = tensor_entry.logical_shape[0] as usize;
+                        let cols = tensor_entry.logical_shape[1] as usize;
+                        let layout = &tensor_entry.physical_layout;
+                        let group_size = layout.group_size as usize;
+                        let groups_per_row = layout.groups_per_tile as usize;
+                        let bytes_per_group = (group_size * 2 + 7) / 8;
+                        let input_buf_id = &op.bindings[0].buffer_id;
+                        let output_buf_id = &op.bindings[4].buffer_id;
+                        let input_buf = self.buffer_store.get(input_buf_id).ok_or_else(|| {
+                            CImageRuntimeError::KernelBindingMissing(format!(
+                                "f32_to_half input: {input_buf_id}"
+                            ))
+                        })?;
+                        let output_buf = self.buffer_store.get(output_buf_id).ok_or_else(|| {
+                            CImageRuntimeError::KernelBindingMissing(format!(
+                                "half_to_f32 output: {output_buf_id}"
+                            ))
+                        })?;
 
-            // Segment  4: attention subgraph (rope, kv_append, scores, softmax, apply)
-            {
-                let s = Instant::now();
-                dispatch_f32_segment(4, 8)?;
-                seg_recorder.record(
-                    4,
-                    "attention_subgraph",
-                    5,
-                    s.elapsed().as_secs_f64() * 1000.0,
-                );
-            }
+                        // Allocate half intermediate buffers (zero-filled by Metal; GPU overwrites).
+                        let half_in_size = (cols * 2) as u64;
+                        let half_in_buf = self
+                            .device
+                            .new_buffer(half_in_size, metal::MTLResourceOptions::StorageModeShared);
+                        if half_in_buf.length() == 0 && half_in_size > 0 {
+                            return Err(CImageRuntimeError::BufferAllocationFailed(
+                                "half_in_temp".into(),
+                            ));
+                        }
+                        let out_size = (rows * 2) as u64;
+                        let half_out_buf = self
+                            .device
+                            .new_buffer(out_size, metal::MTLResourceOptions::StorageModeShared);
+                        if half_out_buf.length() == 0 && out_size > 0 {
+                            return Err(CImageRuntimeError::BufferAllocationFailed(
+                                "half_out_temp".into(),
+                            ));
+                        }
 
-            // Segment  9: o_proj ternary
-            {
-                let s = Instant::now();
-                dispatch_ternary_proj("o_proj", 9)?;
-                seg_recorder.record(9, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
+                        let mut tc = vec![0u8; 36];
+                        tc[0..4].copy_from_slice(&(rows as u32).to_le_bytes());
+                        tc[4..8].copy_from_slice(&(cols as u32).to_le_bytes());
+                        tc[8..12].copy_from_slice(&(group_size as u32).to_le_bytes());
+                        tc[12..16].copy_from_slice(&(groups_per_row as u32).to_le_bytes());
+                        tc[16..20].copy_from_slice(&(bytes_per_group as u32).to_le_bytes());
+                        tc[20..24].copy_from_slice(&0u32.to_le_bytes());
+                        let const_buf = self.device.new_buffer_with_data(
+                            tc.as_ptr() as *const std::ffi::c_void,
+                            tc.len() as u64,
+                            metal::MTLResourceOptions::StorageModeShared,
+                        );
+                        if const_buf.length() == 0 {
+                            return Err(CImageRuntimeError::BufferAllocationFailed(
+                                "ternary_const".into(),
+                            ));
+                        }
 
-            // Segment 10: residual_add + rmsnorm
-            {
-                let s = Instant::now();
-                dispatch_f32_segment(10, 11)?;
-                seg_recorder.record(
-                    10,
-                    "residual_add_rmsnorm",
-                    2,
-                    s.elapsed().as_secs_f64() * 1000.0,
-                );
-            }
+                        let codes_buf_id = format!("{proj_name}_codes");
+                        let scales_buf_id = format!("{proj_name}_scales");
 
-            // Segment 12: gate_proj ternary
-            {
-                let s = Instant::now();
-                dispatch_ternary_proj("gate_proj", 12)?;
-                seg_recorder.record(12, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
+                        let t_cb = queue.new_command_buffer();
+                        let t_enc = t_cb.new_compute_command_encoder();
 
-            // Segment 13: up_proj ternary
-            {
-                let s = Instant::now();
-                dispatch_ternary_proj("up_proj", 13)?;
-                seg_recorder.record(13, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
+                        // 1. f32 → half (GPU).
+                        let f2h_pso = self
+                            .pso_map
+                            .get("cimage_f32_to_half")
+                            .expect("f32_to_half PSO pre-warmed");
+                        t_enc.set_compute_pipeline_state(&f2h_pso);
+                        t_enc.set_buffer(0, Some(input_buf), 0);
+                        t_enc.set_buffer(1, Some(&half_in_buf), 0);
+                        t_enc.dispatch_thread_groups(
+                            metal::MTLSize::new(cols as u64, 1, 1),
+                            metal::MTLSize::new(1, 1, 1),
+                        );
 
-            // Segment 14: silu + mul
-            {
-                let s = Instant::now();
-                dispatch_f32_segment(14, 15)?;
-                seg_recorder.record(14, "silu_mul", 2, s.elapsed().as_secs_f64() * 1000.0);
-            }
+                        // 2. Ternary gemv.
+                        let pso = self
+                            .pso_map
+                            .get("cimage_ternary_gemv_v1")
+                            .expect("ternary gemv PSO");
+                        t_enc.set_compute_pipeline_state(&pso);
+                        t_enc.set_buffer(0, Some(&half_in_buf), 0);
+                        if let Some(buf) = self.buffer_store.get(&codes_buf_id) {
+                            t_enc.set_buffer(1, Some(buf), 0);
+                        }
+                        if let Some(buf) = self.buffer_store.get(&scales_buf_id) {
+                            t_enc.set_buffer(2, Some(buf), 0);
+                        }
+                        t_enc.set_buffer(3, Some(&half_out_buf), 0);
+                        t_enc.set_buffer(4, Some(&const_buf), 0);
+                        t_enc.dispatch_thread_groups(
+                            metal::MTLSize::new(rows as u64, 1, 1),
+                            metal::MTLSize::new(1, 1, 1),
+                        );
 
-            // Segment 16: down_proj ternary
-            {
-                let s = Instant::now();
-                dispatch_ternary_proj("down_proj", 16)?;
-                seg_recorder.record(16, "ternary_gemv", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
+                        // 3. half → f32 (GPU, writes directly to output buffer).
+                        let h2f_pso = self
+                            .pso_map
+                            .get("cimage_half_to_f32")
+                            .expect("half_to_f32 PSO pre-warmed");
+                        t_enc.set_compute_pipeline_state(&h2f_pso);
+                        t_enc.set_buffer(0, Some(&half_out_buf), 0);
+                        t_enc.set_buffer(1, Some(output_buf), 0);
+                        t_enc.dispatch_thread_groups(
+                            metal::MTLSize::new(rows as u64, 1, 1),
+                            metal::MTLSize::new(1, 1, 1),
+                        );
 
-            // Segment 17: residual_add (final)
-            {
-                let s = Instant::now();
-                dispatch_f32_segment(17, 17)?;
-                seg_recorder.record(17, "residual_add", 1, s.elapsed().as_secs_f64() * 1000.0);
-            }
+                        t_enc.end_encoding();
+                        t_cb.commit();
+                        t_cb.wait_until_completed();
+                        Ok(())
+                    };
 
-            let command_buffer_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
-            total_command_buffer_ms += command_buffer_ms;
+                // Dispatch in segments
+                // Segment  0: rmsnorm
+                {
+                    let s = Instant::now();
+                    dispatch_f32_segment(0, 0)?;
+                    if !is_warmup {
+                        seg_recorder.record(0, "rmsnorm", 1, s.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
 
-            layer_timings.push(CImageLayerTiming {
-                layer,
-                weight_upload_ms,
-                command_buffer_ms,
-            });
+                // Segments 1-3: ternary Q, K, V projections
+                {
+                    let ti = 1;
+                    let s = Instant::now();
+                    dispatch_ternary_proj("q_proj", ti)?;
+                    if !is_warmup {
+                        seg_recorder.record(
+                            ti,
+                            "ternary_gemv",
+                            1,
+                            s.elapsed().as_secs_f64() * 1000.0,
+                        );
+                    }
+                }
+                {
+                    let ti = 2;
+                    let s = Instant::now();
+                    dispatch_ternary_proj("k_proj", ti)?;
+                    if !is_warmup {
+                        seg_recorder.record(
+                            ti,
+                            "ternary_gemv",
+                            1,
+                            s.elapsed().as_secs_f64() * 1000.0,
+                        );
+                    }
+                }
+                {
+                    let ti = 3;
+                    let s = Instant::now();
+                    dispatch_ternary_proj("v_proj", ti)?;
+                    if !is_warmup {
+                        seg_recorder.record(
+                            ti,
+                            "ternary_gemv",
+                            1,
+                            s.elapsed().as_secs_f64() * 1000.0,
+                        );
+                    }
+                }
 
-            // h. Validation at this layer index.
-            let should_validate = validate_every_n.map(|n| layer % n == 0).unwrap_or(false);
+                // Segment  4: attention subgraph (rope, kv_append, scores, softmax, apply)
+                {
+                    let s = Instant::now();
+                    dispatch_f32_segment(4, 8)?;
+                    if !is_warmup {
+                        seg_recorder.record(
+                            4,
+                            "attention_subgraph",
+                            5,
+                            s.elapsed().as_secs_f64() * 1000.0,
+                        );
+                    }
+                }
 
-            if should_validate {
-                if let Some(ref cpu_tensors) = cpu_layers {
-                    let metal_hidden = self.readback_f32("hidden_out", hidden_dim * seq_len)?;
+                // Segment  9: o_proj ternary
+                {
+                    let s = Instant::now();
+                    dispatch_ternary_proj("o_proj", 9)?;
+                    if !is_warmup {
+                        seg_recorder.record(
+                            9,
+                            "ternary_gemv",
+                            1,
+                            s.elapsed().as_secs_f64() * 1000.0,
+                        );
+                    }
+                }
 
-                    let cpu_ref = cpu_tensors.get(layer).expect("cpu tensors for layer");
-                    let refs: Vec<&TernaryPackedTensor> = cpu_ref.iter().collect();
+                // Segment 10: residual_add + rmsnorm
+                {
+                    let s = Instant::now();
+                    dispatch_f32_segment(10, 11)?;
+                    if !is_warmup {
+                        seg_recorder.record(
+                            10,
+                            "residual_add_rmsnorm",
+                            2,
+                            s.elapsed().as_secs_f64() * 1000.0,
+                        );
+                    }
+                }
 
-                    let cpu_out = bitnet_decoder_layer_reference(
-                        &cpu_hidden,
-                        &refs,
-                        num_heads,
-                        num_kv_heads,
-                        head_dim,
-                        seq_len,
-                        None, // no KV cache for per-layer comparison
-                    );
+                // Segment 12: gate_proj ternary
+                // If ANE is available and this is an MLP projection, try ANE
+                {
+                    #[cfg(feature = "ane-executor")]
+                    {
+                        if let Some(ane) = &ane_backend {
+                            ane.execute_ternary("gate_proj", layer, hidden_dim, intermediate_dim)?;
+                        } else {
+                            let s = Instant::now();
+                            dispatch_ternary_proj("gate_proj", 12)?;
+                            if !is_warmup {
+                                seg_recorder.record(
+                                    12,
+                                    "ternary_gemv",
+                                    1,
+                                    s.elapsed().as_secs_f64() * 1000.0,
+                                );
+                            }
+                        }
+                    }
+                    #[cfg(not(feature = "ane-executor"))]
+                    {
+                        let s = Instant::now();
+                        dispatch_ternary_proj("gate_proj", 12)?;
+                        if !is_warmup {
+                            seg_recorder.record(
+                                12,
+                                "ternary_gemv",
+                                1,
+                                s.elapsed().as_secs_f64() * 1000.0,
+                            );
+                        }
+                    }
+                }
 
-                    let nrmse = compute_nrmse(&cpu_out, &metal_hidden);
-                    let cosine = compute_cosine_similarity(&cpu_out, &metal_hidden);
-                    let max_abs = compute_max_abs_error(&cpu_out, &metal_hidden);
-                    let passed = nrmse < 1e-3 && cosine > 0.999;
+                // Segment 13: up_proj ternary
+                // If ANE is available and this is an MLP projection, try ANE
+                {
+                    #[cfg(feature = "ane-executor")]
+                    {
+                        if let Some(ane) = &ane_backend {
+                            ane.execute_ternary("up_proj", layer, hidden_dim, intermediate_dim)?;
+                        } else {
+                            let s = Instant::now();
+                            dispatch_ternary_proj("up_proj", 13)?;
+                            if !is_warmup {
+                                seg_recorder.record(
+                                    13,
+                                    "ternary_gemv",
+                                    1,
+                                    s.elapsed().as_secs_f64() * 1000.0,
+                                );
+                            }
+                        }
+                    }
+                    #[cfg(not(feature = "ane-executor"))]
+                    {
+                        let s = Instant::now();
+                        dispatch_ternary_proj("up_proj", 13)?;
+                        if !is_warmup {
+                            seg_recorder.record(
+                                13,
+                                "ternary_gemv",
+                                1,
+                                s.elapsed().as_secs_f64() * 1000.0,
+                            );
+                        }
+                    }
+                }
 
-                    eprintln!(
+                // Segment 14: silu + mul
+                {
+                    let s = Instant::now();
+                    dispatch_f32_segment(14, 15)?;
+                    if !is_warmup {
+                        seg_recorder.record(14, "silu_mul", 2, s.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
+
+                // Segment 16: down_proj ternary
+                // If ANE is available and this is an MLP projection, try ANE
+                {
+                    #[cfg(feature = "ane-executor")]
+                    {
+                        if let Some(ane) = &ane_backend {
+                            ane.execute_ternary("down_proj", layer, hidden_dim, intermediate_dim)?;
+                        } else {
+                            let s = Instant::now();
+                            dispatch_ternary_proj("down_proj", 16)?;
+                            if !is_warmup {
+                                seg_recorder.record(
+                                    16,
+                                    "ternary_gemv",
+                                    1,
+                                    s.elapsed().as_secs_f64() * 1000.0,
+                                );
+                            }
+                        }
+                    }
+                    #[cfg(not(feature = "ane-executor"))]
+                    {
+                        let s = Instant::now();
+                        dispatch_ternary_proj("down_proj", 16)?;
+                        if !is_warmup {
+                            seg_recorder.record(
+                                16,
+                                "ternary_gemv",
+                                1,
+                                s.elapsed().as_secs_f64() * 1000.0,
+                            );
+                        }
+                    }
+                }
+
+                // Segment 17: residual_add (final)
+                {
+                    let s = Instant::now();
+                    dispatch_f32_segment(17, 17)?;
+                    if !is_warmup {
+                        seg_recorder.record(
+                            17,
+                            "residual_add",
+                            1,
+                            s.elapsed().as_secs_f64() * 1000.0,
+                        );
+                    }
+                }
+
+                let command_buffer_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
+                if !is_warmup {
+                    total_command_buffer_ms += command_buffer_ms;
+                }
+
+                if !is_warmup {
+                    layer_timings.push(CImageLayerTiming {
+                        layer,
+                        weight_upload_ms,
+                        command_buffer_ms,
+                    });
+                }
+
+                // h. Validation at this layer index.
+                let should_validate = validate_every_n.map(|n| layer % n == 0).unwrap_or(false);
+
+                if should_validate {
+                    if let Some(ref cpu_tensors) = cpu_layers {
+                        let metal_hidden = self.readback_f32("hidden_out", hidden_dim * seq_len)?;
+
+                        let cpu_ref = cpu_tensors.get(layer).expect("cpu tensors for layer");
+                        let refs: Vec<&TernaryPackedTensor> = cpu_ref.iter().collect();
+
+                        let cpu_out = bitnet_decoder_layer_reference(
+                            &cpu_hidden,
+                            &refs,
+                            num_heads,
+                            num_kv_heads,
+                            head_dim,
+                            seq_len,
+                            None, // no KV cache for per-layer comparison
+                        );
+
+                        let nrmse = compute_nrmse(&cpu_out, &metal_hidden);
+                        let cosine = compute_cosine_similarity(&cpu_out, &metal_hidden);
+                        let max_abs = compute_max_abs_error(&cpu_out, &metal_hidden);
+                        let passed = nrmse < 1e-3 && cosine > 0.999;
+
+                        eprintln!(
                         "Layer {layer} validation: NRMSE={:.6e} cosine={:.6} max_abs={:.6} passed={}",
                         nrmse, cosine, max_abs, passed
                     );
 
-                    if !passed {
-                        validation_passed = false;
-                        if first_divergent_layer.is_none() {
-                            first_divergent_layer = Some(layer);
+                        if !passed {
+                            validation_passed = false;
+                            if first_divergent_layer.is_none() {
+                                first_divergent_layer = Some(layer);
+                            }
                         }
+
+                        layer_validations.push(CImageLayerValidationReceipt {
+                            layer,
+                            hidden_nrmse: nrmse,
+                            hidden_cosine: cosine,
+                            max_abs_error: max_abs,
+                            passed,
+                        });
+
+                        // Advance CPU hidden state for next layer's validation.
+                        cpu_hidden.clone_from(&cpu_out);
                     }
-
-                    layer_validations.push(CImageLayerValidationReceipt {
-                        layer,
-                        hidden_nrmse: nrmse,
-                        hidden_cosine: cosine,
-                        max_abs_error: max_abs,
-                        passed,
-                    });
-
-                    // Advance CPU hidden state for next layer's validation.
-                    cpu_hidden.clone_from(&cpu_out);
                 }
-            }
 
-            // i. Copy hidden_out -> hidden_in for next layer.
-            let out_buf = self.buffer_store.remove("hidden_out");
-            let in_buf = self.buffer_store.remove("hidden_in");
-            // Zero the incoming hidden_out (was hidden_in) for next layer's residual.
-            if let Some(buf) = in_buf.as_ref() {
-                let ptr = buf.contents() as *mut u8;
-                unsafe {
-                    std::ptr::write_bytes(ptr, 0, hidden_bytes as usize);
+                // i. Copy hidden_out -> hidden_in for next layer.
+                let out_buf = self.buffer_store.remove("hidden_out");
+                let in_buf = self.buffer_store.remove("hidden_in");
+                // Zero the incoming hidden_out (was hidden_in) for next layer's residual.
+                if let Some(buf) = in_buf.as_ref() {
+                    let ptr = buf.contents() as *mut u8;
+                    unsafe {
+                        std::ptr::write_bytes(ptr, 0, hidden_bytes as usize);
+                    }
+                    buf.did_modify_range(metal::NSRange::new(0, hidden_bytes));
                 }
-                buf.did_modify_range(metal::NSRange::new(0, hidden_bytes));
+                // Swap: old hidden_out → hidden_in, old hidden_in (zeroed) → hidden_out
+                if let Some(buf) = out_buf {
+                    self.buffer_store.insert("hidden_in".into(), buf);
+                }
+                if let Some(buf) = in_buf {
+                    self.buffer_store.insert("hidden_out".into(), buf);
+                }
+            } // for layer
+              // Per-run timing.
+            let run_elapsed = run_start.elapsed().as_secs_f64() * 1000.0;
+            if !is_warmup {
+                bench_timings.push(run_elapsed);
             }
-            // Swap: old hidden_out → hidden_in, old hidden_in (zeroed) → hidden_out
-            if let Some(buf) = out_buf {
-                self.buffer_store.insert("hidden_in".into(), buf);
-            }
-            if let Some(buf) = in_buf {
-                self.buffer_store.insert("hidden_out".into(), buf);
-            }
-        }
+        } // for run_idx
+
+        // ── Compute receipt statistics ────────────────────────────────────
+        let total_wall_ms: f64 = bench_timings.iter().sum();
+        let families = seg_recorder.aggregate();
+        let attention_ms_total: f64 = families
+            .iter()
+            .filter(|f| f.kernel_family == "attention_subgraph")
+            .map(|f| f.total_command_buffer_ms)
+            .sum();
+        let ternary_gemv_ms_total: f64 = families
+            .iter()
+            .filter(|f| f.kernel_family == "ternary_gemv")
+            .map(|f| f.total_command_buffer_ms)
+            .sum();
+        let total_gpu_ms = total_command_buffer_ms.max(1e-9);
+        let other_ms_total = (total_gpu_ms - attention_ms_total - ternary_gemv_ms_total).max(0.0);
+        let attention_share = attention_ms_total / total_gpu_ms;
+        let gemv_share = ternary_gemv_ms_total / total_gpu_ms;
+        let gpu_sec = total_gpu_ms / 1000.0;
+        let wall_sec = total_wall_ms.max(1e-9) / 1000.0;
+        let effective_prefill_tok_s = (seq_len as f64) / gpu_sec;
+        let wall_prefill_tok_s = (seq_len as f64) / wall_sec;
+        let avg_layer_gpu_sec = (total_gpu_ms / num_layers as f64 / 1000.0).max(1e-9);
+        let avg_layer_wall_sec = (total_wall_ms / num_layers as f64 / 1000.0).max(1e-9);
+        let effective_decode_tok_s = 1.0 / avg_layer_gpu_sec;
+        let wall_decode_tok_s = 1.0 / avg_layer_wall_sec;
+        let host_wall_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+        let host_overhead_ms_total =
+            (host_wall_ms - total_wall_ms - attention_ms_total - ternary_gemv_ms_total).max(0.0);
 
         Ok(CImageModelExecutionReceipt {
             cimage_digest: String::new(),
@@ -2417,7 +2803,7 @@ impl CImageMetalRegionRunner {
             model_id: manifest.model_family.clone(),
             profile_id: format!("{:?}", manifest.layout_profile),
             kernel_dispatch_count: 18 * num_layers,
-            per_kernel_family: seg_recorder.aggregate(),
+            per_kernel_family: families,
             bandwidth_estimate: {
                 let (bytes_read, bytes_written) = compute_per_layer_bandwidth(
                     hidden_dim,
@@ -2427,7 +2813,7 @@ impl CImageMetalRegionRunner {
                     intermediate_dim,
                     seq_len,
                 );
-                let total_bandwidth_ms = total_command_buffer_ms.max(1e-9);
+                let total_bandwidth_ms = total_gpu_ms;
                 let effective_gbps = (bytes_read + bytes_written) as f64 * num_layers as f64
                     / total_bandwidth_ms
                     / 1_000_000.0;
@@ -2438,18 +2824,34 @@ impl CImageMetalRegionRunner {
                 }
             },
             tokens_per_second_prefill: {
-                let total_sec = (total_command_buffer_ms / 1000.0).max(1e-9);
+                let total_sec = gpu_sec;
                 seq_len as f64 * num_layers as f64 / total_sec
             },
             tokens_per_second_decode: {
-                let avg_layer_sec =
-                    (total_command_buffer_ms / 1000.0 / num_layers as f64).max(1e-9);
+                let avg_layer_sec = avg_layer_gpu_sec;
                 1.0 / avg_layer_sec
             },
             first_divergent_layer,
             validation_enabled: validate_every_n.is_some(),
             fallback_used: false,
-            selected_kernel_variant_id: "default".into(),
+            selected_kernel_variant_id: format!("metal:{}", self.device().name().replace(' ', "-")),
+            q_len: seq_len,
+            kv_len: max_seq_len,
+            warmup_runs,
+            bench_runs,
+            host_upload_ms_total,
+            host_encode_ms_total: 0.0,   // TODO: wire per-encode timing
+            host_allocate_ms_total: 0.0, // TODO: wire allocation timing
+            host_overhead_ms_total,
+            attention_ms_total,
+            ternary_gemv_ms_total,
+            other_ms_total,
+            attention_share,
+            gemv_share,
+            effective_prefill_tok_s,
+            wall_prefill_tok_s,
+            effective_decode_tok_s,
+            wall_decode_tok_s,
         })
     }
 }
@@ -3150,7 +3552,7 @@ mod tests {
 
         // Run first layer only, no validation
         let receipt = runner
-            .run_bitnet_full_model_stack(&loaded, None, Some(1))
+            .run_bitnet_full_model_stack(&loaded, None, Some(1), None, 0, 0, None)
             .expect("run full model stack for 1 layer");
 
         assert_eq!(receipt.num_layers, 1, "should have run 1 layer");
@@ -3189,7 +3591,7 @@ mod tests {
 
         // Run 5 layers with validation at layer 4
         let receipt = runner
-            .run_bitnet_full_model_stack(&loaded, Some(4), Some(5))
+            .run_bitnet_full_model_stack(&loaded, Some(4), Some(5), None, 0, 0, None)
             .expect("run full model stack for 5 layers");
 
         assert_eq!(receipt.num_layers, 5, "should have run 5 layers");
@@ -3226,7 +3628,7 @@ mod tests {
 
         // Run all 30 layers, no CPU validation (norm format mismatch)
         let receipt = runner
-            .run_bitnet_full_model_stack(&loaded, None, Some(30))
+            .run_bitnet_full_model_stack(&loaded, None, Some(30), None, 0, 0, None)
             .expect("run full model stack for 30 layers");
 
         assert_eq!(receipt.num_layers, 30, "should have run 30 layers");
@@ -3282,7 +3684,7 @@ mod tests {
         let device = metal::Device::system_default().expect("Metal device");
         let mut runner = CImageMetalRegionRunner::new(&device).expect("create runner");
         let receipt = runner
-            .run_bitnet_full_model_stack(&loaded, None, Some(5))
+            .run_bitnet_full_model_stack(&loaded, None, Some(5), None, 0, 0, None)
             .expect("run for 5 layers");
 
         assert_eq!(receipt.num_layers, 5);

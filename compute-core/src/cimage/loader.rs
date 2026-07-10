@@ -3,18 +3,25 @@
 //! Reads a cimage V0 file from disk, validates structure, and returns a
 //! [`LoadedCImageV0`] with all sections deserialized and in-memory.
 
-use std::fs;
-use std::path::Path;
-
 use crate::cimage::{
     CImageError, CImageHeaderV0, CImageManifestV0, CImagePayloadDirectoryV0,
     CImageReceiptDirectoryV0, CImageResult,
 };
+use std::fs::File;
+use std::path::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LoadedCImageV0 {
     /// Original filesystem path.
     pub path: std::path::PathBuf,
+    /// Memory-mapped backing of the entire file, retained for zero-copy
+    /// access to payload data when creating Metal buffers.
+    pub _mmap: Option<memmap2::Mmap>,
+    /// Offset within the mmap to the start of the payload blob (for
+    /// no-copy GPU buffer creation).
+    pub payload_mmap_offset: usize,
+    /// Length of the payload blob within the mmap.
+    pub payload_mmap_len: usize,
     /// The raw bytes of the entire file, kept for re-validation or digesting.
     pub raw_file_bytes: Vec<u8>,
     /// Deserialized fixed-size header (bincode).
@@ -27,6 +34,23 @@ pub struct LoadedCImageV0 {
     pub receipt_directory: CImageReceiptDirectoryV0,
     /// Contiguous payload blob (raw bytes).
     pub payload_blob: Vec<u8>,
+}
+
+impl Clone for LoadedCImageV0 {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            _mmap: None, // mmap is not Cloneable; reset to None
+            payload_mmap_offset: self.payload_mmap_offset,
+            payload_mmap_len: self.payload_mmap_len,
+            raw_file_bytes: self.raw_file_bytes.clone(),
+            header: self.header.clone(),
+            manifest: self.manifest.clone(),
+            payload_directory: self.payload_directory.clone(),
+            receipt_directory: self.receipt_directory.clone(),
+            payload_blob: self.payload_blob.clone(),
+        }
+    }
 }
 
 /// Stateless loader for cimage V0 artifacts.
@@ -43,7 +67,11 @@ impl CImageLoader {
     /// [`CImageError::RangeOutOfBounds`] when any offset + len exceeds the file,
     /// [`CImageError::JsonDeserialize`] when a JSON section cannot be parsed.
     pub fn load_v0(path: &Path) -> CImageResult<LoadedCImageV0> {
-        let raw = fs::read(path).map_err(|e| CImageError::Io(e.to_string()))?;
+        let file = File::open(path).map_err(|e| CImageError::Io(e.to_string()))?;
+        let mmap =
+            unsafe { memmap2::Mmap::map(&file).map_err(|e| CImageError::Io(e.to_string()))? };
+        drop(file);
+        let raw = mmap[..].to_vec();
         let file_size = raw.len() as u64;
         let path = path.to_path_buf();
 
@@ -164,6 +192,9 @@ impl CImageLoader {
 
         Ok(LoadedCImageV0 {
             path,
+            _mmap: Some(mmap),
+            payload_mmap_offset: header.payload_blob_offset as usize,
+            payload_mmap_len: header.payload_blob_len as usize,
             raw_file_bytes: raw,
             header,
             manifest,

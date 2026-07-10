@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 use crate::execution_plan::backend_capability::{BackendCapabilityRegistry, BackendRole};
 use crate::execution_plan::fusion::{DataflowGraph, DataflowNode, DataflowOp, FusedGroup};
 use crate::execution_plan::fusion_scheduler::{
-    FusionPolicy, FusionSchedule, FusionScheduler, FusionSelectionPolicy,
+    schedule_groups, FusionPolicy, FusionSchedule, FusionSelectionPolicy,
 };
 use crate::execution_plan::{
-    ActivationArenaPlan, CodecFamily, CommandBufferPolicy, DispatchShape,
-    EstimatedKernelCost, ExecutionMode, ExecutionPhase, ExecutionRegion,
-    ExecutionRegionKind, HardwareProfileId, KernelOpKind, KernelSpecializationKey,
-    ModelExecutionPlan, ModelExecutionPlanReceipt, ScheduledKernelOp, TileShape,
+    ActivationArenaPlan, CodecFamily, CommandBufferPolicy, DispatchShape, EstimatedKernelCost,
+    ExecutionMode, ExecutionPhase, ExecutionRegion, ExecutionRegionKind, HardwareProfileId,
+    KernelOpKind, KernelSpecializationKey, ModelExecutionPlan, ModelExecutionPlanReceipt,
+    ScheduledKernelOp, TileShape,
 };
 
 // ── PipelineGraphBuilder ──────────────────────────────────────────────────
@@ -41,17 +41,13 @@ fn map_op_to_kernel_kind(op: &DataflowOp) -> KernelOpKind {
         DataflowOp::Mul { .. } => KernelOpKind::MlpActivation,
         DataflowOp::KvRead { .. } => KernelOpKind::AttentionScore,
         DataflowOp::KvWrite { .. } => KernelOpKind::AttentionApply,
-        DataflowOp::LoadWeight { .. } | DataflowOp::Dequantize { .. } => {
-            KernelOpKind::RmsNorm
-        }
+        DataflowOp::LoadWeight { .. } | DataflowOp::Dequantize { .. } => KernelOpKind::RmsNorm,
         DataflowOp::StoreActivation { .. } => KernelOpKind::RmsNorm,
     }
 }
 
 /// Build a placeholder specialization key for planner-level scheduling.
-fn placeholder_specialization(
-    hardware_profile: HardwareProfileId,
-) -> KernelSpecializationKey {
+fn placeholder_specialization(hardware_profile: HardwareProfileId) -> KernelSpecializationKey {
     KernelSpecializationKey {
         template_id: crate::execution_plan::KernelTemplateId::Nf4Tile640Gemv,
         execution_phase: ExecutionPhase::Decode,
@@ -87,18 +83,13 @@ impl ExecutionPlanner {
             _ => registry.unwrap_or_else(BackendCapabilityRegistry::new),
         };
 
-        let scheduler = FusionScheduler::new(registry);
-
         let policy = FusionPolicy {
             max_group_size: match execution_mode {
                 ExecutionMode::MegakernelExperimental => 16,
                 _ => 8,
             },
             allow_materialization: true,
-            allow_research_fusions: matches!(
-                execution_mode,
-                ExecutionMode::MegakernelExperimental
-            ),
+            allow_research_fusions: matches!(execution_mode, ExecutionMode::MegakernelExperimental),
             execution_mode,
         };
 
@@ -109,34 +100,33 @@ impl ExecutionPlanner {
         };
 
         // Schedule fused groups; fall back to singletons on error.
-        let schedule: FusionSchedule = scheduler
-            .schedule(
-                &graph,
-                &policy,
-                &selection_policy,
-                BackendRole::ProductionHotPath,
-            )
-            .unwrap_or_else(|_| FusionSchedule {
-                groups: graph
-                    .nodes
-                    .iter()
-                    .enumerate()
-                    .map(|(i, node)| FusedGroup {
-                        id: format!("singleton_{i}"),
-                        body: vec![node.clone()],
-                        inputs: node.inputs.clone(),
-                        outputs: node.outputs.clone(),
-                        internal_values: vec![],
-                        codec_family: CodecFamily::RawF32,
-                        precision_plan: None,
-                    })
-                    .collect(),
-                receipts: vec![],
-            });
+        let schedule: FusionSchedule = schedule_groups(
+            &registry,
+            &graph,
+            &policy,
+            &selection_policy,
+            BackendRole::ProductionHotPath,
+        )
+        .unwrap_or_else(|_| FusionSchedule {
+            groups: graph
+                .nodes
+                .iter()
+                .enumerate()
+                .map(|(i, node)| FusedGroup {
+                    id: format!("singleton_{i}"),
+                    body: vec![node.clone()],
+                    inputs: node.inputs.clone(),
+                    outputs: node.outputs.clone(),
+                    internal_values: vec![],
+                    codec_family: CodecFamily::RawF32,
+                    precision_plan: None,
+                })
+                .collect(),
+            receipts: vec![],
+        });
 
         // Lower groups to execution regions.
-        let (regions, pso_keys, scratch_bytes) =
-            Self::lower_groups(&schedule.groups, &target);
+        let (regions, pso_keys, scratch_bytes) = Self::lower_groups(&schedule.groups, &target);
 
         // Plan identity.
         let plan_id = format!("plan_{:016x}", millis_since_epoch());

@@ -69,6 +69,7 @@ sqlite = { version = "0.37", optional = true }
 deno_core = { version = "0.405", optional = true }
 deno_core_icudata = { version = "0.77", optional = true }
 anyhow = "1.0.102"
+tracing = "0.1"
 sqlx-postgres = { version = "0.7", optional = true, default-features = false, features = ["uuid", "json"] }
 duckdb = { version = "1.1", optional = true }
 fred = { version = "10", optional = true, features = ["i-client"] }
@@ -82,10 +83,12 @@ mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
 research = ["prism-backend", "mlx-backend"]
 ffi = ["prism-backend"]
 ane = []
+ane-executor = ["prism-backend"]
 metal-dispatch = ["dep:metal", "dep:objc", "dep:block"]
 server = ["dep:axum", "dep:tower-http"]
 server-dashboard = ["server", "dep:sqlx-postgres", "dep:duckdb", "dep:fred"]
 rocm-probe = []
+amd-rocm = []
 level-zero-probe = []
 candle-cpu = []
 intel = []
@@ -168,3 +171,6 @@ required-features = ["prism-backend"]
 name = "tribunus-compute-image"
 path = "src/bin/tribunus-compute-image.rs"
 required-features = ["research"]
+[[bin]]
+name = "tribunus-ecs-compile"
+path = "src/bin/tribunus_ecs_compile.rs"

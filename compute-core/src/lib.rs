@@ -188,6 +188,8 @@ pub mod device;
 pub mod diffusion;
 #[cfg(feature = "generation-diffusion")]
 pub mod diffusion_provider;
+/// ECS compiler pipeline — entity-component-system world, systems, and component types.
+pub mod ecs;
 #[cfg(feature = "mlx-backend")]
 pub mod engine;
 pub mod engine_error;

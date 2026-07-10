@@ -33,11 +33,10 @@ pub mod accelerate_lane;
 /// AMD ROCm backend — HIP-based GPU compute for Linux/AMD hardware.
 #[cfg(feature = "amd-rocm")]
 pub mod amd_rocm;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
-    feature = "prism-backend-ios"
+    feature = "ane-executor"
 ))]
 #[path = "ane.rs"]
 pub mod ane_backend;
