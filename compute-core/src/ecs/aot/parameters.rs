@@ -78,6 +78,8 @@ pub enum DType {
 // ── Kernel parameters ────────────────────────────────────────────────────
 
 /// Fully-resolved compile-time constants for one kernel variant.
+impl crate::ecs::Component for KernelParameters {}
+/// Fully-resolved compile-time constants for one kernel variant.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelParameters {
     pub kernel_family: KernelFamily,

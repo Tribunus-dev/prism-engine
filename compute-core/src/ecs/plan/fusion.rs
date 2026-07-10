@@ -13,7 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::ecs::plan::{CodecFamily, DType, precision_plan::PrecisionPlan};
-use crate::execution_profile::{GroupAxis, MetadataLayout, PhysicalTileLayout};
+use crate::ecs::execution_profile::{GroupAxis, MetadataLayout, PhysicalTileLayout};
 
 // ---------------------------------------------------------------------------
 // Core type aliases
@@ -409,7 +409,7 @@ pub struct ScheduledOp {
     pub op_index: usize,
     pub step_name: String,
     pub op_kind: ScheduledOpKind,
-    pub execution_view: crate::execution_profile::ExecutionView,
+    pub execution_view: crate::ecs::execution_profile::ExecutionView,
     pub input_tensors: Vec<usize>,
     pub output_tensors: Vec<usize>,
     pub arithmetic_intensity: Option<f64>,
@@ -940,7 +940,7 @@ mod tests {
     /// All DataflowOp variants must serialize and deserialize.
     #[test]
     fn dataflow_op_roundtrip() {
-        use crate::execution_profile::{
+        use crate::ecs::execution_profile::{
             GroupAxis, MetadataLayout, StorageOrder, TileFamily, TileShape as ProfileTileShape,
         };
 

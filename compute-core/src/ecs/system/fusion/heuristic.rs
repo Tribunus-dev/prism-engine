@@ -3,7 +3,7 @@ use crate::ecs::plan::backend_capability::{
     default_registry, BackendCapabilityRegistry, BackendRole, UnsupportedFusionReason,
 };
 use crate::ecs::plan::fusion::DataflowOpKind;
-use crate::ecs::plan::fusion_scheduler::FusionPolicy;
+use crate::ecs::plan::fusion_scheduler_types::FusionPolicy;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, SchedulePhase};
 
 // ── Op kind string parser ──────────────────────────────────────────────

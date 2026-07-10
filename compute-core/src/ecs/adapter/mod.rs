@@ -1942,7 +1942,7 @@ impl ModelFamilyAdapter for PatternAdapter {
             final_logit_softcapping: None,
             hidden_size_per_layer_input: 0,
             layer_types: vec![],
-            rope_local: crate::config::hardware::RopeSpec {
+            rope_local: crate::ecs::config::hardware::RopeSpec {
                 theta: 10000.0,
                 rope_type: "default".to_string(),
                 partial_rotary_factor: None,

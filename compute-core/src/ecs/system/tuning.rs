@@ -1,5 +1,33 @@
-use crate::ecs::aot::profile_id::AmdGpuProfileId;
 use crate::ecs::component::backend::{BackendTarget, GPUArch, TuningSpec};
+use serde::{Deserialize, Serialize};
+
+/// Stable profile identifier for AMD GPU hardware.
+///
+/// Coarse enough for kernel variant selection. Groups GPUs by architecture
+/// generation and performance tier (compute unit count, memory bandwidth).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum AmdGpuProfileId {
+    // \u2500\u2500 CDNA 3 (Instinct MI300) \u2500\u2500
+    /// AMD Instinct MI300X \u2014 304 CU, 192 GB HBM3, 5.2 TB/s
+    InstinctMi300X,
+    /// AMD Instinct MI300A \u2014 228 CU, 128 GB HBM3, 5.2 TB/s (APU)
+    InstinctMi300A,
+    // \u2500\u2500 CDNA 4 (Instinct MI350) \u2500\u2500
+    /// AMD Instinct MI350 \u2014 next-gen CDNA 4 (placeholder, TBD specs)
+    InstinctMi350,
+    // \u2500\u2500 RDNA 3 (consumer) \u2500\u2500
+    /// AMD Radeon RX 7900 XTX \u2014 96 CU, 24 GB GDDR6, 960 GB/s
+    RadeonRx7900Xtx,
+    /// AMD Radeon RX 7900 XT \u2014 84 CU, 20 GB GDDR6, 800 GB/s
+    RadeonRx7900Xt,
+    /// AMD Radeon RX 7800 XT \u2014 60 CU, 16 GB GDDR6, 624 GB/s
+    RadeonRx7800Xt,
+    // \u2500\u2500 RDNA 3.5 (integrated / Strix Point) \u2500\u2500
+    /// AMD Ryzen AI 9 HX 370 (RDNA 3.5 iGPU) \u2014 16 CU
+    RyzenAi9Hx370,
+    /// Fallback for unrecognized AMD GPUs.
+    UnknownAmd,
+}
 
 /// Inline AMD GPU profile data for AOT profile matching.
 /// Replaces the old external profile DB to keep the system self-contained.

@@ -18,6 +18,7 @@ pub mod backend_capability;
 pub mod fusion;
 pub mod fusion_schedule_types;
 pub mod fusion_scheduler;
+pub mod fusion_scheduler_types;
 pub mod precision_plan;
 pub mod profile;
 pub mod receipts;

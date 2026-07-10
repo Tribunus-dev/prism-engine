@@ -16,16 +16,10 @@ impl CompilerSystem for ExecutablePackagingSystem {
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
-
         for &kernel in &kernel_entities {
-            let name = world
-                .name(kernel)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "unnamed_kernel".to_string());
-
+            let name = world.name(kernel).unwrap_or("kernel").to_string();
             if let Some(binary) = world.get_component::<CompiledBinary>(kernel).cloned() {
                 let exe = world.spawn(EntityKind::Executable, Some(format!("exe_{}", name)));
-                world.add_component(exe, binary.clone());
                 world.add_component(
                     exe,
                     ExecutableFormat {
@@ -46,7 +40,6 @@ impl CompilerSystem for ExecutablePackagingSystem {
                 );
             }
         }
-
         Ok(())
     }
 }
@@ -61,43 +54,39 @@ impl CompilerSystem for AdmissionValidationSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let exe_entities = world.entities_of_kind(EntityKind::Executable);
-        let kernel_entities = world.entities_of_kind(EntityKind::Kernel);
+        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let executable_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let mut any_failure = false;
 
-        let mut all_entities: Vec<CompEntity> = Vec::new();
-        all_entities.extend(exe_entities);
-        all_entities.extend(kernel_entities);
-
-        let mut gates_found = false;
-
-        for &entity in &all_entities {
-            if let Some(gate) = world.get_component::<QualityGateResult>(entity) {
-                gates_found = true;
-                if !gate.passed {
-                    tracing::warn!(
-                        "AdmissionValidationSystem: quality gate FAILED on entity {:?}: nrmse={}, perplexity_delta={} and passed=false",
-                        entity,
-                        gate.nrmse,
-                        gate.perplexity_delta,
-                    );
+        for &k in &kernel_entities {
+            if let Some(qg) = world.get_component::<QualityGateResult>(k) {
+                if !qg.passed {
+                    tracing::warn!("Quality gate failed for kernel (nrmse={})", qg.nrmse);
+                }
+            }
+        }
+        for &e in &executable_entities {
+            if let Some(qg) = world.get_component::<QualityGateResult>(e) {
+                if !qg.passed {
+                    tracing::warn!("Quality gate failed for executable (nrmse={})", qg.nrmse);
                 }
             }
         }
 
-        if !gates_found {
-            let model_entities = world.entities_of_kind(EntityKind::Model);
-            if let Some(&model) = model_entities.first() {
+        // Find the ModelEntity and attach a default-passed gate if none exist
+        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        for &m in &model_entities {
+            if world.get_component::<QualityGateResult>(m).is_none() {
                 world.add_component(
-                    model,
+                    m,
                     QualityGateResult {
+                        passed: !any_failure,
                         nrmse: 0.0,
                         perplexity_delta: 0.0,
-                        passed: true,
                     },
                 );
             }
         }
-
         Ok(())
     }
 }

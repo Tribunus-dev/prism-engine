@@ -56,6 +56,7 @@ fn parallel_sha256(data: &[u8]) -> [u8; 32] {
     Sha256::digest(&combined).into()
 }
 
+#[cfg(feature = "mlx-backend")]
 use tribunus_compute_core::ane_compile::compile_ane_artifacts;
 use tribunus_compute_core::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
 use tribunus_compute_core::compute_image::compile::execution_graph::{

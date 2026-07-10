@@ -22,6 +22,7 @@ fn main() {
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
         let template_dir = std::path::Path::new(&manifest_dir)
             .join("src")
+            .join("ecs")
             .join("compute_image")
             .join("templates");
         let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
@@ -176,27 +177,27 @@ fn main() {
         let _out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
         if !cfg!(feature = "coreai-backend") {
             cc::Build::new()
-                .file("src/bridge/coreai_arena.mm")
+                .file("src/ecs/bridge/coreai_arena.mm")
                 .flag("-fobjc-arc")
                 .flag("-std=c++17")
                 .compile("coreai_arena");
             // ObjC++ .mm files need C++ standard library for personality v0.
             println!("cargo:rustc-link-lib=c++");
             cc::Build::new()
-                .file("src/bridge/coreai_exec.mm")
+                .file("src/ecs/bridge/coreai_exec.mm")
                 .flag("-fobjc-arc")
                 .flag("-fblocks")
                 .flag("-std=c++17")
                 .compile("coreai_exec");
             cc::Build::new()
-                .file("src/bridge/coreai_state.mm")
+                .file("src/ecs/bridge/coreai_state.mm")
                 .flag("-fobjc-arc")
                 .flag("-fblocks")
                 .flag("-std=c++17")
                 .compile("coreai_state");
         }
         cc::Build::new()
-            .file("src/bridge/ane_private.mm")
+            .file("src/ecs/bridge/ane_private.mm")
             .flag("-fobjc-arc")
             .flag("-fblocks")
             .flag("-std=c++17")
@@ -215,7 +216,7 @@ fn main() {
         // Swift structs — not bridgeable from ObjC++.
         if cfg!(feature = "coreai-backend") {
             let swift_out = format!("{}/libcoreai_bridge.o", _out_dir);
-            let swift_src = "src/bridge/coreai_bridge.swift";
+            let swift_src = "src/ecs/bridge/coreai_bridge.swift";
             let status = std::process::Command::new("swiftc")
                 .args(["-c", "-emit-object", "-module-name", "CoreAiBridge"])
                 .arg(swift_src)

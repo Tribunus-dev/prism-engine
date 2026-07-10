@@ -44,6 +44,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+#[cfg(feature = "mlx-backend")]
 use tribunus_compute_core::audio_preprocess_accelerate;
 use tribunus_compute_core::backend::create_inference_executor;
 use tribunus_compute_core::backend::flex_dispatch::{
@@ -856,6 +857,8 @@ async fn chat_completions(
         };
 
         // ── Audio encoding ──────────────────────────────────────────────
+        let audio_frames = 0usize;
+        #[cfg(feature = "mlx-backend")]
         let audio_frames = if !audio_bytes.is_empty() {
             let mut total_frames = 0usize;
             for (idx, audio_data) in audio_bytes.iter().enumerate() {

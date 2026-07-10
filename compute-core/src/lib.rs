@@ -19,370 +19,363 @@ compile_error!(
 
 extern crate self as tribunus_compute_core;
 
-#[cfg(feature = "mlx-backend")]
-pub mod analysis;
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
-pub mod ane;
+pub use crate::ecs::ane;
+/// ANE runtime — planar engine program descriptor and lowering.
+#[cfg(target_os = "macos")]
+pub use crate::ecs::ane_runtime;
+#[cfg(feature = "mlx-backend")]
+pub use crate::ecs::core::analysis;
 #[cfg(any(
     target_os = "macos",
     all(feature = "prism-backend-ios", target_os = "ios")
 ))]
-pub mod ane_bridge;
-#[cfg(all(target_os = "macos", feature = "prism-backend"))]
-pub mod ane_compile;
-/// ANE runtime — planar engine program descriptor and lowering.
-#[cfg(target_os = "macos")]
-pub mod ane_runtime;
+pub use crate::ecs::core::ane_bridge;
+#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
+pub use crate::ecs::core::ane_compile;
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend"),
 ))]
-pub mod arena;
+pub use crate::ecs::core::arena;
 #[cfg(target_os = "macos")]
-pub mod arena_info;
+pub use crate::ecs::core::arena_info;
 #[cfg(any(feature = "prism-backend", feature = "prism-backend-ios"))]
-pub mod tts;
+pub use crate::ecs::tts;
 // Pure Rust (atomics + uuid) — must stay unconditional: `errors.rs` (an
 // unconditional module) imports `arena_lifecycle::LifecycleState`, so gating
 // this to macOS broke every non-mac build.
 #[cfg(any(target_os = "macos", feature = "amd-rocm"))]
 pub mod aot_kernels;
-pub mod arena_lifecycle;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend"),
-))]
-pub mod arena_pool;
-pub mod assistant_graph;
+pub use crate::ecs::assistant_graph;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod attention;
+pub use crate::ecs::audio;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod audio;
-#[cfg(any(
-    feature = "prism-backend",
-    feature = "prism-backend-ios",
-    feature = "mlx-backend"
-))]
-pub mod audio_preprocess_accelerate;
-#[cfg(feature = "generation-tts")]
-pub mod audio_provider;
+pub use crate::ecs::autopsy;
+pub use crate::ecs::backend;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod autopsy;
-pub mod backend;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod benchmark;
-pub mod bitnet;
-#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
-pub mod bridge;
+pub use crate::ecs::benchmark;
+pub use crate::ecs::bitnet;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod cache;
+pub use crate::ecs::cache;
 #[cfg(any(feature = "prism-backend", feature = "prism-backend-ios"))]
-pub mod calibration;
+pub use crate::ecs::calibration;
+pub use crate::ecs::cimage;
+pub use crate::ecs::cimage_runtime;
+pub use crate::ecs::compilation;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod capability;
-pub mod cimage;
-pub mod cimage_runtime;
-pub mod cli;
-pub mod compilation;
+pub use crate::ecs::compile;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod compile;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod compile_pipeline;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod compile_progress;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod compile_state;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod compiler;
+pub use crate::ecs::compiler;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios",
     feature = "ffi"
 ))]
-pub mod compute_image;
-pub mod compute_image_v0;
-pub mod compute_ir;
-pub mod compute_lane;
-pub mod compute_service;
-pub mod config;
-pub mod config_namespace;
+pub use crate::ecs::compute_image;
+pub use crate::ecs::compute_image_v0;
+pub use crate::ecs::config;
 #[cfg(feature = "mlx-backend")]
-pub mod contracts;
+pub use crate::ecs::contracts;
+pub use crate::ecs::core::arena_lifecycle;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend"),
+))]
+pub use crate::ecs::core::arena_pool;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+pub use crate::ecs::core::attention;
+#[cfg(feature = "mlx-backend")]
+pub use crate::ecs::core::audio_preprocess_accelerate;
+#[cfg(feature = "generation-tts")]
+pub use crate::ecs::core::audio_provider;
+#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
+pub use crate::ecs::core::bridge;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod copy_ledger;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend"),
-))]
-pub mod coreai;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend"),
-))]
-pub mod coreai_audit;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend"),
-))]
-pub mod coreai_bridge;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend"),
-))]
-pub mod coreai_pipeline;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend"),
-))]
-pub mod coreai_state;
+pub use crate::ecs::core::capability;
+pub use crate::ecs::core::cli;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod cpu_benchmarks;
-pub mod crash_breadcrumb;
+pub use crate::ecs::core::compile_pipeline;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::core::compile_progress;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::core::compile_state;
+pub use crate::ecs::core::compute_ir;
+pub use crate::ecs::core::compute_lane;
+pub use crate::ecs::core::compute_service;
+pub use crate::ecs::core::config_namespace;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::core::copy_ledger;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend"),
+))]
+pub use crate::ecs::core::coreai_audit;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend"),
+))]
+pub use crate::ecs::core::coreai_bridge;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend"),
+))]
+pub use crate::ecs::core::coreai_pipeline;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend"),
+))]
+pub use crate::ecs::core::coreai_state;
+#[cfg(feature = "mlx-backend")]
+pub use crate::ecs::core::cpu_benchmarks;
+pub use crate::ecs::core::crash_breadcrumb;
+#[cfg(feature = "generation-diffusion")]
+pub use crate::ecs::core::diffusion_provider;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend"),
+))]
+pub use crate::ecs::coreai;
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
-pub mod decode_attribution;
+pub use crate::ecs::decode_attribution;
 /// Device registry — runtime hardware enumeration and capability discovery.
-pub mod device;
-pub mod diffusion;
-#[cfg(feature = "generation-diffusion")]
-pub mod diffusion_provider;
+pub use crate::ecs::device;
+pub use crate::ecs::diffusion;
 /// ECS compiler pipeline — entity-component-system world, systems, and component types.
 pub mod ecs;
 #[cfg(feature = "mlx-backend")]
-pub mod engine;
-pub mod engine_error;
-pub mod engine_policy;
-pub mod engine_receipts;
-pub mod errors;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod evidence;
+pub use crate::ecs::core::engine;
+pub use crate::ecs::core::engine_error;
+pub use crate::ecs::core::engine_policy;
+pub use crate::ecs::core::engine_receipts;
+pub use crate::ecs::core::errors;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod executor;
+pub use crate::ecs::core::executor;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod executor_projection;
-pub mod experiment;
+pub use crate::ecs::core::executor_projection;
+pub use crate::ecs::core::experiment;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod external_array;
+pub use crate::ecs::core::external_array;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios",
     feature = "ffi"
 ))]
-pub mod ffi;
-pub mod fusion_region;
+pub use crate::ecs::core::ffi;
+pub use crate::ecs::core::fusion_region;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod gemma;
+pub use crate::ecs::core::gemma;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod generation;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod gguf;
-pub mod gpu_memory;
+pub use crate::ecs::core::gguf;
+pub use crate::ecs::core::gpu_memory;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod gpu_worker;
+pub use crate::ecs::core::gpu_worker;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod heterogeneous;
+pub use crate::ecs::core::heterogeneous;
 #[cfg(feature = "mlx-backend")]
-pub mod hybrid_profile;
+pub use crate::ecs::core::hybrid_profile;
 #[cfg(feature = "generation-image")]
-pub mod image_provider;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod inference;
-pub mod inference_profile;
+pub use crate::ecs::core::image_provider;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod integration;
+pub use crate::ecs::core::integration;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod kv_arena;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod kv_cache;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod layout_compiler;
-pub mod layout_transform;
+pub use crate::ecs::core::layout_compiler;
+pub use crate::ecs::core::layout_transform;
 #[cfg(feature = "mlx-backend")]
-pub mod loader;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod parsing;
-pub mod ternary;
+pub use crate::ecs::core::loader;
 /// Ternary codec — 2-bit {-1, 0, +1} quantization.
 #[cfg(feature = "generation-video")]
-pub mod video_provider;
+pub use crate::ecs::core::video_provider;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::evidence;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::generation;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+pub use crate::ecs::inference;
+pub use crate::ecs::inference_profile;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::kv_arena;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub use crate::ecs::kv_cache;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::parsing;
+pub use crate::ecs::ternary;
 #[macro_use]
-pub mod logging;
+pub use crate::ecs::core::logging;
 /// AMD ROCm backend — multi-die GPU compute module for AMD hardware.
 #[cfg(feature = "amd-rocm")]
-pub mod amd_rocm;
-/// CPU fusion backend — Accelerate + Rayon as a first-class fusion candidate.
-pub mod cpu_runtime;
+pub use crate::ecs::core::amd_rocm;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod editing;
+pub use crate::ecs::core::editing;
+/// CPU fusion backend — Accelerate + Rayon as a first-class fusion candidate.
+pub use crate::ecs::cpu_runtime;
 /// Execution plan — kernel specialization, region batching, and plan data types.
 pub mod execution_plan;
-/// Execution profiling — measures whether a codec policy is worth using.
-pub mod execution_profile;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod exo;
 /// Pure-data types for KV cache, usable without mlx dependency.
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod kv_cache_types;
+pub use crate::ecs::core::kv_cache_types;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod lora;
-pub mod lut;
+pub use crate::ecs::core::lora;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod mapped_image;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub mod memory;
+pub use crate::ecs::core::mapped_image;
 #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
-pub mod metal_capture;
+pub use crate::ecs::core::metal_capture;
 #[cfg(feature = "metal-dispatch")]
-pub mod metal_launcher;
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-pub mod metal_runtime;
-pub mod metrics;
+pub use crate::ecs::core::metal_launcher;
+pub use crate::ecs::core::metrics;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod mil_builder;
+pub use crate::ecs::core::mil_builder;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod mlpackage;
+pub use crate::ecs::core::mlpackage;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod mlx_api_compat;
+pub use crate::ecs::core::mlx_api_compat;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod mlx_executor;
+pub use crate::ecs::core::mlx_executor;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod mlx_inventory;
+pub use crate::ecs::core::mlx_inventory;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod mlx_patch_register;
+pub use crate::ecs::core::mlx_patch_register;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod mlx_runtime_probe;
+pub use crate::ecs::core::mlx_runtime_probe;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod model;
-pub mod model_adapter;
-#[cfg(feature = "mlx-backend")]
-pub mod model_cache;
+pub use crate::ecs::core::model;
+/// Execution profiling — measures whether a codec policy is worth using.
+pub use crate::ecs::execution_profile;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod model_runtime;
-pub mod model_store;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod models;
-pub mod native_kernel;
-pub mod nf4tile640;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod operation_catalog;
+pub use crate::ecs::exo;
+pub use crate::ecs::lut;
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
-pub mod pipeline_parity;
-pub mod placement_profile;
-pub mod plugin;
+pub use crate::ecs::memory;
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+pub use crate::ecs::metal_runtime;
+pub mod model_adapter;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::agent;
+#[cfg(feature = "candle-cpu")]
+pub use crate::ecs::core::candle_cpu_backend;
+#[cfg(feature = "mlx-backend")]
+pub use crate::ecs::core::model_cache;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod primitives;
-pub mod profile_compiler;
+pub use crate::ecs::core::model_runtime;
+pub use crate::ecs::core::model_store;
+pub use crate::ecs::core::native_kernel;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::core::operation_catalog;
+#[cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
+pub use crate::ecs::core::pipeline_parity;
+pub use crate::ecs::core::placement_profile;
+pub use crate::ecs::core::plugin;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod profiled_executor;
+pub use crate::ecs::core::primitives;
+pub use crate::ecs::core::profile_compiler;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod profiled_model;
+pub use crate::ecs::core::profiled_executor;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+pub use crate::ecs::core::profiled_model;
 #[cfg(any(feature = "mlx-backend", feature = "candle-cpu"))]
-pub mod projection_executor;
+pub use crate::ecs::core::projection_executor;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod projection_identity;
+pub use crate::ecs::core::projection_identity;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod projection_tests;
+pub use crate::ecs::core::projection_tests;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
@@ -392,144 +385,140 @@ pub mod projection_tests;
     feature = "tensix",
 ))]
 /// Always-available projection data types (see module docs).
-pub mod projection_types;
-pub mod quantization;
+pub use crate::ecs::core::projection_types;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod quantized;
+pub use crate::ecs::core::quantized;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod readiness_gates;
-pub mod reasoning_evidence;
-pub mod receipt;
-pub mod receipts;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod registry;
+pub use crate::ecs::core::readiness_gates;
+pub use crate::ecs::core::receipt;
+pub use crate::ecs::core::receipts;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod replay_projection;
-pub mod requalification;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod research;
+pub use crate::ecs::core::replay_projection;
+pub use crate::ecs::core::requalification;
 #[cfg(feature = "mlx-backend")]
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod research_contracts;
+pub use crate::ecs::core::research_contracts;
 #[cfg(feature = "mlx-backend")]
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod research_metrics;
+pub use crate::ecs::core::research_metrics;
 #[cfg(feature = "mlx-backend")]
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub mod research_trace;
+pub use crate::ecs::core::research_trace;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod residency;
-pub mod ring;
+pub use crate::ecs::core::residency;
+pub use crate::ecs::core::ring;
+pub use crate::ecs::core::runtime_contract;
+pub use crate::ecs::core::runtime_orchestration;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod runtime;
-pub mod runtime_contract;
-pub mod runtime_orchestration;
+pub use crate::ecs::core::runtime_trace;
+#[cfg(feature = "mlx-backend")]
+pub use crate::ecs::core::session;
+#[cfg(feature = "mlx-backend")]
+pub use crate::ecs::core::sidecar;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod runtime_trace;
+pub use crate::ecs::core::speculative;
+pub use crate::ecs::core::storage_kernel;
+pub use crate::ecs::core::streaming;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::core::supervisor_crash;
+pub use crate::ecs::core::tokenizer;
+pub use crate::ecs::core::toolchain_attest;
+pub use crate::ecs::core::transform_recipe;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+pub use crate::ecs::core::treatment;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::core::validator;
+pub use crate::ecs::core::worker_crash_ledger;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::core::worker_dispatch;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::core::worker_memory;
+pub use crate::ecs::core::worker_protocol;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::models;
+pub use crate::ecs::nf4tile640;
+pub use crate::ecs::quantization;
+pub use crate::ecs::reasoning_evidence;
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub use crate::ecs::registry;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::research;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+pub use crate::ecs::runtime;
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
-pub mod scheduling;
+pub use crate::ecs::scheduling;
 #[cfg(all(target_os = "macos", feature = "server"))]
-pub mod server;
-#[cfg(feature = "mlx-backend")]
-pub mod session;
-/// Training-aware compilation — targets, gates, feedback, and receipts.
-pub mod training_target;
-
-#[cfg(feature = "mlx-backend")]
-pub mod sidecar;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod speculative;
-pub mod state_store;
-
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod supervisor_crash;
-
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod agent;
-#[cfg(feature = "candle-cpu")]
-pub mod candle_cpu_backend;
+pub use crate::ecs::server;
+pub use crate::ecs::state_store;
 #[cfg(feature = "storage-adapters")]
-pub mod storage_adapters;
-pub mod storage_kernel;
-pub mod streaming;
-pub mod tokenizer;
-pub mod toolchain_attest;
+pub use crate::ecs::storage_adapters;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod tools;
-pub mod transform_recipe;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod treatment;
+pub use crate::ecs::tools;
+/// Training-aware compilation — targets, gates, feedback, and receipts.
+pub use crate::ecs::training_target;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod validator;
+pub use crate::ecs::video;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub mod video;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod vision;
-pub mod worker_crash_ledger;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod worker_dispatch;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod worker_memory;
-pub mod worker_protocol;
+pub use crate::ecs::vision;
 #[cfg(feature = "mlx-backend")]
 pub use crate::session::{
     ControlSessionState, GenerationControlSession, InferenceSession, InferenceSessionState,

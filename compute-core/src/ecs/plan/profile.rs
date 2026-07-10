@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use super::*;
-use crate::execution_profile::*;
+use crate::ecs::execution_profile::*;
 
 /// Real profile runner that executes a ModelExecutionPlan and collects receipts.
 pub async fn run_profile_plan(
@@ -107,7 +107,7 @@ pub async fn run_profile_plan(
 use crate::metal_runtime::pso_cache::MetalPsoCache;
 
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-use crate::ecs::plan::region_encoder::RegionEncoder;
+use crate::execution_plan::region_encoder::RegionEncoder;
 
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 use metal::{ComputePipelineState, Device};

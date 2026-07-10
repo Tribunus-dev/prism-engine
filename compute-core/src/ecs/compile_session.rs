@@ -38,7 +38,70 @@ impl CompileSession {
     pub fn register_builtin_systems(&mut self) {
         use crate::ecs::system::*;
 
+        // ── Phase A: ModelLoading ────────────────────────────────────────
+        #[cfg(target_os = "macos")]
+        self.world.add_system(Box::new(metal_init::MetalInitSystem));
+        self.world
+            .add_system(Box::new(phase_engine_init::PhaseEngineInitSystem));
+        self.world
+            .add_system(Box::new(session_init::SessionInitSystem));
+
+        #[cfg(any(
+            feature = "mlx-backend",
+            feature = "prism-backend",
+            feature = "prism-backend-ios"
+        ))]
+        self.world
+            .add_system(Box::new(source_load::SourceLoadingSystem {
+                source_dir: ".".into(),
+                skip_validation: true,
+            }));
+        #[cfg(any(
+            feature = "mlx-backend",
+            feature = "prism-backend",
+            feature = "prism-backend-ios"
+        ))]
+        self.world
+            .add_system(Box::new(source_load::TensorTableLoadingSystem {
+                source_dir: ".".into(),
+            }));
+        #[cfg(any(
+            feature = "mlx-backend",
+            feature = "prism-backend",
+            feature = "prism-backend-ios"
+        ))]
+        self.world.add_system(Box::new(tts::TTSSystem {
+            safetensors_path: ".".into(),
+            output_dir: ".".into(),
+        }));
+        self.world.add_system(Box::new(download::DownloadSystem));
+        self.world
+            .add_system(Box::new(download::HfSourceParsingSystem));
+        self.world.add_system(Box::new(archive::ArchiveSystem));
+        self.world
+            .add_system(Box::new(archive::PrecompiledAneSystem {
+                src_dir: ".".into(),
+                output_dir: ".".into(),
+            }));
+        self.world
+            .add_system(Box::new(draft_model::DraftModelSystem {
+                ckpt_dir: ".".into(),
+            }));
+        // Engine lifecycle systems (Phase A: ModelLoading)
+        self.world
+            .add_system(Box::new(engine_systems::EngineInitSystem));
+        self.world
+            .add_system(Box::new(engine_systems::ModelInstallSystem));
+        self.world
+            .add_system(Box::new(engine_systems::ModelLoadSystem));
+        self.world
+            .add_system(Box::new(engine_systems::CimageLoadSystem));
+        self.world
+            .add_system(Box::new(engine_systems::HostInferenceInitSystem));
+
         // ── Phase B: Quantization ────────────────────────────────────────
+        self.world.add_system(Box::new(int4_pack::Int4PackSystem));
+
         self.world
             .add_system(Box::new(quant_plan::CodecSelectionSystem));
         self.world
@@ -47,6 +110,13 @@ impl CompileSession {
             .add_system(Box::new(moe_budget::MoERoutingSystem));
         self.world
             .add_system(Box::new(moe_budget::MemoryBudgetSystem));
+        // Compilation systems ported from compilation/ and compiler/
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world
+            .add_system(Box::new(planning_core::AneEligibilitySystem));
 
         // ── Phase C: MemoryPlanning ──────────────────────────────────────
         self.world
@@ -57,6 +127,20 @@ impl CompileSession {
             .add_system(Box::new(buffer_lifetime::LifetimeAnalysisSystem::new()));
         self.world
             .add_system(Box::new(buffer_lifetime::ScratchPlanningSystem::default()));
+        self.world
+            .add_system(Box::new(backend_residency::BackendResidencySystem));
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world
+            .add_system(Box::new(planning_core::MemoryBudgetSystemV2));
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world
+            .add_system(Box::new(planning_core::RegionPlannerSystem));
 
         // ── Phase D: FusionDispatch ──────────────────────────────────────
         self.world
@@ -67,6 +151,21 @@ impl CompileSession {
             .add_system(Box::new(fusion::dispatch::DispatchFormationSystem));
         self.world
             .add_system(Box::new(fusion::scalar::ScalarDispatchSystem));
+        self.world
+            .add_system(Box::new(compiler_systems::GraphEqualizationSystem));
+        self.world
+            .add_system(Box::new(compiler_systems::GraphOptimizerSystem));
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world
+            .add_system(Box::new(planning_core::RegionCatalogueSystem));
+
+        self.world
+            .add_system(Box::new(execution_graph::ExecutionGraphSystem));
+        self.world
+            .add_system(Box::new(capability_registry_sys::CapabilityRegistrySystem));
 
         // ── Phase E: KernelGeneration ────────────────────────────────────
         self.world
@@ -79,7 +178,27 @@ impl CompileSession {
         self.world
             .add_system(Box::new(tuning::AOTProfileMatchSystem));
 
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world.add_system(Box::new(portfolio::PortfolioSystem {
+            output_dir: ".".into(),
+        }));
+
+        // ── AOT catalog systems ────────────────────────────────────────
+        self.world
+            .add_system(Box::new(kernel_catalog::KernelCatalogSystem));
+        self.world
+            .add_system(Box::new(variant_gen::VariantGenerationSystem));
+        self.world
+            .add_system(Box::new(variant_select::VariantSelectionSystem));
+
         // ── Phase F: Compilation ────────────────────────────────────────
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
         self.world.add_system(Box::new(
             backend_compile::BackendCompilationSystem::default(),
         ));
@@ -89,6 +208,35 @@ impl CompileSession {
             .add_system(Box::new(validation::ExecutablePackagingSystem));
         self.world
             .add_system(Box::new(validation::AdmissionValidationSystem));
+        self.world
+            .add_system(Box::new(catalog_validation::CatalogValidationSystem));
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        {
+            self.world
+                .add_system(Box::new(pipeline_core::DistillCoreSystem));
+            self.world
+                .add_system(Box::new(pipeline_core::EpochSchedulerSystem));
+            self.world
+                .add_system(Box::new(pipeline_core::FrontierSystem));
+            self.world
+                .add_system(Box::new(pipeline_core::PhaseIRSystem));
+            self.world
+                .add_system(Box::new(pipeline_core::ProfitabilitySystem));
+            self.world
+                .add_system(Box::new(pipeline_core::StagingSystem));
+            self.world
+                .add_system(Box::new(pipeline_core::TriLaneSystem));
+        }
+        self.world
+            .add_system(Box::new(compiler_systems::CompileScheduleSystem));
+        self.world
+            .add_system(Box::new(compiler_systems::BackendAssessmentSystem));
+
+        self.world
+            .add_system(Box::new(ternary_pipeline::TertiaryPipelineSystem::new()));
 
         // ── Phase G: Packaging ──────────────────────────────────────────
         let output_path = self
@@ -105,6 +253,108 @@ impl CompileSession {
             .add_system(Box::new(package::ReceiptSigningSystem {
                 output_dir: receipt_dir,
             }));
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world
+            .add_system(Box::new(planning_core::ReceiptSystem));
+        #[cfg(target_os = "macos")]
+        self.world
+            .add_system(Box::new(metal_cleanup::MetalCleanupSystem));
+        self.world
+            .add_system(Box::new(phase_engine_cleanup::PhaseEngineCleanupSystem));
+        self.world
+            .add_system(Box::new(session_cleanup::SessionCleanupSystem));
+        // Engine packaging cleanup (Phase G)
+        self.world
+            .add_system(Box::new(engine_systems::ModelUnloadSystem));
+        self.world
+            .add_system(Box::new(engine_systems::EngineMetricsSystem));
+        self.world
+            .add_system(Box::new(engine_systems::EngineShutdownSystem));
+        // ── Phase H: Validation ────────────────────────────────────────
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world.add_system(Box::new(gates::AdmissionGateSystem));
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world
+            .add_system(Box::new(gates::AneAdmissionGateSystem));
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world.add_system(Box::new(gates::EvidenceProbeSystem));
+        #[cfg(all(
+            target_os = "macos",
+            any(feature = "mlx-backend", feature = "prism-backend")
+        ))]
+        self.world
+            .add_system(Box::new(gates::QualificationGateSystem));
+        #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+        self.world
+            .add_system(Box::new(validation_matrix::ValidationMatrixSystem));
+    }
+
+    /// Register runtime execution systems (Phase I: Execution).
+    ///
+    /// These systems drive the runtime scheduling loop: backpressure,
+    /// token budget, phase engine, work dispatch, completion ingestion,
+    /// and slot leases.
+    pub fn register_execution_systems(&mut self) {
+        use crate::ecs::system::*;
+
+        // ── Backend dispatch & eval systems (Validation phase) ────────────
+        self.world
+            .add_system(Box::new(backend_eval::BackendEvalSystem));
+        self.world
+            .add_system(Box::new(backend_dispatch::BackendDispatchSystem));
+
+        // ── Runtime execution systems (Execution phase) ──────────────────
+        #[cfg(target_os = "macos")]
+        self.world
+            .add_system(Box::new(metal_transfer::MetalTransferSystem));
+        #[cfg(target_os = "macos")]
+        self.world
+            .add_system(Box::new(metal_dispatch::MetalDispatchSystem));
+        // Engine execution systems (Phase I)
+        self.world
+            .add_system(Box::new(engine_systems::GenerationRequestSystem));
+        self.world
+            .add_system(Box::new(engine_systems::CimageGenerateSystem));
+        self.world
+            .add_system(Box::new(engine_systems::InferenceCycleSystem));
+        self.world
+            .add_system(Box::new(engine_systems::TokenBudgetInferenceSystem));
+        self.world
+            .add_system(Box::new(engine_systems::CancelSystem));
+        self.world
+            .add_system(Box::new(engine_systems::MemoryPressureSystem));
+        self.world
+            .add_system(Box::new(phase_engine_tick::PhaseEngineTickSystem));
+        self.world
+            .add_system(Box::new(session_decode_tick::SessionDecodeTickSystem));
+        self.world
+            .add_system(Box::new(work_dispatch_tick::WorkDispatchTickSystem));
+        self.world
+            .add_system(Box::new(backpressure_tick::BackpressureTickSystem));
+        self.world
+            .add_system(Box::new(token_budget_tick::TokenBudgetTickSystem));
+        self.world
+            .add_system(Box::new(phase_engine::PhaseEngineSystem));
+        self.world
+            .add_system(Box::new(work_dispatch::WorkDispatchSystem));
+        self.world
+            .add_system(Box::new(completion_ingest::CompletionIngestSystem));
+        self.world
+            .add_system(Box::new(slot_lease_tick::SlotLeaseTickSystem));
+        self.world
+            .add_system(Box::new(executor_systems::ExecutorSystem));
     }
 
     /// Load a model into the ECS world.
@@ -133,7 +383,7 @@ impl CompileSession {
         Ok(())
     }
 
-    /// Run all 8 compiler phases in order (A → H), logging each phase.
+    /// Run all 9 compiler phases in order (A → I), logging each phase.
     ///
     /// Returns the output CImage path (if configured), or `None`.
     pub fn compile(&mut self) -> anyhow::Result<Option<String>> {
@@ -146,6 +396,7 @@ impl CompileSession {
             (SchedulePhase::Compilation, "Compilation"),
             (SchedulePhase::Packaging, "Packaging"),
             (SchedulePhase::Validation, "Validation"),
+            (SchedulePhase::Execution, "Execution"),
         ];
 
         for (phase, name) in &phases {

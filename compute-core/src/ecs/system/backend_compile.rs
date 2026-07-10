@@ -1,9 +1,21 @@
 use std::path::PathBuf;
 
-use crate::ecs::aot::CompileError;
 use crate::ecs::component::backend::{
     BackendTarget, BinaryFormat, CompileConfig, CompileMode, CompiledBinary, KernelSource,
 };
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum CompileError {
+    #[error("xcrun metal not found \u{2014} Xcode CLI tools may not be installed")]
+    MetalNotFound,
+    #[error("compilation failed: {details}")]
+    CompileFailed { details: String },
+    #[error("metallib creation failed: {details}")]
+    MetallibFailed { details: String },
+    #[error("I/O error: {details}")]
+    Io { details: String },
+}
+
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use sha2::{Digest, Sha256};
 

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 
-use crate::cimage::receipts::EvidenceReceiptV0;
-use crate::cimage::{
+use crate::ecs::cimage::receipts::EvidenceReceiptV0;
+use crate::ecs::cimage::{
     CImageArtifactKind, CImageManifestV0, CImagePayloadKind, CImagePayloadRef,
     CImageReceiptRef, CImageTensorEntry, CImageWriter,
     ModelExecutionPlanSummary, PendingPayload, PendingReceipt, PhysicalTileLayout,

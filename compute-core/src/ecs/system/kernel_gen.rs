@@ -7,8 +7,6 @@ use crate::ecs::plan::{CodecFamily, KernelTemplateId};
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use std::collections::{HashMap, HashSet};
 
-impl crate::ecs::Component for crate::ecs::aot::parameters::KernelParameters {}
-
 /// Selects a kernel template for each dispatch based on its root op and codec.
 ///
 /// Creates a `KernelEntity` per `DispatchEntity` that has a `FusionGroup`,

@@ -10,7 +10,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use super::fusion::DataflowGraph;
-use super::fusion_scheduler::{
+use super::fusion_scheduler_types::{
     BackendTarget, FusionEvaluation, FusionSchedule, FusionSupportLevel,
 };
 use super::KernelSpecializationKey;
@@ -210,10 +210,8 @@ pub fn collect_lowering_receipt(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::plan::fusion::{
-        DataflowGraph, DataflowNode, DataflowOp, FusedGroup,
-    };
-    use crate::ecs::plan::fusion_scheduler::{
+    use crate::ecs::plan::fusion::{DataflowGraph, DataflowNode, DataflowOp, FusedGroup};
+    use crate::ecs::plan::fusion_scheduler_types::{
         BackendTarget, FusionCandidate, FusionEvaluation, FusionRejection, FusionSchedule,
         FusionSupportLevel, LoweringCost,
     };

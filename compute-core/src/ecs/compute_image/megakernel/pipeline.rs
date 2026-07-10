@@ -1,0 +1,1118 @@
+#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+//! Dispatch orchestration for the persistent GPU megakernel (Metal 4 + MPP TensorOps).
+//!
+//! The [`Megakernel`] struct owns the compiled Metal compute pipeline state
+//! and provides methods to allocate KV cache buffers, submit decode work
+//! via an atomic ring buffer, poll for completion, and read back
+//! logits and entropy data.
+//!
+//! Compiled with `-std=metal4`.  The GEMV tile decompression uses threadgroup
+//! scratch memory at index 0 (1280 bytes = 640 halves) to decompress ternary
+//! weights to FP16 before issuing `mpp::tensor_ops` operations.  Backward
+//! compatible with M1–M4 (TensorOps auto-fall back to ALU on pre-M5 hardware).
+//! All non-GEMV shader paths (RMSNorm, RoPE, SwiGLU, GQA attention, centroid
+//! scout, MTP) are unchanged from the M3 baseline.
+
+use super::*;
+use crate::ecs::compute_image::cimage_loader::CimageDeployment;
+use crate::ecs::compute_image::kv_interleave::*;
+use crate::tts::talker::{TtsMegakernel, TtsWeightBindings};
+use block::ConcreteBlock;
+use metal::*;
+use std::sync::mpsc;
+/// Logits per slot: 1 main head + N MTP heads, each VOCAB_SIZE half values.
+pub const LOGITS_PER_SLOT: u64 = (1 + NUM_MTP_HEADS as u64) * VOCAB_SIZE as u64 * 2;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Size of the submission ring buffer (must match shader constant).
+pub const RING_SIZE: usize = 512;
+
+/// Compute the maximum number of decode slots the device can support
+/// based on available memory and per-slot KV cache cost.
+fn compute_num_slots(device: &Device) -> u64 {
+    let working_set = device.recommended_max_working_set_size();
+
+    // Per-slot KV cache cost in bytes (nf4tile640 K+V + FP16 scratch + logits)
+    let nf4_kv_per_slot = (LAYERS as u64) * (MAX_CONTEXT as u64) * KV_NF4_PER_POSITION;
+    let scratch_per_slot =
+        (MAX_CONTEXT as u64) * (NUM_KV_HEADS as u64) * (GLOBAL_HEAD_DIM as u64) * 2 * 2; // K+V FP16
+    let logits_per_slot = LOGITS_PER_SLOT;
+    let per_slot_total = nf4_kv_per_slot + scratch_per_slot + logits_per_slot;
+
+    // Reserve ~1.5 GB for model weights, scales, embed table, centroids, norms
+    let kv_budget = working_set.saturating_sub(1_500_000_000);
+    let max_slots = if per_slot_total > 0 {
+        kv_budget / per_slot_total
+    } else {
+        0
+    };
+
+    // Cap at compile-time ceiling
+    (max_slots as u64).clamp(1, NUM_SLOTS as u64)
+}
+
+pub struct Megakernel {
+    pso: ComputePipelineState,
+    queue: CommandQueue,
+    device: Device,
+    pub int4_mode: bool,
+    pub num_slots: u64,
+    ring_head: AtomicU32,
+    last_completed: AtomicU32,
+    // KV interleave pipeline
+    pub kv_prefetch_enabled: bool,
+    pub pso_decode: Option<ComputePipelineState>,
+    pub pso_prefetch: Option<ComputePipelineState>,
+    pub interleave_plan: KvInterleavePlan,
+    pub telemetry_tracker: PipelineTelemetryTracker,
+    /// Channel receiver for epoch completion receipts (received via dispatch_epoch handler).
+    pub epoch_rx: std::sync::Mutex<mpsc::Receiver<KvPipelineReceipt>>,
+    epoch_tx: mpsc::Sender<KvPipelineReceipt>,
+}
+
+impl Megakernel {
+    pub fn new(
+        device: &Device,
+        queue: &CommandQueue,
+        deployment: &CimageDeployment,
+        int4_mode: bool,
+        tap_mode: super::kernels::TapMode,
+    ) -> Result<Self, String> {
+        let num_slots = compute_num_slots(device);
+        let taps = tap_mode.is_tapped();
+        // A precompiled metallib was built WITHOUT `-DPRISM_TAPS` — using it in
+        // a tapped-audit build would silently produce an untapped kernel (the
+        // pre-mode env convention had exactly this hole: TRIBUNUS_TAPS=1 plus a
+        // shipped metallib meant stale taps caught only by the progress-counter
+        // refusal). Audit builds therefore ALWAYS runtime-compile from source.
+        let pso = if let (Some(metallib_buf), false) = (&deployment.metallib_buffer, taps) {
+            let ptr = metallib_buf.contents() as *const u8;
+            let len = metallib_buf.length() as usize;
+            let data = unsafe { std::slice::from_raw_parts(ptr, len) };
+            if int4_mode {
+                compile_kernel_from_metallib_int4(device, data)?
+            } else {
+                compile_kernel_from_metallib(device, data)?
+            }
+        } else {
+            if taps && deployment.metallib_buffer.is_some() {
+                eprintln!(
+                    "[megakernel] tapped-audit mode: ignoring precompiled metallib,                      runtime-compiling the tapped kernel from source"
+                );
+            }
+            super::kernels::compile_kernel(device, int4_mode, taps)?
+        };
+
+        // Compile KV interleave kernels if enabled
+        let (pso_decode, pso_prefetch) = if int4_mode {
+            (None, None) // INT4 not yet supported for interleave
+        } else {
+            let library = if let Some(metallib_buf) = &deployment.metallib_buffer {
+                let ptr = metallib_buf.contents() as *const u8;
+                let len = metallib_buf.length() as usize;
+                let data = unsafe { std::slice::from_raw_parts(ptr, len) };
+                Some(
+                    device
+                        .new_library_with_data(data)
+                        .map_err(|e| format!("new_library_with_data: {:?}", e))?,
+                )
+            } else {
+                // Re-read the .metallib generated by compile_kernel above
+                let tmp = std::env::temp_dir().join("tribunus-full-transformer");
+                let lib_path = tmp.join("gemma4_full.metallib");
+                std::fs::read(&lib_path)
+                    .ok()
+                    .and_then(|lib_data| device.new_library_with_data(&lib_data).ok())
+            };
+
+            if let Some(lib) = library {
+                let d = Some(super::kernels::compile_function_from_lib(
+                    device,
+                    &lib,
+                    "persistent_decode_worker",
+                )?);
+                let p = Some(super::kernels::compile_function_from_lib(
+                    device,
+                    &lib,
+                    "persistent_kv_prefetch_worker",
+                )?);
+                (d, p)
+            } else {
+                (None, None)
+            }
+        };
+
+        // Build interleave plan from device capabilities
+        let interleave_plan = KvInterleavePlan::build(device);
+        let kv_prefetch_enabled = interleave_plan.enabled && pso_decode.is_some();
+
+        let (epoch_tx, epoch_rx) = mpsc::channel();
+
+        Ok(Self {
+            pso,
+            queue: queue.clone(),
+            device: device.clone(),
+            int4_mode,
+            num_slots,
+            ring_head: AtomicU32::new(0),
+            last_completed: AtomicU32::new(0),
+            kv_prefetch_enabled,
+            pso_decode,
+            pso_prefetch,
+            interleave_plan,
+            telemetry_tracker: PipelineTelemetryTracker::default(),
+            epoch_rx: std::sync::Mutex::new(epoch_rx),
+            epoch_tx,
+        })
+    }
+
+    /// Launch with KV cache allocation.  Returns buffers needed by the
+    /// orchestrator for decode steps.
+    pub fn launch(
+        &self,
+        deployment: &CimageDeployment,
+        _batch_size: u32,
+    ) -> Result<KernelBuffers, String> {
+        let num_slots = compute_num_slots(&self.device);
+
+        // ── KV cache buffers (nf4tile640) ────────────────────────────
+        // nf4tile640 per position: 8 heads × 2 (K+V) × 360 bytes = 5,760 bytes
+        let nf4_per_slot = (LAYERS * MAX_CONTEXT * KV_NF4_PER_POSITION as u32) as u64;
+        let nf4_total = nf4_per_slot * num_slots;
+
+        // Packed codes (u32 × 80 per tile, one K+V pair per head per position)
+        let kv_codes = self
+            .device
+            .new_buffer(nf4_total * 320 / 360, MTLResourceOptions::StorageModeShared);
+        // Block scales (f32 × 5 per tile)
+        let kv_scales = self
+            .device
+            .new_buffer(nf4_total * 20 / 360, MTLResourceOptions::StorageModeShared);
+        // Block biases (f32 × 5 per tile)
+        let kv_biases = self
+            .device
+            .new_buffer(nf4_total * 20 / 360, MTLResourceOptions::StorageModeShared);
+
+        unsafe {
+            std::ptr::write_bytes(kv_codes.contents(), 0, nf4_total as usize * 320 / 360);
+            std::ptr::write_bytes(kv_scales.contents(), 0, nf4_total as usize * 20 / 360);
+            std::ptr::write_bytes(kv_biases.contents(), 0, nf4_total as usize * 20 / 360);
+        }
+
+        // ── FP16 scratch buffers (1 layer per slot) ──────────────────
+        // Scratch holds decompressed FP16 K/V for one layer, used during decode.
+        let scratch_elems_per_slot = (MAX_CONTEXT * NUM_KV_HEADS * GLOBAL_HEAD_DIM) as u64;
+        let scratch_bytes_per_slot = scratch_elems_per_slot * 2; // half = 2 bytes
+        let scratch_total = scratch_bytes_per_slot * num_slots;
+
+        let kv_scratch_k = self
+            .device
+            .new_buffer(scratch_total, MTLResourceOptions::StorageModeShared);
+        let kv_scratch_v = self
+            .device
+            .new_buffer(scratch_total, MTLResourceOptions::StorageModeShared);
+
+        // Zero-initialize all buffers
+        unsafe {
+            std::ptr::write_bytes(kv_scratch_k.contents(), 0, scratch_total as usize);
+            std::ptr::write_bytes(kv_scratch_v.contents(), 0, scratch_total as usize);
+        }
+
+        // ── Atomic ring buffer for work submission ───────────────────
+        // ring_entries: RING_SIZE entries × 5 u32s each (state|kind, token_id/chunk_pos, seq_pos/num_prior, kv_slot_id, reserved)
+        // CPUCacheModeWriteCombined: CPU writes bypass SLC entirely, go directly to DRAM.
+        // This prevents evicting ANE's hot weights from the 8 MB SLC.
+        let ring_entries = self.device.new_buffer(
+            RING_SIZE as u64 * 5 * 4,
+            MTLResourceOptions::CPUCacheModeWriteCombined | MTLResourceOptions::StorageModeShared,
+        );
+        unsafe {
+            std::ptr::write_bytes(ring_entries.contents(), 0, RING_SIZE * 5 * 4);
+        }
+
+        // ring_tail: atomic u32 (GPU produces)
+        let ring_tail = self
+            .device
+            .new_buffer(4, MTLResourceOptions::StorageModeShared);
+        unsafe {
+            *(ring_tail.contents() as *mut u32) = 0;
+        }
+
+        let logits_total = num_slots * LOGITS_PER_SLOT;
+        let slot_logits = self
+            .device
+            .new_buffer(logits_total, MTLResourceOptions::StorageModeShared);
+
+        // completion_counter: atomic u32 (GPU increments after each work item)
+        // CPUCacheModeWriteCombined CPU only reads, but ensures no SLC pollution.
+        let completion_counter = self.device.new_buffer(
+            4,
+            MTLResourceOptions::CPUCacheModeWriteCombined | MTLResourceOptions::StorageModeShared,
+        );
+        unsafe {
+            *(completion_counter.contents() as *mut u32) = 0;
+        }
+
+        // ── Ternary-centroid decompress scratch ────────────────────
+        let cent_tiles = ((HIDDEN_DIM + 255) / 256) as u64;
+        let centroid_scales = deployment
+            .centroid_scales_buffer
+            .as_ref()
+            .map(|b| b.clone())
+            .unwrap_or_else(|| {
+                self.device.new_buffer(
+                    NUM_CENTROIDS as u64 * cent_tiles * 2,
+                    MTLResourceOptions::StorageModeShared,
+                )
+            });
+
+        let centroid_scratch = self.device.new_buffer(
+            NUM_CENTROIDS as u64 * HIDDEN_DIM as u64 * 2,
+            MTLResourceOptions::StorageModeShared,
+        );
+
+        let decompress_progress = self
+            .device
+            .new_buffer(4, MTLResourceOptions::StorageModeShared);
+        unsafe {
+            *(decompress_progress.contents() as *mut u32) = 0;
+        }
+
+        // ── Entropy map buffer (half per position per slot) ──────────
+        let entropy_size = MAX_CONTEXT as u64 * 2 * num_slots;
+        let entropy_map = self
+            .device
+            .new_buffer(entropy_size, MTLResourceOptions::StorageModeShared);
+
+        // ── Active token mask (continuous compaction) ──
+        // One u32 per MAX_CONTEXT position per slot. 1 = active, 0 = evicted.
+        // CPU updates after each decode step based on running entropy scores.
+        let active_mask_bytes = (MAX_CONTEXT as u64) * 4 * num_slots;
+        let active_mask = self
+            .device
+            .new_buffer(active_mask_bytes, MTLResourceOptions::StorageModeShared);
+        // Initialize all to 1 (all positions active by default)
+        unsafe {
+            let ptr = active_mask.contents() as *mut u32;
+            for i in 0..(MAX_CONTEXT as usize * num_slots as usize) {
+                *ptr.add(i) = 1;
+            }
+        }
+
+        // ── Draft model output buffer ──────────────────────────────
+        // Per slot: [u32 count] + [MAX_DRAFT_CANDIDATES × u32 token_ids] +
+        // [MAX_DRAFT_CANDIDATES × f32 logprobs]
+        let draft_output_bytes = (num_slots as u64) * (1 + MAX_DRAFT_CANDIDATES as u64 * 2) * 4;
+        let draft_output = self
+            .device
+            .new_buffer(draft_output_bytes, MTLResourceOptions::StorageModeShared);
+        unsafe {
+            std::ptr::write_bytes(draft_output.contents(), 0, draft_output_bytes as usize);
+        }
+
+        // ── Per-head attention gates (Gated Attention from Qwen NeurIPS 2025) ──
+        // One f16 per query head. sigmoid(g) gates the SDPA output per head.
+        let head_gates_bytes = NUM_Q_HEADS as u64 * 2; // 16 heads × 2 bytes = 32 bytes
+        let head_gates = self
+            .device
+            .new_buffer(head_gates_bytes, MTLResourceOptions::StorageModeShared);
+        // Initialize to 0 (sigmoid(0) = 0.5 = half-open gate)
+        unsafe {
+            std::ptr::write_bytes(head_gates.contents(), 0, head_gates_bytes as usize);
+        }
+
+        // ── Stage 0 activation taps (STAGE0_TAPS_SPEC.md, Transport A) ──
+        // [(2·LAYERS+2) × HIDDEN_DIM] f16 (~735 KB) + 4-byte progress atomic.
+        // Written only by PSOs compiled with -DPRISM_TAPS=1 (TRIBUNUS_TAPS=1);
+        // otherwise inert. Always allocated: the cost is negligible and it
+        // keeps buffer binding unconditional.
+        let tap_slots = (2 * LAYERS + 2) as u64;
+        let layer_taps = self.device.new_buffer(
+            tap_slots * HIDDEN_DIM as u64 * 2,
+            MTLResourceOptions::StorageModeShared,
+        );
+        let tap_progress = self
+            .device
+            .new_buffer(4, MTLResourceOptions::StorageModeShared);
+        unsafe {
+            // u32::MAX = "no tap slot completed yet".
+            std::ptr::write_bytes(tap_progress.contents(), 0xFF, 4);
+        }
+
+        // ── KV prefetch arena ───────────────────────────────────────
+        let arena_layout = KvPrefetchArena::layout(MAX_CONTEXT, NUM_KV_HEADS, GLOBAL_HEAD_DIM);
+        let kv_prefetch_arena = self.device.new_buffer(
+            arena_layout.total_bytes as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        // Initialize headers to Empty state
+        unsafe {
+            let ptr = kv_prefetch_arena.contents() as *mut u8;
+            for i in 0..2 {
+                let header_ptr =
+                    ptr.add(arena_layout.sets[i].header_offset) as *mut KvScratchHeader;
+                std::ptr::write(header_ptr, KvScratchHeader::new());
+            }
+            // Initialize queue
+            let queue_ptr = ptr.add(arena_layout.queue_offset) as *mut KvPrefetchQueueAbi;
+            std::ptr::write(queue_ptr, KvPrefetchQueueAbi::new());
+        }
+
+        // ── Epoch control block (32 bytes opaque device-side state) ────
+        let epoch_control = self.device.new_buffer(
+            std::mem::size_of::<EpochControl>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        unsafe {
+            let ctrl_ptr = epoch_control.contents() as *mut EpochControl;
+            std::ptr::write(ctrl_ptr, EpochControl::default());
+        }
+
+        // ── Epoch receipt buffer (64 bytes, written by GPU at epoch end) ──
+        let epoch_receipt = self.device.new_buffer(
+            size_of::<KvEpochReceipt>() as u64,
+            MTLResourceOptions::StorageModeShared,
+        );
+        unsafe {
+            let receipt_ptr = epoch_receipt.contents() as *mut KvEpochReceipt;
+            std::ptr::write(receipt_ptr, KvEpochReceipt::default());
+        }
+
+        // One-shot dispatch of persistent kernel (runs forever)
+        let cmd_buf = self.queue.new_command_buffer();
+        let enc = cmd_buf.new_compute_command_encoder();
+
+        enc.set_compute_pipeline_state(&self.pso);
+        if self.int4_mode {
+            if let Some(fused) = &deployment.fused_int4_buffer {
+                enc.set_buffer(0, Some(&**fused), 0);
+            } else {
+                enc.set_buffer(0, deployment.weights_int4_buffer.as_ref().map(|b| &**b), 0);
+            }
+        } else {
+            enc.set_buffer(0, Some(&deployment.weights_buffer), 0);
+        }
+        enc.set_buffer(1, Some(&deployment.scales_buffer), 0);
+        if let Some(b) = &deployment.norms_buffer {
+            enc.set_buffer(2, Some(b), 0);
+        }
+        if let Some(b) = &deployment.embed_buffer {
+            enc.set_buffer(3, Some(b), 0);
+        }
+        if let Some(b) = &deployment.centroid_buffer {
+            enc.set_buffer(4, Some(b), 0);
+        }
+        if let Some(b) = &deployment.cluster_map_buffer {
+            enc.set_buffer(5, Some(b), 0);
+        }
+        enc.set_buffer(6, Some(&*kv_codes), 0);
+        enc.set_buffer(7, Some(&*kv_scales), 0);
+        enc.set_buffer(8, Some(&*kv_biases), 0);
+        enc.set_buffer(14, deployment.embed_scales_buffer.as_ref().map(|b| &**b), 0);
+        enc.set_buffer(15, Some(&*centroid_scales), 0);
+        enc.set_buffer(16, Some(&*centroid_scratch), 0);
+        enc.set_buffer(17, Some(&*decompress_progress), 0);
+        // slot 18: removed (old work_queue)
+        enc.set_buffer(19, Some(&*kv_scratch_k), 0);
+        enc.set_buffer(20, Some(&*kv_scratch_v), 0);
+        enc.set_buffer(21, Some(&*entropy_map), 0);
+        enc.set_buffer(11, Some(&*active_mask), 0);
+        enc.set_buffer(22, Some(&*ring_entries), 0);
+        enc.set_buffer(23, Some(&*ring_tail), 0);
+        enc.set_buffer(24, Some(&*slot_logits), 0);
+        enc.set_buffer(25, Some(&*completion_counter), 0);
+        enc.set_buffer(28, Some(&*draft_output), 0);
+        enc.set_buffer(29, Some(&*head_gates), 0);
+        enc.set_buffer(31, Some(&*layer_taps), 0);
+        enc.set_buffer(32, Some(&*tap_progress), 0);
+
+        // Threadgroup scratch for ternary->FP16 decompress in tile-GEMV:
+        // 640 halves = 1280 bytes at index 0 (consumed by the `tile_scratch`
+        // threadgroup buffer in the Metal 4 shader).
+        enc.set_threadgroup_memory_length(0, (TILE as u64) * 2);
+
+        // ── KV interleave concurrent dispatch ──────────────────
+        // When prefetch is enabled, dispatch decode + prefetch workers
+        // concurrently on the same encoder. Decode enqueues prefetch
+        // requests; prefetch processes them.
+        if self.kv_prefetch_enabled {
+            let pso_d = self
+                .pso_decode
+                .as_ref()
+                .expect("pso_decode must be Some when kv_prefetch_enabled");
+            let pso_p = self
+                .pso_prefetch
+                .as_ref()
+                .expect("pso_prefetch must be Some when kv_prefetch_enabled");
+
+            // Bind extra interleave decode buffers (extension of standard
+            // decode bindings already set above).
+            enc.set_buffer(13, Some(&epoch_control), 0);
+            enc.set_buffer(18, Some(&epoch_receipt), 0);
+            let max_tokens_per_epoch = 0xFFFFFFFFu32;
+            let max_tokens_bytes = max_tokens_per_epoch.to_le_bytes();
+            enc.set_bytes(
+                27,
+                std::mem::size_of::<u32>() as u64,
+                max_tokens_bytes.as_ptr() as *const std::ffi::c_void,
+            );
+            enc.set_buffer(30, Some(&kv_prefetch_arena), 0);
+
+            // Dispatch decode worker (persistent_decode_worker)
+            enc.set_compute_pipeline_state(pso_d);
+            enc.dispatch_thread_groups(
+                MTLSize {
+                    width: num_slots,
+                    height: 1,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
+            );
+
+            // Bind prefetch worker buffers (override slots 1-11)
+            enc.set_buffer(1, Some(&*kv_codes), 0);
+            enc.set_buffer(2, Some(&*kv_scales), 0);
+            enc.set_buffer(3, Some(&*kv_biases), 0);
+            enc.set_buffer(5, Some(&*kv_scratch_k), 0);
+            enc.set_buffer(6, Some(&*kv_scratch_v), 0);
+            // Headers pointer into arena buffer at set[0].header_offset
+            enc.set_buffer(
+                7,
+                Some(&kv_prefetch_arena),
+                arena_layout.sets[0].header_offset as u64,
+            );
+            let slot_offset = 0u32;
+            let slot_offset_bytes = slot_offset.to_le_bytes();
+            enc.set_bytes(
+                8,
+                std::mem::size_of::<u32>() as u64,
+                slot_offset_bytes.as_ptr() as *const std::ffi::c_void,
+            );
+            let max_positions = MAX_CONTEXT as u32;
+            let max_positions_bytes = max_positions.to_le_bytes();
+            enc.set_bytes(
+                9,
+                std::mem::size_of::<u32>() as u64,
+                max_positions_bytes.as_ptr() as *const std::ffi::c_void,
+            );
+            let max_tokens_epoch = 0xFFFFFFFFu32;
+            let max_tokens_epoch_bytes = max_tokens_epoch.to_le_bytes();
+            enc.set_bytes(
+                10,
+                std::mem::size_of::<u32>() as u64,
+                max_tokens_epoch_bytes.as_ptr() as *const std::ffi::c_void,
+            );
+            enc.set_buffer(11, Some(&epoch_control), 0);
+
+            // Dispatch prefetch worker (persistent_kv_prefetch_worker)
+            enc.set_compute_pipeline_state(pso_p);
+            enc.dispatch_thread_groups(
+                MTLSize {
+                    width: num_slots,
+                    height: 1,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
+            );
+        } else {
+            // Standard single-kernel persistent decode dispatch
+            enc.dispatch_thread_groups(
+                MTLSize {
+                    width: num_slots,
+                    height: 1,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
+            );
+        }
+
+        enc.end_encoding();
+        cmd_buf.commit();
+        // Do NOT wait -- the persistent kernel runs forever
+
+        Ok(KernelBuffers {
+            kv_codes,
+            kv_scales,
+            kv_biases,
+            kv_scratch_k,
+            kv_scratch_v,
+            ring_entries,
+            ring_tail,
+            slot_logits,
+            completion_counter,
+            centroid_scratch,
+            centroid_scales,
+            decompress_progress,
+            entropy_map,
+            active_mask,
+            head_gates,
+            layer_taps,
+            tap_progress,
+            draft_output,
+            kv_prefetch_arena: Some(kv_prefetch_arena),
+            pso_decode: self.pso_decode.clone(),
+            pso_prefetch: self.pso_prefetch.clone(),
+            arena_layout: Some(arena_layout),
+            epoch_control: Some(epoch_control),
+            epoch_receipt: Some(epoch_receipt),
+        })
+    }
+
+    /// Dispatch the KV interleave decode + prefetch workers as a dual-kernel pipeline.
+    ///
+    /// Both kernels share the same command encoder and execute sequentially.
+    /// The decode worker runs first, enqueuing prefetch requests; the prefetch
+    /// worker then processes the queue.  If interleave is disabled or PSOS are
+    /// unavailable, this is a no-op.  The encoder SHOULD be created with
+    /// [`CommandBuffer::compute_command_encoder_with_dispatch_type`] using
+    /// [`MTLDispatchType::Concurrent`] when interleave is enabled for decode/
+    /// prefetch overlap.
+    pub fn dispatch_interleaved(
+        &self,
+        encoder: &metal::ComputeCommandEncoderRef,
+        buffers: &KernelBuffers,
+        _slot_id: u32,
+        max_tokens_per_epoch: u32,
+    ) {
+        if !self.kv_prefetch_enabled {
+            return;
+        }
+        if let (Some(pso_d), Some(pso_p), Some(arena), Some(epoch_ctrl), Some(_epoch_rcpt)) = (
+            &self.pso_decode,
+            &self.pso_prefetch,
+            &buffers.kv_prefetch_arena,
+            &buffers.epoch_control,
+            &buffers.epoch_receipt,
+        ) {
+            // arena layout reference kept for future buffer binding
+            let _ = arena;
+
+            // Dispatch decode worker
+            encoder.set_compute_pipeline_state(pso_d);
+            // Decode interleave extras: epoch_control@13, epoch_receipt@18, max_tokens@27, prefetch_queue@30
+            encoder.set_buffer(13, Some(epoch_ctrl), 0);
+            let mte = max_tokens_per_epoch.to_le_bytes();
+            encoder.set_bytes(
+                27,
+                std::mem::size_of::<u32>() as u64,
+                mte.as_ptr() as *const std::ffi::c_void,
+            );
+            if let Some(layout) = &buffers.arena_layout {
+                encoder.set_buffer(30, Some(arena), layout.queue_offset as u64);
+            }
+            encoder.dispatch_threads(
+                MTLSize {
+                    width: max_tokens_per_epoch as u64,
+                    height: 1,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
+            );
+
+            // Dispatch prefetch worker
+            encoder.set_compute_pipeline_state(pso_p);
+            // Prefetch worker: bind KV cache scratch at correct slots
+            encoder.set_buffer(1, Some(&buffers.kv_codes), 0);
+            encoder.set_buffer(2, Some(&buffers.kv_scales), 0);
+            encoder.set_buffer(3, Some(&buffers.kv_biases), 0);
+            encoder.set_buffer(5, Some(&buffers.kv_scratch_k), 0);
+            encoder.set_buffer(6, Some(&buffers.kv_scratch_v), 0);
+            if let Some(layout) = &buffers.arena_layout {
+                encoder.set_buffer(
+                    7,
+                    Some(arena),
+                    layout.sets[layout.active_set].header_offset as u64,
+                );
+            }
+            let sz = std::mem::size_of::<u32>() as u64;
+            encoder.set_bytes(8, sz, [0u8; 4].as_ptr() as *const std::ffi::c_void); // slot_offset = 0
+            encoder.set_bytes(
+                9,
+                sz,
+                (MAX_CONTEXT as u32).to_le_bytes().as_ptr() as *const std::ffi::c_void,
+            );
+            encoder.set_bytes(10, sz, mte.as_ptr() as *const std::ffi::c_void);
+            encoder.set_buffer(11, Some(epoch_ctrl), 0);
+            encoder.dispatch_threads(
+                MTLSize {
+                    width: max_tokens_per_epoch as u64,
+                    height: 1,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 256,
+                    height: 1,
+                    depth: 1,
+                },
+            );
+        }
+    }
+
+    /// Prefill a slot with a batch of tokens using the GPU work queue.
+    pub fn prefill_slot_batched(
+        &self,
+        buffers: &KernelBuffers,
+        slot_id: u32,
+        tokens: &[u32],
+        start_pos: u32,
+        kv_slot_id: u32,
+    ) {
+        for (i, &token) in tokens.iter().enumerate() {
+            let pos = start_pos + i as u32;
+
+            self.submit_work(buffers, slot_id, token, pos, kv_slot_id);
+
+            // Spin-wait for GPU completion
+            while !self.poll_work(buffers, slot_id) {
+                std::hint::spin_loop();
+            }
+
+            // Reset slot for the next token in the batch.
+            // We skip reading logits the KV cache is the only output we need.
+            self.reset_work_slot(buffers, slot_id);
+        }
+    }
+
+    /// One-shot decode: dispatch the full transformer kernel for one token.
+    /// Submit a decode request to the ring buffer.
+    /// Returns immediately after writing the ring entry.
+    /// The GPU will dequeue it asynchronously.
+    pub fn submit_work(
+        &self,
+        buffers: &KernelBuffers,
+        _slot_id: u32,
+        token_id: u32,
+        seq_pos: u32,
+        kv_slot_id: u32,
+    ) {
+        unsafe {
+            let head = self.ring_head.fetch_add(1, Ordering::Release);
+            let idx = head as usize % RING_SIZE;
+            let entries = buffers.ring_entries.contents() as *mut u32;
+            let entry = entries.add(idx * 5);
+            *entry.add(0) = 1; // SUBMITTED | (kind << 2) — kind=0 for decode
+            entry.add(1).write(token_id);
+            entry.add(2).write(seq_pos);
+            entry.add(3).write(kv_slot_id);
+            entry.add(4).write(0); // reserved
+            std::sync::atomic::fence(Ordering::SeqCst); // ensure store visibility
+        }
+    }
+
+    /// Dispatch a single epoch's work as an independent command buffer.
+    ///
+    /// Creates a new command buffer with both decode and prefetch workers,
+    /// binds epoch control/receipt buffers, and attaches a completion handler
+    /// that reads the epoch receipt, validates epoch conservation, and sends
+    /// a [`KvPipelineReceipt`] through the internal epoch channel.
+    ///
+    /// If interleave is disabled or PSOS are unavailable, this is a no-op.
+    pub fn dispatch_epoch(
+        &self,
+        buffers: &KernelBuffers,
+        _slot_id: u32,
+        max_tokens_per_epoch: u32,
+    ) -> Result<(), String> {
+        if !self.kv_prefetch_enabled {
+            return Ok(());
+        }
+
+        let (pso_d, pso_p, epoch_ctrl, epoch_rcpt, kv_prefetch_arena) = match (
+            &self.pso_decode,
+            &self.pso_prefetch,
+            &buffers.epoch_control,
+            &buffers.epoch_receipt,
+            &buffers.kv_prefetch_arena,
+        ) {
+            (Some(d), Some(p), Some(ctrl), Some(rcpt), Some(arena)) => (
+                d.clone(),
+                p.clone(),
+                ctrl.clone(),
+                rcpt.clone(),
+                arena.clone(),
+            ),
+            _ => return Ok(()),
+        };
+
+        let cmd_buf = self.queue.new_command_buffer();
+        // Use concurrent dispatch for decode + prefetch overlap when enabled
+        let enc = if self.interleave_plan.enabled {
+            cmd_buf.compute_command_encoder_with_dispatch_type(MTLDispatchType::Concurrent)
+        } else {
+            cmd_buf.new_compute_command_encoder()
+        };
+
+        enc.set_compute_pipeline_state(&pso_d);
+
+        // Standard decode buffers (slots 0-5 for weights/scales/norms/embed/centroid/cluster_map
+        // and slot 14 for embed_scales are model-level — bound from deployment elsewhere).
+        enc.set_buffer(6, Some(&buffers.kv_codes), 0);
+        enc.set_buffer(7, Some(&buffers.kv_scales), 0);
+        enc.set_buffer(8, Some(&buffers.kv_biases), 0);
+        enc.set_buffer(11, Some(&buffers.active_mask), 0);
+        // Slot 13: epoch_control
+        enc.set_buffer(13, Some(&epoch_ctrl), 0);
+        enc.set_buffer(15, Some(&buffers.centroid_scales), 0);
+        enc.set_buffer(16, Some(&buffers.centroid_scratch), 0);
+        enc.set_buffer(17, Some(&buffers.decompress_progress), 0);
+        // Slot 18: epoch receipt
+        enc.set_buffer(18, Some(&epoch_rcpt), 0);
+        enc.set_buffer(19, Some(&buffers.kv_scratch_k), 0);
+        enc.set_buffer(20, Some(&buffers.kv_scratch_v), 0);
+        enc.set_buffer(21, Some(&buffers.entropy_map), 0);
+        enc.set_buffer(22, Some(&buffers.ring_entries), 0);
+        enc.set_buffer(23, Some(&buffers.ring_tail), 0);
+        enc.set_buffer(24, Some(&buffers.slot_logits), 0);
+        enc.set_buffer(25, Some(&buffers.completion_counter), 0);
+        // Slot 27: max_tokens_per_epoch as inline constant
+        let max_tokens_bytes = max_tokens_per_epoch.to_le_bytes();
+        enc.set_bytes(
+            27,
+            std::mem::size_of::<u32>() as u64,
+            max_tokens_bytes.as_ptr() as *const std::ffi::c_void,
+        );
+        enc.set_buffer(28, Some(&buffers.draft_output), 0);
+        enc.set_buffer(29, Some(&buffers.head_gates), 0);
+        enc.set_buffer(31, Some(&buffers.layer_taps), 0);
+        enc.set_buffer(32, Some(&buffers.tap_progress), 0);
+        // Slot 30: kv_prefetch_queue from arena
+        if let Some(layout) = &buffers.arena_layout {
+            enc.set_buffer(30, Some(&kv_prefetch_arena), layout.queue_offset as u64);
+        }
+
+        // Dispatch decode worker
+        enc.dispatch_threads(
+            MTLSize {
+                width: max_tokens_per_epoch as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 256,
+                height: 1,
+                depth: 1,
+            },
+        );
+
+        // ── Prefetch worker dispatch ──
+        enc.set_compute_pipeline_state(&pso_p);
+
+        // Bind prefetch-specific buffers
+        enc.set_buffer(1, Some(&buffers.kv_codes), 0);
+        enc.set_buffer(2, Some(&buffers.kv_scales), 0);
+        enc.set_buffer(3, Some(&buffers.kv_biases), 0);
+        enc.set_buffer(5, Some(&buffers.kv_scratch_k), 0);
+        enc.set_buffer(6, Some(&buffers.kv_scratch_v), 0);
+        // Slot 7: headers pointer from arena (active set header)
+        if let Some(layout) = &buffers.arena_layout {
+            enc.set_buffer(
+                7,
+                Some(&kv_prefetch_arena),
+                layout.sets[layout.active_set].header_offset as u64,
+            );
+        }
+        // Slot 8: slot_offset inline bytes (value: 0u32)
+        let slot_offset_bytes = 0u32.to_le_bytes();
+        enc.set_bytes(
+            8,
+            std::mem::size_of::<u32>() as u64,
+            slot_offset_bytes.as_ptr() as *const std::ffi::c_void,
+        );
+        // Slot 9: max_positions inline bytes (value: MAX_CONTEXT)
+        let max_positions_bytes = MAX_CONTEXT.to_le_bytes();
+        enc.set_bytes(
+            9,
+            std::mem::size_of::<u32>() as u64,
+            max_positions_bytes.as_ptr() as *const std::ffi::c_void,
+        );
+        // Slot 10: max_tokens_per_epoch inline bytes
+        let prefetch_max_tokens_bytes = max_tokens_per_epoch.to_le_bytes();
+        enc.set_bytes(
+            10,
+            std::mem::size_of::<u32>() as u64,
+            prefetch_max_tokens_bytes.as_ptr() as *const std::ffi::c_void,
+        );
+        // Slot 11: epoch_control (same buffer as decode uses)
+        enc.set_buffer(11, Some(&epoch_ctrl), 0);
+
+        enc.dispatch_threads(
+            MTLSize {
+                width: max_tokens_per_epoch as u64,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 256,
+                height: 1,
+                depth: 1,
+            },
+        );
+
+        enc.end_encoding();
+
+        // Attach completion handler: read receipt, validate, send via channel
+        let epoch_tx = self.epoch_tx.clone();
+        let rcpt_buf = epoch_rcpt;
+        let handler = ConcreteBlock::new(move |_buf: &CommandBufferRef| {
+            // Read epoch receipt from shared buffer
+            let receipt = unsafe {
+                let ptr = rcpt_buf.contents() as *const KvEpochReceipt;
+                ptr.read_volatile()
+            };
+
+            // Validate epoch conservation
+            let is_valid =
+                receipt.outcome == OUTCOME_READY_CONSUMABLE || receipt.outcome == OUTCOME_NONE;
+            let fault = if !is_valid {
+                FAULT_INVALID_READY_STATE
+            } else if receipt.kv_bytes_prefetched < receipt.kv_bytes_consumed {
+                // Handoff integrity: more bytes consumed than prefetched in this epoch
+                FAULT_HANDOFF_INTEGRITY
+            } else {
+                FAULT_NONE
+            };
+
+            // Build and send pipeline receipt
+            let pipeline_receipt = KvPipelineReceipt {
+                session_id: 0,
+                sequence_id: receipt.epoch_id,
+                token_epoch: receipt.epoch_id,
+                model_layer_count: LAYERS,
+                prefetch_requests: receipt.kv_bytes_prefetched as u32 / 1024,
+                prefetch_hits: 0,
+                prefetch_misses: 0,
+                fallback_decompressions: 0,
+                canceled_prefetches: 0,
+                stale_prefetches: 0,
+                historical_kv_bytes_prefetched: receipt.kv_bytes_prefetched,
+                historical_kv_bytes_consumed: receipt.kv_bytes_consumed,
+                decode_lane_us: receipt.decode_duration_us,
+                prefetch_lane_us: receipt.prefetch_duration_us,
+                overlap_window_us: 0,
+                stall_wait_us: 0,
+                fallback_us: 0,
+                estimated_bandwidth_contention_penalty_us: 0,
+                pipeline_mode: KvPipelineMode::FullLayerDoubleBuffer,
+                selected_worker_topology: WorkerTopology::SingleDecode,
+                correctness_status: if fault == FAULT_NONE {
+                    PipelineCorrectnessStatus::Verified
+                } else {
+                    PipelineCorrectnessStatus::Degraded
+                },
+            };
+            let _ = epoch_tx.send(pipeline_receipt);
+        });
+        cmd_buf.add_completed_handler(&handler);
+
+        cmd_buf.commit();
+        Ok(())
+    }
+    pub fn submit_prefill_work(
+        &self,
+        buffers: &KernelBuffers,
+        slot_id: u32,
+        chunk_pos: u32,
+        num_prior: u32,
+    ) {
+        unsafe {
+            let head = self.ring_head.fetch_add(1, Ordering::Release);
+            let idx = head as usize % RING_SIZE;
+            let entries = buffers.ring_entries.contents() as *mut u32;
+            let entry = entries.add(idx * 5);
+            *entry.add(0) = 1 | (1 << 2); // SUBMITTED | (PREFILL << 2)
+            entry.add(1).write(chunk_pos);
+            entry.add(2).write(num_prior);
+            entry.add(3).write(slot_id);
+            entry.add(4).write(0);
+        }
+    }
+
+    /// Poll whether the latest submitted work has completed.
+    /// Returns true if the GPU has incremented completion_counter
+    /// past the last_known value.
+    pub fn poll_work(&self, buffers: &KernelBuffers, _slot_id: u32) -> bool {
+        let completed = unsafe { *(buffers.completion_counter.contents() as *const u32) };
+        let known = self.last_completed.load(Ordering::Acquire);
+        if completed > known {
+            self.last_completed.store(completed, Ordering::Release);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Read logits from a completed slot.
+    pub fn read_slot_logits(&self, buffers: &KernelBuffers, slot_id: u32, head: u32) -> Vec<u16> {
+        let offset = (slot_id as u64) * LOGITS_PER_SLOT + (head as u64) * (VOCAB_SIZE as u64) * 2;
+        let ptr = unsafe { buffers.slot_logits.contents().add(offset as usize) as *const u16 };
+        let n = VOCAB_SIZE as usize;
+        unsafe { std::slice::from_raw_parts(ptr, n).to_vec() }
+    }
+
+    /// Read entropy map for a completed slot.
+    /// Returns per-position entropy values (half-float) as u16 slice.
+    /// Only the first `num_cached` positions contain valid data.
+    pub fn read_entropy_map(&self, buffers: &KernelBuffers, slot_id: u32) -> Vec<u16> {
+        let slot_offset = (slot_id as u64) * (MAX_CONTEXT as u64) * 2;
+        let ptr = unsafe { buffers.entropy_map.contents().add(slot_offset as usize) as *const u16 };
+        let n = MAX_CONTEXT as usize;
+        unsafe { std::slice::from_raw_parts(ptr, n).to_vec() }
+    }
+
+    /// Read the Stage 0 activation tap buffer: raw f16 bits in
+    /// [(2·LAYERS+2) × HIDDEN_DIM] slot order (STAGE0_TAPS_SPEC slot map).
+    /// Meaningful only when the kernel was compiled with taps.
+    pub fn read_layer_taps(&self, buffers: &KernelBuffers) -> Vec<u16> {
+        let n = (2 * LAYERS as usize + 2) * HIDDEN_DIM as usize;
+        let ptr = buffers.layer_taps.contents() as *const u16;
+        unsafe { std::slice::from_raw_parts(ptr, n).to_vec() }
+    }
+
+    /// Read the tap progress counter (last completed slot; u32::MAX = none).
+    pub fn read_tap_progress(&self, buffers: &KernelBuffers) -> u32 {
+        unsafe { *(buffers.tap_progress.contents() as *const u32) }
+    }
+
+    /// Reset slot state after reading results.
+    pub fn reset_work_slot(&self, _buffers: &KernelBuffers, _slot_id: u32) {
+        // no-op: ring entries are naturally consumed by the GPU
+    }
+
+    /// Submit a draft model decode request (kind=3).
+    ///
+    /// The GPU runs the fast draft model forward pass at `seq_pos` for slot 0,
+    /// writing up to `num_candidates` candidate token IDs + log-probs into
+    /// the `draft_output` buffer.
+    pub fn submit_draft(
+        &self,
+        buffers: &KernelBuffers,
+        _token_id: u32,
+        seq_pos: u32,
+        num_candidates: u32,
+    ) {
+        unsafe {
+            let head = self.ring_head.fetch_add(1, Ordering::Release);
+            let idx = head as usize % RING_SIZE;
+            let entries = buffers.ring_entries.contents() as *mut u32;
+            let entry = entries.add(idx * 5);
+            *entry.add(0) = 1 | (3 << 2); // SUBMITTED | (DRAFT << 2)
+            entry.add(1).write(num_candidates); // number of tokens to draft
+            entry.add(2).write(seq_pos);
+            entry.add(3).write(0); // slot 0
+            entry.add(4).write(0);
+            std::sync::atomic::fence(Ordering::SeqCst);
+        }
+    }
+
+    /// Read draft model output for slot 0.
+    ///
+    /// Returns a vector of `(token_id, logprob)` pairs for each candidate
+    /// token the draft model produced, in order.  The logprob is the draft
+    /// model's log-probability for that token (already converted to f32).
+    pub fn read_draft_output(&self, buffers: &KernelBuffers) -> Vec<(u32, f32)> {
+        let slot = 0usize;
+        let slot_offset = slot * (1 + MAX_DRAFT_CANDIDATES as usize * 2);
+        let ptr = buffers.draft_output.contents() as *const u32;
+        let count = unsafe { *ptr.add(slot_offset) }.min(MAX_DRAFT_CANDIDATES);
+        unsafe {
+            let token_ptr = ptr.add(slot_offset + 1) as *const u32;
+            let prob_ptr = ptr.add(slot_offset + 1 + MAX_DRAFT_CANDIDATES as usize) as *const f32;
+            (0..count as usize)
+                .map(|i| (*token_ptr.add(i), *prob_ptr.add(i)))
+                .collect()
+        }
+    }
+}
+
+/// Per-decode buffers returned by [`Megakernel::launch`].
+pub struct KernelBuffers {
+    pub kv_codes: metal::Buffer, // nf4tile640 packed codes (u32 × 80 per tile)
+    pub kv_scales: metal::Buffer, // nf4tile640 block scales (f32 × 5 per tile)
+    pub kv_biases: metal::Buffer, // nf4tile640 block biases (f32 × 5 per tile)
+    pub kv_scratch_k: metal::Buffer,
+    pub kv_scratch_v: metal::Buffer,
+    pub ring_entries: metal::Buffer, // RING_SIZE * 5 * 4 bytes (WorkEntry[512])
+    pub ring_tail: metal::Buffer,    // 4 bytes (atomic u32, GPU-produced)
+    pub slot_logits: metal::Buffer,  // NUM_SLOTS * VOCAB_SIZE * 2 bytes (half-float)
+    pub completion_counter: metal::Buffer, // 4 bytes (atomic u32, GPU-incremented)
+    pub centroid_scratch: metal::Buffer,
+    pub centroid_scales: metal::Buffer,
+    pub decompress_progress: metal::Buffer,
+    pub entropy_map: metal::Buffer,
+    pub active_mask: metal::Buffer,
+    /// Draft model output buffer: per-slot, first u32 = candidate count, then
+    /// MAX_DRAFT_CANDIDATES × u32 token IDs, then MAX_DRAFT_CANDIDATES × f32 log-probs.
+    pub draft_output: metal::Buffer,
+    /// Per-head attention gates (NUM_Q_HEADS × f16). sigmoid(gate) gates the SDPA output.
+    pub head_gates: metal::Buffer,
+    /// Stage 0 activation taps: [(2·LAYERS+2) × HIDDEN_DIM] f16 slots
+    /// (STAGE0_TAPS_SPEC.md). Inert unless the kernel was compiled with taps.
+    pub layer_taps: metal::Buffer,
+    /// Last completed tap slot (device-scope atomic u32; u32::MAX = none).
+    pub tap_progress: metal::Buffer,
+    // KV interleave
+    pub kv_prefetch_arena: Option<metal::Buffer>,
+    pub pso_decode: Option<ComputePipelineState>,
+    pub pso_prefetch: Option<ComputePipelineState>,
+    pub arena_layout: Option<KvPrefetchArena>,
+    pub epoch_control: Option<metal::Buffer>,
+    pub epoch_receipt: Option<metal::Buffer>,
+}
+
+/// Threadgroup constants for the T32 coalesced GEMV kernel.
+pub const PERSISTENT_GEMV_ROWS_PER_TG: usize = 1;
+pub const PERSISTENT_GEMV_THREADS_PER_TG: usize = 32;
+
+/// Launch the persistent T32 coalesced GEMV kernel.
+pub fn dispatch_persistent_gemv(
+    encoder: &metal::ComputeCommandEncoderRef,
+    pso: &metal::ComputePipelineState,
+    weight_stream: &metal::BufferRef,
+    activation_vector: &metal::BufferRef,
+    output_vector: &metal::BufferRef,
+    num_rows: usize,
+) {
+    encoder.set_compute_pipeline_state(pso);
+    encoder.set_buffer(0, Some(weight_stream), 0);
+    encoder.set_buffer(1, Some(activation_vector), 0);
+    encoder.set_buffer(2, Some(output_vector), 0);
+    encoder.dispatch_thread_groups(
+        MTLSize {
+            width: num_rows as u64,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: PERSISTENT_GEMV_THREADS_PER_TG as u64,
+            height: 1,
+            depth: 1,
+        },
+    );
+}
+
+/// Create a TTS Talker megakernel with the given weights.
+///
+/// Delegates to [`TtsMegakernel::new`] for pipeline compilation and
+/// KV cache allocation.
+pub fn create_tts_pipeline(
+    device: &metal::Device,
+    weights: TtsWeightBindings,
+) -> Result<TtsMegakernel, String> {
+    TtsMegakernel::new(device, weights)
+}

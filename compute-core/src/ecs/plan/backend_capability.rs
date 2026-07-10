@@ -10,7 +10,7 @@
 
 /// Re-export of the CPU program op type — the spec declares this at the
 /// backend capability layer for unified import paths.
-pub use crate::cpu_runtime::capabilities::CpuProgramOp;
+pub use crate::ecs::cpu_runtime::capabilities::CpuProgramOp;
 
 use crate::ecs::plan::fusion::{DataflowOpKind, FusedGroup};
 use crate::ecs::plan::precision_plan::PrecisionScope;

@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::execution_profile::ExecutionView;
+use crate::ecs::execution_profile::ExecutionView;
 
 /// Discriminant for dataflow operations at the schedule level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

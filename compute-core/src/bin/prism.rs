@@ -938,6 +938,7 @@ fn ane_compile(name: &str) {
     eprintln!("[prism:ane] Compiling ANE subgraphs for {name}...");
 
     #[cfg(feature = "prism-backend")]
+    #[cfg(feature = "mlx-backend")]
     {
         use tribunus_compute_core::ane_compile;
         match ane_compile::compile_ane_artifacts(&dir) {

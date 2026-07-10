@@ -89,3 +89,44 @@ pub struct ExecutableFormat {
     pub variant_label: String,
 }
 impl Component for ExecutableFormat {}
+
+// ---------------------------------------------------------------------------
+// Backend dispatch & runtime components
+// ---------------------------------------------------------------------------
+
+/// Identifies a backend instance and its capabilities.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendComponent {
+    pub backend_id: String,
+    pub capabilities: Vec<String>,
+    pub instance_id: u64,
+}
+impl Component for BackendComponent {}
+
+/// Tracks a tensor handle managed by a particular backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TensorComponent {
+    pub handle: u64,
+    pub backend_id: String,
+    pub shape: Vec<u32>,
+    pub dtype: String,
+    pub residency: String,
+}
+impl Component for TensorComponent {}
+
+/// Cache entry for a compiled region on a backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledRegionComponent {
+    pub handle: u64,
+    pub backend_id: String,
+    pub region_hash: String,
+}
+impl Component for CompiledRegionComponent {}
+/// Wraps Metal device, command queue, and buffer manager handles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetalDeviceState {
+    pub device_handle: u64,
+    pub command_queue_handle: u64,
+    pub buffer_manager_handle: u64,
+}
+impl Component for MetalDeviceState {}
