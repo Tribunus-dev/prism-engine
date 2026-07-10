@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod tests {
+    use crate::ecs::adapter::CanonicalRole;
     use crate::ecs::compile_session::CompileSession;
     use crate::ecs::component::fusion::*;
     use crate::ecs::component::memory::*;
     use crate::ecs::component::tensor::*;
-    use crate::ecs::*;
     use crate::ecs::plan::CodecFamily;
-    use crate::ecs::adapter::CanonicalRole;
+    use crate::ecs::*;
 
     // -----------------------------------------------------------------------
     // test_compworld_basics
@@ -594,5 +594,85 @@ mod tests {
             large_wg.is_none() || large_wg != Some(&WorkgroupCount(1, 1, 1)),
             "dispatch with ≥128 elements should NOT have scalar workgroup"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // BitNet ECS full-pipeline test
+    // -----------------------------------------------------------------------
+    #[test]
+    #[cfg(feature = "prism-backend")]
+    fn test_bitnet_ecs_pipeline() {
+        use crate::ecs::adapter::CanonicalRole;
+        use crate::ecs::compile_session::CompileSession;
+        use crate::ecs::plan::CodecFamily;
+
+        let mut session = CompileSession::new();
+        session.register_builtin_systems();
+
+        // Create a minimal BitNet model: small transformer, 2 layers
+        let model = session
+            .world
+            .spawn(EntityKind::Model, Some("bitnet-test".into()));
+        let hidden_dim = 64u32;
+        let num_layers = 2u32;
+
+        for layer in 0..num_layers {
+            let layer_e = session
+                .world
+                .spawn(EntityKind::Layer, Some(format!("layer_{layer}")));
+            for (role, shape) in &[
+                (CanonicalRole::Q(layer), vec![hidden_dim, hidden_dim]),
+                (CanonicalRole::K(layer), vec![hidden_dim, hidden_dim]),
+                (CanonicalRole::V(layer), vec![hidden_dim, hidden_dim]),
+                (CanonicalRole::O(layer), vec![hidden_dim, hidden_dim]),
+                (CanonicalRole::Gate(layer), vec![hidden_dim * 4, hidden_dim]),
+                (CanonicalRole::Up(layer), vec![hidden_dim * 4, hidden_dim]),
+                (CanonicalRole::Down(layer), vec![hidden_dim, hidden_dim * 4]),
+            ] {
+                let t = session
+                    .world
+                    .spawn(EntityKind::Tensor, Some(role.to_string()));
+                session.world.add_component(
+                    t,
+                    Shape {
+                        dims: shape.clone(),
+                    },
+                );
+                session.world.add_component(t, DataType::F32);
+                session.world.add_component(t, CanonicalRoleComp(*role));
+                session
+                    .world
+                    .add_component(t, CodecFamilyComp(CodecFamily::Int8, 128));
+            }
+        }
+
+        // Run phases B–G (compilation pipeline)
+        for phase in &[
+            crate::ecs::SchedulePhase::QuantizationPlanning,
+            crate::ecs::SchedulePhase::MemoryPlanning,
+            crate::ecs::SchedulePhase::FusionDispatch,
+            crate::ecs::SchedulePhase::KernelGeneration,
+            crate::ecs::SchedulePhase::Compilation,
+            crate::ecs::SchedulePhase::Packaging,
+        ] {
+            session.world.run_phase(*phase).unwrap();
+        }
+
+        // Verify: tensor entities exist
+        let tensor_count = session.world.entities_of_kind(EntityKind::Tensor).len();
+        assert!(tensor_count > 0, "should have tensor entities");
+
+        // Verify: buffer entities created (memory planning phase)
+        let buffer_count = session.world.entities_of_kind(EntityKind::Buffer).len();
+        assert!(buffer_count > 0, "should have buffer entities");
+
+        // Verify: dispatch entities created (fusion phase)
+        let dispatch_count = session.world.entities_of_kind(EntityKind::Dispatch).len();
+        assert!(dispatch_count > 0, "should have dispatch entities");
+
+        println!("BitNet ECS pipeline test passed:");
+        println!("  Tensors: {}", tensor_count);
+        println!("  Buffers: {}", buffer_count);
+        println!("  Dispatches: {}", dispatch_count);
     }
 }
