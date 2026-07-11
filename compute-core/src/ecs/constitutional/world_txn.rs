@@ -2,6 +2,7 @@ pub use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::system_desc::ReadDependency;
 pub use crate::ecs::constitutional::types::*;
 use crate::ecs::CompWorld;
+use crate::ecs::EntityKind;
 use serde::{Deserialize, Serialize};
 
 /// Access kind for concurrency control.
@@ -83,12 +84,23 @@ pub struct WorldTxn {
     pub(crate) inserts: Vec<StagedInsert>,
     /// Staged component removals
     pub(crate) removes: Vec<StagedRemove>,
+    /// Staged entity spawns
+    pub(crate) spawns: Vec<StagedSpawn>,
     /// Domain events to emit after successful commit
     pub(crate) events: Vec<DomainEvent>,
     /// Read dependencies for OCC validation
     pub(crate) read_deps: Vec<ReadDependency>,
     /// Expected world epoch at construction time
     pub(crate) expected_epoch: WorldEpoch,
+}
+
+/// A staged entity spawn.
+#[allow(dead_code)]
+pub(crate) struct StagedSpawn {
+    pub entity: u64,
+    pub kind: EntityKind,
+    pub preflight: Box<dyn Fn(&CompWorld) -> Result<(), WorldTxnError> + Send + Sync>,
+    pub apply: Box<dyn FnOnce(&mut CompWorld) + Send>,
 }
 
 /// A staged component insert.
@@ -123,10 +135,37 @@ impl WorldTxn {
         Self {
             inserts: Vec::new(),
             removes: Vec::new(),
+            spawns: Vec::new(),
             events: Vec::new(),
             read_deps: Vec::new(),
             expected_epoch: world.current_epoch(),
         }
+    }
+
+    /// Peek the next available entity ID from the world.
+    pub fn next_entity_id(world: &CompWorld) -> u64 {
+        world.next_entity_id()
+    }
+
+    /// Stage an entity spawn with a reserved entity ID.
+    pub fn stage_spawn(&mut self, entity: u64, kind: EntityKind) {
+        self.spawns.push(StagedSpawn {
+            entity,
+            kind,
+            preflight: Box::new(move |world: &CompWorld| {
+                if world.has_entity(crate::ecs::CompEntity(entity)) {
+                    return Err(WorldTxnError::InvalidEntity(entity));
+                }
+                Ok(())
+            }),
+            apply: Box::new(move |world: &mut CompWorld| {
+                world.spawn_entity_with_id(entity, kind);
+            }),
+        });
+    }
+
+    pub fn spawn_count(&self) -> usize {
+        self.spawns.len()
     }
 
     /// Stage a component insert or update.

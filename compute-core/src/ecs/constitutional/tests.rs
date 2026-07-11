@@ -146,6 +146,8 @@ mod tests {
             version: SchemaVersion(1),
             type_name: "TestComponent".into(),
             description: "A test component".into(),
+            durability: ComponentDurability::Durable,
+            type_id: None,
         };
         reg.register(entry.clone());
         let retrieved = reg.get(&sid);

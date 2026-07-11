@@ -389,6 +389,36 @@ impl CompWorld {
         }
     }
 
+    /// Returns the next entity ID that will be assigned, without consuming it.
+    pub fn next_entity_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Spawn an entity at a specific reserved ID (used by WorldTxn during commit).
+    ///
+    /// Idempotent: if the entity slot already exists at this ID, the call is
+    /// a no-op. This allows phase 1aa (reservation) and phase 3c (apply) to
+    /// both call it without double-pushing entity metadata.
+    pub fn spawn_entity_with_id(&mut self, id: u64, kind: EntityKind) -> CompEntity {
+        let idx = (id - 1) as usize;
+        if idx < self.entity_meta.len() {
+            // Already reserved — idempotent.
+            return CompEntity(id);
+        }
+        // Fill gap if needed (spawns may be out of order from reservation)
+        while self.entity_meta.len() <= idx {
+            self.entity_meta.push(EntityMeta {
+                kind,
+                generation: 0,
+                name: None,
+            });
+        }
+        if id > self.next_id {
+            self.next_id = id + 1;
+        }
+        CompEntity(id)
+    }
+
     pub fn spawn_entity(&mut self, kind: EntityKind) -> CompEntity {
         let id = self.next_id;
         self.next_id += 1;
@@ -576,6 +606,15 @@ impl CompWorld {
             });
         }
 
+        // 1aa. Pre-validate staged spawns and reserve entity IDs so
+        //      that step 1c finds spawned entities during existence checks.
+        for spawn in &txn.spawns {
+            (spawn.preflight)(self)?;
+            // Reserve the entity slot so subsequent insert/remove checks find it.
+            // spawn_entity_with_id is idempotent for already-reserved slots.
+            self.spawn_entity_with_id(spawn.entity, spawn.kind);
+        }
+
         // 1b. Validate read dependencies
         for dep in &txn.read_deps {
             let current_ver = self
@@ -654,6 +693,11 @@ impl CompWorld {
         for remove in txn.removes {
             (remove.apply)(&mut self.component_store);
             *self.component_versions.entry(remove.entity).or_insert(0) += 1;
+        }
+
+        // 3c. Apply staged spawns
+        for spawn in txn.spawns {
+            (spawn.apply)(self);
         }
 
         // -- PHASE 4: Advance epoch AFTER all mutations succeed --------
