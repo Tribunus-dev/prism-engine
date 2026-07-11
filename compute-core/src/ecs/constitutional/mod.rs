@@ -1,13 +1,13 @@
-pub mod persistence;
 pub mod command;
 pub mod envelope;
+pub mod persistence;
 pub mod schema;
 pub mod system_desc;
 pub mod types;
 
-pub use persistence::*;
 pub use command::*;
 pub use envelope::*;
+pub use persistence::*;
 pub use schema::*;
 pub use system_desc::*;
 pub use types::*;
@@ -19,5 +19,9 @@ pub mod scheduler;
 pub use scheduler::*;
 pub mod driver;
 pub use driver::*;
+pub mod sparse_set;
+pub use sparse_set::*;
+pub mod migration;
+pub use migration::*;
 #[cfg(test)]
 mod tests;

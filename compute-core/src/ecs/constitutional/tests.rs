@@ -6,6 +6,7 @@ mod tests {
     use crate::ecs::constitutional::*;
     use crate::ecs::receipt_bus::*;
     use crate::ecs::{CompWorld, EntityKind};
+    use std::collections::HashMap;
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -1480,5 +1481,93 @@ mod tests {
 
         let _rx = bus.subscribe(Box::new(NoopSub));
         assert_eq!(bus.subscriber_count(), 1);
+    }
+    // ── SparseSet ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_sparse_set_insert_get_remove() {
+        let mut set = SparseSet::new();
+        assert_eq!(set.get(1), None);
+        set.insert(1, "hello");
+        assert_eq!(set.get(1), Some(&"hello"));
+        let removed = set.remove(1);
+        assert_eq!(removed, Some("hello"));
+        assert_eq!(set.get(1), None);
+    }
+
+    #[test]
+    fn test_sparse_set_update_overwrites() {
+        let mut set = SparseSet::new();
+        set.insert(1, "alpha");
+        set.insert(1, "beta");
+        assert_eq!(set.get(1), Some(&"beta"));
+    }
+
+    #[test]
+    fn test_sparse_set_iteration() {
+        let mut set = SparseSet::new();
+        set.insert(1, 10u64);
+        set.insert(2, 20);
+        set.insert(3, 30);
+        let collected: Vec<(u64, &u64)> = set.iter().collect();
+        assert_eq!(collected, vec![(1, &10), (2, &20), (3, &30)]);
+    }
+
+    #[test]
+    fn test_sparse_set_contains() {
+        let mut set = SparseSet::new();
+        set.insert(1, "x");
+        assert!(set.contains(1));
+        assert!(!set.contains(2));
+    }
+
+    #[test]
+    fn test_sparse_set_len() {
+        let mut set = SparseSet::new();
+        assert_eq!(set.len(), 0);
+        set.insert(1, "a");
+        set.insert(2, "b");
+        assert_eq!(set.len(), 2);
+        set.remove(1);
+        assert_eq!(set.len(), 1);
+        assert!(set.is_empty() == false);
+    }
+
+    #[test]
+    fn test_sparse_set_swap_remove_preserves() {
+        let mut set = SparseSet::new();
+        set.insert(1, "first");
+        set.insert(2, "second");
+        set.insert(3, "third");
+        set.remove(1);
+        assert_eq!(set.get(2), Some(&"second"));
+        assert_eq!(set.get(3), Some(&"third"));
+        assert_eq!(set.len(), 2);
+
+        // 1 is gone
+        assert_eq!(set.get(1), None);
+    }
+
+    #[test]
+    fn test_sparse_equivalence_with_hashmap() {
+        let mut set = SparseSet::new();
+        let mut map = HashMap::new();
+        set.insert(10, 100u64);
+        set.insert(20, 200);
+        set.insert(30, 300);
+        map.insert(10, 100);
+        map.insert(20, 200);
+        map.insert(30, 300);
+        assert_sparse_equivalence(&set, &map);
+    }
+
+    #[test]
+    fn test_sparse_set_serde() {
+        let mut set = SparseSet::new();
+        set.insert(1, "alice".to_string());
+        set.insert(2, "bob".to_string());
+        let json = serde_json::to_string(&set).unwrap();
+        let deserialized: SparseSet<String> = serde_json::from_str(&json).unwrap();
+        assert_eq!(set, deserialized);
     }
 }
