@@ -1740,7 +1740,7 @@ mod tests {
         };
 
         let initial_epoch = world.current_epoch();
-        let result = cmd.execute(&mut world, &schema_registry, outcome);
+        let result = cmd.clone().execute(&mut world, &schema_registry, outcome);
         let (committed, events) = result.expect("discovery should succeed");
 
         assert!(
@@ -1772,9 +1772,14 @@ mod tests {
         };
 
         let initial_epoch = world.current_epoch();
-        let err = cmd.execute(&mut world, &schema_registry, outcome).unwrap_err();
+        let err = cmd
+            .execute(&mut world, &schema_registry, outcome)
+            .unwrap_err();
 
-        assert!(matches!(err, DeviceError::DiscoveryFailed), "expected DiscoveryFailed, got {err:?}");
+        assert!(
+            matches!(err, DeviceError::DiscoveryFailed),
+            "expected DiscoveryFailed, got {err:?}"
+        );
         assert_eq!(world.current_epoch(), initial_epoch);
     }
 
@@ -1797,7 +1802,9 @@ mod tests {
         };
 
         let initial_epoch = world.current_epoch();
-        let err = cmd.execute(&mut world, &schema_registry, outcome).unwrap_err();
+        let err = cmd
+            .execute(&mut world, &schema_registry, outcome)
+            .unwrap_err();
 
         assert!(
             matches!(err, DeviceError::RequestMismatch),
@@ -1817,24 +1824,140 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  Residency & Deployment Tests  (Wave 1 — model deployment subsystem)
-
     // ══════════════════════════════════════════════════════════════════════
+    //  Residency & Deployment Tests  (Wave 1 — model deployment subsystem)
     //
-    //  Tests for model lifecycle, residency lifecycle, deployment commands,
-    //  and serialization roundtrips.
+    //  Schema-bound deployment, preflight validation, idempotent redeployment,
+    //  replay without live allocations, stale outcome rejection.
+
+    /// Helper: create a schema registry with all residency schemas registered.
+    fn make_residency_schema_registry() -> SchemaRegistry {
+        let mut reg = SchemaRegistry::new();
+        reg.register_for_type::<ModelId>(
+            ComponentSchemaId(5),
+            SchemaVersion(1),
+            "ModelId",
+            "Model domain identity",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ModelArtifactRef>(
+            ComponentSchemaId(6),
+            SchemaVersion(1),
+            "ModelArtifactRef",
+            "Reference to source artifact",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ModelLifecycle>(
+            ComponentSchemaId(7),
+            SchemaVersion(1),
+            "ModelLifecycle",
+            "Model lifecycle state",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ResidencyDeviceRef>(
+            ComponentSchemaId(8),
+            SchemaVersion(1),
+            "ResidencyDeviceRef",
+            "Target device reference",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ResidencyMemoryClaim>(
+            ComponentSchemaId(9),
+            SchemaVersion(1),
+            "ResidencyMemoryClaim",
+            "Memory claim stats",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ResidencyFormat>(
+            ComponentSchemaId(10),
+            SchemaVersion(1),
+            "ResidencyFormat",
+            "Weight representation format",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ResidencyLifecycle>(
+            ComponentSchemaId(11),
+            SchemaVersion(1),
+            "ResidencyLifecycle",
+            "Residency lifecycle state",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<AllocationToken>(
+            ComponentSchemaId(12),
+            SchemaVersion(1),
+            "AllocationToken",
+            "Ephemeral allocation key",
+            ComponentDurability::Ephemeral,
+        );
+        reg
+    }
+
+    /// Helper: create a CompWorld with one Artifact (entity 1) and one device
+    /// at DeviceLifecycle::Ready (entity 2), with DeviceStableId and DeviceMemoryLimits.
+    fn make_deployment_world() -> CompWorld {
+        let mut world = CompWorld::new();
+        // Artifact entity (1) with digest
+        world.spawn(EntityKind::Artifact, Some("test_artifact".into()));
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
+        );
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
+        );
+        // Device entity (2) with stable ID, Ready lifecycle, memory limits
+        world.spawn(EntityKind::Device, Some("test_device".into()));
+        world.add_component(
+            crate::ecs::CompEntity(2),
+            DeviceStableId("pci-0000:01:00.0".into()),
+        );
+        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
+        world.add_component(
+            crate::ecs::CompEntity(2),
+            DeviceMemoryLimits {
+                total_bytes: 8_589_934_592,
+                max_alloc_bytes: 4_294_967_296,
+            },
+        );
+        world
+    }
+
+    /// Create a standard DeployModelCommand targeting artifact 1, device 2.
+    fn make_deploy_cmd() -> DeployModelCommand {
+        DeployModelCommand {
+            id: MessageId::compute(b"deploy-1"),
+            artifact_entity: 1,
+            device_entity: 2,
+            device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
+            format: ResidencyFormat::Native,
+            memory_bytes: 1_073_741_824,
+        }
+    }
+
+    /// Create a successful EffectOutcome correlated with the given command.
+    fn make_success_outcome(cmd: &DeployModelCommand) -> EffectOutcome {
+        EffectOutcome {
+            id: MessageId::compute(b"outcome-1"),
+            request_id: cmd.to_effect_request().id,
+            success: true,
+            output: serde_json::json!({
+                "allocation_token": "pool-7/slot-42",
+                "actual_bytes": 1_073_741_824,
+                "format": "native",
+                "attempt_id": "attempt-1",
+            }),
+        }
+    }
 
     // ── test_model_lifecycle_transitions ─────────────────────────────────
 
     #[test]
     fn test_model_lifecycle_transitions() {
-        // Happy path: Created → Validated → Deployable → Deprecated → Removed
         assert!(ModelLifecycle::Created.can_transition_to(ModelLifecycle::Validated));
         assert!(ModelLifecycle::Validated.can_transition_to(ModelLifecycle::Deployable));
         assert!(ModelLifecycle::Deployable.can_transition_to(ModelLifecycle::Deprecated));
         assert!(ModelLifecycle::Deprecated.can_transition_to(ModelLifecycle::Removed));
-
-        // Invalid transitions fail
         assert!(!ModelLifecycle::Created.can_transition_to(ModelLifecycle::Deployable));
         assert!(!ModelLifecycle::Created.can_transition_to(ModelLifecycle::Deprecated));
         assert!(!ModelLifecycle::Created.can_transition_to(ModelLifecycle::Removed));
@@ -1854,144 +1977,20 @@ mod tests {
 
     #[test]
     fn test_residency_lifecycle_from_lifecycle_module() {
-        // All variants
         let desired = ResidencyLifecycle::Desired;
         let binding = ResidencyLifecycle::Binding;
         let resident = ResidencyLifecycle::Resident;
         let evicting = ResidencyLifecycle::Evicting;
         let evicted = ResidencyLifecycle::Evicted;
-
         assert_ne!(desired, binding);
         assert_ne!(binding, resident);
         assert_ne!(resident, evicting);
         assert_ne!(evicting, evicted);
-
-        // is_resident() true only for Resident
         assert!(resident.is_resident());
         assert!(!desired.is_resident());
         assert!(!binding.is_resident());
         assert!(!evicting.is_resident());
         assert!(!evicted.is_resident());
-    }
-
-    // ── test_deploy_model_success ────────────────────────────────────────
-
-    #[test]
-    fn test_deploy_model_success() {
-        let mut world = CompWorld::new();
-        // Pre-existing artifact entity (entity 1)
-        world.spawn(EntityKind::Artifact, Some("test_artifact".into()));
-        // Device entity (entity 2)
-        world.spawn(EntityKind::Device, Some("test_device".into()));
-
-        let schema_registry = SchemaRegistry::new();
-
-        let cmd = DeployModelCommand {
-            id: MessageId::compute(b"deploy-1"),
-            artifact_entity: 1,
-            device_entity: 2,
-            device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
-            format: ResidencyFormat::Native,
-            memory_bytes: 1_073_741_824,
-        };
-
-        let outcome = EffectOutcome {
-            id: MessageId::compute(b"outcome-1"),
-            request_id: cmd.to_effect_request().id,
-            success: true,
-            output: serde_json::json!({"result": "ok"}),
-        };
-
-        let start_epoch = world.current_epoch();
-        let (epoch, event) = cmd.execute(&mut world, &schema_registry, outcome)
-            .expect("deploy should succeed");
-
-        // Epoch advanced
-        assert!(epoch.0 > start_epoch, "epoch should advance");
-        assert_eq!(world.current_epoch(), epoch.0, "world epoch matches committed epoch");
-
-        // Event kind
-        assert_eq!(event.kind, "model_deployed");
-
-        // Model entity (3) and residency entity (4) should exist
-        assert!(world.has_entity(crate::ecs::CompEntity(3)), "model entity should exist");
-        assert!(world.has_entity(crate::ecs::CompEntity(4)), "residency entity should exist");
-
-        // Model entity kind
-        assert_eq!(world.entity_kind(crate::ecs::CompEntity(3)), Some(EntityKind::Model));
-    }
-
-    // ── test_deploy_model_effect_failure ─────────────────────────────────
-
-    #[test]
-    fn test_deploy_model_effect_failure() {
-        let mut world = CompWorld::new();
-        world.spawn(EntityKind::Artifact, Some("test_artifact".into()));
-
-        let schema_registry = SchemaRegistry::new();
-
-        let cmd = DeployModelCommand {
-            id: MessageId::compute(b"deploy-fail"),
-            artifact_entity: 1,
-            device_entity: 2,
-            device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
-            format: ResidencyFormat::Native,
-            memory_bytes: 1_073_741_824,
-        };
-
-        let outcome = EffectOutcome {
-            id: MessageId::compute(b"outcome-fail"),
-            request_id: cmd.to_effect_request().id,
-            success: false,
-            output: serde_json::json!({"error": "out of memory"}),
-        };
-
-        let start_epoch = world.current_epoch();
-        let result = cmd.execute(&mut world, &schema_registry, outcome);
-
-        assert!(matches!(result, Err(DeploymentError::EffectFailed)));
-        assert_eq!(
-            world.current_epoch(),
-            start_epoch,
-            "epoch should not advance on effect failure"
-        );
-    }
-
-    // ── test_deploy_model_request_mismatch ───────────────────────────────
-
-    #[test]
-    fn test_deploy_model_request_mismatch() {
-        let mut world = CompWorld::new();
-        world.spawn(EntityKind::Artifact, Some("test_artifact".into()));
-
-        let schema_registry = SchemaRegistry::new();
-
-        let cmd = DeployModelCommand {
-            id: MessageId::compute(b"deploy-mismatch"),
-            artifact_entity: 1,
-            device_entity: 2,
-            device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
-            format: ResidencyFormat::Native,
-            memory_bytes: 1_073_741_824,
-        };
-
-        // Wrong request_id -- does not match cmd.to_effect_request().id
-        let outcome = EffectOutcome {
-            id: MessageId::compute(b"outcome-mismatch"),
-            request_id: MessageId::compute(b"some-other-request"),
-            success: true,
-            output: serde_json::json!({"result": "ok"}),
-        };
-
-        let start_epoch = world.current_epoch();
-        let result = cmd.execute(&mut world, &schema_registry, outcome);
-
-        assert!(matches!(result, Err(DeploymentError::RequestMismatch)));
-        assert_eq!(
-            world.current_epoch(),
-            start_epoch,
-            "epoch should not advance on request mismatch"
-        );
     }
 
     // ── test_allocation_token_ephemeral ──────────────────────────────────
@@ -2008,7 +2007,6 @@ mod tests {
 
     #[test]
     fn test_model_lifecycle_serde() {
-        // ModelLifecycle roundtrip
         for variant in &[
             ModelLifecycle::Created,
             ModelLifecycle::Validated,
@@ -2020,8 +2018,6 @@ mod tests {
             let deserialized: ModelLifecycle = serde_json::from_str(&json).unwrap();
             assert_eq!(*variant, deserialized);
         }
-
-        // ModelArtifactRef roundtrip
         let ref1 = ModelArtifactRef {
             artifact_id: 42,
             digest: ArtifactDigest([0xab; 32]),
@@ -2035,7 +2031,6 @@ mod tests {
 
     #[test]
     fn test_residency_types_serde() {
-        // ResidencyDeviceRef
         let dev_ref = ResidencyDeviceRef {
             device_id: 7,
             device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
@@ -2044,27 +2039,456 @@ mod tests {
         let back: ResidencyDeviceRef = serde_json::from_str(&json).unwrap();
         assert_eq!(dev_ref, back);
 
-        // ResidencyMemoryClaim
+        // ResidencyMemoryClaim — updated structure
         let claim = ResidencyMemoryClaim {
-            bytes: 1_073_741_824,
-            allocated: true,
+            requested_bytes: 1_073_741_824,
+            actual_bytes: 1_073_741_824,
         };
         let json = serde_json::to_string(&claim).unwrap();
         let back: ResidencyMemoryClaim = serde_json::from_str(&json).unwrap();
         assert_eq!(claim, back);
 
-        // ResidencyFormat
-        for variant in &[ResidencyFormat::Native, ResidencyFormat::Quantized, ResidencyFormat::Distilled] {
+        for variant in &[
+            ResidencyFormat::Native,
+            ResidencyFormat::Quantized,
+            ResidencyFormat::Distilled,
+        ] {
             let json = serde_json::to_string(variant).unwrap();
             let back: ResidencyFormat = serde_json::from_str(&json).unwrap();
             assert_eq!(*variant, back);
         }
 
-        // AllocationToken
         let token = AllocationToken("pool-7/slot-42".into());
         let json = serde_json::to_string(&token).unwrap();
         let back: AllocationToken = serde_json::from_str(&json).unwrap();
         assert_eq!(token, back);
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    //  Wave 1 Canonical Deployment Tests (schema-bound, validated)
+
+    // ── test_schema_enforcement_rejects_unregistered ─────────────────────
+
+    #[test]
+    fn test_schema_enforcement_rejects_unregistered() {
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Artifact, Some("a".into()));
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
+        );
+        world.spawn(EntityKind::Device, Some("d".into()));
+        world.add_component(crate::ecs::CompEntity(2), DeviceStableId("pci-x".into()));
+        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
+        world.add_component(
+            crate::ecs::CompEntity(2),
+            DeviceMemoryLimits {
+                total_bytes: 1 << 30,
+                max_alloc_bytes: 1 << 30,
+            },
+        );
+
+        let empty_registry = SchemaRegistry::new();
+        let cmd = make_deploy_cmd();
+        let result = cmd
+            .clone()
+            .execute(&mut world, &empty_registry, make_success_outcome(&cmd));
+        assert!(matches!(result, Err(DeploymentError::SchemaError(_))));
+    }
+
+    // ── test_preflight_artifact_not_found ───────────────────────────────
+
+    #[test]
+    fn test_preflight_artifact_not_found() {
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Device, Some("d".into()));
+        world.add_component(crate::ecs::CompEntity(1), DeviceLifecycle::Ready);
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            DeviceMemoryLimits {
+                total_bytes: 1 << 30,
+                max_alloc_bytes: 1 << 30,
+            },
+        );
+
+        let reg = make_residency_schema_registry();
+        let cmd = DeployModelCommand {
+            artifact_entity: 999,
+            ..make_deploy_cmd()
+        };
+        let result = cmd
+            .clone()
+            .execute(&mut world, &reg, make_success_outcome(&cmd));
+        assert!(matches!(result, Err(DeploymentError::ArtifactNotFound(_))));
+    }
+
+    // ── test_preflight_device_not_ready ─────────────────────────────────
+
+    #[test]
+    fn test_preflight_device_not_ready() {
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Artifact, Some("a".into()));
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
+        );
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
+        );
+        world.spawn(EntityKind::Device, Some("d".into()));
+        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Discovered);
+
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+        let result = cmd
+            .clone()
+            .execute(&mut world, &reg, make_success_outcome(&cmd));
+        assert!(matches!(result, Err(DeploymentError::DeviceNotReady(_))));
+    }
+
+    // ── test_insufficient_memory_rejected ───────────────────────────────
+
+    #[test]
+    fn test_insufficient_memory_rejected() {
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Artifact, Some("a".into()));
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
+        );
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
+        );
+        world.spawn(EntityKind::Device, Some("d".into()));
+        world.add_component(
+            crate::ecs::CompEntity(2),
+            DeviceStableId("pci-0000:01:00.0".into()),
+        );
+        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
+        world.add_component(
+            crate::ecs::CompEntity(2),
+            DeviceMemoryLimits {
+                total_bytes: 536_870_912,
+                max_alloc_bytes: 268_435_456,
+            },
+        );
+
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+        let result = cmd
+            .clone()
+            .execute(&mut world, &reg, make_success_outcome(&cmd));
+        assert!(matches!(
+            result,
+            Err(DeploymentError::InsufficientMemory { .. })
+        ));
+    }
+
+    // ── test_deploy_model_entities_and_components ────────────────────────
+
+    #[test]
+    fn test_deploy_model_entities_and_components() {
+        let mut world = make_deployment_world();
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+
+        let start_epoch = world.current_epoch();
+        let (epoch, event) = cmd
+            .clone()
+            .execute(&mut world, &reg, make_success_outcome(&cmd))
+            .expect("deploy should succeed");
+
+        assert!(epoch.0 > start_epoch);
+        assert_eq!(event.kind, "model_deployed");
+        assert!(event.entity_id.is_some());
+
+        let model = crate::ecs::CompEntity(3);
+        assert!(world.has_entity(model));
+        assert_eq!(world.entity_kind(model), Some(EntityKind::Model));
+        assert!(
+            world.get_component::<ModelId>(model).is_some(),
+            "ModelId component"
+        );
+        assert!(
+            world.get_component::<ModelArtifactRef>(model).is_some(),
+            "ModelArtifactRef component"
+        );
+        assert_eq!(
+            world.get_component::<ModelLifecycle>(model),
+            Some(&ModelLifecycle::Created),
+        );
+
+        let art_ref = world.get_component::<ModelArtifactRef>(model).unwrap();
+        assert_eq!(art_ref.artifact_id, 1);
+        assert_eq!(art_ref.digest, ArtifactDigest([0xab; 32]));
+
+        let residency = crate::ecs::CompEntity(4);
+        assert!(world.has_entity(residency));
+        assert_eq!(world.entity_kind(residency), Some(EntityKind::Residency));
+
+        let dev_ref = world
+            .get_component::<ResidencyDeviceRef>(residency)
+            .unwrap();
+        assert_eq!(dev_ref.device_id, 2);
+        assert_eq!(
+            dev_ref.device_stable_id,
+            DeviceStableId("pci-0000:01:00.0".into())
+        );
+
+        let claim = world
+            .get_component::<ResidencyMemoryClaim>(residency)
+            .unwrap();
+        assert_eq!(claim.requested_bytes, 1_073_741_824);
+        assert_eq!(claim.actual_bytes, 1_073_741_824);
+
+        assert_eq!(
+            world.get_component::<ResidencyFormat>(residency),
+            Some(&ResidencyFormat::Native),
+        );
+        assert_eq!(
+            world.get_component::<ResidencyLifecycle>(residency),
+            Some(&ResidencyLifecycle::Binding),
+        );
+        assert!(
+            world.get_component::<AllocationToken>(residency).is_some(),
+            "AllocationToken present"
+        );
+    }
+
+    // ── test_deploy_idempotent ──────────────────────────────────────────
+
+    #[test]
+    fn test_deploy_idempotent() {
+        let mut world = make_deployment_world();
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+
+        let (_, event1) = cmd
+            .clone()
+            .execute(&mut world, &reg, make_success_outcome(&cmd))
+            .expect("first deploy should succeed");
+        let model_id = event1.payload["model_id"].as_u64().unwrap();
+        let entity_count_after_first = world.entity_count();
+
+        let (_, event2) = cmd
+            .clone()
+            .execute(&mut world, &reg, make_success_outcome(&cmd))
+            .expect("second deploy should succeed");
+        let model_id2 = event2.payload["model_id"].as_u64().unwrap();
+
+        assert_eq!(model_id2, model_id, "idempotent: same model entity");
+        assert!(event2.payload["idempotent"].as_bool().unwrap_or(false));
+        assert_eq!(world.entity_count(), entity_count_after_first);
+    }
+
+    // ── test_deploy_effect_outcome_allocation ───────────────────────────
+
+    #[test]
+    fn test_deploy_effect_outcome_allocation() {
+        let mut world = make_deployment_world();
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+
+        let mut outcome = make_success_outcome(&cmd);
+        outcome.output = serde_json::json!({
+            "allocation_token": "pool-42/slot-7",
+            "actual_bytes": 512_000_000,
+            "format": "quantized",
+            "attempt_id": "attempt-42",
+        });
+
+        let (_, _) = cmd
+            .execute(&mut world, &reg, outcome)
+            .expect("deploy should succeed");
+
+        let residency = crate::ecs::CompEntity(4);
+        let claim = world
+            .get_component::<ResidencyMemoryClaim>(residency)
+            .unwrap();
+        assert_eq!(claim.requested_bytes, 1_073_741_824, "requested unchanged");
+        assert_eq!(claim.actual_bytes, 512_000_000, "actual from outcome");
+
+        assert_eq!(
+            world.get_component::<ResidencyFormat>(residency),
+            Some(&ResidencyFormat::Quantized),
+        );
+        let token = world.get_component::<AllocationToken>(residency).unwrap();
+        assert_eq!(token.0, "pool-42/slot-7");
+    }
+
+    // ── test_replay_model_deployed ──────────────────────────────────────
+
+    #[test]
+    fn test_replay_model_deployed() {
+        let mut world = CompWorld::new();
+
+        let event = DomainEvent {
+            id: MessageId::compute(b"ev-replay"),
+            kind: "model_deployed".to_string(),
+            entity_id: Some(EntityKindId(1)),
+            payload: serde_json::json!({
+                "model_id": 1,
+                "residency_id": 2,
+                "device": 10,
+                "artifact": 5,
+                "format": "native",
+                "memory_requested": 1_073_741_824,
+                "memory_actual": 1_073_741_824,
+            }),
+        };
+
+        let (epoch, model_id) =
+            replay_model_deployed(&mut world, &event).expect("replay should succeed");
+
+        assert!(epoch.0 > WorldEpoch(1));
+
+        let model = crate::ecs::CompEntity(model_id);
+        assert!(world.has_entity(model));
+        assert_eq!(world.entity_kind(model), Some(EntityKind::Model));
+        assert!(world.get_component::<ModelLifecycle>(model).is_some());
+        assert!(world.get_component::<ModelArtifactRef>(model).is_some());
+
+        let residency = crate::ecs::CompEntity(2);
+        assert!(world.has_entity(residency));
+        assert_eq!(world.entity_kind(residency), Some(EntityKind::Residency));
+        assert!(world
+            .get_component::<ResidencyDeviceRef>(residency)
+            .is_some());
+        assert!(world
+            .get_component::<ResidencyMemoryClaim>(residency)
+            .is_some());
+
+        assert_eq!(
+            world.get_component::<ResidencyLifecycle>(residency),
+            Some(&ResidencyLifecycle::Binding),
+            "replay sets Binding for reconciliation",
+        );
+        assert!(
+            world.get_component::<AllocationToken>(residency).is_none(),
+            "AllocationToken must NOT survive replay",
+        );
+    }
+
+    // ── test_replay_idempotent ──────────────────────────────────────────
+
+    #[test]
+    fn test_replay_idempotent() {
+        let mut world = CompWorld::new();
+
+        let event = DomainEvent {
+            id: MessageId::compute(b"ev-replay-idem"),
+            kind: "model_deployed".to_string(),
+            entity_id: Some(EntityKindId(1)),
+            payload: serde_json::json!({
+                "model_id": 1,
+                "residency_id": 2,
+                "device": 10,
+                "artifact": 5,
+                "format": "quantized",
+                "memory_requested": 1_073_741_824,
+                "memory_actual": 512_000_000,
+            }),
+        };
+
+        let entity_count_before = world.entity_count();
+        replay_model_deployed(&mut world, &event).expect("first replay");
+        let entity_count_after_first = world.entity_count();
+        assert!(entity_count_after_first > 0);
+
+        replay_model_deployed(&mut world, &event).expect("second replay");
+        assert_eq!(world.entity_count(), entity_count_after_first);
+    }
+
+    // ── test_deploy_effect_failure_epoch_unchanged ──────────────────────
+
+    #[test]
+    fn test_deploy_effect_failure_epoch_unchanged() {
+        let mut world = make_deployment_world();
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+
+        let outcome = EffectOutcome {
+            id: MessageId::compute(b"outcome-fail"),
+            request_id: cmd.to_effect_request().id,
+            success: false,
+            output: serde_json::json!({"error": "out of memory"}),
+        };
+
+        let start_epoch = world.current_epoch();
+        let result = cmd.clone().execute(&mut world, &reg, outcome);
+        assert!(matches!(result, Err(DeploymentError::EffectFailed)));
+        assert_eq!(world.current_epoch(), start_epoch);
+    }
+
+    // ── test_deploy_request_mismatch_rejected ───────────────────────────
+
+    #[test]
+    fn test_deploy_request_mismatch_rejected() {
+        let mut world = make_deployment_world();
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+
+        let outcome = EffectOutcome {
+            id: MessageId::compute(b"outcome-mismatch"),
+            request_id: MessageId::compute(b"wrong-request"),
+            success: true,
+            output: serde_json::json!({"result": "ok"}),
+        };
+
+        let start_epoch = world.current_epoch();
+        let result = cmd.clone().execute(&mut world, &reg, outcome);
+        assert!(matches!(result, Err(DeploymentError::RequestMismatch)));
+        assert_eq!(world.current_epoch(), start_epoch);
+    }
+
+    // ── test_validate_residency_schemas ─────────────────────────────────
+
+    #[test]
+    fn test_validate_residency_schemas() {
+        let reg = make_residency_schema_registry();
+        assert!(validate_residency_schemas(&reg).is_ok());
+
+        let empty = SchemaRegistry::new();
+        assert!(validate_residency_schemas(&empty).is_err());
+    }
+
+    // ── test_preflight_api_direct_call ──────────────────────────────────
+
+    #[test]
+    fn test_preflight_api_direct_call() {
+        let world = make_deployment_world();
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+
+        assert!(cmd.preflight(&world, &reg).is_ok());
+
+        let bad_cmd = DeployModelCommand {
+            artifact_entity: 999,
+            ..make_deploy_cmd()
+        };
+        assert!(matches!(
+            bad_cmd.preflight(&world, &reg),
+            Err(DeploymentError::ArtifactNotFound(999))
+        ));
+    }
+
+    // ── test_deploy_model_entity_id_authoritative ───────────────────────
+
+    #[test]
+    fn test_deploy_model_entity_id_authoritative() {
+        let mut world = make_deployment_world();
+        let reg = make_residency_schema_registry();
+        let cmd = make_deploy_cmd();
+
+        let (_, event) = cmd
+            .clone()
+            .execute(&mut world, &reg, make_success_outcome(&cmd))
+            .expect("deploy should succeed");
+
+        assert_eq!(event.entity_id, Some(EntityKindId(3)));
+        assert_eq!(event.payload["model_id"].as_u64(), Some(3));
+        assert_eq!(event.payload["residency_id"].as_u64(), Some(4));
+    }
 }
