@@ -64,6 +64,18 @@ pub enum ReceiptKind {
     Other(String),
 }
 
+impl std::fmt::Display for ReceiptKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match serde_json::to_value(self) {
+            Ok(v) => match v.as_str() {
+                Some(s) => write!(f, "{}", s),
+                None => write!(f, "{:?}", self),
+            },
+            Err(_) => write!(f, "{:?}", self),
+        }
+    }
+}
+
 // ── ReceiptId ───────────────────────────────────────────────────────────────
 
 /// Content-addressed receipt identifier.
@@ -78,7 +90,7 @@ impl ReceiptId {
         let mut hasher = blake3::Hasher::new();
         hasher.update(&payload_hash);
         match entity_id {
-            Some(id) => hasher.update(id.as_bytes()),
+            Some(id) => { hasher.update(id.as_bytes()); }
             None => {}
         }
         hasher.update(&epoch.to_le_bytes());
@@ -301,7 +313,7 @@ impl ReceiptBus {
         }
     }
 
-    pub fn subscribe(&self, subscriber: Box<dyn ReceiptSubscriber>) {
+    pub fn subscribe(&self, mut subscriber: Box<dyn ReceiptSubscriber>) {
         let mut subs = self.subscribers.lock();
         // Replay buffered receipts to the new subscriber
         for receipt in self.buffer.lock().iter() {
@@ -516,9 +528,9 @@ mod tests {
     #[test]
     fn test_bus_subscriber_dispatched() {
         let bus = ReceiptBus::new();
-        let dispatched = parking_lot::Mutex::new(Vec::new());
+        let dispatched = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
         struct TestSub {
-            events: &'static parking_lot::Mutex<Vec<String>>,
+            events: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
         }
         impl ReceiptSubscriber for TestSub {
             fn on_receipt(&mut self, receipt: &CanonicalReceipt) {
@@ -529,7 +541,7 @@ mod tests {
             }
         }
         let sub = Box::new(TestSub {
-            events: Box::leak(Box::new(dispatched)),
+            events: dispatched.clone(),
         });
         bus.subscribe(sub);
 
@@ -547,9 +559,9 @@ mod tests {
     #[test]
     fn test_kind_filter() {
         let bus = ReceiptBus::new();
-        let dispatched = parking_lot::Mutex::new(Vec::new());
+        let dispatched = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
         struct FilterSub {
-            events: &'static parking_lot::Mutex<Vec<String>>,
+            events: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
         }
         impl ReceiptSubscriber for FilterSub {
             fn on_receipt(&mut self, receipt: &CanonicalReceipt) {
@@ -560,7 +572,7 @@ mod tests {
             }
         }
         let sub = Box::new(FilterSub {
-            events: Box::leak(Box::new(dispatched)),
+            events: dispatched.clone(),
         });
         bus.subscribe(sub);
 
@@ -617,7 +629,7 @@ mod tests {
         let json = serde_json::to_string(&ReceiptKind::ArtifactDiscovered).unwrap();
         assert_eq!(json, "\"artifact_discovered\"");
         let json = serde_json::to_string(&ReceiptKind::Other("custom_event".into())).unwrap();
-        assert_eq!(json, "\"custom_event\"");
+        assert_eq!(json, r#"{"other":"custom_event"}"#);
     }
 
     #[test]

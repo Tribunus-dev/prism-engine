@@ -1124,6 +1124,7 @@ impl Drop for ComputeEngine {
 /// - 10x more output tokens than expected prompt → DecodeHeavy
 /// - Otherwise → Balanced
 #[cfg(feature = "mlx-backend")]
+#[cfg(feature = "mlx-backend")]
 pub fn classify_workload(req: &GenerationRequest) -> crate::model_runtime::WorkloadClass {
     let est_prompt_tokens = req.prompt.split_whitespace().count().max(1) as u32;
     let est_decode_tokens = if req.max_tokens == 0 {
@@ -1148,6 +1149,7 @@ mod qualification_budget_tests {
     /// Re-export constants from engine_policy for test coverage.
     use crate::engine_policy;
 
+    #[cfg(feature = "mlx-backend")]
     #[test]
     fn qualification_prompt_ceiling_is_small() {
         // These are now defined in engine_policy; verify aliases match.
@@ -1155,6 +1157,7 @@ mod qualification_budget_tests {
         assert_eq!(engine_policy::SAFE_ZERO_MAX_TOKENS, 8);
     }
 
+    #[cfg(feature = "mlx-backend")]
     #[test]
     fn qualification_deadline_is_bounded() {
         assert_eq!(
@@ -1166,8 +1169,11 @@ mod qualification_budget_tests {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "mlx-backend")]
     use crate::ecs::kv_cache::KvCache;
+    #[cfg(feature = "mlx-backend")]
     use crate::ecs::model_runtime::ModelRuntime;
+    #[cfg(feature = "mlx-backend")]
     use crate::ecs::model_runtime::WorkloadClass;
     use std::path::Path;
 
@@ -1183,6 +1189,7 @@ mod tests {
         assert_eq!(*bad.unwrap(), 300_000);
     }
 
+    #[cfg(feature = "mlx-backend")]
     #[test]
     #[ignore = "requires installed ComputeImage at TRIBUNUS_COMPILED_IMAGE"]
     fn installed_image_lifecycle_gate() {
@@ -1278,6 +1285,7 @@ mod tests {
         eprintln!("[lifecycle-gate] PASSED: token={}", token);
     }
 
+    #[cfg(feature = "mlx-backend")]
     #[test]
     fn missing_image_rejected_before_execution() {
         let result = ModelRuntime::open(Path::new("/nonexistent/path/model"));
@@ -1286,7 +1294,8 @@ mod tests {
 
     #[test]
     #[ignore = "full v1 qualification — requires installed Gemma image at TRIBUNUS_COMPILED_IMAGE"]
-    fn v1_qualification_gate() {
+    #[cfg(feature = "mlx-backend")]
+        fn v1_qualification_gate() {
         let image_dir =
             std::env::var("TRIBUNUS_COMPILED_IMAGE").expect("TRIBUNUS_COMPILED_IMAGE not set");
         let image_path = Path::new(&image_dir);

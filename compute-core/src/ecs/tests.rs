@@ -634,11 +634,9 @@ mod tests {
                     .spawn(EntityKind::Tensor, Some(role.to_string()));
                 session.world.add_component(
                     t,
-                    Shape {
-                        dims: shape.clone(),
-                    },
+                    Shape(shape.clone()),
                 );
-                session.world.add_component(t, DataType::F32);
+                session.world.add_component(t, DataType(DType::F32));
                 session.world.add_component(t, CanonicalRoleComp(*role));
                 session
                     .world

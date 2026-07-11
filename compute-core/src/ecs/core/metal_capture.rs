@@ -15,13 +15,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Check if Metal is available on this machine.
 pub fn is_available() -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
     {
         let mut res: bool = false;
         let ret = unsafe { mlx_metal_is_available(&mut res) };
         return ret == 0 && res;
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(all(target_os = "macos", feature = "mlx-backend")))]
     {
         false
     }
@@ -31,7 +31,7 @@ pub fn is_available() -> bool {
 /// Returns true on success.  The capture file is finalized when
 /// [`stop_capture`] is called or the [`CaptureGuard`] is dropped.
 pub fn start_capture(path: &str) -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
     {
         let c_path = match CString::new(path) {
             Ok(s) => s,
@@ -40,7 +40,7 @@ pub fn start_capture(path: &str) -> bool {
         let ret = unsafe { mlx_metal_start_capture(c_path.as_ptr()) };
         return ret == 0;
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(all(target_os = "macos", feature = "mlx-backend")))]
     {
         false
     }
@@ -49,12 +49,12 @@ pub fn start_capture(path: &str) -> bool {
 /// Stop Metal capture and finalize the capture file.
 /// Returns true on success.
 pub fn stop_capture() -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
     {
         let ret = unsafe { mlx_metal_stop_capture() };
         return ret == 0;
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(all(target_os = "macos", feature = "mlx-backend")))]
     {
         false
     }
@@ -258,14 +258,14 @@ impl CaptureReceipt {
 // If the MLX version changes, re-verify these signatures against
 // mlx-sys/src/mlx-c/mlx/c/metal.h.
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
 extern "C" {
     fn mlx_metal_is_available(res: *mut bool) -> i32;
     fn mlx_metal_start_capture(path: *const std::ffi::c_char) -> i32;
     fn mlx_metal_stop_capture() -> i32;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mlx-backend"))]
 mod tests {
     use super::*;
 

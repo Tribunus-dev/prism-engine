@@ -13,6 +13,7 @@ pub mod assessment;
 pub mod attention;
 pub mod audio_preprocess_accelerate;
 pub mod audio_provider;
+#[cfg(feature = "mlx-backend")]
 pub mod bridge;
 pub mod candle_cpu_backend;
 pub mod capability;
@@ -82,7 +83,9 @@ pub mod placement_profile;
 pub mod plugin;
 pub mod primitives;
 pub mod profile_compiler;
+#[cfg(feature = "mlx-backend")]
 pub mod profiled_executor;
+#[cfg(feature = "mlx-backend")]
 pub mod profiled_model;
 pub mod projection_executor;
 pub mod projection_identity;

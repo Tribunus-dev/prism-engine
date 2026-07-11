@@ -3031,6 +3031,7 @@ mod tests {
                 model_type: "gemma4".into(),
                 moe_config: None,
                 diffusion_config: None,
+                thinking_mode: false,
             },
             vision_config: Some(VisionArchitecture {
                 hidden_size: 1152,

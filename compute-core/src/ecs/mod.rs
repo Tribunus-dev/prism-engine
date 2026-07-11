@@ -194,6 +194,7 @@ pub use component::memory::*;
 pub use component::quality::*;
 pub use component::tensor::*;
 
+use anyhow;
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -212,6 +213,7 @@ pub trait Component: std::fmt::Debug + Send + Sync + 'static {}
 pub enum SchedulePhase {
     ModelLoading,
     Quantization,
+    QuantizationPlanning,
     MemoryPlanning,
     FusionDispatch,
     KernelGeneration,
@@ -223,9 +225,9 @@ pub enum SchedulePhase {
 
 /// A compiler pass over the ECS world.
 pub trait CompilerSystem: Send + Sync {
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
     fn phase(&self) -> SchedulePhase;
-    fn run(&self, world: &mut CompWorld);
+    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()>;
 }
 
 /// The ECS world — all entities, components, and systems.
@@ -253,6 +255,7 @@ impl std::fmt::Debug for CompWorld {
 struct EntityMeta {
     kind: EntityKind,
     generation: u32,
+    name: Option<String>,
 }
 
 impl Default for EntityMeta {
@@ -260,6 +263,7 @@ impl Default for EntityMeta {
         Self {
             kind: EntityKind::Model,
             generation: 0,
+            name: None,
         }
     }
 }
@@ -309,6 +313,50 @@ impl Default for ComponentStore {
 }
 
 impl CompWorld {
+    /// Spawn entity with kind and optional name.
+    pub fn spawn(&mut self, kind: EntityKind, name: Option<String>) -> CompEntity {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.entity_meta.push(EntityMeta {
+            kind,
+            generation: 0,
+            name,
+        });
+        CompEntity(id)
+    }
+
+    /// Get the name of an entity.
+    pub fn name(&self, entity: CompEntity) -> Option<&str> {
+        let idx = (entity.0 - 1) as usize;
+        self.entity_meta.get(idx).and_then(|m| m.name.as_deref())
+    }
+
+    /// Find all entities of a given kind.
+    pub fn entities_of_kind(&self, kind: EntityKind) -> Vec<CompEntity> {
+        self.entity_meta
+            .iter()
+            .enumerate()
+            .filter(|(_, meta)| meta.kind == kind)
+            .map(|(i, _)| CompEntity((i + 1) as u64))
+            .collect()
+    }
+
+    /// Remove a component from an entity.
+    /// Get the kind of an entity (alias for entity_kind).
+    pub fn kind(&self, entity: CompEntity) -> Option<EntityKind> {
+        self.entity_kind(entity)
+    }
+
+    pub fn remove_component<T: Component>(&mut self, entity: CompEntity) -> Option<T> {
+        let store = &mut self.component_store;
+        let type_id = TypeId::of::<T>();
+        store
+            .data
+            .get_mut(&type_id)?
+            .downcast_mut::<HashMap<EntityId, T>>()
+            .and_then(|map| map.remove(&entity.0))
+    }
+
     pub fn new() -> Self {
         Self {
             component_store: ComponentStore::default(),
@@ -326,6 +374,7 @@ impl CompWorld {
         self.entity_meta.push(EntityMeta {
             kind,
             generation: 0,
+            name: None,
         });
         CompEntity(id)
     }
@@ -392,20 +441,20 @@ impl CompWorld {
             .and_then(|map| map.get_mut(&entity.0))
     }
 
-    pub fn add_resource<T: 'static>(&mut self, resource: T) {
+    pub fn add_resource<T: 'static + Send + Sync>(&mut self, resource: T) {
         self.resource_store
             .data
             .insert(TypeId::of::<T>(), Box::new(resource));
     }
 
-    pub fn get_resource<T: 'static>(&self) -> Option<&T> {
+    pub fn get_resource<T: 'static + Send + Sync>(&self) -> Option<&T> {
         self.resource_store
             .data
             .get(&TypeId::of::<T>())
             .and_then(|b| b.downcast_ref::<T>())
     }
 
-    pub fn get_resource_mut<T: 'static>(&mut self) -> Option<&mut T> {
+    pub fn get_resource_mut<T: 'static + Send + Sync>(&mut self) -> Option<&mut T> {
         self.resource_store
             .data
             .get_mut(&TypeId::of::<T>())
@@ -416,38 +465,41 @@ impl CompWorld {
         self.systems.push(system);
     }
 
-    pub fn run_phase(&mut self, phase: SchedulePhase) {
-        let err = {
-            let prev_systems = std::mem::take(&mut self.systems);
-            let matched: Vec<_> = prev_systems
-                .into_iter()
-                .filter(|s| s.phase() == phase)
-                .collect();
-            let unmatched: Vec<_> = std::mem::take(&mut self.systems);
-            self.systems = unmatched;
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                for system in &matched {
-                    system.run(self);
-                }
-                self.commit_stage();
-            }));
-            if result.is_err() {
+    pub fn run_phase(&mut self, phase: SchedulePhase) -> anyhow::Result<()> {
+        let prev_systems = std::mem::take(&mut self.systems);
+        let matched: Vec<_> = prev_systems
+            .into_iter()
+            .filter(|s| s.phase() == phase)
+            .collect();
+        let unmatched: Vec<_> = std::mem::take(&mut self.systems);
+        self.systems = unmatched;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            for system in &matched {
+                system.run(self)?;
+            }
+            self.commit_stage();
+            Ok::<_, anyhow::Error>(())
+        }));
+        for sys in matched {
+            self.systems.push(sys);
+        }
+        match result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => {
                 self.rollback_stage();
+                Err(e)
             }
-            for sys in matched {
-                self.systems.push(sys);
+            Err(panic) => {
+                self.rollback_stage();
+                let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                Err(anyhow::anyhow!("System panic (rolled back): {msg}"))
             }
-            result
-        };
-        if let Err(panic) = err {
-            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = panic.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "unknown panic".to_string()
-            };
-            tracing::error!("CompWorld phase failed (rolled back): {msg}");
         }
     }
 
@@ -461,21 +513,21 @@ impl CompWorld {
 }
 
 impl ResourceStore {
-    pub fn insert<T: 'static>(&mut self, resource: T) {
+    pub fn insert<T: 'static + Send + Sync>(&mut self, resource: T) {
         self.data.insert(TypeId::of::<T>(), Box::new(resource));
     }
 
-    pub fn get<T: 'static>(&self) -> Option<&T> {
+    pub fn get<T: 'static + Send + Sync>(&self) -> Option<&T> {
         self.data
             .get(&TypeId::of::<T>())
             .and_then(|b| b.downcast_ref::<T>())
     }
 
-    pub fn contains<T: 'static>(&self) -> bool {
+    pub fn contains<T: 'static + Send + Sync>(&self) -> bool {
         self.data.contains_key(&TypeId::of::<T>())
     }
 
-    pub fn remove<T: 'static>(&mut self) -> Option<T> {
+    pub fn remove<T: 'static + Send + Sync>(&mut self) -> Option<T> {
         self.data
             .remove(&TypeId::of::<T>())
             .and_then(|b| b.downcast::<T>().ok().map(|b| *b))

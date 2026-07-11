@@ -391,6 +391,7 @@ mod tests {
             rope_global: None,
             moe_config: None,
             diffusion_config: None,
+            thinking_mode: false,
         };
         CanonicalModel {
             architecture: arch,

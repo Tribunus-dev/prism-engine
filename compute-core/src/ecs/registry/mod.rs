@@ -10,12 +10,6 @@
 pub mod compiler;
 pub mod disclosure;
 pub mod governor;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub mod ledger;
 pub mod overlay;
 pub mod trust_store;
 pub mod types;
@@ -23,12 +17,6 @@ pub mod types;
 pub use compiler::*;
 pub use disclosure::*;
 pub use governor::*;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub use ledger::*;
 pub use overlay::*;
 pub use trust_store::*;
 pub use types::*;

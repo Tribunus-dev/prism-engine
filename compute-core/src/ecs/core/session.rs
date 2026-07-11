@@ -852,6 +852,7 @@ mod tests {
 
     // ── InferenceSession ───────────────────────────────────────────────
 
+    #[cfg(feature = "mlx-backend")]
     #[test]
     fn test_inference_session_new() {
         let session = InferenceSession::new("inf-1".into(), Vec::new());
@@ -867,6 +868,7 @@ mod tests {
         assert!(!session.is_terminal());
     }
 
+    #[cfg(feature = "mlx-backend")]
     #[test]
     fn test_inference_session_happy_path() {
         let mut session = InferenceSession::new("inf-2".into(), Vec::new());
@@ -887,6 +889,7 @@ mod tests {
         assert!(session.is_terminal());
     }
 
+    #[cfg(feature = "mlx-backend")]
     #[test]
     fn test_inference_session_cancellation_flag() {
         let session = InferenceSession::new("inf-3".into(), Vec::new());
@@ -901,6 +904,7 @@ mod tests {
             .load(std::sync::atomic::Ordering::Relaxed));
     }
 
+    #[cfg(feature = "mlx-backend")]
     #[test]
     fn test_inference_session_receipts() {
         let mut receipts = Vec::new();
