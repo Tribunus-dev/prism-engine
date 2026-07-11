@@ -61,6 +61,16 @@ pub enum WorldTxnError {
     },
     #[error("invalid entity handle: {0}")]
     InvalidEntity(u64),
+    #[error("schema mismatch for {schema_id:?}: expected {expected}")]
+    SchemaMismatch {
+        schema_id: ComponentSchemaId,
+        expected: String,
+    },
+    #[error("component not found: entity {entity} schema {schema_id:?}")]
+    ComponentNotFound {
+        entity: u64,
+        schema_id: ComponentSchemaId,
+    },
 }
 
 /// A pending world transaction.
@@ -89,6 +99,9 @@ pub(crate) struct StagedInsert {
     /// Applies the staged mutation to component_store.
     /// Created at add_component::<T>() time when the concrete type is known.
     pub apply: Box<dyn FnOnce(&mut ComponentStore) + Send>,
+    /// Preflight validation: checks entity existence and column accessibility.
+    /// Called in transit() Phase 1, before any mutations.
+    pub preflight: Box<dyn Fn(&ComponentStore) -> Result<(), WorldTxnError> + Send + Sync>,
 }
 
 /// A staged component removal.
@@ -97,6 +110,9 @@ pub(crate) struct StagedRemove {
     pub schema_id: ComponentSchemaId,
     /// Applies the staged removal to component_store.
     pub apply: Box<dyn FnOnce(&mut ComponentStore) + Send>,
+    /// Preflight validation: checks entity existence and component access.
+    /// Called in transit() Phase 1, before any mutations.
+    pub preflight: Box<dyn Fn(&ComponentStore) -> Result<(), WorldTxnError> + Send + Sync>,
 }
 
 use crate::ecs::ComponentStore;
@@ -136,6 +152,18 @@ impl WorldTxn {
                     .expect("type mismatch in ComponentStore");
                 map.insert(entity, component);
             }),
+            preflight: Box::new(move |store: &ComponentStore| {
+                // Verify the typed column is accessible
+                if let Some(b) = store.data.get(&type_id) {
+                    if b.downcast_ref::<HashMap<u64, T>>().is_none() {
+                        return Err(WorldTxnError::SchemaMismatch {
+                            schema_id,
+                            expected: std::any::type_name::<T>().to_string(),
+                        });
+                    }
+                }
+                Ok(())
+            }),
         });
     }
 
@@ -156,6 +184,25 @@ impl WorldTxn {
                     .and_then(|b| b.downcast_mut::<std::collections::HashMap<u64, T>>())
                     .expect("type mismatch in ComponentStore");
                 map.remove(&entity);
+            }),
+            preflight: Box::new(move |store: &ComponentStore| {
+                match store.data.get(&type_id) {
+                    None => {
+                        return Err(WorldTxnError::ComponentNotFound { entity, schema_id });
+                    }
+                    Some(b) => {
+                        let map = b
+                            .downcast_ref::<std::collections::HashMap<u64, T>>()
+                            .ok_or(WorldTxnError::SchemaMismatch {
+                                schema_id,
+                                expected: std::any::type_name::<T>().to_string(),
+                            })?;
+                        if !map.contains_key(&entity) {
+                            return Err(WorldTxnError::ComponentNotFound { entity, schema_id });
+                        }
+                    }
+                }
+                Ok(())
             }),
         });
     }

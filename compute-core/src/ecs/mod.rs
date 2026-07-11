@@ -293,6 +293,7 @@ pub enum EntityKind {
     Executable,
     Fence,
     Session,
+    Artifact,
 }
 
 /// Type-erased storage for components, indexed by (TypeId, EntityId).
@@ -554,6 +555,15 @@ impl CompWorld {
         &self.committed_events
     }
 
+    /// Check whether an entity exists in the world.
+    pub fn has_entity(&self, entity: CompEntity) -> bool {
+        if entity.0 == 0 {
+            return false;
+        }
+        let idx = (entity.0 - 1) as usize;
+        idx < self.entity_meta.len()
+    }
+
     pub fn drain_committed_events(&mut self) -> Vec<DomainEvent> {
         std::mem::take(&mut self.committed_events)
     }
@@ -589,12 +599,23 @@ impl CompWorld {
             if idx >= self.entity_meta.len() {
                 return Err(WorldTxnError::InvalidEntity(insert.entity));
             }
+            // Full generation validation comes with CompEntity refactor;
+            // for now the handle is just a 1-based index and generation
+            // is always 0 in append-only mode.
         }
         for remove in &txn.removes {
             let idx = (remove.entity as usize).wrapping_sub(1);
             if idx >= self.entity_meta.len() {
                 return Err(WorldTxnError::InvalidEntity(remove.entity));
             }
+        }
+
+        // 1d. Validate staged operations via preflight closures
+        for insert in &txn.inserts {
+            (insert.preflight)(&self.component_store)?;
+        }
+        for remove in &txn.removes {
+            (remove.preflight)(&self.component_store)?;
         }
 
         // -- PHASE 2: Build journal with the new epoch -----------------

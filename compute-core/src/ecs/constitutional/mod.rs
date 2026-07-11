@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod command;
 pub mod envelope;
 pub mod persistence;
@@ -5,6 +6,7 @@ pub mod schema;
 pub mod system_desc;
 pub mod types;
 
+pub use artifact::*;
 pub use command::*;
 pub use envelope::*;
 pub use persistence::*;
