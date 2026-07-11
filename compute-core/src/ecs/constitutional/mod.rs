@@ -13,6 +13,8 @@ pub use persistence::*;
 pub use schema::*;
 pub use system_desc::*;
 pub use types::*;
+pub mod residency;
+pub use residency::*;
 pub mod world_txn;
 pub use world_txn::*;
 pub mod lifecycle;

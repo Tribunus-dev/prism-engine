@@ -1815,4 +1815,256 @@ mod tests {
             ComponentDurability::Ephemeral,
         );
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Residency & Deployment Tests  (Wave 1 — model deployment subsystem)
+
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    //  Tests for model lifecycle, residency lifecycle, deployment commands,
+    //  and serialization roundtrips.
+
+    // ── test_model_lifecycle_transitions ─────────────────────────────────
+
+    #[test]
+    fn test_model_lifecycle_transitions() {
+        // Happy path: Created → Validated → Deployable → Deprecated → Removed
+        assert!(ModelLifecycle::Created.can_transition_to(ModelLifecycle::Validated));
+        assert!(ModelLifecycle::Validated.can_transition_to(ModelLifecycle::Deployable));
+        assert!(ModelLifecycle::Deployable.can_transition_to(ModelLifecycle::Deprecated));
+        assert!(ModelLifecycle::Deprecated.can_transition_to(ModelLifecycle::Removed));
+
+        // Invalid transitions fail
+        assert!(!ModelLifecycle::Created.can_transition_to(ModelLifecycle::Deployable));
+        assert!(!ModelLifecycle::Created.can_transition_to(ModelLifecycle::Deprecated));
+        assert!(!ModelLifecycle::Created.can_transition_to(ModelLifecycle::Removed));
+        assert!(!ModelLifecycle::Validated.can_transition_to(ModelLifecycle::Created));
+        assert!(!ModelLifecycle::Validated.can_transition_to(ModelLifecycle::Deprecated));
+        assert!(!ModelLifecycle::Validated.can_transition_to(ModelLifecycle::Removed));
+        assert!(!ModelLifecycle::Deployable.can_transition_to(ModelLifecycle::Validated));
+        assert!(!ModelLifecycle::Deployable.can_transition_to(ModelLifecycle::Created));
+        assert!(!ModelLifecycle::Deprecated.can_transition_to(ModelLifecycle::Deployable));
+        assert!(!ModelLifecycle::Removed.can_transition_to(ModelLifecycle::Created));
+        assert!(!ModelLifecycle::Removed.can_transition_to(ModelLifecycle::Validated));
+        assert!(!ModelLifecycle::Removed.can_transition_to(ModelLifecycle::Deployable));
+        assert!(!ModelLifecycle::Removed.can_transition_to(ModelLifecycle::Deprecated));
+    }
+
+    // ── test_residency_lifecycle_from_lifecycle_module ───────────────────
+
+    #[test]
+    fn test_residency_lifecycle_from_lifecycle_module() {
+        // All variants
+        let desired = ResidencyLifecycle::Desired;
+        let binding = ResidencyLifecycle::Binding;
+        let resident = ResidencyLifecycle::Resident;
+        let evicting = ResidencyLifecycle::Evicting;
+        let evicted = ResidencyLifecycle::Evicted;
+
+        assert_ne!(desired, binding);
+        assert_ne!(binding, resident);
+        assert_ne!(resident, evicting);
+        assert_ne!(evicting, evicted);
+
+        // is_resident() true only for Resident
+        assert!(resident.is_resident());
+        assert!(!desired.is_resident());
+        assert!(!binding.is_resident());
+        assert!(!evicting.is_resident());
+        assert!(!evicted.is_resident());
+    }
+
+    // ── test_deploy_model_success ────────────────────────────────────────
+
+    #[test]
+    fn test_deploy_model_success() {
+        let mut world = CompWorld::new();
+        // Pre-existing artifact entity (entity 1)
+        world.spawn(EntityKind::Artifact, Some("test_artifact".into()));
+        // Device entity (entity 2)
+        world.spawn(EntityKind::Device, Some("test_device".into()));
+
+        let schema_registry = SchemaRegistry::new();
+
+        let cmd = DeployModelCommand {
+            id: MessageId::compute(b"deploy-1"),
+            artifact_entity: 1,
+            device_entity: 2,
+            device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
+            format: ResidencyFormat::Native,
+            memory_bytes: 1_073_741_824,
+        };
+
+        let outcome = EffectOutcome {
+            id: MessageId::compute(b"outcome-1"),
+            request_id: cmd.to_effect_request().id,
+            success: true,
+            output: serde_json::json!({"result": "ok"}),
+        };
+
+        let start_epoch = world.current_epoch();
+        let (epoch, event) = cmd.execute(&mut world, &schema_registry, outcome)
+            .expect("deploy should succeed");
+
+        // Epoch advanced
+        assert!(epoch.0 > start_epoch, "epoch should advance");
+        assert_eq!(world.current_epoch(), epoch.0, "world epoch matches committed epoch");
+
+        // Event kind
+        assert_eq!(event.kind, "model_deployed");
+
+        // Model entity (3) and residency entity (4) should exist
+        assert!(world.has_entity(crate::ecs::CompEntity(3)), "model entity should exist");
+        assert!(world.has_entity(crate::ecs::CompEntity(4)), "residency entity should exist");
+
+        // Model entity kind
+        assert_eq!(world.entity_kind(crate::ecs::CompEntity(3)), Some(EntityKind::Model));
+    }
+
+    // ── test_deploy_model_effect_failure ─────────────────────────────────
+
+    #[test]
+    fn test_deploy_model_effect_failure() {
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Artifact, Some("test_artifact".into()));
+
+        let schema_registry = SchemaRegistry::new();
+
+        let cmd = DeployModelCommand {
+            id: MessageId::compute(b"deploy-fail"),
+            artifact_entity: 1,
+            device_entity: 2,
+            device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
+            format: ResidencyFormat::Native,
+            memory_bytes: 1_073_741_824,
+        };
+
+        let outcome = EffectOutcome {
+            id: MessageId::compute(b"outcome-fail"),
+            request_id: cmd.to_effect_request().id,
+            success: false,
+            output: serde_json::json!({"error": "out of memory"}),
+        };
+
+        let start_epoch = world.current_epoch();
+        let result = cmd.execute(&mut world, &schema_registry, outcome);
+
+        assert!(matches!(result, Err(DeploymentError::EffectFailed)));
+        assert_eq!(
+            world.current_epoch(),
+            start_epoch,
+            "epoch should not advance on effect failure"
+        );
+    }
+
+    // ── test_deploy_model_request_mismatch ───────────────────────────────
+
+    #[test]
+    fn test_deploy_model_request_mismatch() {
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Artifact, Some("test_artifact".into()));
+
+        let schema_registry = SchemaRegistry::new();
+
+        let cmd = DeployModelCommand {
+            id: MessageId::compute(b"deploy-mismatch"),
+            artifact_entity: 1,
+            device_entity: 2,
+            device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
+            format: ResidencyFormat::Native,
+            memory_bytes: 1_073_741_824,
+        };
+
+        // Wrong request_id -- does not match cmd.to_effect_request().id
+        let outcome = EffectOutcome {
+            id: MessageId::compute(b"outcome-mismatch"),
+            request_id: MessageId::compute(b"some-other-request"),
+            success: true,
+            output: serde_json::json!({"result": "ok"}),
+        };
+
+        let start_epoch = world.current_epoch();
+        let result = cmd.execute(&mut world, &schema_registry, outcome);
+
+        assert!(matches!(result, Err(DeploymentError::RequestMismatch)));
+        assert_eq!(
+            world.current_epoch(),
+            start_epoch,
+            "epoch should not advance on request mismatch"
+        );
+    }
+
+    // ── test_allocation_token_ephemeral ──────────────────────────────────
+
+    #[test]
+    fn test_allocation_token_ephemeral() {
+        assert_eq!(
+            AllocationToken::ephemeral_durability(),
+            ComponentDurability::Ephemeral,
+        );
+    }
+
+    // ── test_model_lifecycle_serde ───────────────────────────────────────
+
+    #[test]
+    fn test_model_lifecycle_serde() {
+        // ModelLifecycle roundtrip
+        for variant in &[
+            ModelLifecycle::Created,
+            ModelLifecycle::Validated,
+            ModelLifecycle::Deployable,
+            ModelLifecycle::Deprecated,
+            ModelLifecycle::Removed,
+        ] {
+            let json = serde_json::to_string(variant).unwrap();
+            let deserialized: ModelLifecycle = serde_json::from_str(&json).unwrap();
+            assert_eq!(*variant, deserialized);
+        }
+
+        // ModelArtifactRef roundtrip
+        let ref1 = ModelArtifactRef {
+            artifact_id: 42,
+            digest: ArtifactDigest([0xab; 32]),
+        };
+        let json = serde_json::to_string(&ref1).unwrap();
+        let deserialized: ModelArtifactRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(ref1, deserialized);
+    }
+
+    // ── test_residency_types_serde ───────────────────────────────────────
+
+    #[test]
+    fn test_residency_types_serde() {
+        // ResidencyDeviceRef
+        let dev_ref = ResidencyDeviceRef {
+            device_id: 7,
+            device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
+        };
+        let json = serde_json::to_string(&dev_ref).unwrap();
+        let back: ResidencyDeviceRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(dev_ref, back);
+
+        // ResidencyMemoryClaim
+        let claim = ResidencyMemoryClaim {
+            bytes: 1_073_741_824,
+            allocated: true,
+        };
+        let json = serde_json::to_string(&claim).unwrap();
+        let back: ResidencyMemoryClaim = serde_json::from_str(&json).unwrap();
+        assert_eq!(claim, back);
+
+        // ResidencyFormat
+        for variant in &[ResidencyFormat::Native, ResidencyFormat::Quantized, ResidencyFormat::Distilled] {
+            let json = serde_json::to_string(variant).unwrap();
+            let back: ResidencyFormat = serde_json::from_str(&json).unwrap();
+            assert_eq!(*variant, back);
+        }
+
+        // AllocationToken
+        let token = AllocationToken("pool-7/slot-42".into());
+        let json = serde_json::to_string(&token).unwrap();
+        let back: AllocationToken = serde_json::from_str(&json).unwrap();
+        assert_eq!(token, back);
+    }
+
 }
