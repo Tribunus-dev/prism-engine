@@ -136,6 +136,7 @@ in shadow mode.
     mutation paths.
 
 ## Wave Plan
+## Authority Purge Registry
 
 ### Wave 1: Placement Authority (current)
 Model deployment + residency. Canonical model entities from artifacts,
