@@ -264,7 +264,9 @@ mod tests {
     /// Create a minimal world with one spawned entity for txn tests.
     fn make_world() -> CompWorld {
         let mut world = CompWorld::new();
-        world.spawn(EntityKind::Model, Some("test_entity".into()));
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Model);
+        world.transit(txn).unwrap();
         world
     }
 
@@ -331,27 +333,27 @@ mod tests {
     fn test_multiple_commits_advance_epoch() {
         let mut world = make_world();
 
-        // Starting epoch should be 1
-        assert_eq!(world.current_epoch(), WorldEpoch(1));
+        // Starting epoch should be 2 (make_world uses one transit)
+        assert_eq!(world.current_epoch(), WorldEpoch(2));
 
         // Commit 3 transactions
         let commit1 = world
             .transit(WorldTxn::new(&world))
             .expect("commit 1 should succeed");
-        assert_eq!(commit1.0, WorldEpoch(2));
+        assert_eq!(commit1.0, WorldEpoch(3));
 
         let commit2 = world
             .transit(WorldTxn::new(&world))
             .expect("commit 2 should succeed");
-        assert_eq!(commit2.0, WorldEpoch(3));
+        assert_eq!(commit2.0, WorldEpoch(4));
 
         let commit3 = world
             .transit(WorldTxn::new(&world))
             .expect("commit 3 should succeed");
-        assert_eq!(commit3.0, WorldEpoch(4));
+        assert_eq!(commit3.0, WorldEpoch(5));
 
         // Final epoch matches
-        assert_eq!(world.current_epoch(), WorldEpoch(4));
+        assert_eq!(world.current_epoch(), WorldEpoch(5));
     }
 
     // ── test_mutation_journal_records_changes ───────────────────────────────
@@ -2091,21 +2093,41 @@ mod tests {
     #[test]
     fn test_schema_enforcement_rejects_unregistered() {
         let mut world = CompWorld::new();
-        world.spawn(EntityKind::Artifact, Some("a".into()));
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        // Entity 1: Artifact
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
         );
-        world.spawn(EntityKind::Device, Some("d".into()));
-        world.add_component(crate::ecs::CompEntity(2), DeviceStableId("pci-x".into()));
-        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
-        world.add_component(
-            crate::ecs::CompEntity(2),
+        world.transit(txn).unwrap();
+        // Entity 2: Device
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceStableId("pci-x".into()),
+        );
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Ready,
+        );
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             DeviceMemoryLimits {
                 total_bytes: 1 << 30,
                 max_alloc_bytes: 1 << 30,
             },
         );
+        world.transit(txn).unwrap();
 
         let empty_registry = SchemaRegistry::new();
         let cmd = make_deploy_cmd();
@@ -2120,15 +2142,25 @@ mod tests {
     #[test]
     fn test_preflight_artifact_not_found() {
         let mut world = CompWorld::new();
-        world.spawn(EntityKind::Device, Some("d".into()));
-        world.add_component(crate::ecs::CompEntity(1), DeviceLifecycle::Ready);
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        // Entity 1: Device
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Device);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Ready,
+        );
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             DeviceMemoryLimits {
                 total_bytes: 1 << 30,
                 max_alloc_bytes: 1 << 30,
             },
         );
+        world.transit(txn).unwrap();
 
         let reg = make_residency_schema_registry();
         let cmd = DeployModelCommand {
@@ -2146,17 +2178,32 @@ mod tests {
     #[test]
     fn test_preflight_device_not_ready() {
         let mut world = CompWorld::new();
-        world.spawn(EntityKind::Artifact, Some("a".into()));
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        // Entity 1: Artifact
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
         );
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
         );
-        world.spawn(EntityKind::Device, Some("d".into()));
-        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Discovered);
+        world.transit(txn).unwrap();
+        // Entity 2: Device
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Discovered,
+        );
+        world.transit(txn).unwrap();
 
         let reg = make_residency_schema_registry();
         let cmd = make_deploy_cmd();
@@ -2171,28 +2218,47 @@ mod tests {
     #[test]
     fn test_insufficient_memory_rejected() {
         let mut world = CompWorld::new();
-        world.spawn(EntityKind::Artifact, Some("a".into()));
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        // Entity 1: Artifact
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
         );
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
         );
-        world.spawn(EntityKind::Device, Some("d".into()));
-        world.add_component(
-            crate::ecs::CompEntity(2),
+        world.transit(txn).unwrap();
+        // Entity 2: Device
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             DeviceStableId("pci-0000:01:00.0".into()),
         );
-        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
-        world.add_component(
-            crate::ecs::CompEntity(2),
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Ready,
+        );
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             DeviceMemoryLimits {
                 total_bytes: 536_870_912,
                 max_alloc_bytes: 268_435_456,
             },
         );
+        world.transit(txn).unwrap();
 
         let reg = make_residency_schema_registry();
         let cmd = make_deploy_cmd();
@@ -2826,14 +2892,32 @@ mod tests {
     fn test_admit_session_device_not_ready() {
         let reg = make_session_schema_registry();
         let mut world = CompWorld::new();
-        world.spawn(EntityKind::Model, Some("model".into()));
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        // Entity 1: Model
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Model);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             ModelId(DomainId(uuid::Uuid::nil())),
         );
-        world.add_component(crate::ecs::CompEntity(1), ModelLifecycle::Deployable);
-        world.spawn(EntityKind::Device, Some("device".into()));
-        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Discovered);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            ModelLifecycle::Deployable,
+        );
+        world.transit(txn).unwrap();
+        // Entity 2: Device
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Discovered,
+        );
+        world.transit(txn).unwrap();
         let cmd = CreateSessionCommand {
             id: MessageId::compute(b"session-device-not-ready"),
             config: SessionConfig {
@@ -2855,14 +2939,32 @@ mod tests {
     fn test_admit_session_model_not_admissible() {
         let reg = make_session_schema_registry();
         let mut world = CompWorld::new();
-        world.spawn(EntityKind::Device, Some("device".into()));
-        world.add_component(crate::ecs::CompEntity(1), DeviceLifecycle::Ready);
-        world.spawn(EntityKind::Model, Some("model".into()));
-        world.add_component(
-            crate::ecs::CompEntity(2),
+        // Entity 1: Device
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Device);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Ready,
+        );
+        world.transit(txn).unwrap();
+        // Entity 2: Model
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Model);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             ModelId(DomainId(uuid::Uuid::nil())),
         );
-        world.add_component(crate::ecs::CompEntity(2), ModelLifecycle::Deployable);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            ModelLifecycle::Deployable,
+        );
+        world.transit(txn).unwrap();
         let cmd = CreateSessionCommand {
             id: MessageId::compute(b"session-model-not-admissible"),
             config: SessionConfig {

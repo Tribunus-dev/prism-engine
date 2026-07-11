@@ -718,7 +718,10 @@ mod tests {
     /// Helper: create a minimal CompWorld with a target entity.
     fn setup_world() -> CompWorld {
         let mut world = CompWorld::new();
-        world.spawn_entity(EntityKind::Model);
+        let mut txn = WorldTxn::new(&world);
+        let eid = WorldTxn::next_entity_id(&world);
+        txn.stage_spawn(eid, EntityKind::Model);
+        world.transit(txn).unwrap();
         world
     }
 

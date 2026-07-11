@@ -76,7 +76,7 @@ fred = { version = "10", optional = true, features = ["i-client", "i-keys", "i-s
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 
 [features]
-default = []
+default = ["legacy_mutations"]
 prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal", "dep:image"]
 prism-backend-ios = ["prism-backend", "metal-dispatch", "backend-metal", "dep:image"]
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
@@ -96,6 +96,7 @@ tensix = []
 storage-adapters = []
 backend-cpu = []
 napi = []
+legacy_mutations = []
 private-development = []
 image = []
 msgpack = []

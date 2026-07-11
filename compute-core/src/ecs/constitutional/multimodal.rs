@@ -807,12 +807,21 @@ mod tests {
         let session_id = make_session(&mut world);
         // Model at entity 100, artifact at entity 200 — explicit IDs to avoid
         // conflict with session_entity (entity 1 from make_session).
-        world.spawn_entity_with_id(100, EntityKind::Model);
-        world.add_component(
-            crate::ecs::CompEntity(100),
+        // Entity 100: Model with Deployable lifecycle
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(100, EntityKind::Model);
+        txn.add_component(
+            100,
+            ComponentSchemaId(7), // SCHEMA_MODEL_LIFECYCLE
+            SchemaVersion(1),
             crate::ecs::constitutional::residency::ModelLifecycle::Deployable,
         );
-        world.spawn_entity_with_id(200, EntityKind::Artifact);
+        world.transit(txn).unwrap();
+
+        // Entity 200: Artifact (no components)
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(200, EntityKind::Artifact);
+        world.transit(txn).unwrap();
 
         let cmd = CreatePipelineCommand {
             id: MessageId::compute(b"test-execute"),

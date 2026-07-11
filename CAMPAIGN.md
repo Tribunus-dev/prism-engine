@@ -127,12 +127,13 @@ in shadow mode.
   - **Server & API Bridges** — 3 commands, 6 types, 11 tests. replay_ingress_request_submitted registered.
   - **Persistence & Projections** — FsEventStore (file-backed, durable-before-ack, restart recovery proven),
     ReplayRegistry with 16 appliers, ReplayEngine::replay_into, InMemoryEventStore, Snapshot. 177 tests.
-  - **Legacy Spawn Guard** — CompWorld.direct_mutation_allowed guard prevents direct spawn/add_component
-  - **Legacy Spawn Guard** — CompWorld.direct_mutation_allowed guard prevents direct spawn/add_component
-    outside WorldTxn. Enabled in all constitutional test setup helpers (make_deployment_world,
-    make_session_world). spawn_entity_with_id next_id bug fixed (≥ instead of >).
-    make_session_world sets guard=false after setup, proving constitutional tests are mutation-pure.
-    177 constitutional tests pass with guard active in mainstream helpers.
+  - **Legacy Spawn Guard (feature-gated)** — `legacy_mutations` feature in Cargo.toml,
+    enabled by default for backward compatibility. Without the feature, `CompWorld::new()`
+    sets `direct_mutation_allowed=false`, causing panic on any `world.spawn()` or
+    `world.add_component()` outside WorldTxn. Constitutional tests verified: 177/177 pass
+    WITHOUT `legacy_mutations` feature. All direct mutations converted to WorldTxn in
+    test helpers and inline setups. Proves the constitutional kernel needs no legacy
+    mutation paths.
 
 ## Wave Plan
 

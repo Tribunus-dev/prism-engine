@@ -403,7 +403,7 @@ impl CompWorld {
             journal: Vec::new(),
             component_versions: std::collections::HashMap::new(),
             committed_events: Vec::new(),
-            direct_mutation_allowed: true,
+            direct_mutation_allowed: cfg!(feature = "legacy_mutations"),
         }
     }
 

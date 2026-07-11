@@ -678,7 +678,11 @@ mod tests {
         for entry in &stored_events {
             let kind = &entry.event.kind[..];
             if kind == "artifact_loaded" {
-                let entity = replay_world.spawn_entity(EntityKind::Artifact);
+                let entity_id = WorldTxn::next_entity_id(&replay_world);
+                let mut txn = WorldTxn::new(&replay_world);
+                txn.stage_spawn(entity_id, EntityKind::Artifact);
+                replay_world.transit(txn).unwrap();
+                let entity = crate::ecs::CompEntity(entity_id);
                 assert_eq!(replay_world.entity_kind(entity), Some(EntityKind::Artifact));
             }
         }
