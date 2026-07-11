@@ -2,6 +2,7 @@
 mod tests {
     use crate::ecs::constitutional::command::*;
     use crate::ecs::constitutional::*;
+    use crate::ecs::{CompWorld, EntityKind};
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -242,5 +243,196 @@ mod tests {
         let s = format!("{}", id);
         assert_eq!(s.len(), 64); // hex-encoded blake3 = 64 chars
         assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  WorldTxn Tests  (Stage 2 — constitutional ECS migration)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Create a minimal world with one spawned entity for txn tests.
+    fn make_world() -> CompWorld {
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Model, Some("test_entity".into()));
+        world
+    }
+
+    /// Create a transaction against a world, staging an insert on entity 1.
+    fn make_txn_with_insert(world: &CompWorld) -> WorldTxn {
+        let mut txn = WorldTxn::new(world);
+        txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn
+    }
+
+    // ── test_atomic_commit ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_atomic_commit() {
+        let mut world = make_world();
+        let start_epoch = world.current_epoch();
+
+        let txn = make_txn_with_insert(&world);
+        let committed = world.transit(txn).expect("commit should succeed");
+
+        // Epoch advanced
+        assert!(world.current_epoch() > start_epoch);
+        assert_eq!(committed.0, world.current_epoch());
+
+        // Journal contains the component change
+        let journal = world.last_journal();
+        assert_eq!(journal.len(), 1, "journal should have one change entry");
+
+        let change = &journal[0];
+        assert_eq!(change.entity, 1);
+        assert_eq!(change.schema_id, ComponentSchemaId(10));
+        assert_eq!(change.schema_version, SchemaVersion(1));
+        assert_eq!(change.change_type, ChangeType::Insert);
+        assert_eq!(change.world_epoch, committed.0);
+    }
+
+    // ── test_stale_epoch_rejects ────────────────────────────────────────────
+
+    #[test]
+    fn test_stale_epoch_rejects() {
+        let mut world = make_world();
+
+        // Start a transaction (records current epoch)
+        let txn_stale = WorldTxn::new(&world);
+
+        // Advance the world epoch by committing a different transaction
+        let txn_advance = WorldTxn::new(&world);
+        world
+            .transit(txn_advance)
+            .expect("advancing commit should succeed");
+
+        // The stale transaction should be rejected
+        let result = world.transit(txn_stale);
+        assert!(
+            matches!(result, Err(WorldTxnError::StaleEpoch { .. })),
+            "expected StaleEpoch error, got {:?}",
+            result
+        );
+    }
+
+    // ── test_multiple_commits_advance_epoch ─────────────────────────────────
+
+    #[test]
+    fn test_multiple_commits_advance_epoch() {
+        let mut world = make_world();
+
+        // Starting epoch should be 1
+        assert_eq!(world.current_epoch(), WorldEpoch(1));
+
+        // Commit 3 transactions
+        let commit1 = world
+            .transit(WorldTxn::new(&world))
+            .expect("commit 1 should succeed");
+        assert_eq!(commit1.0, WorldEpoch(2));
+
+        let commit2 = world
+            .transit(WorldTxn::new(&world))
+            .expect("commit 2 should succeed");
+        assert_eq!(commit2.0, WorldEpoch(3));
+
+        let commit3 = world
+            .transit(WorldTxn::new(&world))
+            .expect("commit 3 should succeed");
+        assert_eq!(commit3.0, WorldEpoch(4));
+
+        // Final epoch matches
+        assert_eq!(world.current_epoch(), WorldEpoch(4));
+    }
+
+    // ── test_mutation_journal_records_changes ───────────────────────────────
+
+    #[test]
+    fn test_mutation_journal_records_changes() {
+        let mut world = make_world();
+
+        // Transaction with one insert
+        let mut txn = WorldTxn::new(&world);
+        txn.add_component(
+            1,
+            ComponentSchemaId(42),
+            SchemaVersion(2),
+            "hello".to_string(),
+        );
+
+        let committed = world.transit(txn).expect("commit should succeed");
+
+        let journal = world.last_journal();
+        assert_eq!(journal.len(), 1, "expected exactly one journal entry");
+
+        let entry = &journal[0];
+        assert_eq!(entry.entity, 1);
+        assert_eq!(entry.schema_id, ComponentSchemaId(42));
+        assert_eq!(entry.schema_version, SchemaVersion(2));
+        assert_eq!(entry.change_type, ChangeType::Insert);
+        assert_eq!(entry.world_epoch, committed.0);
+
+        // before_hash is None for a fresh insert (no prior value); hashing comes in a future stage
+        assert!(
+            entry.before_hash.is_none(),
+            "before_hash must be None for insert"
+        );
+
+        // after_hash is None until content hashing is wired in a future stage
+        assert!(
+            entry.after_hash.is_none(),
+            "after_hash must be None for insert"
+        );
+    }
+
+    // ── test_access_declaration_construction ────────────────────────────────
+
+    #[test]
+    fn test_access_declaration_construction() {
+        // AccessKind variants
+        let read = AccessKind::Read;
+        let write = AccessKind::Write;
+        assert_ne!(read, write);
+        assert_eq!(format!("{:?}", read), "Read");
+        assert_eq!(format!("{:?}", write), "Write");
+
+        // ChangeType variants
+        let insert = ChangeType::Insert;
+        let update = ChangeType::Update;
+        let remove = ChangeType::Remove;
+        assert_ne!(insert, update);
+        assert_ne!(update, remove);
+        assert_ne!(insert, remove);
+        assert_eq!(format!("{:?}", insert), "Insert");
+        assert_eq!(format!("{:?}", update), "Update");
+        assert_eq!(format!("{:?}", remove), "Remove");
+
+        // AccessDeclaration construction
+        let decl = AccessDeclaration {
+            schema_id: ComponentSchemaId(7),
+            entity: Some(42),
+            access: AccessKind::Read,
+        };
+        assert_eq!(decl.schema_id, ComponentSchemaId(7));
+        assert_eq!(decl.entity, Some(42));
+        assert_eq!(decl.access, AccessKind::Read);
+
+        // AccessDeclaration serialization roundtrip
+        let json = serde_json::to_string(&decl).unwrap();
+        let deserialized: AccessDeclaration = serde_json::from_str(&json).unwrap();
+        assert_eq!(decl.schema_id, deserialized.schema_id);
+        assert_eq!(decl.entity, deserialized.entity);
+        assert_eq!(decl.access, deserialized.access);
+
+        // ChangeType serialization roundtrip
+        for ct in [ChangeType::Insert, ChangeType::Update, ChangeType::Remove] {
+            let json = serde_json::to_string(&ct).unwrap();
+            let deserialized: ChangeType = serde_json::from_str(&json).unwrap();
+            assert_eq!(ct, deserialized);
+        }
+
+        // AccessKind serialization roundtrip
+        for ak in [AccessKind::Read, AccessKind::Write] {
+            let json = serde_json::to_string(&ak).unwrap();
+            let deserialized: AccessKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(ak, deserialized);
+        }
     }
 }

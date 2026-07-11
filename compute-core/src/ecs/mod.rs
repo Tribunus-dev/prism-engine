@@ -195,6 +195,10 @@ pub use component::memory::*;
 pub use component::quality::*;
 pub use component::tensor::*;
 
+use crate::ecs::constitutional::types::WorldEpoch;
+use crate::ecs::constitutional::world_txn::{
+    CommittedEpoch, ComponentChange, WorldTxn, WorldTxnError,
+};
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -238,6 +242,9 @@ pub struct CompWorld {
     entity_meta: Vec<EntityMeta>,
     next_id: u64,
     staging: Vec<Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>>,
+    epoch: WorldEpoch,
+    journal: Vec<ComponentChange>,
+    component_versions: std::collections::HashMap<u64, u64>,
 }
 
 impl std::fmt::Debug for CompWorld {
@@ -370,6 +377,9 @@ impl CompWorld {
             entity_meta: Vec::new(),
             next_id: 1,
             staging: Vec::new(),
+            epoch: WorldEpoch(1),
+            journal: Vec::new(),
+            component_versions: std::collections::HashMap::new(),
         }
     }
 
@@ -523,6 +533,83 @@ impl CompWorld {
 
     pub fn system_count(&self) -> usize {
         self.systems.len()
+    }
+}
+
+impl CompWorld {
+    pub fn current_epoch(&self) -> WorldEpoch {
+        self.epoch
+    }
+
+    pub fn last_journal(&self) -> &[ComponentChange] {
+        &self.journal
+    }
+    pub fn transit(&mut self, txn: WorldTxn) -> Result<CommittedEpoch, WorldTxnError> {
+        // 1. Validate epoch
+        if self.epoch != txn.expected_epoch {
+            return Err(WorldTxnError::StaleEpoch {
+                expected: txn.expected_epoch,
+                current: self.epoch,
+            });
+        }
+
+        // 2. Validate read dependencies
+        for dep in &txn.read_deps {
+            let current_ver = self
+                .component_versions
+                .get(&dep.entity)
+                .copied()
+                .unwrap_or(0);
+            if current_ver != dep.observed_version {
+                return Err(WorldTxnError::StaleRead {
+                    entity: dep.entity,
+                    schema_id: dep.schema_id,
+                    observed: dep.observed_version,
+                    current: current_ver,
+                });
+            }
+        }
+
+        // 3. Advance epoch first so journal entries record the new epoch
+        self.epoch.0 += 1;
+
+        // 4. Build mutation journal from staged changes
+        let mut journal = Vec::new();
+        for insert in &txn.inserts {
+            journal.push(ComponentChange {
+                entity: insert.entity,
+                schema_id: insert.schema_id,
+                schema_version: insert.schema_version,
+                change_type: crate::ecs::constitutional::world_txn::ChangeType::Insert,
+                before_hash: None,
+                after_hash: None,
+                world_epoch: self.epoch,
+            });
+
+            // Increment component version for this entity
+            *self.component_versions.entry(insert.entity).or_insert(0) += 1;
+        }
+
+        for remove in &txn.removes {
+            journal.push(ComponentChange {
+                entity: remove.entity,
+                schema_id: remove.schema_id,
+                schema_version: crate::ecs::constitutional::types::SchemaVersion(0),
+                change_type: crate::ecs::constitutional::world_txn::ChangeType::Remove,
+                before_hash: None,
+                after_hash: None,
+                world_epoch: self.epoch,
+            });
+
+            *self.component_versions.entry(remove.entity).or_insert(0) += 1;
+        }
+
+        let committed = CommittedEpoch(self.epoch);
+
+        // 5. Store journal
+        self.journal = journal;
+
+        Ok(committed)
     }
 }
 
