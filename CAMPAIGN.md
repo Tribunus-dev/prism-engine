@@ -79,13 +79,17 @@ in shadow mode.
   2. ModelRegistry (server/models.rs) — model lifecycle outside ECS
   3. DistillationEngine (server/distill_worker.rs) — job lifecycle in HashMap
   4. CancellationManager (scheduling/cancellation.rs) — cancellation authority
-  5. WeightCache (backend/residency.rs) — weight residency decisions
-  6. TrustStore (registry/trust_store.rs) — provider trust decisions
-  7. AppState (server/routes.rs) — composite anti-pattern with multiple HashMaps
-  8. GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs) — global mutable singleton
-  9. ServerEngine (server/engine.rs) — session/request state
+  4. ~~CancellationManager (scheduling/cancellation.rs)~~ `REMOVED` — 758 lines dead code
+  5. ~~ServerEngine (server/engine.rs)~~ `REMOVED` — 300 lines dead code
+  6. WeightCache (backend/residency.rs) — weight residency decisions
+  7. TrustStore (registry/trust_store.rs) — provider trust decisions
+  8. AppState (server/routes.rs) — composite anti-pattern with multiple HashMaps
+  9. GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs) — global mutable singleton
   10. HeterogeneousExecutor.routing_table (backend/heterogeneous_executor.rs) — routing
   11. AneBackend (backend/ane.rs) — ANE program/weight binding state
+  12. AdapterRegistry (model_adapter/mod.rs) — model role assignment
+  13. ModelRegistry (server/models.rs) — model lifecycle
+  14. DistillationEngine (server/distill_worker.rs) — job lifecycle
   
   Full audit reports:
   - local://audit-direct-store.md (60 production violations)
