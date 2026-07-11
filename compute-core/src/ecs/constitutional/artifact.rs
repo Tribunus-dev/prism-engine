@@ -215,6 +215,53 @@ impl LoadArtifactCommand {
 
 // ── Errors ────────────────────────────────────────────────────────────────
 
+// ── Replay ────────────────────────────────────────────────────────────────
+
+/// Replay an `artifact_loaded` event to reconstruct an artifact entity.
+pub fn replay_artifact_loaded(
+    world: &mut CompWorld,
+    event: &DomainEvent,
+) -> Result<(CommittedEpoch, u64), ArtifactError> {
+    let entity_id = event.entity_id.ok_or(ArtifactError::MissingDigest)?.0;
+    let path = event
+        .payload
+        .get("artifact_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let mut txn = WorldTxn::new(world);
+    if !world.has_entity(crate::ecs::CompEntity(entity_id)) {
+        txn.stage_spawn(entity_id, crate::ecs::EntityKind::Artifact);
+    }
+    let file_length = event
+        .payload
+        .get("file_length")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    txn.add_component(
+        entity_id,
+        ComponentSchemaId(2),
+        SchemaVersion(1),
+        crate::ecs::constitutional::artifact::ArtifactPath(path.to_string()),
+    );
+    txn.add_component(
+        entity_id,
+        ComponentSchemaId(1),
+        SchemaVersion(1),
+        crate::ecs::constitutional::artifact::ArtifactLifecycle::Loaded,
+    );
+    txn.add_component(
+        entity_id,
+        ComponentSchemaId(4),
+        SchemaVersion(1),
+        crate::ecs::constitutional::artifact::ArtifactMetadata {
+            length: file_length,
+            path: path.to_string(),
+        },
+    );
+    let epoch = world.transit(txn).map_err(ArtifactError::CommitFailed)?;
+    Ok((epoch, entity_id))
+}
+
 /// Artifact ingestion errors.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ArtifactError {

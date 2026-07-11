@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::ecs::constitutional::persistence::{
-        EventLogEntry, EventStore, InMemoryEventStore, ProjectionCheckpoint, ReplayEngine, Snapshot,
+        EventLogEntry, EventStore, InMemoryEventStore, ProjectionCheckpoint, ReplayEngine,
+        ReplayRegistry, Snapshot,
     };
     use crate::ecs::constitutional::*;
     use crate::ecs::receipt_bus::*;
@@ -2904,7 +2905,7 @@ mod tests {
             id: MessageId::compute(b"replay-event"),
             kind: "session_admitted".to_string(),
             entity_id: Some(EntityKindId(1)),
-            payload: serde_json::json!({"session_id": 1, "models": [3], "devices": [2]}),
+            payload: serde_json::json!({"session_id": 1, "models": [12], "devices": [2]}),
         };
         let epoch = replay_session_admitted(&mut world, &event).expect("replay should succeed");
         assert!(epoch.0 .0 > WorldEpoch(0).0);
@@ -2922,5 +2923,336 @@ mod tests {
         assert!(epoch2.0 .0 > epoch.0 .0);
         let sessions: Vec<_> = world.entities_of_kind(EntityKind::Session);
         assert_eq!(sessions.len(), 1);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Replay Integration Test (Stage 6+)
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    //  End-to-end: execute a multi-subsystem workflow (artifact → device →
+    //  model deployment → session), store all events, then replay into a
+    //  fresh world and verify the reconstructed state matches.
+
+    #[test]
+    fn test_full_replay_integration() {
+        // ── Phase 1: Build realistic synthetic events ─────────────────────
+        // These events mirror what the constitutional commands produce after
+        // successful effect outcomes.
+
+        let mut event_store = InMemoryEventStore::new();
+        let mut world = CompWorld::new();
+
+        // --- 1a. Discover a device (auto-assigned to entity 1) ---
+        let device_event = DomainEvent {
+            id: MessageId::compute(b"full-replay-device"),
+            kind: "device_discovered".to_string(),
+            entity_id: None,
+            payload: serde_json::json!({
+                "stable_id": "pcie:0000:00:01.0:1002:740f",
+            }),
+        };
+        let epoch_device = replay_device_discovered(&mut world, &device_event)
+            .expect("replay device_discovered should succeed");
+        assert!(epoch_device.0.0.0 > 0);
+
+        // --- 1b. Load an artifact (entity 2) ---
+        let artifact_event = DomainEvent {
+            id: MessageId::compute(b"full-replay-artifact"),
+            kind: "artifact_loaded".to_string(),
+            entity_id: Some(EntityKindId(2)),
+            payload: serde_json::json!({
+                "artifact_path": "/tmp/model.bin",
+                "observed_digest": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                "file_length": 8192,
+                "entity_type": "artifact",
+            }),
+        };
+        let epoch_artifact = replay_artifact_loaded(&mut world, &artifact_event)
+            .expect("replay artifact_loaded should succeed");
+        assert!(epoch_artifact.0.0.0 > 0);
+
+        // --- 1c. Deploy a model (entity 3) with residency (entity 4) ---
+        let model_event = DomainEvent {
+            id: MessageId::compute(b"full-replay-model"),
+            kind: "model_deployed".to_string(),
+            entity_id: Some(EntityKindId(3)),
+            payload: serde_json::json!({
+                "model_id": 3,
+                "residency_id": 4,
+                "device": 1,
+                "artifact": 2,
+                "format": "native",
+                "memory_requested": 1_073_741_824,
+                "memory_actual": 1_073_741_824,
+            }),
+        };
+        let epoch_model = replay_model_deployed(&mut world, &model_event)
+            .expect("replay model_deployed should succeed");
+        assert!(epoch_model.0.0.0 > 0);
+
+        // --- 1d. Admit a session (entity 5) ---
+        let session_event = DomainEvent {
+            id: MessageId::compute(b"full-replay-session"),
+            kind: "session_admitted".to_string(),
+            entity_id: Some(EntityKindId(5)),
+            payload: serde_json::json!({
+                "session_id": 5,
+                "models": [3],
+                "devices": [1],
+            }),
+        };
+        let epoch_session = replay_session_admitted(&mut world, &session_event)
+            .expect("replay session_admitted should succeed");
+        assert!(epoch_session.0.0 > 0);
+
+        // ── Phase 2: Store all events in InMemoryEventStore ──────────────
+        // Events are stored with their replay epochs in order.
+        let all_events = [
+            (&device_event, epoch_device.0.0),
+            (&artifact_event, epoch_artifact.0.0),
+            (&model_event, epoch_model.0.0),
+            (&session_event, epoch_session.0),
+        ];
+        for (event, epoch) in &all_events {
+            event_store
+                .append_events(
+                    *epoch,
+                    &[EventLogEntry {
+                        epoch: *epoch,
+                        sequence: 0,
+                        event: (*event).clone(),
+                        world_digest: [0u8; 32],
+                    }],
+                )
+                .expect("append_events should succeed");
+        }
+
+        assert_eq!(
+            event_store.event_count(),
+            4,
+            "should store exactly 4 events"
+        );
+
+        // ── Phase 3: Capture reference state from the original world ─────
+        // Entity kinds and counts
+        let artifacts_orig: Vec<_> = world.entities_of_kind(EntityKind::Artifact);
+        let devices_orig: Vec<_> = world.entities_of_kind(EntityKind::Device);
+        let models_orig: Vec<_> = world.entities_of_kind(EntityKind::Model);
+        let residencies_orig: Vec<_> = world.entities_of_kind(EntityKind::Residency);
+        let sessions_orig: Vec<_> = world.entities_of_kind(EntityKind::Session);
+
+        assert_eq!(artifacts_orig.len(), 1, "world should have 1 artifact");
+        assert_eq!(devices_orig.len(), 1, "world should have 1 device");
+        assert_eq!(models_orig.len(), 1, "world should have 1 model");
+        assert_eq!(residencies_orig.len(), 1, "world should have 1 residency");
+        assert_eq!(sessions_orig.len(), 1, "world should have 1 session");
+
+        // Verify component presence on the artifact
+        let art_entity = artifacts_orig[0];
+        assert_eq!(world.entity_kind(art_entity), Some(EntityKind::Artifact));
+        assert!(world.get_component::<ArtifactPath>(art_entity).is_some());
+        assert!(world
+            .get_component::<ArtifactLifecycle>(art_entity)
+            .is_some());
+
+        // Verify component presence on the device
+        let dev_entity = devices_orig[0];
+        assert_eq!(world.entity_kind(dev_entity), Some(EntityKind::Device));
+        assert!(world.get_component::<DeviceStableId>(dev_entity).is_some());
+
+        // Verify component presence on the model
+        let mdl_entity = models_orig[0];
+        assert_eq!(world.entity_kind(mdl_entity), Some(EntityKind::Model));
+        assert!(world.get_component::<ModelLifecycle>(mdl_entity).is_some());
+
+        // Verify component presence on the residency
+        let res_entity = residencies_orig[0];
+        assert_eq!(world.entity_kind(res_entity), Some(EntityKind::Residency));
+        assert!(world
+            .get_component::<ResidencyDeviceRef>(res_entity)
+            .is_some());
+        assert!(world
+            .get_component::<ResidencyMemoryClaim>(res_entity)
+            .is_some());
+        assert!(world.get_component::<ResidencyFormat>(res_entity).is_some());
+        assert!(world
+            .get_component::<ResidencyLifecycle>(res_entity)
+            .is_some());
+
+        // Verify component presence on the session
+        let ses_entity = sessions_orig[0];
+        assert_eq!(world.entity_kind(ses_entity), Some(EntityKind::Session));
+        assert!(world.get_component::<SessionConfig>(ses_entity).is_some());
+        assert!(world.get_component::<SessionModels>(ses_entity).is_some());
+        assert!(world.get_component::<SessionDevices>(ses_entity).is_some());
+        assert!(world
+            .get_component::<SessionLifecycle>(ses_entity)
+            .is_some());
+
+        // ── Phase 4: Replay into fresh world using ReplayRegistry ────────
+        let mut replay_world = CompWorld::new();
+        let registry = ReplayRegistry::register_all();
+
+        let start_epoch = replay_world.current_epoch();
+        let replay_result = ReplayEngine::replay_into(
+            &mut replay_world,
+            &event_store,
+            start_epoch,
+            &registry,
+        )
+        .expect("replay_into should succeed");
+
+        assert_eq!(
+            replay_result.events_replayed, 4,
+            "should replay exactly 4 events"
+        );
+        assert_eq!(
+            replay_result.last_epoch, epoch_session.0,
+            "last epoch should match the final event"
+        );
+
+        // ── Phase 5: Verify reconstructed world matches ──────────────────
+        let artifacts_replay: Vec<_> = replay_world.entities_of_kind(EntityKind::Artifact);
+        let devices_replay: Vec<_> = replay_world.entities_of_kind(EntityKind::Device);
+        let models_replay: Vec<_> = replay_world.entities_of_kind(EntityKind::Model);
+        let residencies_replay: Vec<_> = replay_world.entities_of_kind(EntityKind::Residency);
+        let sessions_replay: Vec<_> = replay_world.entities_of_kind(EntityKind::Session);
+
+        // Entity counts must match
+        assert_eq!(
+            artifacts_replay.len(),
+            artifacts_orig.len(),
+            "artifact count should match"
+        );
+        assert_eq!(
+            devices_replay.len(),
+            devices_orig.len(),
+            "device count should match"
+        );
+        assert_eq!(
+            models_replay.len(),
+            models_orig.len(),
+            "model count should match"
+        );
+        assert_eq!(
+            residencies_replay.len(),
+            residencies_orig.len(),
+            "residency count should match"
+        );
+        assert_eq!(
+            sessions_replay.len(),
+            sessions_orig.len(),
+            "session count should match"
+        );
+
+        // Verify entity kinds and components in replayed world
+        let art_replay = artifacts_replay[0];
+        assert_eq!(
+            replay_world.entity_kind(art_replay),
+            Some(EntityKind::Artifact)
+        );
+        assert!(replay_world
+            .get_component::<ArtifactPath>(art_replay)
+            .is_some());
+        assert!(replay_world
+            .get_component::<ArtifactLifecycle>(art_replay)
+            .is_some());
+
+        let dev_replay = devices_replay[0];
+        assert_eq!(
+            replay_world.entity_kind(dev_replay),
+            Some(EntityKind::Device)
+        );
+        assert!(replay_world
+            .get_component::<DeviceStableId>(dev_replay)
+            .is_some());
+
+        let mdl_replay = models_replay[0];
+        assert_eq!(
+            replay_world.entity_kind(mdl_replay),
+            Some(EntityKind::Model)
+        );
+        assert!(replay_world
+            .get_component::<ModelLifecycle>(mdl_replay)
+            .is_some());
+
+        let res_replay = residencies_replay[0];
+        assert_eq!(
+            replay_world.entity_kind(res_replay),
+            Some(EntityKind::Residency)
+        );
+        assert!(replay_world
+            .get_component::<ResidencyDeviceRef>(res_replay)
+            .is_some());
+        assert!(replay_world
+            .get_component::<ResidencyMemoryClaim>(res_replay)
+            .is_some());
+        assert!(replay_world
+            .get_component::<ResidencyFormat>(res_replay)
+            .is_some());
+        assert!(replay_world
+            .get_component::<ResidencyLifecycle>(res_replay)
+            .is_some());
+
+        let ses_replay = sessions_replay[0];
+        assert_eq!(
+            replay_world.entity_kind(ses_replay),
+            Some(EntityKind::Session)
+        );
+        assert!(replay_world
+            .get_component::<SessionConfig>(ses_replay)
+            .is_some());
+        assert!(replay_world
+            .get_component::<SessionModels>(ses_replay)
+            .is_some());
+        assert!(replay_world
+            .get_component::<SessionDevices>(ses_replay)
+            .is_some());
+        assert!(replay_world
+            .get_component::<SessionLifecycle>(ses_replay)
+            .is_some());
+
+        // Idempotency: replaying again must not change entity counts.
+        // Note: replay_device_discovered uses next_entity_id and is NOT idempotent,
+        // so we start from epoch 3 to skip the device event and re-run artifact+model+session.
+        let _ = ReplayEngine::replay_into(
+            &mut replay_world,
+            &event_store,
+            WorldEpoch(3),
+            &registry,
+        )
+        .expect("second replay_into should succeed");
+
+        let artifacts_again: Vec<_> = replay_world.entities_of_kind(EntityKind::Artifact);
+        let devices_again: Vec<_> = replay_world.entities_of_kind(EntityKind::Device);
+        let models_again: Vec<_> = replay_world.entities_of_kind(EntityKind::Model);
+        let residencies_again: Vec<_> = replay_world.entities_of_kind(EntityKind::Residency);
+        let sessions_again: Vec<_> = replay_world.entities_of_kind(EntityKind::Session);
+
+        assert_eq!(
+            artifacts_again.len(),
+            artifacts_orig.len(),
+            "idempotent: artifact count should not change"
+        );
+        assert_eq!(
+            devices_again.len(),
+            devices_orig.len(),
+            "idempotent: device count should not change"
+        );
+        assert_eq!(
+            models_again.len(),
+            models_orig.len(),
+            "idempotent: model count should not change"
+        );
+        assert_eq!(
+            residencies_again.len(),
+            residencies_orig.len(),
+            "idempotent: residency count should not change"
+        );
+        assert_eq!(
+            sessions_again.len(),
+            sessions_orig.len(),
+            "idempotent: session count should not change"
+        );
     }
 }

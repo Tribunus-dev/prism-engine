@@ -216,6 +216,47 @@ impl InitializeDeviceCommand {
 
 // ── Errors ─────────────────────────────────────────────────────────────────
 
+// ── Replay ────────────────────────────────────────────────────────────────
+
+/// Replay a `device_discovered` event to reconstruct a device entity.
+pub fn replay_device_discovered(
+    world: &mut CompWorld,
+    event: &DomainEvent,
+) -> Result<(CommittedEpoch, u64), DeviceError> {
+    let stable_id_str = event
+        .payload
+        .get("stable_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("replay");
+    // Scan for existing device with this stable ID
+    let entity_id = if let Some(existing) =
+        find_device_by_stable_id(world, &DeviceStableId(stable_id_str.to_string()))
+    {
+        existing
+    } else {
+        let id = WorldTxn::next_entity_id(world);
+        let mut txn = WorldTxn::new(world);
+        txn.stage_spawn(id, crate::ecs::EntityKind::Device);
+        txn.add_component(
+            id,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceStableId(stable_id_str.to_string()),
+        );
+        txn.add_component(
+            id,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            crate::ecs::constitutional::lifecycle::DeviceLifecycle::Discovered,
+        );
+        let epoch = world
+            .transit(txn)
+            .map_err(|e| DeviceError::CommitFailed(e))?;
+        return Ok((epoch, id));
+    };
+    Ok((CommittedEpoch(WorldEpoch(0)), entity_id))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeviceError {
     #[error("discovery effect failed")]

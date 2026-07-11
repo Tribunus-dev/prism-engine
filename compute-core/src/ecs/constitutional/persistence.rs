@@ -1,6 +1,8 @@
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::types::*;
+use crate::ecs::CompWorld;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A single entry in the durable event log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +50,25 @@ pub trait EventStore: Send + Sync {
 pub struct ReplayEngine;
 
 impl ReplayEngine {
+    /// Replay events from the store into an existing world using a registry of appliers.
+    pub fn replay_into(
+        world: &mut CompWorld,
+        store: &dyn EventStore,
+        from_epoch: WorldEpoch,
+        registry: &ReplayRegistry,
+    ) -> Result<ReplayResult, String> {
+        let events = store.get_events_from(from_epoch);
+        let event_count = events.len() as u64;
+        for entry in &events {
+            registry.apply(world, &entry.event)?;
+        }
+        Ok(ReplayResult {
+            events_replayed: event_count,
+            last_epoch: events.last().map(|e| e.epoch).unwrap_or(from_epoch),
+            final_digest: [0u8; 32],
+        })
+    }
+
     /// Replay events from the store starting at `from_epoch` and return reconstructed state.
     /// This is the recovery path — process restarts, replays the event log, rebuilds the world.
     pub fn replay(store: &dyn EventStore, from_epoch: WorldEpoch) -> ReplayResult {
@@ -58,6 +79,79 @@ impl ReplayEngine {
             last_epoch: events.last().map(|e| e.epoch).unwrap_or(from_epoch),
             final_digest: [0u8; 32], // computed from actual replay in full implementation
         }
+    }
+}
+
+/// Function signature for replaying a single event.
+pub type ReplayApplier = fn(&mut CompWorld, &DomainEvent) -> Result<(), String>;
+
+/// Registry mapping event kind strings to replay applier functions.
+pub struct ReplayRegistry {
+    appliers: HashMap<String, ReplayApplier>,
+}
+
+impl ReplayRegistry {
+    pub fn new() -> Self {
+        Self {
+            appliers: HashMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, event_kind: &str, applier: ReplayApplier) {
+        self.appliers.insert(event_kind.to_string(), applier);
+    }
+
+    pub fn apply(&self, world: &mut CompWorld, event: &DomainEvent) -> Result<(), String> {
+        let applier = self.appliers.get(&event.kind).ok_or_else(|| {
+            format!(
+                "no replay applier registered for event kind: {}",
+                event.kind
+            )
+        })?;
+        applier(world, event)
+    }
+
+    pub fn register_all() -> Self {
+        let mut reg = Self::new();
+        reg.register("artifact_loaded", |w, e| {
+            crate::ecs::constitutional::artifact::replay_artifact_loaded(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("device_discovered", |w, e| {
+            crate::ecs::constitutional::device::replay_device_discovered(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("model_deployed", |w, e| {
+            crate::ecs::constitutional::residency::replay_model_deployed(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("session_admitted", |w, e| {
+            crate::ecs::constitutional::session::replay_session_admitted(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("work_created", |w, e| {
+            crate::ecs::constitutional::work::replay_work_created(w, e)
+        });
+        reg.register("compilation_job_created", |w, e| {
+            crate::ecs::constitutional::compilation::replay_compilation_job_created(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("lease_acquired", |w, e| {
+            crate::ecs::constitutional::execution::replay_lease_acquired(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("lease_completed", |w, e| {
+            crate::ecs::constitutional::execution::replay_lease_completed(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg
     }
 }
 

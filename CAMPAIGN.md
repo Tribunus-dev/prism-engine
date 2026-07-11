@@ -20,14 +20,15 @@ No legacy map, registry, manager, cache, or database table can independently con
 | 2 | **Device Discovery** | `Canonical` | Device | DeviceStableId, DriverFactoryId, BackendFamily, DeviceCapabilities, DeviceMemoryLimits, DeviceTopology, DeviceHealth, DeviceLifecycle, DesiredDeviceState, ObservedDeviceState, LastObservation, RuntimeHandleKey | kernel |
 | 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
 | 4 | **Session Lifecycle** | `Design` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
-| 5 | **Work Scheduling** | `Design` | WorkItem | WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent, WorkPrerequisites, WorkOutput | kernel |
-| 6 | **Execution Leases** | `Design` | — | ExecutionLease, LeaseOwner, LeaseTokenRange, KvSlot, KvOwnership, ExecutionOutput | kernel |
-| 7 | **Compilation & Model Production** | `Design` | CompilationJob | CompilationJob, JobInput, JobConfig, JobOutput, JobLifecycle, ValidationReceipt, QuantizationPlan, CimagePromotion | kernel |
-| 8 | **Agent & Tool Execution** | `Design` | Agent | AgentRun, AgentTask, AgentPhase, ToolInvocation, ToolOutcome, AgentMessage, AgentConfig, AgentLifecycle | kernel |
-| 9 | **Multimodal Pipelines** | `Design` | Pipeline | Pipeline, PipelineStage, PipelineModality, InputArtifactRef, OutputArtifactRef, PipelineLifecycle, WorkLeaseRef | kernel |
-| 10 | **Distributed Topology** | `Design` | Node | PeerIdentity, NodeMembership, PeerCapabilities, NodeTopology, TrustState, WorkerHealth, RemoteLease, RemoteCapabilityObservation | kernel |
-| 11 | **Server & API Bridges** | `Design` | — | IngressRequest, ApiKey, RateLimiterState, RequestQueue, TransportSession, IngressLifecycle | kernel |
-| 12 | **Persistence & Projections** | `Inventory` | — | — | kernel |
+| 4 | **Session Lifecycle** | `Shadow` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
+| 5 | **Work Scheduling** | `Shadow` | WorkItem | WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent, WorkPrerequisites, WorkOutput | kernel |
+| 6 | **Execution Leases** | `Shadow` | — | ExecutionLease, LeaseOwner, LeaseTokenRange, KvSlot, KvOwnership, ExecutionOutput | kernel |
+| 7 | **Compilation & Model Production** | `Shadow` | CompilationJob | CompilationJob, JobInput, JobConfig, JobOutput, JobLifecycle, ValidationReceipt, QuantizationPlan, CimagePromotion | kernel |
+| 8 | **Agent & Tool Execution** | `Shadow` | Agent | AgentRun, AgentTask, AgentPhase, ToolInvocation, ToolOutcome, AgentMessage, AgentConfig, AgentLifecycle | kernel |
+| 9 | **Multimodal Pipelines** | `Shadow` | Pipeline | Pipeline, PipelineStage, PipelineModality, InputArtifactRef, OutputArtifactRef, PipelineLifecycle, WorkLeaseRef | kernel |
+| 10 | **Distributed Topology** | `Shadow` | Node | PeerIdentity, NodeMembership, PeerCapabilities, NodeTopology, TrustState, WorkerHealth, RemoteLease, RemoteCapabilityObservation | kernel |
+| 11 | **Server & API Bridges** | `Shadow` | — | IngressRequest, ApiKey, RateLimiterState, RequestQueue, TransportSession, IngressLifecycle | kernel |
+| 12 | **Persistence & Projections** | `Design` | — | ReplayRegistry, EventStore (InMemory), Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
 | 13 | **Dashboard** | `Inventory` | — | — | dashboard |
 
 ## Cutover Protocol
@@ -72,32 +73,28 @@ in shadow mode.
   split.
 
 ### Design (types exist, not wired into authority)
-- **Session Lifecycle** — CreateSessionCommand with preflight (model+device validation),
-    TransitionSessionCommand, schema-bound SessionConfig/SessionModels/SessionDevices.
-    10 tests.
-- **Work Scheduling** — WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent,
-    CreateWorkCommand, LeaseWorkCommand, CompleteWorkCommand, FailWorkCommand, CancelWorkCommand.
-    7 tests.
-- **Execution Leases** — AcquireExecutionLeaseCommand, CompleteExecutionLeaseCommand,
-    ExecutionLease/LeaseOwner/LeaseTokenRange/KvSlot/KvOwnership. 4 tests.
-- **Compilation & Model Production** — CreateCompilationJobCommand, PromoteCimageCommand,
-    SubmitValidationReceiptCommand, 8 component types, JobLifecycle with 6 states. 11 tests.
-- **Agent & Tool Execution** — CreateAgentRunCommand, SubmitToolOutcomeCommand,
-    9 component types, AgentPhase with 7 states. 9 tests.
-- **Multimodal Pipelines** — CreatePipelineCommand with stage/artifact preflight,
-    SubmitStageOutputCommand, 7 component types, PipelineLifecycle with 7 states. 8 tests.
-- **Distributed Topology** — RegisterPeerCommand, ObserveWorkerCapabilityCommand,
-    8 component types (PeerIdentity, TrustState, WorkerHealth, RemoteLease), TrustState
-    with 5 states. 5 tests.
-- **Server & API Bridges** — SubmitIngressRequestCommand, ResolveIngressCommand,
-    IngressLifecycleTransitionCommand, 6 component types, IngressLifecycle with 6 states.
-    11 tests.
+  - **Persistence & Projections** — ReplayRegistry with 12 event kind → replay applier
+    mappings. ReplayEngine::replay_into for batch reconstruction. InMemoryEventStore,
+    Snapshot, ProjectionCheckpoint. Full replay integration test proves
+    artifact→device→model→session→work workflow survives replay.
 
 ### Shadow (constitutional path running, legacy comparison pending)
 - **Model Deployment & Residency** — Schema-bound deployment, preflight validation,
      idempotent redeployment, replay safety. 18 tests covering entity/component
      attachment, effect failure/mismatch, stale outcome rejection, replay without
      fake allocations. Comparison target: `loader`, `residency`, `model_cache` modules.
+- **Session Lifecycle** — CreateSessionCommand, TransitionSessionCommand, 10 tests.
+    replay_session_admitted registered in ReplayRegistry.
+- **Work Scheduling** — 5 commands (Create/Lease/Complete/Fail/Cancel), 7 tests.
+    replay_work_created registered in ReplayRegistry.
+- **Execution Leases** — AcquireExecutionLeaseCommand, CompleteExecutionLeaseCommand,
+    4 tests. replay_lease_acquired/completed registered.
+- **Compilation & Model Production** — 3 commands, 8 types, 11 tests.
+    replay_compilation_job_created registered.
+- **Agent & Tool Execution** — 2 commands, 9 types, 9 tests. Need replay function.
+- **Multimodal Pipelines** — 2 commands, 7 types, 8 tests. Need replay function.
+- **Distributed Topology** — 2 commands, 8 types, 5 tests. Need replay function.
+- **Server & API Bridges** — 3 commands, 6 types, 11 tests. Need replay function.
 
 ## Wave Plan
 
