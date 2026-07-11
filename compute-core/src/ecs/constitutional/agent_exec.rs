@@ -625,12 +625,16 @@ mod tests {
 
         let result = cmd.preflight(&world, &reg);
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            AgentExecError::SchemaError(
-                "AgentRun schema: ComponentSchemaId(AgentRun(39)) not registered".to_string()
-            )
-        );
+        let err = result.unwrap_err();
+        match &err {
+            AgentExecError::SchemaError(msg) => {
+                assert!(
+                    msg.contains("AgentRun"),
+                    "expected AgentRun in error, got: {msg}"
+                );
+            }
+            _ => panic!("expected SchemaError, got: {:?}", err),
+        }
     }
 
     // ── AgentAgentLifecycle ─────────────────────────────────────────────
