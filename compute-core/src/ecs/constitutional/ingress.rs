@@ -1,7 +1,9 @@
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
+};
 use crate::ecs::{CompWorld, EntityKind};
 use serde::{Deserialize, Serialize};
 
@@ -208,10 +210,8 @@ impl SubmitIngressRequestCommand {
 
         txn.stage_spawn(request_id, EntityKind::Session);
 
-        txn.add_component(
+        txn.put_durable(
             request_id,
-            ComponentSchemaId(SCHEMA_INGRESS_REQUEST),
-            SchemaVersion(1),
             IngressRequest {
                 request_id,
                 transport: self.transport.clone(),
@@ -223,12 +223,7 @@ impl SubmitIngressRequestCommand {
             },
         );
 
-        txn.add_component(
-            request_id,
-            ComponentSchemaId(SCHEMA_INGRESS_LIFECYCLE),
-            SchemaVersion(1),
-            IngressLifecycle::Received,
-        );
+        txn.put_durable(request_id, IngressLifecycle::Received);
 
         let body_hash_hex: String = body_hash
             .as_bytes()
@@ -312,12 +307,7 @@ impl ResolveIngressCommand {
         let mut txn = WorldTxn::new(world);
 
         // Update lifecycle
-        txn.add_component(
-            self.ingress_entity,
-            ComponentSchemaId(SCHEMA_INGRESS_LIFECYCLE),
-            SchemaVersion(1),
-            IngressLifecycle::Resolved,
-        );
+        txn.put_durable(self.ingress_entity, IngressLifecycle::Resolved);
 
         // Update the resolved_command field by replacing IngressRequest
         if let Some(ingress_req) =
@@ -327,12 +317,7 @@ impl ResolveIngressCommand {
                 resolved_command: Some(self.resolved_command_id.to_string()),
                 ..ingress_req.clone()
             };
-            txn.add_component(
-                self.ingress_entity,
-                ComponentSchemaId(SCHEMA_INGRESS_REQUEST),
-                SchemaVersion(1),
-                updated,
-            );
+            txn.put_durable(self.ingress_entity, updated);
         }
 
         let event = DomainEvent {
@@ -406,12 +391,7 @@ impl IngressLifecycleTransitionCommand {
 
         let mut txn = WorldTxn::new(world);
 
-        txn.add_component(
-            self.ingress_entity,
-            ComponentSchemaId(SCHEMA_INGRESS_LIFECYCLE),
-            SchemaVersion(1),
-            self.target,
-        );
+        txn.put_durable(self.ingress_entity, self.target);
 
         let event = DomainEvent {
             id: self.id,
@@ -456,6 +436,72 @@ impl crate::ecs::Component for RateLimiterState {}
 impl crate::ecs::Component for RequestQueue {}
 impl crate::ecs::Component for TransportSession {}
 impl crate::ecs::Component for IngressLifecycle {}
+
+impl ClassifiedComponent for IngressRequest {
+    type Class = DurableClass;
+}
+impl DurableComponent for IngressRequest {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.ingress",
+        id: 63,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ApiKey {
+    type Class = DurableClass;
+}
+impl DurableComponent for ApiKey {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.ingress",
+        id: 64,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for RateLimiterState {
+    type Class = DurableClass;
+}
+impl DurableComponent for RateLimiterState {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.ingress",
+        id: 65,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for RequestQueue {
+    type Class = DurableClass;
+}
+impl DurableComponent for RequestQueue {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.ingress",
+        id: 66,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for TransportSession {
+    type Class = DurableClass;
+}
+impl DurableComponent for TransportSession {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.ingress",
+        id: 67,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for IngressLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for IngressLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.ingress",
+        id: 68,
+        version: 1,
+    };
+}
 
 // ── Replay Functions ───────────────────────────────────────────────────
 

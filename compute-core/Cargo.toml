@@ -129,6 +129,10 @@ required-features = ["prism-backend"]
 name = "prism-bench-ab"
 path = "src/bin/prism_bench_ab.rs"
 required-features = ["prism-backend"]
+[[bench]]
+name = "benchmark_placement"
+path = "benches/benchmark_placement.rs"
+required-features = ["mlx-backend"]
 
 [build-dependencies]
 cc = "1.2"

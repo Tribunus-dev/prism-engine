@@ -3,7 +3,9 @@ use crate::ecs::constitutional::driver::BackendCapability;
 use crate::ecs::constitutional::lifecycle::DeviceLifecycle;
 use crate::ecs::constitutional::schema::{ComponentDurability, SchemaRegistry};
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
+};
 use crate::ecs::CompWorld;
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +101,21 @@ impl RuntimeHandleKey {
         ComponentDurability::Ephemeral
     }
 }
+
+// ── Component Schema IDs (69-80) ─────────────────────────────────────────
+
+pub const SCHEMA_DEVICE_STABLE_ID: u64 = 69;
+pub const SCHEMA_DRIVER_FACTORY_ID: u64 = 70;
+pub const SCHEMA_BACKEND_FAMILY: u64 = 71;
+pub const SCHEMA_DEVICE_CAPABILITIES: u64 = 72;
+pub const SCHEMA_DEVICE_MEMORY_LIMITS: u64 = 73;
+pub const SCHEMA_DEVICE_TOPOLOGY: u64 = 74;
+pub const SCHEMA_DEVICE_HEALTH: u64 = 75;
+pub const SCHEMA_DEVICE_LIFECYCLE: u64 = 76;
+pub const SCHEMA_DESIRED_DEVICE_STATE: u64 = 77;
+pub const SCHEMA_OBSERVED_DEVICE_STATE: u64 = 78;
+pub const SCHEMA_LAST_OBSERVATION: u64 = 79;
+pub const SCHEMA_RUNTIME_HANDLE_KEY: u64 = 80;
 
 // ── Discovery Command ────────────────────────────────────────────────────
 
@@ -284,3 +301,137 @@ impl crate::ecs::Component for DesiredDeviceState {}
 impl crate::ecs::Component for ObservedDeviceState {}
 impl crate::ecs::Component for LastObservation {}
 impl crate::ecs::Component for RuntimeHandleKey {}
+
+// ── ClassifiedComponent / DurableComponent impls ─────────────────────────
+
+impl ClassifiedComponent for DeviceStableId {
+    type Class = DurableClass;
+}
+impl DurableComponent for DeviceStableId {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_DEVICE_STABLE_ID as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for DriverFactoryId {
+    type Class = DurableClass;
+}
+impl DurableComponent for DriverFactoryId {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_DRIVER_FACTORY_ID as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for BackendFamily {
+    type Class = DurableClass;
+}
+impl DurableComponent for BackendFamily {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_BACKEND_FAMILY as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for DeviceCapabilities {
+    type Class = DurableClass;
+}
+impl DurableComponent for DeviceCapabilities {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_DEVICE_CAPABILITIES as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for DeviceMemoryLimits {
+    type Class = DurableClass;
+}
+impl DurableComponent for DeviceMemoryLimits {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_DEVICE_MEMORY_LIMITS as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for DeviceTopology {
+    type Class = DurableClass;
+}
+impl DurableComponent for DeviceTopology {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_DEVICE_TOPOLOGY as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for DeviceHealth {
+    type Class = DurableClass;
+}
+impl DurableComponent for DeviceHealth {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_DEVICE_HEALTH as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for DeviceLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for DeviceLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_DEVICE_LIFECYCLE as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for DesiredDeviceState {
+    type Class = DurableClass;
+}
+impl DurableComponent for DesiredDeviceState {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_DESIRED_DEVICE_STATE as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ObservedDeviceState {
+    type Class = DurableClass;
+}
+impl DurableComponent for ObservedDeviceState {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_OBSERVED_DEVICE_STATE as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for LastObservation {
+    type Class = DurableClass;
+}
+impl DurableComponent for LastObservation {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_LAST_OBSERVATION as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for RuntimeHandleKey {
+    type Class = DurableClass;
+}
+impl DurableComponent for RuntimeHandleKey {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.device",
+        id: SCHEMA_RUNTIME_HANDLE_KEY as u32,
+        version: 1,
+    };
+}

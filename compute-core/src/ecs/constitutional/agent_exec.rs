@@ -2,7 +2,9 @@ use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::lifecycle::SessionLifecycle;
 use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
+};
 use crate::ecs::{CompEntity, CompWorld, EntityKind};
 use serde::{Deserialize, Serialize};
 
@@ -226,10 +228,8 @@ impl CreateAgentRunCommand {
         txn.stage_spawn(agent_id, EntityKind::Agent);
 
         // Durable components
-        txn.add_component(
+        txn.put_durable(
             agent_id,
-            ComponentSchemaId(SCHEMA_AGENT_RUN),
-            SchemaVersion(1),
             AgentRun {
                 run_id: agent_id,
                 session_entity: self.session_entity,
@@ -237,31 +237,11 @@ impl CreateAgentRunCommand {
                 created_at: Timestamp::now(),
             },
         );
-        txn.add_component(
-            agent_id,
-            ComponentSchemaId(SCHEMA_AGENT_TASK),
-            SchemaVersion(1),
-            self.task.clone(),
-        );
-        txn.add_component(
-            agent_id,
-            ComponentSchemaId(SCHEMA_AGENT_CONFIG),
-            SchemaVersion(1),
-            self.config.clone(),
-        );
+        txn.put_durable(agent_id, self.task.clone());
+        txn.put_durable(agent_id, self.config.clone());
         // Initial lifecycle + phase
-        txn.add_component(
-            agent_id,
-            ComponentSchemaId(SCHEMA_AGENT_LIFECYCLE),
-            SchemaVersion(1),
-            AgentLifecycle::Active,
-        );
-        txn.add_component(
-            agent_id,
-            ComponentSchemaId(SCHEMA_AGENT_PHASE),
-            SchemaVersion(1),
-            AgentPhase::Planning,
-        );
+        txn.put_durable(agent_id, AgentLifecycle::Active);
+        txn.put_durable(agent_id, AgentPhase::Planning);
 
         let event = DomainEvent {
             id: self.id,
@@ -331,20 +311,10 @@ impl SubmitToolOutcomeCommand {
         let mut txn = WorldTxn::new(world);
 
         // Record the tool outcome component.
-        txn.add_component(
-            self.agent_entity,
-            ComponentSchemaId(SCHEMA_TOOL_OUTCOME),
-            SchemaVersion(1),
-            self.outcome.clone(),
-        );
+        txn.put_durable(self.agent_entity, self.outcome.clone());
 
         // Transition phase from ToolCall → Observing.
-        txn.add_component(
-            self.agent_entity,
-            ComponentSchemaId(SCHEMA_AGENT_PHASE),
-            SchemaVersion(1),
-            AgentPhase::Observing,
-        );
+        txn.put_durable(self.agent_entity, AgentPhase::Observing);
 
         let event = DomainEvent {
             id: self.id,
@@ -415,13 +385,100 @@ pub fn validate_agent_exec_schemas(schema_registry: &SchemaRegistry) -> Result<(
 // ── Component impls ───────────────────────────────────────────────────────
 
 impl crate::ecs::Component for AgentRun {}
+impl ClassifiedComponent for AgentRun {
+    type Class = DurableClass;
+}
+impl DurableComponent for AgentRun {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.agent",
+        id: 39,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for AgentTask {}
+impl ClassifiedComponent for AgentTask {
+    type Class = DurableClass;
+}
+impl DurableComponent for AgentTask {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.agent",
+        id: 40,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for AgentPhase {}
+impl ClassifiedComponent for AgentPhase {
+    type Class = DurableClass;
+}
+impl DurableComponent for AgentPhase {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.agent",
+        id: 41,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for ToolInvocation {}
+impl ClassifiedComponent for ToolInvocation {
+    type Class = DurableClass;
+}
+impl DurableComponent for ToolInvocation {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.agent",
+        id: 42,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for ToolOutcome {}
+impl ClassifiedComponent for ToolOutcome {
+    type Class = DurableClass;
+}
+impl DurableComponent for ToolOutcome {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.agent",
+        id: 43,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for AgentMessage {}
+impl ClassifiedComponent for AgentMessage {
+    type Class = DurableClass;
+}
+impl DurableComponent for AgentMessage {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.agent",
+        id: 44,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for AgentConfig {}
+impl ClassifiedComponent for AgentConfig {
+    type Class = DurableClass;
+}
+impl DurableComponent for AgentConfig {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.agent",
+        id: 45,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for AgentLifecycle {}
+impl ClassifiedComponent for AgentLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for AgentLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.agent",
+        id: 46,
+        version: 1,
+    };
+}
 
 // ── Replay handlers ─────────────────────────────────────────────────────────
 

@@ -5,7 +5,10 @@ use crate::ecs::constitutional::lifecycle::DeviceLifecycle;
 use crate::ecs::constitutional::lifecycle::ResidencyLifecycle;
 use crate::ecs::constitutional::schema::{ComponentDurability, SchemaRegistry};
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, TransientClass,
+    TransientComponent, WorldTxn, WorldTxnError,
+};
 use crate::ecs::{CompWorld, EntityKind};
 use serde::{Deserialize, Serialize};
 
@@ -296,10 +299,8 @@ impl DeployModelCommand {
                 txn.stage_spawn(residency, EntityKind::Residency);
             }
 
-            txn.add_component(
+            txn.put_durable(
                 existing_model,
-                ComponentSchemaId(SCHEMA_MODEL_ARTIFACT_REF),
-                SchemaVersion(1),
                 ModelArtifactRef {
                     artifact_id: self.artifact_entity,
                     digest: *artifact_digest,
@@ -307,43 +308,24 @@ impl DeployModelCommand {
             );
 
             // Attach residency components (idempotent via add_component overwrite)
-            txn.add_component(
+            txn.put_durable(
                 residency,
-                ComponentSchemaId(SCHEMA_RESIDENCY_DEVICE_REF),
-                SchemaVersion(1),
                 ResidencyDeviceRef {
                     device_id: self.device_entity,
                     device_stable_id: self.device_stable_id.clone(),
                 },
             );
-            txn.add_component(
+            txn.put_durable(
                 residency,
-                ComponentSchemaId(SCHEMA_RESIDENCY_MEMORY_CLAIM),
-                SchemaVersion(1),
                 ResidencyMemoryClaim {
                     requested_bytes: self.memory_bytes,
                     actual_bytes,
                 },
             );
-            txn.add_component(
-                residency,
-                ComponentSchemaId(SCHEMA_RESIDENCY_FORMAT),
-                SchemaVersion(1),
-                format,
-            );
-            txn.add_component(
-                residency,
-                ComponentSchemaId(SCHEMA_RESIDENCY_LIFECYCLE),
-                SchemaVersion(1),
-                ResidencyLifecycle::Binding,
-            );
+            txn.put_durable(residency, format);
+            txn.put_durable(residency, ResidencyLifecycle::Binding);
             // Ephemeral — skipped during replay
-            txn.add_component(
-                residency,
-                ComponentSchemaId(SCHEMA_ALLOCATION_TOKEN),
-                SchemaVersion(1),
-                AllocationToken(allocation_token),
-            );
+            txn.put_transient(residency, AllocationToken(allocation_token));
 
             let event = DomainEvent {
                 id: self.id,
@@ -378,69 +360,38 @@ impl DeployModelCommand {
         txn.stage_spawn(model_id, EntityKind::Model);
 
         // Attach model components
-        txn.add_component(
+        txn.put_durable(model_id, ModelId(DomainId(uuid::Uuid::new_v4())));
+        txn.put_durable(
             model_id,
-            ComponentSchemaId(SCHEMA_MODEL_ID),
-            SchemaVersion(1),
-            ModelId(DomainId(uuid::Uuid::new_v4())),
-        );
-        txn.add_component(
-            model_id,
-            ComponentSchemaId(SCHEMA_MODEL_ARTIFACT_REF),
-            SchemaVersion(1),
             ModelArtifactRef {
                 artifact_id: self.artifact_entity,
                 digest: *artifact_digest,
             },
         );
-        txn.add_component(
-            model_id,
-            ComponentSchemaId(SCHEMA_MODEL_LIFECYCLE),
-            SchemaVersion(1),
-            ModelLifecycle::Created,
-        );
+        txn.put_durable(model_id, ModelLifecycle::Created);
 
         // Spawn residency entity
         txn.stage_spawn(residency_id, EntityKind::Residency);
 
         // Attach residency components
-        txn.add_component(
+        txn.put_durable(
             residency_id,
-            ComponentSchemaId(SCHEMA_RESIDENCY_DEVICE_REF),
-            SchemaVersion(1),
             ResidencyDeviceRef {
                 device_id: self.device_entity,
                 device_stable_id: self.device_stable_id.clone(),
             },
         );
-        txn.add_component(
+        txn.put_durable(
             residency_id,
-            ComponentSchemaId(SCHEMA_RESIDENCY_MEMORY_CLAIM),
-            SchemaVersion(1),
             ResidencyMemoryClaim {
                 requested_bytes: self.memory_bytes,
                 actual_bytes,
             },
         );
-        txn.add_component(
-            residency_id,
-            ComponentSchemaId(SCHEMA_RESIDENCY_FORMAT),
-            SchemaVersion(1),
-            format,
-        );
-        txn.add_component(
-            residency_id,
-            ComponentSchemaId(SCHEMA_RESIDENCY_LIFECYCLE),
-            SchemaVersion(1),
-            ResidencyLifecycle::Binding,
-        );
+        txn.put_durable(residency_id, format);
+        txn.put_durable(residency_id, ResidencyLifecycle::Binding);
         // Ephemeral allocation token — not restored during replay
-        txn.add_component(
-            residency_id,
-            ComponentSchemaId(SCHEMA_ALLOCATION_TOKEN),
-            SchemaVersion(1),
-            AllocationToken(allocation_token),
-        );
+        txn.put_transient(residency_id, AllocationToken(allocation_token));
 
         // Emit domain event
         let event = DomainEvent {
@@ -660,3 +611,87 @@ impl crate::ecs::Component for ResidencyMemoryClaim {}
 impl crate::ecs::Component for ResidencyLifecycle {}
 impl crate::ecs::Component for ResidencyFormat {}
 impl crate::ecs::Component for AllocationToken {}
+
+// ── ClassifiedComponent / (Durable|Transient)Component impls ─────────────
+
+impl ClassifiedComponent for ModelId {
+    type Class = DurableClass;
+}
+impl DurableComponent for ModelId {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_MODEL_ID as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ModelArtifactRef {
+    type Class = DurableClass;
+}
+impl DurableComponent for ModelArtifactRef {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_MODEL_ARTIFACT_REF as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ModelLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for ModelLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_MODEL_LIFECYCLE as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ResidencyDeviceRef {
+    type Class = DurableClass;
+}
+impl DurableComponent for ResidencyDeviceRef {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_RESIDENCY_DEVICE_REF as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ResidencyMemoryClaim {
+    type Class = DurableClass;
+}
+impl DurableComponent for ResidencyMemoryClaim {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_RESIDENCY_MEMORY_CLAIM as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ResidencyFormat {
+    type Class = DurableClass;
+}
+impl DurableComponent for ResidencyFormat {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_RESIDENCY_FORMAT as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ResidencyLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for ResidencyLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_RESIDENCY_LIFECYCLE as u32,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for AllocationToken {
+    type Class = TransientClass;
+}
+impl TransientComponent for AllocationToken {}

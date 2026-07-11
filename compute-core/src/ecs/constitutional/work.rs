@@ -1,6 +1,8 @@
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{WorldTxn, WorldTxnError};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
+};
 use crate::ecs::{CompWorld, Component, EntityKind};
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +66,16 @@ pub struct WorkItemComponent {
 }
 
 impl Component for WorkItemComponent {}
+impl ClassifiedComponent for WorkItemComponent {
+    type Class = DurableClass;
+}
+impl DurableComponent for WorkItemComponent {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.work",
+        id: 18,
+        version: 1,
+    };
+}
 
 // ── WorkState ────────────────────────────────────────────────────────────────
 //
@@ -96,6 +108,16 @@ impl WorkState {
 }
 
 impl Component for WorkState {}
+impl ClassifiedComponent for WorkState {
+    type Class = DurableClass;
+}
+impl DurableComponent for WorkState {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.work",
+        id: 19,
+        version: 1,
+    };
+}
 
 // ── WorkLeaseComponent ───────────────────────────────────────────────────────
 //
@@ -112,6 +134,16 @@ pub struct WorkLeaseComponent {
 }
 
 impl Component for WorkLeaseComponent {}
+impl ClassifiedComponent for WorkLeaseComponent {
+    type Class = DurableClass;
+}
+impl DurableComponent for WorkLeaseComponent {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.work",
+        id: 20,
+        version: 1,
+    };
+}
 
 // ── ResourceClaimComponent ───────────────────────────────────────────────────
 //
@@ -126,6 +158,16 @@ pub struct ResourceClaimComponent {
 }
 
 impl Component for ResourceClaimComponent {}
+impl ClassifiedComponent for ResourceClaimComponent {
+    type Class = DurableClass;
+}
+impl DurableComponent for ResourceClaimComponent {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.work",
+        id: 21,
+        version: 1,
+    };
+}
 
 // ── WorkPrerequisites ────────────────────────────────────────────────────────
 //
@@ -136,6 +178,16 @@ impl Component for ResourceClaimComponent {}
 pub struct WorkPrerequisites(pub Vec<Prerequisite>);
 
 impl Component for WorkPrerequisites {}
+impl ClassifiedComponent for WorkPrerequisites {
+    type Class = DurableClass;
+}
+impl DurableComponent for WorkPrerequisites {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.work",
+        id: 22,
+        version: 1,
+    };
+}
 
 // ── WorkOutput ───────────────────────────────────────────────────────────────
 //
@@ -146,6 +198,16 @@ impl Component for WorkPrerequisites {}
 pub struct WorkOutput(pub Vec<u8>);
 
 impl Component for WorkOutput {}
+impl ClassifiedComponent for WorkOutput {
+    type Class = DurableClass;
+}
+impl DurableComponent for WorkOutput {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.work",
+        id: 23,
+        version: 1,
+    };
+}
 
 // ── Schema Validation ────────────────────────────────────────────────────────
 
@@ -218,10 +280,8 @@ impl CreateWorkCommand {
         };
 
         // Stage components
-        txn.add_component::<WorkItemComponent>(
+        txn.put_durable::<WorkItemComponent>(
             work_entity,
-            ComponentSchemaId(SCHEMA_WORK_ITEM),
-            SchemaVersion(1),
             WorkItemComponent {
                 kind: self.kind,
                 target_entity: self.target_entity,
@@ -229,24 +289,12 @@ impl CreateWorkCommand {
                 max_retries: 0,
             },
         );
-        txn.add_component::<WorkState>(
-            work_entity,
-            ComponentSchemaId(SCHEMA_WORK_STATE),
-            SchemaVersion(1),
-            WorkState::Pending,
-        );
-        txn.add_component::<ResourceClaimComponent>(
-            work_entity,
-            ComponentSchemaId(SCHEMA_RESOURCE_CLAIM),
-            SchemaVersion(1),
-            self.resource_claim,
-        );
+        txn.put_durable::<WorkState>(work_entity, WorkState::Pending);
+        txn.put_durable::<ResourceClaimComponent>(work_entity, self.resource_claim);
 
         if !self.prerequisites.is_empty() {
-            txn.add_component::<WorkPrerequisites>(
+            txn.put_durable::<WorkPrerequisites>(
                 work_entity,
-                ComponentSchemaId(SCHEMA_WORK_PREREQUISITES),
-                SchemaVersion(1),
                 WorkPrerequisites(self.prerequisites),
             );
         }
@@ -297,18 +345,11 @@ impl LeaseWorkCommand {
         let _entity = crate::ecs::CompEntity(self.work_entity);
 
         // Update state to Leased
-        txn.add_component::<WorkState>(
-            self.work_entity,
-            ComponentSchemaId(SCHEMA_WORK_STATE),
-            SchemaVersion(1),
-            WorkState::Leased(self.lease_generation),
-        );
+        txn.put_durable::<WorkState>(self.work_entity, WorkState::Leased(self.lease_generation));
 
         // Attach lease metadata
-        txn.add_component::<WorkLeaseComponent>(
+        txn.put_durable::<WorkLeaseComponent>(
             self.work_entity,
-            ComponentSchemaId(SCHEMA_WORK_LEASE),
-            SchemaVersion(1),
             WorkLeaseComponent {
                 work_entity: self.work_entity,
                 lease_generation: self.lease_generation,
@@ -383,26 +424,13 @@ impl CompleteWorkCommand {
     /// Execute: set state to Completed, attach output, remove lease, emit event.
     pub fn execute(self, _world: &CompWorld, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
         // Update state to Completed
-        txn.add_component::<WorkState>(
-            self.work_entity,
-            ComponentSchemaId(SCHEMA_WORK_STATE),
-            SchemaVersion(1),
-            WorkState::Completed,
-        );
+        txn.put_durable::<WorkState>(self.work_entity, WorkState::Completed);
 
         // Attach output
-        txn.add_component::<WorkOutput>(
-            self.work_entity,
-            ComponentSchemaId(SCHEMA_WORK_OUTPUT),
-            SchemaVersion(1),
-            WorkOutput(self.output),
-        );
+        txn.put_durable::<WorkOutput>(self.work_entity, WorkOutput(self.output));
 
         // Remove lease
-        txn.remove_component::<WorkLeaseComponent>(
-            self.work_entity,
-            ComponentSchemaId(SCHEMA_WORK_LEASE),
-        );
+        txn.remove_durable::<WorkLeaseComponent>(self.work_entity);
 
         let domain_event = DomainEvent {
             id: self.id,
@@ -479,29 +507,16 @@ impl FailWorkCommand {
             .unwrap_or(false);
 
         // Remove lease
-        txn.remove_component::<WorkLeaseComponent>(
-            self.work_entity,
-            ComponentSchemaId(SCHEMA_WORK_LEASE),
-        );
+        txn.remove_durable::<WorkLeaseComponent>(self.work_entity);
 
         if should_retry {
             // Increment retry_count and go back to Ready
             if let Some(wi) = world.get_component::<WorkItemComponent>(entity) {
                 let mut updated = wi.clone();
                 updated.retry_count += 1;
-                txn.add_component::<WorkItemComponent>(
-                    self.work_entity,
-                    ComponentSchemaId(SCHEMA_WORK_ITEM),
-                    SchemaVersion(1),
-                    updated,
-                );
+                txn.put_durable::<WorkItemComponent>(self.work_entity, updated);
             }
-            txn.add_component::<WorkState>(
-                self.work_entity,
-                ComponentSchemaId(SCHEMA_WORK_STATE),
-                SchemaVersion(1),
-                WorkState::Ready,
-            );
+            txn.put_durable::<WorkState>(self.work_entity, WorkState::Ready);
 
             let domain_event = DomainEvent {
                 id: self.id,
@@ -519,12 +534,7 @@ impl FailWorkCommand {
             Ok(domain_event)
         } else {
             // Transition to Failed
-            txn.add_component::<WorkState>(
-                self.work_entity,
-                ComponentSchemaId(SCHEMA_WORK_STATE),
-                SchemaVersion(1),
-                WorkState::Failed,
-            );
+            txn.put_durable::<WorkState>(self.work_entity, WorkState::Failed);
 
             let domain_event = DomainEvent {
                 id: self.id,
@@ -582,19 +592,11 @@ impl CancelWorkCommand {
 
         // Remove lease if present
         if world.get_component::<WorkLeaseComponent>(entity).is_some() {
-            txn.remove_component::<WorkLeaseComponent>(
-                self.work_entity,
-                ComponentSchemaId(SCHEMA_WORK_LEASE),
-            );
+            txn.remove_durable::<WorkLeaseComponent>(self.work_entity);
         }
 
         // Set state to Cancelled
-        txn.add_component::<WorkState>(
-            self.work_entity,
-            ComponentSchemaId(SCHEMA_WORK_STATE),
-            SchemaVersion(1),
-            WorkState::Cancelled,
-        );
+        txn.put_durable::<WorkState>(self.work_entity, WorkState::Cancelled);
 
         let domain_event = DomainEvent {
             id: self.id,
@@ -808,12 +810,7 @@ mod tests {
             .unwrap();
 
         let mut txn = WorldTxn::new(&world);
-        txn.add_component::<WorkState>(
-            work_entity.0,
-            ComponentSchemaId(19),
-            SchemaVersion(1),
-            WorkState::Ready,
-        );
+        txn.put_durable::<WorkState>(work_entity.0, WorkState::Ready);
         world.transit(txn).unwrap();
 
         let state = world.get_component::<WorkState>(work_entity).unwrap();
@@ -897,12 +894,7 @@ mod tests {
         // Ready
         {
             let mut txn = WorldTxn::new(&world);
-            txn.add_component::<WorkState>(
-                work_entity.0,
-                ComponentSchemaId(19),
-                SchemaVersion(1),
-                WorkState::Ready,
-            );
+            txn.put_durable::<WorkState>(work_entity.0, WorkState::Ready);
             world.transit(txn).unwrap();
         }
 
@@ -951,10 +943,8 @@ mod tests {
             let mut txn = WorldTxn::new(&world);
             let work_entity_id = WorldTxn::next_entity_id(&world);
             txn.stage_spawn(work_entity_id, EntityKind::Executable);
-            txn.add_component::<WorkItemComponent>(
+            txn.put_durable::<WorkItemComponent>(
                 work_entity_id,
-                ComponentSchemaId(18),
-                SchemaVersion(1),
                 WorkItemComponent {
                     kind: WorkKind::Validate,
                     target_entity: target,
@@ -962,12 +952,7 @@ mod tests {
                     max_retries: 3,
                 },
             );
-            txn.add_component::<WorkState>(
-                work_entity_id,
-                ComponentSchemaId(19),
-                SchemaVersion(1),
-                WorkState::Ready,
-            );
+            txn.put_durable::<WorkState>(work_entity_id, WorkState::Ready);
             world.transit(txn).unwrap();
         }
 

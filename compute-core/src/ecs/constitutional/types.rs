@@ -197,6 +197,18 @@ impl Timestamp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EntityKindId(pub u64);
 
+/// Schema key — stable protocol identifier independent of crate names.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct SchemaKey {
+    pub namespace: &'static str,
+    pub id: u32,
+    pub version: u32,
+}
+
+/// 256-bit digest for component value identification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Digest256(pub [u8; 32]);
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /// Serialize/deserialize `[u8; 32]` as a lowercase hex string.

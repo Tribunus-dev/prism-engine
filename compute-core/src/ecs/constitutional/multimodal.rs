@@ -2,6 +2,7 @@ use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::lifecycle::{LifecycleError, SessionLifecycle};
 use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
+use crate::ecs::constitutional::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn};
 use crate::ecs::{CompWorld, EntityKind};
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,17 @@ pub struct Pipeline {
 
 impl crate::ecs::Component for Pipeline {}
 
+impl ClassifiedComponent for Pipeline {
+    type Class = DurableClass;
+}
+impl DurableComponent for Pipeline {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.multimodal",
+        id: 47,
+        version: 1,
+    };
+}
+
 /// A stage within a pipeline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PipelineStage {
@@ -42,6 +54,17 @@ pub struct PipelineStage {
 }
 
 impl crate::ecs::Component for PipelineStage {}
+
+impl ClassifiedComponent for PipelineStage {
+    type Class = DurableClass;
+}
+impl DurableComponent for PipelineStage {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.multimodal",
+        id: 48,
+        version: 1,
+    };
+}
 
 /// What modality this pipeline handles.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -58,6 +81,17 @@ pub enum PipelineModality {
 
 impl crate::ecs::Component for PipelineModality {}
 
+impl ClassifiedComponent for PipelineModality {
+    type Class = DurableClass;
+}
+impl DurableComponent for PipelineModality {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.multimodal",
+        id: 49,
+        version: 1,
+    };
+}
+
 /// Artifact used as input to a pipeline stage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputArtifactRef {
@@ -67,6 +101,17 @@ pub struct InputArtifactRef {
 }
 
 impl crate::ecs::Component for InputArtifactRef {}
+
+impl ClassifiedComponent for InputArtifactRef {
+    type Class = DurableClass;
+}
+impl DurableComponent for InputArtifactRef {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.multimodal",
+        id: 50,
+        version: 1,
+    };
+}
 
 /// Artifact produced by a pipeline stage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +123,17 @@ pub struct OutputArtifactRef {
 }
 
 impl crate::ecs::Component for OutputArtifactRef {}
+
+impl ClassifiedComponent for OutputArtifactRef {
+    type Class = DurableClass;
+}
+impl DurableComponent for OutputArtifactRef {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.multimodal",
+        id: 51,
+        version: 1,
+    };
+}
 
 /// Lifecycle for a multimodal pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -93,6 +149,17 @@ pub enum PipelineLifecycle {
 }
 
 impl crate::ecs::Component for PipelineLifecycle {}
+
+impl ClassifiedComponent for PipelineLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for PipelineLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.multimodal",
+        id: 52,
+        version: 1,
+    };
+}
 
 impl PipelineLifecycle {
     /// Returns true if this state is terminal (no further transitions possible).
@@ -135,6 +202,17 @@ pub struct WorkLeaseRef {
 }
 
 impl crate::ecs::Component for WorkLeaseRef {}
+
+impl ClassifiedComponent for WorkLeaseRef {
+    type Class = DurableClass;
+}
+impl DurableComponent for WorkLeaseRef {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.multimodal",
+        id: 53,
+        version: 1,
+    };
+}
 
 // ── CreatePipelineCommand ─────────────────────────────────────────────────
 
@@ -236,10 +314,8 @@ impl CreatePipelineCommand {
         txn.stage_spawn(pipeline_id, EntityKind::Pipeline);
 
         // 3. Attach pipeline metadata
-        txn.add_component(
+        txn.put_durable(
             pipeline_id,
-            ComponentSchemaId(SCHEMA_PIPELINE),
-            SchemaVersion(1),
             Pipeline {
                 pipeline_id,
                 session_entity: self.session_entity,
@@ -249,20 +325,10 @@ impl CreatePipelineCommand {
         );
 
         // 4. Attach modality
-        txn.add_component(
-            pipeline_id,
-            ComponentSchemaId(SCHEMA_PIPELINE_MODALITY),
-            SchemaVersion(1),
-            self.target_modality,
-        );
+        txn.put_durable(pipeline_id, self.target_modality);
 
         // 5. Attach lifecycle
-        txn.add_component(
-            pipeline_id,
-            ComponentSchemaId(SCHEMA_PIPELINE_LIFECYCLE),
-            SchemaVersion(1),
-            PipelineLifecycle::Created,
-        );
+        txn.put_durable(pipeline_id, PipelineLifecycle::Created);
 
         // 6. Attach stages as separate entities
         // Use sequential IDs starting after pipeline_id
@@ -276,22 +342,12 @@ impl CreatePipelineCommand {
 
         for (i, stage) in self.stages.into_iter().enumerate() {
             let stage_entity = stage_entities[i];
-            txn.add_component(
-                stage_entity,
-                ComponentSchemaId(SCHEMA_PIPELINE_STAGE),
-                SchemaVersion(1),
-                stage,
-            );
+            txn.put_durable(stage_entity, stage);
         }
 
         // 7. Attach input artifacts
         for artifact in self.input_artifacts {
-            txn.add_component(
-                pipeline_id,
-                ComponentSchemaId(SCHEMA_INPUT_ARTIFACT),
-                SchemaVersion(1),
-                artifact,
-            );
+            txn.put_durable(pipeline_id, artifact);
         }
 
         // 8. Emit event
@@ -362,10 +418,8 @@ impl SubmitStageOutputCommand {
 
         let mut txn = WorldTxn::new(world);
 
-        txn.add_component(
+        txn.put_durable(
             self.pipeline_entity,
-            ComponentSchemaId(SCHEMA_OUTPUT_ARTIFACT),
-            SchemaVersion(1),
             OutputArtifactRef {
                 artifact_id: self.output_artifact_id,
                 stage_index: self.stage_index,

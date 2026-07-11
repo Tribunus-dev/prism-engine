@@ -4,7 +4,9 @@ use crate::ecs::constitutional::lifecycle::{
 };
 use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn,
+};
 use crate::ecs::{CompWorld, EntityKind};
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +95,74 @@ impl crate::ecs::Component for LeaseTokenRange {}
 impl crate::ecs::Component for KvSlot {}
 impl crate::ecs::Component for KvOwnership {}
 impl crate::ecs::Component for ExecutionOutput {}
+
+// ── Constitutional classification ────────────────────────────────────────
+
+impl ClassifiedComponent for ExecutionLease {
+    type Class = DurableClass;
+}
+impl DurableComponent for ExecutionLease {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.execution",
+        id: 24,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for LeaseOwner {
+    type Class = DurableClass;
+}
+impl DurableComponent for LeaseOwner {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.execution",
+        id: 25,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for LeaseTokenRange {
+    type Class = DurableClass;
+}
+impl DurableComponent for LeaseTokenRange {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.execution",
+        id: 26,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for KvSlot {
+    type Class = DurableClass;
+}
+impl DurableComponent for KvSlot {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.execution",
+        id: 27,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for KvOwnership {
+    type Class = DurableClass;
+}
+impl DurableComponent for KvOwnership {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.execution",
+        id: 28,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ExecutionOutput {
+    type Class = DurableClass;
+}
+impl DurableComponent for ExecutionOutput {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.execution",
+        id: 29,
+        version: 1,
+    };
+}
 
 // ── Schema Validation ─────────────────────────────────────────────────────
 
@@ -233,10 +303,8 @@ impl AcquireExecutionLeaseCommand {
 
         // 3. Attach lease components
         let token_range_end = self.token_batch_size; // simplified: 0..batch_size
-        txn.add_component(
+        txn.put_durable(
             lease_id,
-            ComponentSchemaId(SCHEMA_EXECUTION_LEASE),
-            SchemaVersion(1),
             ExecutionLease {
                 lease_id,
                 session_entity: self.session_entity,
@@ -249,19 +317,15 @@ impl AcquireExecutionLeaseCommand {
                 deadline: self.deadline,
             },
         );
-        txn.add_component(
+        txn.put_durable(
             lease_id,
-            ComponentSchemaId(SCHEMA_LEASE_OWNER),
-            SchemaVersion(1),
             LeaseOwner {
                 session_id: self.session_entity,
                 work_item_id: lease_id,
             },
         );
-        txn.add_component(
+        txn.put_durable(
             lease_id,
-            ComponentSchemaId(SCHEMA_LEASE_RANGE),
-            SchemaVersion(1),
             LeaseTokenRange {
                 start: 0,
                 end: token_range_end,
@@ -328,10 +392,8 @@ impl CompleteExecutionLeaseCommand {
         let mut txn = WorldTxn::new(world);
 
         // Attach execution output to the lease entity
-        txn.add_component(
+        txn.put_durable(
             self.lease_id,
-            ComponentSchemaId(SCHEMA_EXECUTION_OUTPUT),
-            SchemaVersion(1),
             ExecutionOutput {
                 tokens: self.tokens.clone(),
                 logprobs: None,

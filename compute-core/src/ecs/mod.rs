@@ -710,13 +710,15 @@ impl CompWorld {
             self.spawn_entity_with_id(spawn.entity, spawn.kind);
         }
 
-        for insert in prepared.inserts {
-            (insert.apply)(&mut self.component_store);
-            *self.component_versions.entry(insert.entity).or_insert(0) += 1;
+        // Apply durable ops (journaled — component versions still bumped)
+        for op in prepared.durable_ops {
+            (op.apply)(&mut self.component_store);
+            *self.component_versions.entry(op.entity).or_insert(0) += 1;
         }
-        for remove in prepared.removes {
-            (remove.apply)(&mut self.component_store);
-            *self.component_versions.entry(remove.entity).or_insert(0) += 1;
+        // Apply transient ops (not journaled — component versions bumped)
+        for op in prepared.transient_ops {
+            (op.apply)(&mut self.component_store);
+            *self.component_versions.entry(op.entity).or_insert(0) += 1;
         }
 
         // 3c. Apply staged spawns

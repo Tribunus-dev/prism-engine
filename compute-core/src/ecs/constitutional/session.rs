@@ -5,7 +5,9 @@ use crate::ecs::constitutional::residency::ModelLifecycle;
 use crate::ecs::constitutional::residency::ResidencyDeviceRef;
 use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
+};
 use crate::ecs::{CompWorld, EntityKind};
 use serde::{Deserialize, Serialize};
 
@@ -231,12 +233,7 @@ impl CreateSessionCommand {
         {
             // Update components on existing session
             let mut txn = WorldTxn::new(world);
-            txn.add_component(
-                existing,
-                ComponentSchemaId(SCHEMA_SESSION_CONFIG),
-                SchemaVersion(1),
-                self.config.clone(),
-            );
+            txn.put_durable(existing, self.config.clone());
 
             let event = DomainEvent {
                 id: self.id,
@@ -261,30 +258,10 @@ impl CreateSessionCommand {
         txn.stage_spawn(session_id, EntityKind::Session);
 
         // 4. Attach components
-        txn.add_component(
-            session_id,
-            ComponentSchemaId(SCHEMA_SESSION_CONFIG),
-            SchemaVersion(1),
-            self.config.clone(),
-        );
-        txn.add_component(
-            session_id,
-            ComponentSchemaId(SCHEMA_SESSION_MODELS),
-            SchemaVersion(1),
-            SessionModels(self.model_entities.clone()),
-        );
-        txn.add_component(
-            session_id,
-            ComponentSchemaId(SCHEMA_SESSION_DEVICES),
-            SchemaVersion(1),
-            SessionDevices(self.device_entities.clone()),
-        );
-        txn.add_component(
-            session_id,
-            ComponentSchemaId(SCHEMA_SESSION_LIFECYCLE),
-            SchemaVersion(1),
-            SessionLifecycle::Created,
-        );
+        txn.put_durable(session_id, self.config.clone());
+        txn.put_durable(session_id, SessionModels(self.model_entities.clone()));
+        txn.put_durable(session_id, SessionDevices(self.device_entities.clone()));
+        txn.put_durable(session_id, SessionLifecycle::Created);
 
         // 5. Emit event
         let event = DomainEvent {
@@ -341,12 +318,7 @@ impl TransitionSessionCommand {
             .map_err(|e| SessionError::InvalidTransition(e))?;
 
         let mut txn = WorldTxn::new(world);
-        txn.add_component(
-            self.session_entity,
-            ComponentSchemaId(SCHEMA_SESSION_LIFECYCLE),
-            SchemaVersion(1),
-            self.target,
-        );
+        txn.put_durable(self.session_entity, self.target);
 
         let event = DomainEvent {
             id: self.id,
@@ -489,3 +461,60 @@ impl crate::ecs::Component for SessionModels {}
 impl crate::ecs::Component for SessionDevices {}
 impl crate::ecs::Component for SessionLifecycle {}
 impl crate::ecs::Component for ResidencyModelRef {}
+
+// ── Constitutional classification ────────────────────────────────────────
+
+impl ClassifiedComponent for SessionConfig {
+    type Class = DurableClass;
+}
+impl DurableComponent for SessionConfig {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.session",
+        id: 13,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for SessionModels {
+    type Class = DurableClass;
+}
+impl DurableComponent for SessionModels {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.session",
+        id: 14,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for SessionDevices {
+    type Class = DurableClass;
+}
+impl DurableComponent for SessionDevices {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.session",
+        id: 15,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for SessionLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for SessionLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.session",
+        id: 16,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for ResidencyModelRef {
+    type Class = DurableClass;
+}
+impl DurableComponent for ResidencyModelRef {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.session",
+        id: 17,
+        version: 1,
+    };
+}

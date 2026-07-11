@@ -1,53 +1,6 @@
+use super::work::{Prerequisite, WorkKind, WorkState};
 use crate::ecs::constitutional::types::*;
 use serde::{Deserialize, Serialize};
-
-/// Kind of work a work item represents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum WorkKind {
-    LoadModel,
-    CompileGraph,
-    RunInference,
-    Distill,
-    Validate,
-    Package,
-    Teardown,
-    Custom(u64),
-}
-
-/// State of a work item in its lifecycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum WorkState {
-    Pending,
-    Ready,
-    Leased,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-impl WorkState {
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
-    }
-}
-
-/// Kind of prerequisite — references stable ComponentSchemaId.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum PrereqKind {
-    ComponentPresent,
-    EventReceived,
-    ResourceAvailable,
-    Custom(u64),
-}
-
-/// A single prerequisite for a work item to become ready.
-/// Scoped to a specific entity, prerequisite kind, and generation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Prerequisite {
-    pub entity: u64,
-    pub kind: PrereqKind,
-    pub generation: u64,
-}
 
 /// Resource claim — what resources this work item needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

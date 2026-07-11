@@ -2,6 +2,7 @@ use crate::ecs::constitutional::artifact::ArtifactDigest;
 use crate::ecs::constitutional::command::{DomainEvent, EffectRequest};
 use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
+use crate::ecs::constitutional::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
 use crate::ecs::CompWorld;
 use serde::{Deserialize, Serialize};
@@ -117,13 +118,100 @@ pub struct CimagePromotion {
 // ── Component Trait impls ────────────────────────────────────────────────────
 
 impl crate::ecs::Component for CompilationJob {}
+impl ClassifiedComponent for CompilationJob {
+    type Class = DurableClass;
+}
+impl DurableComponent for CompilationJob {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 31,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for JobInput {}
+impl ClassifiedComponent for JobInput {
+    type Class = DurableClass;
+}
+impl DurableComponent for JobInput {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 32,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for JobConfig {}
+impl ClassifiedComponent for JobConfig {
+    type Class = DurableClass;
+}
+impl DurableComponent for JobConfig {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 33,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for JobOutput {}
+impl ClassifiedComponent for JobOutput {
+    type Class = DurableClass;
+}
+impl DurableComponent for JobOutput {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 34,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for JobLifecycle {}
+impl ClassifiedComponent for JobLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for JobLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 35,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for ValidationReceipt {}
+impl ClassifiedComponent for ValidationReceipt {
+    type Class = DurableClass;
+}
+impl DurableComponent for ValidationReceipt {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 36,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for QuantizationPlan {}
+impl ClassifiedComponent for QuantizationPlan {
+    type Class = DurableClass;
+}
+impl DurableComponent for QuantizationPlan {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 37,
+        version: 1,
+    };
+}
+
 impl crate::ecs::Component for CimagePromotion {}
+impl ClassifiedComponent for CimagePromotion {
+    type Class = DurableClass;
+}
+impl DurableComponent for CimagePromotion {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 38,
+        version: 1,
+    };
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Schema Validation
@@ -216,10 +304,8 @@ impl CreateCompilationJobCommand {
         txn.stage_spawn(entity_id, crate::ecs::EntityKind::Executable);
 
         // Job metadata
-        txn.add_component(
+        txn.put_durable(
             entity_id,
-            ComponentSchemaId(SCHEMA_COMPILATION_JOB),
-            SchemaVersion(1),
             CompilationJob {
                 job_id: self.job_id,
                 target_artifact: self.model_artifact,
@@ -229,10 +315,8 @@ impl CreateCompilationJobCommand {
         );
 
         // Input
-        txn.add_component(
+        txn.put_durable(
             entity_id,
-            ComponentSchemaId(SCHEMA_JOB_INPUT),
-            SchemaVersion(1),
             JobInput {
                 model_artifact: self.model_artifact,
                 source_format: "".to_string(),
@@ -241,20 +325,10 @@ impl CreateCompilationJobCommand {
         );
 
         // Config
-        txn.add_component(
-            entity_id,
-            ComponentSchemaId(SCHEMA_JOB_CONFIG),
-            SchemaVersion(1),
-            self.config.clone(),
-        );
+        txn.put_durable(entity_id, self.config.clone());
 
         // Lifecycle — starts Pending
-        txn.add_component(
-            entity_id,
-            ComponentSchemaId(SCHEMA_JOB_LIFECYCLE),
-            SchemaVersion(1),
-            JobLifecycle::Pending,
-        );
+        txn.put_durable(entity_id, JobLifecycle::Pending);
 
         let event = DomainEvent {
             id: self.id,
@@ -324,12 +398,7 @@ impl SubmitValidationReceiptCommand {
         let entity = self.job_entity;
         let mut txn = WorldTxn::new(world);
 
-        txn.add_component(
-            entity,
-            ComponentSchemaId(SCHEMA_VALIDATION_RECEIPT),
-            SchemaVersion(1),
-            self.receipt.clone(),
-        );
+        txn.put_durable(entity, self.receipt.clone());
 
         let event = DomainEvent {
             id: self.id,
@@ -412,10 +481,8 @@ impl PromoteCimageCommand {
         let mut txn = WorldTxn::new(world);
 
         // Attach promotion record
-        txn.add_component(
+        txn.put_durable(
             self.cimage_entity,
-            ComponentSchemaId(SCHEMA_CIMAGE_PROMOTION),
-            SchemaVersion(1),
             CimagePromotion {
                 cimage_entity: self.cimage_entity,
                 promotion_generation: 1,
@@ -425,12 +492,7 @@ impl PromoteCimageCommand {
         );
 
         // Transition lifecycle to Promoted (add replaces the old value)
-        txn.add_component(
-            self.cimage_entity,
-            ComponentSchemaId(SCHEMA_JOB_LIFECYCLE),
-            SchemaVersion(1),
-            JobLifecycle::Promoted,
-        );
+        txn.put_durable(self.cimage_entity, JobLifecycle::Promoted);
 
         let event = DomainEvent {
             id: self.id,

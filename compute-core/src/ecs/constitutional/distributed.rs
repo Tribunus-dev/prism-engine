@@ -1,7 +1,9 @@
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
+};
 use crate::ecs::{CompEntity, CompWorld, EntityKind};
 use serde::{Deserialize, Serialize};
 
@@ -124,6 +126,96 @@ impl crate::ecs::Component for TrustState {}
 impl crate::ecs::Component for WorkerHealth {}
 impl crate::ecs::Component for RemoteLease {}
 impl crate::ecs::Component for RemoteCapabilityObservation {}
+
+// ── ClassifiedComponent / DurableComponent impls ─────────────────────────
+
+impl ClassifiedComponent for PeerIdentity {
+    type Class = DurableClass;
+}
+impl DurableComponent for PeerIdentity {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.distributed",
+        id: 55,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for NodeMembership {
+    type Class = DurableClass;
+}
+impl DurableComponent for NodeMembership {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.distributed",
+        id: 56,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for PeerCapabilities {
+    type Class = DurableClass;
+}
+impl DurableComponent for PeerCapabilities {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.distributed",
+        id: 57,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for NodeTopology {
+    type Class = DurableClass;
+}
+impl DurableComponent for NodeTopology {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.distributed",
+        id: 58,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for TrustState {
+    type Class = DurableClass;
+}
+impl DurableComponent for TrustState {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.distributed",
+        id: 59,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for WorkerHealth {
+    type Class = DurableClass;
+}
+impl DurableComponent for WorkerHealth {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.distributed",
+        id: 60,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for RemoteLease {
+    type Class = DurableClass;
+}
+impl DurableComponent for RemoteLease {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.distributed",
+        id: 61,
+        version: 1,
+    };
+}
+
+impl ClassifiedComponent for RemoteCapabilityObservation {
+    type Class = DurableClass;
+}
+impl DurableComponent for RemoteCapabilityObservation {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.distributed",
+        id: 62,
+        version: 1,
+    };
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Schema Validation
@@ -266,36 +358,11 @@ impl RegisterPeerCommand {
 
         txn.stage_spawn(node_id, EntityKind::Node);
 
-        txn.add_component(
-            node_id,
-            ComponentSchemaId(SCHEMA_PEER_IDENTITY),
-            SchemaVersion(1),
-            self.peer_identity.clone(),
-        );
-        txn.add_component(
-            node_id,
-            ComponentSchemaId(SCHEMA_NODE_MEMBERSHIP),
-            SchemaVersion(1),
-            self.node_membership.clone(),
-        );
-        txn.add_component(
-            node_id,
-            ComponentSchemaId(SCHEMA_PEER_CAPABILITIES),
-            SchemaVersion(1),
-            PeerCapabilities(self.capabilities.clone()),
-        );
-        txn.add_component(
-            node_id,
-            ComponentSchemaId(SCHEMA_TRUST_STATE),
-            SchemaVersion(1),
-            TrustState::Untrusted,
-        );
-        txn.add_component(
-            node_id,
-            ComponentSchemaId(SCHEMA_WORKER_HEALTH),
-            SchemaVersion(1),
-            WorkerHealth::Healthy,
-        );
+        txn.put_durable(node_id, self.peer_identity.clone());
+        txn.put_durable(node_id, self.node_membership.clone());
+        txn.put_durable(node_id, PeerCapabilities(self.capabilities.clone()));
+        txn.put_durable(node_id, TrustState::Untrusted);
+        txn.put_durable(node_id, WorkerHealth::Healthy);
 
         let event = DomainEvent {
             id: self.id,
@@ -362,10 +429,8 @@ impl ObserveWorkerCapabilityCommand {
 
         txn.stage_spawn(observation_id, EntityKind::Node);
 
-        txn.add_component(
+        txn.put_durable(
             observation_id,
-            ComponentSchemaId(SCHEMA_REMOTE_CAPABILITY_OBSERVATION),
-            SchemaVersion(1),
             RemoteCapabilityObservation {
                 worker_entity: self.worker_entity,
                 observed_capability: self.capability.clone(),

@@ -2,7 +2,9 @@ use crate::ecs::constitutional::command::{DomainEvent, EffectOutcome, EffectRequ
 use crate::ecs::constitutional::lifecycle::ArtifactLifecycle;
 use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
-use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
+use crate::ecs::constitutional::world_txn::{
+    ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
+};
 use crate::ecs::CompWorld;
 use serde::{Deserialize, Serialize};
 
@@ -12,11 +14,31 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactPath(pub String);
 impl crate::ecs::Component for ArtifactPath {}
+impl ClassifiedComponent for ArtifactPath {
+    type Class = DurableClass;
+}
+impl DurableComponent for ArtifactPath {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.artifact",
+        id: 2,
+        version: 1,
+    };
+}
 
 /// Component: artifact content digest (blake3 / sha-256).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactDigest(pub [u8; 32]);
 impl crate::ecs::Component for ArtifactDigest {}
+impl ClassifiedComponent for ArtifactDigest {
+    type Class = DurableClass;
+}
+impl DurableComponent for ArtifactDigest {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.artifact",
+        id: 3,
+        version: 1,
+    };
+}
 
 /// Component: artifact metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,8 +47,28 @@ pub struct ArtifactMetadata {
     pub path: String,
 }
 impl crate::ecs::Component for ArtifactMetadata {}
+impl ClassifiedComponent for ArtifactMetadata {
+    type Class = DurableClass;
+}
+impl DurableComponent for ArtifactMetadata {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.artifact",
+        id: 4,
+        version: 1,
+    };
+}
 
 impl crate::ecs::Component for ArtifactLifecycle {}
+impl ClassifiedComponent for ArtifactLifecycle {
+    type Class = DurableClass;
+}
+impl DurableComponent for ArtifactLifecycle {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.artifact",
+        id: 1,
+        version: 1,
+    };
+}
 
 // ── Format helpers ────────────────────────────────────────────────────────
 
@@ -157,24 +199,9 @@ impl LoadArtifactCommand {
         let mut txn = WorldTxn::new(world);
 
         txn.stage_spawn(entity_id, crate::ecs::EntityKind::Artifact);
-        txn.add_component(
-            entity_id,
-            crate::ecs::constitutional::types::ComponentSchemaId(1),
-            crate::ecs::constitutional::types::SchemaVersion(1),
-            ArtifactLifecycle::Loaded,
-        );
-        txn.add_component(
-            entity_id,
-            crate::ecs::constitutional::types::ComponentSchemaId(2),
-            crate::ecs::constitutional::types::SchemaVersion(1),
-            ArtifactPath(self.artifact_path.clone()),
-        );
-        txn.add_component(
-            entity_id,
-            crate::ecs::constitutional::types::ComponentSchemaId(3),
-            crate::ecs::constitutional::types::SchemaVersion(1),
-            ArtifactDigest(observed_digest),
-        );
+        txn.put_durable(entity_id, ArtifactLifecycle::Loaded);
+        txn.put_durable(entity_id, ArtifactPath(self.artifact_path.clone()));
+        txn.put_durable(entity_id, ArtifactDigest(observed_digest));
 
         let file_length: u64 = outcome
             .output
@@ -182,10 +209,8 @@ impl LoadArtifactCommand {
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
 
-        txn.add_component(
+        txn.put_durable(
             entity_id,
-            crate::ecs::constitutional::types::ComponentSchemaId(4),
-            crate::ecs::constitutional::types::SchemaVersion(1),
             ArtifactMetadata {
                 length: file_length,
                 path: self.artifact_path.clone(),
