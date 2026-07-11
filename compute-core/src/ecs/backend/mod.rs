@@ -113,9 +113,6 @@ pub mod npu;
     feature = "tensix",
 ))]
 pub mod placement;
-/// Tensor residency tracking — auditable contract for where a tensor lives.
-#[cfg(feature = "legacy_mutations")]
-pub mod residency;
 pub mod routing;
 pub mod shared_event;
 pub mod tensor_registry;
@@ -448,34 +445,6 @@ pub trait TensorBackend {
     ) -> Result<EvaluationReceipt, String> {
         self.evaluate(group_id, outputs)
     }
-
-    // ── Residency (auditable tensor tracking) ────────────────────────
-
-    /// Return the residency record for the tensor identified by `handle`.
-    #[cfg(feature = "legacy_mutations")]
-    fn residency(&self, _handle: TensorHandle) -> Result<residency::TensorResidency, String> {
-        Err("residency tracking not yet implemented".into())
-    }
-
-    #[cfg(not(feature = "legacy_mutations"))]
-    fn residency(&self, _handle: TensorHandle) -> Result<(), String> {
-        Err("residency tracking not available".into())
-    }
-
-    /// Record a transfer event for the tensor identified by `handle`.
-    #[cfg(feature = "legacy_mutations")]
-    fn record_transfer(
-        &mut self,
-        _handle: TensorHandle,
-        _target: residency::BackendId,
-    ) -> Result<(), String> {
-        Err("residency tracking not yet implemented".into())
-    }
-
-    #[cfg(not(feature = "legacy_mutations"))]
-    fn record_transfer(&mut self, _handle: TensorHandle) -> Result<(), String> {
-        Err("residency tracking not available".into())
-    }
 }
 
 // ── Compiled region backend trait ─────────────────────────────────────────
@@ -503,32 +472,6 @@ pub trait CompiledRegionBackend: TensorBackend {
     /// Whether this backend can execute the given region family as a
     /// compiled unit rather than decomposing into primitive ops.
     fn supports_region(&self, family: OperationFamily) -> bool;
-}
-
-// ── Transfer check helper ──────────────────────────────────────────────────
-
-/// Check whether a transfer is needed when reading `handle` from `from` on
-/// `to`. Returns the [`residency::TransferDecision`] so the scheduler can
-/// plan the mapping and log the event.
-#[cfg(feature = "legacy_mutations")]
-pub fn check_transfer<T: TensorBackend>(
-    from: &T,
-    _to: &T,
-    handle: TensorHandle,
-) -> Result<residency::TransferDecision, String> {
-    let r = from.residency(handle)?;
-    let decision = r.requires_transfer(residency::BackendId::Unknown);
-    Ok(decision)
-}
-
-#[cfg(not(feature = "legacy_mutations"))]
-pub fn check_transfer<T: TensorBackend>(
-    from: &T,
-    _to: &T,
-    handle: TensorHandle,
-) -> Result<(), String> {
-    let _r = from.residency(handle)?;
-    Err("residency tracking not available".into())
 }
 
 #[cfg(feature = "mlx-backend")]

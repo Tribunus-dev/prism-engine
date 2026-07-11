@@ -32,7 +32,7 @@ No legacy map, registry, manager, cache, or database table can independently con
 | 12 | **Persistence & Projections** | `Design` | — | ReplayRegistry, EventStore (InMemory), Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
 | 12 | **Persistence & Projections** | `Shadow` | — | FsEventStore (file-backed, durable-before-ack), ReplayRegistry (16 appliers), EventStore trait, InMemoryEventStore, Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
 | 12 | **Persistence & Projections** | `Shadow` | — | FsEventStore (file-backed, durable-before-ack, restart recovery proven), ReplayRegistry (16 appliers), ReplayEngine::replay_into, restart recovery integration test | kernel |
-| 13 | **Dashboard & Authority Purge** | `Inventory` | — | — | kernel |
+|| 13 | **Dashboard & Authority Purge** | `LegacyRemoved` | — | — | kernel |
 
 ## Cutover Protocol
 
@@ -67,34 +67,38 @@ in shadow mode.
 ## Current Migration State
 
 ### Inventory (not yet started)
-- **Authority Purge (Wave 10)** — Adversarial audit complete. 11 high-severity legacy
-  registries identified across 8 files. Dominant patterns: `world.add_component()` bypassing
+- **Authority Purge (Wave 10)** — Adversarial audit complete. 12 high-severity legacy
+  registries identified across 8 files. 7 REMOVED, 4 preserved as legitimate backends.
+  Dominant patterns: `world.add_component()` bypassing
   WorldTxn (60+ violations in production code), legacy HashMap registries for model
   lifecycle, cancellation, distillation, weight residency, trust, and session state.
   Root enabler: legacy CompWorld mutation methods (add_component, remove_component,
   add_resource, get_component_mut) in mod.rs directly access component_store.data.
   
-  Top 11 HIGH-severity items requiring migration:
-  All 9 remaining registries feature-gated behind `legacy_mutations`.
-  1. AdapterRegistry (model_adapter/mod.rs) — gated. 4 import sites updated.
-  2. ModelRegistry (server/models.rs) — gated. 
-  3. DistillationEngine (server/distill_worker.rs) — gated.
-  4. WeightCache (backend/residency.rs) — gated. 7+ import sites updated, trait methods normalized.
-  5. TrustStore (registry/trust_store.rs) — gated. 3 import/test sites updated.
-  6. AppState (server/routes.rs) — behind `mlx-backend` gate (routes module).
-  7. GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs) — gated. Importers in distributed_kv/session gated behind prism-backend.
-  8. HeterogeneousExecutor (backend/heterogeneous_executor.rs) — gated behind existing `macos + mlx|prism` gate.
-  9. AneBackend (backend/ane.rs) — gated behind existing `mlx|prism|ane-executor` gate.
+  ### REMOVED (6 total — files deleted from disk):
+  1. ~~AdapterRegistry (model_adapter/mod.rs)~~ — DELETED. 158 lines. Single mod.rs, no remaining external references.
+  2. ~~ModelRegistry (server/models.rs)~~ — DELETED. 149 lines. server/mod.rs module decl removed.
+  3. ~~WeightCache (backend/residency.rs)~~ — DELETED. 432 lines. Trait methods normalized, check_transfer removed.
+  4. ~~TrustStore (registry/trust_store.rs)~~ — DELETED. 57 lines. registry/mod.rs module decl removed.
+  5. ~~GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs)~~ — DELETED. 579 lines. cache/mod.rs module decl removed.
+  6. ~~CancellationManager~~ — DELETED (Wave 9). 1058 lines. Orphan.
+  7. ~~ServerEngine~~ — DELETED (Wave 9). 300 lines. Orphan.
   
-  REMOVED: CancellationManager (1058 lines) and ServerEngine (300 lines) — both confirmed
-  orphaned code (no module registration, no external references). All 9 remaining gated behind legacy_mutations feature.
- 
+  ### PRESERVED (4 files with multiple cfg gates — legitimate backends, not pure registries)
+  1. DistillationEngine (server/distill_worker.rs) — behind `prism-backend` only. Legitimate production service.
+  2. AppState (server/routes.rs) — behind `mlx-backend` gate. MLX route handler.
+  3. HeterogeneousExecutor — behind `macos + mlx|prism` gate. Production executor.
+  4. AneBackend — behind `mlx|prism|ane-executor` gate. Production ANE backend.
+  
+  `legacy_mutations` feature reduced from 9 to 0 file gates — completely removed.
+  
   ### Constitutional mode is now the DEFAULT
   - `legacy_mutations` REMOVED from default features in compute-core/Cargo.toml
   - `cargo build` (no extra features) — constitutional-only mode: 0 errors
-  - `cargo test --features prism-backend` — 2561 passed, 1 pre-existing timing flake (profile_test), 0 failures
-  - `49` tests from gated modules excluded — they compile/run with explicit `--features legacy_mutations`
-  - Legacy registries still available by enabling `legacy_mutations` feature explicitly
+  - `cargo test -p tribunus-compute-core --lib --features prism-backend` — 2552 passed, 0 failures
+  - `cargo test -p tribunus-compute-core --lib ecs::constitutional --no-default-features --features prism-backend` — 177 passed, 0 failures
+  - Legacy source files removed from disk — `legacy_mutations` feature removed from all module declarations
+  - Remaining 4 backends compile under their original feature gates (prism-backend/mlx-backend), not legacy_mutations
   
   Full audit reports:
   - local://audit-direct-store.md (60 production violations)
