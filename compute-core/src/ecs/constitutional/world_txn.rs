@@ -59,6 +59,8 @@ pub enum WorldTxnError {
         observed: u64,
         current: u64,
     },
+    #[error("invalid entity handle: {0}")]
+    InvalidEntity(u64),
 }
 
 /// A pending world transaction.
@@ -93,6 +95,8 @@ pub(crate) struct StagedInsert {
 pub(crate) struct StagedRemove {
     pub entity: u64,
     pub schema_id: ComponentSchemaId,
+    /// Applies the staged removal to component_store.
+    pub apply: Box<dyn FnOnce(&mut ComponentStore) + Send>,
 }
 
 use crate::ecs::ComponentStore;
@@ -136,8 +140,24 @@ impl WorldTxn {
     }
 
     /// Stage a component removal.
-    pub fn remove_component(&mut self, entity: u64, schema_id: ComponentSchemaId) {
-        self.removes.push(StagedRemove { entity, schema_id });
+    pub fn remove_component<T: 'static + Send + Sync>(
+        &mut self,
+        entity: u64,
+        schema_id: ComponentSchemaId,
+    ) {
+        let type_id = std::any::TypeId::of::<T>();
+        self.removes.push(StagedRemove {
+            entity,
+            schema_id,
+            apply: Box::new(move |store: &mut crate::ecs::ComponentStore| {
+                let map: &mut std::collections::HashMap<u64, T> = store
+                    .data
+                    .get_mut(&type_id)
+                    .and_then(|b| b.downcast_mut::<std::collections::HashMap<u64, T>>())
+                    .expect("type mismatch in ComponentStore");
+                map.remove(&entity);
+            }),
+        });
     }
 
     /// Add a domain event to emit after commit.

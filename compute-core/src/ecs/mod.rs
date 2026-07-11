@@ -583,15 +583,25 @@ impl CompWorld {
             }
         }
 
-        // PHASE 2 — Apply (mutations under the commit lock)
+        // 1c. Validate entity existence for every staged operation
+        for insert in &txn.inserts {
+            let idx = (insert.entity as usize).wrapping_sub(1);
+            if idx >= self.entity_meta.len() {
+                return Err(WorldTxnError::InvalidEntity(insert.entity));
+            }
+        }
+        for remove in &txn.removes {
+            let idx = (remove.entity as usize).wrapping_sub(1);
+            if idx >= self.entity_meta.len() {
+                return Err(WorldTxnError::InvalidEntity(remove.entity));
+            }
+        }
 
-        // 2a. Advance epoch
-        self.epoch.0 += 1;
+        // -- PHASE 2: Build journal with the new epoch -----------------
 
-        // 2b. Apply staged inserts via closures
+        let next_epoch = WorldEpoch(self.epoch.0 + 1);
         let mut journal = Vec::new();
-        for insert in txn.inserts {
-            (insert.apply)(&mut self.component_store);
+        for insert in &txn.inserts {
             journal.push(ComponentChange {
                 entity: insert.entity,
                 schema_id: insert.schema_id,
@@ -599,13 +609,10 @@ impl CompWorld {
                 change_type: ChangeType::Insert,
                 before_hash: None,
                 after_hash: None,
-                world_epoch: self.epoch,
+                world_epoch: next_epoch,
             });
-            *self.component_versions.entry(insert.entity).or_insert(0) += 1;
         }
-
-        // 2c. Process removals
-        for remove in txn.removes {
+        for remove in &txn.removes {
             journal.push(ComponentChange {
                 entity: remove.entity,
                 schema_id: remove.schema_id,
@@ -613,18 +620,28 @@ impl CompWorld {
                 change_type: ChangeType::Remove,
                 before_hash: None,
                 after_hash: None,
-                world_epoch: self.epoch,
+                world_epoch: next_epoch,
             });
         }
 
-        // 2d. Store committed domain events
+        // -- PHASE 3: Apply all mutations ------------------------------
+
+        for insert in txn.inserts {
+            (insert.apply)(&mut self.component_store);
+            *self.component_versions.entry(insert.entity).or_insert(0) += 1;
+        }
+        for remove in txn.removes {
+            (remove.apply)(&mut self.component_store);
+            *self.component_versions.entry(remove.entity).or_insert(0) += 1;
+        }
+
+        // -- PHASE 4: Advance epoch AFTER all mutations succeed --------
+
+        self.epoch = next_epoch;
+        self.journal = journal;
         self.committed_events = txn.events;
 
-        // 2e. Store journal
-        self.journal = journal;
-
-        // PHASE 3 — Finalize
-        Ok(CommittedEpoch(self.epoch))
+        Ok(CommittedEpoch(next_epoch))
     }
 }
 
