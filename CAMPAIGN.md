@@ -75,21 +75,19 @@ in shadow mode.
   add_resource, get_component_mut) in mod.rs directly access component_store.data.
   
   Top 11 HIGH-severity items requiring migration:
-  1. AdapterRegistry (adapter/mod.rs) — model role assignment bypasses ECS
-  2. ModelRegistry (server/models.rs) — model lifecycle outside ECS
-  3. DistillationEngine (server/distill_worker.rs) — job lifecycle in HashMap
-  4. CancellationManager (scheduling/cancellation.rs) — cancellation authority
-  4. ~~CancellationManager (scheduling/cancellation.rs)~~ `REMOVED` — 758 lines dead code
-  5. ~~ServerEngine (server/engine.rs)~~ `REMOVED` — 300 lines dead code
-  6. WeightCache (backend/residency.rs) — weight residency decisions
-  7. TrustStore (registry/trust_store.rs) — provider trust decisions
-  8. AppState (server/routes.rs) — composite anti-pattern with multiple HashMaps
-  9. GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs) — global mutable singleton
-  10. HeterogeneousExecutor.routing_table (backend/heterogeneous_executor.rs) — routing
-  11. AneBackend (backend/ane.rs) — ANE program/weight binding state
-  12. AdapterRegistry (model_adapter/mod.rs) — model role assignment
-  13. ModelRegistry (server/models.rs) — model lifecycle
-  14. DistillationEngine (server/distill_worker.rs) — job lifecycle
+  Top 9 HIGH-severity items still requiring migration:
+  1. AdapterRegistry (model_adapter/mod.rs) — model role assignment. IN USE (prism_alpha)
+  2. ModelRegistry (server/models.rs) — model lifecycle. IN USE (tribunus-server)
+  3. DistillationEngine (server/distill_worker.rs) — job lifecycle. IN USE (prism_server)
+  4. WeightCache (backend/residency.rs) — weight residency decisions. IN USE (orchestrator)
+  5. TrustStore (registry/trust_store.rs) — provider trust. IN USE (disclosure)
+  6. AppState (server/routes.rs) — composite server state. IN USE (server binaries)
+  7. GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs) — prefix cache singleton. IN USE (distributed_kv, inference)
+  8. HeterogeneousExecutor.routing_table (backend/heterogeneous_executor.rs) — routing. IN USE (prism_server)
+  9. AneBackend (backend/ane.rs) — ANE program binding. IN USE (prism_server)
+  
+  REMOVED: CancellationManager (1058 lines) and ServerEngine (300 lines) — both confirmed
+  orphaned code (no module registration, no external references).
   
   Full audit reports:
   - local://audit-direct-store.md (60 production violations)
