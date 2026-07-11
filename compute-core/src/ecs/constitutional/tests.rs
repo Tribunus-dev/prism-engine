@@ -824,6 +824,205 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════
+    //  Phase 2 — Transaction Preparation (PreparedWorldTxn)
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_prepare_failed_read_dep_leaves_state_unchanged() {
+        let mut world = CompWorld::new();
+        let schemas = SchemaRegistry::new();
+
+        // Spawn entity 1
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Model);
+        txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        world.transit(txn).unwrap();
+
+        let epoch_before = world.current_epoch();
+        let occupancy_before = world.has_entity(CompEntity(1));
+
+        // Create txn with a stale read dep (entity 3 version doesn't match)
+        let mut txn = WorldTxn::new(&world);
+        txn.add_component(1, ComponentSchemaId(10), SchemaVersion(2), 99u64);
+        txn.record_read(crate::ecs::constitutional::system_desc::ReadDependency {
+            entity: 3,
+            schema_id: ComponentSchemaId(10),
+            observed_version: 5, // entity 3 doesn't exist, version is 0
+        });
+
+        let result = world.prepare(txn, &schemas);
+        assert!(result.is_err(), "prepare with stale read dep must fail");
+
+        // State must be unchanged
+        assert_eq!(world.current_epoch(), epoch_before);
+        assert_eq!(world.has_entity(CompEntity(1)), occupancy_before);
+    }
+
+    #[test]
+    fn test_prepare_does_not_change_epoch() {
+        let mut world = make_world();
+        let schemas = SchemaRegistry::new();
+        let epoch_before = world.current_epoch();
+
+        let txn = WorldTxn::new(&world);
+        let _prepared = world.prepare(txn, &schemas).unwrap();
+
+        assert_eq!(
+            world.current_epoch(),
+            epoch_before,
+            "prepare must not change epoch"
+        );
+    }
+
+    #[test]
+    fn test_prepare_does_not_advance_next_id() {
+        let mut world = make_world();
+        let schemas = SchemaRegistry::new();
+        let next_before = world.next_entity_id();
+
+        // Prepare a txn with a spawn at ID 200
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(200, EntityKind::Model);
+        let _prepared = world.prepare(txn, &schemas).unwrap();
+
+        assert_eq!(
+            world.next_entity_id(),
+            next_before,
+            "prepare must not advance next_id"
+        );
+    }
+
+    #[test]
+    fn test_apply_advances_epoch_exactly_once() {
+        let mut world = make_world();
+        let schemas = SchemaRegistry::new();
+        let epoch_before = world.current_epoch();
+
+        let txn = WorldTxn::new(&world);
+        let prepared = world.prepare(txn, &schemas).unwrap();
+        let receipt = world.apply_prepared(prepared);
+
+        assert_eq!(
+            world.current_epoch(),
+            WorldEpoch(epoch_before.0 + 1),
+            "apply must advance epoch by exactly 1"
+        );
+        assert_eq!(receipt.committed_epoch, world.current_epoch());
+    }
+
+    #[test]
+    fn test_drop_prepared_changes_nothing() {
+        let mut world = make_world();
+        let schemas = SchemaRegistry::new();
+        let epoch_before = world.current_epoch();
+        let next_before = world.next_entity_id();
+
+        // Prepare but drop the result
+        let txn = WorldTxn::new(&world);
+        let prepared = world.prepare(txn, &schemas).unwrap();
+        std::mem::drop(prepared);
+
+        assert_eq!(world.current_epoch(), epoch_before);
+        assert_eq!(world.next_entity_id(), next_before);
+    }
+
+    #[test]
+    fn test_prepared_cannot_be_applied_twice() {
+        // This is a compile-time guarantee: PreparedWorldTxn::apply() takes
+        // self by value. The test verifies the API contract.
+        let mut world = make_world();
+        let schemas = SchemaRegistry::new();
+
+        let txn = WorldTxn::new(&world);
+        let prepared = world.prepare(txn, &schemas).unwrap();
+        world.apply_prepared(prepared);
+
+        // Uncommenting the following line would fail to compile:
+        // world.apply_prepared(prepared);  // error: use of moved value
+    }
+
+    #[test]
+    fn test_prepare_no_mutation_guarantee() {
+        // Verify prepare takes &self (shared ref), not &mut self
+        let world = CompWorld::new();
+        let schemas = SchemaRegistry::new();
+
+        let txn = WorldTxn::new(&world);
+        // This compiles only if prepare() borrows immutably:
+        let _prepared = world.prepare(txn, &schemas).unwrap();
+
+        // After prepare, world is still usable (not consumed)
+        assert_eq!(world.current_epoch(), WorldEpoch(1));
+    }
+
+    #[test]
+    fn test_journal_and_event_ordering_deterministic() {
+        let mut world = CompWorld::new();
+        let schemas = SchemaRegistry::new();
+
+        // Three inserts in one transaction
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Model);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            1,
+            ComponentSchemaId(10),
+            SchemaVersion(1),
+            "first".to_string(),
+        );
+        txn.add_component(
+            2,
+            ComponentSchemaId(20),
+            SchemaVersion(1),
+            "second".to_string(),
+        );
+        txn.emit_event(crate::ecs::constitutional::command::DomainEvent {
+            id: crate::ecs::constitutional::types::MessageId::compute(b"test-event"),
+            kind: "test_event".to_string(),
+            entity_id: Some(crate::ecs::constitutional::types::EntityKindId(1)),
+            payload: serde_json::Value::Null,
+        });
+
+        let prepared = world.prepare(txn, &schemas).unwrap();
+        let journal = prepared.journal_length();
+        let events = prepared.event_count();
+
+        // Apply and verify
+        world.apply_prepared(prepared);
+
+        let applied_journal = world.last_journal();
+        assert_eq!(applied_journal.len(), journal);
+        assert_eq!(applied_journal[0].entity, 1);
+        assert_eq!(applied_journal[1].entity, 2);
+
+        let applied_events = world.last_committed_events();
+        assert_eq!(applied_events.len(), events);
+    }
+
+    #[test]
+    fn test_equivalent_preparations_produce_equivalent_receipts() {
+        let schemas = SchemaRegistry::new();
+
+        let mut world1 = make_world();
+        let receipt1 = {
+            let txn = WorldTxn::new(&world1);
+            let prepared = world1.prepare(txn, &schemas).unwrap();
+            world1.apply_prepared(prepared)
+        };
+
+        let mut world2 = make_world();
+        let receipt2 = {
+            let txn = WorldTxn::new(&world2);
+            let prepared = world2.prepare(txn, &schemas).unwrap();
+            world2.apply_prepared(prepared)
+        };
+
+        assert_eq!(receipt1.committed_epoch, receipt2.committed_epoch);
+        assert_eq!(receipt1.journal_length, receipt2.journal_length);
+        assert_eq!(receipt1.event_count, receipt2.event_count);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
     //  Lifecycle Tests  (Stage 3 — entity lifecycle types)
     // ══════════════════════════════════════════════════════════════════════
     //

@@ -196,9 +196,11 @@ pub use component::quality::*;
 pub use component::tensor::*;
 
 use crate::ecs::constitutional::command::DomainEvent;
+use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::{SchemaVersion, WorldEpoch};
 use crate::ecs::constitutional::world_txn::{
-    ChangeType, CommittedEpoch, ComponentChange, WorldTxn, WorldTxnError,
+    ChangeType, CommitReceipt, CommittedEpoch, ComponentChange, PreparedWorldTxn, WorldTxn,
+    WorldTxnError,
 };
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
@@ -653,135 +655,87 @@ impl CompWorld {
         self.entity_meta.get(idx).is_some_and(|m| m.is_some())
     }
 
+    /// Read the component version (write count) for a given entity.
+    /// Returns 0 if no writes have occurred for this entity.
+    pub fn component_version(&self, entity_id: u64) -> u64 {
+        self.component_versions
+            .get(&entity_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Expose component_store for preflight closure evaluation during prepare().
+    pub(crate) fn component_store_ref(&self) -> &ComponentStore {
+        &self.component_store
+    }
+
     pub fn drain_committed_events(&mut self) -> Vec<DomainEvent> {
         std::mem::take(&mut self.committed_events)
     }
     pub fn transit(&mut self, txn: WorldTxn) -> Result<CommittedEpoch, WorldTxnError> {
-        // 1a. Validate epoch
-        if self.epoch != txn.expected_epoch {
-            return Err(WorldTxnError::StaleEpoch {
-                expected: txn.expected_epoch,
-                current: self.epoch,
-            });
-        }
-        // 1aa. Validate spawn preflights (no mutation during validation)
-        for spawn in &txn.spawns {
-            (spawn.preflight)(self)?;
-        }
-        // 1ab. Check for duplicate spawn entity IDs within this transaction
-        {
-            let mut seen = std::collections::HashSet::new();
-            for spawn in &txn.spawns {
-                if !seen.insert(spawn.entity) {
-                    return Err(WorldTxnError::InvalidEntity(spawn.entity));
-                }
-            }
-        }
+        let schemas = SchemaRegistry::new();
+        let prepared = self.prepare(txn, &schemas)?;
+        let receipt = self.apply_prepared(prepared);
+        Ok(CommittedEpoch(receipt.committed_epoch))
+    }
 
-        // 1b. Validate read dependencies
-        for dep in &txn.read_deps {
-            let current_ver = self
-                .component_versions
-                .get(&dep.entity)
-                .copied()
-                .unwrap_or(0);
-            if current_ver != dep.observed_version {
-                return Err(WorldTxnError::StaleRead {
-                    entity: dep.entity,
-                    schema_id: dep.schema_id,
-                    observed: dep.observed_version,
-                    current: current_ver,
-                });
-            }
-        }
+    /// Validate a transaction against the world WITHOUT mutating it.
+    /// On success returns a PreparedWorldTxn that can be atomically applied.
+    pub fn prepare(
+        &self,
+        txn: WorldTxn,
+        schemas: &SchemaRegistry,
+    ) -> Result<PreparedWorldTxn, WorldTxnError> {
+        txn.prepare_inner(self, schemas)
+    }
 
-        // 1c. Validate entity existence for every staged operation
-        // Collect entity IDs that will be spawned in this transaction
-        let pending_spawn_ids: std::collections::HashSet<u64> =
-            txn.spawns.iter().map(|s| s.entity).collect();
-        for insert in &txn.inserts {
-            // Entity must be occupied, unless it has a pending spawn in this txn
-            if pending_spawn_ids.contains(&insert.entity) {
-                continue;
-            }
-            let idx = (insert.entity as usize).wrapping_sub(1);
-            if idx >= self.entity_meta.len() || self.entity_meta[idx].is_none() {
-                return Err(WorldTxnError::InvalidEntity(insert.entity));
-            }
-        }
-        for remove in &txn.removes {
-            // Entity must be occupied, unless it has a pending spawn in this txn
-            if pending_spawn_ids.contains(&remove.entity) {
-                continue;
-            }
-            let idx = (remove.entity as usize).wrapping_sub(1);
-            if idx >= self.entity_meta.len() || self.entity_meta[idx].is_none() {
-                return Err(WorldTxnError::InvalidEntity(remove.entity));
-            }
-        }
+    /// Atomically apply a validated, prepared transaction.
+    ///
+    /// # Panics
+    /// - If the world epoch does not match the prepared transaction's expected epoch.
+    ///
+    /// After the first mutation, no recoverable errors remain — all invariants
+    /// were validated during ::prepare().
+    pub fn apply_prepared(&mut self, prepared: PreparedWorldTxn) -> CommitReceipt {
+        // verify epoch before any mutation
+        assert_eq!(
+            self.epoch, prepared.expected_epoch,
+            "prepared transaction epoch mismatch: expected {:?}, world is at {:?}",
+            prepared.expected_epoch, self.epoch
+        );
 
-        // 1d. Validate staged operations via preflight closures
-        for insert in &txn.inserts {
-            (insert.preflight)(&self.component_store)?;
-        }
-        for remove in &txn.removes {
-            (remove.preflight)(&self.component_store)?;
-        }
-
-        // -- PHASE 2: Build journal with the new epoch -----------------
-
-        let next_epoch = WorldEpoch(self.epoch.0 + 1);
-        let mut journal = Vec::new();
-        for insert in &txn.inserts {
-            journal.push(ComponentChange {
-                entity: insert.entity,
-                schema_id: insert.schema_id,
-                schema_version: insert.schema_version,
-                change_type: ChangeType::Insert,
-                before_hash: None,
-                after_hash: None,
-                world_epoch: next_epoch,
-            });
-        }
-        for remove in &txn.removes {
-            journal.push(ComponentChange {
-                entity: remove.entity,
-                schema_id: remove.schema_id,
-                schema_version: SchemaVersion(0),
-                change_type: ChangeType::Remove,
-                before_hash: None,
-                after_hash: None,
-                world_epoch: next_epoch,
-            });
-        }
-
-        // -- PHASE 3: Apply all mutations ------------------------------
-        // Reserve spawn entity slots (now that all validation passed)
-        for spawn in &txn.spawns {
+        // -- PHASE 3: Apply all mutations ----------------------------------
+        // Reserve spawn entity slots
+        for spawn in &prepared.spawns {
             self.spawn_entity_with_id(spawn.entity, spawn.kind);
         }
 
-        for insert in txn.inserts {
+        for insert in prepared.inserts {
             (insert.apply)(&mut self.component_store);
             *self.component_versions.entry(insert.entity).or_insert(0) += 1;
         }
-        for remove in txn.removes {
+        for remove in prepared.removes {
             (remove.apply)(&mut self.component_store);
             *self.component_versions.entry(remove.entity).or_insert(0) += 1;
         }
 
         // 3c. Apply staged spawns
-        for spawn in txn.spawns {
+        for spawn in prepared.spawns {
             (spawn.apply)(self);
         }
 
-        // -- PHASE 4: Advance epoch AFTER all mutations succeed --------
-
+        // -- PHASE 4: Advance epoch AFTER all mutations succeed -----------
+        let next_epoch = WorldEpoch(self.epoch.0 + 1);
         self.epoch = next_epoch;
-        self.journal = journal;
-        self.committed_events = txn.events;
+        self.journal = prepared.journal;
+        self.committed_events = prepared.events;
 
-        Ok(CommittedEpoch(next_epoch))
+        let receipt = CommitReceipt {
+            committed_epoch: next_epoch,
+            journal_length: self.journal.len(),
+            event_count: self.committed_events.len(),
+        };
+        receipt
     }
 }
 
