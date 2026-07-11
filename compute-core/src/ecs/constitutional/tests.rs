@@ -233,10 +233,15 @@ mod tests {
     #[test]
     fn test_envelope_map() {
         let e = make_test_envelope();
+        let original_id = e.id;
         let mapped = e.map(|s| s.len());
         assert_eq!(mapped.payload, 5); // "hello".len()
                                        // Metadata preserved
         assert_eq!(mapped.correlation_id, CorrelationId(uuid::Uuid::nil()));
+        // ID is recomputed — different payload means different hash
+        assert_ne!(mapped.id, original_id, "map should recompute the ID");
+        // Content-addressing invariant: id == compute_id()
+        assert_eq!(mapped.id, mapped.compute_id(), "id must equal compute_id()");
     }
 
     // ── Display / Display impl ─────────────────────────────────────────────
@@ -505,8 +510,6 @@ mod tests {
             SessionLifecycle::Active,
             SessionLifecycle::Quiescing,
             SessionLifecycle::Saving,
-            SessionLifecycle::Completed,
-            SessionLifecycle::Releasing,
         ];
         for state in &non_terminal {
             assert!(
@@ -519,6 +522,32 @@ mod tests {
         assert!(SessionLifecycle::Released
             .can_transition_to(SessionLifecycle::Failed)
             .is_err());
+        // Completed and Releasing cannot transition to Failed
+        assert!(SessionLifecycle::Completed
+            .can_transition_to(SessionLifecycle::Failed)
+            .is_err());
+        assert!(SessionLifecycle::Releasing
+            .can_transition_to(SessionLifecycle::Failed)
+            .is_err());
+    }
+
+    // ── test_failed_to_releasing ──────────────────────────────────────────────
+
+    #[test]
+    fn test_failed_to_releasing() {
+        assert!(
+            SessionLifecycle::Failed
+                .can_transition_to(SessionLifecycle::Releasing)
+                .is_ok(),
+            "Failed should be able to transition to Releasing"
+        );
+        // Releasing → Releasing is not directly in the match, so it should fail
+        assert!(
+            SessionLifecycle::Failed
+                .can_transition_to(SessionLifecycle::Released)
+                .is_err(),
+            "Failed should not skip to Released"
+        );
     }
 
     // ── test_session_terminal ────────────────────────────────────────────────

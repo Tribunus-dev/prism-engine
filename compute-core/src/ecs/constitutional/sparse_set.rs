@@ -39,7 +39,7 @@ impl<T> SparseSet<T> {
     /// Insert a component for an entity. Replaces existing value if present.
     pub fn insert(&mut self, entity: u64, value: T) {
         let idx = self.sparse_idx(entity);
-        if idx < self.dense.len() as u32 && self.sparse[idx as usize] != SENTINEL {
+        if idx < self.sparse.len() as u32 && self.sparse[idx as usize] != SENTINEL {
             // Update existing — entity is already in the set
             let dense_idx = self.sparse[idx as usize] as usize;
             self.dense[dense_idx] = value;
@@ -59,7 +59,10 @@ impl<T> SparseSet<T> {
         if idx < self.sparse.len() as u32 {
             let dense_idx = self.sparse[idx as usize];
             if dense_idx != SENTINEL {
-                return Some(&self.dense[dense_idx as usize]);
+                // Verify full handle matches (generation-aware)
+                if self.entities[dense_idx as usize] == entity {
+                    return Some(&self.dense[dense_idx as usize]);
+                }
             }
         }
         None
@@ -73,6 +76,10 @@ impl<T> SparseSet<T> {
         }
         let dense_idx = self.sparse[idx as usize];
         if dense_idx == SENTINEL {
+            return None;
+        }
+        // Verify full handle matches (generation-aware)
+        if self.entities[dense_idx as usize] != entity {
             return None;
         }
         // Swap with last element

@@ -85,6 +85,7 @@ pub(crate) struct StagedInsert {
     pub schema_id: ComponentSchemaId,
     pub schema_version: SchemaVersion,
     /// Type-erased component value for application
+    #[allow(dead_code)]
     pub erased_value: Box<dyn std::any::Any + Send>,
 }
 

@@ -402,9 +402,10 @@ pub fn pack_nf4_tile_awls(
 }
 
 /// Pack multiple tiles from a flat f32 array (shapes are M×K layout).
-/// Tile across in_features (rows): each output channel has ceil(rows / TILE_ELEMENTS) tiles
-/// gathering strided elements from the row-major input.
-/// Non-multiple row dimensions are zero-padded to the next tile boundary.
+/// Tile across out_features (cols): contiguous row slices of TILE_ELEMENTS elements.
+/// This groups values from the same input channel, which have similar
+/// magnitudes and produce lower quantization error than strided gathering.
+/// Non-multiple column dimensions are zero-padded to the next tile boundary.
 ///
 /// Returns `(packed_codes, scales, biases, rows, cols)` with data for all tiles stored
 /// contiguously per buffer (tile-major order).
@@ -1178,7 +1179,7 @@ pub fn dequant_matmul_reference(
         k,
         n,
         output,
-        tiles_per_ch,
+        tiles_per_row,
         total_tiles,
     );
 

@@ -71,12 +71,12 @@ impl<T: Serialize> Envelope<T> {
 
         MessageId::new(hasher.finalize().into())
     }
-}
 
-impl<T> Envelope<T> {
     /// Map the payload while preserving all envelope metadata.
-    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Envelope<U> {
-        Envelope {
+    /// The content-addressed ID is recomputed from the new payload,
+    /// maintaining the invariant that `id == compute_id()`.
+    pub fn map<U: Serialize>(self, f: impl FnOnce(T) -> U) -> Envelope<U> {
+        let mut envelope = Envelope {
             id: self.id,
             correlation_id: self.correlation_id,
             causation_id: self.causation_id,
@@ -86,9 +86,13 @@ impl<T> Envelope<T> {
             timestamp: self.timestamp,
             aggregate_sequence: self.aggregate_sequence,
             payload: f(self.payload),
-        }
+        };
+        envelope.id = envelope.compute_id();
+        envelope
     }
+}
 
+impl<T> Envelope<T> {
     /// Borrow the payload.
     pub fn payload(&self) -> &T {
         &self.payload

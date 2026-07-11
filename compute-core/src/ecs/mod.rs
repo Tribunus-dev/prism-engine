@@ -195,6 +195,7 @@ pub use component::memory::*;
 pub use component::quality::*;
 pub use component::tensor::*;
 
+use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::types::WorldEpoch;
 use crate::ecs::constitutional::world_txn::{
     CommittedEpoch, ComponentChange, WorldTxn, WorldTxnError,
@@ -245,6 +246,7 @@ pub struct CompWorld {
     epoch: WorldEpoch,
     journal: Vec<ComponentChange>,
     component_versions: std::collections::HashMap<u64, u64>,
+    committed_events: Vec<DomainEvent>,
 }
 
 impl std::fmt::Debug for CompWorld {
@@ -261,6 +263,7 @@ impl std::fmt::Debug for CompWorld {
 #[derive(Debug)]
 struct EntityMeta {
     kind: EntityKind,
+    #[allow(dead_code)]
     generation: u32,
     name: Option<String>,
 }
@@ -269,6 +272,7 @@ impl Default for EntityMeta {
     fn default() -> Self {
         Self {
             kind: EntityKind::Model,
+            #[allow(dead_code)]
             generation: 0,
             name: None,
         }
@@ -380,6 +384,7 @@ impl CompWorld {
             epoch: WorldEpoch(1),
             journal: Vec::new(),
             component_versions: std::collections::HashMap::new(),
+            committed_events: Vec::new(),
         }
     }
 
@@ -544,6 +549,15 @@ impl CompWorld {
     pub fn last_journal(&self) -> &[ComponentChange] {
         &self.journal
     }
+
+    pub fn last_committed_events(&self) -> &[DomainEvent] {
+        &self.committed_events
+    }
+
+    pub fn drain_committed_events(&mut self) -> Vec<DomainEvent> {
+        std::mem::take(&mut self.committed_events)
+    }
+
     pub fn transit(&mut self, txn: WorldTxn) -> Result<CommittedEpoch, WorldTxnError> {
         // 1. Validate epoch
         if self.epoch != txn.expected_epoch {
@@ -608,6 +622,9 @@ impl CompWorld {
 
         // 5. Store journal
         self.journal = journal;
+
+        // 6. Store committed events
+        self.committed_events = txn.events;
 
         Ok(committed)
     }

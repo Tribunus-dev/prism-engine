@@ -211,8 +211,16 @@ impl SessionLifecycle {
             | (Self::Saving, Self::Active)
             | (Self::Completed, Self::Releasing)
             | (Self::Releasing, Self::Released) => true,
-            // Failure allowed from any non-terminal state
-            _ if target == Self::Failed && !self.is_terminal() => true,
+            // Allow failure from any non-terminal and non-completing state
+            (Self::Failed, Self::Releasing) => true,
+            // Failure allowed from any non-terminal, non-completing, and non-releasing state
+            _ if target == Self::Failed
+                && !self.is_terminal()
+                && *self != Self::Completed
+                && *self != Self::Releasing =>
+            {
+                true
+            }
             _ => false,
         };
         if allowed {
