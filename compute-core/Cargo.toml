@@ -65,7 +65,6 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 content_inspector = "0.2"
 encoding_rs = "0.8"
-sqlite = { version = "0.37", optional = true }
 deno_core = { version = "0.405", optional = true }
 deno_core_icudata = { version = "0.77", optional = true }
 anyhow = "1.0.102"
@@ -78,7 +77,7 @@ image = { version = "0.25", optional = true, default-features = false, features 
 
 [features]
 default = []
-prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal", "dep:image", "dep:sqlite"]
+prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal", "dep:image"]
 prism-backend-ios = ["prism-backend", "metal-dispatch", "backend-metal", "dep:image"]
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
 research = ["prism-backend", "mlx-backend"]

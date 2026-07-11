@@ -5,6 +5,7 @@ pub mod component;
 pub mod config;
 pub mod entity;
 pub mod plan;
+pub mod receipt_bus;
 pub mod system;
 #[cfg(test)]
 mod tests;
@@ -67,6 +68,7 @@ pub mod decode_attribution;
 pub mod device;
 pub mod diffusion;
 pub mod diffusion_provider;
+pub mod duckdb_projection;
 pub mod editing;
 pub mod engine;
 pub mod engine_error;
@@ -125,6 +127,7 @@ pub mod native_kernel;
 pub mod nf4tile640;
 pub mod operation_catalog;
 pub mod parsing;
+pub mod pg_receipt_subscriber;
 pub mod pipeline_parity;
 pub mod placement_profile;
 pub mod plugin;
@@ -175,6 +178,7 @@ pub mod transform_recipe;
 pub mod treatment;
 pub mod tts;
 pub mod validator;
+pub mod valkey_projection;
 pub mod video;
 pub mod video_provider;
 pub mod vision;
@@ -206,39 +210,40 @@ pub trait Component: std::fmt::Debug + Send + Sync + 'static {}
 /// Phase in the compiler pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SchedulePhase {
-    ModelLoading,     // Phase A
-    Quantization,     // Phase B
-    MemoryPlanning,   // Phase C
-    FusionDispatch,   // Phase D
-    KernelGeneration, // Phase E
-    Compilation,      // Phase F
-    Packaging,        // Phase G
-    Validation,       // Phase H — final admission gates and completeness checks
-    Execution,        // Phase I — runtime execution, scheduling, and dispatch
+    ModelLoading,
+    Quantization,
+    MemoryPlanning,
+    FusionDispatch,
+    KernelGeneration,
+    Compilation,
+    Packaging,
+    Validation,
+    Execution,
 }
 
 /// A compiler pass over the ECS world.
 pub trait CompilerSystem: Send + Sync {
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
     fn phase(&self) -> SchedulePhase;
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()>;
+    fn run(&self, world: &mut CompWorld);
 }
 
 /// The ECS world — all entities, components, and systems.
 pub struct CompWorld {
-    next_id: EntityId,
-    entities: Vec<EntityMeta>,
-    components: ComponentStore,
+    component_store: ComponentStore,
+    resource_store: ResourceStore,
     systems: Vec<Box<dyn CompilerSystem>>,
-    resources: ResourceStore,
+    entity_meta: Vec<EntityMeta>,
+    next_id: u64,
+    staging: Vec<Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>>,
 }
 
 impl std::fmt::Debug for CompWorld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CompWorld")
-            .field("entity_count", &self.entities.len())
+            .field("entity_count", &self.entity_meta.len())
             .field("system_count", &self.systems.len())
-            .field("component_type_count", &self.components.data.len())
+            .field("staged_changes", &self.staging.len())
             .finish()
     }
 }
@@ -246,15 +251,15 @@ impl std::fmt::Debug for CompWorld {
 /// Manages the lifecycle of a single executable argument region.
 #[derive(Debug)]
 struct EntityMeta {
-    name: Option<String>,
     kind: EntityKind,
+    generation: u32,
 }
 
 impl Default for EntityMeta {
     fn default() -> Self {
         Self {
-            name: None,
             kind: EntityKind::Model,
+            generation: 0,
         }
     }
 }
@@ -306,160 +311,191 @@ impl Default for ComponentStore {
 impl CompWorld {
     pub fn new() -> Self {
         Self {
-            next_id: 1,
-            entities: Vec::new(),
-            components: ComponentStore::default(),
+            component_store: ComponentStore::default(),
+            resource_store: ResourceStore::default(),
             systems: Vec::new(),
-            resources: ResourceStore::default(),
+            entity_meta: Vec::new(),
+            next_id: 1,
+            staging: Vec::new(),
         }
     }
 
-    pub fn add_resource<T: Send + Sync + 'static>(&mut self, resource: T) {
-        self.resources.insert(resource);
-    }
-
-    pub fn get_resource<T: Send + Sync + 'static>(&self) -> Option<&T> {
-        self.resources.get()
-    }
-
-    pub fn get_resource_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
-        self.resources.get_mut()
-    }
-
-    pub fn spawn(&mut self, kind: EntityKind, name: Option<String>) -> CompEntity {
+    pub fn spawn_entity(&mut self, kind: EntityKind) -> CompEntity {
         let id = self.next_id;
         self.next_id += 1;
-        self.entities.push(EntityMeta { name, kind });
+        self.entity_meta.push(EntityMeta {
+            kind,
+            generation: 0,
+        });
         CompEntity(id)
     }
 
-    pub fn kind(&self, entity: CompEntity) -> Option<EntityKind> {
-        self.entities.get(entity.0 as usize - 1).map(|m| m.kind)
-    }
-
-    pub fn name(&self, entity: CompEntity) -> Option<&str> {
-        self.entities
-            .get(entity.0 as usize - 1)
-            .and_then(|m| m.name.as_deref())
+    pub fn entity_kind(&self, entity: CompEntity) -> Option<EntityKind> {
+        let idx = (entity.0 - 1) as usize;
+        self.entity_meta.get(idx).map(|m| m.kind)
     }
 
     pub fn add_component<T: Component>(&mut self, entity: CompEntity, component: T) {
-        self.components.insert(entity, component);
+        let store = &mut self.component_store;
+        let type_id = TypeId::of::<T>();
+        let map: &mut HashMap<EntityId, T> = store
+            .data
+            .entry(type_id)
+            .or_insert_with(|| Box::new(HashMap::<EntityId, T>::new()))
+            .downcast_mut::<HashMap<EntityId, T>>()
+            .expect("type mismatch in ComponentStore");
+        map.insert(entity.0, component);
+    }
+
+    pub fn stage_component<T: Component>(&mut self, entity: CompEntity, component: T) {
+        self.staging
+            .push(Box::new(move |store: &mut ComponentStore| {
+                let type_id = TypeId::of::<T>();
+                let map: &mut HashMap<EntityId, T> = store
+                    .data
+                    .entry(type_id)
+                    .or_insert_with(|| Box::new(HashMap::<EntityId, T>::new()))
+                    .downcast_mut::<HashMap<EntityId, T>>()
+                    .expect("type mismatch in ComponentStore");
+                map.insert(entity.0, component);
+            }));
+    }
+
+    pub fn commit_stage(&mut self) {
+        let staging = std::mem::take(&mut self.staging);
+        for op in staging {
+            op(&mut self.component_store);
+        }
+    }
+
+    pub fn rollback_stage(&mut self) {
+        self.staging.clear();
     }
 
     pub fn get_component<T: Component>(&self, entity: CompEntity) -> Option<&T> {
-        self.components.get(entity)
+        let store = &self.component_store;
+        let type_id = TypeId::of::<T>();
+        store
+            .data
+            .get(&type_id)?
+            .downcast_ref::<HashMap<EntityId, T>>()
+            .and_then(|map| map.get(&entity.0))
     }
 
     pub fn get_component_mut<T: Component>(&mut self, entity: CompEntity) -> Option<&mut T> {
-        self.components.get_mut(entity)
+        let store = &mut self.component_store;
+        let type_id = TypeId::of::<T>();
+        store
+            .data
+            .get_mut(&type_id)?
+            .downcast_mut::<HashMap<EntityId, T>>()
+            .and_then(|map| map.get_mut(&entity.0))
     }
 
-    pub fn remove_component<T: Component>(&mut self, entity: CompEntity) -> Option<T> {
-        self.components.remove(entity)
+    pub fn add_resource<T: 'static>(&mut self, resource: T) {
+        self.resource_store
+            .data
+            .insert(TypeId::of::<T>(), Box::new(resource));
+    }
+
+    pub fn get_resource<T: 'static>(&self) -> Option<&T> {
+        self.resource_store
+            .data
+            .get(&TypeId::of::<T>())
+            .and_then(|b| b.downcast_ref::<T>())
+    }
+
+    pub fn get_resource_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.resource_store
+            .data
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|b| b.downcast_mut::<T>())
     }
 
     pub fn add_system(&mut self, system: Box<dyn CompilerSystem>) {
         self.systems.push(system);
     }
 
-    pub fn run_phase(&mut self, phase: SchedulePhase) -> anyhow::Result<()> {
-        // Take systems out of self to avoid borrow conflict, then restore.
-        let systems = std::mem::take(&mut self.systems);
-        for system in &systems {
-            if system.phase() == phase {
-                system.run(self)?;
+    pub fn run_phase(&mut self, phase: SchedulePhase) {
+        let err = {
+            let prev_systems = std::mem::take(&mut self.systems);
+            let matched: Vec<_> = prev_systems
+                .into_iter()
+                .filter(|s| s.phase() == phase)
+                .collect();
+            let unmatched: Vec<_> = std::mem::take(&mut self.systems);
+            self.systems = unmatched;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                for system in &matched {
+                    system.run(self);
+                }
+                self.commit_stage();
+            }));
+            if result.is_err() {
+                self.rollback_stage();
             }
+            for sys in matched {
+                self.systems.push(sys);
+            }
+            result
+        };
+        if let Err(panic) = err {
+            let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = panic.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            };
+            tracing::error!("CompWorld phase failed (rolled back): {msg}");
         }
-        self.systems = systems;
-        Ok(())
-    }
-
-    pub fn run_all(&mut self) -> anyhow::Result<()> {
-        let phases = [
-            SchedulePhase::ModelLoading,
-            SchedulePhase::Quantization,
-            SchedulePhase::MemoryPlanning,
-            SchedulePhase::FusionDispatch,
-            SchedulePhase::KernelGeneration,
-            SchedulePhase::Compilation,
-            SchedulePhase::Packaging,
-            SchedulePhase::Validation,
-        ];
-        for phase in phases {
-            self.run_phase(phase)?;
-        }
-        Ok(())
     }
 
     pub fn entity_count(&self) -> usize {
-        self.entities.len()
+        self.entity_meta.len()
     }
 
-    pub fn entities_of_kind(&self, kind: EntityKind) -> Vec<CompEntity> {
-        self.entities
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.kind == kind)
-            .map(|(i, _)| CompEntity(i as u64 + 1))
-            .collect()
+    pub fn system_count(&self) -> usize {
+        self.systems.len()
     }
 }
 
 impl ResourceStore {
-    fn insert<T: Send + Sync + 'static>(&mut self, resource: T) {
-        let tid = TypeId::of::<T>();
-        self.data.insert(tid, Box::new(resource));
+    pub fn insert<T: 'static>(&mut self, resource: T) {
+        self.data.insert(TypeId::of::<T>(), Box::new(resource));
     }
 
-    fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
-        let tid = TypeId::of::<T>();
+    pub fn get<T: 'static>(&self) -> Option<&T> {
         self.data
-            .get(&tid)
-            .and_then(|slot| slot.downcast_ref::<T>())
+            .get(&TypeId::of::<T>())
+            .and_then(|b| b.downcast_ref::<T>())
     }
 
-    fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
-        let tid = TypeId::of::<T>();
+    pub fn contains<T: 'static>(&self) -> bool {
+        self.data.contains_key(&TypeId::of::<T>())
+    }
+
+    pub fn remove<T: 'static>(&mut self) -> Option<T> {
         self.data
-            .get_mut(&tid)
-            .and_then(|slot| slot.downcast_mut::<T>())
+            .remove(&TypeId::of::<T>())
+            .and_then(|b| b.downcast::<T>().ok().map(|b| *b))
     }
 }
 
 impl ComponentStore {
-    fn insert<T: Component>(&mut self, entity: CompEntity, component: T) {
-        let tid = TypeId::of::<T>();
-        let slot = self
-            .data
-            .entry(tid)
-            .or_insert_with(|| Box::<HashMap<EntityId, T>>::default());
-        if let Some(map) = slot.downcast_mut::<HashMap<EntityId, T>>() {
-            map.insert(entity.0, component);
-        }
+    pub fn contains<T: Component>(&self, entity: CompEntity) -> bool {
+        let type_id = TypeId::of::<T>();
+        self.data
+            .get(&type_id)
+            .and_then(|b| b.downcast_ref::<HashMap<EntityId, T>>())
+            .map_or(false, |map| map.contains_key(&entity.0))
     }
 
-    fn get<T: Component>(&self, entity: CompEntity) -> Option<&T> {
-        let tid = TypeId::of::<T>();
+    pub fn remove<T: Component>(&mut self, entity: CompEntity) -> Option<T> {
+        let type_id = TypeId::of::<T>();
         self.data
-            .get(&tid)
-            .and_then(|slot| slot.downcast_ref::<HashMap<EntityId, T>>())
-            .and_then(|map| map.get(&entity.0))
-    }
-
-    fn get_mut<T: Component>(&mut self, entity: CompEntity) -> Option<&mut T> {
-        let tid = TypeId::of::<T>();
-        self.data
-            .get_mut(&tid)
-            .and_then(|slot| slot.downcast_mut::<HashMap<EntityId, T>>())
-            .and_then(|map| map.get_mut(&entity.0))
-    }
-
-    fn remove<T: Component>(&mut self, entity: CompEntity) -> Option<T> {
-        let tid = TypeId::of::<T>();
-        self.data
-            .get_mut(&tid)
-            .and_then(|slot| slot.downcast_mut::<HashMap<EntityId, T>>())
+            .get_mut(&type_id)
+            .and_then(|b| b.downcast_mut::<HashMap<EntityId, T>>())
             .and_then(|map| map.remove(&entity.0))
     }
 }

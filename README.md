@@ -30,7 +30,11 @@ curl http://localhost:8080/v1/chat/completions \
 
 ## Features
 
-Cargo feature flags (compose as needed):
+See [compute-core/Cargo.toml](compute-core/Cargo.toml) for available feature flags. Key:
+- `prism-backend` — Full Metal GPU dispatch + ANE + server (macOS)
+- `server-dashboard` — Dashboard with PostgreSQL/DuckDB/Valkey adapters
+- `mlx-backend` — MLX framework support (experimental)
+- `backend-cpu` — CPU-only build (Linux, tracking)
 
 - `server` — OpenAI-compatible HTTP server (`/v1/chat/completions`)
 - `ane` — Apple Neural Engine backend (macOS only)
