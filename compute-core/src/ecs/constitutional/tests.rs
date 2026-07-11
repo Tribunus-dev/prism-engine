@@ -832,4 +832,443 @@ mod tests {
         assert!(msg.contains("Released"), "msg: {}", msg);
         assert!(msg.contains("Releasing"), "msg: {}", msg);
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Driver Registry Tests  (Stage 4)
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    //  Pure type-level tests: construction, serde roundtrips, factory registration.
+    //  No real backend hardware is involved.
+
+    use crate::ecs::constitutional::driver::*;
+    use crate::ecs::constitutional::scheduler::*;
+    use std::sync::Arc;
+
+    // ── Mock Factory ─────────────────────────────────────────────────────
+
+    struct MockFactory {
+        name: String,
+        available: bool,
+    }
+
+    impl DriverFactory for MockFactory {
+        fn enumerate(&self) -> Vec<DriverInfo> {
+            vec![DriverInfo {
+                name: self.name.clone(),
+                version_major: 1,
+                version_minor: 0,
+                available: self.available,
+                description: String::new(),
+            }]
+        }
+
+        fn try_create(&self, info: &DriverInfo) -> Option<DriverCreateOutcome> {
+            if self.available && info.available {
+                Some(DriverCreateOutcome {
+                    handle: "mock-handle".into(),
+                    capabilities: vec![BackendCapability::MatMulF32],
+                    device_metadata: DeviceMetadata {
+                        name: "mock-device".into(),
+                        device_id: DomainId(uuid::Uuid::nil()),
+                        memory_bytes: 1024,
+                        compute_units: 1,
+                        max_alloc_bytes: 512,
+                    },
+                    validation_digest: [0u8; 32],
+                })
+            } else {
+                None
+            }
+        }
+
+        fn name(&self) -> &str {
+            &self.name
+        }
+    }
+
+    // ── test_backend_capability_variants ─────────────────────────────────
+
+    #[test]
+    fn test_backend_capability_variants() {
+        let variants: Vec<BackendCapability> = vec![
+            BackendCapability::MatMulF32,
+            BackendCapability::MatMulF16,
+            BackendCapability::MatMulInt8,
+            BackendCapability::UnifiedMemory,
+            BackendCapability::DedicatedMemory { size_bytes: 8192 },
+            BackendCapability::MoeDispatch,
+            BackendCapability::Attention,
+            BackendCapability::FusedMlp,
+            BackendCapability::RequiresHostCopy,
+            BackendCapability::SupportsPeerAccess,
+            BackendCapability::Other("custom".into()),
+        ];
+
+        // All are distinct
+        for i in 0..variants.len() {
+            for j in (i + 1)..variants.len() {
+                assert_ne!(variants[i], variants[j]);
+            }
+        }
+
+        // Debug output
+        assert_eq!(format!("{:?}", BackendCapability::MatMulF32), "MatMulF32");
+        assert_eq!(
+            format!("{:?}", BackendCapability::Other("custom".into())),
+            "Other(\"custom\")"
+        );
+
+        // Clone
+        let cloned = variants[0].clone();
+        assert_eq!(variants[0], cloned);
+
+        // Serde roundtrip — unit variants
+        let json = serde_json::to_string(&BackendCapability::MatMulF32).unwrap();
+        assert_eq!(json, "\"MatMulF32\"");
+        let deser: BackendCapability = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, BackendCapability::MatMulF32);
+
+        // Serde roundtrip — Other with data
+        let other = BackendCapability::Other("roundtrip-test".into());
+        let json = serde_json::to_string(&other).unwrap();
+        let deser: BackendCapability = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, other);
+    }
+
+    // ── test_driver_info_construction ────────────────────────────────────
+
+    #[test]
+    fn test_driver_info_construction() {
+        let info = DriverInfo {
+            name: "test-backend".into(),
+            version_major: 2,
+            version_minor: 1,
+            available: true,
+            description: "A test backend".into(),
+        };
+        assert_eq!(info.name, "test-backend");
+        assert_eq!(info.version_major, 2);
+        assert_eq!(info.version_minor, 1);
+        assert!(info.available);
+        assert_eq!(info.description, "A test backend");
+
+        // Serde roundtrip
+        let json = serde_json::to_string(&info).unwrap();
+        let deser: DriverInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(info.name, deser.name);
+        assert_eq!(info.available, deser.available);
+        assert_eq!(info.description, deser.description);
+        assert_eq!(info, deser);
+    }
+
+    // ── test_driver_registry_register_and_enumerate ──────────────────────
+
+    #[test]
+    fn test_driver_registry_register_and_enumerate() {
+        let mut reg = DriverRegistry::new();
+        assert_eq!(reg.factory_count(), 0);
+
+        let factory = Arc::new(MockFactory {
+            name: "mock-factory".into(),
+            available: true,
+        });
+        reg.register_factory(factory);
+
+        assert_eq!(reg.factory_count(), 1);
+
+        let all = reg.enumerate_all();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].0, "mock-factory");
+        assert_eq!(all[0].1.len(), 1);
+        assert_eq!(all[0].1[0].name, "mock-factory");
+        assert!(all[0].1[0].available);
+    }
+
+    // ── test_driver_registry_enumerate_preserves_order ───────────────────
+
+    #[test]
+    fn test_driver_registry_enumerate_preserves_order() {
+        let mut reg = DriverRegistry::new();
+
+        reg.register_factory(Arc::new(MockFactory {
+            name: "first".into(),
+            available: true,
+        }));
+        reg.register_factory(Arc::new(MockFactory {
+            name: "second".into(),
+            available: true,
+        }));
+
+        let all = reg.enumerate_all();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].0, "first");
+        assert_eq!(all[1].0, "second");
+    }
+
+    // ── test_driver_factory_create_validated ─────────────────────────────
+
+    #[test]
+    fn test_driver_factory_create_validated() {
+        let mut reg = DriverRegistry::new();
+        reg.register_factory(Arc::new(MockFactory {
+            name: "valid-factory".into(),
+            available: true,
+        }));
+
+        // Valid info — matches factory name and is available
+        let valid_info = DriverInfo {
+            name: "valid-factory".into(),
+            version_major: 1,
+            version_minor: 0,
+            available: true,
+            description: String::new(),
+        };
+        let outcome = reg.try_create_from_info(&valid_info);
+        assert!(outcome.is_some());
+        assert_eq!(outcome.as_ref().unwrap().handle, "mock-handle");
+
+        // Invalid info — matches factory name but not available
+        let invalid_info = DriverInfo {
+            name: "valid-factory".into(),
+            version_major: 1,
+            version_minor: 0,
+            available: false,
+            description: String::new(),
+        };
+        assert!(reg.try_create_from_info(&invalid_info).is_none());
+    }
+
+    // ── test_backend_capability_serde ────────────────────────────────────
+
+    #[test]
+    fn test_backend_capability_serde() {
+        // Unit variants
+        let json = serde_json::to_string(&BackendCapability::MatMulF32).unwrap();
+        let deser: BackendCapability = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, BackendCapability::MatMulF32);
+
+        // Other
+        let other = BackendCapability::Other("custom-backend".into());
+        let json = serde_json::to_string(&other).unwrap();
+        assert!(json.contains("\"Other\""));
+        assert!(json.contains("custom-backend"));
+        let deser: BackendCapability = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, other);
+
+        // DedicatedMemory with data field
+        let mem = BackendCapability::DedicatedMemory { size_bytes: 4096 };
+        let json = serde_json::to_string(&mem).unwrap();
+        let deser: BackendCapability = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, mem);
+    }
+
+    // ── test_device_metadata_serde ───────────────────────────────────────
+
+    #[test]
+    fn test_device_metadata_serde() {
+        let meta = DeviceMetadata {
+            name: "test-device".into(),
+            device_id: DomainId(uuid::Uuid::nil()),
+            memory_bytes: 8_589_934_592,
+            compute_units: 16,
+            max_alloc_bytes: 4_294_967_296,
+        };
+
+        let json = serde_json::to_string(&meta).unwrap();
+        let deser: DeviceMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta, deser);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Scheduler Tests  (Stage 5)
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    //  Pure type-level tests: construction, state predicates, drain behavior.
+
+    // ── test_work_item_construction ──────────────────────────────────────
+
+    #[test]
+    fn test_work_item_construction() {
+        let item = WorkItem::new(WorkKind::RunInference, 42);
+        assert_eq!(item.kind, WorkKind::RunInference);
+        assert_eq!(item.target_entity, 42);
+        assert_eq!(item.state, WorkState::Pending);
+        assert!(item.prerequisites.is_empty());
+        assert!(item.is_ready());
+    }
+
+    // ── test_work_item_with_prereqs ──────────────────────────────────────
+
+    #[test]
+    fn test_work_item_with_prereqs() {
+        let mut item = WorkItem::new(WorkKind::LoadModel, 7);
+        item.prerequisites.push(Prerequisite {
+            entity: 1,
+            kind: PrereqKind::ComponentPresent,
+            generation: 0,
+        });
+        assert_eq!(item.prerequisites.len(), 1);
+        assert!(!item.is_ready());
+    }
+
+    // ── test_work_state_is_terminal ──────────────────────────────────────
+
+    #[test]
+    fn test_work_state_is_terminal() {
+        assert!(WorkState::Completed.is_terminal());
+        assert!(WorkState::Failed.is_terminal());
+        assert!(WorkState::Cancelled.is_terminal());
+
+        assert!(!WorkState::Pending.is_terminal());
+        assert!(!WorkState::Ready.is_terminal());
+        assert!(!WorkState::Leased.is_terminal());
+    }
+
+    // ── test_work_lease_construction ─────────────────────────────────────
+
+    #[test]
+    fn test_work_lease_construction() {
+        let lease = WorkLease {
+            work_entity: 42,
+            kind: WorkKind::RunInference,
+            lease_generation: 1,
+            attempt: 0,
+            cancellation_epoch: WorldEpoch(0),
+            expiry: Timestamp(1_700_000_000_000_000_000),
+            resource_claim: ResourceClaim {
+                memory_bytes: 1024,
+                compute_units: 2,
+                priority: Priority::Normal,
+            },
+        };
+        assert_eq!(lease.work_entity, 42);
+        assert_eq!(lease.kind, WorkKind::RunInference);
+        assert_eq!(lease.lease_generation, 1);
+    }
+
+    // ── test_scheduler_drain ─────────────────────────────────────────────
+
+    #[test]
+    fn test_scheduler_drain() {
+        let mut sched = Scheduler::new();
+        sched.mark_ready(1, WorkKind::RunInference);
+        sched.mark_ready(2, WorkKind::RunInference);
+
+        assert_eq!(sched.ready_count(), 2);
+
+        let batch1 = sched.drain(1);
+        assert_eq!(batch1.len(), 1);
+        assert_eq!(sched.ready_count(), 1);
+
+        let batch2 = sched.drain(1);
+        assert_eq!(batch2.len(), 1);
+        assert_eq!(sched.ready_count(), 0);
+
+        let batch3 = sched.drain(1);
+        assert_eq!(batch3.len(), 0);
+    }
+
+    // ── test_scheduler_drain_respects_max ────────────────────────────────
+
+    #[test]
+    fn test_scheduler_drain_respects_max() {
+        let mut sched = Scheduler::new();
+        for i in 0..5 {
+            sched.mark_ready(i as u64, WorkKind::RunInference);
+        }
+
+        assert_eq!(sched.ready_count(), 5);
+
+        let batch1 = sched.drain(3);
+        assert_eq!(batch1.len(), 3);
+        assert_eq!(sched.ready_count(), 2);
+
+        let batch2 = sched.drain(3);
+        assert_eq!(batch2.len(), 2);
+        assert_eq!(sched.ready_count(), 0);
+
+        let batch3 = sched.drain(3);
+        assert_eq!(batch3.len(), 0);
+    }
+
+    // ── test_priority_ordering ───────────────────────────────────────────
+
+    #[test]
+    fn test_priority_ordering() {
+        assert!(Priority::Low.as_u8() < Priority::Normal.as_u8());
+        assert!(Priority::Normal.as_u8() < Priority::High.as_u8());
+        assert!(Priority::High.as_u8() < Priority::Critical.as_u8());
+
+        assert_eq!(Priority::Low.as_u8(), 0);
+        assert_eq!(Priority::Normal.as_u8(), 1);
+        assert_eq!(Priority::High.as_u8(), 2);
+        assert_eq!(Priority::Critical.as_u8(), 3);
+    }
+
+    // ── test_prerequisite_construction ───────────────────────────────────
+
+    #[test]
+    fn test_prerequisite_construction() {
+        let prereq = Prerequisite {
+            entity: 7,
+            kind: PrereqKind::EventReceived,
+            generation: 3,
+        };
+        assert_eq!(prereq.entity, 7);
+        assert_eq!(prereq.kind, PrereqKind::EventReceived);
+        assert_eq!(prereq.generation, 3);
+
+        let json = serde_json::to_string(&prereq).unwrap();
+        let deser: Prerequisite = serde_json::from_str(&json).unwrap();
+        assert_eq!(prereq, deser);
+    }
+
+    // ── test_resource_claim_serde ────────────────────────────────────────
+
+    #[test]
+    fn test_resource_claim_serde() {
+        let claim = ResourceClaim {
+            memory_bytes: 4_294_967_296,
+            compute_units: 8,
+            priority: Priority::High,
+        };
+
+        let json = serde_json::to_string(&claim).unwrap();
+        let deser: ResourceClaim = serde_json::from_str(&json).unwrap();
+        assert_eq!(claim, deser);
+    }
+
+    // ── test_scheduler_register_pending ──────────────────────────────────
+
+    #[test]
+    fn test_scheduler_register_pending() {
+        let mut sched = Scheduler::new();
+        assert_eq!(sched.ready_count(), 0);
+
+        // register_pending does not change ready_count
+        sched.register_pending(10);
+        assert_eq!(sched.ready_count(), 0);
+
+        // Only mark_ready increases ready_count
+        sched.mark_ready(10, WorkKind::Validate);
+        assert_eq!(sched.ready_count(), 1);
+    }
+
+    // ── test_multiple_kinds_drain ────────────────────────────────────────
+
+    #[test]
+    fn test_multiple_kinds_drain() {
+        let mut sched = Scheduler::new();
+        sched.mark_ready(1, WorkKind::LoadModel);
+        sched.mark_ready(2, WorkKind::CompileGraph);
+        sched.mark_ready(3, WorkKind::RunInference);
+
+        let leases = sched.drain(10);
+        assert_eq!(leases.len(), 3);
+
+        let kinds: std::collections::HashSet<WorkKind> = leases.iter().map(|l| l.kind).collect();
+        assert!(kinds.contains(&WorkKind::LoadModel));
+        assert!(kinds.contains(&WorkKind::CompileGraph));
+        assert!(kinds.contains(&WorkKind::RunInference));
+    }
 }

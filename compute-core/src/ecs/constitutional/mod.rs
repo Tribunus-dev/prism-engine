@@ -13,5 +13,9 @@ pub mod world_txn;
 pub use world_txn::*;
 pub mod lifecycle;
 pub use lifecycle::*;
+pub mod scheduler;
+pub use scheduler::*;
+pub mod driver;
+pub use driver::*;
 #[cfg(test)]
 mod tests;
