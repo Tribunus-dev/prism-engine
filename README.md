@@ -1,70 +1,109 @@
 # Prism Engine
 
-Palettized LUT inference runtime with Metal GPU acceleration (Apple Silicon) and CPU fallback. Cross-platform Linux build with `--features backend-cpu` (tracking).
+Prism Engine is the native compute runtime behind Tribunus. It combines a local
+model runtime and `.cimage` compiler with a transactional compute kernel for
+governing model artifacts, devices, residency, sessions, work, compilation, and
+execution evidence.
 
-One format (`.cimage`), supporting Metal GPU on Apple Silicon. CPU backend in development. OpenAI-compatible API.
+The project is optimized first for Apple Silicon. Its production-oriented path
+uses Metal, Accelerate, and optional Core ML integration; a portable CPU path is
+being hardened for Linux. Prism is under active development and its public API,
+model format, and operational contracts may still change.
 
-## Quick Start
+## What exists today
+
+| Surface | Current state |
+|---|---|
+| Local inference | The `prism` CLI can pull, compile, list, and run supported models, including an interactive chat mode and an OpenAI-compatible HTTP endpoint. |
+| Compute images | Prism compiles model inputs into `.cimage`, a versioned artifact format designed to carry weights, layouts, execution plans, and validation evidence. |
+| Apple Silicon execution | Metal dispatch is the primary accelerated path. The compute core also contains ANE/Core ML integration and heterogeneous device planning at differing maturity levels. |
+| Constitutional ECS | Artifact ingestion is replay-verified, device discovery is canonical, and model, session, work, compilation, multimodal, distributed, and ingress domains have transactional shadow paths. |
+| Recovery and evidence | The kernel includes durable-before-ack event storage, receipts, replay registration, restart recovery, stale-outcome rejection, and rebuildable projections. |
+| Integration | Rust libraries, a C ABI, a Swift bridge, Node-API bindings, CLI binaries, and HTTP server surfaces live in this workspace. |
+| Cross-platform execution | Linux CPU builds are continuously checked, but the portable runtime is still being completed. AMD ROCm, Intel, NVIDIA, and Tenstorrent support are development surfaces rather than supported production backends. |
+
+The important architectural distinction is that a backend result is not, by
+itself, authoritative. Prism’s compute kernel is being built so that state
+changes pass through validated transactions and durable receipts, while caches,
+queues, hardware handles, and analytical projections remain explicitly derived
+or ephemeral.
+
+## Repository map
+
+| Path | Role |
+|---|---|
+| `compute-core/` | The Tribunus compute kernel: ECS authority, compilation, backends, scheduling, evidence, replay, server, and hardware integration. |
+| `src/` | The focused Prism LUT runtime, model graph, tokenizer, CLI, and local server. |
+| `prism-ffi/` | C-compatible integration surface. |
+| `prism-bridge/` | Swift-facing bridge. |
+| `prism-napi/` | Node-API bindings. |
+| `evidence-schema/` | Shared evidence and receipt schemas. |
+| `kernels/` | Metal kernels, performance contracts, and implementation notes. |
+| `models/` | Model-family integrations and experimental generation crates. |
+
+For the governing architecture and its migration status, see
+[`compute-core/ARCHITECTURE.md`](compute-core/ARCHITECTURE.md). For the compute
+image ABI, see [`docs/cimage-layout-abi-v1.md`](docs/cimage-layout-abi-v1.md).
+
+## Quick start
+
+The most complete end-user path currently targets an Apple Silicon Mac with the
+Rust and Xcode command-line toolchains installed.
 
 ```bash
-# Pull a model from HuggingFace (downloads + compiles to .cimage)
-cargo run --release --bin prism --features full-apple -- pull Qwen/Qwen2.5-0.5B-Instruct
+# Download a supported Hugging Face model and compile it to .cimage.
+cargo run --release --bin prism --features full-apple -- \
+  pull Qwen/Qwen2.5-0.5B-Instruct
 
-# Run the server
-cargo run --release --bin prism --features full-apple -- run qwen2.5-0.5b-instruct
+# Start the local OpenAI-compatible server.
+cargo run --release --bin prism --features full-apple -- \
+  run qwen2.5-0.5b-instruct
 
-# Try it
+# Send a chat completion.
 curl http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"hello"}],"max_tokens":5}'
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"hello"}],"max_tokens":32}'
 ```
 
-## CLI
+Compiled models are stored under `${PRISM_HOME:-$HOME/.prism}/models/<name>/`.
+Each model directory contains its `model.cimage` alongside the configuration and
+tokenizer artifacts needed to load it.
 
-| Command | Description |
-|---------|-------------|
-| `prism pull <repo>` | Download + compile from HuggingFace |
-| `prism run <model>` | Start OpenAI-compatible server |
-| `prism list` | List compiled models |
-| `prism compile <source>` | Compile a model name, local dir, or `.gguf` file |
+The CLI also exposes `prism list`, `prism compile <source>`, and
+`prism run <model> --chat`. Run `cargo run --bin prism -- --help` for the current
+command surface.
 
-## Features
+## Build profiles
 
-See [compute-core/Cargo.toml](compute-core/Cargo.toml) for available feature flags. Key:
-- `prism-backend` — Full Metal GPU dispatch + ANE + server (macOS)
-- `server-dashboard` — Dashboard with PostgreSQL/DuckDB/Valkey adapters
-- `mlx-backend` — MLX framework support (experimental)
-- `backend-cpu` — CPU-only build (Linux, tracking)
+| Feature | Intended use |
+|---|---|
+| `full-apple` | Root CLI/server with the full Apple Silicon compute path. |
+| `prism-backend` | Compute-core Metal, server, image, and Core ML plumbing. |
+| `metal-dispatch` | Metal acceleration for the focused root LUT runtime. |
+| `mlx-backend` | Experimental MLX-backed research paths. |
+| `backend-cpu` | Portable CPU compilation and ongoing Linux hardening. |
+| `server-dashboard` | Server plus dashboard adapters and projections. |
 
-- `server` — OpenAI-compatible HTTP server (`/v1/chat/completions`)
-- `ane` — Apple Neural Engine backend (macOS only)
-- `metal-dispatch` — Metal GPU GEMV acceleration for the root LUT engine (macOS only; requires the Xcode toolchain)
-- `gguf-compile` — enable `prism compile <file.gguf>` support
-- `prism-backend` — full compute-core execution path (Metal + ANE + Accelerate)
-- `full` — `server` + `ane`
-- `full-apple` — `prism-backend` + `ane` + `server` (the complete Apple-Silicon runtime)
+Feature ownership differs between the root crate and `tribunus-compute-core`.
+Treat the two `Cargo.toml` files as the source of truth when embedding a specific
+surface. Off macOS, Metal kernels are replaced with a linkable placeholder.
+`PRISM_MOCK_BUILD=1` forces that development mode on macOS; artifacts produced
+that way must not be shipped as accelerated builds.
 
-## Platform Support
+## Project status
 
-| Platform | Status |
-|----------|--------|
-| macOS (Apple Silicon) | **Supported** — Metal GPU + ANE via `full-apple` |
-| Linux / other (CPU) | **In progress** — portable CPU path; builds without the Metal toolchain |
-| NVIDIA / AMD / Intel GPU | **Planned** — see the cross-platform hardening roadmap |
+Prism Engine is pre-1.0 research and systems software. Continuous integration
+checks the Apple Silicon `prism-backend` library and a narrower Linux CPU build.
+That does not imply that every declared binary, backend, model family, or
+experimental feature is production-ready. Supported behavior is the behavior
+covered by the selected build, test, hardware, and receipt gates.
 
-> Off macOS the Metal kernels cannot be compiled, so the build emits a
-> placeholder kernel library to keep the crate linkable. Set `PRISM_MOCK_BUILD=1`
-> to force this on macOS for a fast, non-GPU dev build — never ship a mock build.
-## Model Format
-
-Models are stored in `~/.prism/models/<name>/`:
-
-```
-model.cimage       Compiled palettized weights
-config.json        HuggingFace model config
-tokenizer.json     HuggingFace tokenizer
-```
+The authority migration is also intentionally incremental. Several domains run
+in shadow mode while legacy registries are removed. The status in
+[`CAMPAIGN.md`](CAMPAIGN.md) records that cutover work; “shadow” means the new
+transactional representation exists, not that it is already the sole runtime
+authority.
 
 ## License
 
-AGPL-3.0-only. See [LICENSE](LICENSE).
+Prism Engine is licensed under AGPL-3.0-only. See [`LICENSE`](LICENSE).

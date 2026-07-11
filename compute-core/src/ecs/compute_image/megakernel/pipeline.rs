@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Dispatch orchestration for the persistent GPU megakernel (Metal 4 + MPP TensorOps).
 //!
 //! The [`Megakernel`] struct owns the compiled Metal compute pipeline state
@@ -22,6 +26,11 @@ use metal::*;
 use std::sync::mpsc;
 /// Logits per slot: 1 main head + N MTP heads, each VOCAB_SIZE half values.
 pub const LOGITS_PER_SLOT: u64 = (1 + NUM_MTP_HEADS as u64) * VOCAB_SIZE as u64 * 2;
+use crate::ecs::canonical::execution_graph::{ExecutionLane, RegionId};
+use crate::ecs::canonical::kernel_abi::{
+    BufferBinding, DispatchGeometryPolicy, KernelAbi, KernelGroup, KernelImplementationClass,
+    KernelSemanticId, SpecializationParameters,
+};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Size of the submission ring buffer (must match shader constant).
@@ -1115,4 +1124,91 @@ pub fn create_tts_pipeline(
     weights: TtsWeightBindings,
 ) -> Result<TtsMegakernel, String> {
     TtsMegakernel::new(device, weights)
+}
+pub fn megakernel_to_kernel_group() -> KernelGroup {
+    KernelGroup {
+        semantic_id: KernelSemanticId("prism.transformer.gemma4.decode".into()),
+        implementation_class: KernelImplementationClass::PersistentTransformer,
+        operations: vec![],
+        specialization: SpecializationParameters {
+            tile_m: Some(32),
+            tile_k: Some(64),
+            tile_n: Some(32),
+            group_size: Some(128),
+            metadata_layout: None,
+        },
+        abi: KernelAbi {
+            version: 1,
+            buffers: vec![
+                BufferBinding {
+                    slot: 0,
+                    name: "weights".into(),
+                    byte_size: 0,
+                    optional: false,
+                },
+                BufferBinding {
+                    slot: 1,
+                    name: "input".into(),
+                    byte_size: 0,
+                    optional: false,
+                },
+                BufferBinding {
+                    slot: 2,
+                    name: "output".into(),
+                    byte_size: 0,
+                    optional: false,
+                },
+            ],
+            constants: vec![],
+            threadgroup_memory: vec![],
+            dispatch_geometry: DispatchGeometryPolicy::FromConstant,
+            threads_per_threadgroup: (256, 1, 1),
+        },
+        source_region: RegionId(0),
+        target_lane: ExecutionLane::MetalGpu,
+    }
+}
+
+pub fn per_layer_to_kernel_group() -> KernelGroup {
+    KernelGroup {
+        semantic_id: KernelSemanticId("prism.decoder.per_layer.v1".into()),
+        implementation_class: KernelImplementationClass::PerLayer,
+        operations: vec![],
+        specialization: SpecializationParameters {
+            tile_m: Some(32),
+            tile_k: Some(64),
+            tile_n: Some(32),
+            group_size: Some(128),
+            metadata_layout: None,
+        },
+        abi: KernelAbi {
+            version: 1,
+            buffers: vec![
+                BufferBinding {
+                    slot: 0,
+                    name: "weights".into(),
+                    byte_size: 0,
+                    optional: false,
+                },
+                BufferBinding {
+                    slot: 1,
+                    name: "input".into(),
+                    byte_size: 0,
+                    optional: false,
+                },
+                BufferBinding {
+                    slot: 2,
+                    name: "output".into(),
+                    byte_size: 0,
+                    optional: false,
+                },
+            ],
+            constants: vec![],
+            threadgroup_memory: vec![],
+            dispatch_geometry: DispatchGeometryPolicy::FromConstant,
+            threads_per_threadgroup: (256, 1, 1),
+        },
+        source_region: RegionId(0),
+        target_lane: ExecutionLane::MetalGpu,
+    }
 }

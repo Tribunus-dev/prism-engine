@@ -4,6 +4,7 @@ mod tests {
         EventLogEntry, EventStore, InMemoryEventStore, ProjectionCheckpoint, ReplayEngine,
         ReplayRegistry, Snapshot,
     };
+    use crate::ecs::constitutional::schema::SchemaCatalogue;
     use crate::ecs::constitutional::*;
     use crate::ecs::receipt_bus::*;
     use crate::ecs::{CompEntity, CompWorld, EntityKind};
@@ -20,7 +21,7 @@ mod tests {
             timestamp: Timestamp::now(),
             aggregate_sequence: AggregateSequence(1),
             payload: "hello".to_string(),
-    }
+        }
     }
 
     // ── WorldEpoch ─────────────────────────────────────────────────────────
@@ -33,8 +34,25 @@ mod tests {
         type Class = DurableClass;
     }
     impl DurableComponent for TestDurable {
-        const SCHEMA_KEY: SchemaKey =
-            SchemaKey { namespace: "prism.test", id: 1, version: 1 };
+        const SCHEMA_KEY: SchemaKey = SchemaKey {
+            namespace: "prism.test",
+            id: 1,
+            version: 1,
+        };
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    struct TestDurable2(u64);
+    impl crate::ecs::Component for TestDurable2 {}
+    impl ClassifiedComponent for TestDurable2 {
+        type Class = DurableClass;
+    }
+    impl DurableComponent for TestDurable2 {
+        const SCHEMA_KEY: SchemaKey = SchemaKey {
+            namespace: "prism.test",
+            id: 2,
+            version: 1,
+        };
     }
 
     #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -47,7 +65,7 @@ mod tests {
 
     /// Create a world with one entity carrying both a durable and a transient
     /// component.  Returns (world, entity_id).
-fn make_world_both() -> (CompWorld, u64) {
+    fn make_world_both() -> (CompWorld, u64) {
         let mut world = CompWorld::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
@@ -57,7 +75,6 @@ fn make_world_both() -> (CompWorld, u64) {
         world.transit(txn).unwrap();
         (world, eid)
     }
-
 
     #[test]
     fn test_world_epoch_ordering() {
@@ -329,8 +346,8 @@ fn make_world_both() -> (CompWorld, u64) {
 
         let change = &journal[0];
         assert_eq!(change.entity, 1);
-        assert_eq!(change.schema_id, ComponentSchemaId(10));
-        assert_eq!(change.schema_version, SchemaVersion(1));
+        assert_eq!(change.schema_key.id, 10);
+        assert_eq!(change.schema_key.version, 1);
         assert_eq!(change.change_type, ChangeType::Insert);
         assert_eq!(change.world_epoch, committed.0);
     }
@@ -410,8 +427,8 @@ fn make_world_both() -> (CompWorld, u64) {
 
         let entry = &journal[0];
         assert_eq!(entry.entity, 1);
-        assert_eq!(entry.schema_id, ComponentSchemaId(42));
-        assert_eq!(entry.schema_version, SchemaVersion(2));
+        assert_eq!(entry.schema_key.id, 42);
+        assert_eq!(entry.schema_key.version, 2);
         assert_eq!(entry.change_type, ChangeType::Insert);
         assert_eq!(entry.world_epoch, committed.0);
 
@@ -862,8 +879,6 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_prepare_failed_read_dep_leaves_state_unchanged() {
         let mut world = CompWorld::new();
-        let schemas = SchemaRegistry::new();
-
         // Spawn entity 1
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
@@ -882,7 +897,7 @@ fn make_world_both() -> (CompWorld, u64) {
             observed_version: 5, // entity 3 doesn't exist, version is 0
         });
 
-        let result = world.prepare(txn, &schemas);
+        let result = world.prepare(txn, None);
         assert!(result.is_err(), "prepare with stale read dep must fail");
 
         // State must be unchanged
@@ -893,11 +908,10 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_prepare_does_not_change_epoch() {
         let mut world = make_world();
-        let schemas = SchemaRegistry::new();
         let epoch_before = world.current_epoch();
 
         let txn = WorldTxn::new(&world);
-        let _prepared = world.prepare(txn, &schemas).unwrap();
+        let _prepared = world.prepare(txn, None).unwrap();
 
         assert_eq!(
             world.current_epoch(),
@@ -909,13 +923,12 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_prepare_does_not_advance_next_id() {
         let mut world = make_world();
-        let schemas = SchemaRegistry::new();
         let next_before = world.next_entity_id();
 
         // Prepare a txn with a spawn at ID 200
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(200, EntityKind::Model);
-        let _prepared = world.prepare(txn, &schemas).unwrap();
+        let _prepared = world.prepare(txn, None).unwrap();
 
         assert_eq!(
             world.next_entity_id(),
@@ -927,11 +940,10 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_apply_advances_epoch_exactly_once() {
         let mut world = make_world();
-        let schemas = SchemaRegistry::new();
         let epoch_before = world.current_epoch();
 
         let txn = WorldTxn::new(&world);
-        let prepared = world.prepare(txn, &schemas).unwrap();
+        let prepared = world.prepare(txn, None).unwrap();
         let receipt = world.apply_prepared(prepared);
 
         assert_eq!(
@@ -945,13 +957,12 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_drop_prepared_changes_nothing() {
         let mut world = make_world();
-        let schemas = SchemaRegistry::new();
         let epoch_before = world.current_epoch();
         let next_before = world.next_entity_id();
 
         // Prepare but drop the result
         let txn = WorldTxn::new(&world);
-        let prepared = world.prepare(txn, &schemas).unwrap();
+        let prepared = world.prepare(txn, None).unwrap();
         std::mem::drop(prepared);
 
         assert_eq!(world.current_epoch(), epoch_before);
@@ -963,10 +974,8 @@ fn make_world_both() -> (CompWorld, u64) {
         // This is a compile-time guarantee: PreparedWorldTxn::apply() takes
         // self by value. The test verifies the API contract.
         let mut world = make_world();
-        let schemas = SchemaRegistry::new();
-
         let txn = WorldTxn::new(&world);
-        let prepared = world.prepare(txn, &schemas).unwrap();
+        let prepared = world.prepare(txn, None).unwrap();
         world.apply_prepared(prepared);
 
         // Uncommenting the following line would fail to compile:
@@ -977,11 +986,9 @@ fn make_world_both() -> (CompWorld, u64) {
     fn test_prepare_no_mutation_guarantee() {
         // Verify prepare takes &self (shared ref), not &mut self
         let world = CompWorld::new();
-        let schemas = SchemaRegistry::new();
-
         let txn = WorldTxn::new(&world);
         // This compiles only if prepare() borrows immutably:
-        let _prepared = world.prepare(txn, &schemas).unwrap();
+        let _prepared = world.prepare(txn, None).unwrap();
 
         // After prepare, world is still usable (not consumed)
         assert_eq!(world.current_epoch(), WorldEpoch(1));
@@ -990,8 +997,6 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_journal_and_event_ordering_deterministic() {
         let mut world = CompWorld::new();
-        let schemas = SchemaRegistry::new();
-
         // Three inserts in one transaction
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
@@ -1015,7 +1020,7 @@ fn make_world_both() -> (CompWorld, u64) {
             payload: serde_json::Value::Null,
         });
 
-        let prepared = world.prepare(txn, &schemas).unwrap();
+        let prepared = world.prepare(txn, None).unwrap();
         let journal = prepared.journal_length();
         let events = prepared.event_count();
 
@@ -1033,19 +1038,17 @@ fn make_world_both() -> (CompWorld, u64) {
 
     #[test]
     fn test_equivalent_preparations_produce_equivalent_receipts() {
-        let schemas = SchemaRegistry::new();
-
         let mut world1 = make_world();
         let receipt1 = {
             let txn = WorldTxn::new(&world1);
-            let prepared = world1.prepare(txn, &schemas).unwrap();
+            let prepared = world1.prepare(txn, None).unwrap();
             world1.apply_prepared(prepared)
         };
 
         let mut world2 = make_world();
         let receipt2 = {
             let txn = WorldTxn::new(&world2);
-            let prepared = world2.prepare(txn, &schemas).unwrap();
+            let prepared = world2.prepare(txn, None).unwrap();
             world2.apply_prepared(prepared)
         };
 
@@ -4244,14 +4247,15 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.put_durable(eid, TestDurable(99));
         world.transit(txn).unwrap();
         let journal = world.last_journal();
-        assert_eq!(journal.len(), 1, "durable insert should produce one journal entry");
         assert_eq!(
-            journal[0].schema_id,
-            ComponentSchemaId(TestDurable::SCHEMA_KEY.id as u64),
+            journal.len(),
+            1,
+            "durable insert should produce one journal entry"
         );
+        assert_eq!(journal[0].schema_key.id, TestDurable::SCHEMA_KEY.id,);
         assert_eq!(
-            journal[0].schema_version,
-            SchemaVersion(TestDurable::SCHEMA_KEY.version),
+            journal[0].schema_key.version,
+            TestDurable::SCHEMA_KEY.version,
         );
     }
 
@@ -4268,7 +4272,11 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_schema_catalogue_rejects_duplicate_keys() {
         let r1 = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "test", id: 1, version: 1 },
+            key: SchemaKey {
+                namespace: "test",
+                id: 1,
+                version: 1,
+            },
             type_id: std::any::TypeId::of::<TestDurable>(),
             type_name: "TestDurable",
             encode: |_| vec![],
@@ -4276,7 +4284,11 @@ fn make_world_both() -> (CompWorld, u64) {
             replay_apply: |_, _, _| {},
         };
         let r2 = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "test", id: 1, version: 1 },
+            key: SchemaKey {
+                namespace: "test",
+                id: 1,
+                version: 1,
+            },
             type_id: std::any::TypeId::of::<TestDurable>(),
             type_name: "TestDurable",
             encode: |_| vec![],
@@ -4291,7 +4303,11 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_schema_catalogue_rejects_one_type_two_keys() {
         let r1 = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "test", id: 1, version: 1 },
+            key: SchemaKey {
+                namespace: "test",
+                id: 1,
+                version: 1,
+            },
             type_id: std::any::TypeId::of::<TestDurable>(),
             type_name: "TestDurable",
             encode: |_| vec![],
@@ -4299,7 +4315,11 @@ fn make_world_both() -> (CompWorld, u64) {
             replay_apply: |_, _, _| {},
         };
         let r2 = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "other", id: 1, version: 1 },
+            key: SchemaKey {
+                namespace: "other",
+                id: 1,
+                version: 1,
+            },
             type_id: std::any::TypeId::of::<TestDurable>(),
             type_name: "TestDurable",
             encode: |_| vec![],
@@ -4307,13 +4327,20 @@ fn make_world_both() -> (CompWorld, u64) {
             replay_apply: |_, _, _| {},
         };
         let result = SchemaCatalogue::build(vec![r1, r2]);
-        assert!(result.is_err(), "one type under two keys should be rejected");
+        assert!(
+            result.is_err(),
+            "one type under two keys should be rejected"
+        );
     }
 
     #[test]
     fn test_schema_catalogue_rejects_version_zero() {
         let r = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "test", id: 1, version: 0 },
+            key: SchemaKey {
+                namespace: "test",
+                id: 1,
+                version: 0,
+            },
             type_id: std::any::TypeId::of::<TestDurable>(),
             type_name: "TestDurable",
             encode: |_| vec![],
@@ -4327,7 +4354,11 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_schema_catalogue_rejects_reserved_namespace() {
         let r = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "_reserved", id: 1, version: 1 },
+            key: SchemaKey {
+                namespace: "_reserved",
+                id: 1,
+                version: 1,
+            },
             type_id: std::any::TypeId::of::<TestDurable>(),
             type_name: "TestDurable",
             encode: |_| vec![],
@@ -4341,7 +4372,11 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_schema_catalogue_deterministic_digest() {
         let r = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "test", id: 1, version: 1 },
+            key: SchemaKey {
+                namespace: "test",
+                id: 1,
+                version: 1,
+            },
             type_id: std::any::TypeId::of::<TestDurable>(),
             type_name: "TestDurable",
             encode: |_| vec![],
@@ -4363,7 +4398,11 @@ fn make_world_both() -> (CompWorld, u64) {
     #[test]
     fn test_catalogue_digest_order_independent() {
         let r_a = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "alpha", id: 1, version: 1 },
+            key: SchemaKey {
+                namespace: "alpha",
+                id: 1,
+                version: 1,
+            },
             type_id: std::any::TypeId::of::<TestDurable>(),
             type_name: "TestDurable",
             encode: |_| vec![],
@@ -4371,7 +4410,11 @@ fn make_world_both() -> (CompWorld, u64) {
             replay_apply: |_, _, _| {},
         };
         let r_b = DurableSchemaRegistration {
-            key: SchemaKey { namespace: "beta", id: 1, version: 1 },
+            key: SchemaKey {
+                namespace: "beta",
+                id: 1,
+                version: 1,
+            },
             type_id: std::any::TypeId::of::<TestTransient>(),
             type_name: "TestTransient",
             encode: |_| vec![],
@@ -4411,24 +4454,14 @@ fn make_world_both() -> (CompWorld, u64) {
             world.transit(txn).unwrap();
             world.last_journal().to_vec()
         };
-        assert_eq!(journal_a, journal_b, "equivalent txn => equivalent journals");
+        assert_eq!(
+            journal_a, journal_b,
+            "equivalent txn => equivalent journals"
+        );
     }
 
     #[test]
     fn test_journal_ordering_deterministic() {
-        // Create a second durable type for multi-insert ordering
-        #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-        struct TestDurable2(u64);
-        impl crate::ecs::Component for TestDurable2 {}
-        impl ClassifiedComponent for TestDurable2 {
-            type Class = DurableClass;
-        }
-
-        impl DurableComponent for TestDurable2 {
-            const SCHEMA_KEY: SchemaKey =
-                SchemaKey { namespace: "prism.test", id: 2, version: 1 };
-        }
-
         let mut world = CompWorld::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
@@ -4439,8 +4472,8 @@ fn make_world_both() -> (CompWorld, u64) {
         let journal = world.last_journal();
         assert_eq!(journal.len(), 2);
         // Order matches insertion order
-        assert_eq!(journal[0].schema_id, ComponentSchemaId(TestDurable::SCHEMA_KEY.id as u64));
-        assert_eq!(journal[1].schema_id, ComponentSchemaId(TestDurable2::SCHEMA_KEY.id as u64));
+        assert_eq!(journal[0].schema_key.id, TestDurable::SCHEMA_KEY.id);
+        assert_eq!(journal[1].schema_key.id, TestDurable2::SCHEMA_KEY.id);
     }
 
     // ── Durable / transient behavior tests (items 17–25) ───────────────────
@@ -4521,8 +4554,7 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.stage_spawn(eid, EntityKind::Node);
         txn.put_durable(eid, TestDurable(42));
         replayed.transit(txn).unwrap();
-        let val = replayed
-            .get_component::<TestDurable>(CompEntity(eid));
+        let val = replayed.get_component::<TestDurable>(CompEntity(eid));
         assert!(val.is_some(), "durable component reconstructed by replay");
         assert_eq!(val.unwrap().0, 42);
     }
@@ -4537,7 +4569,10 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.put_durable(eid, TestDurable(42));
         replayed.transit(txn).unwrap();
         let transient = replayed.get_component::<TestTransient>(CompEntity(eid));
-        assert!(transient.is_none(), "transient component absent after replay");
+        assert!(
+            transient.is_none(),
+            "transient component absent after replay"
+        );
     }
 
     #[test]
@@ -4551,8 +4586,12 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.put_transient(eid, TestTransient("hidden".into()));
         world.transit(txn).unwrap();
         let journal = world.last_journal();
-        assert_eq!(journal.len(), 1, "only durable components appear in durable journal");
-        assert_eq!(journal[0].schema_id, ComponentSchemaId(TestDurable::SCHEMA_KEY.id as u64));
+        assert_eq!(
+            journal.len(),
+            1,
+            "only durable components appear in durable journal"
+        );
+        assert_eq!(journal[0].schema_key.id, TestDurable::SCHEMA_KEY.id);
     }
 
     #[test]
@@ -4565,11 +4604,15 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.put_transient(eid, TestTransient("memory".into()));
         world.transit(txn).unwrap();
         assert!(
-            world.get_component::<TestDurable>(CompEntity(eid)).is_some(),
+            world
+                .get_component::<TestDurable>(CompEntity(eid))
+                .is_some(),
             "durable present"
         );
         assert!(
-            world.get_component::<TestTransient>(CompEntity(eid)).is_some(),
+            world
+                .get_component::<TestTransient>(CompEntity(eid))
+                .is_some(),
             "transient present"
         );
     }
@@ -4584,8 +4627,12 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.put_transient(eid, TestTransient("lost".into()));
         world.transit(txn).unwrap();
         // Both present in live world
-        assert!(world.get_component::<TestDurable>(CompEntity(eid)).is_some());
-        assert!(world.get_component::<TestTransient>(CompEntity(eid)).is_some());
+        assert!(world
+            .get_component::<TestDurable>(CompEntity(eid))
+            .is_some());
+        assert!(world
+            .get_component::<TestTransient>(CompEntity(eid))
+            .is_some());
 
         // Replay: only durable portion
         let mut replayed = CompWorld::new();
@@ -4594,11 +4641,15 @@ fn make_world_both() -> (CompWorld, u64) {
         txn2.put_durable(eid, TestDurable(42));
         replayed.transit(txn2).unwrap();
         assert!(
-            replayed.get_component::<TestDurable>(CompEntity(eid)).is_some(),
+            replayed
+                .get_component::<TestDurable>(CompEntity(eid))
+                .is_some(),
             "durable survives replay"
         );
         assert!(
-            replayed.get_component::<TestTransient>(CompEntity(eid)).is_none(),
+            replayed
+                .get_component::<TestTransient>(CompEntity(eid))
+                .is_none(),
             "transient does not survive replay"
         );
     }
@@ -4628,12 +4679,14 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.expected_epoch = WorldEpoch(1); // stale — world is at epoch 2
         txn.put_durable(next_eid, TestDurable(77));
 
-        let schemas = SchemaRegistry::new();
-        let result = world.prepare(txn, &schemas);
+        let result = world.prepare(txn, None);
         assert!(result.is_err(), "stale-epoch txn should fail prepare");
         // World must be unchanged: epoch stayed at 2, entity 2 never spawned
         assert_eq!(world.current_epoch(), WorldEpoch(2), "epoch unchanged");
-        assert!(!world.has_entity(CompEntity(next_eid)), "entity not created");
+        assert!(
+            !world.has_entity(CompEntity(next_eid)),
+            "entity not created"
+        );
     }
 
     #[test]
@@ -4651,10 +4704,12 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.expected_epoch = WorldEpoch(1); // stale
         txn.put_transient(next_eid, TestTransient("doomed".into()));
 
-        let schemas = SchemaRegistry::new();
-        let result = world.prepare(txn, &schemas);
+        let result = world.prepare(txn, None);
         assert!(result.is_err(), "stale-epoch txn should fail prepare");
-        assert!(!world.has_entity(CompEntity(next_eid)), "entity not created");
+        assert!(
+            !world.has_entity(CompEntity(next_eid)),
+            "entity not created"
+        );
     }
 
     #[test]
@@ -4674,11 +4729,13 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.stage_spawn(next_eid, EntityKind::Node);
         txn.put_durable(next_eid, TestDurable(99));
 
-        let schemas = SchemaRegistry::new();
-        let result = world.prepare(txn, &schemas);
+        let result = world.prepare(txn, None);
         assert!(result.is_err(), "stale-epoch txn should fail");
         // The new entity must NOT exist because the transaction never applied
-        assert!(!world.has_entity(CompEntity(next_eid)), "entity not created after failed prepare");
+        assert!(
+            !world.has_entity(CompEntity(next_eid)),
+            "entity not created after failed prepare"
+        );
         assert_eq!(world.entity_count(), 1, "only original entity exists");
     }
 
@@ -4709,17 +4766,123 @@ fn make_world_both() -> (CompWorld, u64) {
         txn.stage_spawn(eid, EntityKind::Node);
         txn.put_durable(eid, TestDurable(42));
         txn.put_transient(eid, TestTransient("dropped".into()));
-
-        let schemas = SchemaRegistry::new();
-        let prepared = world.prepare(txn, &schemas).expect("preparation should succeed");
+        let prepared = world
+            .prepare(txn, None)
+            .expect("preparation should succeed");
         drop(prepared);
 
-        assert_eq!(world.current_epoch(), epoch_before, "epoch unchanged after drop");
-        assert_eq!(world.entity_count(), count_before, "no entities spawned after drop");
+        assert_eq!(
+            world.current_epoch(),
+            epoch_before,
+            "epoch unchanged after drop"
+        );
+        assert_eq!(
+            world.entity_count(),
+            count_before,
+            "no entities spawned after drop"
+        );
         assert!(
             world.last_journal().is_empty(),
             "journal remains empty after drop"
         );
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Phase 1 exit-gate new tests — API validation, conflict detection,
+    //  schema enforcement, and namespace tracking
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Compile-fail demonstration: put_transient requires TransientComponent,
+    // which TestDurable (a DurableComponent) does not satisfy.
+    // Uncommenting triggers:
+    //   error[E0277]: the trait bound `TestDurable: TransientComponent` is not satisfied
+    // fn test_durable_not_transient() {
+    //     let mut world = CompWorld::new();
+    //     let eid = WorldTxn::next_entity_id(&world);
+    //     let mut txn = WorldTxn::new(&world);
+    //     txn.stage_spawn(eid, EntityKind::Node);
+    //     txn.put_transient(eid, TestDurable(42));
+    // }
+
+    #[test]
+    fn test_remove_never_created_component_does_not_panic() {
+        // Removing a component type that was never inserted on the entity
+        // must silently succeed (no-op) rather than panic.
+        let mut world = CompWorld::new();
+        let eid = WorldTxn::next_entity_id(&world);
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(eid, EntityKind::Node);
+        txn.put_durable(eid, TestDurable(42));
+        world.transit(txn).unwrap();
+
+        // Remove a component type never inserted on this entity
+        let mut txn = WorldTxn::new(&world);
+        txn.remove_durable::<TestDurable2>(eid);
+        let result = world.transit(txn);
+        assert!(
+            result.is_ok(),
+            "remove of never-inserted component should succeed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_conflicting_inserts_rejected() {
+        let mut world = CompWorld::new();
+        let eid = WorldTxn::next_entity_id(&world);
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(eid, EntityKind::Node);
+        txn.put_durable(eid, TestDurable(1));
+        txn.put_durable(eid, TestDurable(2)); // same entity + same type => conflict
+        let result = world.prepare(txn, None);
+        assert!(
+            matches!(result, Err(WorldTxnError::Conflict { .. })),
+            "expected Conflict error, got {:?}",
+            result.as_ref().err()
+        );
+    }
+
+    #[test]
+    fn test_schema_catalogue_enforces_registration() {
+        // Build a SchemaCatalogue that does NOT include TestDurable.
+        // Then try to insert TestDurable — should fail with UnregisteredSchema.
+        let cat = SchemaCatalogue::build(vec![]).unwrap();
+        assert_eq!(cat.len(), 0, "catalogue should be empty");
+
+        let mut world = CompWorld::new();
+        let eid = WorldTxn::next_entity_id(&world);
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(eid, EntityKind::Node);
+        txn.put_durable(eid, TestDurable(42));
+        let result = world.prepare(txn, Some(&cat));
+        assert!(
+            matches!(result, Err(WorldTxnError::UnregisteredSchema { .. })),
+            "expected UnregisteredSchema error, got {:?}",
+            result.as_ref().err()
+        );
+    }
+
+    #[test]
+    fn test_namespace_preserved_in_journal() {
+        // Insert a durable component with a known namespace and verify
+        // the journal entry's schema_key.namespace matches.
+        let mut world = CompWorld::new();
+        let eid = WorldTxn::next_entity_id(&world);
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(eid, EntityKind::Node);
+        txn.put_durable(eid, TestDurable(42));
+        world.transit(txn).unwrap();
+        let journal = world.last_journal();
+        assert_eq!(journal.len(), 1);
+        assert_eq!(
+            journal[0].schema_key.namespace,
+            TestDurable::SCHEMA_KEY.namespace,
+            "namespace preserved in journal entry"
+        );
+        assert_eq!(journal[0].schema_key.id, TestDurable::SCHEMA_KEY.id);
+        assert_eq!(
+            journal[0].schema_key.version,
+            TestDurable::SCHEMA_KEY.version
+        );
+    }
 }

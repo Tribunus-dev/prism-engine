@@ -12,6 +12,16 @@ members = [
     "mlx-rs-fork/mlx-sys",
     "mlx-rs-fork/mlx-macros",
     "mlx-rs-fork/mlx-internal-macros",
+    "prism-mcp-model",
+    "prism-mcp-build",
+    "prism-mcp-kernel",
+    "prism-mcp-admission",
+    "prism-mcp-bench",
+    "prism-mcp-replay",
+    "prism-mcp-trace",
+    "prism-mcp-lab",
+    "prism-mcp-core",
+    "prism-mcpd",
 ]
 
 [workspace.package]
@@ -21,8 +31,8 @@ license = "AGPL-3.0-only"
 authors = ["Tribunus Dev"]
 repository = "https://github.com/Tribunus-dev/prism-engine"
 documentation = "https://github.com/Tribunus-dev/prism-engine"
-keywords = ["inference", "apple-silicon"]
-categories = ["science", "wasm"]
+keywords = ["inference", "apple-silicon", "metal", "machine-learning"]
+categories = ["science"]
 
 [workspace.dependencies]
 mlx-internal-macros = { path = "mlx-rs-fork/mlx-internal-macros" }
@@ -68,7 +78,7 @@ name = "prism-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Palettized LUT inference runtime with Metal GPU acceleration"
+description = "Native compute-image runtime and governed inference kernel for Apple Silicon"
 repository = "https://github.com/Tribunus-dev/prism-engine"
 
 [lib]

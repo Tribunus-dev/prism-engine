@@ -1,11 +1,14 @@
-//! AOT Metal compiler wrapper — compiles kernel source variants at CImage build time.
+//! AOT (ahead-of-time) compiler types — transitional.
 //!
-//! Shells out to `xcrun metal` on the build machine to produce `.metallib`
-//! payloads for each target profile. This runs only during CImage creation,
-//! never on the end-user device.
+//! These types are being superseded by the canonical types in
+//! `ecs::canonical::kernel_abi` and `ecs::metal_backend`.
 //!
-//! The actual compilation logic lives in `ecs::system::backend_compile::MetalCompiler`.
-//! This module retains only the type definitions consumed by the AOT pipeline.
+//! - `CompiledKernelVariant` → `canonical::kernel_abi::CompiledKernelArtifact`
+//! - `CompileError` → `metal_backend::BackendCompileError`
+//! - Compilation logic → `metal_backend::MetalBackendCompiler`
+//!
+//! This module remains for backward compatibility during migration.
+//! New code should use `ecs::metal_backend::MetalBackendCompiler`.
 
 use serde::{Deserialize, Serialize};
 

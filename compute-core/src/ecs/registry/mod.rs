@@ -13,6 +13,7 @@ pub mod governor;
 pub mod overlay;
 pub mod types;
 
+#[cfg(feature = "legacy_mutations")]
 pub use compiler::*;
 pub use disclosure::*;
 pub use governor::*;

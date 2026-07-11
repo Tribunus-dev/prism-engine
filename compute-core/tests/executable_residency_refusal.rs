@@ -80,8 +80,9 @@ mod tests {
     #[test]
     fn test_missing_mandatory_object() {
         let plan = make_plan_with_mandatory_bytes(1024);
-        let result = ResidencyAdmission::new().check_admission(&plan, 1024 * 1024);
+        let result = ResidencyAdmission::new().check_admission(&plan, 100 * 1024 * 1024);
         // Should succeed since plan has mandatory objects and enough memory
+        // (KV cache requires 4MB + activation arena 1KB -> 100MB is ample)
         assert!(matches!(result, ResidencyAdmissionResult::Admitted { .. }));
     }
 }

@@ -99,6 +99,8 @@ pub struct QuantizedTensor {
 pub enum OqError {
     #[error("Unsupported quantization level: {0:?}")]
     UnsupportedLevel(OqLevel),
+    #[error("Feature not implemented: {0}")]
+    Unimplemented(String),
     #[error("Tensor shape mismatch: expected {expected:?}, got {got:?}")]
     ShapeMismatch {
         expected: Vec<usize>,
@@ -118,12 +120,11 @@ pub enum OqError {
 /// 3. Quantize weights, store scale + zero-point
 /// 4. Apply expert down_proj boost for fractional levels
 pub fn apply_oq(_weights: &[u8], _config: &OqConfig) -> Result<Vec<QuantizedTensor>, OqError> {
-    // TODO: Implement per oq.py reference
-    // - Build layer quant plan
-    // - Compute MSE-optimal clip thresholds
-    // - Apply K-quant style quantization per group
-    // - Return quantized tensors
-    todo!("oQ quantization not yet implemented")
+    // oQ quantization is not yet implemented. When the feature is enabled,
+    // this stub returns an error rather than panicking.
+    return Err(OqError::Unimplemented(
+        "oQ quantization not yet implemented".into(),
+    ));
 }
 
 #[cfg(test)]

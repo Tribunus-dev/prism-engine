@@ -1,0 +1,450 @@
+{
+  "schema": "tribunus.semantic_review.findings.v1",
+  "packet_id": "tribunus-gemini-ir",
+  "artifact_id": "10_review_findings.json",
+  "generated_at": "2026-07-10T23:11:10.829Z",
+  "repo_root_name": "prism-engine",
+  "git_head_sha": "dd8ff86e25353617616bd527919cbd88836b30f7",
+  "git_branch": "main",
+  "dirty": true,
+  "generator_version": "code_review_export@gemini_structured_ir_v1",
+  "summary": {
+    "readiness": "candidate_for_gate_acceptance",
+    "critical_count": 0,
+    "warning_count": 0,
+    "info_count": 0,
+    "top_findings": []
+  },
+  "findings": [],
+  "unresolved_imports": {
+    "total": 0,
+    "by_resolution_status": {},
+    "by_category": {},
+    "by_severity": {},
+    "items": []
+  },
+  "required_path_status": [
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/bootstrap-builder.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/source-graph.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/verify-packets.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/gemini-ir-builder.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/gemini-attachment-builder.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/progress.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/archive.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/types.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/constants.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/classification.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/policy.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/source-excerpt.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/treesitter.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/review-export/import-analysis.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/indexer.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/snapshot.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/parsers/tree-sitter-languages.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/parsers/tree-sitter.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/parsers/typescript-program.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/store/code-index-types.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/store/code-index-store.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/store/migrations/0001_code_files.sql",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/store/migrations/0002_symbols_imports_references.sql",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/code-intelligence/store/migrations/0003_tests_findings_snapshots.sql",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/store/pglite-types.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/store/pglite-runtime.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/store/pglite-store.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/store/pglite-migrations.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/store/migrations/0001_core.sql",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/store/migrations/0002_indexes.sql",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/services/config.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/server/registry.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/server/server.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/server/dispatch.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/paths.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/receipts.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/capabilities.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/store.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/subprocess.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/secrets.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/sync.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/invocation-context.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/governance/limits.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/shared/errors.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "packages/tribunus-mcp/src/shared/digests.ts",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "package.json",
+      "status": "missing",
+      "artifact_id": "03_module_graph.json",
+      "severity_if_missing": "warning"
+    },
+    {
+      "path": "AGENTS.md",
+      "status": "missing",
+      "artifact_id": "05_type_api_surface.json",
+      "severity_if_missing": "warning"
+    }
+  ],
+  "gate_checks": [
+    {
+      "check_id": "packet_has_10_json_files",
+      "description": "Packet contains exactly 10 JSON files.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "required_omp_kernel_present",
+      "description": "Required OMP kernel files are present.",
+      "status": "warning",
+      "evidence": []
+    },
+    {
+      "check_id": "required_manifests_present",
+      "description": "Required tool manifests are present.",
+      "status": "warning",
+      "evidence": []
+    },
+    {
+      "check_id": "required_tests_present",
+      "description": "Required test files are present.",
+      "status": "warning",
+      "evidence": []
+    },
+    {
+      "check_id": "pglite_migrations_present",
+      "description": "PGlite migrations are present.",
+      "status": "warning",
+      "evidence": []
+    },
+    {
+      "check_id": "duckdb_views_present",
+      "description": "DuckDB views are present.",
+      "status": "warning",
+      "evidence": []
+    },
+    {
+      "check_id": "mcp_manifest_present",
+      "description": "MCP manifest is present.",
+      "status": "fail",
+      "evidence": []
+    },
+    {
+      "check_id": "no_omp_imports_from_tribunus",
+      "description": "OMP tools do not import Tribunus package source.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "text_replace_risk_matches_manifest",
+      "description": "text_replace risk matches its manifest.",
+      "status": "fail",
+      "evidence": []
+    },
+    {
+      "check_id": "batch_edit_risk_matches_manifest",
+      "description": "batch_edit risk matches its manifest.",
+      "status": "fail",
+      "evidence": []
+    },
+    {
+      "check_id": "struct_read_risk_matches_manifest",
+      "description": "struct_read risk matches its manifest.",
+      "status": "fail",
+      "evidence": []
+    },
+    {
+      "check_id": "write_tools_require_hash",
+      "description": "Write tools require hash preconditions.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "write_tools_require_path_lock",
+      "description": "Write tools require path locks.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "hash_verified_after_lock",
+      "description": "Hash is verified after lock acquisition.",
+      "status": "not_checked",
+      "evidence": []
+    },
+    {
+      "check_id": "locks_released_in_finally",
+      "description": "Locks are released in finally.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "mutation_records_receipt_diff_event_store",
+      "description": "Mutations record receipt, diff, audit event, and store effects.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "duckdb_not_in_write_path",
+      "description": "DuckDB is not in the write path.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "tests_cover_lock_conflict",
+      "description": "Tests cover lock conflict behavior.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "tests_cover_hash_mismatch",
+      "description": "Tests cover hash mismatch behavior.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "tests_cover_export_completeness",
+      "description": "Tests cover export completeness behavior.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "source_graph_oxc_contributes",
+      "description": "Oxc source graph parses at least one source file when source files are present.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "paired_packets_share_snapshot",
+      "description": "Paired packets share the same snapshot ID.",
+      "status": "pass",
+      "evidence": []
+    },
+    {
+      "check_id": "semantic_files_byte_identical",
+      "description": "Semantic files are byte-identical across packets.",
+      "status": "pass",
+      "evidence": []
+    }
+  ]
+}

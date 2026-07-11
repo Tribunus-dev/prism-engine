@@ -6,6 +6,13 @@
 //! vs g128, INT8 g32 vs g128, and gate-up vs down-residual patterns produce
 //! distinct cache entries.
 
+use crate::ecs::canonical::execution_graph::ExecutionLane;
+use crate::ecs::canonical::execution_graph::RegionId;
+use crate::ecs::canonical::kernel_abi::{
+    DispatchGeometryPolicy, KernelAbi, KernelGroup, KernelImplementationClass, KernelSemanticId,
+    SpecializationParameters,
+};
+use crate::ecs::execution_profile::{GroupAxis, PhysicalTileLayout};
 #[cfg(test)]
 use crate::execution_plan::fusion::DataflowNode;
 use crate::execution_plan::fusion::{DataflowOp, FusedGroup};
@@ -15,7 +22,6 @@ use crate::execution_plan::{
     FunctionConstantSet, HardwareProfileId, KernelOpKind, KernelSpecializationKey,
     KernelTemplateId, MetadataLayout, ScheduledKernelOp, TileShape,
 };
-use crate::ecs::execution_profile::{GroupAxis, PhysicalTileLayout};
 
 // ── Error type ───────────────────────────────────────────────────────────
 
@@ -444,6 +450,58 @@ pub fn metal_lower_fused_group(
     Ok(lowered_op)
 }
 
+/// Lower a `FusedGroup` to both a `ScheduledKernelOp` (existing) and a
+/// canonical `KernelGroup` (PR C). The `KernelGroup` wraps the same
+/// semantic identity, specialization, and ABI as the `ScheduledKernelOp`.
+///
+/// # Returns
+/// - `(ScheduledKernelOp, KernelGroup)` — the existing lowered op alongside
+///   the canonical form for PR C kernel-group dispatch.
+pub fn metal_lower_to_kernel_group(
+    group: &FusedGroup,
+    hardware_profile: HardwareProfileId,
+    execution_phase: ExecutionPhase,
+) -> Result<(ScheduledKernelOp, KernelGroup), MetalLoweringError> {
+    let op = metal_lower_fused_group(group, hardware_profile, execution_phase)?;
+
+    // Use Debug formatting for the template_id since KernelTemplateId is
+    // a fieldless enum without as_str().
+    let template_debug = format!("{:?}", op.specialization.template_id);
+
+    let kernel_group = KernelGroup {
+        semantic_id: KernelSemanticId(format!("prism.fusion.{}", template_debug)),
+        implementation_class: KernelImplementationClass::FusedLayerGroup,
+        operations: vec![], // populated from group.body in a future PR
+        specialization: SpecializationParameters {
+            tile_m: None,
+            tile_k: None,
+            tile_n: None,
+            group_size: Some(op.specialization.group_size),
+            metadata_layout: Some(format!("{:?}", op.specialization.metadata_layout)),
+        },
+        abi: KernelAbi {
+            version: 1,
+            buffers: vec![],   // populated in PR E (ABI-driven dispatch)
+            constants: vec![], // populated in PR E
+            threadgroup_memory: vec![],
+            dispatch_geometry: DispatchGeometryPolicy::Fixed(
+                op.dispatch_shape.grid_x,
+                op.dispatch_shape.grid_y.max(1),
+                op.dispatch_shape.grid_z.max(1),
+            ),
+            threads_per_threadgroup: (
+                op.dispatch_shape.threadgroup_m,
+                op.dispatch_shape.threadgroup_n.max(1),
+                op.dispatch_shape.threadgroup_p.max(1),
+            ),
+        },
+        source_region: RegionId(group.id.len()), // placeholder; refined in PR C+
+        target_lane: ExecutionLane::MetalGpu,
+    };
+
+    Ok((op, kernel_group))
+}
+
 /// Validate that a lowered `ScheduledKernelOp` is ready for execution.
 ///
 /// Checks structural invariants: non-empty op_id, valid specialization key,
@@ -471,11 +529,11 @@ pub fn validate_lowered(op: &ScheduledKernelOp) -> Result<LoweringReadiness, Met
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_plan::fusion::MatMulContract;
     use crate::ecs::execution_profile::{
         GroupAxis, MetadataLayout as ProfMetadataLayout, PhysicalTileLayout, StorageOrder,
         TileFamily, TileShape as ProfileTileShape,
     };
+    use crate::execution_plan::fusion::MatMulContract;
 
     /// Build a `LoadWeight` dataflow node with a given codec and group size.
     fn make_load_node(

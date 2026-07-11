@@ -1,0 +1,15 @@
+{
+  "schema": "tribunus.semantic_review.tool_kernel_ir.v1",
+  "packet_id": "tribunus-gemini-ir",
+  "artifact_id": "06_tool_kernel_ir.json",
+  "generated_at": "2026-07-10T23:11:10.829Z",
+  "repo_root_name": "prism-engine",
+  "git_head_sha": "dd8ff86e25353617616bd527919cbd88836b30f7",
+  "git_branch": "main",
+  "dirty": true,
+  "generator_version": "code_review_export@gemini_structured_ir_v1",
+  "tools": [],
+  "kernel_files": [],
+  "provider_adapters": [],
+  "findings": []
+}

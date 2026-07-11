@@ -1,3 +1,5 @@
+pub mod canonical;
+
 pub mod adapter;
 pub mod aot;
 pub mod compile_session;
@@ -107,9 +109,14 @@ pub mod lora;
 pub mod lut;
 pub mod mapped_image;
 pub mod memory;
+pub mod metal_backend;
 pub mod metal_capture;
 pub mod metal_launcher;
+// Metal runtime — gated behind macOS + metal-dispatch
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub mod metal_runtime;
+// Metal backend compiler — gated behind macOS + metal-dispatch
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub mod metrics;
 pub mod mil_builder;
 pub mod mlpackage;
@@ -196,11 +203,10 @@ pub use component::quality::*;
 pub use component::tensor::*;
 
 use crate::ecs::constitutional::command::DomainEvent;
-use crate::ecs::constitutional::schema::SchemaRegistry;
-use crate::ecs::constitutional::types::{SchemaVersion, WorldEpoch};
+use crate::ecs::constitutional::schema::SchemaCatalogue;
+use crate::ecs::constitutional::types::WorldEpoch;
 use crate::ecs::constitutional::world_txn::{
-    ChangeType, CommitReceipt, CommittedEpoch, ComponentChange, PreparedWorldTxn, WorldTxn,
-    WorldTxnError,
+    CommitReceipt, CommittedEpoch, ComponentChange, PreparedWorldTxn, WorldTxn, WorldTxnError,
 };
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
@@ -673,8 +679,7 @@ impl CompWorld {
         std::mem::take(&mut self.committed_events)
     }
     pub fn transit(&mut self, txn: WorldTxn) -> Result<CommittedEpoch, WorldTxnError> {
-        let schemas = SchemaRegistry::new();
-        let prepared = self.prepare(txn, &schemas)?;
+        let prepared = self.prepare(txn, None)?;
         let receipt = self.apply_prepared(prepared);
         Ok(CommittedEpoch(receipt.committed_epoch))
     }
@@ -684,9 +689,9 @@ impl CompWorld {
     pub fn prepare(
         &self,
         txn: WorldTxn,
-        schemas: &SchemaRegistry,
+        catalogue: Option<&SchemaCatalogue>,
     ) -> Result<PreparedWorldTxn, WorldTxnError> {
-        txn.prepare_inner(self, schemas)
+        txn.prepare_inner(self, catalogue)
     }
 
     /// Atomically apply a validated, prepared transaction.

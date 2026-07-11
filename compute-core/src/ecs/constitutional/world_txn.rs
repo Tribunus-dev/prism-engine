@@ -1,5 +1,5 @@
 pub use crate::ecs::constitutional::command::DomainEvent;
-use crate::ecs::constitutional::schema::SchemaRegistry;
+use crate::ecs::constitutional::schema::SchemaCatalogue;
 use crate::ecs::constitutional::system_desc::ReadDependency;
 pub use crate::ecs::constitutional::types::*;
 use crate::ecs::CompWorld;
@@ -22,11 +22,10 @@ pub struct AccessDeclaration {
 }
 
 /// A component change recorded in the mutation journal.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ComponentChange {
     pub entity: u64,
-    pub schema_id: ComponentSchemaId,
-    pub schema_version: SchemaVersion,
+    pub schema_key: SchemaKey,
     pub change_type: ChangeType,
     pub before_hash: Option<[u8; 32]>,
     pub after_hash: Option<[u8; 32]>,
@@ -72,6 +71,11 @@ pub enum WorldTxnError {
     },
     #[error("component not found: entity {entity} schema {schema_id:?}")]
     ComponentNotFound {
+        entity: u64,
+        schema_id: ComponentSchemaId,
+    },
+    #[error("conflicting operations for entity {entity} schema {schema_id:?}")]
+    Conflict {
         entity: u64,
         schema_id: ComponentSchemaId,
     },
@@ -121,6 +125,9 @@ pub trait DurableComponent:
 pub trait TransientComponent: ClassifiedComponent<Class = TransientClass> {}
 
 /// Registration for a single durable schema.
+/// Exact-ID staging is sparse-safe and failure-atomic; transaction-local entity
+/// allocation (PendingEntityId / TxnEntityRef) remains future work.
+///
 /// A pending world transaction.
 ///
 /// Systems build a WorldTxn by reading from the world and staging changes.
@@ -155,6 +162,10 @@ pub(crate) struct StagedInsert {
     pub entity: u64,
     pub schema_id: ComponentSchemaId,
     pub schema_version: SchemaVersion,
+    /// The full schema key, populated for durable inserts.
+    pub schema_key: SchemaKey,
+    /// Type identity for catalogue validation against the durable schema.
+    pub type_id: std::any::TypeId,
     /// Whether this operation targets a durable component (journaled + replayed).
     pub is_durable: bool,
     /// Applies the staged mutation to component_store.
@@ -169,11 +180,16 @@ pub(crate) struct StagedInsert {
 pub(crate) struct StagedRemove {
     pub entity: u64,
     pub schema_id: ComponentSchemaId,
-    /// Whether this operation targets a durable component.
+    pub schema_version: SchemaVersion,
+    /// The full schema key, populated for durable inserts.
+    pub schema_key: SchemaKey,
+    /// Type identity for catalogue validation against the durable schema.
+    pub type_id: std::any::TypeId,
+    /// Whether this operation targets a durable component (journaled + replayed).
     pub is_durable: bool,
-    /// Applies the staged removal to component_store.
+    /// Applies the staged mutation to component_store.
     pub apply: Box<dyn FnOnce(&mut ComponentStore) + Send>,
-    /// Preflight validation: checks entity existence and component access.
+    /// Preflight validation: checks entity existence and column accessibility.
     /// Called in transit() Phase 1, before any mutations.
     pub preflight: Box<dyn Fn(&ComponentStore) -> Result<(), WorldTxnError> + Send + Sync>,
 }
@@ -228,7 +244,18 @@ impl WorldTxn {
         schema_version: SchemaVersion,
         component: T,
     ) {
-        self.push_insert(entity, schema_id, schema_version, component, true)
+        self.push_insert(
+            entity,
+            schema_id,
+            schema_version,
+            SchemaKey {
+                namespace: "",
+                id: schema_id.0 as u32,
+                version: schema_version.0,
+            },
+            component,
+            true,
+        )
     }
 
     /// The old-style remove_component — gated as pub(crate) for replay/migration only.
@@ -237,7 +264,17 @@ impl WorldTxn {
         entity: u64,
         schema_id: ComponentSchemaId,
     ) {
-        self.push_remove::<T>(entity, schema_id, true)
+        self.push_remove::<T>(
+            entity,
+            schema_id,
+            SchemaVersion(0),
+            SchemaKey {
+                namespace: "",
+                id: schema_id.0 as u32,
+                version: 0,
+            },
+            true,
+        )
     }
 
     /// Insert a durable (journaled, replayed) component.
@@ -247,17 +284,23 @@ impl WorldTxn {
             entity,
             ComponentSchemaId(key.id as u64),
             SchemaVersion(key.version),
+            key,
             component,
             true,
         )
     }
 
     /// Insert a transient (process-local, non-replayed) component.
-    pub fn put_transient<T: 'static + Send + Sync>(&mut self, entity: u64, component: T) {
+    pub fn put_transient<T: TransientComponent>(&mut self, entity: u64, component: T) {
         self.push_insert(
             entity,
             ComponentSchemaId(0), // placeholder — no schema binding for transient
             SchemaVersion(0),
+            SchemaKey {
+                namespace: "",
+                id: 0,
+                version: 0,
+            },
             component,
             false,
         )
@@ -266,12 +309,28 @@ impl WorldTxn {
     /// Remove a durable component.
     pub fn remove_durable<T: DurableComponent>(&mut self, entity: u64) {
         let key = T::SCHEMA_KEY;
-        self.push_remove::<T>(entity, ComponentSchemaId(key.id as u64), true)
+        self.push_remove::<T>(
+            entity,
+            ComponentSchemaId(key.id as u64),
+            SchemaVersion(key.version),
+            key,
+            true,
+        )
     }
 
     /// Remove a transient component.
-    pub fn remove_transient<T: 'static + Send + Sync>(&mut self, entity: u64) {
-        self.push_remove::<T>(entity, ComponentSchemaId(0), false)
+    pub fn remove_transient<T: TransientComponent>(&mut self, entity: u64) {
+        self.push_remove::<T>(
+            entity,
+            ComponentSchemaId(0),
+            SchemaVersion(0),
+            SchemaKey {
+                namespace: "",
+                id: 0,
+                version: 0,
+            },
+            false,
+        )
     }
 
     // ── Shared push helpers ────────────────────────────────────────────
@@ -281,6 +340,7 @@ impl WorldTxn {
         entity: u64,
         schema_id: ComponentSchemaId,
         schema_version: SchemaVersion,
+        schema_key: SchemaKey,
         component: T,
         is_durable: bool,
     ) {
@@ -290,6 +350,8 @@ impl WorldTxn {
             entity,
             schema_id,
             schema_version,
+            schema_key,
+            type_id,
             is_durable,
             apply: Box::new(move |store: &mut ComponentStore| {
                 let map: &mut HashMap<u64, T> = store
@@ -318,20 +380,24 @@ impl WorldTxn {
         &mut self,
         entity: u64,
         schema_id: ComponentSchemaId,
+        schema_version: SchemaVersion,
+        schema_key: SchemaKey,
         is_durable: bool,
     ) {
         let type_id = std::any::TypeId::of::<T>();
         self.removes.push(StagedRemove {
             entity,
             schema_id,
+            schema_version,
+            schema_key,
+            type_id,
             is_durable,
             apply: Box::new(move |store: &mut crate::ecs::ComponentStore| {
-                let map: &mut std::collections::HashMap<u64, T> = store
-                    .data
-                    .get_mut(&type_id)
-                    .and_then(|b| b.downcast_mut::<std::collections::HashMap<u64, T>>())
-                    .expect("type mismatch in ComponentStore");
-                map.remove(&entity);
+                if let Some(b) = store.data.get_mut(&type_id) {
+                    if let Some(map) = b.downcast_mut::<std::collections::HashMap<u64, T>>() {
+                        map.remove(&entity);
+                    }
+                }
             }),
             preflight: Box::new(move |store: &ComponentStore| {
                 // Check column type compatibility only.
@@ -392,6 +458,9 @@ pub(crate) struct PreparedDurableOp {
     pub schema_key: SchemaKey,
     pub apply: Box<dyn FnOnce(&mut crate::ecs::ComponentStore) + Send>,
     pub journal_entry: ComponentChange,
+    /// Encoded value for journal durability; None until the schema catalogue
+    /// is wired for encoding (B6 — future work).
+    pub encoded_value: Option<Vec<u8>>,
 }
 
 /// A prepared transient operation (no journal entry).
@@ -437,9 +506,9 @@ impl WorldTxn {
     /// Validates all invariants against the world WITHOUT mutating it.
     /// On success, returns a PreparedWorldTxn containing the resolved closures.
     pub(crate) fn prepare_inner(
-        mut self,
+        self,
         world: &CompWorld,
-        _schemas: &SchemaRegistry,
+        catalogue: Option<&SchemaCatalogue>,
     ) -> Result<PreparedWorldTxn, WorldTxnError> {
         use crate::ecs::CompEntity;
         use std::collections::HashSet;
@@ -507,6 +576,50 @@ impl WorldTxn {
             (remove.preflight)(&world.component_store_ref())?;
         }
 
+        // 1g. Detect conflicting component operations (two inserts, insert+remove,
+        //     or two removes for the same entity + schema_id)
+        {
+            // Check duplicate inserts (same entity + same type)
+            let mut seen_inserts = HashSet::new();
+            for insert in &self.inserts {
+                if !seen_inserts.insert((insert.entity, insert.type_id)) {
+                    return Err(WorldTxnError::Conflict {
+                        entity: insert.entity,
+                        schema_id: insert.schema_id,
+                    });
+                }
+            }
+            // Check duplicate removes (same entity + same type)
+            let mut seen_removes = HashSet::new();
+            for remove in &self.removes {
+                if !seen_removes.insert((remove.entity, remove.type_id)) {
+                    return Err(WorldTxnError::Conflict {
+                        entity: remove.entity,
+                        schema_id: remove.schema_id,
+                    });
+                }
+            }
+        }
+
+        // 1h. Validate durable inserts against schema catalogue (when provided)
+        if let Some(cat) = catalogue {
+            for insert in &self.inserts {
+                if insert.is_durable {
+                    let reg = cat.registration(&insert.schema_key).ok_or(
+                        WorldTxnError::UnregisteredSchema {
+                            schema_key: insert.schema_key,
+                        },
+                    )?;
+                    if reg.type_id != insert.type_id {
+                        return Err(WorldTxnError::SchemaMismatch {
+                            schema_id: insert.schema_id,
+                            expected: reg.type_name.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
         // -- PHASE 2: Split into durable/transient ops and build journal ---
         let next_epoch = WorldEpoch(world.current_epoch().0 + 1);
         let mut durable_ops = Vec::new();
@@ -517,8 +630,7 @@ impl WorldTxn {
             if insert.is_durable {
                 journal.push(ComponentChange {
                     entity: insert.entity,
-                    schema_id: insert.schema_id,
-                    schema_version: insert.schema_version,
+                    schema_key: insert.schema_key,
                     change_type: ChangeType::Insert,
                     before_hash: None,
                     after_hash: None,
@@ -526,13 +638,11 @@ impl WorldTxn {
                 });
                 durable_ops.push(PreparedDurableOp {
                     entity: insert.entity,
-                    schema_key: SchemaKey {
-                        namespace: "",
-                        id: insert.schema_id.0 as u32,
-                        version: insert.schema_version.0,
-                    },
+                    schema_key: insert.schema_key,
                     apply: insert.apply,
                     journal_entry: journal.last().cloned().unwrap(),
+                    // B6: encoded_value left as None until catalogue is wired
+                    encoded_value: None,
                 });
             } else {
                 transient_ops.push(PreparedTransientOp {
@@ -545,19 +655,25 @@ impl WorldTxn {
             if remove.is_durable {
                 journal.push(ComponentChange {
                     entity: remove.entity,
-                    schema_id: remove.schema_id,
-                    schema_version: SchemaVersion(0),
+                    schema_key: remove.schema_key,
                     change_type: ChangeType::Remove,
                     before_hash: None,
                     after_hash: None,
                     world_epoch: next_epoch,
                 });
+                durable_ops.push(PreparedDurableOp {
+                    entity: remove.entity,
+                    schema_key: remove.schema_key,
+                    apply: remove.apply,
+                    journal_entry: journal.last().cloned().unwrap(),
+                    encoded_value: None,
+                });
+            } else {
+                transient_ops.push(PreparedTransientOp {
+                    entity: remove.entity,
+                    apply: remove.apply,
+                });
             }
-            // Removals use the same apply closure regardless of durability
-            transient_ops.push(PreparedTransientOp {
-                entity: remove.entity,
-                apply: remove.apply,
-            });
         }
 
         // Validation succeeded — move all closures into PreparedWorldTxn

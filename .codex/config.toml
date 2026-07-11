@@ -1,0 +1,13 @@
+[mcp_servers.tribunus]
+command = "bun"
+args = ["run", "/Users/user/Developer/GitHub/Tribunus/packages/tribunus-mcp/src/index.ts"]
+cwd = "/Users/user/Developer/GitHub/prism-engine"
+startup_timeout_sec = 30
+tool_timeout_sec = 600
+
+[mcp_servers.prism]
+command = "cargo"
+args = ["run", "--quiet", "-p", "prism-mcpd", "--manifest-path", "/Users/user/Developer/GitHub/prism-engine/Cargo.toml"]
+cwd = "/Users/user/Developer/GitHub/prism-engine"
+startup_timeout_sec = 60
+tool_timeout_sec = 600

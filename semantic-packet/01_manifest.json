@@ -1,0 +1,156 @@
+{
+  "schema": "tribunus.semantic_review.manifest.v1",
+  "packet_id": "semantic-packet",
+  "artifact_id": "01_manifest.json",
+  "generated_at": "2026-07-10T23:36:39.854Z",
+  "repo_root_name": "prism-engine",
+  "git_head_sha": "dd8ff86e25353617616bd527919cbd88836b30f7",
+  "git_branch": "main",
+  "dirty": true,
+  "generator_version": "code_review_export@gemini_structured_ir_v1",
+  "profile": "gemini_structured_ir_v1",
+  "limits": {
+    "max_zip_files": 10,
+    "max_zip_bytes": 104857600,
+    "target_uncompressed_bytes": 20971520,
+    "max_embedded_source_bytes_per_file": 2097152,
+    "max_total_embedded_source_bytes": 16777216
+  },
+  "counts": {
+    "discovered_files": 2124,
+    "included_files": 1881,
+    "excluded_files": 243,
+    "parsed_files": 11,
+    "parse_error_files": 0,
+    "typescript_programs": 0,
+    "unresolved_imports": 0,
+    "missing_required_paths": 47,
+    "embedded_full_files": 0,
+    "embedded_excerpts": 11,
+    "source_graph_files": 0,
+    "source_graph_parse_errors": 0,
+    "source_graph_parse_ms": 0,
+    "source_graph_resolve_ms": 0,
+    "source_graph_static_imports": 0,
+    "source_graph_static_exports": 0,
+    "source_graph_dynamic_imports": 0,
+    "source_graph_resolved_edges": 0,
+    "source_graph_unresolved_edges": 0
+  },
+  "review_priority": [
+    "01_manifest.json",
+    "10_review_findings.json",
+    "06_tool_kernel_ir.json",
+    "07_pglite_duckdb_ir.json",
+    "08_tests_and_ci_ir.json",
+    "03_module_graph.json",
+    "04_symbol_index.json",
+    "05_type_api_surface.json",
+    "09_architecture_context.json",
+    "02_file_index.json"
+  ],
+  "recommended_read_order": [
+    "01_manifest.json",
+    "10_review_findings.json",
+    "06_tool_kernel_ir.json",
+    "07_pglite_duckdb_ir.json",
+    "08_tests_and_ci_ir.json",
+    "03_module_graph.json",
+    "04_symbol_index.json",
+    "05_type_api_surface.json",
+    "09_architecture_context.json",
+    "02_file_index.json"
+  ],
+  "required_focus_areas": [
+    {
+      "id": "tool-kernel",
+      "description": "OMPs tool kernel authority, flow, and safety properties.",
+      "artifact_ids": [
+        "06_tool_kernel_ir.json",
+        "05_type_api_surface.json",
+        "10_review_findings.json"
+      ]
+    },
+    {
+      "id": "pglite-duckdb",
+      "description": "PGlite relational truth and DuckDB analytical projection.",
+      "artifact_ids": [
+        "07_pglite_duckdb_ir.json",
+        "10_review_findings.json"
+      ]
+    },
+    {
+      "id": "tests-ci",
+      "description": "Tool tests, CI workflows, and coverage matrix.",
+      "artifact_ids": [
+        "08_tests_and_ci_ir.json",
+        "10_review_findings.json"
+      ]
+    },
+    {
+      "id": "module-graph",
+      "description": "Dependency closure and unresolved import classification.",
+      "artifact_ids": [
+        "03_module_graph.json",
+        "10_review_findings.json"
+      ]
+    },
+    {
+      "id": "architecture-context",
+      "description": "Bootstrap constraints, doctrine, and board context.",
+      "artifact_ids": [
+        "09_architecture_context.json"
+      ]
+    }
+  ],
+  "artifact_checksums": [
+    {
+      "path": "02_file_index.json",
+      "sha256": "f2225af93051733dd1a099c0668a9bdb3d8d0a8084795d5092e9bafb961a1a8a",
+      "size_bytes": 1139682
+    },
+    {
+      "path": "03_module_graph.json",
+      "sha256": "9a1d288be420cfb2bf961213764edb18e60649321a2f0e56cfc58126f2399568",
+      "size_bytes": 1400
+    },
+    {
+      "path": "04_symbol_index.json",
+      "sha256": "78f910b48168c3509a8003aea4f5ca1bd3db079bc9dbf7968ce96bda90337479",
+      "size_bytes": 1921
+    },
+    {
+      "path": "05_type_api_surface.json",
+      "sha256": "59f5f84db6085146c828edbce5f343eabe3fa3767ff63740d9ea413085081657",
+      "size_bytes": 4713
+    },
+    {
+      "path": "06_tool_kernel_ir.json",
+      "sha256": "b50337fa5a27f69e92b3830b0ca88fa3a33ddcf594900f1bc0d6a50c3201a94f",
+      "size_bytes": 474
+    },
+    {
+      "path": "07_pglite_duckdb_ir.json",
+      "sha256": "880a359e346e7419d6bb47a94f7235ce9915e6e10aba8a62a35a1c8966d930b9",
+      "size_bytes": 25139
+    },
+    {
+      "path": "08_tests_and_ci_ir.json",
+      "sha256": "83e34b37dee9c84e7b3ec0c72f6e0c1a9d6526e1362a8897d33a016fbd70d388",
+      "size_bytes": 6056
+    },
+    {
+      "path": "09_architecture_context.json",
+      "sha256": "67fb077d1402dba524cbbf369f158d99cf3e4946f5a9e3a568db5f074597d3df",
+      "size_bytes": 4470
+    },
+    {
+      "path": "10_review_findings.json",
+      "sha256": "a65ec7be09137bafd95309f8b595586c585f443d2c689ee090c902953a48d5f0",
+      "size_bytes": 14207
+    }
+  ],
+  "generation_warnings": [
+    "Missing required path count: 47"
+  ]
+}

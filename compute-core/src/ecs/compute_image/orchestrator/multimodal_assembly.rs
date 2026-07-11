@@ -6,6 +6,7 @@
 use crate::ecs::compute_image::multimodal::InputModality;
 
 /// One part of a multimodal prompt.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum PromptPart {
     /// Text tokens to be looked up via the vocabulary embedding table.
@@ -17,6 +18,7 @@ pub enum PromptPart {
 }
 
 /// Reference to image input data (not owned, for zero-copy).
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ImageInputRef {
     pub width: u32,
@@ -29,6 +31,7 @@ pub struct ImageInputRef {
 }
 
 /// Reference to audio input data.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AudioInputRef {
     pub sample_rate: u32,

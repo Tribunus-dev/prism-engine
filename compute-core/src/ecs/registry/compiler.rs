@@ -1,6 +1,7 @@
 //! Deployment compiler — verifies artifact identity, computes capability
 //! intersection, derives resource budgets, and produces a signed RuntimeContract.
 
+#[cfg(feature = "legacy_mutations")]
 use crate::ecs::registry::types::*;
 #[cfg(feature = "legacy_mutations")]
 use crate::ecs::registry::TrustStore;

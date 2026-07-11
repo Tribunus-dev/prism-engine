@@ -10,7 +10,6 @@
 //! platforms, all functions return false / error.  Use `cfg(target_os =
 //! "macos")` guards at the call site when the capture path is optional.
 
-use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Check if Metal is available on this machine.
@@ -30,7 +29,7 @@ pub fn is_available() -> bool {
 /// Start capturing Metal GPU commands to a file.
 /// Returns true on success.  The capture file is finalized when
 /// [`stop_capture`] is called or the [`CaptureGuard`] is dropped.
-pub fn start_capture(path: &str) -> bool {
+pub fn start_capture(_path: &str) -> bool {
     #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
     {
         let c_path = match CString::new(path) {

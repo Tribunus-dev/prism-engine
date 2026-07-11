@@ -101,9 +101,8 @@ impl ComputeImageState {
         _model: &crate::profiled_model::LoadedProfiledModel,
         _graph: EmittedPhaseGraph,
     ) -> Self {
-        // Construction logic requires types not yet fully imported in this
-        // module — extension points: layer-plan extraction, artifact registry
-        // assembly, verification-bundle ingestion, and profile-id derivation.
-        todo!()
+        // ComputeImageState construction is not yet implemented.
+        // The required dependency imports and initialization logic are pending.
+        unimplemented!("ComputeImageState::new — construction logic not yet wired")
     }
 }

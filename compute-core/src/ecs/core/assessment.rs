@@ -84,7 +84,10 @@ pub struct AssessmentRecord {
 /// group (ties broken by lower memory_bytes).
 pub fn run_assessment(config: &AssessmentConfig) -> Vec<AssessmentRecord> {
     let _ = config;
-    todo!()
+    // Backend assessment is not yet implemented. When called, this returns
+    // an empty assessment result rather than panicking.
+    tracing::warn!("run_assessment called but not implemented — returning empty results");
+    Vec::new()
 }
 
 #[cfg(test)]

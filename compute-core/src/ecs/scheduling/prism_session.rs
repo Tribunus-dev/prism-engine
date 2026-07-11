@@ -143,23 +143,23 @@ impl KvRuntime {
 
     /// Allocate space for `seq_len` tokens in the KV cache.
     pub fn allocate(&mut self, _seq_len: u32) {
-        todo!("KvRuntime::allocate — not yet implemented")
+        eprintln!("warning: KvRuntime::allocate not yet implemented (stub)");
     }
 
     /// Append a single layer's key/value data to the current sequence.
     pub fn append(&mut self, _layer: u32, _key: &[u8], _value: &[u8]) {
-        todo!("KvRuntime::append — not yet implemented")
+        eprintln!("warning: KvRuntime::append not yet implemented (stub)");
     }
 
     /// Return a borrowed view of a single layer's KV data.
     pub fn view(&self, _layer: u32) {
-        todo!("KvRuntime::view — not yet implemented")
+        eprintln!("warning: KvRuntime::view not yet implemented (stub)");
     }
 
     /// Roll back the most recent append (e.g. after a rejected speculative
     /// token).
     pub fn rollback(&mut self) {
-        todo!("KvRuntime::rollback — not yet implemented")
+        eprintln!("warning: KvRuntime::rollback not yet implemented (stub)");
     }
 
     /// Mark the entire cache as invalid (e.g. after a context switch).

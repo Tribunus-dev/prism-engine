@@ -1,0 +1,20 @@
+[package]
+name = "prism-mcp-core"
+version = "0.1.0"
+edition = "2021"
+description = "Shared framework for the prism-mcpd multi-tool MCP daemon"
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+crossbeam-channel = "0.5"
+nix = { version = "0.29", features = ["fs"] }
+blake3 = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+hex = "0.4"

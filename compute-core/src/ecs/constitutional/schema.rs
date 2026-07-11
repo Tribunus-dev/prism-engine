@@ -179,7 +179,6 @@ impl SchemaCatalogue {
             hasher.update(key.namespace.as_bytes());
             hasher.update(&key.id.to_le_bytes());
             hasher.update(&key.version.to_le_bytes());
-            hasher.update(reg.type_name.as_bytes());
         }
         let digest = hasher.finalize().into();
 
@@ -192,6 +191,11 @@ impl SchemaCatalogue {
     /// Get the deterministic catalogue digest.
     pub fn digest(&self) -> [u8; 32] {
         self.digest
+    }
+
+    /// Look up a registration by schema key.
+    pub fn registration(&self, key: &SchemaKey) -> Option<&DurableSchemaRegistration> {
+        self.schemas.get(key)
     }
 
     /// Look up a replay applier for the given schema key.
@@ -210,5 +214,22 @@ impl SchemaCatalogue {
     /// Iterate over all registrations in sorted key order.
     pub fn iter(&self) -> impl Iterator<Item = &DurableSchemaRegistration> {
         self.schemas.values()
+    }
+
+    /// Check whether a schema key is registered in this catalogue.
+    pub fn contains(&self, key: &SchemaKey) -> bool {
+        self.schemas.contains_key(key)
+    }
+
+    /// Build an empty catalogue with a deterministic digest.
+    pub fn empty() -> Self {
+        use blake3::Hasher;
+        let mut hasher = Hasher::new();
+        hasher.update(b"prism.schema.catalogue.v1");
+        let digest = hasher.finalize().into();
+        Self {
+            schemas: std::collections::BTreeMap::new(),
+            digest,
+        }
     }
 }

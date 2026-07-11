@@ -1,12 +1,13 @@
-//! AOT kernel variant generation and dispatch for Apple Silicon.
+//! AOT (ahead-of-time) compiler — kernel variants and public compilation API.
 //!
-//! Provides an ahead-of-time kernel variant catalog system:
-//! - Profile database of known Apple Silicon hardware (M1–M5, all tiers)
-//! - Template expansion for parametric Metal kernel generation
-//! - AOT compiler wrapper for build-time variant compilation
-//! - Kernel catalog for embedding multiple variants in a CImage
-//! - Runtime variant selector for picking the best embedded kernel
-//! - Quality × performance scoring with held-out validation
+//! This module is being consolidated into the unified PrismCompiler API.
+//! See `prism_compiler` for the single public compilation entry point.
+//! The remaining submodules provide AOT kernel variant support.
+
+// PrismCompiler — the single public compilation API.
+// Gated behind prism-backend for the full compile path.
+#[cfg(feature = "prism-backend")]
+pub mod prism_compiler;
 
 pub mod catalog;
 pub mod compiler;

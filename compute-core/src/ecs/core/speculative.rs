@@ -800,7 +800,9 @@ impl TreeSpecDecoder {
     /// `max_depth` tokens long.
     pub fn propose(&self, _context: &[u32]) -> Vec<SpeculativeBranch> {
         let _ = self;
-        todo!()
+        // Speculative decoding is not yet implemented.
+        // The TreeSpecDecoder and related infrastructure are stubs.
+        Vec::new()
     }
 
     /// Verify speculative branches against the target model's logits.
@@ -812,7 +814,9 @@ impl TreeSpecDecoder {
     /// sequence.
     pub fn verify(&mut self, _branches: &[SpeculativeBranch], _target_logits: &[f32]) -> Vec<u32> {
         let _ = self;
-        todo!()
+        // Speculative decoding is not yet implemented.
+        // The TreeSpecDecoder and related infrastructure are stubs.
+        Vec::new()
     }
 }
 

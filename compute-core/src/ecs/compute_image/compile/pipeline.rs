@@ -11,7 +11,9 @@ use crate::ecs::compute_image::compile::hardware::run_hardware_assessment;
 use crate::ecs::compute_image::compile::quantize::apply_quantize_to_loaded;
 #[cfg(feature = "prism-backend")]
 use crate::ecs::compute_image::compile::source::load_gguf_source;
-use crate::ecs::compute_image::compile::source::{diff_tensors, ensure_tensor_loaded, LoadedSource};
+use crate::ecs::compute_image::compile::source::{
+    diff_tensors, ensure_tensor_loaded, LoadedSource,
+};
 use crate::ecs::compute_image::hw_assessment::AssessmentReceipt;
 use crate::ecs::compute_image::manifest::{
     mlx_active_memory_bytes, mlx_peak_memory_bytes, CompilationAuthority, CompileReceipt,
@@ -2214,4 +2216,377 @@ pub(crate) fn emit_heterogeneous_image(
     std::fs::write(&path, &json).map_err(|e| format!("write heterogeneous_image.json: {e}"))?;
 
     Ok(())
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// Canonical compiler type output (additive — PR B)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Compile a source model and produce both the existing CompiledImage
+/// and the new canonical CompileOutcome.
+///
+/// This is an additive change — the existing pipeline is unchanged.
+/// The canonical types are produced alongside for future phases.
+pub fn compile_to_canonical(
+    source_dir: &str,
+    output_dir: &str,
+    skip_validation: bool,
+    quantize_mode: Option<CompileQuantMode>,
+) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
+    let compiled = compile_unchecked(source_dir, output_dir, skip_validation, quantize_mode)?;
+
+    // Build canonical ModelIr from the loaded source and manifest
+    let model_ir = build_canonical_model_ir(source_dir, &compiled)?;
+
+    // Build canonical RepresentationPlan from quantization decisions
+    let rep_plan = build_canonical_representation_plan(&compiled);
+
+    build_canonical_outcome(compiled, model_ir, rep_plan, output_dir)
+}
+
+#[cfg(feature = "prism-backend")]
+/// Compile a GGUF model and produce both the existing CompiledImage
+/// and the new canonical CompileOutcome.
+///
+/// This is an additive change — the existing pipeline is unchanged.
+/// The canonical types are produced alongside for future phases.
+pub fn compile_gguf_to_canonical(
+    gguf_path: &str,
+    output_dir: &str,
+    quantize_mode: Option<CompileQuantMode>,
+    ane_models_dir: Option<&str>,
+    metallib_path: Option<&str>,
+    mlx_capture_dir: Option<&str>,
+) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
+    let compiled = compile_gguf_unchecked(
+        gguf_path,
+        output_dir,
+        quantize_mode,
+        ane_models_dir,
+        metallib_path,
+        mlx_capture_dir,
+    )?;
+
+    // Build canonical ModelIr from the GGUF temp source dir and manifest.
+    // compile_gguf_unchecked creates a temp dir with config.json, but that
+    // temp dir is gone by now. Use the manifest's architecture instead.
+    let model_ir = build_canonical_model_ir_from_manifest(&compiled, output_dir);
+
+    // Build canonical RepresentationPlan from quantization decisions
+    let rep_plan = build_canonical_representation_plan(&compiled);
+
+    build_canonical_outcome(compiled, model_ir, rep_plan, output_dir)
+}
+
+/// Build the canonical CompileOutcome from a compiled image and canonical IR.
+fn build_canonical_outcome(
+    compiled: CompiledImage,
+    model_ir: crate::ecs::canonical::ModelIr,
+    rep_plan: crate::ecs::canonical::RepresentationPlan,
+    output_dir: &str,
+) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
+
+    use crate::ecs::canonical::{
+        CimageBuildInput, CompileOutcome, CompilePlan, CompilerReceiptSet,
+        ExecutionGraph, KernelPlan, MemoryPlan, RuntimeStatePlan,
+    };
+
+    let empty_execution_graph = ExecutionGraph {
+        regions: Vec::new(),
+        edges: Vec::new(),
+        state: RuntimeStatePlan {
+            max_context_tokens: 0,
+            kv_cache_bytes_per_token: 0,
+            total_kv_cache_bytes: 0,
+        },
+        memory: MemoryPlan {
+            total_activation_bytes: 0,
+            total_weight_bytes: 0,
+            arena_region_count: 0,
+        },
+    };
+
+    let empty_kernel_plan = KernelPlan { groups: Vec::new() };
+
+    let plan = CompilePlan {
+        model_ir: model_ir.clone(),
+        representation_plan: rep_plan.clone(),
+        execution_graph: empty_execution_graph.clone(),
+        kernel_plan: empty_kernel_plan.clone(),
+        estimated_output_size: 0,
+    };
+
+    let outcome = CompileOutcome {
+        plan,
+        compiled_kernels: Vec::new(),
+        build_input: CimageBuildInput {
+            model_ir_digest: [0u8; 32],
+            representation_plan: rep_plan.clone(),
+            execution_graph: empty_execution_graph,
+            compiled_kernels: Vec::new(),
+            tensor_payloads: Vec::new(),
+            receipts: CompilerReceiptSet {
+                receipts: Vec::new(),
+            },
+        },
+        receipts: CompilerReceiptSet {
+            receipts: Vec::new(),
+        },
+        output_path: Some(output_dir.to_string()),
+    };
+
+    Ok((compiled, outcome))
+}
+
+/// Build a canonical ModelIr from the source directory config.json and
+/// the compiled image manifest.
+fn build_canonical_model_ir(
+    source_dir: &str,
+    compiled: &CompiledImage,
+) -> crate::Result<crate::ecs::canonical::ModelIr> {
+    use crate::ecs::canonical::{
+        ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
+        SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
+    };
+
+    let manifest = &compiled.manifest;
+
+    // Read config.json for architecture params
+    let config_path = std::path::Path::new(source_dir).join("config.json");
+    let config_text =
+        std::fs::read_to_string(&config_path).map_err(|e| format!("read config.json: {e}"))?;
+    let cfg: serde_json::Value =
+        serde_json::from_str(&config_text).map_err(|e| format!("parse config.json: {e}"))?;
+
+    build_model_ir_from_config(&cfg, manifest, source_dir)
+}
+
+/// Build a canonical ModelIr using the manifest's architecture information
+/// when the source config.json is no longer available (e.g. GGUF temp dir).
+fn build_canonical_model_ir_from_manifest(
+    compiled: &CompiledImage,
+    output_dir: &str,
+) -> crate::ecs::canonical::ModelIr {
+    use crate::ecs::canonical::{
+        ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
+        SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
+    };
+
+    let manifest = &compiled.manifest;
+    let arch = &manifest.architecture;
+
+    // Build from manifest.architecture (TextArchitecture) — all fields available
+    let mut by_id = Vec::new();
+    let mut by_name = std::collections::HashMap::new();
+    for (i, tensor) in manifest.tensor_table.iter().enumerate() {
+        let tid = TensorId(i);
+        by_id.push(TensorDescriptor {
+            id: tid,
+            name: tensor.name.clone(),
+            shape: tensor.logical_shape.iter().map(|&x| x as usize).collect(),
+            byte_size: tensor.byte_length,
+            is_lazy: false,
+        });
+        by_name.insert(tensor.name.clone(), tid);
+    }
+
+    ModelIr {
+        identity: ModelIdentity {
+            name: manifest.source.model_type.clone(),
+            revision: None,
+        },
+        architecture: ArchitectureId(arch.model_type.clone()),
+        configuration: ModelConfiguration {
+            hidden_size: arch.hidden_size as usize,
+            intermediate_size: arch.intermediate_size as usize,
+            num_attention_heads: arch.num_attention_heads as usize,
+            num_kv_heads: arch.num_key_value_heads as usize,
+            num_hidden_layers: arch.num_hidden_layers as usize,
+            head_dim: arch.head_dim as usize,
+            vocab_size: arch.vocab_size as usize,
+            max_position_embeddings: arch.max_position_embeddings as usize,
+            rms_norm_eps: arch.rms_norm_eps,
+            rope_theta: Some(arch.rope_local.theta),
+            partial_rope_dim: None,
+            tie_word_embeddings: arch.tie_word_embeddings,
+            num_experts: arch.moe_config.as_ref().map(|m| m.num_experts as usize),
+            num_experts_per_tok: arch.moe_config.as_ref().map(|m| m.top_k_experts as usize),
+            moe_intermediate_size: None,
+            num_mtp_heads: None,
+            mtp_hidden_size: None,
+            mtp_intermediate_size: None,
+        },
+        tensors: TensorCatalogue { by_id, by_name },
+        graph: LogicalGraph {
+            ops: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        },
+        tokenizer: TokenizerDescriptor {
+            tokenizer_type: "unknown".into(),
+            vocab_size: arch.vocab_size as usize,
+            bos_token_id: None,
+            eos_token_id: None,
+            pad_token_id: None,
+        },
+        source_provenance: SourceProvenance {
+            source_type: SourceType::Gguf,
+            source_path: output_dir.to_string(),
+            file_digests: Vec::new(),
+        },
+    }
+}
+
+/// Shared builder: read serde_json config Value + manifest -> ModelIr.
+fn build_model_ir_from_config(
+    cfg: &serde_json::Value,
+    manifest: &crate::ecs::compute_image::manifest::Manifest,
+    source_dir: &str,
+) -> crate::Result<crate::ecs::canonical::ModelIr> {
+    use crate::ecs::canonical::{
+        ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
+        SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
+    };
+
+    let hidden_size = cfg["hidden_size"].as_u64().unwrap_or(0) as usize;
+    let intermediate_size = cfg
+        .get("intermediate_size")
+        .or_else(|| cfg.get("ffn_dim"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let num_attention_heads = cfg["num_attention_heads"].as_u64().unwrap_or(0) as usize;
+    let num_hidden_layers = cfg["num_hidden_layers"].as_u64().unwrap_or(0) as usize;
+    let vocab_size = cfg["vocab_size"].as_u64().unwrap_or(0) as usize;
+
+    // Build TensorCatalogue from manifest.tensor_table
+    let mut by_id = Vec::new();
+    let mut by_name = std::collections::HashMap::new();
+    for (i, tensor) in manifest.tensor_table.iter().enumerate() {
+        let tid = TensorId(i);
+        by_id.push(TensorDescriptor {
+            id: tid,
+            name: tensor.name.clone(),
+            shape: tensor.logical_shape.iter().map(|&x| x as usize).collect(),
+            byte_size: tensor.byte_length,
+            is_lazy: false,
+        });
+        by_name.insert(tensor.name.clone(), tid);
+    }
+
+    Ok(ModelIr {
+        identity: ModelIdentity {
+            name: manifest.source.model_type.clone(),
+            revision: None,
+        },
+        architecture: ArchitectureId(cfg["model_type"].as_str().unwrap_or("unknown").to_string()),
+        configuration: ModelConfiguration {
+            hidden_size,
+            intermediate_size,
+            num_attention_heads,
+            num_kv_heads: cfg["num_key_value_heads"]
+                .as_u64()
+                .unwrap_or(num_attention_heads as u64) as usize,
+            num_hidden_layers,
+            head_dim: cfg["head_dim"].as_u64().unwrap_or(0) as usize,
+            vocab_size,
+            max_position_embeddings: cfg["max_position_embeddings"].as_u64().unwrap_or(0) as usize,
+            rms_norm_eps: cfg["rms_norm_eps"].as_f64().unwrap_or(1e-6),
+            rope_theta: cfg["rope_theta"].as_f64(),
+            partial_rope_dim: None,
+            tie_word_embeddings: cfg["tie_word_embeddings"].as_bool().unwrap_or(false),
+            num_experts: cfg["num_experts"].as_u64().map(|v| v as usize),
+            num_experts_per_tok: cfg["num_experts_per_tok"].as_u64().map(|v| v as usize),
+            moe_intermediate_size: None,
+            num_mtp_heads: cfg["num_mtp_heads"].as_u64().map(|v| v as usize),
+            mtp_hidden_size: None,
+            mtp_intermediate_size: None,
+        },
+        tensors: TensorCatalogue { by_id, by_name },
+        graph: LogicalGraph {
+            ops: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        },
+        tokenizer: TokenizerDescriptor {
+            tokenizer_type: "unknown".into(),
+            vocab_size,
+            bos_token_id: cfg["bos_token_id"].as_u64().map(|v| v as u32),
+            eos_token_id: cfg["eos_token_id"].as_u64().map(|v| v as u32),
+            pad_token_id: cfg["pad_token_id"].as_u64().map(|v| v as u32),
+        },
+        source_provenance: SourceProvenance {
+            source_type: SourceType::Gguf,
+            source_path: source_dir.to_string(),
+            file_digests: Vec::new(),
+        },
+    })
+
+
+/// Build a canonical RepresentationPlan from the compiled image manifest.
+fn build_canonical_representation_plan(
+    compiled: &CompiledImage,
+) -> crate::ecs::canonical::RepresentationPlan {
+    use crate::ecs::canonical::{
+        AdmissionReceipt, CalibrationReceipt, RepresentationPlan, ResidualPlan, TensorId,
+        TensorRepresentation, TensorRepresentationEntry,
+    };
+
+    let manifest = &compiled.manifest;
+    let mut tensors = std::collections::BTreeMap::new();
+    let all_raw = manifest
+        .tensor_table
+        .iter()
+        .all(|t| t.quantization.is_none());
+
+    for (i, tensor) in manifest.tensor_table.iter().enumerate() {
+        let rep = match &tensor.quantization {
+            Some(q)
+                if q.bits == 4
+                    && tensor.storage_dtype.eq_ignore_ascii_case("u8")
+                    && q.group_size > 0 =>
+            {
+                // NF4 or INT4 packed into U8 — detect from storage_layout if available
+                match &q.storage_layout {
+                    Some(layout) => match layout {
+                        crate::ecs::compute_image::manifest::SharedWeightLayout::Nf4Tile640(_) => {
+                            TensorRepresentation::Nf4Tile640(q.group_size)
+                        }
+                    },
+                    None => {
+                        // Ambiguous: default to Nf4Tile640 for 4-bit U8 without explicit layout
+                        TensorRepresentation::Nf4Tile640(q.group_size)
+                    }
+                }
+            }
+            Some(q) if q.bits == 8 && tensor.storage_dtype.eq_ignore_ascii_case("i8") => {
+                TensorRepresentation::Int8Block(q.group_size)
+            }
+            _ => TensorRepresentation::Fp32,
+        };
+
+        // Look up weight_nrmse from quantization_quality table
+        let weight_nrmse = manifest
+            .quantization_quality
+            .iter()
+            .find(|q| q.tensor_name == tensor.name)
+            .map(|q| q.weight_nrmse as f64)
+            .unwrap_or(0.0);
+
+        tensors.insert(
+            TensorId(i),
+            TensorRepresentationEntry {
+                tensor_id: TensorId(i),
+                representation: rep,
+                residual: None,
+                compiled_byte_size: tensor.byte_length,
+                weight_nrmse,
+            },
+        );
+    }
+
+    RepresentationPlan {
+        tensors,
+        calibration_receipt: None,
+        admission_receipt: None,
+        all_raw_f32: all_raw,
+    }
 }

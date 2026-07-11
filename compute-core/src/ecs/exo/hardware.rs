@@ -143,6 +143,7 @@ pub(crate) fn sysctl_value(key: &str) -> Result<String, String> {
 }
 
 /// Format a chip name for display (short, readable).
+#[allow(dead_code)]
 pub(crate) fn format_chip_name(chip: &str) -> String {
     let lower = chip.to_lowercase();
 

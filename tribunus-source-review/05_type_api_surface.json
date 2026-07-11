@@ -1,0 +1,142 @@
+{
+  "schema": "tribunus.semantic_review.type_api_surface.v1",
+  "packet_id": "tribunus-gemini-ir",
+  "artifact_id": "05_type_api_surface.json",
+  "generated_at": "2026-07-10T23:11:10.829Z",
+  "repo_root_name": "prism-engine",
+  "git_head_sha": "dd8ff86e25353617616bd527919cbd88836b30f7",
+  "git_branch": "main",
+  "dirty": true,
+  "generator_version": "code_review_export@gemini_structured_ir_v1",
+  "exported_contracts": [],
+  "tool_contracts": [],
+  "store_contracts": [
+    {
+      "store_id": "OmpRelationalStoreV1",
+      "path": ".omp/tools/_lib/store/pglite-types.ts",
+      "methods": [
+        {
+          "name": "migrate",
+          "signature": "migrate",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "createActor",
+          "signature": "createActor",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "createSession",
+          "signature": "createSession",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "heartbeatSession",
+          "signature": "heartbeatSession",
+          "transaction_behavior": "single_write",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "closeSession",
+          "signature": "closeSession",
+          "transaction_behavior": "single_write",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "abandonExpiredSessions",
+          "signature": "abandonExpiredSessions",
+          "transaction_behavior": "unknown",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "claimWork",
+          "signature": "claimWork",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "releaseWorkClaim",
+          "signature": "releaseWorkClaim",
+          "transaction_behavior": "single_write",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "acquirePathLocks",
+          "signature": "acquirePathLocks",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "store_transaction"
+        },
+        {
+          "name": "releasePathLocks",
+          "signature": "releasePathLocks",
+          "transaction_behavior": "single_write",
+          "authority_role": "store_transaction"
+        },
+        {
+          "name": "findConflictingLocks",
+          "signature": "findConflictingLocks",
+          "transaction_behavior": "read_only",
+          "authority_role": "path_lock_truth"
+        },
+        {
+          "name": "recordInvocation",
+          "signature": "recordInvocation",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "store_transaction"
+        },
+        {
+          "name": "recordMutation",
+          "signature": "recordMutation",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "store_transaction"
+        },
+        {
+          "name": "recordInvocationWithMutations",
+          "signature": "recordInvocationWithMutations",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "store_transaction"
+        },
+        {
+          "name": "recordRead",
+          "signature": "recordRead",
+          "transaction_behavior": "unknown",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "createWriteJournal",
+          "signature": "createWriteJournal",
+          "transaction_behavior": "multi_statement_transaction",
+          "authority_role": "store_transaction"
+        },
+        {
+          "name": "updateWriteJournalStatus",
+          "signature": "updateWriteJournalStatus",
+          "transaction_behavior": "single_write",
+          "authority_role": "store_transaction"
+        },
+        {
+          "name": "findPendingJournals",
+          "signature": "findPendingJournals",
+          "transaction_behavior": "read_only",
+          "authority_role": "journal_truth"
+        },
+        {
+          "name": "listRecentInvocations",
+          "signature": "listRecentInvocations",
+          "transaction_behavior": "read_only",
+          "authority_role": "session_truth"
+        },
+        {
+          "name": "listEffectsForPath",
+          "signature": "listEffectsForPath",
+          "transaction_behavior": "read_only",
+          "authority_role": "file_effect_truth"
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

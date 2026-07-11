@@ -406,7 +406,7 @@ fn decode_png(data: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
             4 => {
                 rgba.extend_from_slice(row_data);
             }
-            _ => todo!("unsupported bit depth"),
+            _ => return Err(format!("unsupported PNG bit depth: {bpp}")),
         }
     }
 

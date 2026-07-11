@@ -1,0 +1,190 @@
+{
+  "schema": "tribunus.semantic_review.tests_and_ci_ir.v1",
+  "packet_id": "semantic-packet",
+  "artifact_id": "08_tests_and_ci_ir.json",
+  "generated_at": "2026-07-10T23:36:39.854Z",
+  "repo_root_name": "prism-engine",
+  "git_head_sha": "dd8ff86e25353617616bd527919cbd88836b30f7",
+  "git_branch": "main",
+  "dirty": true,
+  "generator_version": "code_review_export@gemini_structured_ir_v1",
+  "tests": [],
+  "coverage_matrix": [
+    {
+      "requirement_id": "text_replace_rejects_stale_hash",
+      "requirement": "text_replace rejects stale hash",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/text_replace.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "text_replace_requires_hash",
+      "requirement": "text_replace requires hash by default",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/text_replace.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "text_replace_acquires_path_lock",
+      "requirement": "text_replace acquires path lock",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/text_replace.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "text_replace_releases_lock",
+      "requirement": "text_replace releases lock on error",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/text_replace.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "text_replace_records_evidence",
+      "requirement": "text_replace records receipt/diff/audit/PGlite mutation",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/text_replace.test.ts",
+        "test:.omp/tools/tests/receipts.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "batch_edit_validates_before_write",
+      "requirement": "batch_edit validates all edits before writing",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/batch_edit.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "batch_edit_sorted_locks",
+      "requirement": "batch_edit acquires sorted path locks",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/batch_edit.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "batch_edit_rejects_stale_hash",
+      "requirement": "batch_edit rejects stale hash",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/batch_edit.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "batch_edit_writes_journal",
+      "requirement": "batch_edit writes journal",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/batch_edit.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "batch_edit_releases_locks",
+      "requirement": "batch_edit releases locks in finally",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/batch_edit.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "struct_read_returns_hash",
+      "requirement": "struct_read returns hash",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/struct_read.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "warning"
+    },
+    {
+      "requirement_id": "struct_read_denies_unsafe_paths",
+      "requirement": "struct_read denies unsafe paths",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/path-policy.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "warning"
+    },
+    {
+      "requirement_id": "pglite_migrations_idempotent",
+      "requirement": "PGlite migrations are idempotent",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/pglite-store.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "pglite_active_write_lock",
+      "requirement": "PGlite one active write lock per path",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/pglite-store.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "pglite_pending_journals",
+      "requirement": "PGlite pending journals detectable",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/pglite-store.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "warning"
+    },
+    {
+      "requirement_id": "export_includes_omp_tools_lib",
+      "requirement": "export includes .omp/tools/_lib",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/export-completeness.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "export_includes_manifests_tests_migrations_views",
+      "requirement": "export includes manifests/tests/migrations/views",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/export-completeness.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    },
+    {
+      "requirement_id": "export_classifies_unresolved_imports",
+      "requirement": "export emits unresolved import categories",
+      "covered_by_tests": [
+        "test:.omp/tools/tests/export-completeness.test.ts"
+      ],
+      "coverage_status": "covered",
+      "severity_if_missing": "critical"
+    }
+  ],
+  "ci_workflows": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "name": "CI",
+      "triggers": [
+        "pull_request",
+        "push"
+      ],
+      "jobs": []
+    }
+  ],
+  "package_scripts": [],
+  "test_gaps": []
+}

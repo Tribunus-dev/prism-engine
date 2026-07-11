@@ -92,6 +92,8 @@ pub enum SsdCacheError {
     BlockNotFound(String),
     #[error("Cache directory creation failed: {0}")]
     DirCreationFailed(String),
+    #[error("unimplemented: {0}")]
+    Unimplemented(String),
 }
 
 impl PagedSSDCacheManager {
@@ -130,7 +132,12 @@ impl PagedSSDCacheManager {
     /// Load a block from SSD
     pub fn load_block(&self, _hash: &str) -> Result<Vec<u8>, SsdCacheError> {
         // TODO: implement per paged_ssd_cache.py reference
-        todo!("SSD block loading not yet implemented")
+        // SSD block loading is not yet implemented.
+        // The store_block method already returns Ok(()), and load_block should
+        // return a clear error instead of panicking.
+        Err(SsdCacheError::Unimplemented(
+            "SSD block loading not yet implemented".into(),
+        ))
     }
 
     /// Evict oldest blocks until under target ratio

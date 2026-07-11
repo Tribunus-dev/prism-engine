@@ -2404,7 +2404,9 @@ fn cmd_cimage_run_metal_decoder_layer(args: &[String]) -> Result<(), String> {
     let _json_output = has_flag(args, "--json");
 
     // Stub: implement when CImageMetalRegionRunner::run_decoder_shard_region exists.
-    todo!("run-metal-decoder-layer: wire run_decoder_shard_region (Task A)")
+    // Metal decoder layer not yet wired — CLI path is reachable but the actual
+    // decoder shard region execution hasn't been implemented.
+    Err("Metal decoder layer not yet implemented".to_string())
 }
 /// Run a parametric quantization sweep across selected tensors.
 fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {

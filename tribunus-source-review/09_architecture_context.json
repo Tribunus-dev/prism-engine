@@ -1,0 +1,138 @@
+{
+  "schema": "tribunus.semantic_review.architecture_context.v1",
+  "packet_id": "tribunus-gemini-ir",
+  "artifact_id": "09_architecture_context.json",
+  "generated_at": "2026-07-10T23:11:10.829Z",
+  "repo_root_name": "prism-engine",
+  "git_head_sha": "dd8ff86e25353617616bd527919cbd88836b30f7",
+  "git_branch": "main",
+  "dirty": true,
+  "generator_version": "code_review_export@gemini_structured_ir_v1",
+  "doctrine": [
+    {
+      "doctrine_id": "shipped_code_first",
+      "statement": "Shipped code first, docs second, intent last.",
+      "source_path": "AGENTS.md",
+      "relevance": "This governs how the review packet should separate implementation evidence from documentation."
+    },
+    {
+      "doctrine_id": "omp_tools_no_tribunus_imports",
+      "statement": "OMP tools must not import from Tribunus.",
+      "source_path": ".omp/tools/_lib/tool-context.ts",
+      "relevance": "Tool kernel files should not depend on application packages for authority."
+    },
+    {
+      "doctrine_id": "provider_adapters_no_authority",
+      "statement": "Provider adapters must not own authority.",
+      "source_path": ".omp/tools/_lib/adapters/index.ts",
+      "relevance": "Adapters route calls but do not decide policy."
+    },
+    {
+      "doctrine_id": "pglite_local_authority",
+      "statement": "PGlite is the local coordination authority.",
+      "source_path": ".omp/tools/_lib/store/pglite-store.ts",
+      "relevance": "Path locks, receipts, and mutation records are decided here."
+    },
+    {
+      "doctrine_id": "duckdb_derived_only",
+      "statement": "DuckDB is derived analytics only.",
+      "source_path": ".omp/tools/_lib/analytics/duckdb-projector.ts",
+      "relevance": "DuckDB should project PGlite truth, not mutate it."
+    },
+    {
+      "doctrine_id": "evidence_truth",
+      "statement": "Receipts, diffs, and journals remain file evidence.",
+      "source_path": ".omp/tools/_lib/receipts.ts",
+      "relevance": "Write tools should leave durable evidence trails."
+    },
+    {
+      "doctrine_id": "manifest_driven_export",
+      "statement": "Review export must be manifest-driven and completeness-checked.",
+      "source_path": ".omp/tools/code_review_export.ts",
+      "relevance": "The exporter should reject incomplete review packets."
+    }
+  ],
+  "adr_summaries": [],
+  "board_state": {
+    "campaigns": [],
+    "missions": []
+  },
+  "workflow_rules": [
+    {
+      "path": "AGENTS.md",
+      "summary": "Use prose in updates, prefer tables for matrices, avoid bullets, and keep edits surgical.",
+      "constraints": [
+        "plain prose",
+        "no bullet lists",
+        "surgical edits"
+      ]
+    },
+    {
+      "path": "AGENTS.md",
+      "summary": "Run package commands from package directories, not root, and prefer Bun/tsgo tooling.",
+      "constraints": [
+        "package-local commands",
+        "bun runtime",
+        "tsgo typecheck"
+      ]
+    },
+    {
+      "path": ".omp/tools/code_review_export.ts",
+      "summary": "Review packets should be manifest-driven and completeness checked.",
+      "constraints": [
+        "10 JSON artifacts",
+        "completeness gate",
+        "no runtime evidence"
+      ]
+    }
+  ],
+  "mcp_authority_context": [],
+  "bootstrap_constraints": [
+    {
+      "constraint": "OMP tools must not import from Tribunus.",
+      "satisfied_by": [
+        ".omp/tools/*.ts",
+        "module graph"
+      ],
+      "violations": []
+    },
+    {
+      "constraint": "Provider adapters must not own authority.",
+      "satisfied_by": [
+        ".omp/tools/_lib/adapters/*.ts"
+      ],
+      "violations": []
+    },
+    {
+      "constraint": "PGlite is the local coordination authority.",
+      "satisfied_by": [
+        ".omp/tools/_lib/store/pglite-store.ts",
+        ".omp/tools/_lib/store/pglite-types.ts"
+      ],
+      "violations": []
+    },
+    {
+      "constraint": "DuckDB is derived analytics only.",
+      "satisfied_by": [
+        ".omp/tools/_lib/analytics/duckdb-projector.ts"
+      ],
+      "violations": []
+    },
+    {
+      "constraint": "Receipts/diffs/journals remain file evidence.",
+      "satisfied_by": [
+        ".omp/tools/_lib/receipts.ts",
+        ".omp/tools/_lib/write-journal.ts"
+      ],
+      "violations": []
+    },
+    {
+      "constraint": "Review export must be manifest-driven and completeness-checked.",
+      "satisfied_by": [
+        ".omp/tools/code_review_export.ts",
+        "01_manifest.json"
+      ],
+      "violations": []
+    }
+  ]
+}

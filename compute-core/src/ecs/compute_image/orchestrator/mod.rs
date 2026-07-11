@@ -73,12 +73,16 @@ use multimodal_assembly::PromptPart;
 // ── Architecture constants (shared with megakernel) ───────────────
 
 /// Number of KV heads (GQA). Must match megakernel::NUM_KV_HEADS.
+#[allow(dead_code)]
 pub(crate) const NUM_KV_HEADS: u32 = 8;
 /// KV head dimension (global, after RoPE). Must match megakernel::GLOBAL_HEAD_DIM.
+#[allow(dead_code)]
 pub(crate) const GLOBAL_HEAD_DIM: u32 = 512;
 /// Maximum context length (KV cache slots). Must match megakernel::MAX_CONTEXT.
+#[allow(dead_code)]
 pub(crate) const MAX_CONTEXT: u32 = 2048;
 /// Number of transformer layers.
+#[allow(dead_code)]
 pub(crate) const LAYERS: u32 = 48;
 /// Number of concurrent work queue slots.
 #[allow(dead_code)]

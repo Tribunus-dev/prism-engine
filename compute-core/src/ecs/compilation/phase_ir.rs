@@ -9,7 +9,10 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 // Runtime residency contract reused for compile-phase tensor tracking.
-pub use crate::ecs::backend::residency::{BackendId, MemoryDomain, TensorResidency, TransferDecision};
+#[cfg(feature = "legacy_mutations")]
+pub use crate::ecs::backend::residency::{
+    BackendId, MemoryDomain, TensorResidency, TransferDecision,
+};
 
 // ── Core identities ───────────────────────────────────────────────────────
 

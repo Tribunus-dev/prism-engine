@@ -1,0 +1,75 @@
+{
+  "schema": "tribunus.semantic_review.symbol_index.v1",
+  "packet_id": "tribunus-gemini-ir",
+  "artifact_id": "04_symbol_index.json",
+  "generated_at": "2026-07-10T23:11:10.829Z",
+  "repo_root_name": "prism-engine",
+  "git_head_sha": "dd8ff86e25353617616bd527919cbd88836b30f7",
+  "git_branch": "main",
+  "dirty": true,
+  "generator_version": "code_review_export@gemini_structured_ir_v1",
+  "symbols": [],
+  "authority_symbols": [
+    {
+      "symbol_id": "tool:text_replace",
+      "role": "hash_precondition"
+    },
+    {
+      "symbol_id": "tool:text_replace",
+      "role": "path_lock"
+    },
+    {
+      "symbol_id": "tool:text_replace",
+      "role": "receipt_writer"
+    },
+    {
+      "symbol_id": "tool:batch_edit",
+      "role": "hash_precondition"
+    },
+    {
+      "symbol_id": "tool:batch_edit",
+      "role": "path_lock"
+    },
+    {
+      "symbol_id": "tool:batch_edit",
+      "role": "journal_writer"
+    },
+    {
+      "symbol_id": "tool:struct_read",
+      "role": "path_policy"
+    },
+    {
+      "symbol_id": "symbol:.omp/tools/_lib/store/pglite-store.ts#acquirePathLocks",
+      "role": "path_lock"
+    },
+    {
+      "symbol_id": "symbol:.omp/tools/_lib/store/pglite-store.ts#releasePathLocks",
+      "role": "path_lock"
+    },
+    {
+      "symbol_id": "symbol:.omp/tools/_lib/store/pglite-store.ts#recordMutation",
+      "role": "store_transaction"
+    },
+    {
+      "symbol_id": "symbol:.omp/tools/_lib/store/pglite-store.ts#createWriteJournal",
+      "role": "journal_writer"
+    }
+  ],
+  "missing_expected_symbols": [
+    {
+      "expected": "tool:text_replace",
+      "reason": "tool handler not indexed",
+      "severity": "critical"
+    },
+    {
+      "expected": "tool:batch_edit",
+      "reason": "tool handler not indexed",
+      "severity": "critical"
+    },
+    {
+      "expected": "tool:struct_read",
+      "reason": "tool handler not indexed",
+      "severity": "critical"
+    }
+  ]
+}

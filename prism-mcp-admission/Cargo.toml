@@ -1,0 +1,12 @@
+[package]
+name = "prism-mcp-admission"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+prism-mcp-core = { path = "../prism-mcp-core" }
+rusqlite = { version = "0.31", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"

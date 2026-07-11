@@ -1,0 +1,207 @@
+{
+  "cimage_digest": "",
+  "num_layers": 30,
+  "hidden_dim": 2560,
+  "seq_len": 4096,
+  "layer_validations": [],
+  "layer_timings": [
+    {
+      "layer": 0,
+      "weight_upload_ms": 3.250167,
+      "command_buffer_ms": 65.44575
+    },
+    {
+      "layer": 1,
+      "weight_upload_ms": 2.228792,
+      "command_buffer_ms": 56.838667
+    },
+    {
+      "layer": 2,
+      "weight_upload_ms": 1.2355,
+      "command_buffer_ms": 57.82875
+    },
+    {
+      "layer": 3,
+      "weight_upload_ms": 1.364208,
+      "command_buffer_ms": 56.327291
+    },
+    {
+      "layer": 4,
+      "weight_upload_ms": 1.294334,
+      "command_buffer_ms": 56.988875
+    },
+    {
+      "layer": 5,
+      "weight_upload_ms": 3.272709,
+      "command_buffer_ms": 56.959708
+    },
+    {
+      "layer": 6,
+      "weight_upload_ms": 1.386042,
+      "command_buffer_ms": 56.008708
+    },
+    {
+      "layer": 7,
+      "weight_upload_ms": 1.363042,
+      "command_buffer_ms": 56.657291
+    },
+    {
+      "layer": 8,
+      "weight_upload_ms": 1.585,
+      "command_buffer_ms": 57.351541999999995
+    },
+    {
+      "layer": 9,
+      "weight_upload_ms": 2.8705,
+      "command_buffer_ms": 58.265041
+    },
+    {
+      "layer": 10,
+      "weight_upload_ms": 2.4930410000000003,
+      "command_buffer_ms": 56.968208
+    },
+    {
+      "layer": 11,
+      "weight_upload_ms": 1.379833,
+      "command_buffer_ms": 55.903708
+    },
+    {
+      "layer": 12,
+      "weight_upload_ms": 1.319167,
+      "command_buffer_ms": 56.573541
+    },
+    {
+      "layer": 13,
+      "weight_upload_ms": 2.421209,
+      "command_buffer_ms": 58.626958
+    },
+    {
+      "layer": 14,
+      "weight_upload_ms": 2.600959,
+      "command_buffer_ms": 57.97425
+    },
+    {
+      "layer": 15,
+      "weight_upload_ms": 2.558625,
+      "command_buffer_ms": 57.244125
+    },
+    {
+      "layer": 16,
+      "weight_upload_ms": 2.3983339999999997,
+      "command_buffer_ms": 58.4515
+    },
+    {
+      "layer": 17,
+      "weight_upload_ms": 2.5655,
+      "command_buffer_ms": 57.77225
+    },
+    {
+      "layer": 18,
+      "weight_upload_ms": 2.077416,
+      "command_buffer_ms": 57.563583
+    },
+    {
+      "layer": 19,
+      "weight_upload_ms": 3.4989169999999996,
+      "command_buffer_ms": 57.677666
+    },
+    {
+      "layer": 20,
+      "weight_upload_ms": 2.763667,
+      "command_buffer_ms": 57.422000000000004
+    },
+    {
+      "layer": 21,
+      "weight_upload_ms": 2.257792,
+      "command_buffer_ms": 57.635459
+    },
+    {
+      "layer": 22,
+      "weight_upload_ms": 1.3223340000000001,
+      "command_buffer_ms": 57.191333
+    },
+    {
+      "layer": 23,
+      "weight_upload_ms": 2.5511660000000003,
+      "command_buffer_ms": 59.774415999999995
+    },
+    {
+      "layer": 24,
+      "weight_upload_ms": 2.7805,
+      "command_buffer_ms": 57.927583
+    },
+    {
+      "layer": 25,
+      "weight_upload_ms": 2.0252920000000003,
+      "command_buffer_ms": 57.102291
+    },
+    {
+      "layer": 26,
+      "weight_upload_ms": 2.337917,
+      "command_buffer_ms": 57.65925
+    },
+    {
+      "layer": 27,
+      "weight_upload_ms": 3.0525420000000003,
+      "command_buffer_ms": 57.411334000000004
+    },
+    {
+      "layer": 28,
+      "weight_upload_ms": 2.592042,
+      "command_buffer_ms": 60.055083
+    },
+    {
+      "layer": 29,
+      "weight_upload_ms": 2.599209,
+      "command_buffer_ms": 58.416500000000006
+    }
+  ],
+  "total_command_buffer_ms": 1734.022661,
+  "validation_passed": true,
+  "model_id": "BitNet-b1.58-2B4T",
+  "profile_id": "AppleMProBalanced",
+  "kernel_dispatch_count": 540,
+  "per_kernel_family": [
+    {
+      "kernel_family": "attention_subgraph",
+      "total_command_buffer_ms": 1462.830335,
+      "dispatch_count": 30
+    },
+    {
+      "kernel_family": "residual_add",
+      "total_command_buffer_ms": 6.370666,
+      "dispatch_count": 30
+    },
+    {
+      "kernel_family": "residual_add_rmsnorm",
+      "total_command_buffer_ms": 7.7419579999999995,
+      "dispatch_count": 30
+    },
+    {
+      "kernel_family": "rmsnorm",
+      "total_command_buffer_ms": 16.171080999999997,
+      "dispatch_count": 30
+    },
+    {
+      "kernel_family": "silu_mul",
+      "total_command_buffer_ms": 7.480250999999999,
+      "dispatch_count": 30
+    },
+    {
+      "kernel_family": "ternary_gemv",
+      "total_command_buffer_ms": 233.23362199999997,
+      "dispatch_count": 210
+    }
+  ],
+  "bandwidth_estimate": {
+    "bytes_read_estimate": 317798400,
+    "bytes_written_estimate": 26127360,
+    "effective_bandwidth_gbps": 0.19833983011598025
+  },
+  "tokens_per_second_prefill": 70864.12580625438,
+  "tokens_per_second_decode": 17.300811964417576,
+  "first_divergent_layer": null,
+  "validation_enabled": false,
+  "fallback_used": false,
+  "selected_kernel_variant_id": "default"
+}
