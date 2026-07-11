@@ -294,6 +294,7 @@ pub enum EntityKind {
     Fence,
     Session,
     Artifact,
+    Device,
 }
 
 /// Type-erased storage for components, indexed by (TypeId, EntityId).

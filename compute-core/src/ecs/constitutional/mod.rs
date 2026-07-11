@@ -21,6 +21,8 @@ pub mod scheduler;
 pub use scheduler::*;
 pub mod driver;
 pub use driver::*;
+pub mod device;
+pub use device::*;
 pub mod sparse_set;
 pub use sparse_set::*;
 pub mod migration;

@@ -1601,4 +1601,218 @@ mod tests {
         let deserialized: SparseSet<String> = serde_json::from_str(&json).unwrap();
         assert_eq!(set, deserialized);
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    //  Device discovery tests — pure type-level, no real hardware.
+    //  Tests assume device module types are re-exported at
+    //  crate::ecs::constitutional::*.
+
+    // ── DeviceLifecycle ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_device_lifecycle_states() {
+        let discovered = DeviceLifecycle::Discovered;
+        let initializing = DeviceLifecycle::Initializing;
+        let ready = DeviceLifecycle::Ready;
+        let degraded = DeviceLifecycle::Degraded;
+        let unavailable = DeviceLifecycle::Unavailable;
+        let removed = DeviceLifecycle::Removed;
+
+        assert!(!discovered.is_available());
+        assert!(!initializing.is_available());
+        assert!(ready.is_available());
+        assert!(!degraded.is_available());
+        assert!(!unavailable.is_available());
+        assert!(!removed.is_available());
+
+        assert_ne!(discovered, initializing);
+        assert_ne!(discovered, ready);
+        assert_ne!(initializing, ready);
+        assert_ne!(ready, degraded);
+        assert_ne!(ready, unavailable);
+        assert_ne!(ready, removed);
+    }
+
+    // ── DeviceStableId ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_device_stable_id_pcie() {
+        let sid = DeviceStableId::pcie(0, 1, 2, 3, 0x10de, 0x1234);
+        let s = format!("{:?}", sid);
+        assert!(s.contains("pcie"), "expected pcie in stable id, got: {s}");
+        assert!(s.contains("10de"), "expected vendor in stable id, got: {s}");
+    }
+
+    // ── Serde Roundtrips ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_device_types_serde() {
+        let raw = DeviceStableId::pcie(0, 1, 2, 3, 0x10de, 0x1234);
+        let json = serde_json::to_string(&raw).unwrap();
+        let back: DeviceStableId = serde_json::from_str(&json).unwrap();
+        assert_eq!(raw, back);
+
+        let caps = DeviceCapabilities(vec![
+            BackendCapability::MatMulF32,
+            BackendCapability::MatMulF16,
+        ]);
+        let json = serde_json::to_string(&caps).unwrap();
+        let back: DeviceCapabilities = serde_json::from_str(&json).unwrap();
+        assert_eq!(caps, back);
+
+        let mem = DeviceMemoryLimits {
+            total_bytes: 8_589_934_592,
+            max_alloc_bytes: 4_294_967_296,
+        };
+        let json = serde_json::to_string(&mem).unwrap();
+        let back: DeviceMemoryLimits = serde_json::from_str(&json).unwrap();
+        assert_eq!(mem, back);
+
+        let topo = DeviceTopology {
+            compute_units: 16,
+            description: "Apple M3 GPU".to_string(),
+        };
+        let json = serde_json::to_string(&topo).unwrap();
+        let back: DeviceTopology = serde_json::from_str(&json).unwrap();
+        assert_eq!(topo, back);
+
+        for health in &[
+            DeviceHealth::Healthy,
+            DeviceHealth::Degraded,
+            DeviceHealth::Unhealthy,
+            DeviceHealth::Unknown,
+        ] {
+            let json = serde_json::to_string(health).unwrap();
+            let back: DeviceHealth = serde_json::from_str(&json).unwrap();
+            assert_eq!(*health, back);
+        }
+
+        for state in &[
+            DesiredDeviceState::Active,
+            DesiredDeviceState::Standby,
+            DesiredDeviceState::Offline,
+            DesiredDeviceState::Removed,
+        ] {
+            let json = serde_json::to_string(state).unwrap();
+            let back: DesiredDeviceState = serde_json::from_str(&json).unwrap();
+            assert_eq!(*state, back);
+        }
+
+        for obs in &[
+            ObservedDeviceState::Present,
+            ObservedDeviceState::Absent,
+            ObservedDeviceState::Degraded,
+            ObservedDeviceState::Error,
+        ] {
+            let json = serde_json::to_string(obs).unwrap();
+            let back: ObservedDeviceState = serde_json::from_str(&json).unwrap();
+            assert_eq!(*obs, back);
+        }
+    }
+
+    // ── DiscoverDevicesCommand ───────────────────────────────────────────
+
+    #[test]
+    fn test_discover_devices_success() {
+        let mut world = CompWorld::new();
+        let schema_registry = SchemaRegistry::new();
+        let cmd_id = MessageId::compute(b"discover-gpu");
+        let effect_id = MessageId::compute(b"effect-1");
+
+        let outcome = EffectOutcome {
+            id: effect_id,
+            request_id: MessageId::compute(b"enum:metal"),
+            success: true,
+            output: serde_json::json!({"devices": [{
+                "stable_id": "pcie:0000:01:00.0:10de:1234",
+                "factory_name": "metal",
+                "backend_family": "apple_gpu",
+                "capabilities": ["mat_mul_f32", "mat_mul_f16"],
+                "memory_limits": { "total_bytes": 8589934592_i64, "max_alloc_bytes": 4294967296_i64 },
+                "topology": { "compute_units": 16, "description": "Apple M3 GPU" }
+            }]}),
+        };
+
+        let cmd = DiscoverDevicesCommand {
+            id: cmd_id,
+            factory_name: "metal".to_string(),
+        };
+
+        let initial_epoch = world.current_epoch();
+        let result = cmd.execute(&mut world, &schema_registry, outcome);
+        let (committed, events) = result.expect("discovery should succeed");
+
+        assert!(
+            committed.0 .0 > initial_epoch.0,
+            "epoch should advance on successful discovery"
+        );
+        assert!(
+            events.iter().any(|e| e.kind == "device_discovered"),
+            "should emit device_discovered event"
+        );
+    }
+
+    #[test]
+    fn test_discover_devices_failure() {
+        let mut world = CompWorld::new();
+        let schema_registry = SchemaRegistry::new();
+        let cmd_id = MessageId::compute(b"discover-fail");
+
+        let outcome = EffectOutcome {
+            id: MessageId::compute(b"effect-fail"),
+            request_id: MessageId::compute(b"enum:metal"),
+            success: false,
+            output: serde_json::Value::Null,
+        };
+
+        let cmd = DiscoverDevicesCommand {
+            id: cmd_id,
+            factory_name: "metal".to_string(),
+        };
+
+        let initial_epoch = world.current_epoch();
+        let err = cmd.execute(&mut world, &schema_registry, outcome).unwrap_err();
+
+        assert!(matches!(err, DeviceError::DiscoveryFailed), "expected DiscoveryFailed, got {err:?}");
+        assert_eq!(world.current_epoch(), initial_epoch);
+    }
+
+    #[test]
+    fn test_discover_devices_request_mismatch() {
+        let mut world = CompWorld::new();
+        let schema_registry = SchemaRegistry::new();
+        let cmd_id = MessageId::compute(b"discover-request");
+
+        let outcome = EffectOutcome {
+            id: MessageId::compute(b"effect-mismatch"),
+            request_id: MessageId::compute(b"enum:metal-wrong"),
+            success: true,
+            output: serde_json::Value::Null,
+        };
+
+        let cmd = DiscoverDevicesCommand {
+            id: cmd_id,
+            factory_name: "metal".to_string(),
+        };
+
+        let initial_epoch = world.current_epoch();
+        let err = cmd.execute(&mut world, &schema_registry, outcome).unwrap_err();
+
+        assert!(
+            matches!(err, DeviceError::RequestMismatch),
+            "expected RequestMismatch, got {err:?}"
+        );
+        assert_eq!(world.current_epoch(), initial_epoch);
+    }
+
+    // ── RuntimeHandleKey ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_runtime_handle_key_ephemeral() {
+        assert_eq!(
+            RuntimeHandleKey::ephemeral_durability(),
+            ComponentDurability::Ephemeral,
+        );
+    }
 }
