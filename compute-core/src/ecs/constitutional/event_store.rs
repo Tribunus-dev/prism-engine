@@ -1,4 +1,3 @@
-use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::persistence::{EventLogEntry, EventStore, Snapshot};
 use crate::ecs::constitutional::types::*;
 use std::io::{BufWriter, Read, Write};
@@ -14,6 +13,7 @@ use std::path::Path;
 pub struct FsEventStore {
     events: Vec<EventLogEntry>,
     snapshots: Vec<Snapshot>,
+    #[expect(dead_code, reason = "stored for potential recovery/reporting use")]
     log_path: String,
     snapshot_path: String,
     file: Option<std::fs::File>,

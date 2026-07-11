@@ -20,7 +20,9 @@ No legacy map, registry, manager, cache, or database table can independently con
 | 2 | **Device Discovery** | `Canonical` | Device | DeviceStableId, DriverFactoryId, BackendFamily, DeviceCapabilities, DeviceMemoryLimits, DeviceTopology, DeviceHealth, DeviceLifecycle, DesiredDeviceState, ObservedDeviceState, LastObservation, RuntimeHandleKey | kernel |
 | 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
 | 4 | **Session Lifecycle** | `Shadow` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
+| 3 | **Model Deployment & Residency** | `Canonical` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
 | 5 | **Work Scheduling** | `Shadow` | WorkItem | WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent, WorkPrerequisites, WorkOutput | kernel |
+| 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
 | 6 | **Execution Leases** | `Shadow` | — | ExecutionLease, LeaseOwner, LeaseTokenRange, KvSlot, KvOwnership, ExecutionOutput | kernel |
 | 7 | **Compilation & Model Production** | `Shadow` | CompilationJob | CompilationJob, JobInput, JobConfig, JobOutput, JobLifecycle, ValidationReceipt, QuantizationPlan, CimagePromotion | kernel |
 | 8 | **Agent & Tool Execution** | `Shadow` | Agent | AgentRun, AgentTask, AgentPhase, ToolInvocation, ToolOutcome, AgentMessage, AgentConfig, AgentLifecycle | kernel |
@@ -29,6 +31,7 @@ No legacy map, registry, manager, cache, or database table can independently con
 | 11 | **Server & API Bridges** | `Shadow` | — | IngressRequest, ApiKey, RateLimiterState, RequestQueue, TransportSession, IngressLifecycle | kernel |
 | 12 | **Persistence & Projections** | `Design` | — | ReplayRegistry, EventStore (InMemory), Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
 | 12 | **Persistence & Projections** | `Shadow` | — | FsEventStore (file-backed, durable-before-ack), ReplayRegistry (16 appliers), EventStore trait, InMemoryEventStore, Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
+| 12 | **Persistence & Projections** | `Shadow` | — | FsEventStore (file-backed, durable-before-ack, restart recovery proven), ReplayRegistry (16 appliers), ReplayEngine::replay_into, restart recovery integration test | kernel |
 | 13 | **Dashboard & Authority Purge** | `Inventory` | — | — | kernel |
 
 ## Cutover Protocol
@@ -117,16 +120,15 @@ in shadow mode.
 - **Execution Leases** — AcquireExecutionLeaseCommand, CompleteExecutionLeaseCommand,
     4 tests. replay_lease_acquired/completed registered.
 - **Compilation & Model Production** — 3 commands, 8 types, 11 tests.
-    replay_compilation_job_created registered.
-- **Agent & Tool Execution** — 2 commands, 9 types, 9 tests. Need replay function.
-- **Multimodal Pipelines** — 2 commands, 7 types, 8 tests. Need replay function.
-- **Distributed Topology** — 2 commands, 8 types, 5 tests. Need replay function.
-- **Server & API Bridges** — 3 commands, 6 types, 11 tests. Need replay function.
-  - **Server & API Bridges** — 3 commands, 6 types, 11 tests. Need replay function.
-  - **Persistence & Projections** — FsEventStore with file-backed append-only log,
-    durable-before-ack (fsync), crash recovery by log scanning. 5 tests.
-    ReplayRegistry with 16 registered appliers. ReplayEngine::replay_into for
-    batch world reconstruction from events.
+  - **Compilation & Model Production** — 3 commands, 8 types, 11 tests. replay_compilation_job_created registered.
+  - **Agent & Tool Execution** — 2 commands, 9 types, 9 tests. replay_agent_run_created registered.
+  - **Multimodal Pipelines** — 2 commands, 7 types, 8 tests. replay_pipeline_created registered.
+  - **Distributed Topology** — 2 commands, 8 types, 5 tests. replay_peer_registered registered.
+  - **Server & API Bridges** — 3 commands, 6 types, 11 tests. replay_ingress_request_submitted registered.
+  - **Persistence & Projections** — FsEventStore (file-backed, durable-before-ack, restart recovery proven),
+    ReplayRegistry with 16 appliers, ReplayEngine::replay_into, InMemoryEventStore, Snapshot. 177 tests.
+  - **Legacy Spawn Guard** — CompWorld.direct_mutation_allowed guard prevents direct spawn/add_component
+    outside WorldTxn. 2 tests: guard catches violations, WorldTxn bypasses guard.
 
 ## Wave Plan
 

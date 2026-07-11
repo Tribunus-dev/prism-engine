@@ -247,6 +247,10 @@ pub struct CompWorld {
     journal: Vec<ComponentChange>,
     component_versions: std::collections::HashMap<u64, u64>,
     committed_events: Vec<DomainEvent>,
+    /// When false, direct mutations (spawn, add_component, remove_component)
+    /// panic with a message pointing to WorldTxn. Defaults to true for
+    /// backward compatibility during migration.
+    direct_mutation_allowed: bool,
 }
 
 impl std::fmt::Debug for CompWorld {
@@ -332,6 +336,10 @@ impl Default for ComponentStore {
 impl CompWorld {
     /// Spawn entity with kind and optional name.
     pub fn spawn(&mut self, kind: EntityKind, name: Option<String>) -> CompEntity {
+        assert!(
+            self.direct_mutation_allowed,
+            "direct spawn() called outside WorldTxn — use WorldTxn::stage_spawn()"
+        );
         let entity = self.spawn_entity(kind);
         if let Some(n) = name {
             let idx = (entity.0 - 1) as usize;
@@ -370,6 +378,10 @@ impl CompWorld {
     }
 
     pub fn remove_component<T: Component>(&mut self, entity: CompEntity) -> Option<T> {
+        assert!(
+            self.direct_mutation_allowed,
+            "direct remove_component() called outside WorldTxn — use txn.remove_component()"
+        );
         let store = &mut self.component_store;
         let type_id = TypeId::of::<T>();
         store
@@ -391,12 +403,24 @@ impl CompWorld {
             journal: Vec::new(),
             component_versions: std::collections::HashMap::new(),
             committed_events: Vec::new(),
+            direct_mutation_allowed: true,
         }
     }
 
     /// Returns the next entity ID that will be assigned, without consuming it.
     pub fn next_entity_id(&self) -> u64 {
         self.next_id
+    }
+
+    /// Enable or disable direct mutation mode.
+    /// When disabled, spawn/add_component/remove_component panic.
+    pub fn set_direct_mutation_allowed(&mut self, allowed: bool) {
+        self.direct_mutation_allowed = allowed;
+    }
+
+    /// Check if direct mutation is currently allowed.
+    pub fn is_direct_mutation_allowed(&self) -> bool {
+        self.direct_mutation_allowed
     }
 
     /// Spawn an entity at a specific reserved ID (used by WorldTxn during commit).
@@ -425,6 +449,10 @@ impl CompWorld {
     }
 
     pub fn spawn_entity(&mut self, kind: EntityKind) -> CompEntity {
+        assert!(
+            self.direct_mutation_allowed,
+            "direct spawn_entity() called outside WorldTxn — use WorldTxn::stage_spawn()"
+        );
         let id = self.next_id;
         self.next_id += 1;
         self.entity_meta.push(EntityMeta {
@@ -444,6 +472,10 @@ impl CompWorld {
     }
 
     pub fn add_component<T: Component>(&mut self, entity: CompEntity, component: T) {
+        assert!(
+            self.direct_mutation_allowed,
+            "direct add_component() called outside WorldTxn — use txn.add_component()"
+        );
         let store = &mut self.component_store;
         let type_id = TypeId::of::<T>();
         let map: &mut HashMap<EntityId, T> = store
@@ -498,6 +530,10 @@ impl CompWorld {
     }
 
     pub fn get_component_mut<T: Component>(&mut self, entity: CompEntity) -> Option<&mut T> {
+        assert!(
+            self.direct_mutation_allowed,
+            "direct get_component_mut() called outside WorldTxn — use txn for mutations"
+        );
         let store = &mut self.component_store;
         let type_id = TypeId::of::<T>();
         store

@@ -2953,7 +2953,7 @@ mod tests {
         };
         let epoch_device = replay_device_discovered(&mut world, &device_event)
             .expect("replay device_discovered should succeed");
-        assert!(epoch_device.0.0.0 > 0);
+        assert!(epoch_device.0 .0 .0 > 0);
 
         // --- 1b. Load an artifact (entity 2) ---
         let artifact_event = DomainEvent {
@@ -2969,7 +2969,7 @@ mod tests {
         };
         let epoch_artifact = replay_artifact_loaded(&mut world, &artifact_event)
             .expect("replay artifact_loaded should succeed");
-        assert!(epoch_artifact.0.0.0 > 0);
+        assert!(epoch_artifact.0 .0 .0 > 0);
 
         // --- 1c. Deploy a model (entity 3) with residency (entity 4) ---
         let model_event = DomainEvent {
@@ -2988,7 +2988,7 @@ mod tests {
         };
         let epoch_model = replay_model_deployed(&mut world, &model_event)
             .expect("replay model_deployed should succeed");
-        assert!(epoch_model.0.0.0 > 0);
+        assert!(epoch_model.0 .0 .0 > 0);
 
         // --- 1d. Admit a session (entity 5) ---
         let session_event = DomainEvent {
@@ -3003,14 +3003,14 @@ mod tests {
         };
         let epoch_session = replay_session_admitted(&mut world, &session_event)
             .expect("replay session_admitted should succeed");
-        assert!(epoch_session.0.0 > 0);
+        assert!(epoch_session.0 .0 > 0);
 
         // ── Phase 2: Store all events in InMemoryEventStore ──────────────
         // Events are stored with their replay epochs in order.
         let all_events = [
-            (&device_event, epoch_device.0.0),
-            (&artifact_event, epoch_artifact.0.0),
-            (&model_event, epoch_model.0.0),
+            (&device_event, epoch_device.0 .0),
+            (&artifact_event, epoch_artifact.0 .0),
+            (&model_event, epoch_model.0 .0),
             (&session_event, epoch_session.0),
         ];
         for (event, epoch) in &all_events {
@@ -3094,13 +3094,9 @@ mod tests {
         let registry = ReplayRegistry::register_all();
 
         let start_epoch = replay_world.current_epoch();
-        let replay_result = ReplayEngine::replay_into(
-            &mut replay_world,
-            &event_store,
-            start_epoch,
-            &registry,
-        )
-        .expect("replay_into should succeed");
+        let replay_result =
+            ReplayEngine::replay_into(&mut replay_world, &event_store, start_epoch, &registry)
+                .expect("replay_into should succeed");
 
         assert_eq!(
             replay_result.events_replayed, 4,
@@ -3215,13 +3211,9 @@ mod tests {
         // Idempotency: replaying again must not change entity counts.
         // Note: replay_device_discovered uses next_entity_id and is NOT idempotent,
         // so we start from epoch 3 to skip the device event and re-run artifact+model+session.
-        let _ = ReplayEngine::replay_into(
-            &mut replay_world,
-            &event_store,
-            WorldEpoch(3),
-            &registry,
-        )
-        .expect("second replay_into should succeed");
+        let _ =
+            ReplayEngine::replay_into(&mut replay_world, &event_store, WorldEpoch(3), &registry)
+                .expect("second replay_into should succeed");
 
         let artifacts_again: Vec<_> = replay_world.entities_of_kind(EntityKind::Artifact);
         let devices_again: Vec<_> = replay_world.entities_of_kind(EntityKind::Device);
@@ -3254,5 +3246,126 @@ mod tests {
             sessions_orig.len(),
             "idempotent: session count should not change"
         );
+    }
+
+    // ── Legacy Spawn Guard ────────────────────────────────────────────────
+
+    #[test]
+    fn test_legacy_spawn_guard_catches_violations() {
+        #[derive(Debug)]
+        struct DummyComponent(u64);
+        impl crate::ecs::Component for DummyComponent {}
+
+        use crate::ecs::CompWorld;
+        let mut world = CompWorld::new();
+        world.set_direct_mutation_allowed(false);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            world.spawn(crate::ecs::EntityKind::Model, None);
+        }));
+        assert!(result.is_err(), "spawn should panic when guard is active");
+
+        // add_component
+        world.set_direct_mutation_allowed(true);
+        let e = world.spawn(crate::ecs::EntityKind::Model, None);
+        world.set_direct_mutation_allowed(false);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            world.add_component(e, DummyComponent(42));
+        }));
+        assert!(
+            result.is_err(),
+            "add_component should panic when guard is active"
+        );
+    }
+
+    #[test]
+    fn test_world_txn_bypasses_guard() {
+        use crate::ecs::constitutional::types::*;
+        use crate::ecs::constitutional::world_txn::WorldTxn;
+        use crate::ecs::{CompWorld, EntityKind};
+
+        let mut world = CompWorld::new();
+        world.set_direct_mutation_allowed(false);
+
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Artifact);
+        let epoch = world.transit(txn).expect("WorldTxn should bypass guard");
+        assert!(epoch.0 .0 > 0);
+        assert!(world.has_entity(crate::ecs::CompEntity(1)));
+    }
+
+    #[test]
+    fn test_restart_recovery_fs_event_store() {
+        // Use process-unique temp paths
+        let log_path = format!("/tmp/prism-restart-test-{}.log", std::process::id());
+        let snap_path = format!("/tmp/prism-restart-test-{}.snap", std::process::id());
+        let _ = std::fs::remove_file(&log_path);
+        let _ = std::fs::remove_file(&snap_path);
+
+        // Phase 1: Build a world with events stored in FsEventStore
+        let registry = ReplayRegistry::register_all();
+        let mut store = FsEventStore::open(&log_path, &snap_path).expect("open store");
+        let mut world = CompWorld::new();
+
+        // Build events as if they came from real commands
+        let device_event = DomainEvent {
+            id: MessageId::compute(b"restart-device"),
+            kind: "device_discovered".to_string(),
+            entity_id: None,
+            payload: serde_json::json!({"stable_id": "pci:0000:00:01.0:1002:740f"}),
+        };
+        let artifact_event = DomainEvent {
+            id: MessageId::compute(b"restart-artifact"),
+            kind: "artifact_loaded".to_string(),
+            entity_id: Some(EntityKindId(2)),
+            payload: serde_json::json!({
+                "artifact_path": "/tmp/model.bin",
+                "observed_digest": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                "file_length": 8192,
+                "entity_type": "artifact",
+            }),
+        };
+
+        // Apply events to both the store and the live world
+        for (event, seq) in &[(&device_event, 1u64), (&artifact_event, 2u64)] {
+            let epoch = store.latest_epoch().map(|e| e.0).unwrap_or(0) + 1;
+            let log_entry = EventLogEntry {
+                epoch: WorldEpoch(epoch),
+                sequence: *seq,
+                event: (*event).clone(),
+                world_digest: [0u8; 32],
+            };
+            store
+                .append_events(WorldEpoch(epoch), &[log_entry])
+                .expect("store event");
+
+            // Apply to live world via replay applier
+            registry.apply(&mut world, event).expect("apply event");
+        }
+
+        let entity_count_original = world.entity_count();
+
+        // Phase 2: "Restart" — create fresh world, replay from store
+        let mut fresh_world = CompWorld::new();
+        let result = ReplayEngine::replay_into(&mut fresh_world, &store, WorldEpoch(1), &registry)
+            .expect("replay should succeed");
+
+        // Phase 3: Verify reconstructed world matches original
+        assert_eq!(
+            fresh_world.entity_count(),
+            entity_count_original,
+            "reconstructed world should have same entity count"
+        );
+        assert!(result.events_replayed > 0, "should replay events");
+
+        // Verify entity kinds
+        let devices = fresh_world.entities_of_kind(EntityKind::Device);
+        assert_eq!(devices.len(), 1, "should have 1 device");
+        let artifacts = fresh_world.entities_of_kind(EntityKind::Artifact);
+        assert_eq!(artifacts.len(), 1, "should have 1 artifact");
+
+        // Cleanup temp files
+        let _ = std::fs::remove_file(&log_path);
+        let _ = std::fs::remove_file(&snap_path);
     }
 }
