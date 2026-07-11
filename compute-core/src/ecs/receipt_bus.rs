@@ -8,10 +8,14 @@
 //! ## Thread safety
 //!
 //! [`ReceiptBus::emit`] is `&self` — all internal state uses `parking_lot::Mutex`.
-//! Subscribers receive `&CanonicalReceipt` and must not block.
+//! Subscribers are dispatched via an async [`mpsc::UnboundedSender`] channel.
+//! The synchronous [`ReceiptSubscriber::on_receipt`] trait method is retained
+//! as a compatibility path for manual use outside the bus; new subscribers
+//! should use the async channel instead.
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 // ── ReceiptKind ─────────────────────────────────────────────────────────────
 
@@ -325,10 +329,31 @@ impl CanonicalReceiptBuilder {
 /// Return `Some(vec![…])` from [`kind_filter`](Self::kind_filter) to only
 /// receive specific receipt kinds. Return `None` to receive all receipts.
 pub trait ReceiptSubscriber: Send + Sync {
-    fn on_receipt(&mut self, receipt: &CanonicalReceipt);
+    /// Receive a receipt synchronously.
+    ///
+    /// **Deprecated** — new subscribers should use the async channel from
+    /// [`ReceiptBus::subscribe`] instead and leave this default no-op.
+    fn on_receipt(&mut self, _receipt: &CanonicalReceipt) {}
     fn kind_filter(&self) -> Option<Vec<ReceiptKind>> {
         None
     }
+}
+
+// ── AsyncSubscriber ───────────────────────────────────────────────────────────
+
+/// A subscriber registered with [`ReceiptBus`], backed by an async channel.
+///
+/// The [`subscriber`] field retains the [`Box<dyn ReceiptSubscriber>`] for
+/// backward compat. New subscribers should use the async channel exclusively:
+/// call [`subscribe`](ReceiptBus::subscribe), spawn a worker task that drains
+/// the returned [`mpsc::UnboundedReceiver`], and never touch [`ReceiptSubscriber::on_receipt`].
+pub struct AsyncSubscriber {
+    /// The original synchronous subscriber (compat path).
+    pub subscriber: Box<dyn ReceiptSubscriber>,
+    /// Non-blocking sender — [`emit`](ReceiptBus::emit) only calls `try_send`.
+    pub sender: mpsc::UnboundedSender<CanonicalReceipt>,
+    /// Optional kind filter (cached from the subscriber at registration time).
+    pub filter: Option<Vec<ReceiptKind>>,
 }
 
 // ── ReceiptBus ──────────────────────────────────────────────────────────────
@@ -343,10 +368,10 @@ const DEFAULT_MAX_BUFFER: usize = 10_000;
 ///
 /// # Thread safety
 ///
-/// All methods are thread-safe. Subscribers are called while holding the
-/// subscriber lock, so subscriber callbacks should not re-enter the bus.
+/// All methods are thread-safe. The subscriber lock is held only for the
+/// duration of the (non-blocking) `try_send` call, not for subscriber processing.
 pub struct ReceiptBus {
-    subscribers: Mutex<Vec<Box<dyn ReceiptSubscriber>>>,
+    subscribers: Mutex<Vec<AsyncSubscriber>>,
     buffer: Mutex<Vec<CanonicalReceipt>>,
     max_buffer: usize,
 }
@@ -378,21 +403,32 @@ impl ReceiptBus {
         }
     }
 
-    pub fn subscribe(&self, mut subscriber: Box<dyn ReceiptSubscriber>) {
-        let mut subs = self.subscribers.lock();
-        // Replay buffered receipts to the new subscriber
-        for receipt in self.buffer.lock().iter() {
-            let filter = subscriber.kind_filter();
-            let matches = filter
-                .as_ref()
-                .map_or(true, |kinds| kinds.contains(&receipt.kind));
-            if matches {
-                // We need &mut self, but we're borrowing subscriber from the mutex guard.
-                // Re-acquire with a separate lock to call on_receipt.
-                subscriber.on_receipt(receipt);
-            }
-        }
-        subs.push(subscriber);
+    /// Register a subscriber and return its async channel receiver.
+    ///
+    /// The subscriber is stored alongside an [`mpsc::UnboundedSender`].
+    /// Every future [`emit`](Self::emit) call that matches the subscriber's
+    /// [`kind_filter`](ReceiptSubscriber::kind_filter) sends the receipt
+    /// through the channel without blocking.
+    ///
+    /// Spawn a worker task that drains the returned receiver to process receipts.
+    ///
+    /// ## Compat note
+    ///
+    /// The synchronous [`ReceiptSubscriber::on_receipt`] method is **not** called
+    /// by the bus after this migration. Callers that depended on synchronous
+    /// dispatch must switch to reading from the returned receiver.
+    pub fn subscribe(
+        &self,
+        subscriber: Box<dyn ReceiptSubscriber>,
+    ) -> mpsc::UnboundedReceiver<CanonicalReceipt> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let filter = subscriber.kind_filter();
+        self.subscribers.lock().push(AsyncSubscriber {
+            subscriber,
+            sender: tx,
+            filter,
+        });
+        rx
     }
 
     pub fn emit(&self, receipt: CanonicalReceipt) {
@@ -404,14 +440,15 @@ impl ReceiptBus {
             }
             buf.push(receipt.clone());
         }
-        let mut subs = self.subscribers.lock();
-        for sub in subs.iter_mut() {
-            let filter = sub.kind_filter();
-            let matches = filter
+        let subs = self.subscribers.lock();
+        for sub in subs.iter() {
+            let matches = sub
+                .filter
                 .as_ref()
                 .map_or(true, |kinds| kinds.contains(&receipt.kind));
             if matches {
-                sub.on_receipt(&receipt);
+                // Non-blocking send — subscriber lock is never held across processing
+                let _ = sub.sender.send(receipt.clone());
             }
         }
     }
@@ -600,22 +637,10 @@ mod tests {
     #[test]
     fn test_bus_subscriber_dispatched() {
         let bus = ReceiptBus::new();
-        let dispatched = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
-        struct TestSub {
-            events: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
-        }
-        impl ReceiptSubscriber for TestSub {
-            fn on_receipt(&mut self, receipt: &CanonicalReceipt) {
-                self.events.lock().push(format!("{}", receipt.kind));
-            }
-            fn kind_filter(&self) -> Option<Vec<ReceiptKind>> {
-                None
-            }
-        }
-        let sub = Box::new(TestSub {
-            events: dispatched.clone(),
-        });
-        bus.subscribe(sub);
+        // Dummy subscriber — actual processing happens on the channel receiver
+        struct TestSub;
+        impl ReceiptSubscriber for TestSub {}
+        let mut rx = bus.subscribe(Box::new(TestSub));
 
         bus.emit(
             CanonicalReceiptBuilder::new()
@@ -624,29 +649,21 @@ mod tests {
                 .with_source("test")
                 .build(),
         );
-        assert_eq!(dispatched.lock().len(), 1);
-        assert_eq!(dispatched.lock()[0], "bound");
+
+        let received = rx.try_recv().expect("emit should send via channel");
+        assert_eq!(received.kind, ReceiptKind::Bound);
     }
 
     #[test]
     fn test_kind_filter() {
         let bus = ReceiptBus::new();
-        let dispatched = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
-        struct FilterSub {
-            events: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
-        }
+        struct FilterSub;
         impl ReceiptSubscriber for FilterSub {
-            fn on_receipt(&mut self, receipt: &CanonicalReceipt) {
-                self.events.lock().push(format!("{}", receipt.kind));
-            }
             fn kind_filter(&self) -> Option<Vec<ReceiptKind>> {
                 Some(vec![ReceiptKind::Sealed])
             }
         }
-        let sub = Box::new(FilterSub {
-            events: dispatched.clone(),
-        });
-        bus.subscribe(sub);
+        let mut rx = bus.subscribe(Box::new(FilterSub));
 
         bus.emit(
             CanonicalReceiptBuilder::new()
@@ -655,6 +672,12 @@ mod tests {
                 .with_source("test")
                 .build(),
         );
+        // Bound should be filtered out — nothing in channel
+        assert!(
+            rx.try_recv().is_err(),
+            "Bound receipt should be filtered out"
+        );
+
         bus.emit(
             CanonicalReceiptBuilder::new()
                 .with_kind(ReceiptKind::Sealed)
@@ -662,10 +685,9 @@ mod tests {
                 .with_source("test")
                 .build(),
         );
-        assert_eq!(dispatched.lock().len(), 1);
-        assert_eq!(dispatched.lock()[0], "sealed");
+        let received = rx.try_recv().expect("Sealed receipt should pass filter");
+        assert_eq!(received.kind, ReceiptKind::Sealed);
     }
-
     #[test]
     fn test_serde_roundtrip() {
         let receipt = CanonicalReceiptBuilder::new()

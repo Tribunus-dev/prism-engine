@@ -1,7 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::ecs::constitutional::command::*;
+    use crate::ecs::constitutional::persistence::{
+        EventLogEntry, EventStore, InMemoryEventStore, ProjectionCheckpoint, ReplayEngine, Snapshot,
+    };
     use crate::ecs::constitutional::*;
+    use crate::ecs::receipt_bus::*;
     use crate::ecs::{CompWorld, EntityKind};
 
     // ── Helpers ────────────────────────────────────────────────────────────
@@ -841,7 +844,6 @@ mod tests {
     //  No real backend hardware is involved.
 
     use crate::ecs::constitutional::driver::*;
-    use crate::ecs::constitutional::scheduler::*;
     use std::sync::Arc;
 
     // ── Mock Factory ─────────────────────────────────────────────────────
@@ -1270,5 +1272,213 @@ mod tests {
         assert!(kinds.contains(&WorkKind::LoadModel));
         assert!(kinds.contains(&WorkKind::CompileGraph));
         assert!(kinds.contains(&WorkKind::RunInference));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Persistence & Projection Tests  (Stage 6)
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    //  Sync tests for InMemoryEventStore, ReplayEngine, ProjectionCheckpoint,
+    //  and ReceiptBus subscriber accounting.
+
+    // ── test_in_memory_event_store ─────────────────────────────────────────
+
+    #[test]
+    fn test_in_memory_event_store() {
+        let mut store = InMemoryEventStore::new();
+        assert_eq!(store.event_count(), 0);
+        assert_eq!(store.latest_epoch(), None);
+
+        let entry = EventLogEntry {
+            epoch: WorldEpoch(1),
+            sequence: 1,
+            event: DomainEvent {
+                id: MessageId::compute(b"ev-1"),
+                kind: "Created".into(),
+                entity_id: Some(EntityKindId(1)),
+                payload: serde_json::json!({"x": 1}),
+            },
+            world_digest: [0u8; 32],
+        };
+        let entry2 = EventLogEntry {
+            epoch: WorldEpoch(1),
+            sequence: 2,
+            event: DomainEvent {
+                id: MessageId::compute(b"ev-2"),
+                kind: "Updated".into(),
+                entity_id: Some(EntityKindId(1)),
+                payload: serde_json::json!({"x": 2}),
+            },
+            world_digest: [0u8; 32],
+        };
+
+        store
+            .append_events(WorldEpoch(1), &[entry, entry2])
+            .unwrap();
+        assert_eq!(store.event_count(), 2);
+        assert_eq!(store.latest_epoch(), Some(WorldEpoch(1)));
+    }
+
+    // ── test_event_store_get_events_from ────────────────────────────────────
+
+    #[test]
+    fn test_event_store_get_events_from() {
+        let mut store = InMemoryEventStore::new();
+        let base = DomainEvent {
+            id: MessageId::compute(b"base"),
+            kind: "Created".into(),
+            entity_id: None,
+            payload: serde_json::json!({}),
+        };
+
+        store
+            .append_events(
+                WorldEpoch(1),
+                &[EventLogEntry {
+                    epoch: WorldEpoch(1),
+                    sequence: 1,
+                    event: base.clone(),
+                    world_digest: [0u8; 32],
+                }],
+            )
+            .unwrap();
+        store
+            .append_events(
+                WorldEpoch(2),
+                &[EventLogEntry {
+                    epoch: WorldEpoch(2),
+                    sequence: 2,
+                    event: base.clone(),
+                    world_digest: [1u8; 32],
+                }],
+            )
+            .unwrap();
+        store
+            .append_events(
+                WorldEpoch(3),
+                &[EventLogEntry {
+                    epoch: WorldEpoch(3),
+                    sequence: 3,
+                    event: base.clone(),
+                    world_digest: [2u8; 32],
+                }],
+            )
+            .unwrap();
+
+        let from_epoch_2 = store.get_events_from(WorldEpoch(2));
+        assert_eq!(from_epoch_2.len(), 2);
+        assert_eq!(from_epoch_2[0].epoch, WorldEpoch(2));
+        assert_eq!(from_epoch_2[1].epoch, WorldEpoch(3));
+    }
+
+    // ── test_event_store_snapshot ───────────────────────────────────────────
+
+    #[test]
+    fn test_event_store_snapshot() {
+        let mut store = InMemoryEventStore::new();
+        assert_eq!(store.latest_snapshot(), None);
+
+        let snap = Snapshot {
+            epoch: WorldEpoch(5),
+            world_digest: [0xab; 32],
+            entity_count: 10,
+            component_count: 42,
+            created_at: Timestamp(1_700_000_000_000_000_000),
+        };
+        store.store_snapshot(snap.clone()).unwrap();
+
+        let latest = store.latest_snapshot().expect("should have snapshot");
+        assert_eq!(latest.epoch, WorldEpoch(5));
+        assert_eq!(latest.world_digest, [0xab; 32]);
+        assert_eq!(latest.entity_count, 10);
+        assert_eq!(latest.component_count, 42);
+    }
+
+    // ── test_event_store_epoch_mismatch_rejected ────────────────────────────
+
+    #[test]
+    fn test_event_store_epoch_mismatch_rejected() {
+        let mut store = InMemoryEventStore::new();
+
+        let entry = EventLogEntry {
+            epoch: WorldEpoch(1),
+            sequence: 1,
+            event: DomainEvent {
+                id: MessageId::compute(b"ev"),
+                kind: "Test".into(),
+                entity_id: None,
+                payload: serde_json::json!({}),
+            },
+            world_digest: [0u8; 32],
+        };
+
+        // Try appending an entry with epoch 1 under batch epoch 2
+        let result = store.append_events(WorldEpoch(2), &[entry]);
+        assert!(result.is_err(), "epoch mismatch should be rejected");
+        assert!(
+            result.unwrap_err().contains("epoch mismatch"),
+            "error should contain 'epoch mismatch'"
+        );
+    }
+
+    // ── test_replay_engine ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_replay_engine() {
+        let mut store = InMemoryEventStore::new();
+        let base = DomainEvent {
+            id: MessageId::compute(b"r"),
+            kind: "Event".into(),
+            entity_id: None,
+            payload: serde_json::json!({}),
+        };
+
+        for epoch in 1..=3 {
+            store
+                .append_events(
+                    WorldEpoch(epoch),
+                    &[EventLogEntry {
+                        epoch: WorldEpoch(epoch),
+                        sequence: epoch,
+                        event: base.clone(),
+                        world_digest: [epoch as u8; 32],
+                    }],
+                )
+                .unwrap();
+        }
+
+        let result = ReplayEngine::replay(&store, WorldEpoch(2));
+        assert_eq!(result.events_replayed, 2);
+        assert_eq!(result.last_epoch, WorldEpoch(3));
+    }
+
+    // ── test_projection_checkpoint_serde ────────────────────────────────────
+
+    #[test]
+    fn test_projection_checkpoint_serde() {
+        let cp = ProjectionCheckpoint {
+            last_epoch: WorldEpoch(42),
+            last_sequence: 7,
+        };
+
+        let json = serde_json::to_string(&cp).unwrap();
+        let deserialized: ProjectionCheckpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(cp, deserialized);
+        assert_eq!(deserialized.last_epoch, WorldEpoch(42));
+        assert_eq!(deserialized.last_sequence, 7);
+    }
+
+    // ── test_async_subscriber_construction ──────────────────────────────────
+
+    #[test]
+    fn test_async_subscriber_construction() {
+        let bus = ReceiptBus::new();
+        assert_eq!(bus.subscriber_count(), 0);
+
+        struct NoopSub;
+        impl ReceiptSubscriber for NoopSub {}
+
+        let _rx = bus.subscribe(Box::new(NoopSub));
+        assert_eq!(bus.subscriber_count(), 1);
     }
 }

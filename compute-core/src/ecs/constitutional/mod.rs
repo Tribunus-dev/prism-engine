@@ -1,9 +1,11 @@
+pub mod persistence;
 pub mod command;
 pub mod envelope;
 pub mod schema;
 pub mod system_desc;
 pub mod types;
 
+pub use persistence::*;
 pub use command::*;
 pub use envelope::*;
 pub use schema::*;
