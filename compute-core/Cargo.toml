@@ -118,6 +118,7 @@ required-features = ["prism-backend", "server-dashboard"]
 [[bin]]
 name = "prism-alpha"
 path = "src/bin/prism_alpha.rs"
+required-features = ["legacy_mutations"]
 
 [[bin]]
 name = "check-gguf-meta"

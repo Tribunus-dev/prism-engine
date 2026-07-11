@@ -240,7 +240,7 @@ pub struct CompWorld {
     component_store: ComponentStore,
     resource_store: ResourceStore,
     systems: Vec<Box<dyn CompilerSystem>>,
-    entity_meta: Vec<EntityMeta>,
+    entity_meta: Vec<Option<EntityMeta>>,
     next_id: u64,
     staging: Vec<Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>>,
     epoch: WorldEpoch,
@@ -256,7 +256,10 @@ pub struct CompWorld {
 impl std::fmt::Debug for CompWorld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CompWorld")
-            .field("entity_count", &self.entity_meta.len())
+            .field(
+                "entity_count",
+                &self.entity_meta.iter().filter(|m| m.is_some()).count(),
+            )
             .field("system_count", &self.systems.len())
             .field("staged_changes", &self.staging.len())
             .finish()
@@ -343,7 +346,7 @@ impl CompWorld {
         let entity = self.spawn_entity(kind);
         if let Some(n) = name {
             let idx = (entity.0 - 1) as usize;
-            if let Some(meta) = self.entity_meta.get_mut(idx) {
+            if let Some(Some(meta)) = self.entity_meta.get_mut(idx) {
                 meta.name = Some(n);
             }
         }
@@ -356,7 +359,10 @@ impl CompWorld {
             return None;
         }
         let idx = (entity.0 - 1) as usize;
-        self.entity_meta.get(idx).and_then(|m| m.name.as_deref())
+        self.entity_meta
+            .get(idx)
+            .and_then(|m| m.as_ref())
+            .and_then(|m| m.name.as_deref())
     }
 
     /// Find all entities of a given kind.
@@ -364,7 +370,7 @@ impl CompWorld {
         self.entity_meta
             .iter()
             .enumerate()
-            .filter(|(_, meta)| meta.kind == kind)
+            .filter(|(_, meta)| meta.as_ref().is_some_and(|m| m.kind == kind))
             .map(|(i, _)| CompEntity((i + 1) as u64))
             .collect()
     }
@@ -430,18 +436,20 @@ impl CompWorld {
     /// both call it without double-pushing entity metadata.
     pub fn spawn_entity_with_id(&mut self, id: u64, kind: EntityKind) -> CompEntity {
         let idx = (id - 1) as usize;
-        if idx < self.entity_meta.len() {
-            // Already reserved — idempotent.
+        if idx < self.entity_meta.len() && self.entity_meta[idx].is_some() {
+            // Already occupied — idempotent.
             return CompEntity(id);
         }
         // Fill gap if needed (spawns may be out of order from reservation)
         while self.entity_meta.len() <= idx {
-            self.entity_meta.push(EntityMeta {
-                kind,
-                generation: 0,
-                name: None,
-            });
+            self.entity_meta.push(None);
         }
+        // Mark the slot as occupied (not phantom)
+        self.entity_meta[idx] = Some(EntityMeta {
+            kind,
+            generation: 0,
+            name: None,
+        });
         if id >= self.next_id {
             self.next_id = id + 1;
         }
@@ -455,11 +463,11 @@ impl CompWorld {
         );
         let id = self.next_id;
         self.next_id += 1;
-        self.entity_meta.push(EntityMeta {
+        self.entity_meta.push(Some(EntityMeta {
             kind,
             generation: 0,
             name: None,
-        });
+        }));
         CompEntity(id)
     }
 
@@ -468,7 +476,9 @@ impl CompWorld {
             return None;
         }
         let idx = (entity.0 - 1) as usize;
-        self.entity_meta.get(idx).map(|m| m.kind)
+        self.entity_meta
+            .get(idx)
+            .and_then(|m| m.as_ref().map(|meta| meta.kind))
     }
 
     pub fn add_component<T: Component>(&mut self, entity: CompEntity, component: T) {
@@ -640,7 +650,7 @@ impl CompWorld {
             return false;
         }
         let idx = (entity.0 - 1) as usize;
-        idx < self.entity_meta.len()
+        self.entity_meta.get(idx).is_some_and(|m| m.is_some())
     }
 
     pub fn drain_committed_events(&mut self) -> Vec<DomainEvent> {
@@ -654,14 +664,18 @@ impl CompWorld {
                 current: self.epoch,
             });
         }
-
-        // 1aa. Pre-validate staged spawns and reserve entity IDs so
-        //      that step 1c finds spawned entities during existence checks.
+        // 1aa. Validate spawn preflights (no mutation during validation)
         for spawn in &txn.spawns {
             (spawn.preflight)(self)?;
-            // Reserve the entity slot so subsequent insert/remove checks find it.
-            // spawn_entity_with_id is idempotent for already-reserved slots.
-            self.spawn_entity_with_id(spawn.entity, spawn.kind);
+        }
+        // 1ab. Check for duplicate spawn entity IDs within this transaction
+        {
+            let mut seen = std::collections::HashSet::new();
+            for spawn in &txn.spawns {
+                if !seen.insert(spawn.entity) {
+                    return Err(WorldTxnError::InvalidEntity(spawn.entity));
+                }
+            }
         }
 
         // 1b. Validate read dependencies
@@ -682,18 +696,26 @@ impl CompWorld {
         }
 
         // 1c. Validate entity existence for every staged operation
+        // Collect entity IDs that will be spawned in this transaction
+        let pending_spawn_ids: std::collections::HashSet<u64> =
+            txn.spawns.iter().map(|s| s.entity).collect();
         for insert in &txn.inserts {
+            // Entity must be occupied, unless it has a pending spawn in this txn
+            if pending_spawn_ids.contains(&insert.entity) {
+                continue;
+            }
             let idx = (insert.entity as usize).wrapping_sub(1);
-            if idx >= self.entity_meta.len() {
+            if idx >= self.entity_meta.len() || self.entity_meta[idx].is_none() {
                 return Err(WorldTxnError::InvalidEntity(insert.entity));
             }
-            // Full generation validation comes with CompEntity refactor;
-            // for now the handle is just a 1-based index and generation
-            // is always 0 in append-only mode.
         }
         for remove in &txn.removes {
+            // Entity must be occupied, unless it has a pending spawn in this txn
+            if pending_spawn_ids.contains(&remove.entity) {
+                continue;
+            }
             let idx = (remove.entity as usize).wrapping_sub(1);
-            if idx >= self.entity_meta.len() {
+            if idx >= self.entity_meta.len() || self.entity_meta[idx].is_none() {
                 return Err(WorldTxnError::InvalidEntity(remove.entity));
             }
         }
@@ -734,6 +756,10 @@ impl CompWorld {
         }
 
         // -- PHASE 3: Apply all mutations ------------------------------
+        // Reserve spawn entity slots (now that all validation passed)
+        for spawn in &txn.spawns {
+            self.spawn_entity_with_id(spawn.entity, spawn.kind);
+        }
 
         for insert in txn.inserts {
             (insert.apply)(&mut self.component_store);

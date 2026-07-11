@@ -3,8 +3,6 @@ pub mod benchmark;
 pub mod cpu;
 #[cfg(feature = "server-dashboard")]
 pub mod dashboard;
-#[cfg(feature = "legacy_mutations")]
-// models removed — ModelRegistry file was deleted
 pub mod rate_limiter;
 
 #[cfg(feature = "mlx-backend")]
@@ -12,8 +10,6 @@ pub mod admin;
 #[cfg(feature = "prism-backend")]
 pub mod distill_worker;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub mod engine;
-#[cfg(feature = "prism-backend")]
 pub mod idle_detector;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod routes;
