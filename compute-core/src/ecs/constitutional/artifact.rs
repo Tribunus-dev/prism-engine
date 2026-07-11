@@ -90,23 +90,38 @@ impl LoadArtifactCommand {
         }
 
         // 2. Extract and validate content digest
-        let observed_digest: [u8; 32] = outcome
-            .output
-            .get("digest")
-            .and_then(|v| v.as_str())
-            .and_then(|h| {
-                let bytes = h.as_bytes();
-                if bytes.len() == 64 {
-                    let mut arr = [0u8; 32];
-                    for i in 0..32 {
-                        arr[i] = hex_char(bytes[2 * i]) << 4 | hex_char(bytes[2 * i + 1]);
-                    }
-                    Some(arr)
-                } else {
-                    None
+        let observed_digest: [u8; 32] = {
+            let digest_str = outcome
+                .output
+                .get("digest")
+                .and_then(|v| v.as_str())
+                .ok_or(ArtifactError::MissingDigest)?;
+            let bytes = digest_str.as_bytes();
+            if bytes.len() != 64 {
+                return Err(ArtifactError::InvalidDigestEncoding(
+                    "digest must be 64 hex characters".into(),
+                ));
+            }
+            let mut arr = [0u8; 32];
+            for i in 0..32 {
+                if !bytes[2 * i].is_ascii_hexdigit() || !bytes[2 * i + 1].is_ascii_hexdigit() {
+                    return Err(ArtifactError::InvalidDigestEncoding(format!(
+                        "invalid hex character at position {}",
+                        2 * i
+                    )));
                 }
-            })
-            .unwrap_or([0u8; 32]);
+                let high = hex_char(bytes[2 * i]);
+                let low = hex_char(bytes[2 * i + 1]);
+                if high > 15 || low > 15 {
+                    return Err(ArtifactError::InvalidDigestEncoding(format!(
+                        "invalid hex at position {}",
+                        2 * i
+                    )));
+                }
+                arr[i] = high << 4 | low;
+            }
+            arr
+        };
 
         if let Some(expected) = self.expected_digest {
             if observed_digest != expected {
@@ -120,10 +135,23 @@ impl LoadArtifactCommand {
         // 3. Reserve entity ID (transactional — spawn happens inside commit)
         let entity_id = WorldTxn::next_entity_id(world);
 
-        // 4. Optionally validate schemas
-        let _ = schema_registry.verify_type::<ArtifactLifecycle>(
-            crate::ecs::constitutional::types::ComponentSchemaId(1),
-        );
+        // 4. Validate all schemas are registered for the correct types
+        schema_registry
+            .verify_type::<ArtifactLifecycle>(crate::ecs::constitutional::types::ComponentSchemaId(
+                1,
+            ))
+            .map_err(|e| ArtifactError::SchemaError(e))?;
+        schema_registry
+            .verify_type::<ArtifactPath>(crate::ecs::constitutional::types::ComponentSchemaId(2))
+            .map_err(|e| ArtifactError::SchemaError(e))?;
+        schema_registry
+            .verify_type::<ArtifactDigest>(crate::ecs::constitutional::types::ComponentSchemaId(3))
+            .map_err(|e| ArtifactError::SchemaError(e))?;
+        schema_registry
+            .verify_type::<ArtifactMetadata>(crate::ecs::constitutional::types::ComponentSchemaId(
+                4,
+            ))
+            .map_err(|e| ArtifactError::SchemaError(e))?;
 
         // 5. Build transaction with spawn + components + event
         let mut txn = WorldTxn::new(world);
@@ -192,10 +220,16 @@ impl LoadArtifactCommand {
 pub enum ArtifactError {
     #[error("artifact effect failed: {0}")]
     EffectFailed(String),
-    #[error("request ID mismatch: expected {expected:?}, got {got:?}")]
+    #[error("request ID mismatch")]
     RequestMismatch { expected: MessageId, got: MessageId },
-    #[error("digest mismatch: expected {expected:?}, got {got:?}")]
+    #[error("digest mismatch")]
     DigestMismatch { expected: [u8; 32], got: [u8; 32] },
+    #[error("missing content digest in effect outcome")]
+    MissingDigest,
+    #[error("invalid digest encoding: {0}")]
+    InvalidDigestEncoding(String),
+    #[error("schema error: {0}")]
+    SchemaError(String),
     #[error("commit failed: {0}")]
     CommitFailed(WorldTxnError),
 }
@@ -208,7 +242,7 @@ fn hex_char(c: u8) -> u8 {
         b'0'..=b'9' => c - b'0',
         b'a'..=b'f' => c - b'a' + 10,
         b'A'..=b'F' => c - b'A' + 10,
-        _ => 0,
+        _ => 0xFF,
     }
 }
 
@@ -218,6 +252,7 @@ mod tests {
     use crate::ecs::constitutional::persistence::{
         EventLogEntry, EventStore, InMemoryEventStore, ReplayEngine,
     };
+    use crate::ecs::constitutional::schema::ComponentDurability;
     use crate::ecs::EntityKind;
 
     // ── test_artifact_slice_success ──────────────────────────────────────────
@@ -225,7 +260,35 @@ mod tests {
     #[test]
     fn test_artifact_slice_success() {
         let mut world = CompWorld::new();
-        let schema_registry = SchemaRegistry::new();
+        let mut schema_registry = SchemaRegistry::new();
+        schema_registry.register_for_type::<ArtifactLifecycle>(
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            "artifact_lifecycle",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactPath>(
+            ComponentSchemaId(2),
+            SchemaVersion(1),
+            "artifact_path",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactDigest>(
+            ComponentSchemaId(3),
+            SchemaVersion(1),
+            "artifact_digest",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactMetadata>(
+            ComponentSchemaId(4),
+            SchemaVersion(1),
+            "artifact_metadata",
+            "",
+            ComponentDurability::default(),
+        );
         let id = MessageId::compute(b"artifact-1");
         let path = "/models/test.cimage".to_string();
         let digest = [0xab; 32];
@@ -295,7 +358,35 @@ mod tests {
     #[test]
     fn test_artifact_slice_effect_failure() {
         let mut world = CompWorld::new();
-        let schema_registry = SchemaRegistry::new();
+        let mut schema_registry = SchemaRegistry::new();
+        schema_registry.register_for_type::<ArtifactLifecycle>(
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            "artifact_lifecycle",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactPath>(
+            ComponentSchemaId(2),
+            SchemaVersion(1),
+            "artifact_path",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactDigest>(
+            ComponentSchemaId(3),
+            SchemaVersion(1),
+            "artifact_digest",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactMetadata>(
+            ComponentSchemaId(4),
+            SchemaVersion(1),
+            "artifact_metadata",
+            "",
+            ComponentDurability::default(),
+        );
         let id = MessageId::compute(b"artifact-fail");
         let path = "/models/missing.cimage".to_string();
 
@@ -330,7 +421,35 @@ mod tests {
     #[test]
     fn test_artifact_slice_digest_mismatch() {
         let mut world = CompWorld::new();
-        let schema_registry = SchemaRegistry::new();
+        let mut schema_registry = SchemaRegistry::new();
+        schema_registry.register_for_type::<ArtifactLifecycle>(
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            "artifact_lifecycle",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactPath>(
+            ComponentSchemaId(2),
+            SchemaVersion(1),
+            "artifact_path",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactDigest>(
+            ComponentSchemaId(3),
+            SchemaVersion(1),
+            "artifact_digest",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactMetadata>(
+            ComponentSchemaId(4),
+            SchemaVersion(1),
+            "artifact_metadata",
+            "",
+            ComponentDurability::default(),
+        );
         let id = MessageId::compute(b"artifact-digest");
         let path = "/models/tampered.cimage".to_string();
         let expected = [0x01; 32];
@@ -368,7 +487,35 @@ mod tests {
     #[test]
     fn test_artifact_slice_request_mismatch() {
         let mut world = CompWorld::new();
-        let schema_registry = SchemaRegistry::new();
+        let mut schema_registry = SchemaRegistry::new();
+        schema_registry.register_for_type::<ArtifactLifecycle>(
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            "artifact_lifecycle",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactPath>(
+            ComponentSchemaId(2),
+            SchemaVersion(1),
+            "artifact_path",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactDigest>(
+            ComponentSchemaId(3),
+            SchemaVersion(1),
+            "artifact_digest",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactMetadata>(
+            ComponentSchemaId(4),
+            SchemaVersion(1),
+            "artifact_metadata",
+            "",
+            ComponentDurability::default(),
+        );
         let id = MessageId::compute(b"artifact-req");
         let path = "/models/req_mismatch.cimage".to_string();
 
@@ -405,7 +552,35 @@ mod tests {
     fn test_artifact_slice_replay_no_file() {
         // --- Phase 1: Execute and persist ---
         let mut world = CompWorld::new();
-        let schema_registry = SchemaRegistry::new();
+        let mut schema_registry = SchemaRegistry::new();
+        schema_registry.register_for_type::<ArtifactLifecycle>(
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            "artifact_lifecycle",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactPath>(
+            ComponentSchemaId(2),
+            SchemaVersion(1),
+            "artifact_path",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactDigest>(
+            ComponentSchemaId(3),
+            SchemaVersion(1),
+            "artifact_digest",
+            "",
+            ComponentDurability::default(),
+        );
+        schema_registry.register_for_type::<ArtifactMetadata>(
+            ComponentSchemaId(4),
+            SchemaVersion(1),
+            "artifact_metadata",
+            "",
+            ComponentDurability::default(),
+        );
         let id = MessageId::compute(b"artifact-replay");
         let path = "/models/persistent.cimage".to_string();
         let digest = [0xde; 32];
