@@ -36,10 +36,10 @@ pub mod roles;
 pub mod squat;
 pub mod verify;
 
+pub mod accelerate;
 pub mod awls;
 pub mod fused;
 pub mod protection;
-pub mod accelerate;
 
 use crate::quantization::sweep::spec::Nf4CodebookId;
 
@@ -414,15 +414,14 @@ pub fn pack_nf4_tile_awls(
 /// Panics if `weights.len()` does not equal `rows * cols`.
 pub fn pack_nf4_weights(
     weights: &[f32],
-    rows: usize,        // in_features
-    cols: usize,        // out_features
+    rows: usize, // in_features
+    cols: usize, // out_features
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, u32, u32) {
     let weights = if weights.len() >= rows * cols {
         &weights[..rows * cols]
     } else {
         weights
     };
-
 
     // Tile across out_features (cols): contiguous row slices of 640 elements.
     // This groups values from the same input channel, which have similar
@@ -447,7 +446,11 @@ pub fn pack_nf4_weights(
             let mut tile_vals = [0.0f32; TILE_ELEMENTS];
             for i in 0..TILE_ELEMENTS {
                 let c = col_start + i;
-                tile_vals[i] = if c < cols { weights[row * cols + c] } else { 0.0 };
+                tile_vals[i] = if c < cols {
+                    weights[row * cols + c]
+                } else {
+                    0.0
+                };
             }
             let (codes_tile, scale_tile, bias_tile) = pack_nf4_tile(&tile_vals);
 
@@ -674,7 +677,7 @@ pub fn unpack_nf4_weights_with_group_size(
         "group_size {group_size} must divide TILE_ELEMENTS {TILE_ELEMENTS}"
     );
     let groups_per_tile = TILE_ELEMENTS / group_size;
-    let bytes_per_group = group_size / 2;  // 4-bit codes
+    let bytes_per_group = group_size / 2; // 4-bit codes
     let packed_bytes_per_tile = groups_per_tile * bytes_per_group;
 
     let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
@@ -745,8 +748,12 @@ pub fn unpack_nf4_weights_with_group_size(
 
 /// Unpack NF4 weights with configurable group size and codebook.
 pub fn unpack_nf4_weights_with_group_size_and_codebook(
-    packed_codes: &[u8], scales: &[f32], biases: &[f32],
-    rows: usize, cols: usize, group_size: usize,
+    packed_codes: &[u8],
+    scales: &[f32],
+    biases: &[f32],
+    rows: usize,
+    cols: usize,
+    group_size: usize,
     codebook: &[f32; 16],
 ) -> Vec<f32> {
     assert!(TILE_ELEMENTS % group_size == 0);
@@ -759,7 +766,9 @@ pub fn unpack_nf4_weights_with_group_size_and_codebook(
     let expected_scales_len = total_tiles * groups_per_tile;
     assert_eq!(packed_codes.len(), expected_codes_len);
     assert_eq!(scales.len(), expected_scales_len);
-    if !biases.is_empty() { assert_eq!(biases.len(), expected_scales_len); }
+    if !biases.is_empty() {
+        assert_eq!(biases.len(), expected_scales_len);
+    }
     let mut output = vec![0.0f32; rows * cols];
     for tile_idx in 0..total_tiles {
         let codes_off = tile_idx * packed_bytes_per_tile;
@@ -771,7 +780,11 @@ pub fn unpack_nf4_weights_with_group_size_and_codebook(
         let remaining = cols.saturating_sub(col_base);
         for g in 0..groups_per_tile {
             let scale = scales[scale_off + g];
-            let bias = if biases.is_empty() { 0.0 } else { biases[scale_off + g] };
+            let bias = if biases.is_empty() {
+                0.0
+            } else {
+                biases[scale_off + g]
+            };
             let codes_base = g * bytes_per_group;
             let out_base = row * cols + col_base + g * group_size;
             let copy_len = group_size.min(remaining.saturating_sub(g * group_size));
@@ -813,9 +826,6 @@ pub struct Nf4Tile640Manifest {
     pub total_tiles: u32,
     pub required_kernel: String,
 }
-
-
-
 
 impl Nf4Tile640Manifest {
     /// Build a manifest for the given logical shape.
@@ -868,9 +878,15 @@ pub fn pack_int8_weights(
                 let mut max_abs = 0.0f32;
                 for j in col_start..col_end {
                     let v = weights[i * cols + j].abs();
-                    if v > max_abs { max_abs = v; }
+                    if v > max_abs {
+                        max_abs = v;
+                    }
                 }
-                let scale = if max_abs > 1e-10f32 { max_abs / 127.0f32 } else { 1.0f32 };
+                let scale = if max_abs > 1e-10f32 {
+                    max_abs / 127.0f32
+                } else {
+                    1.0f32
+                };
                 for j in col_start..col_end {
                     let offset = t * TILE_ELEMENTS + (j - col_start);
                     let q = (weights[i * cols + j] / scale).round().clamp(-127.0, 127.0) as i8;
@@ -977,8 +993,14 @@ pub fn unpack_int8_weights_with_group_size(
 /// This is the size of the packed_codes buffer (contiguous bytes of
 /// 4-bit NF4 indices, 8 codes per u32, LE byte order).
 pub fn packed_size(rows: usize, cols: usize) -> usize {
-    let tiles_per_ch = rows.div_ceil(TILE_ELEMENTS);
-    let total_tiles = cols * tiles_per_ch;
+    // Match pack_nf4_weights tiling: tiles are along cols (n dimension).
+    let padded_cols = if cols % TILE_ELEMENTS == 0 {
+        cols
+    } else {
+        cols.div_ceil(TILE_ELEMENTS) * TILE_ELEMENTS
+    };
+    let tiles_per_row = padded_cols / TILE_ELEMENTS;
+    let total_tiles = rows * tiles_per_row;
     total_tiles * PACKED_BYTES_PER_TILE
 }
 
@@ -1061,8 +1083,13 @@ pub fn dequant_matmul_reference(
             n
         ));
     }
-    let tiles_per_ch = k.div_ceil(TILE_ELEMENTS);
-    let total_tiles = n * tiles_per_ch;
+    let padded_n = if n % TILE_ELEMENTS == 0 {
+        n
+    } else {
+        n.div_ceil(TILE_ELEMENTS) * TILE_ELEMENTS
+    };
+    let tiles_per_row = padded_n / TILE_ELEMENTS;
+    let total_tiles = k * tiles_per_row;
     let expected_codes = total_tiles * PACKED_BYTES_PER_TILE;
     let expected_scales = total_tiles * SCALES_F32_PER_TILE;
     if packed_codes.len() != expected_codes {
@@ -1090,9 +1117,9 @@ pub fn dequant_matmul_reference(
         // Dequantize all tiles into a contiguous K×N f32 buffer.
         let mut w_dequant = vec![0.0f32; k * n];
         for tile_idx in 0..total_tiles {
-            let out_ch = tile_idx / tiles_per_ch;
-            let in_tile = tile_idx % tiles_per_ch;
-            let row_base = in_tile * TILE_ELEMENTS;
+            let k_chunk = tile_idx / tiles_per_row;
+            let n_tile = tile_idx % tiles_per_row;
+            let col_base = n_tile * TILE_ELEMENTS;
 
             let codes_off = tile_idx * PACKED_BYTES_PER_TILE;
             let scale_off = tile_idx * SCALES_F32_PER_TILE;
@@ -1114,9 +1141,9 @@ pub fn dequant_matmul_reference(
             let mut tile_f32 = [0.0f32; TILE_ELEMENTS];
             unpack_nf4_tile(codes_slice, scale_slice, bias_slice, &mut tile_f32);
 
-            let limit = TILE_ELEMENTS.min(k - row_base);
+            let limit = TILE_ELEMENTS.min(n - col_base);
             for i in 0..limit {
-                w_dequant[(row_base + i) * n + out_ch] = tile_f32[i];
+                w_dequant[k_chunk * n + col_base + i] = tile_f32[i];
             }
         }
 
@@ -1170,7 +1197,7 @@ fn dequant_matmul_scalar(
     k: usize,
     n: usize,
     output: &mut [f32],
-    tiles_per_ch: usize,
+    tiles_per_row: usize,
     total_tiles: usize,
 ) {
     // Zero the output buffer.
@@ -1178,9 +1205,9 @@ fn dequant_matmul_scalar(
 
     // Iterate tiles in packed order.
     for tile_idx in 0..total_tiles {
-        let out_ch = tile_idx / tiles_per_ch;
-        let in_tile = tile_idx % tiles_per_ch;
-        let row_base = in_tile * TILE_ELEMENTS;
+        let k_chunk = tile_idx / tiles_per_row;
+        let n_tile = tile_idx % tiles_per_row;
+        let col_base = n_tile * TILE_ELEMENTS;
 
         let codes_off = tile_idx * PACKED_BYTES_PER_TILE;
         let scale_off = tile_idx * SCALES_F32_PER_TILE;
@@ -1204,18 +1231,13 @@ fn dequant_matmul_scalar(
         unpack_nf4_tile(codes_slice, scale_slice, bias_slice, &mut tile_f32);
 
         // Accumulate contribution across all M rows of the output.
-        // Each tile covers strided in_features for one output channel.
-        // output[row_m][out_ch] += Σ_i input[row_m][row_base + i] * tile[i]
-        let limit = TILE_ELEMENTS.min(k - row_base);
+        // Each tile covers contiguous out_features for one input channel.
+        // output[row_m][col_base + i] += Σ_i input[row_m][k_chunk] * tile[i]
+        let limit = TILE_ELEMENTS.min(n - col_base);
         for row_m in 0..m {
-            let mut acc = 0.0f32;
             for i in 0..limit {
-                let x_val = input[row_m * k + row_base + i];
-                if x_val != 0.0 {
-                    acc += x_val * tile_f32[i];
-                }
+                output[row_m * n + col_base + i] += input[row_m * k + k_chunk] * tile_f32[i];
             }
-            output[row_m * n + out_ch] += acc;
         }
     }
 }
@@ -1329,8 +1351,10 @@ mod tests {
         assert_eq!(spec.tile_elements, 640);
         assert_eq!(spec.tile_rows, 640);
         assert_eq!(spec.tile_cols, 640);
-        assert_eq!(spec.tile_elements, TILE_ELEMENTS,
-            "TileFamilySpec::tile640() elements must match TILE_ELEMENTS constant");
+        assert_eq!(
+            spec.tile_elements, TILE_ELEMENTS,
+            "TileFamilySpec::tile640() elements must match TILE_ELEMENTS constant"
+        );
     }
 
     #[test]
@@ -1387,7 +1411,8 @@ mod tests {
         let (packed_codes, scales, biases, _p_rows, _p_cols) =
             pack_nf4_weights(&identity, rows, cols);
 
-        let tile_count = cols * rows.div_ceil(TILE_ELEMENTS); // = 640
+        // Packer tiles along cols: total_tiles = rows * cols.div_ceil(TILE_ELEMENTS)
+        let tile_count = rows * cols.div_ceil(TILE_ELEMENTS);
         assert_eq!(packed_codes.len(), tile_count * PACKED_BYTES_PER_TILE);
         assert_eq!(scales.len(), tile_count * SCALES_F32_PER_TILE);
         assert_eq!(biases.len(), tile_count * SCALES_F32_PER_TILE);
@@ -1688,7 +1713,11 @@ mod tests {
                 let group = j / GROUP_SIZE;
                 let scale = 0.1 + (group % 5) as f32 * 0.4;
                 // Row 0 uses codebook[15] = 1.0 so max_abs = scale_j for each tile.
-                let val = if i == 0 { 1.0 * scale } else { NF4_CODEBOOK[(i * 700 + j) % 16] * scale };
+                let val = if i == 0 {
+                    1.0 * scale
+                } else {
+                    NF4_CODEBOOK[(i * 700 + j) % 16] * scale
+                };
                 if j < cols {
                     weights[i * cols + j] = val;
                 }
@@ -2220,11 +2249,11 @@ mod tests {
     #[test]
     fn test_structural_verify_valid() {
         use super::verify::structural_verify;
+        // (2, 640) → tiles along cols: total_tiles=2*1=2 → 640 codes, 10 scales/biases
         let codes = vec![0u8; 640];
         let scales = vec![1.0f32; 10];
         let biases = vec![0.0f32; 10];
-        // (1, 2) → tiles_per_ch=1, total_tiles=2 → 320*2=640 codes, 5*2=10 scales/biases
-        let result = structural_verify(&codes, &scales, &biases, 1, 2);
+        let result = structural_verify(&codes, &scales, &biases, 2, TILE_ELEMENTS as u32);
         assert!(result.is_ok(), "{:?}", result.err());
     }
 
@@ -2234,8 +2263,7 @@ mod tests {
         let codes = vec![255u8; 640];
         let scales = vec![1.0f32; 10];
         let biases = vec![0.0f32; 10];
-        // (1, 2) → tiles_per_ch=1, total_tiles=2
-        let result = structural_verify(&codes, &scales, &biases, 1, 2);
+        let result = structural_verify(&codes, &scales, &biases, 2, TILE_ELEMENTS as u32);
         assert!(
             result.is_ok(),
             "0xFF should be valid codes (15 in each nibble)"
@@ -2344,8 +2372,13 @@ mod tests {
         .unwrap();
 
         // Scalar path.
-        let tiles_per_ch = k.div_ceil(super::TILE_ELEMENTS);
-        let total_tiles = n * tiles_per_ch;
+        let padded_n = if n % super::TILE_ELEMENTS == 0 {
+            n
+        } else {
+            n.div_ceil(super::TILE_ELEMENTS) * super::TILE_ELEMENTS
+        };
+        let tiles_per_row = padded_n / super::TILE_ELEMENTS;
+        let total_tiles = k * tiles_per_row;
         let mut scalar_output = vec![0.0f32; m * n];
         super::dequant_matmul_scalar(
             &input,
@@ -2356,7 +2389,7 @@ mod tests {
             k,
             n,
             &mut scalar_output,
-            tiles_per_ch,
+            tiles_per_row,
             total_tiles,
         );
 
@@ -2479,7 +2512,11 @@ pub fn pack_symmetric_int4_tile(
             .map(|v| v.abs())
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
-        let scale = if max_abs < 1e-30 { 1.0f32 } else { max_abs / max_code };
+        let scale = if max_abs < 1e-30 {
+            1.0f32
+        } else {
+            max_abs / max_code
+        };
         scales[group] = scale;
         biases[group] = 0.0;
 
@@ -2496,4 +2533,3 @@ pub fn pack_symmetric_int4_tile(
 
     (packed_codes, scales, biases)
 }
-

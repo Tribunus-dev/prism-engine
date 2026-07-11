@@ -138,8 +138,13 @@ pub fn structural_verify(
     // 5. Unpack produces correct shape
     // We can attempt unpack; the function will panic on size mismatch, so
     // we check the size ourselves here.
-    let tiles_per_ch = rows.div_ceil(TILE_ELEMENTS);
-    let total_tiles = cols * tiles_per_ch;
+    let padded_cols = if cols % TILE_ELEMENTS == 0 {
+        cols
+    } else {
+        cols.div_ceil(TILE_ELEMENTS) * TILE_ELEMENTS
+    };
+    let tiles_per_row = padded_cols / TILE_ELEMENTS;
+    let total_tiles = rows * tiles_per_row;
     let expected_scales_len = total_tiles * 5; // SCALES_F32_PER_TILE
     if scales.len() != expected_scales_len {
         errors.push(format!(
@@ -557,8 +562,8 @@ mod tests {
     fn test_structural_verify_passes_valid_data() {
         let weights = make_test_tile();
         let (codes, scales, biases) = pack_nf4_tile(&weights);
-        // (640, 1) → tiles_per_ch=1, total_tiles=1 → matches 1 tile of data
-        let result = structural_verify(&codes, &scales, &biases, TILE_ELEMENTS as u32, 1);
+        // (1, 640) → tiles along cols, total_tiles=1 → matches 1 tile of data
+        let result = structural_verify(&codes, &scales, &biases, 1, TILE_ELEMENTS as u32);
         assert!(result.is_ok(), "valid tile should pass: {:?}", result);
     }
 
@@ -567,7 +572,7 @@ mod tests {
         let weights = make_test_tile();
         let (codes, scales, biases) = pack_nf4_tile(&weights);
         let truncated = &codes[..codes.len() - 1];
-        let result = structural_verify(truncated, &scales, &biases, TILE_ELEMENTS as u32, 1);
+        let result = structural_verify(truncated, &scales, &biases, 1, TILE_ELEMENTS as u32);
         assert!(result.is_err(), "truncated codes should fail");
     }
 
@@ -576,7 +581,7 @@ mod tests {
         let weights = make_test_tile();
         let (codes, mut scales, biases) = pack_nf4_tile(&weights);
         scales[0] = f32::NAN;
-        let result = structural_verify(&codes, &scales, &biases, TILE_ELEMENTS as u32, 1);
+        let result = structural_verify(&codes, &scales, &biases, 1, TILE_ELEMENTS as u32);
         assert!(result.is_err(), "NaN scale should fail");
     }
 
@@ -585,7 +590,7 @@ mod tests {
         let weights = make_test_tile();
         let (codes, mut scales, biases) = pack_nf4_tile(&weights);
         scales[1] = f32::INFINITY;
-        let result = structural_verify(&codes, &scales, &biases, TILE_ELEMENTS as u32, 1);
+        let result = structural_verify(&codes, &scales, &biases, 1, TILE_ELEMENTS as u32);
         assert!(result.is_err(), "inf scale should fail");
     }
 
@@ -594,7 +599,7 @@ mod tests {
         let weights = make_test_tile();
         let (codes, scales, mut biases) = pack_nf4_tile(&weights);
         biases[2] = f32::NAN;
-        let result = structural_verify(&codes, &scales, &biases, TILE_ELEMENTS as u32, 1);
+        let result = structural_verify(&codes, &scales, &biases, 1, TILE_ELEMENTS as u32);
         assert!(result.is_err(), "NaN bias should fail");
     }
 
@@ -612,8 +617,8 @@ mod tests {
             &codes,
             &scales,
             &biases,
-            TILE_ELEMENTS,
             1,
+            TILE_ELEMENTS,
             PROFILE_ID_CANONICAL_NF4_V1.0,
         );
         assert_eq!(metrics.matrix_name, "test_proj");
@@ -660,8 +665,8 @@ mod tests {
             &codes,
             &scales,
             &biases,
-            TILE_ELEMENTS,
             1,
+            TILE_ELEMENTS,
             0,
         );
         let m2 = compute_matrix_metrics(
@@ -670,8 +675,8 @@ mod tests {
             &codes,
             &scales,
             &biases,
-            TILE_ELEMENTS,
             1,
+            TILE_ELEMENTS,
             0,
         );
 
@@ -696,8 +701,8 @@ mod tests {
             &codes,
             &scales,
             &biases,
-            TILE_ELEMENTS,
             1,
+            TILE_ELEMENTS,
             0,
         );
         let m2 = compute_matrix_metrics(
@@ -706,8 +711,8 @@ mod tests {
             &codes,
             &scales,
             &biases,
-            TILE_ELEMENTS,
             1,
+            TILE_ELEMENTS,
             0,
         );
 
@@ -732,8 +737,8 @@ mod tests {
             bad_codes,
             &scales,
             &biases,
-            TILE_ELEMENTS,
             1,
+            TILE_ELEMENTS,
             0,
         );
 

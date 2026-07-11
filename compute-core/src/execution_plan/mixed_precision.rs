@@ -262,14 +262,14 @@ impl MixedPrecisionPlanner {
             }
         }
 
-        // 5. Check that the plan isn't regressive: if post-cost >= full rescue
-        //    cost and pre_error was negligible, reject.
+        // 5. Check that the plan isn't regressive.
+        //    Reject if post-cost >= full rescue cost (no byte savings) and
+        //    pre_error was already negligible.
         if total_post_cost >= full_rescue_byte_cost && aggregate_pre_error < 1e-9 {
             return PrecisionPlan::Rejected {
                 reason: "Mixed precision plan has no benefit over full rescue".into(),
             };
         }
-
         let promoted_fraction = promote_count as f64 / sorted.len() as f64;
 
         PrecisionPlan::Accepted {
@@ -348,11 +348,8 @@ mod tests {
                 assert!(sidecar.byte_savings_vs_full_rescue > 0);
 
                 // Aggregate post error: sum of all non-promoted errors
-                let expected_post: f64 = errors
-                    .iter()
-                    .map(|e| e.error_contribution)
-                    .sum::<f64>()
-                    - (0.050 + 0.045);
+                let expected_post: f64 =
+                    errors.iter().map(|e| e.error_contribution).sum::<f64>() - (0.050 + 0.045);
                 assert!((overrides.total_residual_error - expected_post).abs() < 1e-12);
 
                 // Ensure accepted
@@ -383,8 +380,8 @@ mod tests {
     fn planner_rejects_regressive() {
         // Near-zero errors → no benefit from promotion.
         let errors = vec![
-            unit("layer0", 1e-15, 100, 200),
-            unit("layer1", 1e-15, 100, 200),
+            unit("layer0", 1e-15, 100, 100),
+            unit("layer1", 1e-15, 100, 100),
         ];
         let result = MixedPrecisionPlanner::plan(
             CodecFamily::Nf4,

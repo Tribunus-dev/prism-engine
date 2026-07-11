@@ -131,10 +131,7 @@ pub fn evaluate_nf4_batch(
         MTLResourceOptions::StorageModeShared,
     );
 
-    let output_buffer = device.new_buffer(
-        output_bytes,
-        MTLResourceOptions::StorageModeShared,
-    );
+    let output_buffer = device.new_buffer(output_bytes, MTLResourceOptions::StorageModeShared);
 
     let constants_buffer = device.new_buffer_with_data(
         constants_data.as_ptr() as *const std::ffi::c_void,
@@ -143,16 +140,14 @@ pub fn evaluate_nf4_batch(
     );
 
     // ── Compile Metal shader ─────────────────────────────────────────────
-    let lib_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/quantization/sweep/sweep_eval.metal");
+    let lib_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ecs/quantization/sweep/sweep_eval.metal");
     let lib_source = std::fs::read_to_string(&lib_path)
         .map_err(|e| format!("failed to read Metal shader '{}': {e}", lib_path.display()))?;
 
     let library = device
         .new_library_with_source(&lib_source, &CompileOptions::new())
         .map_err(|e| format!("Metal shader compile failed: {e:?}"))?;
-
-
 
     let nf4_fn = library
         .get_function("sweep_eval_nf4", None)
@@ -192,8 +187,7 @@ pub fn evaluate_nf4_batch(
 
     // ── Read back results ────────────────────────────────────────────────
     let output_ptr = output_buffer.contents() as *const f32;
-    let output_slice =
-        unsafe { std::slice::from_raw_parts(output_ptr, output_len) };
+    let output_slice = unsafe { std::slice::from_raw_parts(output_ptr, output_len) };
 
     // ── CPU-side reduction: per candidate ────────────────────────────────
     let mut results = Vec::with_capacity(num_candidates);
@@ -246,7 +240,9 @@ mod tests {
         let total = n * k;
 
         // Fill source with deterministic ramp values.
-        let source: Vec<f32> = (0..total).map(|i| ((i % 128) as f32 - 64.0) * 0.01).collect();
+        let source: Vec<f32> = (0..total)
+            .map(|i| ((i % 128) as f32 - 64.0) * 0.01)
+            .collect();
 
         // Candidate: PrismCurrent codebook, group_size=128, ScaleOnly
         let params: [u32; 4] = [0, 128, 0, 0];
@@ -289,13 +285,14 @@ mod tests {
         let k = 64usize;
         let total = n * k;
 
-        let source: Vec<f32> = (0..total).map(|i| ((i % 64) as f32 - 32.0) * 0.02).collect();
+        let source: Vec<f32> = (0..total)
+            .map(|i| ((i % 64) as f32 - 32.0) * 0.02)
+            .collect();
 
         for codebook_id in 0u32..3u32 {
             let params: [u32; 4] = [codebook_id, 128, 0, 0];
-            let metrics =
-                evaluate_nf4_batch(&source, &[params], 1, n, k)
-                    .expect("should succeed for each codebook");
+            let metrics = evaluate_nf4_batch(&source, &[params], 1, n, k)
+                .expect("should succeed for each codebook");
 
             let m = &metrics[0];
             assert!(m.rmse.is_finite() && m.rmse >= 0.0);
@@ -310,11 +307,13 @@ mod tests {
         let k = 64usize;
         let total = n * k;
 
-        let source: Vec<f32> = (0..total).map(|i| ((i % 64) as f32 - 32.0) * 0.01).collect();
+        let source: Vec<f32> = (0..total)
+            .map(|i| ((i % 64) as f32 - 32.0) * 0.01)
+            .collect();
 
         let params: [u32; 4] = [0, 64, 0, 0]; // group_size=64
-        let metrics = evaluate_nf4_batch(&source, &[params], 1, n, k)
-            .expect("group_size=64 should work");
+        let metrics =
+            evaluate_nf4_batch(&source, &[params], 1, n, k).expect("group_size=64 should work");
 
         let m = &metrics[0];
         assert!(m.rmse.is_finite() && m.rmse >= 0.0);
@@ -328,11 +327,13 @@ mod tests {
         let k = 64usize;
         let total = n * k;
 
-        let source: Vec<f32> = (0..total).map(|i| ((i % 64) as f32 - 32.0) * 0.01).collect();
+        let source: Vec<f32> = (0..total)
+            .map(|i| ((i % 64) as f32 - 32.0) * 0.01)
+            .collect();
 
         let params: [u32; 4] = [1, 128, 1, 0]; // BnB codebook, ScaleBias
-        let metrics = evaluate_nf4_batch(&source, &[params], 1, n, k)
-            .expect("ScaleBias mode should work");
+        let metrics =
+            evaluate_nf4_batch(&source, &[params], 1, n, k).expect("ScaleBias mode should work");
 
         let m = &metrics[0];
         assert!(m.rmse.is_finite() && m.rmse >= 0.0);
