@@ -19,7 +19,6 @@ No legacy map, registry, manager, cache, or database table can independently con
 | 1 | **Artifact Ingestion** | `ReplayVerified` | Artifact | ArtifactPath, ArtifactDigest, ArtifactMetadata, ArtifactLifecycle | kernel |
 | 2 | **Device Discovery** | `Canonical` | Device | DeviceStableId, DriverFactoryId, BackendFamily, DeviceCapabilities, DeviceMemoryLimits, DeviceTopology, DeviceHealth, DeviceLifecycle, DesiredDeviceState, ObservedDeviceState, LastObservation, RuntimeHandleKey | kernel |
 | 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
-| 4 | **Session Lifecycle** | `Design` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
 | 4 | **Session Lifecycle** | `Shadow` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
 | 5 | **Work Scheduling** | `Shadow` | WorkItem | WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent, WorkPrerequisites, WorkOutput | kernel |
 | 6 | **Execution Leases** | `Shadow` | — | ExecutionLease, LeaseOwner, LeaseTokenRange, KvSlot, KvOwnership, ExecutionOutput | kernel |
@@ -29,7 +28,8 @@ No legacy map, registry, manager, cache, or database table can independently con
 | 10 | **Distributed Topology** | `Shadow` | Node | PeerIdentity, NodeMembership, PeerCapabilities, NodeTopology, TrustState, WorkerHealth, RemoteLease, RemoteCapabilityObservation | kernel |
 | 11 | **Server & API Bridges** | `Shadow` | — | IngressRequest, ApiKey, RateLimiterState, RequestQueue, TransportSession, IngressLifecycle | kernel |
 | 12 | **Persistence & Projections** | `Design` | — | ReplayRegistry, EventStore (InMemory), Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
-| 13 | **Dashboard** | `Inventory` | — | — | dashboard |
+| 12 | **Persistence & Projections** | `Shadow` | — | FsEventStore (file-backed, durable-before-ack), ReplayRegistry (16 appliers), EventStore trait, InMemoryEventStore, Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
+| 13 | **Dashboard & Authority Purge** | `Inventory` | — | — | kernel |
 
 ## Cutover Protocol
 
@@ -122,6 +122,11 @@ in shadow mode.
 - **Multimodal Pipelines** — 2 commands, 7 types, 8 tests. Need replay function.
 - **Distributed Topology** — 2 commands, 8 types, 5 tests. Need replay function.
 - **Server & API Bridges** — 3 commands, 6 types, 11 tests. Need replay function.
+  - **Server & API Bridges** — 3 commands, 6 types, 11 tests. Need replay function.
+  - **Persistence & Projections** — FsEventStore with file-backed append-only log,
+    durable-before-ack (fsync), crash recovery by log scanning. 5 tests.
+    ReplayRegistry with 16 registered appliers. ReplayEngine::replay_into for
+    batch world reconstruction from events.
 
 ## Wave Plan
 
