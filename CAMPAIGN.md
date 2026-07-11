@@ -19,14 +19,13 @@ No legacy map, registry, manager, cache, or database table can independently con
 | 1 | **Artifact Ingestion** | `ReplayVerified` | Artifact | ArtifactPath, ArtifactDigest, ArtifactMetadata, ArtifactLifecycle | kernel |
 | 2 | **Device Discovery** | `Canonical` | Device | DeviceStableId, DriverFactoryId, BackendFamily, DeviceCapabilities, DeviceMemoryLimits, DeviceTopology, DeviceHealth, DeviceLifecycle, DesiredDeviceState, ObservedDeviceState, LastObservation, RuntimeHandleKey | kernel |
 | 3 | **Model Deployment & Residency** | `Design` | Model, Residency | — | kernel |
-   | 3 | **Model Deployment & Residency** | `Shadow` | Schema-bound deployment with preflight validation, effect correlation, idempotent redeployment, replay without fake allocations. Constitutional path runs alongside legacy loader. Comparison target: existing model/residency managers in loader, residency, model_cache modules. | kernel |
-| 4 | **Session Lifecycle** | `Design` | Session | SessionLifecycle, InferencePhase | kernel |
-   | 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
-| 5 | **Work Scheduling** | `Design` | WorkItem | WorkItem, WorkState, WorkLease | kernel |
-| 6 | **Inference Execution** | `Inventory` | — | — | runtime |
-| 7 | **Compilation & Model Production** | `Inventory` | — | — | compiler |
-| 8 | **Multimodal Pipelines** | `Inventory` | — | — | multimodal |
-| 9 | **Agent & Tool Execution** | `Inventory` | — | — | agent |
+| 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
+| 4 | **Session Lifecycle** | `Design` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
+| 5 | **Work Scheduling** | `Design` | WorkItem | WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent, WorkPrerequisites, WorkOutput | kernel |
+| 6 | **Execution Leases** | `Design` | — | ExecutionLease, LeaseOwner, LeaseTokenRange, KvSlot, KvOwnership, ExecutionOutput | kernel |
+| 7 | **Compilation & Model Production** | `Design` | CompilationJob | CompilationJob, JobInput, JobConfig, JobOutput, JobLifecycle, ValidationReceipt, QuantizationPlan, CimagePromotion | kernel |
+| 8 | **Agent & Tool Execution** | `Design` | Agent | AgentRun, AgentTask, AgentPhase, ToolInvocation, ToolOutcome, AgentMessage, AgentConfig, AgentLifecycle | kernel |
+| 9 | **Multimodal Pipelines** | `Inventory` | — | — | multimodal |
 | 10 | **Distributed Topology** | `Inventory` | — | — | distributed |
 | 11 | **Server & API Bridges** | `Inventory` | — | — | server |
 | 12 | **Persistence & Projections** | `Inventory` | — | — | kernel |
@@ -74,8 +73,18 @@ in shadow mode.
   split.
 
 ### Design (types exist, not wired into authority)
-- **Session Lifecycle** — SessionLifecycle + InferencePhase enums in lifecycle.rs
-- **Work Scheduling** — WorkItem, WorkState, Scheduler types in scheduler.rs
+- **Session Lifecycle** — CreateSessionCommand with preflight (model+device validation),
+    TransitionSessionCommand, schema-bound SessionConfig/SessionModels/SessionDevices.
+    10 tests.
+- **Work Scheduling** — WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent,
+    CreateWorkCommand, LeaseWorkCommand, CompleteWorkCommand, FailWorkCommand, CancelWorkCommand.
+    7 tests.
+- **Execution Leases** — AcquireExecutionLeaseCommand, CompleteExecutionLeaseCommand,
+    ExecutionLease/LeaseOwner/LeaseTokenRange/KvSlot/KvOwnership. 4 tests.
+- **Compilation & Model Production** — CreateCompilationJobCommand, PromoteCimageCommand,
+    SubmitValidationReceiptCommand, 8 component types, JobLifecycle with 6 states. 11 tests.
+- **Agent & Tool Execution** — CreateAgentRunCommand, SubmitToolOutcomeCommand,
+    9 component types, AgentPhase with 7 states. 9 tests.
 
 ### Shadow (constitutional path running, legacy comparison pending)
 - **Model Deployment & Residency** — Schema-bound deployment, preflight validation,

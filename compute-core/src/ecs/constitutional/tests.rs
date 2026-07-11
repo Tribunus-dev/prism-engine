@@ -1155,7 +1155,7 @@ mod tests {
 
         assert!(!WorkState::Pending.is_terminal());
         assert!(!WorkState::Ready.is_terminal());
-        assert!(!WorkState::Leased.is_terminal());
+        assert!(!WorkState::Leased(0).is_terminal());
     }
 
     // ── test_work_lease_construction ─────────────────────────────────────
@@ -2490,5 +2490,437 @@ mod tests {
         assert_eq!(event.entity_id, Some(EntityKindId(3)));
         assert_eq!(event.payload["model_id"].as_u64(), Some(3));
         assert_eq!(event.payload["residency_id"].as_u64(), Some(4));
+    }
+    // ── Session Admission Tests ──────────────────────────────────────────
+
+    /// Helper: create a schema registry with all session + residency + device schemas.
+    fn make_session_schema_registry() -> SchemaRegistry {
+        let mut reg = SchemaRegistry::new();
+        reg.register_for_type::<ModelId>(
+            ComponentSchemaId(5),
+            SchemaVersion(1),
+            "ModelId",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ModelArtifactRef>(
+            ComponentSchemaId(6),
+            SchemaVersion(1),
+            "ModelArtifactRef",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ModelLifecycle>(
+            ComponentSchemaId(7),
+            SchemaVersion(1),
+            "ModelLifecycle",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ResidencyDeviceRef>(
+            ComponentSchemaId(8),
+            SchemaVersion(1),
+            "ResidencyDeviceRef",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ResidencyMemoryClaim>(
+            ComponentSchemaId(9),
+            SchemaVersion(1),
+            "ResidencyMemoryClaim",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ResidencyFormat>(
+            ComponentSchemaId(10),
+            SchemaVersion(1),
+            "ResidencyFormat",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<ResidencyLifecycle>(
+            ComponentSchemaId(11),
+            SchemaVersion(1),
+            "ResidencyLifecycle",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<AllocationToken>(
+            ComponentSchemaId(12),
+            SchemaVersion(1),
+            "AllocationToken",
+            "",
+            ComponentDurability::Ephemeral,
+        );
+        reg.register_for_type::<ResidencyModelRef>(
+            ComponentSchemaId(17),
+            SchemaVersion(1),
+            "ResidencyModelRef",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<SessionConfig>(
+            ComponentSchemaId(13),
+            SchemaVersion(1),
+            "SessionConfig",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<SessionModels>(
+            ComponentSchemaId(14),
+            SchemaVersion(1),
+            "SessionModels",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<SessionDevices>(
+            ComponentSchemaId(15),
+            SchemaVersion(1),
+            "SessionDevices",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg.register_for_type::<SessionLifecycle>(
+            ComponentSchemaId(16),
+            SchemaVersion(1),
+            "SessionLifecycle",
+            "",
+            ComponentDurability::Durable,
+        );
+        reg
+    }
+
+    /// Create a world with a model deployed to a Ready device.
+    /// Returns (world, model_entity_id, device_entity_id).
+    fn make_session_world() -> (CompWorld, u64, u64) {
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Artifact, Some("artifact".into()));
+        world.add_component(crate::ecs::CompEntity(1), ArtifactDigest([0xab; 32]));
+        world.spawn(EntityKind::Device, Some("device".into()));
+        world.add_component(
+            crate::ecs::CompEntity(2),
+            DeviceStableId("pci-0000:01:00.0".into()),
+        );
+        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
+        world.add_component(
+            crate::ecs::CompEntity(2),
+            DeviceMemoryLimits {
+                total_bytes: 1 << 30,
+                max_alloc_bytes: 1 << 30,
+            },
+        );
+        world.spawn(EntityKind::Model, Some("model".into()));
+        world.add_component(
+            crate::ecs::CompEntity(3),
+            ModelId(DomainId(uuid::Uuid::nil())),
+        );
+        world.add_component(
+            crate::ecs::CompEntity(3),
+            ModelArtifactRef {
+                artifact_id: 1,
+                digest: ArtifactDigest([0xab; 32]),
+            },
+        );
+        world.add_component(crate::ecs::CompEntity(3), ModelLifecycle::Deployable);
+        world.spawn(EntityKind::Residency, Some("residency".into()));
+        world.add_component(
+            crate::ecs::CompEntity(4),
+            ResidencyDeviceRef {
+                device_id: 2,
+                device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
+            },
+        );
+        world.add_component(
+            crate::ecs::CompEntity(4),
+            ResidencyMemoryClaim {
+                requested_bytes: 1 << 20,
+                actual_bytes: 1 << 20,
+            },
+        );
+        world.add_component(crate::ecs::CompEntity(4), ResidencyFormat::Native);
+        world.add_component(crate::ecs::CompEntity(4), ResidencyLifecycle::Resident);
+        world.add_component(
+            crate::ecs::CompEntity(4),
+            ResidencyModelRef {
+                residency_id: 4,
+                model_id: 3,
+            },
+        );
+        (world, 3, 2)
+    }
+
+    #[test]
+    fn test_admit_session_success() {
+        let (mut world, model_id, device_id) = make_session_world();
+        let reg = make_session_schema_registry();
+        let cmd = CreateSessionCommand {
+            id: MessageId::compute(b"session-1"),
+            config: SessionConfig {
+                max_tokens: 4096,
+                max_input_tokens: 2048,
+                max_output_tokens: 2048,
+                batch_size: 1,
+                priority: 1,
+                deadline_epochs: 100,
+            },
+            model_entities: vec![model_id],
+            device_entities: vec![device_id],
+        };
+        let start_epoch = world.current_epoch();
+        let (epoch, event) = cmd.execute(&mut world, &reg).expect("admit should succeed");
+        assert!(epoch.0 > start_epoch);
+        assert_eq!(event.kind, "session_admitted");
+        assert!(event.entity_id.is_some());
+        let session_id = event.entity_id.unwrap().0;
+        let session = crate::ecs::CompEntity(session_id);
+        assert!(world.has_entity(session));
+        assert_eq!(world.entity_kind(session), Some(EntityKind::Session));
+        assert!(world.get_component::<SessionConfig>(session).is_some());
+        assert!(world.get_component::<SessionModels>(session).is_some());
+        assert!(world.get_component::<SessionDevices>(session).is_some());
+        assert_eq!(
+            world.get_component::<SessionLifecycle>(session),
+            Some(&SessionLifecycle::Created)
+        );
+        let models = world.get_component::<SessionModels>(session).unwrap();
+        assert_eq!(models.0, vec![model_id]);
+        let devices = world.get_component::<SessionDevices>(session).unwrap();
+        assert_eq!(devices.0, vec![device_id]);
+    }
+
+    #[test]
+    fn test_admit_session_no_models() {
+        let (mut world, _model_id, device_id) = make_session_world();
+        let reg = make_session_schema_registry();
+        let cmd = CreateSessionCommand {
+            id: MessageId::compute(b"session-no-models"),
+            config: SessionConfig {
+                max_tokens: 4096,
+                max_input_tokens: 2048,
+                max_output_tokens: 2048,
+                batch_size: 1,
+                priority: 1,
+                deadline_epochs: 100,
+            },
+            model_entities: vec![],
+            device_entities: vec![device_id],
+        };
+        let err = cmd.execute(&mut world, &reg).unwrap_err();
+        assert_eq!(err, SessionError::NoModels);
+    }
+
+    #[test]
+    fn test_admit_session_no_devices() {
+        let (mut world, model_id, _device_id) = make_session_world();
+        let reg = make_session_schema_registry();
+        let cmd = CreateSessionCommand {
+            id: MessageId::compute(b"session-no-devices"),
+            config: SessionConfig {
+                max_tokens: 4096,
+                max_input_tokens: 2048,
+                max_output_tokens: 2048,
+                batch_size: 1,
+                priority: 1,
+                deadline_epochs: 100,
+            },
+            model_entities: vec![model_id],
+            device_entities: vec![],
+        };
+        let err = cmd.execute(&mut world, &reg).unwrap_err();
+        assert_eq!(err, SessionError::NoDevices);
+    }
+
+    #[test]
+    fn test_admit_session_model_not_found() {
+        let (mut world, _model_id, device_id) = make_session_world();
+        let reg = make_session_schema_registry();
+        let cmd = CreateSessionCommand {
+            id: MessageId::compute(b"session-model-not-found"),
+            config: SessionConfig {
+                max_tokens: 4096,
+                max_input_tokens: 2048,
+                max_output_tokens: 2048,
+                batch_size: 1,
+                priority: 1,
+                deadline_epochs: 100,
+            },
+            model_entities: vec![999],
+            device_entities: vec![device_id],
+        };
+        let err = cmd.execute(&mut world, &reg).unwrap_err();
+        assert_eq!(err, SessionError::ModelNotFound(999));
+    }
+
+    #[test]
+    fn test_admit_session_device_not_ready() {
+        let reg = make_session_schema_registry();
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Model, Some("model".into()));
+        world.add_component(
+            crate::ecs::CompEntity(1),
+            ModelId(DomainId(uuid::Uuid::nil())),
+        );
+        world.add_component(crate::ecs::CompEntity(1), ModelLifecycle::Deployable);
+        world.spawn(EntityKind::Device, Some("device".into()));
+        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Discovered);
+        let cmd = CreateSessionCommand {
+            id: MessageId::compute(b"session-device-not-ready"),
+            config: SessionConfig {
+                max_tokens: 4096,
+                max_input_tokens: 2048,
+                max_output_tokens: 2048,
+                batch_size: 1,
+                priority: 1,
+                deadline_epochs: 100,
+            },
+            model_entities: vec![1],
+            device_entities: vec![2],
+        };
+        let err = cmd.execute(&mut world, &reg).unwrap_err();
+        assert_eq!(err, SessionError::DeviceNotReady(2));
+    }
+
+    #[test]
+    fn test_admit_session_model_not_admissible() {
+        let reg = make_session_schema_registry();
+        let mut world = CompWorld::new();
+        world.spawn(EntityKind::Device, Some("device".into()));
+        world.add_component(crate::ecs::CompEntity(1), DeviceLifecycle::Ready);
+        world.spawn(EntityKind::Model, Some("model".into()));
+        world.add_component(
+            crate::ecs::CompEntity(2),
+            ModelId(DomainId(uuid::Uuid::nil())),
+        );
+        world.add_component(crate::ecs::CompEntity(2), ModelLifecycle::Deployable);
+        let cmd = CreateSessionCommand {
+            id: MessageId::compute(b"session-model-not-admissible"),
+            config: SessionConfig {
+                max_tokens: 4096,
+                max_input_tokens: 2048,
+                max_output_tokens: 2048,
+                batch_size: 1,
+                priority: 1,
+                deadline_epochs: 100,
+            },
+            model_entities: vec![2],
+            device_entities: vec![1],
+        };
+        let err = cmd.execute(&mut world, &reg).unwrap_err();
+        assert_eq!(err, SessionError::ModelNotAdmissible(2));
+    }
+
+    #[test]
+    fn test_admit_session_idempotent() {
+        let (mut world, model_id, device_id) = make_session_world();
+        let reg = make_session_schema_registry();
+        let cmd = CreateSessionCommand {
+            id: MessageId::compute(b"session-idempotent"),
+            config: SessionConfig {
+                max_tokens: 4096,
+                max_input_tokens: 2048,
+                max_output_tokens: 2048,
+                batch_size: 1,
+                priority: 1,
+                deadline_epochs: 100,
+            },
+            model_entities: vec![model_id],
+            device_entities: vec![device_id],
+        };
+        let (_, event1) = cmd.clone().execute(&mut world, &reg).expect("first admit");
+        let session_id1 = event1.entity_id.unwrap().0;
+        let entity_count_after_first = world.entity_count();
+        let (_, event2) = cmd.execute(&mut world, &reg).expect("second admit");
+        let session_id2 = event2.entity_id.unwrap().0;
+        assert_eq!(session_id1, session_id2);
+        assert!(event2.payload["idempotent"].as_bool().unwrap_or(false));
+        assert_eq!(world.entity_count(), entity_count_after_first);
+    }
+
+    #[test]
+    fn test_transition_session_lifecycle() {
+        let (mut world, model_id, device_id) = make_session_world();
+        let reg = make_session_schema_registry();
+        let cmd = CreateSessionCommand {
+            id: MessageId::compute(b"session-transition"),
+            config: SessionConfig {
+                max_tokens: 4096,
+                max_input_tokens: 2048,
+                max_output_tokens: 2048,
+                batch_size: 1,
+                priority: 1,
+                deadline_epochs: 100,
+            },
+            model_entities: vec![model_id],
+            device_entities: vec![device_id],
+        };
+        let (_, event) = cmd.execute(&mut world, &reg).expect("admit should succeed");
+        let session_id = event.entity_id.unwrap().0;
+
+        let txn_cmd = TransitionSessionCommand {
+            id: MessageId::compute(b"transition-created-admitted"),
+            session_entity: session_id,
+            target: SessionLifecycle::Admitted,
+        };
+        let (epoch, event2) = txn_cmd
+            .execute(&mut world, &reg)
+            .expect("transition Created->Admitted should succeed");
+        assert!(epoch.0 .0 > WorldEpoch(0).0);
+        assert_eq!(event2.kind, "session_admitted");
+        let session = crate::ecs::CompEntity(session_id);
+        assert_eq!(
+            world.get_component::<SessionLifecycle>(session),
+            Some(&SessionLifecycle::Admitted)
+        );
+
+        let invalid_cmd = TransitionSessionCommand {
+            id: MessageId::compute(b"transition-admitted-released"),
+            session_entity: session_id,
+            target: SessionLifecycle::Released,
+        };
+        let err = invalid_cmd.execute(&mut world, &reg).unwrap_err();
+        assert!(matches!(err, SessionError::InvalidTransition(_)));
+    }
+
+    #[test]
+    fn test_session_config_serde() {
+        let config = SessionConfig {
+            max_tokens: 4096,
+            max_input_tokens: 2048,
+            max_output_tokens: 2048,
+            batch_size: 4,
+            priority: 2,
+            deadline_epochs: 200,
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deserialized: SessionConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(config, deserialized);
+    }
+
+    #[test]
+    fn test_replay_session_admitted() {
+        let reg = make_session_schema_registry();
+        let mut world = CompWorld::new();
+        let event = DomainEvent {
+            id: MessageId::compute(b"replay-event"),
+            kind: "session_admitted".to_string(),
+            entity_id: Some(EntityKindId(1)),
+            payload: serde_json::json!({"session_id": 1, "models": [3], "devices": [2]}),
+        };
+        let epoch = replay_session_admitted(&mut world, &event).expect("replay should succeed");
+        assert!(epoch.0 .0 > WorldEpoch(0).0);
+        let session = crate::ecs::CompEntity(1);
+        assert!(world.has_entity(session));
+        assert_eq!(world.entity_kind(session), Some(EntityKind::Session));
+        assert!(world.get_component::<SessionConfig>(session).is_some());
+        assert!(world.get_component::<SessionModels>(session).is_some());
+        assert!(world.get_component::<SessionDevices>(session).is_some());
+        assert_eq!(
+            world.get_component::<SessionLifecycle>(session),
+            Some(&SessionLifecycle::Created)
+        );
+        let epoch2 = replay_session_admitted(&mut world, &event).expect("idempotent replay");
+        assert!(epoch2.0 .0 > epoch.0 .0);
+        let sessions: Vec<_> = world.entities_of_kind(EntityKind::Session);
+        assert_eq!(sessions.len(), 1);
     }
 }

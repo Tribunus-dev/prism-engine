@@ -296,6 +296,7 @@ pub enum EntityKind {
     Artifact,
     Device,
     Residency,
+    Agent,
 }
 
 /// Type-erased storage for components, indexed by (TypeId, EntityId).
