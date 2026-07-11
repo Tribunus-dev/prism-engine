@@ -13,6 +13,18 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
+#[cfg(test)]
+use parking_lot::Mutex as ParkingMutex;
+/// Test-only global breadcrumb path override.
+/// When set, write_breadcrumb uses this path instead of reading CML_BREADCRUMB_PATH,
+/// avoiding races between parallel tests on the process-level env var.
+#[cfg(test)]
+use std::sync::LazyLock;
+
+#[cfg(test)]
+static TEST_BREADCRUMB_PATH: LazyLock<ParkingMutex<Option<std::path::PathBuf>>> =
+    LazyLock::new(|| ParkingMutex::new(None));
+
 /// Write a breadcrumb to the breadcrumb file.
 ///
 /// The file path is read from `CML_BREADCRUMB_PATH` env var.
@@ -20,9 +32,21 @@ use std::path::Path;
 /// The file is flushed and fsynced after each write so the last
 /// completed breadcrumb survives a child crash.
 pub fn write_breadcrumb(name: &str) {
-    let path = match std::env::var("CML_BREADCRUMB_PATH") {
-        Ok(p) => p,
-        Err(_) => return, // breadcrumbs not configured
+    #[cfg(test)]
+    let path = {
+        let guard = TEST_BREADCRUMB_PATH.lock();
+        guard.clone()
+    };
+    #[cfg(not(test))]
+    let path = None;
+    let path = path.or_else(|| {
+        std::env::var("CML_BREADCRUMB_PATH")
+            .map(std::path::PathBuf::from)
+            .ok()
+    });
+    let path = match path {
+        Some(p) => p,
+        None => return,
     };
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(f, "{name}");
@@ -34,8 +58,16 @@ pub fn write_breadcrumb(name: &str) {
 
 /// Set the breadcrumb file path for the current process.
 pub fn set_breadcrumb_path(path: &Path) {
-    unsafe {
-        std::env::set_var("CML_BREADCRUMB_PATH", path);
+    #[cfg(test)]
+    {
+        *TEST_BREADCRUMB_PATH.lock() = Some(path.to_path_buf());
+    }
+    #[cfg(not(test))]
+    {
+        let _ = path;
+        unsafe {
+            std::env::set_var("CML_BREADCRUMB_PATH", path);
+        }
     }
 }
 

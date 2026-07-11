@@ -84,9 +84,9 @@ pub(crate) struct StagedInsert {
     pub entity: u64,
     pub schema_id: ComponentSchemaId,
     pub schema_version: SchemaVersion,
-    /// Type-erased component value for application
-    #[allow(dead_code)]
-    pub erased_value: Box<dyn std::any::Any + Send>,
+    /// Applies the staged mutation to component_store.
+    /// Created at add_component::<T>() time when the concrete type is known.
+    pub apply: Box<dyn FnOnce(&mut ComponentStore) + Send>,
 }
 
 /// A staged component removal.
@@ -94,6 +94,8 @@ pub(crate) struct StagedRemove {
     pub entity: u64,
     pub schema_id: ComponentSchemaId,
 }
+
+use crate::ecs::ComponentStore;
 
 impl WorldTxn {
     /// Begin a new transaction against the given world at its current epoch.
@@ -108,18 +110,28 @@ impl WorldTxn {
     }
 
     /// Stage a component insert or update.
-    pub fn add_component<T: 'static + Send>(
+    pub fn add_component<T: 'static + Send + Sync>(
         &mut self,
         entity: u64,
         schema_id: ComponentSchemaId,
         schema_version: SchemaVersion,
         component: T,
     ) {
+        use std::collections::HashMap;
+        let type_id = std::any::TypeId::of::<T>();
         self.inserts.push(StagedInsert {
             entity,
             schema_id,
             schema_version,
-            erased_value: Box::new(component),
+            apply: Box::new(move |store: &mut ComponentStore| {
+                let map: &mut HashMap<u64, T> = store
+                    .data
+                    .entry(type_id)
+                    .or_insert_with(|| Box::new(HashMap::<u64, T>::new()))
+                    .downcast_mut::<HashMap<u64, T>>()
+                    .expect("type mismatch in ComponentStore");
+                map.insert(entity, component);
+            }),
         });
     }
 

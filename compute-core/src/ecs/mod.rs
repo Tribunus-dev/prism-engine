@@ -196,9 +196,9 @@ pub use component::quality::*;
 pub use component::tensor::*;
 
 use crate::ecs::constitutional::command::DomainEvent;
-use crate::ecs::constitutional::types::WorldEpoch;
+use crate::ecs::constitutional::types::{SchemaVersion, WorldEpoch};
 use crate::ecs::constitutional::world_txn::{
-    CommittedEpoch, ComponentChange, WorldTxn, WorldTxnError,
+    ChangeType, CommittedEpoch, ComponentChange, WorldTxn, WorldTxnError,
 };
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
@@ -557,9 +557,8 @@ impl CompWorld {
     pub fn drain_committed_events(&mut self) -> Vec<DomainEvent> {
         std::mem::take(&mut self.committed_events)
     }
-
     pub fn transit(&mut self, txn: WorldTxn) -> Result<CommittedEpoch, WorldTxnError> {
-        // 1. Validate epoch
+        // 1a. Validate epoch
         if self.epoch != txn.expected_epoch {
             return Err(WorldTxnError::StaleEpoch {
                 expected: txn.expected_epoch,
@@ -567,7 +566,7 @@ impl CompWorld {
             });
         }
 
-        // 2. Validate read dependencies
+        // 1b. Validate read dependencies
         for dep in &txn.read_deps {
             let current_ver = self
                 .component_versions
@@ -584,49 +583,48 @@ impl CompWorld {
             }
         }
 
-        // 3. Advance epoch first so journal entries record the new epoch
+        // PHASE 2 — Apply (mutations under the commit lock)
+
+        // 2a. Advance epoch
         self.epoch.0 += 1;
 
-        // 4. Build mutation journal from staged changes
+        // 2b. Apply staged inserts via closures
         let mut journal = Vec::new();
-        for insert in &txn.inserts {
+        for insert in txn.inserts {
+            (insert.apply)(&mut self.component_store);
             journal.push(ComponentChange {
                 entity: insert.entity,
                 schema_id: insert.schema_id,
                 schema_version: insert.schema_version,
-                change_type: crate::ecs::constitutional::world_txn::ChangeType::Insert,
+                change_type: ChangeType::Insert,
                 before_hash: None,
                 after_hash: None,
                 world_epoch: self.epoch,
             });
-
-            // Increment component version for this entity
             *self.component_versions.entry(insert.entity).or_insert(0) += 1;
         }
 
-        for remove in &txn.removes {
+        // 2c. Process removals
+        for remove in txn.removes {
             journal.push(ComponentChange {
                 entity: remove.entity,
                 schema_id: remove.schema_id,
-                schema_version: crate::ecs::constitutional::types::SchemaVersion(0),
-                change_type: crate::ecs::constitutional::world_txn::ChangeType::Remove,
+                schema_version: SchemaVersion(0),
+                change_type: ChangeType::Remove,
                 before_hash: None,
                 after_hash: None,
                 world_epoch: self.epoch,
             });
-
-            *self.component_versions.entry(remove.entity).or_insert(0) += 1;
         }
 
-        let committed = CommittedEpoch(self.epoch);
-
-        // 5. Store journal
-        self.journal = journal;
-
-        // 6. Store committed events
+        // 2d. Store committed domain events
         self.committed_events = txn.events;
 
-        Ok(committed)
+        // 2e. Store journal
+        self.journal = journal;
+
+        // PHASE 3 — Finalize
+        Ok(CommittedEpoch(self.epoch))
     }
 }
 

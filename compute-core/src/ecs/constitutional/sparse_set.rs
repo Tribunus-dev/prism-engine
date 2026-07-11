@@ -37,12 +37,21 @@ impl<T> SparseSet<T> {
     }
 
     /// Insert a component for an entity. Replaces existing value if present.
+    /// When the sparse slot points to a dense entry whose entity handle differs
+    /// (generation changed via slot reuse), both the value and handle are replaced.
     pub fn insert(&mut self, entity: u64, value: T) {
         let idx = self.sparse_idx(entity);
         if idx < self.sparse.len() as u32 && self.sparse[idx as usize] != SENTINEL {
-            // Update existing — entity is already in the set
             let dense_idx = self.sparse[idx as usize] as usize;
-            self.dense[dense_idx] = value;
+            if self.entities[dense_idx] == entity {
+                // Same generation — update existing value
+                self.dense[dense_idx] = value;
+            } else {
+                // Different generation — stale handle or reused slot
+                // Replace both value and entity handle
+                self.dense[dense_idx] = value;
+                self.entities[dense_idx] = entity;
+            }
         } else {
             // Insert new
             self.ensure_sparse(entity);
