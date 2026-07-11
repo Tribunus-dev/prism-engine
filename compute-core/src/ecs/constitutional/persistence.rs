@@ -151,6 +151,26 @@ impl ReplayRegistry {
                 .map(|_| ())
                 .map_err(|err| format!("{err}"))
         });
+        reg.register("pipeline_created", |w, e| {
+            crate::ecs::constitutional::multimodal::replay_pipeline_created(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("agent_run_created", |w, e| {
+            crate::ecs::constitutional::agent_exec::replay_agent_run_created(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("peer_registered", |w, e| {
+            crate::ecs::constitutional::distributed::replay_peer_registered(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
+        reg.register("ingress_request_submitted", |w, e| {
+            crate::ecs::constitutional::ingress::replay_ingress_request_submitted(w, e)
+                .map(|_| ())
+                .map_err(|err| format!("{err}"))
+        });
         reg
     }
 }

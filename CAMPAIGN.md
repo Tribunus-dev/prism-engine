@@ -63,6 +63,33 @@ in shadow mode.
 
 ## Current Migration State
 
+### Inventory (not yet started)
+- **Authority Purge (Wave 10)** — Adversarial audit complete. 11 high-severity legacy
+  registries identified across 8 files. Dominant patterns: `world.add_component()` bypassing
+  WorldTxn (60+ violations in production code), legacy HashMap registries for model
+  lifecycle, cancellation, distillation, weight residency, trust, and session state.
+  Root enabler: legacy CompWorld mutation methods (add_component, remove_component,
+  add_resource, get_component_mut) in mod.rs directly access component_store.data.
+  
+  Top 11 HIGH-severity items requiring migration:
+  1. AdapterRegistry (adapter/mod.rs) — model role assignment bypasses ECS
+  2. ModelRegistry (server/models.rs) — model lifecycle outside ECS
+  3. DistillationEngine (server/distill_worker.rs) — job lifecycle in HashMap
+  4. CancellationManager (scheduling/cancellation.rs) — cancellation authority
+  5. WeightCache (backend/residency.rs) — weight residency decisions
+  6. TrustStore (registry/trust_store.rs) — provider trust decisions
+  7. AppState (server/routes.rs) — composite anti-pattern with multiple HashMaps
+  8. GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs) — global mutable singleton
+  9. ServerEngine (server/engine.rs) — session/request state
+  10. HeterogeneousExecutor.routing_table (backend/heterogeneous_executor.rs) — routing
+  11. AneBackend (backend/ane.rs) — ANE program/weight binding state
+  
+  Full audit reports:
+  - local://audit-direct-store.md (60 production violations)
+  - local://audit-legacy-registries.md (11 HIGH, 7 MEDIUM, 20 LOW)
+  - local://audit-spawn-patterns.md (11 direct spawn violations)
+  - local://audit-projection-authority.md (no violations — projections correctly tiered)
+
 ### Complete (ReplayVerified)
 - **Artifact Ingestion** — LoadArtifactCommand, effect validation, transactional
   spawn, schema-bound components, replay through EventStore.

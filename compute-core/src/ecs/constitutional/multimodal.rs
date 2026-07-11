@@ -448,6 +448,47 @@ pub enum MultimodalError {
     InvalidTransition(LifecycleError),
 }
 
+/// Replay a `pipeline_created` event to reconstruct a pipeline entity.
+///
+/// Restores: Pipeline, PipelineLifecycle::Created. Idempotent.
+pub fn replay_pipeline_created(
+    world: &mut CompWorld,
+    event: &DomainEvent,
+) -> Result<CommittedEpoch, MultimodalError> {
+    let pipeline_id = event
+        .entity_id
+        .ok_or(MultimodalError::PipelineNotFound(0))?
+        .0;
+    let session_entity = event
+        .payload
+        .get("session_entity")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let mut txn = WorldTxn::new(world);
+    if !world.has_entity(crate::ecs::CompEntity(pipeline_id)) {
+        txn.stage_spawn(pipeline_id, EntityKind::Pipeline);
+    }
+    txn.add_component(
+        pipeline_id,
+        ComponentSchemaId(SCHEMA_PIPELINE),
+        SchemaVersion(1),
+        Pipeline {
+            pipeline_id,
+            session_entity,
+            target_modality: "replay".to_string(),
+            created_at: Timestamp::now(),
+        },
+    );
+    txn.add_component(
+        pipeline_id,
+        ComponentSchemaId(SCHEMA_PIPELINE_LIFECYCLE),
+        SchemaVersion(1),
+        PipelineLifecycle::Created,
+    );
+    let epoch = world.transit(txn).map_err(MultimodalError::CommitFailed)?;
+    Ok(epoch)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

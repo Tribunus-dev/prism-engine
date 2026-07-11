@@ -423,6 +423,66 @@ impl crate::ecs::Component for AgentMessage {}
 impl crate::ecs::Component for AgentConfig {}
 impl crate::ecs::Component for AgentLifecycle {}
 
+// ── Replay handlers ─────────────────────────────────────────────────────────
+
+/// Replay handler for the `AgentRunCreated` event.
+///
+/// Spawns an agent entity and populates `AgentRun`, `AgentConfig`, and
+/// `AgentLifecycle::Active` components from the event payload.
+pub fn replay_agent_run_created(
+    world: &mut CompWorld,
+    event: &DomainEvent,
+) -> Result<CommittedEpoch, AgentExecError> {
+    let agent_id = event.entity_id.ok_or(AgentExecError::AgentNotFound(0))?.0;
+    let session_entity = event
+        .payload
+        .get("session_entity")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let task = event
+        .payload
+        .get("task")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let mut txn = WorldTxn::new(world);
+    if !world.has_entity(crate::ecs::CompEntity(agent_id)) {
+        txn.stage_spawn(agent_id, EntityKind::Agent);
+    }
+    txn.add_component(
+        agent_id,
+        ComponentSchemaId(SCHEMA_AGENT_RUN),
+        SchemaVersion(1),
+        AgentRun {
+            run_id: agent_id,
+            session_entity,
+            name: task.clone(),
+            created_at: Timestamp::now(),
+        },
+    );
+    txn.add_component(
+        agent_id,
+        ComponentSchemaId(SCHEMA_AGENT_CONFIG),
+        SchemaVersion(1),
+        AgentConfig {
+            model: "default".to_string(),
+            temperature: 0.7,
+            max_tokens: 4096,
+            tools_enabled: true,
+            max_tool_rounds: 5,
+        },
+    );
+    txn.add_component(
+        agent_id,
+        ComponentSchemaId(SCHEMA_AGENT_LIFECYCLE),
+        SchemaVersion(1),
+        AgentLifecycle::Active,
+    );
+    let epoch = world.transit(txn).map_err(AgentExecError::CommitFailed)?;
+    Ok(epoch)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -457,6 +457,62 @@ impl crate::ecs::Component for RequestQueue {}
 impl crate::ecs::Component for TransportSession {}
 impl crate::ecs::Component for IngressLifecycle {}
 
+// ── Replay Functions ───────────────────────────────────────────────────
+
+/// Replay an ingress request submitted event, restoring the ingress entity
+/// and its request/lifecycle components.
+pub fn replay_ingress_request_submitted(
+    world: &mut CompWorld,
+    event: &DomainEvent,
+) -> Result<CommittedEpoch, IngressError> {
+    let entity_id = event.entity_id.ok_or(IngressError::EntityNotFound(0))?.0;
+    let transport = event
+        .payload
+        .get("transport")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let method = event
+        .payload
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("GET")
+        .to_string();
+    let path = event
+        .payload
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("/")
+        .to_string();
+
+    let mut txn = WorldTxn::new(world);
+    if !world.has_entity(crate::ecs::CompEntity(entity_id)) {
+        txn.stage_spawn(entity_id, EntityKind::Session);
+    }
+    txn.add_component(
+        entity_id,
+        ComponentSchemaId(SCHEMA_INGRESS_REQUEST),
+        SchemaVersion(1),
+        IngressRequest {
+            request_id: entity_id,
+            transport,
+            method,
+            path,
+            body_hash: [0u8; 32],
+            received_at: Timestamp::now(),
+            resolved_command: None,
+        },
+    );
+    txn.add_component(
+        entity_id,
+        ComponentSchemaId(SCHEMA_INGRESS_LIFECYCLE),
+        SchemaVersion(1),
+        IngressLifecycle::Received,
+    );
+    let epoch = world.transit(txn).map_err(IngressError::CommitFailed)?;
+    Ok(epoch)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

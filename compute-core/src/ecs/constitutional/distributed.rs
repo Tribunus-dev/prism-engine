@@ -128,6 +128,71 @@ impl crate::ecs::Component for RemoteCapabilityObservation {}
 // ══════════════════════════════════════════════════════════════════════════════
 // Schema Validation
 // ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// Replay
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// Replay a `peer_registered` event to reconstruct a peer node entity.
+///
+/// Restores: PeerIdentity, NodeMembership, TrustState::Observed.
+/// Spawns the node entity if not already present (idempotent).
+pub fn replay_peer_registered(
+    world: &mut CompWorld,
+    event: &DomainEvent,
+) -> Result<CommittedEpoch, DistributedError> {
+    let node_id = event
+        .payload
+        .get("node_id")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let peer_id_str = event
+        .payload
+        .get("peer_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("replay");
+    let cluster = event
+        .payload
+        .get("cluster_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+
+    let mut txn = WorldTxn::new(world);
+
+    if !world.has_entity(crate::ecs::CompEntity(node_id)) {
+        txn.stage_spawn(node_id, EntityKind::Node);
+    }
+
+    txn.add_component(
+        node_id,
+        ComponentSchemaId(SCHEMA_PEER_IDENTITY),
+        SchemaVersion(1),
+        PeerIdentity {
+            peer_id: peer_id_str.to_string(),
+            public_key: vec![],
+            discovered_at: Timestamp::now(),
+        },
+    );
+    txn.add_component(
+        node_id,
+        ComponentSchemaId(SCHEMA_NODE_MEMBERSHIP),
+        SchemaVersion(1),
+        NodeMembership {
+            node_id,
+            cluster_name: cluster.to_string(),
+            joined_epoch: WorldEpoch(0),
+            last_seen: Timestamp::now(),
+        },
+    );
+    txn.add_component(
+        node_id,
+        ComponentSchemaId(SCHEMA_TRUST_STATE),
+        SchemaVersion(1),
+        TrustState::Observed,
+    );
+
+    let epoch = world.transit(txn).map_err(DistributedError::CommitFailed)?;
+    Ok(epoch)
+}
 
 /// Validate all distributed schemas are registered for the correct types.
 pub fn validate_distributed_schemas(reg: &SchemaRegistry) -> Result<(), String> {
