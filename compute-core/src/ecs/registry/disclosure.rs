@@ -302,7 +302,8 @@ impl NonceExecutionContext {
         h.update(&self.expiry_epoch_monotonic.to_be_bytes());
         h.update(&self.engine_request_sequence.to_be_bytes());
         let mut challenge = [0u8; 32];
-        challenge.copy_from_slice(h.finalize().as_slice());
+        let result = h.finalize();
+        challenge.copy_from_slice(&result);
         challenge
     }
 }
@@ -503,8 +504,10 @@ pub enum DisclosureEvidenceMode {
 
 // ── Enterprise trust store (stub) ─────────────────────────────────────────
 
+#[cfg(feature = "legacy_mutations")]
 pub struct EnterpriseTrustStore;
 
+#[cfg(feature = "legacy_mutations")]
 impl EnterpriseTrustStore {
     pub fn new() -> Self {
         Self
@@ -548,6 +551,7 @@ impl EnterpriseTrustStore {
     }
 }
 
+#[cfg(feature = "legacy_mutations")]
 impl Default for EnterpriseTrustStore {
     fn default() -> Self {
         Self::new()
@@ -701,6 +705,7 @@ impl OutputDeliveryGatekeeper {
         }
     }
 
+    #[cfg(feature = "legacy_mutations")]
     pub fn verify_and_commit_clearance(
         acceptance: &HostDisclosureAcceptance,
         expected_generation: u64,
@@ -825,6 +830,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy_mutations")]
     fn test_nonce_failed_verification_releases() {
         let mut store = NonceStore::new();
         let nonce = [2u8; 32];

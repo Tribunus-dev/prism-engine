@@ -3,12 +3,13 @@ pub mod benchmark;
 pub mod cpu;
 #[cfg(feature = "server-dashboard")]
 pub mod dashboard;
+#[cfg(feature = "legacy_mutations")]
 pub mod models;
 pub mod rate_limiter;
 
 #[cfg(feature = "mlx-backend")]
 pub mod admin;
-#[cfg(feature = "prism-backend")]
+#[cfg(any(feature = "prism-backend", feature = "legacy_mutations"))]
 pub mod distill_worker;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod engine;

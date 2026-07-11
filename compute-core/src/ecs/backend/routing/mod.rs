@@ -264,6 +264,7 @@ pub struct GraphRegion {
 }
 
 #[cfg(test)]
+#[cfg(feature = "legacy_mutations")]
 mod tests {
     use super::*;
     use crate::ecs::backend::residency;

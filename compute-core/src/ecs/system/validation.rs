@@ -56,7 +56,7 @@ impl CompilerSystem for AdmissionValidationSystem {
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
         let executable_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
-        let mut any_failure = false;
+        let any_failure = false;
 
         for &k in &kernel_entities {
             if let Some(qg) = world.get_component::<QualityGateResult>(k) {

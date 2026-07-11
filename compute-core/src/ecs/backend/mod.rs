@@ -36,7 +36,8 @@ pub mod amd_rocm;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
-    feature = "ane-executor"
+    feature = "ane-executor",
+    feature = "legacy_mutations",
 ))]
 #[path = "ane.rs"]
 pub mod ane_backend;
@@ -72,6 +73,13 @@ pub mod graph;
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
+#[cfg(any(
+    all(
+        target_os = "macos",
+        any(feature = "mlx-backend", feature = "prism-backend")
+    ),
+    feature = "legacy_mutations"
+))]
 // production-neutral heterogeneous orchestration
 pub mod heterogeneous_executor;
 #[cfg(feature = "intel")]
@@ -106,6 +114,7 @@ pub mod npu;
 ))]
 pub mod placement;
 /// Tensor residency tracking — auditable contract for where a tensor lives.
+#[cfg(feature = "legacy_mutations")]
 pub mod residency;
 pub mod routing;
 pub mod shared_event;
@@ -443,33 +452,29 @@ pub trait TensorBackend {
     // ── Residency (auditable tensor tracking) ────────────────────────
 
     /// Return the residency record for the tensor identified by `handle`.
-    #[cfg(any(
-        feature = "mlx-backend",
-        feature = "prism-backend",
-        feature = "candle-cpu",
-        feature = "intel",
-        feature = "tensix",
-        feature = "amd-rocm",
-    ))]
+    #[cfg(feature = "legacy_mutations")]
     fn residency(&self, _handle: TensorHandle) -> Result<residency::TensorResidency, String> {
         Err("residency tracking not yet implemented".into())
     }
 
+    #[cfg(not(feature = "legacy_mutations"))]
+    fn residency(&self, _handle: TensorHandle) -> Result<(), String> {
+        Err("residency tracking not available".into())
+    }
+
     /// Record a transfer event for the tensor identified by `handle`.
-    #[cfg(any(
-        feature = "mlx-backend",
-        feature = "prism-backend",
-        feature = "candle-cpu",
-        feature = "intel",
-        feature = "tensix",
-        feature = "amd-rocm",
-    ))]
+    #[cfg(feature = "legacy_mutations")]
     fn record_transfer(
         &mut self,
         _handle: TensorHandle,
         _target: residency::BackendId,
     ) -> Result<(), String> {
         Err("residency tracking not yet implemented".into())
+    }
+
+    #[cfg(not(feature = "legacy_mutations"))]
+    fn record_transfer(&mut self, _handle: TensorHandle) -> Result<(), String> {
+        Err("residency tracking not available".into())
     }
 }
 
@@ -505,13 +510,7 @@ pub trait CompiledRegionBackend: TensorBackend {
 /// Check whether a transfer is needed when reading `handle` from `from` on
 /// `to`. Returns the [`residency::TransferDecision`] so the scheduler can
 /// plan the mapping and log the event.
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "candle-cpu",
-    feature = "intel",
-    feature = "tensix",
-    feature = "amd-rocm",
-))]
+#[cfg(feature = "legacy_mutations")]
 pub fn check_transfer<T: TensorBackend>(
     from: &T,
     _to: &T,
@@ -520,6 +519,16 @@ pub fn check_transfer<T: TensorBackend>(
     let r = from.residency(handle)?;
     let decision = r.requires_transfer(residency::BackendId::Unknown);
     Ok(decision)
+}
+
+#[cfg(not(feature = "legacy_mutations"))]
+pub fn check_transfer<T: TensorBackend>(
+    from: &T,
+    _to: &T,
+    handle: TensorHandle,
+) -> Result<(), String> {
+    let _r = from.residency(handle)?;
+    Err("residency tracking not available".into())
 }
 
 #[cfg(feature = "mlx-backend")]

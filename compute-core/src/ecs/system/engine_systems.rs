@@ -35,9 +35,17 @@ impl Component for ModelStoreComponent {}
 #[derive(Debug, Clone)]
 enum LoadedModelVariant {
     /// Model loaded from the legacy model store path.
-    Store { image_hash: String, vocab_size: u32 },
+    Store {
+        #[allow(dead_code)]
+        image_hash: String,
+        #[allow(dead_code)]
+        vocab_size: u32,
+    },
     /// Model loaded from a sealed cimage artifact.
-    Cimage { vocab_size: u32 },
+    Cimage {
+        #[allow(dead_code)]
+        vocab_size: u32,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -200,7 +208,7 @@ impl CompilerSystem for ModelInstallSystem {
         // Clone the store to release the immutable borrow on world
         // before any mutable accesses inside the loop.
         let store = store_comp.0.clone();
-        drop(store_comp);
+        let _ = store_comp;
 
         let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
@@ -216,7 +224,7 @@ impl CompilerSystem for ModelInstallSystem {
             let source_identity = request.source_identity.clone();
             let compiler_version = request.compiler_version.clone();
             let result_tx = request.result_tx.clone();
-            drop(request); // release immutable borrow before mutable access
+            let _ = request; // release immutable borrow before mutable access
 
             let result = store.install(
                 std::path::Path::new(&source_dir),
@@ -288,7 +296,7 @@ impl CompilerSystem for ModelLoadSystem {
         };
         // Clone the store to release the immutable borrow.
         let store = store_comp.0.clone();
-        drop(store_comp);
+        let _ = store_comp;
 
         let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
@@ -301,7 +309,7 @@ impl CompilerSystem for ModelLoadSystem {
 
             let image_hash = request.image_hash.clone();
             let result_tx = request.result_tx.clone();
-            drop(request);
+            let _ = request;
 
             // Verify the integrity seal.
             let seal_result = store.verify_seal(&image_hash);
@@ -373,7 +381,7 @@ impl CompilerSystem for CimageLoadSystem {
 
             let cimage_bytes = request.cimage_bytes.clone();
             let result_tx = request.result_tx.clone();
-            drop(request); // release immutable borrow
+            let _ = request; // release immutable borrow
 
             // Validate minimum size.
             if cimage_bytes.len()
@@ -765,9 +773,9 @@ impl CompilerSystem for CancelSystem {
                 continue;
             };
 
-            let job_id = cancel.job_id.clone();
+            let _job_id = cancel.job_id.clone();
             let result_tx = cancel.result_tx.clone();
-            drop(cancel); // release immutable borrow
+            let _ = cancel; // release immutable borrow
 
             // Find matching entities and mark them as EOS.
             for target in &entities {

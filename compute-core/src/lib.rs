@@ -184,6 +184,11 @@ pub use crate::ecs::device;
 pub use crate::ecs::diffusion;
 /// ECS compiler pipeline — entity-component-system world, systems, and component types.
 pub mod ecs;
+/// AMD ROCm backend — multi-die GPU compute module for AMD hardware.
+#[cfg(feature = "amd-rocm")]
+pub use crate::ecs::core::amd_rocm;
+#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
+pub use crate::ecs::core::editing;
 #[cfg(feature = "mlx-backend")]
 pub use crate::ecs::core::engine;
 pub use crate::ecs::core::engine_error;
@@ -237,9 +242,12 @@ pub use crate::ecs::core::layout_compiler;
 pub use crate::ecs::core::layout_transform;
 #[cfg(feature = "mlx-backend")]
 pub use crate::ecs::core::loader;
+pub use crate::ecs::core::logging;
 /// Ternary codec — 2-bit {-1, 0, +1} quantization.
 #[cfg(feature = "generation-video")]
 pub use crate::ecs::core::video_provider;
+/// CPU fusion backend — Accelerate + Rayon as a first-class fusion candidate.
+pub use crate::ecs::cpu_runtime;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
@@ -270,15 +278,6 @@ pub use crate::ecs::kv_cache;
 ))]
 pub use crate::ecs::parsing;
 pub use crate::ecs::ternary;
-#[macro_use]
-pub use crate::ecs::core::logging;
-/// AMD ROCm backend — multi-die GPU compute module for AMD hardware.
-#[cfg(feature = "amd-rocm")]
-pub use crate::ecs::core::amd_rocm;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub use crate::ecs::core::editing;
-/// CPU fusion backend — Accelerate + Rayon as a first-class fusion candidate.
-pub use crate::ecs::cpu_runtime;
 /// Execution plan — kernel specialization, region batching, and plan data types.
 pub mod execution_plan;
 /// Pure-data types for KV cache, usable without mlx dependency.
@@ -337,6 +336,8 @@ pub use crate::ecs::lut;
 pub use crate::ecs::memory;
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub use crate::ecs::metal_runtime;
+#[cfg(feature = "legacy_mutations")]
+#[cfg(feature = "legacy_mutations")]
 pub mod model_adapter;
 #[cfg(any(
     feature = "mlx-backend",

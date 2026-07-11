@@ -50,7 +50,7 @@ impl CompilerSystem for TertiaryPipelineSystem {
             .first()
             .ok_or_else(|| anyhow::anyhow!("no model entity found for cimage assembly"))?;
 
-        let model_name = world.name(model_entity).unwrap_or("model").to_string();
+        let _model_name = world.name(model_entity).unwrap_or("model").to_string();
 
         // Collect segment metadata from tensor entities.
         let mut segments = [SegmentEntry {
@@ -61,7 +61,7 @@ impl CompilerSystem for TertiaryPipelineSystem {
         let mut seg_count = 0u32;
 
         let tensor_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
-        for &entity in &tensor_entities {
+        for &_entity in &tensor_entities {
             if seg_count >= CIMAGE_SEGMENT_CAPACITY as u32 {
                 break;
             }

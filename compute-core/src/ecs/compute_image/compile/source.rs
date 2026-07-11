@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Source loading — reads safetensors shards from disk, provides lazy mmap
 //! access for deferred loading and streaming compilation.
 
@@ -476,6 +480,7 @@ pub(crate) fn load_source(source_dir: &Path, skip_validation: bool) -> crate::Re
     }
 
     // ── Model-family adapter validation ──
+    #[cfg(feature = "legacy_mutations")]
     {
         if skip_validation {
             // skip adapter check in dev/skip mode
@@ -597,6 +602,7 @@ pub(crate) fn load_gguf_source(
         "llama" => "LlamaForCausalLM",
         _ => "LlamaForCausalLM",
     };
+    #[cfg(feature = "legacy_mutations")]
     {
         let json = serde_json::json!({
             "architectures": [architecture_name],
@@ -721,6 +727,7 @@ pub(crate) fn load_gguf_source(
     }
 
     // 9. Model-adapter check (reads from temp config.json)
+    #[cfg(feature = "legacy_mutations")]
     if !skip_validation {
         let config_val: serde_json::Value = fs::read_to_string(&config_path)
             .ok()

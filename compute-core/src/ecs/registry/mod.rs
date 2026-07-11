@@ -11,6 +11,7 @@ pub mod compiler;
 pub mod disclosure;
 pub mod governor;
 pub mod overlay;
+#[cfg(feature = "legacy_mutations")]
 pub mod trust_store;
 pub mod types;
 
@@ -18,5 +19,6 @@ pub use compiler::*;
 pub use disclosure::*;
 pub use governor::*;
 pub use overlay::*;
+#[cfg(feature = "legacy_mutations")]
 pub use trust_store::*;
 pub use types::*;

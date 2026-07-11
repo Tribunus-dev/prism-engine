@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::ecs::compilation::ane_eligibility::AneEligibility;
 use crate::ecs::compilation::phase_ir::{PhaseRegion, RegionId};
 use crate::ecs::compilation::region_catalogue::{RegionAdmission, RegionCatalogue};
+#[cfg(feature = "legacy_mutations")]
 use crate::model_adapter::CanonicalModel;
 
 // ── Scheduled operation ──────────────────────────────────────────────────
@@ -79,6 +80,7 @@ pub struct RegionExecutionPlan {
 ///
 /// After all layers:
 ///   final_norm → logits_projection
+#[cfg(feature = "legacy_mutations")]
 pub fn build_region_plan(
     model: &CanonicalModel,
     catalogue: &RegionCatalogue,
@@ -262,6 +264,7 @@ pub fn build_region_plan(
     }
 }
 
+#[cfg(feature = "legacy_mutations")]
 fn push_op(
     ops: &mut Vec<ScheduledOp>,
     op_index: &mut u32,
@@ -284,6 +287,7 @@ fn push_op(
     *op_index += 1;
 }
 
+#[cfg(feature = "legacy_mutations")]
 fn partition_islands(ops: &[ScheduledOp]) -> Vec<CoreAiIsland> {
     let mut islands = Vec::new();
     let mut island_id = 0u32;
@@ -358,6 +362,7 @@ pub fn build_phase_regions(plan: &RegionExecutionPlan) -> Vec<PhaseRegion> {
 // ── Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[cfg(feature = "legacy_mutations")]
 mod tests {
     use super::*;
     use crate::ecs::config::{AttentionKind, RopeSpec, TextArchitecture};

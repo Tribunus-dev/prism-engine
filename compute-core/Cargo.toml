@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 autobins = false
-description = "Tribunus Compute Kernel — core MLX backend"
+description = "Tribunus transactional compute kernel, compiler, and hardware runtime"
 
 [lib]
 name = "tribunus_compute_core"

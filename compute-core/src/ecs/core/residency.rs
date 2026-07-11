@@ -373,8 +373,11 @@ mod tests {
     }
 }
 
+#[cfg(feature = "legacy_mutations")]
 use crate::ecs::backend::residency::TensorResidency;
+#[cfg(feature = "legacy_mutations")]
 use std::collections::HashMap;
+#[cfg(feature = "legacy_mutations")]
 use std::collections::VecDeque;
 
 // ── Weight Cache ───────────────────────────────────────────────────────────
@@ -388,12 +391,14 @@ pub struct WeightCacheKey {
     pub data_format: String,
 }
 
+#[cfg(feature = "legacy_mutations")]
 #[derive(Clone, Debug)]
 pub struct WeightCacheEntry {
     pub residency: TensorResidency,
     pub session_id: Option<String>,
 }
 
+#[cfg(feature = "legacy_mutations")]
 pub struct WeightCache {
     pub max_dram_bytes: u64,
     pub current_dram_bytes: u64,
@@ -405,6 +410,7 @@ pub struct WeightCache {
     pub upload_avoidance_bytes: u64,
 }
 
+#[cfg(feature = "legacy_mutations")]
 impl WeightCache {
     pub fn new(max_dram_bytes: u64) -> Self {
         Self {

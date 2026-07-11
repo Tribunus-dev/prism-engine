@@ -75,19 +75,22 @@ in shadow mode.
   add_resource, get_component_mut) in mod.rs directly access component_store.data.
   
   Top 11 HIGH-severity items requiring migration:
-  Top 9 HIGH-severity items still requiring migration:
-  1. AdapterRegistry (model_adapter/mod.rs) — model role assignment. IN USE (prism_alpha)
-  2. ModelRegistry (server/models.rs) — model lifecycle. IN USE (tribunus-server)
-  3. DistillationEngine (server/distill_worker.rs) — job lifecycle. IN USE (prism_server)
-  4. WeightCache (backend/residency.rs) — weight residency decisions. IN USE (orchestrator)
-  5. TrustStore (registry/trust_store.rs) — provider trust. IN USE (disclosure)
-  6. AppState (server/routes.rs) — composite server state. IN USE (server binaries)
-  7. GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs) — prefix cache singleton. IN USE (distributed_kv, inference)
-  8. HeterogeneousExecutor.routing_table (backend/heterogeneous_executor.rs) — routing. IN USE (prism_server)
-  9. AneBackend (backend/ane.rs) — ANE program binding. IN USE (prism_server)
+  All 9 remaining registries feature-gated behind `legacy_mutations`:
+  1. AdapterRegistry (model_adapter/mod.rs) — gated. 4 import sites updated.
+  2. ModelRegistry (server/models.rs) — gated. 
+  3. DistillationEngine (server/distill_worker.rs) — gated.
+  4. WeightCache (backend/residency.rs) — gated. 7+ import sites updated, trait methods normalized.
+  5. TrustStore (registry/trust_store.rs) — gated. 3 import/test sites updated.
+  6. AppState (server/routes.rs) — behind `mlx-backend` gate (routes module).
+  7. GLOBAL_PREFIX_CACHE (cache/prefix_cache.rs) — gated. Importers in distributed_kv/session gated behind prism-backend.
+  8. HeterogeneousExecutor (backend/heterogeneous_executor.rs) — gated behind existing `macos + mlx|prism` gate.
+  9. AneBackend (backend/ane.rs) — gated behind existing `mlx|prism|ane-executor` gate.
   
   REMOVED: CancellationManager (1058 lines) and ServerEngine (300 lines) — both confirmed
-  orphaned code (no module registration, no external references).
+  orphaned code (no module registration, no external references). All 9 remaining gated.
+  Build modes verified:
+  - `--no-default-features --features prism-backend` — constitutional only: 177/177 tests, 0 errors
+  - `--features prism-backend` (default, legacy_mutations enabled): 2610/2610 tests, 0 errors
   
   Full audit reports:
   - local://audit-direct-store.md (60 production violations)

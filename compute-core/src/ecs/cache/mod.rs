@@ -12,4 +12,6 @@ pub mod chunk_kv;
 #[cfg(feature = "mlx-backend")]
 pub mod evolkv;
 pub mod paged_ssd_cache;
+#[cfg(feature = "legacy_mutations")]
+#[cfg(feature = "legacy_mutations")]
 pub mod prefix_cache;

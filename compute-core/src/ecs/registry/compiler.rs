@@ -2,10 +2,13 @@
 //! intersection, derives resource budgets, and produces a signed RuntimeContract.
 
 use crate::ecs::registry::types::*;
+#[cfg(feature = "legacy_mutations")]
 use crate::ecs::registry::TrustStore;
 
+#[cfg(feature = "legacy_mutations")]
 pub struct DeploymentCompiler;
 
+#[cfg(feature = "legacy_mutations")]
 impl DeploymentCompiler {
     pub fn compile(
         manifest: &ComputeImageManifest,
