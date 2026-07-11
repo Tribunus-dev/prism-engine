@@ -543,6 +543,10 @@ impl CompWorld {
             .and_then(|map| map.get_mut(&entity.0))
     }
 
+    #[cfg_attr(
+        not(feature = "legacy_mutations"),
+        deprecated(note = "resources should be committed via WorldTxn")
+    )]
     pub fn add_resource<T: 'static + Send + Sync>(&mut self, resource: T) {
         self.resource_store
             .data
@@ -556,6 +560,10 @@ impl CompWorld {
             .and_then(|b| b.downcast_ref::<T>())
     }
 
+    #[cfg_attr(
+        not(feature = "legacy_mutations"),
+        deprecated(note = "resources should be committed via WorldTxn")
+    )]
     pub fn get_resource_mut<T: 'static + Send + Sync>(&mut self) -> Option<&mut T> {
         self.resource_store
             .data
