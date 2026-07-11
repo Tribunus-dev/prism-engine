@@ -442,7 +442,7 @@ impl CompWorld {
                 name: None,
             });
         }
-        if id > self.next_id {
+        if id >= self.next_id {
             self.next_id = id + 1;
         }
         CompEntity(id)

@@ -765,7 +765,12 @@ mod tests {
         let reg = make_compilation_schema_registry();
 
         // Set up an artifact entity for the model
-        world.spawn(crate::ecs::EntityKind::Artifact, Some("test_model".into()));
+        // Use id 2 (past next_id=1) so spawn_entity_with_id bumps next_id to 3,
+        // ensuring cmd.execute() gets a fresh id for the job entity.
+        let artifact_id = 2u64;
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(artifact_id, crate::ecs::EntityKind::Artifact);
+        world.transit(txn).unwrap();
 
         let config = JobConfig {
             target_format: "mlmodelc".to_string(),
@@ -776,7 +781,7 @@ mod tests {
         let cmd = CreateCompilationJobCommand {
             id: MessageId::compute(b"create_job_1"),
             job_id: 100,
-            model_artifact: 1,
+            model_artifact: 2,
             target_profile: "m1-ane".to_string(),
             config,
         };
@@ -797,7 +802,7 @@ mod tests {
             .get_component::<CompilationJob>(entity)
             .expect("CompilationJob component");
         assert_eq!(job.job_id, 100);
-        assert_eq!(job.target_artifact, 1);
+        assert_eq!(job.target_artifact, 2);
         assert_eq!(job.target_device_profile, "m1-ane");
 
         let lifecycle = world
@@ -839,16 +844,16 @@ mod tests {
         let reg = make_compilation_schema_registry();
 
         // Spawn an entity as a job (must be in some lifecycle state)
-        let entity_id = {
-            let e = world.spawn(
-                crate::ecs::EntityKind::Executable,
-                Some("job_entity".into()),
-            );
-            e.0
-        };
-
-        // Lifecycle is Pending, not Validating — should fail
-        world.add_component(crate::ecs::CompEntity(entity_id), JobLifecycle::Pending);
+        let entity_id = WorldTxn::next_entity_id(&world);
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(entity_id, crate::ecs::EntityKind::Executable);
+        txn.add_component(
+            entity_id,
+            ComponentSchemaId(SCHEMA_JOB_LIFECYCLE),
+            SchemaVersion(1),
+            JobLifecycle::Pending,
+        );
+        world.transit(txn).unwrap();
 
         let cmd = SubmitValidationReceiptCommand {
             id: MessageId::compute(b"receipt_1"),

@@ -128,7 +128,11 @@ in shadow mode.
   - **Persistence & Projections** — FsEventStore (file-backed, durable-before-ack, restart recovery proven),
     ReplayRegistry with 16 appliers, ReplayEngine::replay_into, InMemoryEventStore, Snapshot. 177 tests.
   - **Legacy Spawn Guard** — CompWorld.direct_mutation_allowed guard prevents direct spawn/add_component
-    outside WorldTxn. 2 tests: guard catches violations, WorldTxn bypasses guard.
+  - **Legacy Spawn Guard** — CompWorld.direct_mutation_allowed guard prevents direct spawn/add_component
+    outside WorldTxn. Enabled in all constitutional test setup helpers (make_deployment_world,
+    make_session_world). spawn_entity_with_id next_id bug fixed (≥ instead of >).
+    make_session_world sets guard=false after setup, proving constitutional tests are mutation-pure.
+    177 constitutional tests pass with guard active in mainstream helpers.
 
 ## Wave Plan
 

@@ -615,16 +615,37 @@ mod tests {
         );
 
         // Spawn session entity (1) — must be Active
-        world.spawn(EntityKind::Session, Some("test_session".into()));
-        world.add_component(crate::ecs::CompEntity(1), SessionLifecycle::Active);
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Session);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            SessionLifecycle::Active,
+        );
+        world.transit(txn).unwrap();
 
         // Spawn device entity (2) — must be Ready
-        world.spawn(EntityKind::Device, Some("test_device".into()));
-        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Ready,
+        );
+        world.transit(txn).unwrap();
 
         // Spawn residency entity (3) — must be Resident
-        world.spawn(EntityKind::Residency, Some("test_deployment".into()));
-        world.add_component(crate::ecs::CompEntity(3), ResidencyLifecycle::Resident);
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(3, EntityKind::Residency);
+        txn.add_component(
+            3,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            ResidencyLifecycle::Resident,
+        );
+        world.transit(txn).unwrap();
 
         let cmd = AcquireExecutionLeaseCommand {
             id: MessageId::compute(b"test-acquire"),
@@ -698,21 +719,35 @@ mod tests {
         );
 
         // Spawn entities but with wrong lifecycle states
-        world.spawn(EntityKind::Session, Some("session".into()));
-        world.add_component(
-            crate::ecs::CompEntity(1),
-            SessionLifecycle::Created, // NOT Active
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Session);
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            SessionLifecycle::Created,
         );
-        world.spawn(EntityKind::Device, Some("device".into()));
-        world.add_component(
-            crate::ecs::CompEntity(2),
-            DeviceLifecycle::Discovered, // NOT Ready
+        world.transit(txn).unwrap();
+
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Discovered,
         );
-        world.spawn(EntityKind::Residency, Some("dep".into()));
-        world.add_component(
-            crate::ecs::CompEntity(3),
-            ResidencyLifecycle::Binding, // NOT Resident
+        world.transit(txn).unwrap();
+
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(3, EntityKind::Residency);
+        txn.add_component(
+            3,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            ResidencyLifecycle::Binding,
         );
+        world.transit(txn).unwrap();
 
         let cmd = AcquireExecutionLeaseCommand {
             id: MessageId::compute(b"test-acquire-fail"),
@@ -732,6 +767,7 @@ mod tests {
         );
 
         // Fix session to Active, should now fail on DeploymentNotResident
+        world.set_direct_mutation_allowed(true);
         world.add_component(crate::ecs::CompEntity(1), SessionLifecycle::Active);
         assert!(
             matches!(

@@ -1898,29 +1898,47 @@ mod tests {
     fn make_deployment_world() -> CompWorld {
         let mut world = CompWorld::new();
         // Artifact entity (1) with digest
-        world.spawn(EntityKind::Artifact, Some("test_artifact".into()));
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.add_component(
+            1,
+            ComponentSchemaId(3),
+            SchemaVersion(1),
             crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
         );
-        world.add_component(
-            crate::ecs::CompEntity(1),
+        txn.add_component(
+            1,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
         );
+        world.transit(txn).unwrap();
         // Device entity (2) with stable ID, Ready lifecycle, memory limits
-        world.spawn(EntityKind::Device, Some("test_device".into()));
-        world.add_component(
-            crate::ecs::CompEntity(2),
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             DeviceStableId("pci-0000:01:00.0".into()),
         );
-        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
-        world.add_component(
-            crate::ecs::CompEntity(2),
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Ready,
+        );
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             DeviceMemoryLimits {
                 total_bytes: 8_589_934_592,
                 max_alloc_bytes: 4_294_967_296,
             },
         );
+        world.transit(txn).unwrap();
+        world.set_direct_mutation_allowed(false);
         world
     }
 
@@ -2595,58 +2613,110 @@ mod tests {
     /// Returns (world, model_entity_id, device_entity_id).
     fn make_session_world() -> (CompWorld, u64, u64) {
         let mut world = CompWorld::new();
-        world.spawn(EntityKind::Artifact, Some("artifact".into()));
-        world.add_component(crate::ecs::CompEntity(1), ArtifactDigest([0xab; 32]));
-        world.spawn(EntityKind::Device, Some("device".into()));
-        world.add_component(
-            crate::ecs::CompEntity(2),
+        // Entity 1: Artifact
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.add_component(
+            1,
+            ComponentSchemaId(3),
+            SchemaVersion(1),
+            ArtifactDigest([0xab; 32]),
+        );
+        world.transit(txn).unwrap();
+        // Entity 2: Device with stable ID, Ready, memory
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(2, EntityKind::Device);
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             DeviceStableId("pci-0000:01:00.0".into()),
         );
-        world.add_component(crate::ecs::CompEntity(2), DeviceLifecycle::Ready);
-        world.add_component(
-            crate::ecs::CompEntity(2),
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
+            DeviceLifecycle::Ready,
+        );
+        txn.add_component(
+            2,
+            ComponentSchemaId(1),
+            SchemaVersion(1),
             DeviceMemoryLimits {
                 total_bytes: 1 << 30,
                 max_alloc_bytes: 1 << 30,
             },
         );
-        world.spawn(EntityKind::Model, Some("model".into()));
-        world.add_component(
-            crate::ecs::CompEntity(3),
+        world.transit(txn).unwrap();
+        // Entity 3: Model with ID, artifact ref, lifecycle
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(3, EntityKind::Model);
+        txn.add_component(
+            3,
+            ComponentSchemaId(5),
+            SchemaVersion(1),
             ModelId(DomainId(uuid::Uuid::nil())),
         );
-        world.add_component(
-            crate::ecs::CompEntity(3),
+        txn.add_component(
+            3,
+            ComponentSchemaId(6),
+            SchemaVersion(1),
             ModelArtifactRef {
                 artifact_id: 1,
                 digest: ArtifactDigest([0xab; 32]),
             },
         );
-        world.add_component(crate::ecs::CompEntity(3), ModelLifecycle::Deployable);
-        world.spawn(EntityKind::Residency, Some("residency".into()));
-        world.add_component(
-            crate::ecs::CompEntity(4),
+        txn.add_component(
+            3,
+            ComponentSchemaId(7),
+            SchemaVersion(1),
+            ModelLifecycle::Deployable,
+        );
+        world.transit(txn).unwrap();
+        // Entity 4: Residency with device ref, memory claim, format, lifecycle, model ref
+        let mut txn = WorldTxn::new(&world);
+        txn.stage_spawn(4, EntityKind::Residency);
+        txn.add_component(
+            4,
+            ComponentSchemaId(8),
+            SchemaVersion(1),
             ResidencyDeviceRef {
                 device_id: 2,
                 device_stable_id: DeviceStableId("pci-0000:01:00.0".into()),
             },
         );
-        world.add_component(
-            crate::ecs::CompEntity(4),
+        txn.add_component(
+            4,
+            ComponentSchemaId(9),
+            SchemaVersion(1),
             ResidencyMemoryClaim {
                 requested_bytes: 1 << 20,
                 actual_bytes: 1 << 20,
             },
         );
-        world.add_component(crate::ecs::CompEntity(4), ResidencyFormat::Native);
-        world.add_component(crate::ecs::CompEntity(4), ResidencyLifecycle::Resident);
-        world.add_component(
-            crate::ecs::CompEntity(4),
+        txn.add_component(
+            4,
+            ComponentSchemaId(10),
+            SchemaVersion(1),
+            ResidencyFormat::Native,
+        );
+        txn.add_component(
+            4,
+            ComponentSchemaId(11),
+            SchemaVersion(1),
+            ResidencyLifecycle::Resident,
+        );
+        txn.add_component(
+            4,
+            ComponentSchemaId(17),
+            SchemaVersion(1),
             ResidencyModelRef {
                 residency_id: 4,
                 model_id: 3,
             },
         );
+        world.transit(txn).unwrap();
+        world.set_direct_mutation_allowed(false);
         (world, 3, 2)
     }
 
