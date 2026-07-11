@@ -435,4 +435,401 @@ mod tests {
             assert_eq!(ak, deserialized);
         }
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Lifecycle Tests  (Stage 3 — entity lifecycle types)
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    //  Pure type-level tests: no runtime behavior, no CompWorld dependency.
+    //  Tests exercise transition guards, terminal/status predicates,
+    //  typed relationship construction, and serde roundtrips.
+
+    // ── test_session_lifecycle_valid_transitions ─────────────────────────────
+
+    #[test]
+    fn test_session_lifecycle_valid_transitions() {
+        // Drive through the happy path: Created → Admitted → Active → Quiescing → Releasing → Released
+        assert!(SessionLifecycle::Created
+            .can_transition_to(SessionLifecycle::Admitted)
+            .is_ok());
+        assert!(SessionLifecycle::Admitted
+            .can_transition_to(SessionLifecycle::Active)
+            .is_ok());
+        assert!(SessionLifecycle::Active
+            .can_transition_to(SessionLifecycle::Quiescing)
+            .is_ok());
+        assert!(SessionLifecycle::Quiescing
+            .can_transition_to(SessionLifecycle::Releasing)
+            .is_ok());
+        assert!(SessionLifecycle::Releasing
+            .can_transition_to(SessionLifecycle::Released)
+            .is_ok());
+    }
+
+    // ── test_session_lifecycle_rejects_invalid ───────────────────────────────
+
+    #[test]
+    fn test_session_lifecycle_rejects_invalid() {
+        // Impossible forward jumps
+        assert!(SessionLifecycle::Created
+            .can_transition_to(SessionLifecycle::Completed)
+            .is_err());
+        assert!(SessionLifecycle::Admitted
+            .can_transition_to(SessionLifecycle::Released)
+            .is_err());
+        // Backwards transition
+        assert!(SessionLifecycle::Active
+            .can_transition_to(SessionLifecycle::Created)
+            .is_err());
+        // Skipping states
+        assert!(SessionLifecycle::Created
+            .can_transition_to(SessionLifecycle::Released)
+            .is_err());
+        // Terminal → anything (Released is the only terminal)
+        assert!(SessionLifecycle::Released
+            .can_transition_to(SessionLifecycle::Admitted)
+            .is_err());
+    }
+
+    // ── test_session_failure_from_any_non_terminal ───────────────────────────
+
+    #[test]
+    fn test_session_failure_from_any_non_terminal() {
+        let non_terminal = [
+            SessionLifecycle::Created,
+            SessionLifecycle::Admitted,
+            SessionLifecycle::Active,
+            SessionLifecycle::Quiescing,
+            SessionLifecycle::Saving,
+            SessionLifecycle::Completed,
+            SessionLifecycle::Releasing,
+        ];
+        for state in &non_terminal {
+            assert!(
+                state.can_transition_to(SessionLifecycle::Failed).is_ok(),
+                "Failed should be reachable from {:?}",
+                state
+            );
+        }
+        // Terminal state (Released) cannot transition to Failed
+        assert!(SessionLifecycle::Released
+            .can_transition_to(SessionLifecycle::Failed)
+            .is_err());
+    }
+
+    // ── test_session_terminal ────────────────────────────────────────────────
+
+    #[test]
+    fn test_session_terminal() {
+        // Only Released is terminal
+        for state in &[
+            SessionLifecycle::Created,
+            SessionLifecycle::Admitted,
+            SessionLifecycle::Active,
+            SessionLifecycle::Quiescing,
+            SessionLifecycle::Saving,
+            SessionLifecycle::Completed,
+            SessionLifecycle::Failed,
+            SessionLifecycle::Releasing,
+        ] {
+            assert!(!state.is_terminal(), "{:?} should not be terminal", state);
+        }
+        assert!(SessionLifecycle::Released.is_terminal());
+
+        // is_releasing is true only for Releasing and Quiescing
+        for state in &[
+            SessionLifecycle::Created,
+            SessionLifecycle::Admitted,
+            SessionLifecycle::Active,
+            SessionLifecycle::Saving,
+            SessionLifecycle::Completed,
+            SessionLifecycle::Failed,
+            SessionLifecycle::Released,
+        ] {
+            assert!(!state.is_releasing(), "{:?} should not be releasing", state);
+        }
+        assert!(SessionLifecycle::Quiescing.is_releasing());
+        assert!(SessionLifecycle::Releasing.is_releasing());
+    }
+
+    // ── test_inference_phase_valid_transitions ───────────────────────────────
+
+    #[test]
+    fn test_inference_phase_valid_transitions() {
+        // Happy generate path
+        assert!(InferencePhase::AwaitingInput
+            .can_transition_to(InferencePhase::Prefill)
+            .is_ok());
+        assert!(InferencePhase::Prefill
+            .can_transition_to(InferencePhase::Decode)
+            .is_ok());
+        // Self-transition (keep decoding)
+        assert!(InferencePhase::Decode
+            .can_transition_to(InferencePhase::Decode)
+            .is_ok());
+        // Decode → ToolWait → AwaitingInput
+        assert!(InferencePhase::Decode
+            .can_transition_to(InferencePhase::ToolWait)
+            .is_ok());
+        assert!(InferencePhase::ToolWait
+            .can_transition_to(InferencePhase::AwaitingInput)
+            .is_ok());
+        // Decode → OutputFinalization → AwaitingInput
+        assert!(InferencePhase::Decode
+            .can_transition_to(InferencePhase::OutputFinalization)
+            .is_ok());
+        assert!(InferencePhase::OutputFinalization
+            .can_transition_to(InferencePhase::AwaitingInput)
+            .is_ok());
+        // Decode → Compaction → Decode (CPU memory compaction)
+        assert!(InferencePhase::Decode
+            .can_transition_to(InferencePhase::Compaction)
+            .is_ok());
+        assert!(InferencePhase::Compaction
+            .can_transition_to(InferencePhase::Decode)
+            .is_ok());
+    }
+
+    // ── test_inference_phase_rejects_invalid ─────────────────────────────────
+
+    #[test]
+    fn test_inference_phase_rejects_invalid() {
+        // Phase skipping
+        assert!(InferencePhase::AwaitingInput
+            .can_transition_to(InferencePhase::ToolWait)
+            .is_err());
+        assert!(InferencePhase::Prefill
+            .can_transition_to(InferencePhase::AwaitingInput)
+            .is_err());
+        // Wrong direction
+        assert!(InferencePhase::Decode
+            .can_transition_to(InferencePhase::Prefill)
+            .is_err());
+        assert!(InferencePhase::OutputFinalization
+            .can_transition_to(InferencePhase::Decode)
+            .is_err());
+    }
+
+    // ── test_is_generating ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_generating() {
+        assert!(InferencePhase::Prefill.is_generating());
+        assert!(InferencePhase::Decode.is_generating());
+        for phase in &[
+            InferencePhase::AwaitingInput,
+            InferencePhase::ToolWait,
+            InferencePhase::Compaction,
+            InferencePhase::OutputFinalization,
+        ] {
+            assert!(
+                !phase.is_generating(),
+                "{:?} should not be generating",
+                phase
+            );
+        }
+    }
+
+    // ── test_teardown_state_machine ──────────────────────────────────────────
+
+    #[test]
+    fn test_teardown_state_machine() {
+        // Forward path
+        assert!(TeardownState::Active
+            .can_transition_to(TeardownState::Quiescing)
+            .is_ok());
+        assert!(TeardownState::Quiescing
+            .can_transition_to(TeardownState::Releasing)
+            .is_ok());
+        assert!(TeardownState::Releasing
+            .can_transition_to(TeardownState::Released)
+            .is_ok());
+        // Backwards transitions fail
+        assert!(TeardownState::Released
+            .can_transition_to(TeardownState::Releasing)
+            .is_err());
+        assert!(TeardownState::Releasing
+            .can_transition_to(TeardownState::Quiescing)
+            .is_err());
+        assert!(TeardownState::Quiescing
+            .can_transition_to(TeardownState::Active)
+            .is_err());
+        // Self-transition (identity) is not in the allowed list
+        assert!(TeardownState::Active
+            .can_transition_to(TeardownState::Active)
+            .is_err());
+        // Terminal
+        assert!(!TeardownState::Active.is_terminal());
+        assert!(!TeardownState::Quiescing.is_terminal());
+        assert!(!TeardownState::Releasing.is_terminal());
+        assert!(TeardownState::Released.is_terminal());
+    }
+
+    // ── test_artifact_lifecycle ──────────────────────────────────────────────
+
+    #[test]
+    fn test_artifact_lifecycle() {
+        assert!(ArtifactLifecycle::Validated.is_usable());
+        assert!(ArtifactLifecycle::Loaded.is_usable());
+        assert!(!ArtifactLifecycle::Discovered.is_usable());
+        assert!(!ArtifactLifecycle::Invalid.is_usable());
+
+        // Serde roundtrip
+        for variant in &[
+            ArtifactLifecycle::Discovered,
+            ArtifactLifecycle::Validated,
+            ArtifactLifecycle::Loaded,
+            ArtifactLifecycle::Invalid,
+        ] {
+            let json = serde_json::to_string(variant).unwrap();
+            let deserialized: ArtifactLifecycle = serde_json::from_str(&json).unwrap();
+            assert_eq!(*variant, deserialized);
+        }
+    }
+
+    // ── test_device_lifecycle ────────────────────────────────────────────────
+
+    #[test]
+    fn test_device_lifecycle() {
+        assert!(DeviceLifecycle::Ready.is_available());
+        for state in &[
+            DeviceLifecycle::Discovered,
+            DeviceLifecycle::Initializing,
+            DeviceLifecycle::Degraded,
+            DeviceLifecycle::Unavailable,
+            DeviceLifecycle::Removed,
+        ] {
+            assert!(!state.is_available(), "{:?} should not be available", state);
+        }
+    }
+
+    // ── test_residency_lifecycle ─────────────────────────────────────────────
+
+    #[test]
+    fn test_residency_lifecycle() {
+        assert!(ResidencyLifecycle::Resident.is_resident());
+        for state in &[
+            ResidencyLifecycle::Desired,
+            ResidencyLifecycle::Binding,
+            ResidencyLifecycle::Evicting,
+            ResidencyLifecycle::Evicted,
+        ] {
+            assert!(!state.is_resident(), "{:?} should not be resident", state);
+        }
+    }
+
+    // ── test_typed_relationships ─────────────────────────────────────────────
+
+    #[test]
+    fn test_typed_relationships() {
+        let rel = SessionUsesModel {
+            session_id: 1,
+            model_id: 2,
+        };
+        assert_eq!(rel.session_id, 1);
+        assert_eq!(rel.model_id, 2);
+
+        let rt = ResidencyTargets {
+            residency_id: 3,
+            device_id: 4,
+        };
+        assert_eq!(rt.residency_id, 3);
+        assert_eq!(rt.device_id, 4);
+
+        let p = Parent { parent_id: 5 };
+        assert_eq!(p.parent_id, 5);
+
+        // Serde roundtrips
+        let json = serde_json::to_string(&rel).unwrap();
+        let deser: SessionUsesModel = serde_json::from_str(&json).unwrap();
+        assert_eq!(rel, deser);
+
+        let json = serde_json::to_string(&rt).unwrap();
+        let deser: ResidencyTargets = serde_json::from_str(&json).unwrap();
+        assert_eq!(rt, deser);
+
+        let json = serde_json::to_string(&p).unwrap();
+        let deser: Parent = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, deser);
+    }
+
+    // ── test_storage_handle ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_storage_handle() {
+        let handle = StorageHandle("test-handle-42".to_string());
+        // Debug output contains the inner string
+        let debug = format!("{:?}", handle);
+        assert!(
+            debug.contains("test-handle-42"),
+            "Debug should contain inner value: {}",
+            debug
+        );
+
+        // Serde roundtrip
+        let json = serde_json::to_string(&handle).unwrap();
+        let deserialized: StorageHandle = serde_json::from_str(&json).unwrap();
+        assert_eq!(handle, deserialized);
+    }
+
+    // ── test_session_checkpoint_serde ────────────────────────────────────────
+
+    #[test]
+    fn test_session_checkpoint_serde() {
+        let cp = SessionCheckpoint {
+            model_digest: [1u8; 32],
+            context_digest: [2u8; 32],
+            token_position: 128,
+            world_epoch: WorldEpoch(42),
+            kv_layout_version: 3,
+            compatibility_digest: [4u8; 32],
+            payload_digest: [5u8; 32],
+            storage_handle: StorageHandle("arena-7/slot-3".to_string()),
+            created_at: Timestamp(1_700_000_000_000_000_000),
+        };
+
+        let json = serde_json::to_string(&cp).unwrap();
+        let deserialized: SessionCheckpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(cp.model_digest, deserialized.model_digest);
+        assert_eq!(cp.context_digest, deserialized.context_digest);
+        assert_eq!(cp.token_position, deserialized.token_position);
+        assert_eq!(cp.world_epoch, deserialized.world_epoch);
+        assert_eq!(cp.kv_layout_version, deserialized.kv_layout_version);
+        assert_eq!(cp.compatibility_digest, deserialized.compatibility_digest);
+        assert_eq!(cp.payload_digest, deserialized.payload_digest);
+        assert_eq!(cp.storage_handle, deserialized.storage_handle);
+        assert_eq!(cp.created_at, deserialized.created_at);
+    }
+
+    // ── test_lifecycle_error_display ─────────────────────────────────────────
+
+    #[test]
+    fn test_lifecycle_error_display() {
+        let err = LifecycleError::InvalidSessionTransition {
+            from: SessionLifecycle::Created,
+            to: SessionLifecycle::Completed,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("invalid session"), "msg: {}", msg);
+        assert!(msg.contains("Created"), "msg: {}", msg);
+        assert!(msg.contains("Completed"), "msg: {}", msg);
+
+        let err = LifecycleError::InvalidPhaseTransition {
+            from: InferencePhase::AwaitingInput,
+            to: InferencePhase::ToolWait,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("invalid inference"), "msg: {}", msg);
+        assert!(msg.contains("AwaitingInput"), "msg: {}", msg);
+        assert!(msg.contains("ToolWait"), "msg: {}", msg);
+
+        let err = LifecycleError::InvalidTeardownTransition {
+            from: TeardownState::Released,
+            to: TeardownState::Releasing,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("invalid teardown"), "msg: {}", msg);
+        assert!(msg.contains("Released"), "msg: {}", msg);
+        assert!(msg.contains("Releasing"), "msg: {}", msg);
+    }
 }

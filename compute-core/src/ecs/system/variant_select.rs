@@ -6,7 +6,7 @@
 //! fallbacks. Attaches a `SelectedVariant` component to each parent kernel.
 //! Runs in Phase E (`KernelGeneration`).
 
-use crate::ecs::component::aot::{CompEntityRef, KernelVariantEntityData, SelectedVariant};
+use crate::ecs::component::aot::{KernelVariantEntityData, SelectedVariant};
 use crate::ecs::component::backend::GPUArch;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
@@ -207,7 +207,7 @@ impl CompilerSystem for VariantSelectionSystem {
 
         // For each group, score and select the best variant.
         for (parent_kernel, variants) in &groups {
-            let mut scored: Vec<f64> = variants
+            let scored: Vec<f64> = variants
                 .iter()
                 .map(|(_, data)| score_variant(data, &device_profile))
                 .collect();
@@ -239,6 +239,7 @@ impl CompilerSystem for VariantSelectionSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::component::aot::CompEntityRef;
     use crate::ecs::plan::KernelTemplateId;
 
     #[test]

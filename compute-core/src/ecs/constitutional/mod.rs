@@ -11,5 +11,7 @@ pub use system_desc::*;
 pub use types::*;
 pub mod world_txn;
 pub use world_txn::*;
+pub mod lifecycle;
+pub use lifecycle::*;
 #[cfg(test)]
 mod tests;

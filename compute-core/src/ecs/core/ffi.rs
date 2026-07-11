@@ -1,9 +1,24 @@
 //! C-compatible FFI bridge for PrismEngine Swift menu bar app.
 //! Rust-native API (formerly extern "C" FFI). Raw-pointer params require unsafe.
 
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 use std::path::Path;
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 use std::sync::Arc;
 
 #[cfg(any(
