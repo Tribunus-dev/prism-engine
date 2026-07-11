@@ -12,7 +12,8 @@ mod tests {
     // test_compworld_basics
     // -----------------------------------------------------------------------
     #[test]
-    fn test_compworld_basics() {
+    #[cfg(feature = "legacy_mutations")]
+fn test_compworld_basics() {
         let mut world = CompWorld::new();
         assert_eq!(world.entity_count(), 0);
 
@@ -109,7 +110,8 @@ mod tests {
     // test_ecs_pipeline_model_loading
     // -----------------------------------------------------------------------
     #[test]
-    fn test_ecs_pipeline_model_loading() {
+    #[cfg(feature = "legacy_mutations")]
+fn test_ecs_pipeline_model_loading() {
         let mut session = CompileSession::new();
         session.register_builtin_systems();
 
@@ -242,7 +244,8 @@ mod tests {
     // test_codec_selection_per_role
     // -----------------------------------------------------------------------
     #[test]
-    fn test_codec_selection_per_role() {
+    #[cfg(feature = "legacy_mutations")]
+fn test_codec_selection_per_role() {
         // Create a CompileSession with systems registered.
         let mut session = CompileSession::new();
         session.register_builtin_systems();
@@ -365,7 +368,8 @@ mod tests {
     // test_buffer_allocation
     // -----------------------------------------------------------------------
     #[test]
-    fn test_buffer_allocation_with_memory_domain() {
+    #[cfg(feature = "legacy_mutations")]
+fn test_buffer_allocation_with_memory_domain() {
         let mut session = CompileSession::new();
         session.register_builtin_systems();
 
@@ -444,7 +448,8 @@ mod tests {
     // test_fusion_analysis — MLP layer (Gate, Up, Down)
     // -----------------------------------------------------------------------
     #[test]
-    fn test_fusion_analysis_mlp_layer() {
+    #[cfg(feature = "legacy_mutations")]
+fn test_fusion_analysis_mlp_layer() {
         let mut session = CompileSession::new();
         session.register_builtin_systems();
 
@@ -550,7 +555,8 @@ mod tests {
     // test_scalar_dispatch
     // -----------------------------------------------------------------------
     #[test]
-    fn test_scalar_dispatch() {
+    #[cfg(feature = "legacy_mutations")]
+fn test_scalar_dispatch() {
         let mut session = CompileSession::new();
         session.register_builtin_systems();
 
@@ -601,7 +607,8 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     #[cfg(feature = "prism-backend")]
-    fn test_bitnet_ecs_pipeline() {
+    #[cfg(feature = "legacy_mutations")]
+fn test_bitnet_ecs_pipeline() {
         use crate::ecs::adapter::CanonicalRole;
         use crate::ecs::compile_session::CompileSession;
         use crate::ecs::component::backend::BackendTarget;

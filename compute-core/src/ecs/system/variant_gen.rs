@@ -197,7 +197,8 @@ mod tests {
     use super::*;
     use crate::ecs::component::fusion::FusionGroup;
 
-    #[test]
+    #[cfg(feature = "legacy_mutations")]
+#[test]
     fn test_generates_variants_for_dispatches() {
         let mut world = CompWorld::new();
         let dispatch = world.spawn(EntityKind::Dispatch, None);
@@ -226,7 +227,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg(feature = "legacy_mutations")]
+#[test]
     fn test_no_dispatches_no_variants() {
         let mut world = CompWorld::new();
 

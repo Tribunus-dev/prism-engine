@@ -75,7 +75,7 @@ in shadow mode.
   add_resource, get_component_mut) in mod.rs directly access component_store.data.
   
   Top 11 HIGH-severity items requiring migration:
-  All 9 remaining registries feature-gated behind `legacy_mutations`:
+  All 9 remaining registries feature-gated behind `legacy_mutations`.
   1. AdapterRegistry (model_adapter/mod.rs) — gated. 4 import sites updated.
   2. ModelRegistry (server/models.rs) — gated. 
   3. DistillationEngine (server/distill_worker.rs) — gated.
@@ -87,10 +87,14 @@ in shadow mode.
   9. AneBackend (backend/ane.rs) — gated behind existing `mlx|prism|ane-executor` gate.
   
   REMOVED: CancellationManager (1058 lines) and ServerEngine (300 lines) — both confirmed
-  orphaned code (no module registration, no external references). All 9 remaining gated.
-  Build modes verified:
-  - `--no-default-features --features prism-backend` — constitutional only: 177/177 tests, 0 errors
-  - `--features prism-backend` (default, legacy_mutations enabled): 2610/2610 tests, 0 errors
+  orphaned code (no module registration, no external references). All 9 remaining gated behind legacy_mutations feature.
+ 
+  ### Constitutional mode is now the DEFAULT
+  - `legacy_mutations` REMOVED from default features in compute-core/Cargo.toml
+  - `cargo build` (no extra features) — constitutional-only mode: 0 errors
+  - `cargo test --features prism-backend` — 2561 passed, 1 pre-existing timing flake (profile_test), 0 failures
+  - `49` tests from gated modules excluded — they compile/run with explicit `--features legacy_mutations`
+  - Legacy registries still available by enabling `legacy_mutations` feature explicitly
   
   Full audit reports:
   - local://audit-direct-store.md (60 production violations)

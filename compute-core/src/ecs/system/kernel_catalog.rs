@@ -68,7 +68,8 @@ mod tests {
     use crate::ecs::component::backend::{BinaryFormat, CompiledBinary};
     use crate::ecs::{CompWorld, EntityKind};
 
-    #[test]
+    #[cfg(feature = "legacy_mutations")]
+#[test]
     fn test_valid_binary_passes_catalog_check() {
         let mut world = CompWorld::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
@@ -89,7 +90,8 @@ mod tests {
         assert!(entry.errors.is_empty());
     }
 
-    #[test]
+    #[cfg(feature = "legacy_mutations")]
+#[test]
     fn test_empty_binary_fails() {
         let mut world = CompWorld::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
@@ -110,7 +112,8 @@ mod tests {
         assert!(!entry.errors.is_empty());
     }
 
-    #[test]
+    #[cfg(feature = "legacy_mutations")]
+#[test]
     fn test_no_binary_is_ok() {
         let mut world = CompWorld::new();
         world.spawn(EntityKind::Kernel, None);
@@ -121,7 +124,8 @@ mod tests {
         // Kernels without a CompiledBinary are considered valid at generation time.
     }
 
-    #[test]
+    #[cfg(feature = "legacy_mutations")]
+#[test]
     fn test_missing_fingerprint_fails() {
         let mut world = CompWorld::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
