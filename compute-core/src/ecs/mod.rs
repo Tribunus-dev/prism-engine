@@ -281,6 +281,8 @@ impl Default for EntityMeta {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityKind {
+    Node,
+    Pipeline,
     Model,
     Tensor,
     Layer,

@@ -180,6 +180,11 @@ pub struct SessionCheckpoint {
 /// Errors for invalid lifecycle transitions.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LifecycleError {
+    #[error("invalid pipeline lifecycle transition: from {from:?} to {to:?}")]
+    InvalidPipelineTransition {
+        from: super::multimodal::PipelineLifecycle,
+        to: super::multimodal::PipelineLifecycle,
+    },
     #[error("invalid session lifecycle transition: from {from:?} to {to:?}")]
     InvalidSessionTransition {
         from: SessionLifecycle,

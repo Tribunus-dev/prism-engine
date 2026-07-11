@@ -2392,7 +2392,7 @@ mod tests {
             }),
         };
 
-        let entity_count_before = world.entity_count();
+        let _entity_count_before = world.entity_count();
         replay_model_deployed(&mut world, &event).expect("first replay");
         let entity_count_after_first = world.entity_count();
         assert!(entity_count_after_first > 0);
@@ -2898,7 +2898,7 @@ mod tests {
 
     #[test]
     fn test_replay_session_admitted() {
-        let reg = make_session_schema_registry();
+        let _reg = make_session_schema_registry();
         let mut world = CompWorld::new();
         let event = DomainEvent {
             id: MessageId::compute(b"replay-event"),

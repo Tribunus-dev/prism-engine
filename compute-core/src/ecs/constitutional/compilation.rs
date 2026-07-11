@@ -565,7 +565,6 @@ pub fn replay_compilation_job_created(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::constitutional::schema::SchemaEntry;
     use crate::ecs::CompWorld;
 
     /// Build a schema registry with all compilation types registered.

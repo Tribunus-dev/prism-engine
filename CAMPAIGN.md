@@ -18,16 +18,15 @@ No legacy map, registry, manager, cache, or database table can independently con
 |---|-----------|--------|-------------|---------|-------|
 | 1 | **Artifact Ingestion** | `ReplayVerified` | Artifact | ArtifactPath, ArtifactDigest, ArtifactMetadata, ArtifactLifecycle | kernel |
 | 2 | **Device Discovery** | `Canonical` | Device | DeviceStableId, DriverFactoryId, BackendFamily, DeviceCapabilities, DeviceMemoryLimits, DeviceTopology, DeviceHealth, DeviceLifecycle, DesiredDeviceState, ObservedDeviceState, LastObservation, RuntimeHandleKey | kernel |
-| 3 | **Model Deployment & Residency** | `Design` | Model, Residency | — | kernel |
 | 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
 | 4 | **Session Lifecycle** | `Design` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
 | 5 | **Work Scheduling** | `Design` | WorkItem | WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent, WorkPrerequisites, WorkOutput | kernel |
 | 6 | **Execution Leases** | `Design` | — | ExecutionLease, LeaseOwner, LeaseTokenRange, KvSlot, KvOwnership, ExecutionOutput | kernel |
 | 7 | **Compilation & Model Production** | `Design` | CompilationJob | CompilationJob, JobInput, JobConfig, JobOutput, JobLifecycle, ValidationReceipt, QuantizationPlan, CimagePromotion | kernel |
 | 8 | **Agent & Tool Execution** | `Design` | Agent | AgentRun, AgentTask, AgentPhase, ToolInvocation, ToolOutcome, AgentMessage, AgentConfig, AgentLifecycle | kernel |
-| 9 | **Multimodal Pipelines** | `Inventory` | — | — | multimodal |
-| 10 | **Distributed Topology** | `Inventory` | — | — | distributed |
-| 11 | **Server & API Bridges** | `Inventory` | — | — | server |
+| 9 | **Multimodal Pipelines** | `Design` | Pipeline | Pipeline, PipelineStage, PipelineModality, InputArtifactRef, OutputArtifactRef, PipelineLifecycle, WorkLeaseRef | kernel |
+| 10 | **Distributed Topology** | `Design` | Node | PeerIdentity, NodeMembership, PeerCapabilities, NodeTopology, TrustState, WorkerHealth, RemoteLease, RemoteCapabilityObservation | kernel |
+| 11 | **Server & API Bridges** | `Design` | — | IngressRequest, ApiKey, RateLimiterState, RequestQueue, TransportSession, IngressLifecycle | kernel |
 | 12 | **Persistence & Projections** | `Inventory` | — | — | kernel |
 | 13 | **Dashboard** | `Inventory` | — | — | dashboard |
 
@@ -85,6 +84,14 @@ in shadow mode.
     SubmitValidationReceiptCommand, 8 component types, JobLifecycle with 6 states. 11 tests.
 - **Agent & Tool Execution** — CreateAgentRunCommand, SubmitToolOutcomeCommand,
     9 component types, AgentPhase with 7 states. 9 tests.
+- **Multimodal Pipelines** — CreatePipelineCommand with stage/artifact preflight,
+    SubmitStageOutputCommand, 7 component types, PipelineLifecycle with 7 states. 8 tests.
+- **Distributed Topology** — RegisterPeerCommand, ObserveWorkerCapabilityCommand,
+    8 component types (PeerIdentity, TrustState, WorkerHealth, RemoteLease), TrustState
+    with 5 states. 5 tests.
+- **Server & API Bridges** — SubmitIngressRequestCommand, ResolveIngressCommand,
+    IngressLifecycleTransitionCommand, 6 component types, IngressLifecycle with 6 states.
+    11 tests.
 
 ### Shadow (constitutional path running, legacy comparison pending)
 - **Model Deployment & Residency** — Schema-bound deployment, preflight validation,
