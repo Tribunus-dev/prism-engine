@@ -12,7 +12,6 @@
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 // ── ReceiptKind ─────────────────────────────────────────────────────────────
 
@@ -66,12 +65,50 @@ pub enum ReceiptKind {
 
 impl std::fmt::Display for ReceiptKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match serde_json::to_value(self) {
-            Ok(v) => match v.as_str() {
-                Some(s) => write!(f, "{}", s),
-                None => write!(f, "{:?}", self),
-            },
-            Err(_) => write!(f, "{:?}", self),
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl ReceiptKind {
+    /// Return a stable string representation of this receipt kind.
+    ///
+    /// For unit variants this returns `snake_case` identical to the serde
+    /// representation. For `Other(s)` it returns the inner string directly.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::SourceValidated => "source_validated",
+            Self::Admitted => "admitted",
+            Self::Bound => "bound",
+            Self::Sealed => "sealed",
+            Self::Failed => "failed",
+            Self::ModelLoaded => "model_loaded",
+            Self::RequestAdmitted => "request_admitted",
+            Self::PrefillCompleted => "prefill_completed",
+            Self::TokenDecoded => "token_decoded",
+            Self::GenerationCompleted => "generation_completed",
+            Self::PhaseValidated => "phase_validated",
+            Self::ParityCheckPassed => "parity_check_passed",
+            Self::ParityCheckFailed => "parity_check_failed",
+            Self::CalibrationCompleted => "calibration_completed",
+            Self::JobCreated => "job_created",
+            Self::CalibrationStarted => "calibration_started",
+            Self::TensorCandidatesIdentified => "tensor_candidates_identified",
+            Self::PromotionEligible => "promotion_eligible",
+            Self::PromotionCommitted => "promotion_committed",
+            Self::RequestReceived => "request_received",
+            Self::StreamStarted => "stream_started",
+            Self::StreamCancelled => "stream_cancelled",
+            Self::StreamCompleted => "stream_completed",
+            Self::PhaseReceipt => "phase_receipt",
+            Self::StepReceipt => "step_receipt",
+            Self::MetricsReported => "metrics_reported",
+            Self::ArenaCreated => "arena_created",
+            Self::ArenaReleased => "arena_released",
+            Self::ArenaLeased => "arena_leased",
+            Self::StateMutation => "state_mutation",
+            Self::ArtifactDiscovered => "artifact_discovered",
+            Self::ArtifactIngested => "artifact_ingested",
+            Self::Other(s) => s.as_str(),
         }
     }
 }
@@ -90,7 +127,9 @@ impl ReceiptId {
         let mut hasher = blake3::Hasher::new();
         hasher.update(&payload_hash);
         match entity_id {
-            Some(id) => { hasher.update(id.as_bytes()); }
+            Some(id) => {
+                hasher.update(id.as_bytes());
+            }
             None => {}
         }
         hasher.update(&epoch.to_le_bytes());
@@ -138,7 +177,19 @@ pub struct CanonicalReceipt {
 
 impl CanonicalReceipt {
     /// Minimal constructor — sets kind, payload, source, and timestamp.
-    /// Use [`CanonicalReceiptBuilder`] for richer construction.
+    ///
+    /// ## Content addressing vs causal identity
+    ///
+    /// `ReceiptId` is computed from `blake3(payload_hash || epoch || seq)`.
+    /// Because [`new`](Self::new) always passes `entity_id: None, epoch: 0, seq: 0`,
+    /// two receipts with identical payloads get the **same ID** regardless of
+    /// source, timestamp, or causal context. This is correct for evidence
+    /// deduplication (identical evidence blobs are the same content) but does
+    /// **not** provide unique event identity.
+    ///
+    /// Use [`CanonicalReceiptBuilder`] with explicit `epoch`/`seq`/`entity_id`
+    /// when causal envelope identity is required. The constitutional ECS
+    /// migration will introduce `MessageId` + `Envelope<T>` for that purpose.
     pub fn new(kind: ReceiptKind, payload: serde_json::Value, source: impl Into<String>) -> Self {
         let source = source.into();
         let payload_str = serde_json::to_string(&payload).unwrap_or_default();
@@ -282,6 +333,9 @@ pub trait ReceiptSubscriber: Send + Sync {
 
 // ── ReceiptBus ──────────────────────────────────────────────────────────────
 
+/// Default maximum number of receipts retained in the replay buffer.
+const DEFAULT_MAX_BUFFER: usize = 10_000;
+
 /// Central hub for emitting and subscribing to [`CanonicalReceipt`]s.
 ///
 /// Every receipt is buffered for test/audit draining and forwarded to
@@ -294,6 +348,7 @@ pub trait ReceiptSubscriber: Send + Sync {
 pub struct ReceiptBus {
     subscribers: Mutex<Vec<Box<dyn ReceiptSubscriber>>>,
     buffer: Mutex<Vec<CanonicalReceipt>>,
+    max_buffer: usize,
 }
 
 impl std::fmt::Debug for ReceiptBus {
@@ -301,15 +356,25 @@ impl std::fmt::Debug for ReceiptBus {
         f.debug_struct("ReceiptBus")
             .field("subscriber_count", &self.subscribers.lock().len())
             .field("buffered_count", &self.buffer.lock().len())
+            .field("max_buffer", &self.max_buffer)
             .finish()
     }
 }
 
 impl ReceiptBus {
     pub fn new() -> Self {
+        Self::with_max_buffer(DEFAULT_MAX_BUFFER)
+    }
+
+    /// Create a bus with a bounded replay buffer.
+    ///
+    /// When the buffer exceeds `max` the oldest receipts are dropped.
+    /// Set to `usize::MAX` for unbounded growth (not recommended in production).
+    pub fn with_max_buffer(max: usize) -> Self {
         Self {
             subscribers: Mutex::new(Vec::new()),
             buffer: Mutex::new(Vec::new()),
+            max_buffer: max,
         }
     }
 
@@ -331,7 +396,14 @@ impl ReceiptBus {
     }
 
     pub fn emit(&self, receipt: CanonicalReceipt) {
-        self.buffer.lock().push(receipt.clone());
+        {
+            let mut buf = self.buffer.lock();
+            if buf.len() >= self.max_buffer {
+                let excess = buf.len().saturating_sub(self.max_buffer - 1);
+                buf.drain(..excess);
+            }
+            buf.push(receipt.clone());
+        }
         let mut subs = self.subscribers.lock();
         for sub in subs.iter_mut() {
             let filter = sub.kind_filter();
@@ -359,7 +431,7 @@ impl ReceiptBus {
 
 impl Default for ReceiptBus {
     fn default() -> Self {
-        Self::new()
+        Self::with_max_buffer(DEFAULT_MAX_BUFFER)
     }
 }
 

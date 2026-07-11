@@ -50,6 +50,7 @@ impl VisionEncoderConfig {
 }
 
 /// Return the projection dimension for each vision architecture variant.
+#[allow(dead_code)]
 fn projection_dim_for_arch(arch: &VisionArch) -> u32 {
     match arch {
         VisionArch::ClipVitL => 768,

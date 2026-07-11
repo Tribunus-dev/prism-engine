@@ -91,6 +91,8 @@ pub use crate::ecs::compiler;
 pub use crate::ecs::compute_image;
 pub use crate::ecs::compute_image_v0;
 pub use crate::ecs::config;
+/// Constitutional ECS kernel — stable identity types, causal messaging, command/effect/event types, and schema registry.
+pub use crate::ecs::constitutional;
 #[cfg(feature = "mlx-backend")]
 pub use crate::ecs::contracts;
 pub use crate::ecs::core::arena_lifecycle;

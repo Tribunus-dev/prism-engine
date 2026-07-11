@@ -52,6 +52,7 @@ pub mod compute_ir;
 pub mod compute_lane;
 pub mod compute_service;
 pub mod config_namespace;
+pub mod constitutional;
 pub mod contracts;
 pub mod copy_ledger;
 pub mod core;
@@ -194,7 +195,6 @@ pub use component::memory::*;
 pub use component::quality::*;
 pub use component::tensor::*;
 
-use anyhow;
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -315,18 +315,21 @@ impl Default for ComponentStore {
 impl CompWorld {
     /// Spawn entity with kind and optional name.
     pub fn spawn(&mut self, kind: EntityKind, name: Option<String>) -> CompEntity {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.entity_meta.push(EntityMeta {
-            kind,
-            generation: 0,
-            name,
-        });
-        CompEntity(id)
+        let entity = self.spawn_entity(kind);
+        if let Some(n) = name {
+            let idx = (entity.0 - 1) as usize;
+            if let Some(meta) = self.entity_meta.get_mut(idx) {
+                meta.name = Some(n);
+            }
+        }
+        entity
     }
 
     /// Get the name of an entity.
     pub fn name(&self, entity: CompEntity) -> Option<&str> {
+        if entity.0 == 0 {
+            return None;
+        }
         let idx = (entity.0 - 1) as usize;
         self.entity_meta.get(idx).and_then(|m| m.name.as_deref())
     }
@@ -341,9 +344,11 @@ impl CompWorld {
             .collect()
     }
 
-    /// Remove a component from an entity.
     /// Get the kind of an entity (alias for entity_kind).
     pub fn kind(&self, entity: CompEntity) -> Option<EntityKind> {
+        if entity.0 == 0 {
+            return None;
+        }
         self.entity_kind(entity)
     }
 
@@ -380,6 +385,9 @@ impl CompWorld {
     }
 
     pub fn entity_kind(&self, entity: CompEntity) -> Option<EntityKind> {
+        if entity.0 == 0 {
+            return None;
+        }
         let idx = (entity.0 - 1) as usize;
         self.entity_meta.get(idx).map(|m| m.kind)
     }
@@ -417,6 +425,13 @@ impl CompWorld {
         }
     }
 
+    /// Discard deferred component insert operations added via [`stage_component`].
+    ///
+    /// **This is NOT a transactional world rollback.** It only clears the staging
+    /// queue. Systems that performed direct mutations via [`add_component`],
+    /// [`remove_component`], [`get_component_mut`], or [`spawn`] before returning
+    /// an error are NOT reverted. Use [`WorldTxn`] (when available) for atomic
+    /// state transitions.
     pub fn rollback_stage(&mut self) {
         self.staging.clear();
     }
@@ -467,11 +482,8 @@ impl CompWorld {
 
     pub fn run_phase(&mut self, phase: SchedulePhase) -> anyhow::Result<()> {
         let prev_systems = std::mem::take(&mut self.systems);
-        let matched: Vec<_> = prev_systems
-            .into_iter()
-            .filter(|s| s.phase() == phase)
-            .collect();
-        let unmatched: Vec<_> = std::mem::take(&mut self.systems);
+        let (matched, unmatched): (Vec<_>, Vec<_>) =
+            prev_systems.into_iter().partition(|s| s.phase() == phase);
         self.systems = unmatched;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             for system in &matched {
@@ -486,11 +498,11 @@ impl CompWorld {
         match result {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => {
-                self.rollback_stage();
-                Err(e)
+                self.staging.clear();
+                Err(e.context("system returned error (deferred component inserts discarded)"))
             }
             Err(panic) => {
-                self.rollback_stage();
+                self.staging.clear();
                 let msg = if let Some(s) = panic.downcast_ref::<&str>() {
                     s.to_string()
                 } else if let Some(s) = panic.downcast_ref::<String>() {
@@ -498,7 +510,9 @@ impl CompWorld {
                 } else {
                     "unknown panic".to_string()
                 };
-                Err(anyhow::anyhow!("System panic (rolled back): {msg}"))
+                Err(anyhow::anyhow!(
+                    "System panicked (staged inserts discarded): {msg}"
+                ))
             }
         }
     }

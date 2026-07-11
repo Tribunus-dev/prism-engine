@@ -604,6 +604,8 @@ mod tests {
     fn test_bitnet_ecs_pipeline() {
         use crate::ecs::adapter::CanonicalRole;
         use crate::ecs::compile_session::CompileSession;
+        use crate::ecs::component::backend::BackendTarget;
+        use crate::ecs::component::tensor::LayerIndex;
         use crate::ecs::plan::CodecFamily;
 
         let mut session = CompileSession::new();
@@ -620,6 +622,7 @@ mod tests {
             let layer_e = session
                 .world
                 .spawn(EntityKind::Layer, Some(format!("layer_{layer}")));
+            session.world.add_component(layer_e, LayerIndex(layer));
             for (role, shape) in &[
                 (CanonicalRole::Q(layer), vec![hidden_dim, hidden_dim]),
                 (CanonicalRole::K(layer), vec![hidden_dim, hidden_dim]),
@@ -632,16 +635,18 @@ mod tests {
                 let t = session
                     .world
                     .spawn(EntityKind::Tensor, Some(role.to_string()));
-                session.world.add_component(
-                    t,
-                    Shape(shape.clone()),
-                );
+                session.world.add_component(t, Shape(shape.clone()));
                 session.world.add_component(t, DataType(DType::F32));
                 session.world.add_component(t, CanonicalRoleComp(*role));
                 session
                     .world
                     .add_component(t, CodecFamilyComp(CodecFamily::Int8, 128));
             }
+        }
+
+        // Add BackendTarget required by MemoryDomainAssignmentSystem
+        for t in session.world.entities_of_kind(EntityKind::Tensor) {
+            session.world.add_component(t, BackendTarget::Metal);
         }
 
         // Run phases B–G (compilation pipeline)

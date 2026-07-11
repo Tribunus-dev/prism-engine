@@ -1295,7 +1295,7 @@ mod tests {
     #[test]
     #[ignore = "full v1 qualification — requires installed Gemma image at TRIBUNUS_COMPILED_IMAGE"]
     #[cfg(feature = "mlx-backend")]
-        fn v1_qualification_gate() {
+    fn v1_qualification_gate() {
         let image_dir =
             std::env::var("TRIBUNUS_COMPILED_IMAGE").expect("TRIBUNUS_COMPILED_IMAGE not set");
         let image_path = Path::new(&image_dir);
