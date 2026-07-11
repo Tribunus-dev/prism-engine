@@ -19,7 +19,9 @@ No legacy map, registry, manager, cache, or database table can independently con
 | 1 | **Artifact Ingestion** | `ReplayVerified` | Artifact | ArtifactPath, ArtifactDigest, ArtifactMetadata, ArtifactLifecycle | kernel |
 | 2 | **Device Discovery** | `Canonical` | Device | DeviceStableId, DriverFactoryId, BackendFamily, DeviceCapabilities, DeviceMemoryLimits, DeviceTopology, DeviceHealth, DeviceLifecycle, DesiredDeviceState, ObservedDeviceState, LastObservation, RuntimeHandleKey | kernel |
 | 3 | **Model Deployment & Residency** | `Design` | Model, Residency | — | kernel |
+   | 3 | **Model Deployment & Residency** | `Shadow` | Schema-bound deployment with preflight validation, effect correlation, idempotent redeployment, replay without fake allocations. Constitutional path runs alongside legacy loader. Comparison target: existing model/residency managers in loader, residency, model_cache modules. | kernel |
 | 4 | **Session Lifecycle** | `Design` | Session | SessionLifecycle, InferencePhase | kernel |
+   | 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
 | 5 | **Work Scheduling** | `Design` | WorkItem | WorkItem, WorkState, WorkLease | kernel |
 | 6 | **Inference Execution** | `Inventory` | — | — | runtime |
 | 7 | **Compilation & Model Production** | `Inventory` | — | — | compiler |
@@ -74,7 +76,12 @@ in shadow mode.
 ### Design (types exist, not wired into authority)
 - **Session Lifecycle** — SessionLifecycle + InferencePhase enums in lifecycle.rs
 - **Work Scheduling** — WorkItem, WorkState, Scheduler types in scheduler.rs
-- **Model Deployment & Residency** — Next to implement
+
+### Shadow (constitutional path running, legacy comparison pending)
+- **Model Deployment & Residency** — Schema-bound deployment, preflight validation,
+     idempotent redeployment, replay safety. 18 tests covering entity/component
+     attachment, effect failure/mismatch, stale outcome rejection, replay without
+     fake allocations. Comparison target: `loader`, `residency`, `model_cache` modules.
 
 ## Wave Plan
 
