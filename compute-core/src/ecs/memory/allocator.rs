@@ -39,8 +39,9 @@ pub type ArenaId = u64;
 /// # Pool limits
 ///
 /// `max_pool_bytes` caps total IOSurface allocations. When set to `0` the
-/// pool is unlimited. [`pressure()`](Self::pressure) reports the fraction
+/// Pool is unlimited. [`pressure()`](Self::pressure) reports the fraction
 /// of the pool that is currently allocated.
+#[derive(Debug)]
 pub struct IosurfaceAllocator {
     /// Next arena ID (monotonically increasing).
     next_id: AtomicU64,
@@ -210,6 +211,7 @@ fn bytes_per_element(dtype: DataType) -> u64 {
 ///
 /// Pages are allocated from a free bitmap. All backends (MLX, Accelerate,
 /// Core ML) share the same physical pages via the single IOSurface.
+#[derive(Debug)]
 pub struct PagedIosurfaceAllocator {
     /// Growable list of IOSurface arenas backing the page pool.
     arenas: Vec<Arena>,

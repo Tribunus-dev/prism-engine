@@ -16,14 +16,20 @@ use crate::ecs::autopsy::ModelAutopsy;
 use crate::ecs::cache::chunk_kv::ChunkKvCache;
 use crate::ecs::cache::evolkv::CalibrationSet;
 use crate::ecs::cache::evolkv::LayerBudget;
+#[cfg(feature = "magic-teleportation")]
 use crate::ecs::cache::prefix_cache::{check_shared_prefix, insert_shared_prefix};
 use crate::ecs::compute_image::phase_dag::EmittedPhaseGraph;
 use crate::ecs::compute_image::phase_dag::PhaseCompletionStatus;
 use crate::ecs::compute_image::CompiledImageReader;
 use crate::ecs::config::ModelExecutionPlan;
+use crate::ecs::kv_cache::{KvCache, PageMigrationService};
+use crate::ecs::runtime::executable_session::RuntimeBackends;
+use crate::ecs::scheduling::execution_context::ExecutionContext;
+use crate::ecs::scheduling::phase_engine::PhaseEngine;
+use crate::ecs::scheduling::receipts::PhaseReceipt;
 use crate::engine_error::{EngineError, EngineErrorCode};
 use crate::heterogeneous::ComputeRuntime;
-use crate::ecs::kv_cache::{KvCache, PageMigrationService};
+use crate::log_debug;
 use crate::mapped_image::MappedImage;
 use crate::placement_profile::ExecutionPlacementProfile;
 use crate::profiled_model::format_bytes;
@@ -31,15 +37,11 @@ use crate::profiled_model::{LayerWeightStreamer, LoadedProfiledModel};
 use crate::quantization::turboquant_kv::AsymmetricQuantMode;
 use crate::quantization::turboquant_kv::KvQuantMode;
 use crate::quantization::turboquant_kv::TurboQuantKvCache;
-use crate::ecs::runtime::executable_session::RuntimeBackends;
 use crate::runtime_contract::{
     AuthorityMode, BackendTarget, BudgetClass, RetryPolicy, RuntimeWorkItem,
 };
 use crate::runtime_orchestration::InMemoryCoordinationFabric;
 use crate::runtime_trace::{RuntimeTimeline, TimelineEvent, TimelineEventType};
-use crate::ecs::scheduling::execution_context::ExecutionContext;
-use crate::ecs::scheduling::phase_engine::PhaseEngine;
-use crate::ecs::scheduling::receipts::PhaseReceipt;
 use crate::session::InferenceSessionState;
 use crate::session::SamplerConfig;
 use crate::video::{extract_frames, MAX_VIDEO_FRAMES};
@@ -980,9 +982,12 @@ impl ProfiledInferenceSession {
     ) -> Result<u32, EngineError> {
         // Check shared prefix cache: if another session already computed
         // prefix blocks, skip them and start computing from the first miss.
+        #[cfg(feature = "magic-teleportation")]
         let skip_tokens = check_shared_prefix(prompt_token_ids)
             .map(|(_, count)| count)
             .unwrap_or(0);
+        #[cfg(not(feature = "magic-teleportation"))]
+        let skip_tokens = 0u32;
 
         if skip_tokens > 0 {
             // Fast-forward session state past the cached prefix blocks.
@@ -1011,6 +1016,7 @@ impl ProfiledInferenceSession {
                 Some(token) => {
                     // After prefill completes, insert newly computed blocks
                     // into the shared cache so future sessions can skip them.
+                    #[cfg(feature = "magic-teleportation")]
                     insert_shared_prefix(prompt_token_ids, 0);
                     return Ok(token);
                 }
@@ -2698,6 +2704,7 @@ mod tests {
             model_type: "gemma".to_string(),
             moe_config: Default::default(),
             diffusion_config: Default::default(),
+            thinking_mode: false,
         }
     }
 

@@ -1,5 +1,11 @@
 //! Accelerate native qualification tests.
 //!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
+//!
 //! Proves cblas_sgemm correctness, shape validation, handle lifecycle,
 //! and memory accounting.  Must run under inference-research profile
 //! for native FFI behavior.

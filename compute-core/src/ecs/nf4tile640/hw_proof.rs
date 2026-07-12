@@ -77,6 +77,7 @@ fn make_boundary_like(rows: usize, cols: usize) -> Vec<f32> {
 /// Profile descriptor struct matching the Metal shader's ABI.
 /// Layout must match `metal_tests.rs` ProfileDescriptor exactly.
 #[repr(C)]
+#[allow(dead_code)]
 struct ProfileDescriptor {
     profile_id: u32,
     abi_version: u32,

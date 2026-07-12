@@ -12,6 +12,7 @@ use crate::ecs::backend::coreai_iosurface::CoreAiIOSurfaceExecutable;
 use crate::ecs::backend::metal_consumer::MetalConsumer;
 use crate::ecs::compilation::epoch_scheduler::EpochScheduler;
 use crate::ecs::compilation::failure_injector::FailureInjector;
+#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
 use crate::ecs::compilation::tri_lane::EpochRouteOrigin;
 use crate::ecs::compute_image::apple_shared_arena::AppleSharedArena;
 #[cfg(all(target_os = "macos", feature = "mlx-backend"))]

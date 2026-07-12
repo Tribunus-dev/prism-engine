@@ -1,5 +1,12 @@
 //! Integration tests for TernaryTile640Base representation per spec §18.
 //!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+))]
+//!
 //! Ternary Tile640 codes use 2-bit encoding (00=0, 01=+1, 10=-1, 11=invalid),
 //! 160 code bytes per tile, 4 metadata bytes (f32 alpha) per tile.
 //!

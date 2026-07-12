@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::ident::TargetId;
 
@@ -34,6 +32,7 @@ pub struct ResourceRequirement {
 /// A resource lease. Released on drop.
 #[derive(Debug)]
 pub struct ResourceLease {
+    #[allow(dead_code)]
     class: ResourceClass,
     // For simplicity, each lease uses an atomic counter.
     // In production this would interact with a semaphore.

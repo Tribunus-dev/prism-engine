@@ -1,3 +1,8 @@
+//! Coverage lattice authority tests.
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;

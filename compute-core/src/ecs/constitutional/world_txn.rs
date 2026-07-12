@@ -161,6 +161,7 @@ pub(crate) struct StagedSpawn {
 pub(crate) struct StagedInsert {
     pub entity: u64,
     pub schema_id: ComponentSchemaId,
+    #[allow(dead_code)]
     pub schema_version: SchemaVersion,
     /// The full schema key, populated for durable inserts.
     pub schema_key: SchemaKey,
@@ -180,6 +181,7 @@ pub(crate) struct StagedInsert {
 pub(crate) struct StagedRemove {
     pub entity: u64,
     pub schema_id: ComponentSchemaId,
+    #[allow(dead_code)]
     pub schema_version: SchemaVersion,
     /// The full schema key, populated for durable inserts.
     pub schema_key: SchemaKey,
@@ -259,6 +261,7 @@ impl WorldTxn {
     }
 
     /// The old-style remove_component — gated as pub(crate) for replay/migration only.
+    #[allow(dead_code)]
     pub(crate) fn remove_component<T: 'static + Send + Sync>(
         &mut self,
         entity: u64,
@@ -455,11 +458,14 @@ pub struct CommitReceipt {
 /// A prepared durable operation with schema-bound journal entry.
 pub(crate) struct PreparedDurableOp {
     pub entity: u64,
+    #[allow(dead_code)]
     pub schema_key: SchemaKey,
     pub apply: Box<dyn FnOnce(&mut crate::ecs::ComponentStore) + Send>,
+    #[allow(dead_code)]
     pub journal_entry: ComponentChange,
     /// Encoded value for journal durability; None until the schema catalogue
     /// is wired for encoding (B6 — future work).
+    #[allow(dead_code)]
     pub encoded_value: Option<Vec<u8>>,
 }
 

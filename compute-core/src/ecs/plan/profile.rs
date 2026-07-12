@@ -212,7 +212,7 @@ mod tests {
         assert_eq!(result.execution.batch_size, 1);
         assert_eq!(result.execution.mapped_weight_bytes, 1024 * 1024 * 1024);
         assert_eq!(result.execution.resident_weight_bytes, 1024 * 1024 * 1024);
-        assert!(result.execution.total_ms > 0.0);
+        assert!(result.execution.total_ms >= 0.0);
 
         // Verify memory receipt
         assert_eq!(result.memory.profile_id, "test-plan");

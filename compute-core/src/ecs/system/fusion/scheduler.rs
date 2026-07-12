@@ -123,6 +123,35 @@ fn node_from_kind(kind: &str, id: usize) -> Option<DataflowNode> {
             slot: format!("engram_slot_{id}"),
             output: buf_out.clone(),
         },
+        DataflowOpKind::AneMatMul => DataflowOp::AneMatMul {
+            lhs: buf_in.clone(),
+            rhs: format!("buf_node{id}_weight"),
+            output: buf_out.clone(),
+            contract: MatMulContract {
+                m: 4096,
+                n: 4096,
+                k: 4096,
+                lhs_transposed: false,
+                rhs_transposed: false,
+            },
+            sram_budget: 32768,
+        },
+        DataflowOpKind::AneConv1x1 => DataflowOp::AneConv1x1 {
+            input: buf_in.clone(),
+            weight: format!("conv_weight_{id}"),
+            output: buf_out.clone(),
+            sram_budget: 32768,
+        },
+        DataflowOpKind::AneLoadWeight => DataflowOp::AneLoadWeight {
+            tensor: format!("ane_weight_{id}"),
+            codec: crate::ecs::plan::CodecFamily::Fp16,
+            layout: crate::ecs::execution_profile::PhysicalTileLayout::default(),
+            target_sram_region: 0,
+        },
+        DataflowOpKind::AneStoreOutput => DataflowOp::AneStoreOutput {
+            input: buf_in.clone(),
+            offset: 0,
+        },
     };
 
     Some(DataflowNode {

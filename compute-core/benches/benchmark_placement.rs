@@ -1,3 +1,4 @@
+#![cfg(any())]
 use criterion::{criterion_group, criterion_main, Criterion};
 use mlx_rs::{Array, Dtype};
 use std::time::Instant;

@@ -169,33 +169,18 @@ fn main() {
     let is_macos_target =
         host_target == "aarch64-apple-darwin" || host_target == "x86_64-apple-darwin";
 
-    if is_macos_target
-        && (cfg!(feature = "mlx-backend")
-            || cfg!(feature = "prism-backend")
-            || cfg!(feature = "ffi"))
-    {
-        let _out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
-        if !cfg!(feature = "coreai-backend") {
-            cc::Build::new()
-                .file("src/ecs/bridge/coreai_arena.mm")
-                .flag("-fobjc-arc")
-                .flag("-std=c++17")
-                .compile("coreai_arena");
-            // ObjC++ .mm files need C++ standard library for personality v0.
-            println!("cargo:rustc-link-lib=c++");
-            cc::Build::new()
-                .file("src/ecs/bridge/coreai_exec.mm")
-                .flag("-fobjc-arc")
-                .flag("-fblocks")
-                .flag("-std=c++17")
-                .compile("coreai_exec");
-            cc::Build::new()
-                .file("src/ecs/bridge/coreai_state.mm")
-                .flag("-fobjc-arc")
-                .flag("-fblocks")
-                .flag("-std=c++17")
-                .compile("coreai_state");
-        }
+    // Compile the ANE/arena ObjC bridge unconditionally on macOS.
+    // The `ane_bridge` and `arena` Rust modules are not feature-gated, so their
+    // extern "C" symbols must be linkable in every build (lib, test, etc.).
+    if is_macos_target {
+        cc::Build::new()
+            .file("src/ecs/bridge/coreai_arena.mm")
+            .flag("-fobjc-arc")
+            .flag("-std=c++17")
+            .compile("coreai_arena");
+        // ObjC++ .mm files need C++ standard library for personality v0.
+        println!("cargo:rustc-link-lib=c++");
+
         cc::Build::new()
             .file("src/ecs/bridge/ane_private.mm")
             .flag("-fobjc-arc")
@@ -210,7 +195,30 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=Metal");
         println!("cargo:rustc-link-lib=framework=CoreVideo");
         println!("cargo:rustc-link-lib=framework=Accelerate");
+    }
 
+    // CoreAI bridge files — only needed when a backend that uses Core ML is active.
+    if is_macos_target
+        && (cfg!(feature = "mlx-backend")
+            || cfg!(feature = "prism-backend")
+            || cfg!(feature = "ffi")
+            || cfg!(feature = "ane"))
+    {
+        let _out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
+        if !cfg!(feature = "coreai-backend") {
+            cc::Build::new()
+                .file("src/ecs/bridge/coreai_exec.mm")
+                .flag("-fobjc-arc")
+                .flag("-fblocks")
+                .flag("-std=c++17")
+                .compile("coreai_exec");
+            cc::Build::new()
+                .file("src/ecs/bridge/coreai_state.mm")
+                .flag("-fobjc-arc")
+                .flag("-fblocks")
+                .flag("-std=c++17")
+                .compile("coreai_state");
+        }
         // Swift @C bridge prototype. Replaces coreai_exec.mm + coreai_state.mm
         // when the `coreai-backend` feature is enabled. Core AI's types are
         // Swift structs — not bridgeable from ObjC++.

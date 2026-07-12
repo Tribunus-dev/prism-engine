@@ -1,5 +1,10 @@
 //! Integration tests for INFERENCE-PIPELINE-PARITY-CONTRACT-0001.
 //!
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
+//!
 //! These tests verify that pipeline phase identity propagates correctly
 //! through suite manifest rows and decode attribution receipts.
 

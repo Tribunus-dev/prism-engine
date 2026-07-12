@@ -4,8 +4,8 @@ use super::{
 };
 use crate::ecs::backend::routing::ComputeRouteProfile;
 use crate::ecs::kv_cache::CompressedKvSlot;
-use crate::memory::allocator::{IosurfaceAllocator, PagedIosurfaceAllocator};
 use crate::ecs::scheduling::memory_pool::MemoryPoolAllocator;
+use crate::memory::allocator::{IosurfaceAllocator, PagedIosurfaceAllocator};
 use half::f16;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -20,6 +20,7 @@ use std::sync::Arc;
 /// 4. Process results
 /// 5. Check memory
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct Scheduler {
     queue: Vec<Request>,
     active: Vec<Request>,

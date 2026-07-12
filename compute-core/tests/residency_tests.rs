@@ -11,6 +11,7 @@
 //! Requires: macOS 14.0+ on Apple Silicon (M1+)
 
 #![cfg(target_os = "macos")]
+#![cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 
 use std::sync::Arc;
 

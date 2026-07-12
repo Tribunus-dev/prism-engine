@@ -40,7 +40,6 @@ pub use hardware::*;
 #[cfg(feature = "mlx-backend")]
 mod tests {
     use super::*;
-    use crate::ecs::cache::prefix_cache::{BlockAwarePrefixCache, PREFIX_BLOCK_SIZE};
     use crate::gpu_memory;
 
     #[test]

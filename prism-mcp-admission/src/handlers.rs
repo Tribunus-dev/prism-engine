@@ -519,7 +519,7 @@ impl McpHandler for AdmitTensorHandler {
     fn call(
         &self,
         request: ToolRequest<'_>,
-        ctx: &RequestContext,
+        _ctx: &RequestContext,
         state: &DaemonState,
     ) -> anyhow::Result<ToolResult> {
         let tensor_id = get_str(request.args, "tensor_id")?;

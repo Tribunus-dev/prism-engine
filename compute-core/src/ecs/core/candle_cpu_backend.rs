@@ -1,4 +1,4 @@
-#![cfg(feature = "mlx-backend")]
+#![cfg(all(feature = "mlx-backend", feature = "candle-cpu"))]
 //! Candle CPU backend — [`TensorBackend`] implementation using candle-core.
 //!
 //! This backend runs on CPU via [`candle_core::Tensor`] on

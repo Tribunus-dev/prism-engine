@@ -16,9 +16,9 @@ use tokio::sync::mpsc;
 
 use crate::ecs::backend::placement::ExecutionLane;
 use crate::ecs::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
-use crate::ecs::compilation::ane_admission_gate::{LaneAdmissionGate, RiskPolicy};
 use crate::ecs::compilation::phase_ir::PhaseId;
 use crate::ecs::compilation::tri_lane::{EpochRouteOrigin, NumericalStatus};
+use crate::ecs::compilation::{LaneAdmissionGate, RiskPolicy};
 use crate::ecs::compute_image::compile::portfolio::CoreAiArtifactKey;
 use crate::ecs::scheduling::ane_artifact_cache::{
     AneArtifactCache, ArtifactKey, ArtifactResidencyState,

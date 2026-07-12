@@ -96,6 +96,7 @@ impl Default for TokenBudgetConfig {
 }
 
 /// Token-budget scheduler state.
+#[derive(Debug)]
 pub struct TokenBudgetScheduler {
     config: TokenBudgetConfig,
     run_queue: VecDeque<TokenWorkUnit>,

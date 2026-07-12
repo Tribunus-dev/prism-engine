@@ -49,7 +49,7 @@ impl CompilerSystem for ValidationMatrixSystem {
             };
 
             // Run numerical equivalence test.
-            let mut eq_result = ValidationResult {
+            let eq_result = ValidationResult {
                 kernel_name: name.clone(),
                 test_name: "numerical_equivalence".to_string(),
                 passed: true,
@@ -61,7 +61,7 @@ impl CompilerSystem for ValidationMatrixSystem {
             matrix.results.push(eq_result);
 
             // Run bounds safety test.
-            let mut bounds = ValidationResult {
+            let bounds = ValidationResult {
                 kernel_name: name.clone(),
                 test_name: "bounds_safety".to_string(),
                 passed: true,

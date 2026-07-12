@@ -5,7 +5,6 @@
 //! fused, primitive, runtime-compiled, and AOT).
 
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
 
 /// Result of compiling a Metal source file.
 #[derive(Debug, Clone)]

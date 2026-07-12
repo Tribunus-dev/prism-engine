@@ -1,12 +1,12 @@
+use crate::ecs::adapter::CanonicalRole;
 use crate::ecs::component::fusion::{DataflowGraphHandle, FusionGroup};
 use crate::ecs::component::tensor::{CanonicalRoleComp, LayerIndex};
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use crate::ecs::plan::fusion::{
     DataflowEdge, DataflowGraph, DataflowNode, DataflowOp, DataflowOpKind, DataflowValue,
     MatMulContract, ValueResidency,
 };
 use crate::ecs::plan::DType;
-use crate::ecs::adapter::CanonicalRole;
+use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 use std::collections::HashMap;
 
@@ -208,11 +208,11 @@ fn build_graph_for_layer(
 
     // Emit a MatMul node against a specific weight-tensor role.
     let emit_matmul = |nodes: &mut Vec<DataflowNode>,
-                           values: &mut HashMap<String, DataflowValue>,
-                           node_id: &mut usize,
-                           lhs_buf: &str,
-                           rhs_tensor: &str,
-                           output_buf: &str|
+                       values: &mut HashMap<String, DataflowValue>,
+                       node_id: &mut usize,
+                       lhs_buf: &str,
+                       rhs_tensor: &str,
+                       output_buf: &str|
      -> usize {
         let id = *node_id;
         values
@@ -243,10 +243,10 @@ fn build_graph_for_layer(
     };
 
     let emit_silu = |nodes: &mut Vec<DataflowNode>,
-                         values: &mut HashMap<String, DataflowValue>,
-                         node_id: &mut usize,
-                         input_buf: &str,
-                         output_buf: &str|
+                     values: &mut HashMap<String, DataflowValue>,
+                     node_id: &mut usize,
+                     input_buf: &str,
+                     output_buf: &str|
      -> usize {
         let id = *node_id;
         values
@@ -269,11 +269,11 @@ fn build_graph_for_layer(
     };
 
     let emit_mul = |nodes: &mut Vec<DataflowNode>,
-                        values: &mut HashMap<String, DataflowValue>,
-                        node_id: &mut usize,
-                        lhs: &str,
-                        rhs: &str,
-                        output_buf: &str|
+                    values: &mut HashMap<String, DataflowValue>,
+                    node_id: &mut usize,
+                    lhs: &str,
+                    rhs: &str,
+                    output_buf: &str|
      -> usize {
         let id = *node_id;
         values
@@ -397,8 +397,7 @@ fn build_graph_for_layer(
             continue;
         }
 
-        if role_to_op_kind(role) == Some(DataflowOpKind::MatMul)
-        {
+        if role_to_op_kind(role) == Some(DataflowOpKind::MatMul) {
             let tensor_name = role.to_string();
             let output_buf = format!("{}_output", tensor_name);
             emit_matmul(
@@ -532,6 +531,10 @@ fn op_kind_label(op: &DataflowOp) -> String {
         DataflowOp::StoreActivation { .. } => "StoreActivation",
         DataflowOp::KvRead { .. } => "KvRead",
         DataflowOp::KvWrite { .. } => "KvWrite",
+        DataflowOp::AneMatMul { .. } => "AneMatMul",
+        DataflowOp::AneConv1x1 { .. } => "AneConv1x1",
+        DataflowOp::AneLoadWeight { .. } => "AneLoadWeight",
+        DataflowOp::AneStoreOutput { .. } => "AneStoreOutput",
     }
     .to_string()
 }

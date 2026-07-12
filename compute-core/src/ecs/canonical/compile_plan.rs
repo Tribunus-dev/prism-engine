@@ -8,6 +8,7 @@ use super::execution_graph::ExecutionGraph;
 use super::kernel_abi::{CompiledKernelArtifact, KernelPlan};
 use super::model_ir::ModelIr;
 use super::representation::RepresentationPlan;
+use serde::{Deserialize, Serialize};
 
 /// A request to inspect (not compile) a model source.
 #[derive(Debug, Clone)]
@@ -35,6 +36,19 @@ pub struct CompileRequest {
     pub target_lanes: Vec<super::execution_graph::ExecutionLane>,
     pub policy_path: Option<String>,
     pub quant_mode: Option<String>,
+}
+
+impl Default for CompileRequest {
+    fn default() -> Self {
+        Self {
+            source_path: String::new(),
+            source_type: None,
+            output_path: None,
+            target_lanes: Vec::new(),
+            policy_path: None,
+            quant_mode: None,
+        }
+    }
 }
 
 /// The full plan for a compilation, produced by `PrismCompiler::plan()`.
@@ -84,7 +98,7 @@ pub struct CompilerReceipt {
 }
 
 /// Named stages in the compiler pipeline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompilerStage {
     SourceResolved,
     SourceFileVerified,
@@ -110,7 +124,9 @@ pub struct CompilerReceiptSet {
 
 impl CompilerReceiptSet {
     pub fn new() -> Self {
-        Self { receipts: Vec::new() }
+        Self {
+            receipts: Vec::new(),
+        }
     }
 
     pub fn push(&mut self, receipt: CompilerReceipt) {
@@ -128,6 +144,88 @@ impl Default for CompilerReceiptSet {
     }
 }
 
+/// Full event from one compilation stage with provenance data.
+/// Richer than CompilerReceipt — includes digests and toolchain identity
+/// for evidence chaining between compilation and execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompileEvent {
+    pub stage: CompilerStage,
+    pub success: bool,
+    /// ISO 8601 timestamp when this event was created.
+    pub timestamp: String,
+    pub duration_ms: f64,
+    pub message: Option<String>,
+    /// SHA-256 of the source model file (e.g., GGUF).
+    pub source_digest: Option<String>,
+    /// SHA-256 of the compilation policy / authority manifest.
+    pub policy_digest: Option<String>,
+    /// SHA-256 of any intermediate artifact produced at this stage.
+    pub artifact_digest: Option<String>,
+    /// Compiler/toolchain version string (e.g., metal --version).
+    pub toolchain_version: Option<String>,
+    /// Optional failure detail — populated on CompilationFailed.
+    pub failure_detail: Option<String>,
+}
+
+/// Ordered event stream from one compilation run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompileEventStream {
+    pub events: Vec<CompileEvent>,
+    /// Unique compilation run identifier (UUID v4 or equivalent).
+    pub compilation_id: String,
+    pub source_path: String,
+    pub source_digest: Option<String>,
+    /// ISO 8601 timestamp when compilation started.
+    pub started_at: String,
+    /// ISO 8601 timestamp when compilation completed (or failed).
+    pub completed_at: Option<String>,
+}
+
+impl CompileEventStream {
+    pub fn new(source_path: &str) -> Self {
+        Self {
+            events: Vec::new(),
+            compilation_id: compile_id(),
+            source_path: source_path.to_string(),
+            source_digest: None,
+            started_at: compile_timestamp(),
+            completed_at: None,
+        }
+    }
+
+    pub fn push(&mut self, event: CompileEvent) {
+        self.events.push(event);
+    }
+
+    pub fn all_success(&self) -> bool {
+        self.events.iter().all(|e| e.success)
+    }
+
+    /// Find the first failure event, if any.
+    pub fn first_failure(&self) -> Option<&CompileEvent> {
+        self.events.iter().find(|e| !e.success)
+    }
+
+    /// The last event is the terminal one (CimageSealed or CompilationFailed).
+    pub fn terminal_event(&self) -> Option<&CompileEvent> {
+        self.events.last()
+    }
+
+    /// Produce a summary CompilerReceiptSet from the event stream.
+    pub fn to_receipt_set(&self) -> CompilerReceiptSet {
+        let mut set = CompilerReceiptSet::new();
+        for event in &self.events {
+            set.push(CompilerReceipt {
+                stage: event.stage,
+                success: event.success,
+                duration_ms: event.duration_ms,
+                message: event.message.clone(),
+            });
+        }
+        set
+    }
+}
+
 /// Outcome of a full compilation.
 #[derive(Debug, Clone)]
 pub struct CompileOutcome {
@@ -136,4 +234,24 @@ pub struct CompileOutcome {
     pub build_input: CimageBuildInput,
     pub receipts: CompilerReceiptSet,
     pub output_path: Option<String>,
+    /// Event stream with full provenance from this compilation run.
+    pub event_stream: CompileEventStream,
+}
+
+/// Generate a unique-ish compilation ID from a monotonic timestamp.
+pub fn compile_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("compile-{:016x}", nanos)
+}
+
+/// Monotonic timestamp string (epoch nanoseconds, zero-padded).
+/// Sortable and unique per-call within a process.
+pub fn compile_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| format!("{:020}", d.as_nanos()))
+        .unwrap_or_else(|_| "0".to_string())
 }

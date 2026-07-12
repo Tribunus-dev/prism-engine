@@ -17,8 +17,8 @@
 //!   └── (future providers)
 //! ```
 
-use std::path::Path;
-
+#[cfg(feature = "generation-tts")]
+#[cfg(feature = "generation-tts")]
 use crate::ecs::generation::text_to_speech::TextToSpeechGenerator;
 
 // ── Request / Result ─────────────────────────────────────────────────────
@@ -71,6 +71,7 @@ pub trait AudioGenerationProvider: Send + Sync {
 
 // ── MLX-backed implementation ───────────────────────────────────────────
 
+#[cfg(feature = "generation-tts")]
 /// Wraps [`TextToSpeechGenerator`] behind the [`AudioGenerationProvider`] trait.
 ///
 /// Owns the loaded model and a tokio runtime for the lifetime of the provider.
@@ -79,12 +80,14 @@ pub struct TextToSpeechProvider {
     rt: tokio::runtime::Runtime,
 }
 
+#[cfg(feature = "generation-tts")]
 impl TextToSpeechProvider {
     /// Load a model and wrap it.
     ///
     /// Fails with `ModelNotFound` if `model_path` does not contain a valid
     /// qwen3-tts-mlx model directory.
     pub fn new(model_path: &str) -> Result<Self, AudioGenerationError> {
+        use std::path::Path;
         let p = Path::new(model_path);
         if !p.join("config.json").exists() {
             return Err(AudioGenerationError::ModelNotFound(model_path.to_string()));
@@ -102,6 +105,7 @@ impl TextToSpeechProvider {
     }
 }
 
+#[cfg(feature = "generation-tts")]
 impl AudioGenerationProvider for TextToSpeechProvider {
     fn generate_speech(
         &self,

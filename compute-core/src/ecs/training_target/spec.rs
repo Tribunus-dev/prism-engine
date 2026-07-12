@@ -177,6 +177,10 @@ pub struct WeightTrainingTarget {
     pub gates: WeightTrainingGates,
     /// Priority of this target.
     pub priority: TrainingTargetPriority,
+    /// Optional evolutionary search configuration for this weight target.
+    /// When set, the training pipeline may run an evolutionary search over
+    /// decomposition variants instead of using the default kernel.
+    pub search_config: Option<String>,
 }
 
 // ── KvCacheTrainingTarget ──────────────────────────────────────────────

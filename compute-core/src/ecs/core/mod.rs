@@ -15,6 +15,7 @@ pub mod audio_preprocess_accelerate;
 pub mod audio_provider;
 #[cfg(feature = "mlx-backend")]
 pub mod bridge;
+#[cfg(any(feature = "mlx-backend", feature = "candle-cpu"))]
 pub mod candle_cpu_backend;
 pub mod capability;
 pub mod cli;

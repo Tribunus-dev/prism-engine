@@ -1,4 +1,10 @@
 //! E5D — Residency refusal tests. Validates that residency admission
+//!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! correctly refuses when memory budget is insufficient.
 
 #[cfg(test)]

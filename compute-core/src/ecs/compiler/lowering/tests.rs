@@ -1,5 +1,17 @@
 //! Integration tests for the real-backend lowering preservation gate.
 
+// Imports shared by build_semantic_matmul and its callers.  The types
+// compile unconditionally; suppress the warning when no backend is active.
+#![cfg_attr(
+    not(any(
+        feature = "mlx-backend",
+        all(
+            target_os = "macos",
+            any(feature = "prism-backend", feature = "prism-backend-ios")
+        )
+    )),
+    allow(unused_imports, dead_code)
+)]
 use crate::ecs::backend::routing::{LogicalShape, OperationFamily, OperationId, Phase, TensorId};
 use crate::ecs::backend::DType;
 use crate::ecs::compiler::semantic::{SemanticModule, SemanticOp, ToleranceClass};

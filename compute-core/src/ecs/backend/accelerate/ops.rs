@@ -8,8 +8,10 @@ use crate::ecs::backend::{
 };
 #[cfg(feature = "mlx-backend")]
 use crate::memory::allocator::IosurfaceAllocator;
+#[cfg(feature = "mlx-backend")]
 use parking_lot::Mutex;
 use std::ptr::NonNull;
+#[cfg(feature = "mlx-backend")]
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -204,6 +206,7 @@ impl AccelerateBackend {
 
     /// Allocate a new tensor slot and return its index.
     /// Handles free-list reuse and generation bumping.
+    #[allow(dead_code)]
     fn allocate_slot(&mut self, storage: TensorStorage, shape: &[i32]) -> Result<usize, String> {
         if let Some(idx) = self.free_list.pop() {
             let generation = self.generations[idx]

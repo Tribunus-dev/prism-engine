@@ -3,10 +3,8 @@
 //! Each implementation (megakernel, per-layer, fused, primitive) registers
 //! against a semantic contract with its ABI and supported configurations.
 
-use crate::ecs::canonical::execution_graph::ExecutionLane;
 use crate::ecs::canonical::kernel_abi::{
-    KernelAbi, KernelGroup, KernelImplementationClass, KernelImplementationId, KernelSemanticId,
-    MetalImplementationRegistration,
+    KernelAbi, KernelImplementationId, KernelSemanticId, MetalImplementationRegistration,
 };
 use crate::ecs::canonical::model_ir::ArchitectureId;
 use crate::ecs::canonical::representation::TensorRepresentation;
@@ -145,5 +143,48 @@ impl Default for MetalImplementationCatalogue {
         cat.register_per_layer();
         cat.register_primitives();
         cat
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies that the default catalogue has at least one registered
+    /// implementation (megakernel + per-layer + primitives).
+    /// Documents the structural gap: registrations exist but have empty ABIs.
+    #[test]
+    fn test_default_catalogue_has_registrations() {
+        let cat = MetalImplementationCatalogue::default();
+        assert!(
+            cat.len() > 0,
+            "default catalogue should have at least one registration, got {}",
+            cat.len()
+        );
+    }
+
+    /// Verifies that all default-registered implementations have empty
+    /// ABI slots (no buffers, constants, or threadgroup memory).
+    /// Documents the structural gap: ABIs are structural placeholders.
+    #[test]
+    fn test_all_registrations_have_empty_abis() {
+        let cat = MetalImplementationCatalogue::default();
+        for reg in cat.iter() {
+            assert!(
+                reg.abi.buffers.is_empty(),
+                "{} should have empty buffers",
+                reg.implementation_id.0
+            );
+            assert!(
+                reg.abi.constants.is_empty(),
+                "{} should have empty constants",
+                reg.implementation_id.0
+            );
+            assert!(
+                reg.abi.threadgroup_memory.is_empty(),
+                "{} should have empty threadgroup memory",
+                reg.implementation_id.0
+            );
+        }
     }
 }

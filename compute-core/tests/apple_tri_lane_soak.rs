@@ -1,5 +1,14 @@
 //! ANE-TRI-LANE-REALIZATION-0001 Phase 7: Memory-stability soak.
 //!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "candle-cpu",
+    feature = "intel",
+    feature = "tensix"
+))]
+//!
 //! Exercises the IOSurface slot arena through tens of thousands of epoch
 //! cycles while asserting that the slot map never grows beyond the
 //! manifest's ring depth.  Any new slot appearing in the HashMap indicates

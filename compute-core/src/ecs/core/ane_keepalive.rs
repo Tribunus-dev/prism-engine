@@ -25,9 +25,8 @@ use std::thread;
 
 use crate::ecs::arena::Arena;
 use crate::ecs::arena::DataType;
+use crate::ecs::core::coreai_pipeline::build_matmul_region;
 use crate::ecs::coreai_bridge::CoreAiModel;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-use crate::ecs::coreai_pipeline;
 
 /// ANE keepalive
 /// prevent the ANE from entering a lower-power idle state.

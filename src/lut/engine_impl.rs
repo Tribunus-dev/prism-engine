@@ -28,6 +28,7 @@ mod metal_backend {
     use std::collections::HashMap;
     include!(concat!(env!("OUT_DIR"), "/embedded_metallib.rs"));
     const MAX_SEQ: u64 = 4096;
+    #[allow(dead_code)]
     pub struct MetalBackend {
         pub device: Device,
         pub library: Library,
@@ -122,13 +123,11 @@ mod metal_backend {
             let kv_offsets = vec![0u64; num_layers as usize];
             let mut wb = HashMap::new();
             for (k, ct) in tensors.iter() {
-                let b = unsafe {
-                    device.new_buffer_with_data(
-                        ct.payload.as_ptr() as *const std::ffi::c_void,
-                        ct.payload.len() as u64,
-                        MTLResourceOptions::StorageModeShared,
-                    )
-                };
+                let b = device.new_buffer_with_data(
+                    ct.payload.as_ptr() as *const std::ffi::c_void,
+                    ct.payload.len() as u64,
+                    MTLResourceOptions::StorageModeShared,
+                );
                 wb.insert(k.clone(), (b, ct.dim_m, ct.dim_n));
             }
 
@@ -345,6 +344,7 @@ mod metal_backend {
         }
 
         /// GPU softmax.
+        #[allow(dead_code)]
         pub fn softmax_metal(&self, input: &[u16], output: &mut [u16]) {
             let dim = input.len() as u32;
             let cb = self.command_queue.new_command_buffer();
@@ -374,6 +374,7 @@ mod metal_backend {
         }
 
         /// GPU SiLU activation: x = x / (1 + exp(-x))
+        #[allow(dead_code)]
         pub fn silu_metal(&self, data: &mut [u16]) {
             let len = data.len() as u32;
             let cb = self.command_queue.new_command_buffer();
@@ -403,6 +404,7 @@ mod metal_backend {
         }
 
         /// GPU vector add: a[i] = a[i] + b[i]
+        #[allow(dead_code)]
         pub fn vec_add_metal(&self, a: &mut [u16], b: &[u16]) {
             let len = a.len().min(b.len()) as u32;
             let cb = self.command_queue.new_command_buffer();
@@ -1161,7 +1163,7 @@ impl PrismEngine {
                             hr = h.clone();
                         }
                         TensorRole::GateProj => {
-                            let did_fuse = false;
+                            let mut did_fuse = false;
                             #[cfg(feature = "metal-dispatch")]
                             if _fused_set.contains(&_ni) {
                                 if let Some(ref m) = self.metal {

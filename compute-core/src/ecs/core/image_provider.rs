@@ -17,8 +17,8 @@
 //!   └── LutImageProvider     (future — palettized LUT path)
 //! ```
 
-use std::path::Path;
-
+#[cfg(feature = "flux-klein-mlx")]
+#[cfg(feature = "flux-klein-mlx")]
 use crate::ecs::generation::text_to_image::TextToImageGenerator;
 
 // ── Request / Result ─────────────────────────────────────────────────────
@@ -73,6 +73,7 @@ pub trait ImageGenerationProvider: Send + Sync {
 
 // ── MLX-backed implementation ───────────────────────────────────────────
 
+#[cfg(feature = "flux-klein-mlx")]
 /// Wraps [`TextToImageGenerator`] behind the [`ImageGenerationProvider`] trait.
 ///
 /// Owns the loaded model for the lifetime of the provider.
@@ -80,12 +81,14 @@ pub struct TextToImageProvider {
     inner: TextToImageGenerator,
 }
 
+#[cfg(feature = "flux-klein-mlx")]
 impl TextToImageProvider {
     /// Load a model and wrap it.
     ///
     /// Fails with `ModelNotFound` if `model_path` does not contain a valid
     /// compiled ComputeImage.
     pub fn new(model_path: &str) -> Result<Self, ImageGenerationError> {
+        use std::path::Path;
         let p = Path::new(model_path);
         if !p.join("manifest.json").exists() {
             return Err(ImageGenerationError::ModelNotFound(model_path.to_string()));
@@ -101,6 +104,7 @@ impl TextToImageProvider {
     }
 }
 
+#[cfg(feature = "flux-klein-mlx")]
 impl ImageGenerationProvider for TextToImageProvider {
     fn generate(
         &self,

@@ -342,7 +342,7 @@ impl CimageDeployment {
         // ── Verify SHA-256 hash of payload (everything after the header) ──
         let payload = &bytes[128..];
         let computed = Sha256::digest(payload);
-        if computed.as_slice() != header.payload_hash {
+        if &*computed != header.payload_hash {
             return Err("SHA-256 hash mismatch: payload corrupted".into());
         }
 
@@ -868,7 +868,7 @@ impl CimageDeployment {
 
         let payload = &bytes[128..];
         let computed = Sha256::digest(payload);
-        if computed.as_slice() != header.payload_hash {
+        if &*computed != header.payload_hash {
             return Err("SHA-256 hash mismatch: payload corrupted".into());
         }
 

@@ -28,9 +28,7 @@ impl XorShift32 {
                 .map(|d| d.as_nanos() as u32)
                 .unwrap_or(0x7a3b_c9d1),
         );
-        Self {
-            state: seed.max(1),
-        }
+        Self { state: seed.max(1) }
     }
 
     fn gen_f32(&mut self) -> f32 {
@@ -147,10 +145,7 @@ impl MtpModule {
     /// `hidden`: [1, hidden_dim] — single hidden state vector.
     /// Returns N logit vectors, one per future position, each [1, vocab_size].
     pub fn predict_all(&self, hidden: &Array) -> Result<Vec<Array>, String> {
-        self.heads
-            .iter()
-            .map(|head| head.forward(hidden))
-            .collect()
+        self.heads.iter().map(|head| head.forward(hidden)).collect()
     }
 
     /// Sample N tokens from the predicted distributions.
@@ -177,12 +172,7 @@ impl MtpModule {
     /// `targets`: slice of N token IDs `[t+1, t+2, ..., t+N]` (N = n_future).
     /// `lr`: learning rate for SGD update.
     /// Returns the average cross-entropy loss across all N heads.
-    pub fn train_step(
-        &mut self,
-        hidden: &Array,
-        targets: &[u32],
-        lr: f64,
-    ) -> Result<f64, String> {
+    pub fn train_step(&mut self, hidden: &Array, targets: &[u32], lr: f64) -> Result<f64, String> {
         if targets.len() < self.n_future as usize {
             return Err(format!(
                 "train_step: need {} targets, got {}",
@@ -246,8 +236,8 @@ impl MtpModule {
             let one_hot = Array::from_slice(&one_hot_data, &[1, self.vocab_size as i32]);
 
             // dz = softmax - one_hot  (gradient of CE w.r.t. logits)  [1, vocab_size]
-            let dz = ops::subtract(&softmax_z, &one_hot)
-                .map_err(|e| format!("dz subtract: {:?}", e))?;
+            let dz =
+                ops::subtract(&softmax_z, &one_hot).map_err(|e| format!("dz subtract: {:?}", e))?;
 
             // dL/dW2 = h^T @ dz  →  [hidden_dim, vocab_size]
             let h = ops::matmul(hidden, &head.layer1_weight)
@@ -258,10 +248,9 @@ impl MtpModule {
             let h = mlx_rs::nn::silu(&h).map_err(|e| format!("grad silu: {:?}", e))?;
 
             // Need h^T: [hidden_dim, 1]
-            let h_t = ops::transpose_axes(&h, &[1, 0])
-                .map_err(|e| format!("h transpose: {:?}", e))?;
-            let d_w2 = ops::matmul(&h_t, &dz)
-                .map_err(|e| format!("grad dW2 matmul: {:?}", e))?;
+            let h_t =
+                ops::transpose_axes(&h, &[1, 0]).map_err(|e| format!("h transpose: {:?}", e))?;
+            let d_w2 = ops::matmul(&h_t, &dz).map_err(|e| format!("grad dW2 matmul: {:?}", e))?;
 
             // dL/db2 = dz summed over batch dim (sum over axis 0) → [vocab_size]
             let d_b2 = ops::sum_axis(&dz, 0, None::<bool>)
@@ -270,40 +259,37 @@ impl MtpModule {
             // Backprop through layer2: dh = dz @ W2^T  →  [1, hidden_dim]
             let w2_t = ops::transpose_axes(&head.layer2_weight, &[1, 0])
                 .map_err(|e| format!("w2 transpose: {:?}", e))?;
-            let dh = ops::matmul(&dz, &w2_t)
-                .map_err(|e| format!("grad dh matmul: {:?}", e))?;
+            let dh = ops::matmul(&dz, &w2_t).map_err(|e| format!("grad dh matmul: {:?}", e))?;
 
             // Backprop through SiLU: ds = dh * sigmoid(h) * (1 + h * (1 - sigmoid(h)))
             //   where sigmoid = 1/(1 + exp(-h))
             // SiLU derivative: sigmoid(x) * (1 + x * (1 - sigmoid(x)))
             // Or more simply: ds = dh * (h > 0 ? 1/(1+exp(-h)) * (1 + h * (1 - 1/(1+exp(-h)))) : ...)
             // Let's compute: sig = sigmoid(h); silu_deriv = sig * (1 + h * (1 - sig))
-            let neg_h = ops::multiply(&h, &Array::from_f32(-1.0))
-                .map_err(|e| format!("neg h: {:?}", e))?;
-            let exp_neg_h = ops::exp(&neg_h)
-                .map_err(|e| format!("exp neg h: {:?}", e))?;
+            let neg_h =
+                ops::multiply(&h, &Array::from_f32(-1.0)).map_err(|e| format!("neg h: {:?}", e))?;
+            let exp_neg_h = ops::exp(&neg_h).map_err(|e| format!("exp neg h: {:?}", e))?;
             let one_arr = Array::from_f32(1.0);
-            let denom = ops::add(&exp_neg_h, &one_arr)
-                .map_err(|e| format!("denom add: {:?}", e))?;
-            let sig = ops::divide(&one_arr, &denom)
-                .map_err(|e| format!("sigmoid div: {:?}", e))?;
+            let denom =
+                ops::add(&exp_neg_h, &one_arr).map_err(|e| format!("denom add: {:?}", e))?;
+            let sig = ops::divide(&one_arr, &denom).map_err(|e| format!("sigmoid div: {:?}", e))?;
             // silu_deriv = sig * (1 + h * (1 - sig))
-            let one_minus_sig = ops::subtract(&one_arr, &sig)
-                .map_err(|e| format!("1-sig: {:?}", e))?;
-            let h_times_one_minus_sig = ops::multiply(&h, &one_minus_sig)
-                .map_err(|e| format!("h*(1-sig): {:?}", e))?;
+            let one_minus_sig =
+                ops::subtract(&one_arr, &sig).map_err(|e| format!("1-sig: {:?}", e))?;
+            let h_times_one_minus_sig =
+                ops::multiply(&h, &one_minus_sig).map_err(|e| format!("h*(1-sig): {:?}", e))?;
             let inner = ops::add(&one_arr, &h_times_one_minus_sig)
                 .map_err(|e| format!("inner add: {:?}", e))?;
-            let silu_deriv = ops::multiply(&sig, &inner)
-                .map_err(|e| format!("silu deriv: {:?}", e))?;
-            let ds = ops::multiply(&dh, &silu_deriv)
-                .map_err(|e| format!("ds multiply: {:?}", e))?;
+            let silu_deriv =
+                ops::multiply(&sig, &inner).map_err(|e| format!("silu deriv: {:?}", e))?;
+            let ds =
+                ops::multiply(&dh, &silu_deriv).map_err(|e| format!("ds multiply: {:?}", e))?;
 
             // dL/dW1 = hidden^T @ ds  →  [hidden_dim, hidden_dim]
             let hidden_t = ops::transpose_axes(hidden, &[1, 0])
                 .map_err(|e| format!("hidden transpose: {:?}", e))?;
-            let d_w1 = ops::matmul(&hidden_t, &ds)
-                .map_err(|e| format!("grad dW1 matmul: {:?}", e))?;
+            let d_w1 =
+                ops::matmul(&hidden_t, &ds).map_err(|e| format!("grad dW1 matmul: {:?}", e))?;
 
             // dL/db1 = ds summed over batch dim → [hidden_dim]
             let d_b1 = ops::sum_axis(&ds, 0, None::<bool>)
@@ -313,22 +299,18 @@ impl MtpModule {
             let lr_arr = Array::from_f32(lr_f32);
 
             // W2 -= lr * dW2,  b2 -= lr * db2
-            let w2_step = ops::multiply(&d_w2, &lr_arr)
-                .map_err(|e| format!("w2 step: {:?}", e))?;
+            let w2_step = ops::multiply(&d_w2, &lr_arr).map_err(|e| format!("w2 step: {:?}", e))?;
             let new_w2 = ops::subtract(&head.layer2_weight, &w2_step)
                 .map_err(|e| format!("w2 update: {:?}", e))?;
-            let b2_step = ops::multiply(&d_b2, &lr_arr)
-                .map_err(|e| format!("b2 step: {:?}", e))?;
+            let b2_step = ops::multiply(&d_b2, &lr_arr).map_err(|e| format!("b2 step: {:?}", e))?;
             let new_b2 = ops::subtract(&head.layer2_bias, &b2_step)
                 .map_err(|e| format!("b2 update: {:?}", e))?;
 
             // W1 -= lr * dW1,  b1 -= lr * db1
-            let w1_step = ops::multiply(&d_w1, &lr_arr)
-                .map_err(|e| format!("w1 step: {:?}", e))?;
+            let w1_step = ops::multiply(&d_w1, &lr_arr).map_err(|e| format!("w1 step: {:?}", e))?;
             let new_w1 = ops::subtract(&head.layer1_weight, &w1_step)
                 .map_err(|e| format!("w1 update: {:?}", e))?;
-            let b1_step = ops::multiply(&d_b1, &lr_arr)
-                .map_err(|e| format!("b1 step: {:?}", e))?;
+            let b1_step = ops::multiply(&d_b1, &lr_arr).map_err(|e| format!("b1 step: {:?}", e))?;
             let new_b1 = ops::subtract(&head.layer1_bias, &b1_step)
                 .map_err(|e| format!("b1 update: {:?}", e))?;
 
@@ -350,10 +332,11 @@ impl MtpModule {
         Ok(avg_loss)
     }
 
-/// Reinterpret f32 bytes as u8 bytes (same underlying memory).
-fn f32_slice_to_u8_slice(data: &[f32]) -> &[u8] {
-    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) }
-}
+    /// Reinterpret f32 bytes as u8 bytes (same underlying memory).
+    #[allow(dead_code)]
+    fn f32_slice_to_u8_slice(data: &[f32]) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) }
+    }
 
     /// Save weights to safetensors.
     pub fn save(&self, path: &str) -> Result<(), String> {
@@ -363,9 +346,7 @@ fn f32_slice_to_u8_slice(data: &[f32]) -> &[u8] {
         for (i, head) in self.heads.iter().enumerate() {
             let prefix = format!("head_{}", i);
 
-            let w1_slice = head
-                .layer1_weight
-                .as_slice::<f32>();
+            let w1_slice = head.layer1_weight.as_slice::<f32>();
             let w1_bytes = f32_slice_to_u8_slice(w1_slice);
             let w1_shape: Vec<usize> = head
                 .layer1_weight
@@ -379,9 +360,7 @@ fn f32_slice_to_u8_slice(data: &[f32]) -> &[u8] {
                     .map_err(|e| format!("w1 tensor view: {:?}", e))?,
             ));
 
-            let b1_slice = head
-                .layer1_bias
-                .as_slice::<f32>();
+            let b1_slice = head.layer1_bias.as_slice::<f32>();
             let b1_bytes = f32_slice_to_u8_slice(b1_slice);
             let b1_shape: Vec<usize> = head
                 .layer1_bias
@@ -395,9 +374,7 @@ fn f32_slice_to_u8_slice(data: &[f32]) -> &[u8] {
                     .map_err(|e| format!("b1 tensor view: {:?}", e))?,
             ));
 
-            let w2_slice = head
-                .layer2_weight
-                .as_slice::<f32>();
+            let w2_slice = head.layer2_weight.as_slice::<f32>();
             let w2_bytes = f32_slice_to_u8_slice(w2_slice);
             let w2_shape: Vec<usize> = head
                 .layer2_weight
@@ -411,9 +388,7 @@ fn f32_slice_to_u8_slice(data: &[f32]) -> &[u8] {
                     .map_err(|e| format!("w2 tensor view: {:?}", e))?,
             ));
 
-            let b2_slice = head
-                .layer2_bias
-                .as_slice::<f32>();
+            let b2_slice = head.layer2_bias.as_slice::<f32>();
             let b2_bytes = f32_slice_to_u8_slice(b2_slice);
             let b2_shape: Vec<usize> = head
                 .layer2_bias
@@ -428,8 +403,12 @@ fn f32_slice_to_u8_slice(data: &[f32]) -> &[u8] {
             ));
         }
 
-        serialize_to_file(tensors, &None::<std::collections::HashMap<String, String>>, path.as_ref())
-            .map_err(|e| format!("save safetensors: {:?}", e))
+        serialize_to_file(
+            tensors,
+            &None::<std::collections::HashMap<String, String>>,
+            path.as_ref(),
+        )
+        .map_err(|e| format!("save safetensors: {:?}", e))
     }
 
     /// Load weights from safetensors.
@@ -526,13 +505,12 @@ fn sample_from_logits(logits: &Array, temp: f64, rng: &mut XorShift32) -> Result
         logits.clone()
     };
 
-    let probs = ops::softmax_axes(&scaled, &[-1], None::<bool>)
-        .map_err(|e| format!("softmax: {:?}", e))?;
+    let probs =
+        ops::softmax_axes(&scaled, &[-1], None::<bool>).map_err(|e| format!("softmax: {:?}", e))?;
 
     // Materialize and sample
     probs.eval().map_err(|e| format!("probs eval: {:?}", e))?;
-    let probs_slice = probs
-        .as_slice::<f32>();
+    let probs_slice = probs.as_slice::<f32>();
 
     let vocab_size = probs_slice.len();
     let r = rng.gen_f32();
@@ -550,6 +528,7 @@ fn sample_from_logits(logits: &Array, temp: f64, rng: &mut XorShift32) -> Result
 /// Convert a safetensors TensorView to an mlx_rs Array.
 ///
 /// Convert a &[f32] to &[u8] for safetensors serialization.
+#[allow(dead_code)]
 fn f32_slice_to_u8_slice(data: &[f32]) -> &[u8] {
     let byte_len = data.len() * 4;
     unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, byte_len) }

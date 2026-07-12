@@ -70,6 +70,7 @@ fn make_weight_target(
             required_evidence_level: RequiredEvidenceLevel::WeightSpace,
         },
         priority,
+        search_config: None,
     }
 }
 
@@ -344,6 +345,7 @@ fn test_training_target_digest_changes_when_gate_changes() {
                 training_method: QuantTrainingMethod::ShadowWeightsSte,
                 gates,
                 priority: TrainingTargetPriority::Required,
+                search_config: None,
             }],
             kv_cache_target: None,
             speculative_targets: vec![],
@@ -428,6 +430,7 @@ fn test_check_validates_consistency() {
             required_evidence_level: RequiredEvidenceLevel::WeightSpace,
         },
         priority: TrainingTargetPriority::Required,
+        search_config: None,
     };
 
     let spec = TrainingTargetSpec {
@@ -474,6 +477,7 @@ fn test_check_validates_consistency() {
                 required_evidence_level: RequiredEvidenceLevel::WeightSpace,
             },
             priority: TrainingTargetPriority::Required,
+            search_config: None,
         }],
         kv_cache_target: None,
         speculative_targets: vec![],

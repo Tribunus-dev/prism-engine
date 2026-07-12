@@ -79,6 +79,7 @@ pub mod engine_policy;
 pub mod engine_receipts;
 pub mod errors;
 pub mod evidence;
+pub mod evolution;
 pub mod execution_profile;
 pub mod executor;
 pub mod executor_projection;
@@ -147,6 +148,7 @@ pub mod projection_executor;
 pub mod projection_identity;
 pub mod projection_tests;
 pub mod projection_types;
+#[cfg(test)]
 pub mod quant_abi_test;
 pub mod quantization;
 pub mod quantized;
@@ -208,6 +210,8 @@ use crate::ecs::constitutional::types::WorldEpoch;
 use crate::ecs::constitutional::world_txn::{
     CommitReceipt, CommittedEpoch, ComponentChange, PreparedWorldTxn, WorldTxn, WorldTxnError,
 };
+#[cfg(feature = "mlx-backend")]
+pub use core::bridge;
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;

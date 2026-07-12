@@ -225,8 +225,14 @@ pub fn ane_planar_lower(group: &FusedGroup) -> Result<PlanarProgramDescriptor, A
 
     match group.codec_family {
         CodecFamily::Fp16 | CodecFamily::Int8 | CodecFamily::RawF32 | CodecFamily::Ternary1_58 => {}
-        CodecFamily::Mixed | CodecFamily::Nf4 | CodecFamily::SymInt4 | CodecFamily::Ternary
-        | CodecFamily::Q8_0 | CodecFamily::Q4_K | CodecFamily::Q2_K | CodecFamily::IQ2_XXS => {
+        CodecFamily::Mixed
+        | CodecFamily::Nf4
+        | CodecFamily::SymInt4
+        | CodecFamily::Ternary
+        | CodecFamily::Q8_0
+        | CodecFamily::Q4_K
+        | CodecFamily::Q2_K
+        | CodecFamily::IQ2_XXS => {
             return Err(AneLoweringError::UnsupportedCodec {
                 codec: format!("{:?}", group.codec_family),
             });
@@ -423,6 +429,50 @@ pub fn ane_planar_lower(group: &FusedGroup) -> Result<PlanarProgramDescriptor, A
                 return Err(AneLoweringError::UnsupportedOp {
                     detail: "Dequantize not supported by ANE planar engine".into(),
                 });
+            }
+            // ── ANE-specific operations ───────────────────────────────
+            DataflowOp::AneMatMul {
+                lhs,
+                rhs,
+                output,
+                contract,
+                sram_budget: _,
+            } => {
+                let _lhs_idx = record_input(lhs, shape.clone(), dtype);
+                let _rhs_idx = record_input(rhs, shape.clone(), dtype);
+                let _out_idx = record_output(output, vec![contract.m, contract.n], dtype);
+
+                operations.push(PlanarOp::MatMul(PlanarMatMulOp {
+                    input_id: lhs.clone(),
+                    weight_id: rhs.clone(),
+                    output_id: output.clone(),
+                    elementwise: None,
+                }));
+                operations.push(PlanarOp::StoreMatrix(PlanarStoreMatrixOp {
+                    input_id: output.clone(),
+                    output_id: output.clone(),
+                }));
+            }
+            DataflowOp::AneConv1x1 {
+                input,
+                weight,
+                output,
+                sram_budget: _,
+            } => {
+                let _in_idx = record_input(input, shape.clone(), dtype);
+                let _wt_idx = record_input(weight, shape.clone(), dtype);
+                let _out_idx = record_output(output, shape, dtype);
+            }
+            DataflowOp::AneLoadWeight {
+                tensor,
+                codec: _,
+                layout: _,
+                target_sram_region: _,
+            } => {
+                record_input(tensor, shape.clone(), dtype);
+            }
+            DataflowOp::AneStoreOutput { input, offset: _ } => {
+                record_input(input, shape.clone(), dtype);
             }
         }
     }

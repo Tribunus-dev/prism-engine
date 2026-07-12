@@ -58,6 +58,8 @@ use crate::ecs::server::auth::ApiKeyValidator;
 use crate::ecs::server::benchmark::SystemBenchmark;
 use crate::ecs::server::models::{ModelEntry, ModelRegistry};
 use crate::exo::ExoNode;
+use crate::log_error;
+use crate::log_warn;
 use crate::parsing::Grammar;
 use crate::parsing::GrammarTokenizer;
 use crate::profiled_executor::{

@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS kernel_registry (
 ";
 
 /// Register all kernel handlers with the tool registry.
-pub fn handlers(deps: &ToolDependencies) -> Vec<Arc<dyn McpHandler + Sync + Send>> {
+pub fn handlers(_deps: &ToolDependencies) -> Vec<Arc<dyn McpHandler + Sync + Send>> {
     vec![
         Arc::new(handlers::ListKernelBackends::new()),
         Arc::new(handlers::CompileKernelRecipe),

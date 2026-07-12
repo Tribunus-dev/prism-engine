@@ -186,7 +186,6 @@ mod tests {
     use super::*;
     use crate::ecs::constitutional::command::DomainEvent;
     use crate::ecs::constitutional::persistence::EventLogEntry;
-    use crate::ecs::constitutional::types::*;
 
     fn make_event(epoch: u64, seq: u64) -> EventLogEntry {
         EventLogEntry {

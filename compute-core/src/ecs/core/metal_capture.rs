@@ -10,6 +10,8 @@
 //! platforms, all functions return false / error.  Use `cfg(target_os =
 //! "macos")` guards at the call site when the capture path is optional.
 
+#[cfg(all(target_os = "macos", feature = "mlx-backend"))]
+use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Check if Metal is available on this machine.
@@ -32,6 +34,7 @@ pub fn is_available() -> bool {
 pub fn start_capture(_path: &str) -> bool {
     #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
     {
+        let path = _path;
         let c_path = match CString::new(path) {
             Ok(s) => s,
             Err(_) => return false,

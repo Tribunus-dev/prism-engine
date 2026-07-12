@@ -125,6 +125,9 @@ mod tests {
     #[test]
     fn no_env_var_skips_write() {
         // If CML_BREADCRUMB_PATH is not set, write_breadcrumb should not panic.
+        // Clear the test-global path first so we don't race with
+        // breadcrumb_write_and_read (which sets TEST_BREADCRUMB_PATH).
+        *TEST_BREADCRUMB_PATH.lock() = None;
         unsafe {
             std::env::remove_var("CML_BREADCRUMB_PATH");
         }

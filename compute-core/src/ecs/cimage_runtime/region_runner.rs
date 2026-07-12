@@ -228,6 +228,7 @@ impl RunnerBufferStore {
     /// Create a Metal buffer from byte data using no-copy when the data
     /// pointer is page-aligned (64 KB on Apple Silicon). Falls back to
     /// `new_buffer_with_data` (explicit copy) when unaligned.
+    #[allow(dead_code)]
     fn new_buffer_no_copy_or_fallback(
         &mut self,
         device: &metal::Device,
@@ -239,14 +240,12 @@ impl RunnerBufferStore {
         let buf = if ptr % 16384 == 0 && len > 0 {
             // Page-aligned: use zero-copy.
             // Safety: caller guarantees the backing memory outlives the buffer.
-            unsafe {
-                device.new_buffer_with_bytes_no_copy(
-                    data.as_ptr() as *const std::ffi::c_void,
-                    len,
-                    metal::MTLResourceOptions::StorageModeShared,
-                    None,
-                )
-            }
+            device.new_buffer_with_bytes_no_copy(
+                data.as_ptr() as *const std::ffi::c_void,
+                len,
+                metal::MTLResourceOptions::StorageModeShared,
+                None,
+            )
         } else {
             device.new_buffer_with_data(
                 data.as_ptr() as *const std::ffi::c_void,
@@ -1247,6 +1246,7 @@ impl CImageMetalRegionRunner {
 
     /// Upload bytes to a named buffer. Creates new buffer on first call,
     /// overwrites via update_buffer_data on subsequent calls.
+    #[allow(dead_code)]
     fn upload_or_update_buffer(&mut self, name: &str, data: &[u8]) -> CImageRuntimeResult<()> {
         if let Some(buf) = self.buffer_store.get(name) {
             self.update_buffer_data(buf, data);
@@ -1869,7 +1869,7 @@ impl CImageMetalRegionRunner {
         }
 
         // 1b. Detect Metal device for receipt metadata.
-        let device_name = self.device().name();
+        let _device_name = self.device().name();
 
         // 2. Extract dimensions from manifest tensor entries.
         let manifest = &image.manifest;
@@ -3442,7 +3442,9 @@ mod tests {
     /// Run a synthetic BitNet decoder layer through the Metal region runner.
     #[test]
     fn test_run_bitnet_decoder_region() {
-        use crate::ecs::bitnet::phases::{emit_bitnet_decoder_layer, BitNetDecoderLayerShardConfig};
+        use crate::ecs::bitnet::phases::{
+            emit_bitnet_decoder_layer, BitNetDecoderLayerShardConfig,
+        };
 
         let config = BitNetDecoderLayerShardConfig {
             seed: 42,

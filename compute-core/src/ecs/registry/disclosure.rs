@@ -750,6 +750,7 @@ impl OutputDeliveryGatekeeper {
     }
 }
 
+#[allow(dead_code)]
 fn verify_context_binding(
     bundle: &AttestationBundle,
     acceptance: &HostDisclosureAcceptance,

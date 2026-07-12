@@ -1,4 +1,11 @@
 //! E5B — Decode1 executable profile construction and basic validation.
+//!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+))]
 
 #[cfg(test)]
 mod tests {

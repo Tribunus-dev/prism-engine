@@ -7,8 +7,10 @@
 //! the IOSurface unified memory island (zero-copy via
 //! [`IosurfaceAllocator`] / [`TensorBackend::bind_external`]).
 
-use std::collections::HashMap;
+#[cfg(feature = "mlx-backend")]
 use std::sync::Arc;
+
+use std::collections::HashMap;
 
 use crate::arena::Arena;
 use crate::ecs::backend::flex_dispatch::FlexDispatch;
@@ -75,7 +77,7 @@ impl SlotPool {
 // ── BackendInstance trait ──────────────────────────────────────────────────
 
 /// A backend instance that can execute operations.
-pub trait BackendInstance: TensorBackend {
+pub trait BackendInstance: TensorBackend + Send + Sync {
     /// The [`BackendId`] this instance represents.
     fn backend_kind(&self) -> BackendId;
 

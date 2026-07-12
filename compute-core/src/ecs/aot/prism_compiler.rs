@@ -8,12 +8,12 @@
 //! deleted once their callers route through PrismCompiler.
 
 use crate::ecs::canonical::compile_plan::{
-    CimageBuildInput, CompileOutcome, CompilePlan, CompileRequest, CompilerReceipt,
-    CompilerReceiptSet, CompilerStage, InspectRequest, ModelInspection,
+    compile_timestamp, CimageBuildInput, CompileEvent, CompileEventStream, CompileOutcome,
+    CompilePlan, CompileRequest, CompilerStage, InspectRequest, ModelInspection,
 };
 use crate::ecs::canonical::execution_graph::ExecutionGraph;
-use crate::ecs::canonical::kernel_abi::{CompiledKernelArtifact, KernelPlan};
-use crate::ecs::canonical::model_ir::{ModelIr, SourceType};
+use crate::ecs::canonical::kernel_abi::KernelPlan;
+use crate::ecs::canonical::model_ir::ModelIr;
 use crate::ecs::canonical::representation::RepresentationPlan;
 
 /// Frontend trait — accepts a model source and produces canonical ModelIr.
@@ -40,10 +40,13 @@ pub struct PrismCompiler {
 
 impl Default for PrismCompiler {
     fn default() -> Self {
-        Self {
+        let mut pc = Self {
             frontends: Vec::new(),
             metal_backend: None,
-        }
+        };
+        pc.frontends
+            .push(Box::new(super::gguf_frontend::GgufFrontend::new()));
+        pc
     }
 }
 
@@ -141,24 +144,83 @@ impl PrismCompiler {
 
     /// Compile a model source end-to-end.
     pub fn compile(&self, request: CompileRequest) -> Result<CompileOutcome, String> {
-        let _plan = self.plan(request)?;
-        let mut receipts = CompilerReceiptSet::new();
+        // Real GGUF compilation delegates to the full pipeline.
+        #[cfg(feature = "mlx-backend")]
+        if request.source_path.ends_with(".gguf") || request.source_type.as_deref() == Some("gguf")
+        {
+            let output_dir = request.output_path.clone().unwrap_or_else(|| {
+                let stem = std::path::Path::new(&request.source_path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "output".to_string());
+                format!("{}.cimage", stem)
+            });
 
-        receipts.push(CompilerReceipt {
+            let quant_mode = request
+                .quant_mode
+                .as_deref()
+                .and_then(crate::ecs::config::CompileQuantMode::from_name);
+
+            let (_compiled_image, mut outcome) =
+                crate::ecs::compute_image::compile::compile_gguf_to_canonical(
+                    &request.source_path,
+                    &output_dir,
+                    quant_mode,
+                    None, // ane_models_dir
+                    None, // metallib_path
+                    None, // mlx_capture_dir
+                )
+                .map_err(|e| e.to_string())?;
+
+            // Build event stream from existing pipeline receipts.
+            // As the pipeline is enriched with direct events, this conversion
+            // can be replaced with native event propagation.
+            let mut event_stream = CompileEventStream::new(&request.source_path);
+            for receipt in &outcome.receipts.receipts {
+                let timestamp = compile_timestamp();
+                event_stream.push(CompileEvent {
+                    stage: receipt.stage,
+                    success: receipt.success,
+                    timestamp,
+                    duration_ms: receipt.duration_ms,
+                    message: receipt.message.clone(),
+                    source_digest: None,
+                    policy_digest: None,
+                    artifact_digest: None,
+                    toolchain_version: None,
+                    failure_detail: None,
+                });
+            }
+            event_stream.completed_at = Some(compile_timestamp());
+            outcome.event_stream = event_stream;
+
+            return Ok(outcome);
+        }
+
+        // Non-GGUF sources (or GGUF without the full pipeline feature):
+        // produce a structural CompileOutcome from the plan with empty artifacts.
+        let plan = self.plan(request)?;
+
+        // Build a basic event stream for the non-pipeline path.
+        let mut event_stream = CompileEventStream::new(&plan.model_ir.identity.name);
+        event_stream.push(CompileEvent {
             stage: CompilerStage::SourceResolved,
             success: true,
+            timestamp: compile_timestamp(),
             duration_ms: 0.0,
-            message: None,
+            message: Some("Structural compilation plan produced (no backend)".into()),
+            source_digest: None,
+            policy_digest: None,
+            artifact_digest: None,
+            toolchain_version: None,
+            failure_detail: None,
         });
+        event_stream.completed_at = Some(compile_timestamp());
 
-        // Stub: actual compilation delegates to the registered backends.
-        // The existing compile_unchecked/compile_gguf_unchecked paths are
-        // called from here in the full implementation.
-        //
-        // For now, return a structural CompileOutcome with empty artifacts.
+        let receipts = event_stream.to_receipt_set();
 
         Ok(CompileOutcome {
-            plan: _plan,
+            plan,
             compiled_kernels: vec![],
             build_input: CimageBuildInput {
                 model_ir_digest: [0u8; 32],
@@ -188,6 +250,192 @@ impl PrismCompiler {
             },
             receipts,
             output_path: None,
+            event_stream,
         })
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ecs::canonical::compile_plan::{CompileRequest, InspectRequest};
+    use crate::ecs::canonical::model_ir::*;
+    use std::collections::HashMap;
+
+    const _GGUF_FRONTEND_ENABLED: bool = cfg!(feature = "prism-backend");
+
+    /// Mock frontend that returns minimal valid ModelIr.
+    /// Documents the structural shape needed for compilation pipeline tests.
+    struct MockFrontend;
+
+    impl ModelFrontend for MockFrontend {
+        fn inspect(&self, _source: &InspectRequest) -> Result<ModelInspection, String> {
+            Ok(ModelInspection {
+                identity: ModelIdentity {
+                    name: "mock".into(),
+                    revision: None,
+                },
+                architecture: ArchitectureId("mock".into()),
+                configuration: ModelConfiguration {
+                    hidden_size: 64,
+                    intermediate_size: 256,
+                    num_attention_heads: 4,
+                    num_kv_heads: 2,
+                    num_hidden_layers: 1,
+                    head_dim: 16,
+                    vocab_size: 100,
+                    max_position_embeddings: 128,
+                    rms_norm_eps: 1e-6,
+                    rope_theta: None,
+                    partial_rope_dim: None,
+                    tie_word_embeddings: false,
+                    num_experts: None,
+                    num_experts_per_tok: None,
+                    moe_intermediate_size: None,
+                    num_mtp_heads: None,
+                    mtp_hidden_size: None,
+                    mtp_intermediate_size: None,
+                },
+                tensor_count: 0,
+                total_weight_bytes: 0,
+            })
+        }
+
+        fn import(&self, _source: &InspectRequest) -> Result<ModelIr, String> {
+            Ok(ModelIr {
+                identity: ModelIdentity {
+                    name: "mock".into(),
+                    revision: None,
+                },
+                architecture: ArchitectureId("mock".into()),
+                configuration: ModelConfiguration {
+                    hidden_size: 64,
+                    intermediate_size: 256,
+                    num_attention_heads: 4,
+                    num_kv_heads: 2,
+                    num_hidden_layers: 1,
+                    head_dim: 16,
+                    vocab_size: 100,
+                    max_position_embeddings: 128,
+                    rms_norm_eps: 1e-6,
+                    rope_theta: None,
+                    partial_rope_dim: None,
+                    tie_word_embeddings: false,
+                    num_experts: None,
+                    num_experts_per_tok: None,
+                    moe_intermediate_size: None,
+                    num_mtp_heads: None,
+                    mtp_hidden_size: None,
+                    mtp_intermediate_size: None,
+                },
+                tensors: TensorCatalogue {
+                    by_id: vec![],
+                    by_name: HashMap::new(),
+                },
+                graph: LogicalGraph {
+                    ops: vec![],
+                    inputs: vec![],
+                    outputs: vec![],
+                },
+                tokenizer: TokenizerDescriptor {
+                    tokenizer_type: "mock".into(),
+                    vocab_size: 100,
+                    bos_token_id: Some(1),
+                    eos_token_id: Some(2),
+                    pad_token_id: None,
+                },
+                source_provenance: SourceProvenance {
+                    source_type: SourceType::Gguf,
+                    source_path: "mock".into(),
+                    file_digests: vec![],
+                },
+            })
+        }
+    }
+
+    /// Verifies that a default PrismCompiler has the GGUF frontend registered
+    /// when prism-backend is enabled, and none otherwise.
+    #[test]
+    fn test_default_no_frontends() {
+        let compiler = PrismCompiler::default();
+        if _GGUF_FRONTEND_ENABLED {
+            assert_eq!(
+                compiler.frontends.len(),
+                1,
+                "default PrismCompiler should register one GGUF frontend with prism-backend"
+            );
+        } else {
+            assert!(
+                compiler.frontends.is_empty(),
+                "default PrismCompiler should have no frontends without prism-backend"
+            );
+        }
+        assert!(
+            compiler.metal_backend.is_none(),
+            "default PrismCompiler should have no backend"
+        );
+    }
+
+    /// Verifies that plan() fails when no frontend can import the source.
+    /// Documents the structural gap: without registered frontends, compilation
+    /// cannot proceed.
+    #[test]
+    fn test_plan_fails_without_frontend() {
+        let compiler = PrismCompiler::default();
+        let request = CompileRequest {
+            source_path: "nonexistent.gguf".into(),
+            source_type: None,
+            output_path: None,
+            target_lanes: vec![],
+            policy_path: None,
+            quant_mode: None,
+        };
+        let result = compiler.plan(request);
+        assert!(result.is_err(), "plan() should fail without a frontend");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("no frontend could import"),
+            "error should mention missing frontend: {err}"
+        );
+    }
+
+    /// Verifies that compile() with a mock frontend returns empty artifacts.
+    /// Documents that compile produces a structural CompileOutcome with no
+    /// compiled_kernels and no output_path when no real backend is wired.
+    #[test]
+    fn test_compile_returns_empty_artifacts() {
+        let mut compiler = PrismCompiler::default();
+        compiler.register_frontend(Box::new(MockFrontend));
+
+        let outcome = compiler
+            .compile(CompileRequest {
+                source_path: "mock.gguf".into(),
+                source_type: None,
+                output_path: None,
+                target_lanes: vec![],
+                policy_path: None,
+                quant_mode: None,
+            })
+            .expect("compile() should succeed with a mock frontend");
+
+        assert!(
+            outcome.compiled_kernels.is_empty(),
+            "expected empty compiled_kernels, got {}",
+            outcome.compiled_kernels.len()
+        );
+        assert!(
+            outcome.output_path.is_none(),
+            "expected None output_path, got {:?}",
+            outcome.output_path
+        );
+
+        // Event stream must be populated for the non-pipeline path.
+        assert!(
+            !outcome.event_stream.events.is_empty(),
+            "event stream should have at least one event"
+        );
+        assert!(
+            outcome.event_stream.all_success(),
+            "all events in the stream should be success for the structural path"
+        );
     }
 }

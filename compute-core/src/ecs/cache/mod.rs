@@ -12,4 +12,5 @@ pub mod chunk_kv;
 #[cfg(feature = "mlx-backend")]
 pub mod evolkv;
 pub mod paged_ssd_cache;
-// prefix_cache removed — file was deleted
+#[cfg(feature = "mlx-backend")]
+pub mod prefix_cache;

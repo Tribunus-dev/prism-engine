@@ -1,5 +1,10 @@
 //! Branch-Rejoin Shape Bisection.
 //!
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
+//!
 //! The coverage lattice shows branch_rejoin passes at SMALL (k=4, n=1)
 //! but fails at MEDIUM (k=128, n=128) and LARGE (k=1024, n=1024).
 //! This test finds the exact (k,n) transition point.
@@ -9,9 +14,9 @@
 //!   B: Vary n with fixed k=4
 //!   C: Vary both together (default)
 
+use tribunus_compute_core::decode_attribution::backend_adapters::coreai_adapter;
 use tribunus_compute_core::decode_attribution::graph_catalog;
 use tribunus_compute_core::decode_attribution::shape_profiles::ShapeProfile;
-use tribunus_compute_core::decode_attribution::backend_adapters::coreai_adapter;
 
 fn run_mode(shapes: &[(u32, u32)], mode_name: &str) -> Vec<(u32, u32, bool, String)> {
     let mut results = Vec::new();

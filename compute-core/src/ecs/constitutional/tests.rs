@@ -736,7 +736,7 @@ mod tests {
         );
 
         // Entity 1's component must still be intact
-        let mut txn = WorldTxn::new(&world);
+        let _txn = WorldTxn::new(&world);
         // Read back by checking component version
         assert_eq!(world.entity_kind(CompEntity(1)), Some(EntityKind::Model));
     }
@@ -816,7 +816,7 @@ mod tests {
 
         // Can't re-apply — stale epoch
         let txn = WorldTxn::new(&world);
-        let r2 = world.transit(txn);
+        let _r2 = world.transit(txn);
         // But wait — after the first transit, epoch advanced.
         // So WorldTxn::new records the NEW epoch.
         // This will succeed because it's actually a new txn against current epoch.
@@ -907,7 +907,7 @@ mod tests {
 
     #[test]
     fn test_prepare_does_not_change_epoch() {
-        let mut world = make_world();
+        let world = make_world();
         let epoch_before = world.current_epoch();
 
         let txn = WorldTxn::new(&world);
@@ -922,7 +922,7 @@ mod tests {
 
     #[test]
     fn test_prepare_does_not_advance_next_id() {
-        let mut world = make_world();
+        let world = make_world();
         let next_before = world.next_entity_id();
 
         // Prepare a txn with a spawn at ID 200
@@ -956,7 +956,7 @@ mod tests {
 
     #[test]
     fn test_drop_prepared_changes_nothing() {
-        let mut world = make_world();
+        let world = make_world();
         let epoch_before = world.current_epoch();
         let next_before = world.next_entity_id();
 
@@ -1485,7 +1485,6 @@ mod tests {
     //  Pure type-level tests: construction, serde roundtrips, factory registration.
     //  No real backend hardware is involved.
 
-    use crate::ecs::constitutional::driver::*;
     use std::sync::Arc;
 
     // ── Mock Factory ─────────────────────────────────────────────────────
@@ -4032,6 +4031,7 @@ mod tests {
     #[test]
     fn test_legacy_spawn_guard_catches_violations() {
         #[derive(Debug)]
+        #[allow(dead_code)]
         struct DummyComponent(u64);
         impl crate::ecs::Component for DummyComponent {}
 
@@ -4059,9 +4059,8 @@ mod tests {
 
     #[test]
     fn test_world_txn_bypasses_guard() {
-        use crate::ecs::constitutional::types::*;
         use crate::ecs::constitutional::world_txn::WorldTxn;
-        use crate::ecs::{CompEntity, CompWorld, EntityKind};
+        use crate::ecs::{CompWorld, EntityKind};
 
         let mut world = CompWorld::new();
         world.set_direct_mutation_allowed(false);
@@ -4666,7 +4665,7 @@ mod tests {
     fn test_failed_preparation_durable_leaves_world_unchanged() {
         let mut world = CompWorld::new();
         let eid = WorldTxn::next_entity_id(&world);
-        let epoch_before = world.current_epoch();
+        let _epoch_before = world.current_epoch();
 
         // Advance world epoch so the next transaction is stale
         let mut advance = WorldTxn::new(&world);
@@ -4757,7 +4756,7 @@ mod tests {
 
     #[test]
     fn test_dropped_prepared_transaction_changes_nothing() {
-        let mut world = CompWorld::new();
+        let world = CompWorld::new();
         let eid = WorldTxn::next_entity_id(&world);
         let epoch_before = world.current_epoch();
         let count_before = world.entity_count();
@@ -4828,7 +4827,7 @@ mod tests {
 
     #[test]
     fn test_conflicting_inserts_rejected() {
-        let mut world = CompWorld::new();
+        let world = CompWorld::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4849,7 +4848,7 @@ mod tests {
         let cat = SchemaCatalogue::build(vec![]).unwrap();
         assert_eq!(cat.len(), 0, "catalogue should be empty");
 
-        let mut world = CompWorld::new();
+        let world = CompWorld::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);

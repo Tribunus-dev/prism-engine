@@ -1,5 +1,12 @@
 //! Prism V1 Runtime Representation conformance: NF4 Tile640.
 //!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+))]
+//!
 //! Validates codebook version, tail code masking invariant, payload byte
 //! formulas per spec §10.3, full/partial tile reconstruction, and policy
 //! receipt serialization.

@@ -471,6 +471,12 @@ pub struct ExecutionView {
     pub codec_overrides: HashMap<String, String>,
     pub repacking_required: bool,
     pub residency: ResidencyMode,
+    /// Optional discovered program from evolutionary search.
+    pub discovered_program: Option<String>,
+    /// Optional evolution provenance — JSON-serialized EvolutionProvenance.
+    pub evolution_provenance: Option<String>,
+    /// Last known cost profile — JSON-serialized CostMetrics.
+    pub cost_profile: Option<String>,
 }
 
 /// Broad hardware class with bandwidth and budget estimates.
@@ -882,6 +888,9 @@ impl LayoutResolver {
             codec_overrides: HashMap::new(),
             repacking_required: false,
             residency: ResidencyMode::AlwaysMapped,
+            discovered_program: None,
+            evolution_provenance: None,
+            cost_profile: None,
         });
 
         // Secondary view: A second metal view is available on targets with
@@ -901,6 +910,9 @@ impl LayoutResolver {
                 } else {
                     ResidencyMode::MutuallyExclusiveViewGroup
                 },
+                discovered_program: None,
+                evolution_provenance: None,
+                cost_profile: None,
             });
         }
 

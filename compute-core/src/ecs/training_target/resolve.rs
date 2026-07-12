@@ -7,16 +7,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::execution_plan::CodecFamily;
 use crate::ecs::execution_profile::PhysicalTileLayout;
+use crate::execution_plan::CodecFamily;
 
-use super::gates::{
-    QuantTrainingMethod, RequiredEvidenceLevel,
-    WeightTrainingGates,
-};
+use super::gates::{QuantTrainingMethod, RequiredEvidenceLevel, WeightTrainingGates};
 use super::spec::{
-    ActivationWeightedObjective, TrainingEvidenceGate, TrainingTargetPriority,
-    TrainingTargetSpec, WeightTrainingTarget,
+    ActivationWeightedObjective, TrainingEvidenceGate, TrainingTargetPriority, TrainingTargetSpec,
+    WeightTrainingTarget,
 };
 
 /// Stateless resolver that scans a compiler policy and produces training
@@ -83,7 +80,11 @@ pub enum TrainingTargetResolveError {
 pub fn compute_digest(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
 }
 
 // ── Codec parsing ──────────────────────────────────────────────────────────
@@ -97,7 +98,9 @@ fn parse_codec(s: &str) -> Result<CodecFamily, TrainingTargetResolveError> {
         "nf4" => Ok(CodecFamily::Nf4),
         "symint4" | "sym_int4" | "i4" => Ok(CodecFamily::SymInt4),
         "ternary" | "t3" => Ok(CodecFamily::Ternary),
-        other => Err(TrainingTargetResolveError::UnsupportedCodec(other.to_string())),
+        other => Err(TrainingTargetResolveError::UnsupportedCodec(
+            other.to_string(),
+        )),
     }
 }
 
@@ -189,10 +192,12 @@ fn build_layout(entry: &Value) -> Result<PhysicalTileLayout, TrainingTargetResol
     if let Some(val) = entry.get("metadata_layout").and_then(|v| v.as_str()) {
         match val {
             "AdjacentTile" | "adjacent_tile" | "adjacent" => {
-                layout.metadata_layout = crate::ecs::execution_profile::MetadataLayout::AdjacentTile;
+                layout.metadata_layout =
+                    crate::ecs::execution_profile::MetadataLayout::AdjacentTile;
             }
             "SeparatedManifest" | "separated_manifest" | "manifest" => {
-                layout.metadata_layout = crate::ecs::execution_profile::MetadataLayout::SeparatedManifest;
+                layout.metadata_layout =
+                    crate::ecs::execution_profile::MetadataLayout::SeparatedManifest;
             }
             "Interleaved" | "interleaved" => {
                 layout.metadata_layout = crate::ecs::execution_profile::MetadataLayout::Interleaved;
@@ -264,13 +269,11 @@ fn select_training_method(entry: &Value, codec: CodecFamily) -> QuantTrainingMet
                     schedule_steps: get_usize(entry, "schedule_steps", 1000),
                 }
             }
-            "soft_ternarization" | "soft-ternarization" => {
-                QuantTrainingMethod::SoftTernarization {
-                    temperature_start: get_f32(entry, "temperature_start", 1.0),
-                    temperature_end: get_f32(entry, "temperature_end", 0.1),
-                    learnable_modulation: get_bool(entry, "learnable_modulation", false),
-                }
-            }
+            "soft_ternarization" | "soft-ternarization" => QuantTrainingMethod::SoftTernarization {
+                temperature_start: get_f32(entry, "temperature_start", 1.0),
+                temperature_end: get_f32(entry, "temperature_end", 0.1),
+                learnable_modulation: get_bool(entry, "learnable_modulation", false),
+            },
             "activation_weighted" | "activation-weighted" | "aw" => {
                 let profile_required = get_bool(entry, "profile_required", true);
                 let profile_source = get_str(entry, "profile_source").unwrap_or("calibration");
@@ -278,7 +281,9 @@ fn select_training_method(entry: &Value, codec: CodecFamily) -> QuantTrainingMet
                     profile_required,
                     objective: ActivationWeightedObjective {
                         profile_source: profile_source.to_string(),
-                        activation_norm: get_str(entry, "activation_norm").unwrap_or("l2").to_string(),
+                        activation_norm: get_str(entry, "activation_norm")
+                            .unwrap_or("l2")
+                            .to_string(),
                         percentile: get_f64(entry, "percentile", 95.0),
                         top_k_fraction: get_f64(entry, "top_k_fraction", 0.1),
                     },
@@ -311,11 +316,15 @@ fn build_gates(entry: &Value) -> WeightTrainingGates {
         .or_else(|| gates.and_then(|g| get_str(g, "required_evidence_level")))
     {
         Some("weight_space" | "WeightSpace") => RequiredEvidenceLevel::WeightSpace,
-        Some("synthetic_operator" | "SyntheticOperator") => RequiredEvidenceLevel::SyntheticOperator,
+        Some("synthetic_operator" | "SyntheticOperator") => {
+            RequiredEvidenceLevel::SyntheticOperator
+        }
         Some("hardware_operator" | "HardwareOperator") => RequiredEvidenceLevel::HardwareOperator,
         Some("model_quality" | "ModelQuality") => RequiredEvidenceLevel::ModelQuality,
         Some("runtime_profiled" | "RuntimeProfiled") => RequiredEvidenceLevel::RuntimeProfiled,
-        Some("production_promoted" | "ProductionPromoted") => RequiredEvidenceLevel::ProductionPromoted,
+        Some("production_promoted" | "ProductionPromoted") => {
+            RequiredEvidenceLevel::ProductionPromoted
+        }
         _ => RequiredEvidenceLevel::SyntheticOperator,
     };
 
@@ -380,9 +389,14 @@ impl TrainingTargetResolver {
             .to_string();
 
         // Locate the entries array.
-        let entries = policy.get("entries").and_then(|v| v.as_array()).ok_or_else(
-            || TrainingTargetResolveError::InvalidPolicy("policy must contain an 'entries' array".into()),
-        )?;
+        let entries = policy
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                TrainingTargetResolveError::InvalidPolicy(
+                    "policy must contain an 'entries' array".into(),
+                )
+            })?;
 
         let mut weight_targets: Vec<WeightTrainingTarget> = Vec::new();
         let mut evidence_gates: Vec<TrainingEvidenceGate> = Vec::new();
@@ -426,6 +440,7 @@ impl TrainingTargetResolver {
                 training_method,
                 gates: gates.clone(),
                 priority,
+                search_config: None,
             });
 
             // Emit a standard evidence gate for this target.
@@ -486,13 +501,21 @@ mod tests {
         assert_eq!(result.len(), 1);
         let spec = &result[0];
 
-        assert!(!spec.weight_targets.is_empty(), "expected at least one weight target for ternary entry");
+        assert!(
+            !spec.weight_targets.is_empty(),
+            "expected at least one weight target for ternary entry"
+        );
         assert_eq!(spec.weight_targets[0].tensor_class, "attn_q");
         assert_eq!(spec.weight_targets[0].target_codec, CodecFamily::Ternary);
-        assert!(spec.weight_targets[0].tensor_key_match.contains(&"*attn_q*".to_string()));
+        assert!(spec.weight_targets[0]
+            .tensor_key_match
+            .contains(&"*attn_q*".to_string()));
 
         assert!(!spec.evidence_gates.is_empty(), "expected evidence gates");
-        assert_eq!(spec.evidence_gates[0].gate_id, "gate::attn_q::operator_nrmse");
+        assert_eq!(
+            spec.evidence_gates[0].gate_id,
+            "gate::attn_q::operator_nrmse"
+        );
 
         assert_eq!(spec.source_policy_digest.len(), 64);
     }
@@ -546,8 +569,6 @@ mod tests {
 
     #[test]
     fn resolver_experimental_flags() {
-        
-
         let resolver = TrainingTargetResolver;
         let default_opts = TrainingTargetResolveOptions::default();
 
@@ -562,7 +583,11 @@ mod tests {
         });
 
         let result = resolver.resolve(&policy, &default_opts).unwrap();
-        assert_eq!(result[0].weight_targets.len(), 0, "expected no targets without experimental flags");
+        assert_eq!(
+            result[0].weight_targets.len(),
+            0,
+            "expected no targets without experimental flags"
+        );
 
         let all_opts = TrainingTargetResolveOptions {
             experimental_int8_calibration: true,
@@ -572,7 +597,11 @@ mod tests {
         };
 
         let result = resolver.resolve(&policy, &all_opts).unwrap();
-        assert_eq!(result[0].weight_targets.len(), 3, "expected 3 targets with all experimental flags");
+        assert_eq!(
+            result[0].weight_targets.len(),
+            3,
+            "expected 3 targets with all experimental flags"
+        );
     }
 
     #[test]
@@ -633,8 +662,7 @@ mod tests {
         let input = b"hello world";
         let digest = compute_digest(input);
         assert_eq!(
-            digest,
-            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+            digest, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
             "sha256 of 'hello world' should match known value"
         );
         assert_eq!(digest.len(), 64);
@@ -680,4 +708,36 @@ mod tests {
         );
         assert_eq!(target.physical_layout.alignment_bytes, 512);
     }
-}
+
+    /// Verifies that resolve() produces a spec with zero engram targets.
+    /// Documents the structural gap: engram training targets are not yet
+    /// produced by the policy resolver — only weight targets are emitted.
+    #[test]
+    fn test_resolve_returns_empty_engram_targets() {
+        let resolver = TrainingTargetResolver;
+        let options = TrainingTargetResolveOptions::default();
+
+        let policy = json!({
+            "model_family": "engram-test",
+            "target_cimage_profile": "test",
+            "entries": [
+                {
+                    "tensor_class": "attn_q",
+                    "codec": "Ternary",
+                    "priority": "required"
+                }
+            ]
+        });
+
+        let result = resolver.resolve(&policy, &options).unwrap();
+        assert!(
+            !result.is_empty(),
+            "resolve should produce at least one spec"
+        );
+        assert!(
+            result[0].engram_targets.is_empty(),
+            "expected no engram targets, got {}",
+            result[0].engram_targets.len()
+        );
+    }
+} // mod tests

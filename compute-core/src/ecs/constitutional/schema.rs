@@ -175,7 +175,7 @@ impl SchemaCatalogue {
         use blake3::Hasher;
         let mut hasher = Hasher::new();
         hasher.update(b"prism.schema.catalogue.v1");
-        for (key, reg) in &by_key {
+        for (key, _reg) in &by_key {
             hasher.update(key.namespace.as_bytes());
             hasher.update(&key.id.to_le_bytes());
             hasher.update(&key.version.to_le_bytes());

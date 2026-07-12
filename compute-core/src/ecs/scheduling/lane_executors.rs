@@ -8,7 +8,9 @@
 //! They emit WorkCompletion events into a channel; the Tokio-based orchestrator
 //! loop processes them.
 
+#[cfg(feature = "mlx-backend")]
 use crate::ecs::backend::placement::ExecutionLane;
+
 #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
 use crate::ecs::scheduling::tri_lane_orchestrator::{EpochId, PhaseVariant, WorkCompletion};
 

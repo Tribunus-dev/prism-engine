@@ -364,6 +364,7 @@ struct AppState {
     #[allow(dead_code)]
     tts_pipeline: Option<TtsPipeline>,
     /// Whether cimage uses new format (versus legacy compute_image).
+    #[allow(dead_code)]
     cimage_format: String,
     /// BitNet runtime for new-format cimages (None when using legacy format).
     bitnet_runtime: Option<ParkingMutex<BitNetRuntime>>,
@@ -854,7 +855,7 @@ async fn chat_completions(
         };
 
         // ── Audio encoding ──────────────────────────────────────────────
-        let audio_frames = 0usize;
+        let _audio_frames = 0usize;
         #[cfg(feature = "mlx-backend")]
         let audio_frames = if !audio_bytes.is_empty() {
             let mut total_frames = 0usize;
@@ -2011,6 +2012,8 @@ async fn main() -> Result<(), String> {
         ))
         .with_state(state);
 
+    #[allow(unexpected_cfgs)]
+    #[allow(unexpected_cfgs)]
     #[cfg(feature = "server-dashboard")]
     {
         app = app

@@ -1,19 +1,11 @@
 use anyhow::{Context, Result};
-use nix::fcntl::{flock, FlockArg};
-use std::fs::File;
-use std::os::unix::io::AsRawFd;
+use nix::fcntl::{Flock, FlockArg};
 use std::path::{Path, PathBuf};
 
-/// An exclusive file lock backed by `flock(LOCK_EX)`.
+/// An exclusive file lock backed by `Flock`.
 /// Dropping the guard releases the lock.
 pub struct FileLockGuard {
-    _file: File,
-}
-
-impl Drop for FileLockGuard {
-    fn drop(&mut self) {
-        let _ = flock(self._file.as_raw_fd(), FlockArg::Unlock);
-    }
+    _lock: Flock<std::fs::File>,
 }
 
 /// Cross-process advisory file lock coordinator.
@@ -36,8 +28,9 @@ impl FileLock {
             .read(true)
             .open(&self.path)
             .with_context(|| format!("opening lock file {}", self.path.display()))?;
-        flock(file.as_raw_fd(), FlockArg::LockExclusive)?;
-        Ok(FileLockGuard { _file: file })
+        let lock = Flock::lock(file, FlockArg::LockExclusive)
+            .map_err(|(_file, e)| anyhow::Error::from(e))?;
+        Ok(FileLockGuard { _lock: lock })
     }
 
     pub fn try_lock(&self) -> Result<Option<FileLockGuard>> {
@@ -48,10 +41,10 @@ impl FileLock {
             .read(true)
             .open(&self.path)
             .with_context(|| format!("opening lock file {}", self.path.display()))?;
-        match flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock) {
-            Ok(()) => Ok(Some(FileLockGuard { _file: file })),
-            Err(nix::errno::Errno::EAGAIN) => Ok(None),
-            Err(e) => Err(e).context("flock(LOCK_EX | LOCK_NB)"),
+        match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
+            Ok(lock) => Ok(Some(FileLockGuard { _lock: lock })),
+            Err((_file, nix::errno::Errno::EAGAIN)) => Ok(None),
+            Err((_file, e)) => Err(e).context("flock(LOCK_EX | LOCK_NB)"),
         }
     }
 }

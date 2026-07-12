@@ -401,7 +401,7 @@ mod tests {
 
     fn make_test_tensors(
         hidden_dim: usize,
-        num_heads: usize,
+        _num_heads: usize,
         num_kv_heads: usize,
         head_dim: usize,
         intermediate_dim: usize,

@@ -1,11 +1,10 @@
-use crate::ecs::state_store::access::check_access;
 use crate::ecs::state_store::epochs::StateEpoch;
 use crate::ecs::state_store::kv::KvCacheManager;
 use crate::ecs::state_store::pages::PageTable;
-use crate::ecs::state_store::receipts::{KvAppendReceipt, KvReadReceipt, StateStoreValidationReceipt};
+use crate::ecs::state_store::receipts::{KvAppendReceipt, KvReadReceipt};
 use crate::ecs::state_store::schema::{
-    AccessKind, EvictionKind, KvCacheLayout, KvCacheStoreDecl, KvPrecisionPolicy,
-    KvResidencyPolicy, StateAccessPolicy, StateStoreDecl, StateStoreSchema,
+    AccessKind, KvCacheLayout, KvCacheStoreDecl, KvPrecisionPolicy, KvResidencyPolicy,
+    StateAccessPolicy, StateStoreDecl, StateStoreSchema,
 };
 use crate::ecs::state_store::validate::validate_schema;
 

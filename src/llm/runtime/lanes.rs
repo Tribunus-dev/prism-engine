@@ -210,7 +210,7 @@ pub mod prism_backend {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use tribunus_compute_core::backend::accelerate_lane::AccelerateLane;
-    use tribunus_compute_core::backend::coreml::CoreMlBackend;
+    use tribunus_compute_core::backend::coreai::CoreAiBackend;
     use tribunus_compute_core::backend::MlxBackend;
     use tribunus_compute_core::compute_lane::{
         ComputeLaneId, ComputeLaneRuntime, ComputeLease, ComputeLeaseId,
@@ -256,7 +256,7 @@ pub mod prism_backend {
         #[allow(dead_code)]
         accelerate_lane: AccelerateLane,
         #[allow(dead_code)]
-        coreml_backend: Mutex<CoreMlBackend>,
+        coreml_backend: Mutex<CoreAiBackend>,
         receipts: Mutex<HashMap<DispatchId, LaneExecutionReceipt>>,
     }
 
@@ -268,7 +268,7 @@ pub mod prism_backend {
             Self {
                 metal_runtime: Mutex::new(metal_runtime),
                 accelerate_lane: AccelerateLane::new(),
-                coreml_backend: Mutex::new(CoreMlBackend::new()),
+                coreml_backend: Mutex::new(CoreAiBackend::new()),
                 receipts: Mutex::new(HashMap::new()),
             }
         }

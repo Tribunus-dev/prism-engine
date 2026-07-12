@@ -196,32 +196,23 @@ impl ToolEngine {
             parameters: tool.parameters.clone(),
             required: tool.required.clone(),
         };
-
         match parse_and_repair(raw, &def) {
-            tribunus_compute_core::tools::ToolCallResult::Valid(fc) => {
+            tribunus_compute_core::tools::ToolCallResult::Valid(name, arguments) => {
                 // Unwrap OpenAI-format wrapper: extract inner "arguments" sub-object.
-                let arguments = fc
-                    .arguments
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(fc.arguments);
+                let args = arguments.get("arguments").cloned().unwrap_or(arguments);
                 Ok(ToolCallOutcome::Valid(ParsedCall {
-                    name: fc.name,
-                    arguments,
-                    raw: fc.raw,
+                    name,
+                    arguments: args,
+                    raw: raw.to_string(),
                 }))
             }
-            tribunus_compute_core::tools::ToolCallResult::Repaired(fc, fixes) => {
-                let arguments = fc
-                    .arguments
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(fc.arguments);
+            tribunus_compute_core::tools::ToolCallResult::Repaired(name, arguments, fixes) => {
+                let args = arguments.get("arguments").cloned().unwrap_or(arguments);
                 Ok(ToolCallOutcome::Repaired(
                     ParsedCall {
-                        name: fc.name,
-                        arguments,
-                        raw: fc.raw,
+                        name,
+                        arguments: args,
+                        raw: raw.to_string(),
                     },
                     fixes,
                 ))
@@ -230,6 +221,7 @@ impl ToolEngine {
                 Ok(ToolCallOutcome::Unrepairable(msg))
             }
         }
+
     }
 
     /// Execute a parsed tool call through a caller-provided dispatcher or
@@ -274,7 +266,6 @@ impl ToolEngine {
         let fc = FunctionCall {
             name: call.name.clone(),
             arguments: call.arguments.clone(),
-            raw: call.raw.clone(),
         };
 
         if let Some(d) = dispatcher {
@@ -304,7 +295,7 @@ impl ToolEngine {
         name: &str,
         schema: &serde_json::Value,
     ) -> Result<String, ToolError> {
-        use tribunus_compute_core::grammar::Grammar;
+        use tribunus_compute_core::ecs::parsing::Grammar;
 
         // Attempt validation via compute-core's GBNF pipeline (best-effort).
         // The internal json_schema_to_gbnf may produce GBNF that Grammar::parse
@@ -489,7 +480,7 @@ impl Default for ToolEngine {
 /// Format a `GrammarNode` back into GBNF text.
 #[allow(dead_code)]
 #[cfg(feature = "mlx-backend")]
-fn format_node(node: &tribunus_compute_core::grammar::GrammarNode) -> String {
+fn format_node(node: &tribunus_compute_core::ecs::parsing::GrammarNode) -> String {
     format_node_ctx(node, false)
 }
 
@@ -500,10 +491,10 @@ fn format_node(node: &tribunus_compute_core::grammar::GrammarNode) -> String {
 #[allow(dead_code)]
 #[cfg(feature = "mlx-backend")]
 fn format_node_ctx(
-    node: &tribunus_compute_core::grammar::GrammarNode,
+    node: &tribunus_compute_core::ecs::parsing::GrammarNode,
     parent_is_seq: bool,
 ) -> String {
-    use tribunus_compute_core::grammar::GrammarNode;
+    use tribunus_compute_core::ecs::parsing::GrammarNode;
 
     match node {
         GrammarNode::Lit(s) => format!("\"{}\"", s),

@@ -4,8 +4,46 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use crate::ecs::cache::prefix_cache::{BlockAwarePrefixCache, BlockHash};
 use crate::ecs::exo::cluster::NodeInfo;
+
+// ---------------------------------------------------------------------------
+// Stub types -- prefix_cache module was deleted; kept here so this module
+// compiles for the mlx-backend tests that exercise the distributed KV
+// routing logic independently.
+// ---------------------------------------------------------------------------
+
+/// Stub: Block hash for prefix-block-based KV cache routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockHash(pub [u8; 32]);
+
+/// Stub: Block-aware prefix cache (replaced deleted prefix_cache module).
+pub struct BlockAwarePrefixCache {
+    #[allow(dead_code)]
+    capacity: usize,
+}
+
+impl BlockAwarePrefixCache {
+    /// Create a new cache with the given capacity.
+    pub fn new(capacity: usize) -> Self {
+        Self { capacity }
+    }
+
+    /// Compute a deterministic block hash from a slice of token ids.
+    pub fn compute_block_hash(tokens: &[u32]) -> BlockHash {
+        use std::hash::Hasher;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for t in tokens {
+            t.hash(&mut hasher);
+        }
+        let h = hasher.finish();
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&h.to_ne_bytes());
+        BlockHash(bytes)
+    }
+}
+
+/// Number of tokens per block in the prefix cache.
+pub const PREFIX_BLOCK_SIZE: usize = 64;
 
 // Number of virtual replicas per physical node for the hash ring.
 const HASH_RING_REPLICAS: usize = 151;
@@ -374,7 +412,7 @@ impl DistributedKvCache {
     ///
     /// Returns `None` if even the first block isn't cached anywhere.
     pub fn check_prefix(&self, tokens: &[u32]) -> Option<Vec<BlockHash>> {
-        let tokens_per_block = crate::ecs::cache::prefix_cache::PREFIX_BLOCK_SIZE;
+        let tokens_per_block = PREFIX_BLOCK_SIZE;
 
         let num_full_blocks = tokens.len() / tokens_per_block;
         if num_full_blocks == 0 {

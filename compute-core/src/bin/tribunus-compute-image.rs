@@ -2948,7 +2948,6 @@ fn cmd_cimage_ternary_run_metal_gemv(args: &[String]) -> Result<(), String> {
 
     #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
     {
-        use half::f16;
         use metal::Device as MetalDevice;
         use tribunus_compute_core::cimage::mlp_reference::{
             compute_cosine_similarity, compute_max_abs_error, compute_nrmse,
@@ -3101,7 +3100,7 @@ fn cmd_cimage_ternary_sweep_synthetic_mlp(args: &[String]) -> Result<(), String>
             },
         };
 
-        let (write_receipt, load_receipt, shard_validation) =
+        let (write_receipt, _load_receipt, shard_validation) =
             emit_and_validate_synthetic_mlp(&cimage_path, config)
                 .map_err(|e| format!("emit/validate error for gs={gs}: {e}"))?;
 

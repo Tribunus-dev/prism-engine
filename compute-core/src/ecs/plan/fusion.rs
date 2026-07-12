@@ -12,8 +12,8 @@ use std::collections::{HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::plan::{CodecFamily, DType, precision_plan::PrecisionPlan};
 use crate::ecs::execution_profile::{GroupAxis, MetadataLayout, PhysicalTileLayout};
+use crate::ecs::plan::{precision_plan::PrecisionPlan, CodecFamily, DType};
 
 // ---------------------------------------------------------------------------
 // Core type aliases
@@ -128,6 +128,10 @@ pub enum DataflowOpKind {
     KvRead,
     KvWrite,
     EngramLookup,
+    AneMatMul,
+    AneConv1x1,
+    AneLoadWeight,
+    AneStoreOutput,
 }
 
 /// The operation kind carried by a dataflow node.
@@ -201,6 +205,33 @@ pub enum DataflowOp {
         slot: String,
         input: DataflowBufferId,
     },
+    /// ANE-specific: matrix multiply with SRAM budget constraint.
+    AneMatMul {
+        lhs: DataflowBufferId,
+        rhs: DataflowBufferId,
+        output: DataflowBufferId,
+        contract: MatMulContract,
+        sram_budget: u64,
+    },
+    /// ANE-specific: 1x1 convolution (often replaces MatMul on ANE).
+    AneConv1x1 {
+        input: DataflowBufferId,
+        weight: DataflowTensorRef,
+        output: DataflowBufferId,
+        sram_budget: u64,
+    },
+    /// ANE-specific: load weight to a target SRAM region.
+    AneLoadWeight {
+        tensor: DataflowTensorRef,
+        codec: CodecFamily,
+        layout: PhysicalTileLayout,
+        target_sram_region: u64,
+    },
+    /// ANE-specific: store output from SRAM to main memory.
+    AneStoreOutput {
+        input: DataflowBufferId,
+        offset: u64,
+    },
 }
 
 impl DataflowOp {
@@ -219,11 +250,16 @@ impl DataflowOp {
             DataflowOp::StoreActivation { .. } => DataflowOpKind::StoreActivation,
             DataflowOp::KvRead { .. } => DataflowOpKind::KvRead,
             DataflowOp::KvWrite { .. } => DataflowOpKind::KvWrite,
+            DataflowOp::AneMatMul { .. } => DataflowOpKind::AneMatMul,
+            DataflowOp::AneConv1x1 { .. } => DataflowOpKind::AneConv1x1,
+            DataflowOp::AneLoadWeight { .. } => DataflowOpKind::AneLoadWeight,
+            DataflowOp::AneStoreOutput { .. } => DataflowOpKind::AneStoreOutput,
             // LoadActivation and EngramLookup are not yet defined in DataflowOp.
             // When added, update the match here.
         }
     }
 }
+
 
 // ---------------------------------------------------------------------------
 // FusedGroup
@@ -499,23 +535,27 @@ pub fn fuse_and_schedule(
                         let b = candidate[1].op_kind;
                         if a == ScheduledOpKind::QkvProjection && b == ScheduledOpKind::RmsNorm {
                             FusionPattern::QkvFused
-                        } else if a == ScheduledOpKind::AttentionScore && b == ScheduledOpKind::AttentionApply {
+                        } else if a == ScheduledOpKind::AttentionScore
+                            && b == ScheduledOpKind::AttentionApply
+                        {
                             FusionPattern::AttentionFused
-                        } else if a == ScheduledOpKind::MlpGateUp && b == ScheduledOpKind::MlpActivation {
+                        } else if a == ScheduledOpKind::MlpGateUp
+                            && b == ScheduledOpKind::MlpActivation
+                        {
                             FusionPattern::MlpGateActivation
-                        } else if a == ScheduledOpKind::OProjectionResidual && b == ScheduledOpKind::MlpGateUp {
+                        } else if a == ScheduledOpKind::OProjectionResidual
+                            && b == ScheduledOpKind::MlpGateUp
+                        {
                             FusionPattern::OProjectionResidual
                         } else {
                             FusionPattern::Custom([a, b, a])
                         }
                     }
-                    _ if len >= 3 => {
-                        FusionPattern::Custom([
-                            candidate[0].op_kind,
-                            candidate[1].op_kind,
-                            candidate[2].op_kind,
-                        ])
-                    }
+                    _ if len >= 3 => FusionPattern::Custom([
+                        candidate[0].op_kind,
+                        candidate[1].op_kind,
+                        candidate[2].op_kind,
+                    ]),
                     _ => FusionPattern::Custom([ScheduledOpKind::RmsNorm; 3]),
                 };
                 if known_patterns.contains(&pattern) {
@@ -688,14 +728,23 @@ impl DataflowGraphBuilder {
             shape,
             current_residency: ValueResidency::Unknown,
         };
-        values.insert(activation.clone(), val("activation", DType::F32, vec![1, 2048]));
-        values.insert(normalized.clone(), val("normalized", DType::F32, vec![1, 2048]));
+        values.insert(
+            activation.clone(),
+            val("activation", DType::F32, vec![1, 2048]),
+        );
+        values.insert(
+            normalized.clone(),
+            val("normalized", DType::F32, vec![1, 2048]),
+        );
         values.insert(gate_out.clone(), val("gate_out", DType::F32, vec![1, 8192]));
         values.insert(up_out.clone(), val("up_out", DType::F32, vec![1, 8192]));
         values.insert(gated.clone(), val("gated", DType::F32, vec![1, 8192]));
         values.insert(gated_up.clone(), val("gated_up", DType::F32, vec![1, 8192]));
         values.insert(down_out.clone(), val("down_out", DType::F32, vec![1, 2048]));
-        values.insert(layer_output.clone(), val("layer_output", DType::F32, vec![1, 2048]));
+        values.insert(
+            layer_output.clone(),
+            val("layer_output", DType::F32, vec![1, 2048]),
+        );
 
         // Node 0: RMSNorm
         nodes.push(DataflowNode {
@@ -803,13 +852,41 @@ impl DataflowGraphBuilder {
         });
 
         // Edges
-        edges.push(DataflowEdge { producer: 0, consumer: 1, value: normalized.clone() });
-        edges.push(DataflowEdge { producer: 0, consumer: 2, value: normalized.clone() });
-        edges.push(DataflowEdge { producer: 1, consumer: 3, value: gate_out.clone() });
-        edges.push(DataflowEdge { producer: 3, consumer: 4, value: gated.clone() });
-        edges.push(DataflowEdge { producer: 2, consumer: 4, value: up_out.clone() });
-        edges.push(DataflowEdge { producer: 4, consumer: 5, value: gated_up.clone() });
-        edges.push(DataflowEdge { producer: 5, consumer: 6, value: down_out.clone() });
+        edges.push(DataflowEdge {
+            producer: 0,
+            consumer: 1,
+            value: normalized.clone(),
+        });
+        edges.push(DataflowEdge {
+            producer: 0,
+            consumer: 2,
+            value: normalized.clone(),
+        });
+        edges.push(DataflowEdge {
+            producer: 1,
+            consumer: 3,
+            value: gate_out.clone(),
+        });
+        edges.push(DataflowEdge {
+            producer: 3,
+            consumer: 4,
+            value: gated.clone(),
+        });
+        edges.push(DataflowEdge {
+            producer: 2,
+            consumer: 4,
+            value: up_out.clone(),
+        });
+        edges.push(DataflowEdge {
+            producer: 4,
+            consumer: 5,
+            value: gated_up.clone(),
+        });
+        edges.push(DataflowEdge {
+            producer: 5,
+            consumer: 6,
+            value: down_out.clone(),
+        });
 
         DataflowGraph {
             nodes,
@@ -863,11 +940,8 @@ mod tests {
         assert_eq!(order.len(), 7, "topological sort must include all 7 nodes");
 
         // Verify topological validity: every edge's producer appears before consumer
-        let pos: std::collections::HashMap<usize, usize> = order
-            .iter()
-            .enumerate()
-            .map(|(i, &n)| (n, i))
-            .collect();
+        let pos: std::collections::HashMap<usize, usize> =
+            order.iter().enumerate().map(|(i, &n)| (n, i)).collect();
         for edge in &graph.edges {
             assert!(
                 pos[&edge.producer] < pos[&edge.consumer],
@@ -908,7 +982,9 @@ mod tests {
                 rhs: "gate_proj.weight".into(),
                 output: "gate_out".into(),
                 contract: MatMulContract {
-                    m: 1, n: 8192, k: 2048,
+                    m: 1,
+                    n: 8192,
+                    k: 2048,
                     lhs_transposed: false,
                     rhs_transposed: true,
                 },
@@ -953,7 +1029,10 @@ mod tests {
                     tile_family: TileFamily::tile640(),
                     logical_shape: [2048, 8192],
                     storage_order: StorageOrder::RowMajor,
-                    tile_shape: ProfileTileShape { rows: 640, cols: 640 },
+                    tile_shape: ProfileTileShape {
+                        rows: 640,
+                        cols: 640,
+                    },
                     group_size: 32,
                     group_axis: GroupAxis::PackedContiguous,
                     metadata_layout: MetadataLayout::AdjacentTile,
@@ -962,25 +1041,69 @@ mod tests {
                     interleave: "none".into(),
                 },
             },
-            DataflowOp::Dequantize { input: "quantized".into(), output_dtype: DType::F32 },
-            DataflowOp::MatMul {
-                lhs: "a".into(), rhs: "b".into(), output: "c".into(),
-                contract: MatMulContract { m: 1, n: 8192, k: 2048, lhs_transposed: false, rhs_transposed: true },
+            DataflowOp::Dequantize {
+                input: "quantized".into(),
+                output_dtype: DType::F32,
             },
-            DataflowOp::RmsNorm { input: "x".into(), weight: "ln.weight".into(), output: "y".into(), epsilon: 1e-6 },
-            DataflowOp::SiLU { input: "x".into(), output: "y".into() },
-            DataflowOp::Gelu { input: "x".into(), output: "y".into() },
-            DataflowOp::Mul { lhs: "a".into(), rhs: "b".into(), output: "c".into() },
-            DataflowOp::Add { lhs: "a".into(), rhs: "b".into(), output: "c".into() },
-            DataflowOp::ResidualAdd { residual: "res".into(), update: "upd".into(), output: "out".into() },
-            DataflowOp::StoreActivation { slot: "act_0".into(), input: "x".into() },
-            DataflowOp::KvRead { slot: "k_0".into(), output: "k".into() },
-            DataflowOp::KvWrite { slot: "v_0".into(), input: "v".into() },
+            DataflowOp::MatMul {
+                lhs: "a".into(),
+                rhs: "b".into(),
+                output: "c".into(),
+                contract: MatMulContract {
+                    m: 1,
+                    n: 8192,
+                    k: 2048,
+                    lhs_transposed: false,
+                    rhs_transposed: true,
+                },
+            },
+            DataflowOp::RmsNorm {
+                input: "x".into(),
+                weight: "ln.weight".into(),
+                output: "y".into(),
+                epsilon: 1e-6,
+            },
+            DataflowOp::SiLU {
+                input: "x".into(),
+                output: "y".into(),
+            },
+            DataflowOp::Gelu {
+                input: "x".into(),
+                output: "y".into(),
+            },
+            DataflowOp::Mul {
+                lhs: "a".into(),
+                rhs: "b".into(),
+                output: "c".into(),
+            },
+            DataflowOp::Add {
+                lhs: "a".into(),
+                rhs: "b".into(),
+                output: "c".into(),
+            },
+            DataflowOp::ResidualAdd {
+                residual: "res".into(),
+                update: "upd".into(),
+                output: "out".into(),
+            },
+            DataflowOp::StoreActivation {
+                slot: "act_0".into(),
+                input: "x".into(),
+            },
+            DataflowOp::KvRead {
+                slot: "k_0".into(),
+                output: "k".into(),
+            },
+            DataflowOp::KvWrite {
+                slot: "v_0".into(),
+                input: "v".into(),
+            },
         ];
 
         for op in &ops {
             let json = serde_json::to_string(op).expect("serialize DataflowOp");
-            let _restored: DataflowOp = serde_json::from_str(&json).expect("deserialize DataflowOp");
+            let _restored: DataflowOp =
+                serde_json::from_str(&json).expect("deserialize DataflowOp");
         }
     }
 }

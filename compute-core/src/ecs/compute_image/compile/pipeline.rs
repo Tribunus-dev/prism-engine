@@ -189,11 +189,11 @@ fn detect_validate_quant(
     let config_path = std::path::Path::new(source_dir).join("config.json");
     let config_text =
         std::fs::read_to_string(&config_path).map_err(|e| format!("read config.json: {e}"))?;
-    let config_value: serde_json::Value =
+    let cfg: serde_json::Value =
         serde_json::from_str(&config_text).map_err(|e| format!("parse config.json: {e}"))?;
 
-    let arch = extract_architecture_from_config(&config_value)
-        .map_err(|e| format!("extract architecture: {e}"))?;
+    let arch =
+        extract_architecture_from_config(&cfg).map_err(|e| format!("extract architecture: {e}"))?;
 
     let decision = CompatibilityMatrix::evaluate(&arch, target, preferred_quant);
 
@@ -2284,10 +2284,9 @@ fn build_canonical_outcome(
     rep_plan: crate::ecs::canonical::RepresentationPlan,
     output_dir: &str,
 ) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
-
     use crate::ecs::canonical::{
-        CimageBuildInput, CompileOutcome, CompilePlan, CompilerReceiptSet,
-        ExecutionGraph, KernelPlan, MemoryPlan, RuntimeStatePlan,
+        CimageBuildInput, CompileOutcome, CompilePlan, CompilerReceiptSet, ExecutionGraph,
+        KernelPlan, MemoryPlan, RuntimeStatePlan,
     };
 
     let empty_execution_graph = ExecutionGraph {
@@ -2343,19 +2342,14 @@ fn build_canonical_model_ir(
     source_dir: &str,
     compiled: &CompiledImage,
 ) -> crate::Result<crate::ecs::canonical::ModelIr> {
-    use crate::ecs::canonical::{
-        ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
-        SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
-    };
-
     let manifest = &compiled.manifest;
 
     // Read config.json for architecture params
     let config_path = std::path::Path::new(source_dir).join("config.json");
-    let config_text =
-        std::fs::read_to_string(&config_path).map_err(|e| format!("read config.json: {e}"))?;
-    let cfg: serde_json::Value =
-        serde_json::from_str(&config_text).map_err(|e| format!("parse config.json: {e}"))?;
+    let config_text = std::fs::read_to_string(&config_path)
+        .map_err(|e| crate::Error::from_reason(format!("read config.json: {e}")))?;
+    let cfg: serde_json::Value = serde_json::from_str(&config_text)
+        .map_err(|e| crate::Error::from_reason(format!("parse config.json: {e}")))?;
 
     build_model_ir_from_config(&cfg, manifest, source_dir)
 }
@@ -2519,15 +2513,14 @@ fn build_model_ir_from_config(
             file_digests: Vec::new(),
         },
     })
-
+}
 
 /// Build a canonical RepresentationPlan from the compiled image manifest.
 fn build_canonical_representation_plan(
     compiled: &CompiledImage,
 ) -> crate::ecs::canonical::RepresentationPlan {
     use crate::ecs::canonical::{
-        AdmissionReceipt, CalibrationReceipt, RepresentationPlan, ResidualPlan, TensorId,
-        TensorRepresentation, TensorRepresentationEntry,
+        RepresentationPlan, TensorId, TensorRepresentation, TensorRepresentationEntry,
     };
 
     let manifest = &compiled.manifest;

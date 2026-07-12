@@ -19,6 +19,7 @@
 //! panics, the worker records the panic payload in a shared slot, signals
 //! completion, and continues spinning.  `run()` checks the shared panic slot
 //! after all workers finish and re-panics with the original message if one
+use crate::log_warn;
 /// was recorded.
 ///
 /// ## Safety
@@ -33,7 +34,6 @@
 #[cfg(target_os = "macos")]
 use std::any::Any;
 use std::hint::spin_loop;
-use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};

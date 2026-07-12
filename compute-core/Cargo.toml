@@ -106,6 +106,9 @@ flux-klein-mlx = []
 backend-metal = ["dep:mpsgraph"]
 generation-features-moved-to-separate-crates = []
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("generation-image", "generation-diffusion", "generation-video", "generation-audio-core", "generation-asr", "generation-tts", "generation-audio"))'] }
+
 [[bin]]
 name = "prism"
 path = "src/bin/prism.rs"

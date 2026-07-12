@@ -49,10 +49,9 @@ impl CompilerSystem for CatalogValidationSystem {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_validates_selected_kernels() {
         let mut world = CompWorld::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
@@ -73,7 +72,7 @@ mod tests {
     }
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_skips_kernels_without_selection() {
         let mut world = CompWorld::new();
         world.spawn(EntityKind::Kernel, None);
@@ -84,7 +83,7 @@ mod tests {
     }
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_empty_world() {
         let mut world = CompWorld::new();
         let system = CatalogValidationSystem;

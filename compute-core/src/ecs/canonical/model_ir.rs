@@ -46,7 +46,7 @@ pub struct ModelConfiguration {
 }
 
 /// Unique identifier for a tensor within a ModelIr.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TensorId(pub usize);
 
 /// Describes a single tensor in the model: its name, shape, and data source.

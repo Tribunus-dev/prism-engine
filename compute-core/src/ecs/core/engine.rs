@@ -14,16 +14,13 @@
 
 use std::path::PathBuf;
 
-use crate::ecs::engine_error::{EngineError, EngineErrorCode};
-use crate::ecs::model_store::{InstalledModel, ModelStore};
-use crate::ecs::streaming::GenerationHandle;
-use crate::ecs::worker_protocol::StartGenerationPayload;
-
 use crate::ecs::backend::accelerate::AccelerateBackend;
 use crate::ecs::backend::heterogeneous_executor::BackendInstance;
+#[cfg(feature = "mlx-backend")]
+use crate::ecs::backend::routing::BACKEND_MLX;
 use crate::ecs::backend::routing::{
     BackendExecutionReceipt, BackendId, ComputeRouteProfile, OperationDescriptor, OperationFamily,
-    BACKEND_ACCELERATE, BACKEND_MLX,
+    BACKEND_ACCELERATE,
 };
 #[cfg(feature = "mlx-backend")]
 use crate::ecs::backend::MlxBackend;
@@ -38,14 +35,20 @@ use crate::ecs::compute_image::compile::ternary::{
 use crate::ecs::compute_image::{
     clear_mlx_cache, mlx_active_memory_bytes, mlx_cache_memory_bytes, mlx_get_memory_limit,
 };
+use crate::ecs::engine_error::{EngineError, EngineErrorCode};
 #[cfg(feature = "mlx-backend")]
 use crate::ecs::hybrid_profile::{HybridExecutor, HybridProfile};
+use crate::ecs::model_store::{InstalledModel, ModelStore};
 use crate::ecs::runtime::world::World;
-use crate::ecs::scheduling::PhaseKind;
+#[cfg(feature = "mlx-backend")]
+use crate::ecs::scheduling::token_budget::PhaseKind;
 #[cfg(feature = "mlx-backend")]
 use crate::ecs::scheduling::{
     Scheduler, SchedulerConfig, TokenBudgetConfig, TokenBudgetScheduler, TokenWorkUnit,
 };
+use crate::ecs::streaming::GenerationHandle;
+#[cfg(feature = "mlx-backend")]
+use crate::worker_protocol::StartGenerationPayload;
 use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
@@ -232,6 +235,7 @@ pub struct ComputeEngine {
     /// Peak active memory observed during the most recent inference cycle (bytes).
     peak_memory_used: u64,
     /// Cumulative number of backend fallback events (read from executor static).
+    #[allow(dead_code)]
     fallback_count: u64,
     ecs_world: Option<World>,
     ecs_schedule: Option<crate::runtime::scheduling::schedule::Schedule>,
@@ -1087,6 +1091,7 @@ impl BackendInstance for MlxBackend {
 // shares the backend across threads, so moving the struct between
 // threads before registration is safe.
 unsafe impl Send for AccelerateBackend {}
+unsafe impl Sync for AccelerateBackend {}
 
 impl BackendInstance for AccelerateBackend {
     fn backend_kind(&self) -> BackendId {
@@ -1146,8 +1151,8 @@ pub fn classify_workload(req: &GenerationRequest) -> crate::model_runtime::Workl
 
 #[cfg(test)]
 mod qualification_budget_tests {
-    /// Re-export constants from engine_policy for test coverage.
-    use crate::engine_policy;
+    #[cfg(feature = "mlx-backend")]
+    use crate::ecs::core::engine_policy;
 
     #[cfg(feature = "mlx-backend")]
     #[test]
@@ -1175,6 +1180,7 @@ mod tests {
     use crate::ecs::model_runtime::ModelRuntime;
     #[cfg(feature = "mlx-backend")]
     use crate::ecs::model_runtime::WorkloadClass;
+    #[cfg(feature = "mlx-backend")]
     use std::path::Path;
 
     #[test]

@@ -1,4 +1,10 @@
 //! Prism V1 Runtime Representation conformance: INT8 Tile640.
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+))]
 //!
 //! Validates symmetric quantization invariants, code range constraints,
 //! payload byte formulas per spec §10.3, full/partial tile reconstruction,

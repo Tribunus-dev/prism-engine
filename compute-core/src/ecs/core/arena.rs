@@ -64,6 +64,7 @@ extern "C" {
 /// - Allocated by `Arena::new`
 /// - Borrowed by backends under leases (writer-exclusive or reader-shared)
 /// - Freed when dropped (IOSurface + CVPixelBuffer released)
+#[derive(Debug)]
 pub struct Arena {
     pub info: ArenaInfo,
     pub dtype: DataType,

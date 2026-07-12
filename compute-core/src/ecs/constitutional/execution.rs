@@ -726,7 +726,7 @@ mod tests {
         );
 
         // Execute
-        let (epoch, event) = cmd.execute(&mut world, &reg).unwrap();
+        let (_epoch, event) = cmd.execute(&mut world, &reg).unwrap();
         assert_eq!(event.kind, "lease_acquired");
         assert_eq!(event.payload["lease_id"], 4); // 4th entity
     }

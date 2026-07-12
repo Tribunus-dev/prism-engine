@@ -1,4 +1,11 @@
 //! Determinism and coverage tests for the variant system and coverage
+//!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+))]
 //! analysis.
 //!
 //! These tests verify that:

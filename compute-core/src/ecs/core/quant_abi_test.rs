@@ -7,10 +7,16 @@
 //! Run with:
 //!   cargo test -p tribunus-compute-core -- quant_abi --nocapture
 
+#[cfg(test)]
+#[cfg(test)]
 use mlx_rs::ops;
+#[cfg(test)]
+#[cfg(test)]
 use mlx_rs::Array;
 
+#[cfg(test)]
 /// Generate a deterministic f32 matrix for quantization testing.
+#[allow(dead_code)]
 fn test_matrix(rows: u32, cols: u32) -> Vec<f32> {
     (0..(rows * cols) as usize)
         .map(|i| {
@@ -22,13 +28,17 @@ fn test_matrix(rows: u32, cols: u32) -> Vec<f32> {
         .collect()
 }
 
+#[cfg(test)]
 /// Native MLX quantization reference.
+#[allow(dead_code)]
 fn mlx_quantize_reference(matrix: &[f32], rows: u32, cols: u32) -> (Array, Array, Array) {
     let src = Array::from_slice(matrix, &[rows as i32, cols as i32]);
     ops::quantize(&src, 64, 4).unwrap()
 }
 
+#[cfg(test)]
 /// Tribunus compiler quantization reference.
+#[allow(dead_code)]
 fn tribunus_quantize_int4(matrix: &[f32]) -> (Vec<u32>, f32, f32) {
     crate::ecs::compute_image::compile::quantize_int4_group(matrix)
 }

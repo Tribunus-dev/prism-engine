@@ -1,5 +1,10 @@
 //! Integration tests for Core ML Minimal Reproducer.
 //!
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
+//!
 //! Tests the structural verifier on negative fixtures to confirm it catches
 //! the exact class of bugs it is designed to prevent.
 

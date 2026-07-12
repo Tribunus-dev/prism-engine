@@ -1,4 +1,11 @@
 //! E5A — Deterministic open/prepare/execute fixture.
+//!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "ffi"
+))]
 //! Validates that the schema types construct deterministically.
 
 #[cfg(test)]

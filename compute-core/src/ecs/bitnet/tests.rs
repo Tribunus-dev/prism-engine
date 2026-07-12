@@ -5,8 +5,6 @@
 use crate::ecs::bitnet::importer::BitNetImporter;
 use crate::ecs::bitnet::phases;
 use crate::ecs::cimage::*;
-use crate::ternary::codec::TernaryPackedTensor;
-use crate::ternary::pack::unpack_ternary_codes;
 
 /// Verify that a BitNet ternary cimage can be serialised and validated.
 #[test]

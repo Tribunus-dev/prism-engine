@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ecs::compilation::ane_eligibility::AneEligibility;
 use crate::ecs::compilation::phase_ir::{PhaseRegion, RegionId};
-use crate::ecs::compilation::region_catalogue::{RegionAdmission, RegionCatalogue};
+use crate::ecs::compilation::region_catalogue::RegionAdmission;
 #[cfg(feature = "legacy_mutations")]
 use crate::model_adapter::CanonicalModel;
 

@@ -238,12 +238,9 @@ impl CompilerSystem for VariantSelectionSystem {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::ecs::component::aot::CompEntityRef;
-    use crate::ecs::plan::KernelTemplateId;
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_selects_variant_by_group() {
         let mut world = CompWorld::new();
         let parent = world.spawn(EntityKind::Kernel, None);
@@ -277,7 +274,7 @@ mod tests {
     }
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_empty_variants_noop() {
         let mut world = CompWorld::new();
         let system = VariantSelectionSystem;
@@ -286,7 +283,7 @@ mod tests {
     }
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_profile_from_str_roundtrip() {
         let profiles = [
             AppleSiliconProfileId::M1,
@@ -304,7 +301,7 @@ mod tests {
     }
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_score_variant_exact_match() {
         let data = KernelVariantEntityData {
             profile_id: "apple_m4_max".into(),
@@ -320,7 +317,7 @@ mod tests {
     }
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_score_variant_same_gen() {
         let data = KernelVariantEntityData {
             profile_id: "apple_m4".into(),
@@ -336,7 +333,7 @@ mod tests {
     }
 
     #[cfg(feature = "legacy_mutations")]
-#[test]
+    #[test]
     fn test_score_variant_diff_gen() {
         let data = KernelVariantEntityData {
             profile_id: "apple_m1".into(),

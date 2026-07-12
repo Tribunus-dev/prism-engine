@@ -562,7 +562,6 @@ pub(crate) fn load_gguf_source(
 ) -> crate::Result<LoadedSource> {
     use crate::gguf;
     use std::fs;
-    use std::io::Write;
 
     // 1. Parse GGUF header
     let (metadata, tensors) = gguf::parse_gguf_header(gguf_path)
@@ -592,18 +591,19 @@ pub(crate) fn load_gguf_source(
 
     let arch_type = gguf::meta_str(&metadata, "general.architecture").unwrap_or("unknown");
 
-    // 3. Write a temporary config.json for adapter validation
-    let tmp_dir =
-        tempfile::tempdir().map_err(|e| crate::Error::from_reason(format!("tempdir: {e}")))?;
-    let config_path = tmp_dir.path().join("config.json");
-    let architecture_name = match arch.model_type.as_str() {
-        "gemma4" => "Gemma4ForCausalLM",
-        "gemma" | "gemma2" => "GemmaForCausalLM",
-        "llama" => "LlamaForCausalLM",
-        _ => "LlamaForCausalLM",
-    };
     #[cfg(feature = "legacy_mutations")]
     {
+        use std::io::Write;
+        // 3. Write a temporary config.json for adapter validation
+        let tmp_dir =
+            tempfile::tempdir().map_err(|e| crate::Error::from_reason(format!("tempdir: {e}")))?;
+        let config_path = tmp_dir.path().join("config.json");
+        let architecture_name = match arch.model_type.as_str() {
+            "gemma4" => "Gemma4ForCausalLM",
+            "gemma" | "gemma2" => "GemmaForCausalLM",
+            "llama" => "LlamaForCausalLM",
+            _ => "LlamaForCausalLM",
+        };
         let json = serde_json::json!({
             "architectures": [architecture_name],
             "model_type": arch.model_type,

@@ -10,7 +10,6 @@ use crate::ecs::component::engine::{
 };
 use crate::ecs::core::model_store::ModelStore;
 use crate::ecs::streaming::GenerationEvent;
-
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------
@@ -448,7 +447,7 @@ use crate::ecs::component::engine::HostInferenceHandle;
 #[cfg(feature = "mlx-backend")]
 use crate::ecs::{
     backend::accelerate::AccelerateBackend,
-    hybrid_profile::{HybridExecutor, HybridProfile},
+    core::hybrid_profile::{HybridExecutor, HybridProfile},
     scheduling::{Scheduler, SchedulerConfig, TokenBudgetConfig, TokenBudgetScheduler},
 };
 
@@ -473,7 +472,7 @@ impl CompilerSystem for HostInferenceInitSystem {
         let scheduler = Scheduler::new(config);
 
         // Create a default HybridProfile.
-        let profile = HybridProfile::default();
+        let profile = HybridProfile::dev_default();
         let mut executor = HybridExecutor::new(profile);
         executor.register_mlx(Box::new(crate::ecs::backend::MlxBackend::new()));
         executor.register_accelerate(Box::new(AccelerateBackend::new()));
@@ -498,20 +497,35 @@ impl CompilerSystem for HostInferenceInitSystem {
 // -- mlx-backend resource components (defined regardless, only used with cfg) --
 
 #[cfg(feature = "mlx-backend")]
-#[derive(Debug)]
 struct SchedulerComponent(Scheduler);
+#[cfg(feature = "mlx-backend")]
+impl std::fmt::Debug for SchedulerComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SchedulerComponent").finish()
+    }
+}
 #[cfg(feature = "mlx-backend")]
 impl Component for SchedulerComponent {}
 
 #[cfg(feature = "mlx-backend")]
-#[derive(Debug)]
 struct HybridExecutorComponent(HybridExecutor);
+#[cfg(feature = "mlx-backend")]
+impl std::fmt::Debug for HybridExecutorComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HybridExecutorComponent").finish()
+    }
+}
 #[cfg(feature = "mlx-backend")]
 impl Component for HybridExecutorComponent {}
 
 #[cfg(feature = "mlx-backend")]
-#[derive(Debug)]
 struct TokenBudgetSchedulerComponent(TokenBudgetScheduler);
+#[cfg(feature = "mlx-backend")]
+impl std::fmt::Debug for TokenBudgetSchedulerComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenBudgetSchedulerComponent").finish()
+    }
+}
 #[cfg(feature = "mlx-backend")]
 impl Component for TokenBudgetSchedulerComponent {}
 
@@ -604,13 +618,22 @@ impl CompilerSystem for InferenceCycleSystem {
         };
 
         // Get the scheduler and executor from the engine singleton.
-        let scheduler = world.get_component_mut::<SchedulerComponent>(engine_entity);
-        let executor = world.get_component_mut::<HybridExecutorComponent>(engine_entity);
+        // Use raw pointers to satisfy the borrow checker: these are
+        // distinct component types that do not overlap.
+        let scheduler_ptr: *mut Scheduler = world
+            .get_component_mut::<SchedulerComponent>(engine_entity)
+            .map(|s| &mut s.0 as *mut Scheduler)
+            .unwrap_or(std::ptr::null_mut());
+        let executor_ptr: *mut HybridExecutor = world
+            .get_component_mut::<HybridExecutorComponent>(engine_entity)
+            .map(|e| &mut e.0 as *mut HybridExecutor)
+            .unwrap_or(std::ptr::null_mut());
 
-        let (scheduler, executor) = match (scheduler, executor) {
-            (Some(s), Some(e)) => (&mut s.0, &mut e.0),
-            _ => return Ok(()), // Not initialised — skip.
-        };
+        if scheduler_ptr.is_null() || executor_ptr.is_null() {
+            return Ok(()); // Not initialised — skip.
+        }
+        let scheduler = unsafe { &mut *scheduler_ptr };
+        let executor = unsafe { &mut *executor_ptr };
 
         // 1. Get next batch from the scheduler.
         let batch = scheduler.next_batch();
@@ -668,13 +691,22 @@ impl CompilerSystem for TokenBudgetInferenceSystem {
 
         // Collect mutable references to all three components at once,
         // then work on them.
-        let tbs = world.get_component_mut::<TokenBudgetSchedulerComponent>(engine_entity);
-        let executor = world.get_component_mut::<HybridExecutorComponent>(engine_entity);
+        // Use raw pointers to satisfy the borrow checker: these are
+        // distinct component types that do not overlap.
+        let tbs_ptr: *mut TokenBudgetScheduler = world
+            .get_component_mut::<TokenBudgetSchedulerComponent>(engine_entity)
+            .map(|t| &mut t.0 as *mut TokenBudgetScheduler)
+            .unwrap_or(std::ptr::null_mut());
+        let executor_ptr: *mut HybridExecutor = world
+            .get_component_mut::<HybridExecutorComponent>(engine_entity)
+            .map(|e| &mut e.0 as *mut HybridExecutor)
+            .unwrap_or(std::ptr::null_mut());
 
-        let (tbs, executor) = match (tbs, executor) {
-            (Some(t), Some(e)) => (&mut t.0, &mut e.0),
-            _ => return Ok(()),
-        };
+        if tbs_ptr.is_null() || executor_ptr.is_null() {
+            return Ok(());
+        }
+        let tbs = unsafe { &mut *tbs_ptr };
+        let executor = unsafe { &mut *executor_ptr };
 
         // Reset budget and schedule.
         tbs.reset_budget();

@@ -23,10 +23,14 @@ type F16 = u16;
 #[link(name = "accelerate", kind = "framework")]
 extern "C" {
     fn vDSP_vflt16(A: *const F16, IA: i32, C: *mut f32, IC: i32, N: i32);
+    #[allow(dead_code)]
     fn vDSP_vadd(A: *const f32, IA: i32, B: *const f32, IB: i32, C: *mut f32, IC: i32, N: i32);
+    #[allow(dead_code)]
     fn vDSP_vsub(A: *const f32, IA: i32, B: *const f32, IB: i32, C: *mut f32, IC: i32, N: i32);
     fn vDSP_maxv(A: *const f32, IA: i32, C: *mut f32, N: i32);
+    #[allow(dead_code)]
     fn vDSP_vsdiv(A: *const f32, IA: i32, B: *const f32, C: *mut f32, IC: i32, N: i32);
+    #[allow(dead_code)]
     fn vDSP_vclip(
         A: *const f32,
         IA: i32,
@@ -91,7 +95,7 @@ fn fwht_256_batch(buf: &mut [f32], n_blocks: usize) {
     while stride < 256 {
         for i in 0..n_blocks {
             let off = i * block;
-            let half_end = off + 128;
+            let _half_end = off + 128;
             for j in (off..off + 256).step_by(stride * 2) {
                 for k in j..j + stride {
                     let a = buf[k];
@@ -128,7 +132,7 @@ fn pack_256_accel(buf: &[f32], block_idx: usize) -> [u8; 80] {
         unsafe {
             vDSP_maxv(buf.as_ptr().add(sb_base), 1, &mut max_val, 32);
         }
-        let mut min_val: f32 = 0.0;
+        let _min_val: f32 = 0.0;
         // For abs max, take max of (max, -min). Use vDSP_maxv on abs buffer.
         // Simple approach: compute abs max in a small scalar loop (32 iterations)
         let mut abs_max = 0.0f32;
@@ -179,7 +183,7 @@ fn fp16b_to_f32(b: [u8; 2]) -> f32 {
     s * (1.0 + m as f32 / 1024.0) * 2.0f32.powi(e as i32 - 15)
 }
 
-fn decompress_256(bytes: &[u8], block_idx: usize) -> [f32; PAD] {
+fn decompress_256(bytes: &[u8], _block_idx: usize) -> [f32; PAD] {
     let mut buf = [0.0f32; PAD];
     for sb in 0..8 {
         let off = sb * 10;

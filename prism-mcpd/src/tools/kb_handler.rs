@@ -95,6 +95,7 @@ impl McpHandler for SearchKbHandler {
     }
 }
 
+#[allow(dead_code)]
 pub struct SearchResultRow {
     section_id: String,
     document_id: String,

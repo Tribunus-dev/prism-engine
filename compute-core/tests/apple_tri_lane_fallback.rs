@@ -1,5 +1,14 @@
 //! ANE-TRI-LANE-REALIZATION-0001 Phase 7: Fallback activation soak.
 //!
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios",
+    feature = "candle-cpu",
+    feature = "intel",
+    feature = "tensix"
+))]
+//!
 //! Verifies that when a slot is poisoned (simulating ANE lane failure), the
 //! runtime correctly activates the fallback lane and output continuity is
 //! preserved across the failure boundary.

@@ -1,4 +1,4 @@
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Receiver;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

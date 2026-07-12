@@ -45,6 +45,25 @@ pub struct HybridProfile {
     pub compute_units: ComputeUnits,
 }
 
+impl Default for HybridProfile {
+    fn default() -> Self {
+        Self {
+            root_model_hash: String::new(),
+            compute_image_hash: String::new(),
+            version: 0,
+            mlx_regions: Vec::new(),
+            coreai_islands: Vec::new(),
+            boundary_tensors: Vec::new(),
+            execution_order: Vec::new(),
+            fallback: FallbackPolicy::MlxFallback,
+            required_capabilities: Vec::new(),
+            min_os_version: String::new(),
+            storage_abi: String::new(),
+            compute_units: ComputeUnits::All,
+        }
+    }
+}
+
 /// An MLX execution region — pure MLX operations that run before or after Core ML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MlxRegion {
@@ -242,6 +261,24 @@ impl HybridProfile {
         }
         Ok(())
     }
+
+    /// Create a minimal dev/default profile for testing.
+    pub fn dev_default() -> Self {
+        Self {
+            root_model_hash: "dev".into(),
+            compute_image_hash: "dev".into(),
+            version: 1,
+            mlx_regions: vec![],
+            coreai_islands: vec![],
+            boundary_tensors: vec![],
+            execution_order: vec![],
+            fallback: FallbackPolicy::MlxOnly,
+            required_capabilities: vec![],
+            min_os_version: "14.0".into(),
+            storage_abi: "v1".into(),
+            compute_units: ComputeUnits::CpuAndGpu,
+        }
+    }
 }
 
 // ── HybridExecutor ────────────────────────────────────────────────────────────
@@ -252,9 +289,26 @@ impl HybridProfile {
 /// through the optional IOSurface allocator for zero-copy sharing.
 pub struct HybridExecutor {
     profile: HybridProfile,
-    mlx_backend: Option<Box<dyn BackendInstance + Send>>,
-    accelerate_backend: Option<Box<dyn BackendInstance + Send>>,
+    mlx_backend: Option<Box<dyn BackendInstance + Send + Sync>>,
+    accelerate_backend: Option<Box<dyn BackendInstance + Send + Sync>>,
     allocator: Option<Arc<IosurfaceAllocator>>,
+}
+
+impl std::fmt::Debug for HybridExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HybridExecutor")
+            .field("profile", &self.profile)
+            .field(
+                "mlx_backend",
+                &self.mlx_backend.as_ref().map(|_| "Some(...)"),
+            )
+            .field(
+                "accelerate_backend",
+                &self.accelerate_backend.as_ref().map(|_| "Some(...)"),
+            )
+            .field("allocator", &self.allocator)
+            .finish()
+    }
 }
 
 impl HybridExecutor {
@@ -270,12 +324,12 @@ impl HybridExecutor {
     }
 
     /// Register the MLX backend instance.
-    pub fn register_mlx(&mut self, backend: Box<dyn BackendInstance + Send>) {
+    pub fn register_mlx(&mut self, backend: Box<dyn BackendInstance + Send + Sync>) {
         self.mlx_backend = Some(backend);
     }
 
     /// Register the Accelerate backend instance.
-    pub fn register_accelerate(&mut self, backend: Box<dyn BackendInstance + Send>) {
+    pub fn register_accelerate(&mut self, backend: Box<dyn BackendInstance + Send + Sync>) {
         self.accelerate_backend = Some(backend);
     }
 
