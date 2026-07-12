@@ -45,7 +45,44 @@ use crate::ecs::cimage_runtime::tensor_store::{RuntimeTensor, RuntimeTensorStore
 use crate::quantization::admission::ternary::TernaryMetalExecutionReceipt;
 use crate::ternary::codec::TernaryPackedTensor;
 use crate::ternary::pack::pack_ternary_codes;
+use metal::ComputeCommandEncoderRef;
+use std::ops::Deref;
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+/// RAII guard for a Metal compute encoder that calls `end_encoding()` on drop.
+/// Prevents SIGABRT ("Command encoder released without endEncoding") on early
+/// returns and panics.
+struct AutoEncoder<'a> {
+    inner: Option<&'a ComputeCommandEncoderRef>,
+}
+
+impl<'a> AutoEncoder<'a> {
+    fn new(enc: &'a ComputeCommandEncoderRef) -> Self {
+        Self { inner: Some(enc) }
+    }
+}
+
+impl<'a> Deref for AutoEncoder<'a> {
+    type Target = ComputeCommandEncoderRef;
+    fn deref(&self) -> &ComputeCommandEncoderRef {
+        self.inner.as_ref().expect("AutoEncoder already consumed")
+    }
+}
+
+impl<'a> Drop for AutoEncoder<'a> {
+    fn drop(&mut self) {
+        if let Some(enc) = self.inner.take() {
+            enc.end_encoding();
+        }
+    }
+}
+
+/// Manually end encoding and consume the AutoEncoder.
+fn auto_end_encoding<'a>(mut ae: AutoEncoder<'a>) {
+    if let Some(enc) = ae.inner.take() {
+        enc.end_encoding();
+    }
+}
 
 /// Map an op index in the 7-op MLP shard plan to a Metal kernel function name.
 ///
@@ -602,7 +639,7 @@ impl CImageMetalRegionRunner {
         // 6. Encode and dispatch.
         let encode_start = Instant::now();
         let cb = self.queue.new_command_buffer();
-        let enc = cb.new_compute_command_encoder();
+        let enc = AutoEncoder::new(cb.new_compute_command_encoder());
 
         for (op_index, op) in ops.iter().enumerate() {
             let fn_name = op_index_to_function_name(op_index);
@@ -659,7 +696,7 @@ impl CImageMetalRegionRunner {
             enc.dispatch_thread_groups(grid, tg);
         }
 
-        enc.end_encoding();
+        auto_end_encoding(enc);
 
         let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -1015,7 +1052,7 @@ impl CImageMetalRegionRunner {
         // 7. Encode and dispatch.
         let encode_start = Instant::now();
         let cb = self.queue.new_command_buffer();
-        let enc = cb.new_compute_command_encoder();
+        let enc = AutoEncoder::new(cb.new_compute_command_encoder());
 
         for (op_index, op) in ops.iter().enumerate() {
             let fn_name = decoder_op_index_to_function_name(op_index);
@@ -1056,7 +1093,7 @@ impl CImageMetalRegionRunner {
             enc.dispatch_thread_groups(grid, tg);
         }
 
-        enc.end_encoding();
+        auto_end_encoding(enc);
         let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
 
         let cmd_start = Instant::now();
@@ -1194,7 +1231,7 @@ impl CImageMetalRegionRunner {
         // 7. Get PSO and dispatch.
         let pso = self.get_or_create_pso("cimage_ternary_gemv_v1")?;
         let cb = self.queue.new_command_buffer();
-        let enc = cb.new_compute_command_encoder();
+        let enc = AutoEncoder::new(cb.new_compute_command_encoder());
         enc.set_compute_pipeline_state(&pso);
         enc.set_buffer(0, Some(&act_buf), 0);
         enc.set_buffer(1, Some(&codes_buf), 0);
@@ -1205,7 +1242,7 @@ impl CImageMetalRegionRunner {
         let grid = metal::MTLSize::new(rows as u64, 1, 1);
         let tg = metal::MTLSize::new(1, 1, 1);
         enc.dispatch_thread_groups(grid, tg);
-        enc.end_encoding();
+        auto_end_encoding(enc);
         cb.commit();
         cb.wait_until_completed();
 
@@ -1567,7 +1604,7 @@ impl CImageMetalRegionRunner {
         // Helper: dispatch a batch of f32 ops by index range.
         let dispatch_f32_segment = |start: usize, end: usize| -> CImageRuntimeResult<()> {
             let cb = queue.new_command_buffer();
-            let enc = cb.new_compute_command_encoder();
+            let enc = AutoEncoder::new(cb.new_compute_command_encoder());
             for idx in start..=end {
                 let op = &ops[idx];
                 let fn_name = bitnet_decoder_op_index_to_function_name(idx);
@@ -1601,7 +1638,7 @@ impl CImageMetalRegionRunner {
                     ),
                 );
             }
-            enc.end_encoding();
+            auto_end_encoding(enc);
             cb.commit();
             cb.wait_until_completed();
             Ok(())
@@ -1689,7 +1726,7 @@ impl CImageMetalRegionRunner {
             let scales_buf_id = format!("{proj_name}_scales");
 
             let t_cb = queue.new_command_buffer();
-            let t_enc = t_cb.new_compute_command_encoder();
+            let t_enc = AutoEncoder::new(t_cb.new_compute_command_encoder());
 
             // 1. f32 → half (GPU).
             let f2h_pso = self
@@ -1737,7 +1774,7 @@ impl CImageMetalRegionRunner {
                 metal::MTLSize::new(1, 1, 1),
             );
 
-            t_enc.end_encoding();
+            auto_end_encoding(t_enc);
             t_cb.commit();
             t_cb.wait_until_completed();
             Ok(())
@@ -2281,7 +2318,7 @@ impl CImageMetalRegionRunner {
 
                 let dispatch_f32_segment = |start: usize, end: usize| -> CImageRuntimeResult<()> {
                     let cb = queue.new_command_buffer();
-                    let enc = cb.new_compute_command_encoder();
+                    let enc = AutoEncoder::new(cb.new_compute_command_encoder());
                     for idx in start..=end {
                         let op = &ops[idx];
                         let fn_name = bitnet_decoder_op_index_to_function_name(idx);
@@ -2315,7 +2352,7 @@ impl CImageMetalRegionRunner {
                             ),
                         );
                     }
-                    enc.end_encoding();
+                    auto_end_encoding(enc);
                     cb.commit();
                     cb.wait_until_completed();
                     Ok(())
@@ -2396,9 +2433,9 @@ impl CImageMetalRegionRunner {
                         let scales_buf_id = format!("{proj_name}_scales");
 
                         let t_cb = queue.new_command_buffer();
-                        let t_enc = t_cb.new_compute_command_encoder();
+                        let t_enc = AutoEncoder::new(t_cb.new_compute_command_encoder());
 
-                        // 1. f32 → half (GPU).
+                        // 1. f32 -> half (GPU).
                         let f2h_pso = self
                             .pso_map
                             .get("cimage_f32_to_half")
@@ -2444,7 +2481,7 @@ impl CImageMetalRegionRunner {
                             metal::MTLSize::new(1, 1, 1),
                         );
 
-                        t_enc.end_encoding();
+                        auto_end_encoding(t_enc);
                         t_cb.commit();
                         t_cb.wait_until_completed();
                         Ok(())

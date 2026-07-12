@@ -36,6 +36,10 @@ pub struct CompileRequest {
     pub target_lanes: Vec<super::execution_graph::ExecutionLane>,
     pub policy_path: Option<String>,
     pub quant_mode: Option<String>,
+    /// Authority mode: "sealed" | "test_fixture" | None (unchecked)
+    pub authority: Option<String>,
+    /// Path to a draft GGUF model for speculative decoding
+    pub draft_path: Option<String>,
 }
 
 impl Default for CompileRequest {
@@ -47,6 +51,8 @@ impl Default for CompileRequest {
             target_lanes: Vec::new(),
             policy_path: None,
             quant_mode: None,
+            authority: None,
+            draft_path: None,
         }
     }
 }

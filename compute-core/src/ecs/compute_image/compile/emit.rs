@@ -1,6 +1,7 @@
 //! Tensor emission helpers — writes source tensors into the ImageBuilder
 //! segment pipeline, handles quantized weight triplets, builds the
 //! source identity / manifest hash for deterministic compilation.
+#![allow(dead_code)]
 
 use crate::ecs::compute_image::compile::source::{source_tensor_view, SourceTensor};
 use crate::ecs::compute_image::manifest::{
@@ -9,6 +10,7 @@ use crate::ecs::compute_image::manifest::{
 };
 use crate::ecs::config::PackedLinearShapes;
 use memmap2::Mmap;
+#[cfg(feature = "mlx-backend")]
 use mlx_rs::Array;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -347,6 +349,7 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 // MLX dtype → array conversion
 // ═══════════════════════════════════════════════════════════════════════════
 
+#[cfg(feature = "mlx-backend")]
 #[allow(dead_code)]
 pub(crate) fn dtype_to_array(bytes: &[u8], dtype: &str, shape: &[u32]) -> crate::Result<Array> {
     let dims = shape.iter().map(|&dim| dim as i32).collect::<Vec<_>>();

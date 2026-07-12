@@ -690,7 +690,6 @@ fn compile_gguf(
             None
         }
     });
-    #[cfg(not(all(feature = "prism-backend", feature = "mlx-backend")))]
     let _ = (&target, &quantize_mode);
 
     eprintln!(
@@ -752,39 +751,38 @@ fn compile_gguf(
         let _ = &authority;
 
         let new_pipeline_result = if let Some(draft_path) = draft {
-            // Speculative compilation with draft GGUF.
-            // TODO(M2): Route through PrismCompiler when speculative + authority support is added.
-            let gguf_str = gguf_path.to_string_lossy();
-            let draft_str = draft_path.to_string_lossy();
-            let out_str = output_path.to_string_lossy();
-            tribunus_compute_core::compute_image::compile::compile_gguf_speculative(
-                &gguf_str,
-                &draft_str,
-                &out_str,
-                authority,
-                quantize_mode,
-                target,
-            )
-            .map(|_| ())
+            // Speculative compilation with draft GGUF — routed through PrismCompiler.
+            use tribunus_compute_core::ecs::aot::prism_compiler::PrismCompiler;
+            use tribunus_compute_core::ecs::canonical::compile_plan::CompileRequest;
+            let compiler = PrismCompiler::default();
+            let request = CompileRequest {
+                source_path: gguf_path.to_string_lossy().to_string(),
+                output_path: Some(output_path.to_string_lossy().to_string()),
+                quant_mode: raw_quant.map(|s| s.to_string()),
+                authority: Some(authority.to_string()),
+                draft_path: Some(draft_path.to_string_lossy().to_string()),
+                ..Default::default()
+            };
+            compiler
+                .compile_speculative(request)
+                .map(|_| ())
+                .map_err(|e| tribunus_compute_core::Error::from_reason(e))
         } else if matches!(authority, CompilationAuthority::SealedComputeImage) {
-            // Authority-gated compilation.
-            // TODO(M2): Route through PrismCompiler when authority support is added.
-            let gguf_str = gguf_path.to_string_lossy();
-            let out_str = output_path.to_string_lossy();
-            let ane_str = _ane_models_dir.map(|p| p.to_string_lossy().into_owned());
-            let metal_str = _metallib_path.map(|p| p.to_string_lossy().into_owned());
-            let mlx_str = _mlx_capture_dir.map(|p| p.to_string_lossy().into_owned());
-            tribunus_compute_core::compute_image::compile::compile_gguf_with_authority(
-                &gguf_str,
-                &out_str,
-                authority,
-                quantize_mode,
-                target,
-                ane_str.as_deref(),
-                metal_str.as_deref(),
-                mlx_str.as_deref(),
-            )
-            .map(|_| ())
+            // Authority-gated compilation — routed through PrismCompiler.
+            use tribunus_compute_core::ecs::aot::prism_compiler::PrismCompiler;
+            use tribunus_compute_core::ecs::canonical::compile_plan::CompileRequest;
+            let compiler = PrismCompiler::default();
+            let request = CompileRequest {
+                source_path: gguf_path.to_string_lossy().to_string(),
+                output_path: Some(output_path.to_string_lossy().to_string()),
+                quant_mode: raw_quant.map(|s| s.to_string()),
+                authority: Some(authority.to_string()),
+                ..Default::default()
+            };
+            compiler
+                .compile(request)
+                .map(|_| ())
+                .map_err(|e| tribunus_compute_core::Error::from_reason(e))
         } else {
             // Unchecked default path — canonical PrismCompiler API.
             use tribunus_compute_core::ecs::aot::prism_compiler::PrismCompiler;
@@ -793,7 +791,6 @@ fn compile_gguf(
             let request = CompileRequest {
                 source_path: gguf_path.to_string_lossy().to_string(),
                 output_path: Some(output_path.to_string_lossy().to_string()),
-                // Use the original CLI string so PrismCompiler can parse it back.
                 quant_mode: raw_quant.map(|s| s.to_string()),
                 ..Default::default()
             };

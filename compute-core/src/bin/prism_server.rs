@@ -855,9 +855,8 @@ async fn chat_completions(
         };
 
         // ── Audio encoding ──────────────────────────────────────────────
-        let _audio_frames = 0usize;
         #[cfg(feature = "mlx-backend")]
-        let audio_frames = if !audio_bytes.is_empty() {
+        let audio_frames: usize = if !audio_bytes.is_empty() {
             let mut total_frames = 0usize;
             for (idx, audio_data) in audio_bytes.iter().enumerate() {
                 match audio_preprocess_accelerate::load_wav_to_f32(audio_data) {
@@ -904,6 +903,8 @@ async fn chat_completions(
         } else {
             0
         };
+        #[cfg(not(feature = "mlx-backend"))]
+        let audio_frames: usize = 0;
 
         (img_embeddings, audio_frames)
     } else {

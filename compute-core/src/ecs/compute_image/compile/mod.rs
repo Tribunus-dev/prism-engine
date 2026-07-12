@@ -4,7 +4,11 @@
 pub mod archive;
 pub mod capability_registry;
 mod download;
-#[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 mod emit;
 #[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
 mod pipeline;
@@ -63,7 +67,8 @@ pub mod validation_matrix;
 pub use download::*;
 #[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
 pub(crate) use emit::*;
-#[cfg(feature = "mlx-backend")] // research surface: MLX compile lane
+#[cfg(feature = "mlx-backend")]
+// research surface: MLX compile lane — pipeline requires mlx-rs
 pub use pipeline::*;
 #[cfg(any(
     feature = "mlx-backend",

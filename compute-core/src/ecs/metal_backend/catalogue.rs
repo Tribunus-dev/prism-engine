@@ -198,9 +198,7 @@ impl MetalImplementationCatalogue {
     /// Register primitive projection kernels (linear, RMSNorm, RoPE, etc.).
     pub fn register_primitives(&mut self) {
         for (name, semantic) in &[
-            ("linear_nf4", "prism.linear.nf4.v1"),
             ("linear_rawf32", "prism.linear.rawf32.v1"),
-            ("rmsnorm", "prism.rmsnorm.v1"),
             ("silu", "prism.silu.v1"),
             ("rope", "prism.rope.partial.v1"),
             ("attention_scores", "prism.attention.scores.v1"),
@@ -242,46 +240,42 @@ impl MetalImplementationCatalogue {
                 buffers: vec![
                     BufferBinding {
                         slot: 0,
-                        name: "weights_packed".into(),
-                        byte_size: 0,
-                        optional: false,
-                    },
-                    BufferBinding {
-                        slot: 1,
-                        name: "scales".into(),
-                        byte_size: 0,
-                        optional: false,
-                    },
-                    BufferBinding {
-                        slot: 2,
                         name: "input".into(),
                         byte_size: 0,
                         optional: false,
                     },
                     BufferBinding {
+                        slot: 1,
+                        name: "codes".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 2,
+                        name: "scales".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
                         slot: 3,
+                        name: "biases".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 4,
                         name: "output".into(),
                         byte_size: 0,
                         optional: false,
                     },
-                ],
-                constants: vec![
-                    ConstantBinding {
-                        index: 0,
-                        name: "in_features".into(),
-                        default_value: None,
-                    },
-                    ConstantBinding {
-                        index: 1,
-                        name: "out_features".into(),
-                        default_value: None,
-                    },
-                    ConstantBinding {
-                        index: 2,
-                        name: "group_size".into(),
-                        default_value: None,
+                    BufferBinding {
+                        slot: 5,
+                        name: "constants".into(),
+                        byte_size: 0,
+                        optional: false,
                     },
                 ],
+                constants: vec![],
                 threadgroup_memory: vec![],
                 dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
                 threads_per_threadgroup: (64, 1, 1),
@@ -453,13 +447,122 @@ mod tests {
             nf4_reg.source_entry_point.is_some(),
             "linear_nf4 should have entry_point"
         );
-        assert!(
-            nf4_reg.abi.buffers.len() >= 4,
-            "linear_nf4 abi should have >=4 buffer bindings"
+        // Verify exact ABI matches the cimage_linear_nf4.metal kernel signature:
+        //   buffer(0): input   (device const float*)
+        //   buffer(1): codes   (device const uchar*)
+        //   buffer(2): scales  (device const float*)
+        //   buffer(3): biases  (device const float*)
+        //   buffer(4): output  (device float*)
+        //   buffer(5): constants (constant MlpConstants&)
+        assert_eq!(
+            nf4_reg.abi.buffers.len(),
+            6,
+            "linear_nf4 abi should have 6 buffer bindings (input, codes, scales, biases, output, constants)"
         );
+        assert_eq!(
+            nf4_reg.abi.buffers[0].name, "input",
+            "buffer(0) should be input"
+        );
+        assert_eq!(nf4_reg.abi.buffers[0].slot, 0, "buffer(0) slot should be 0");
+        assert_eq!(
+            nf4_reg.abi.buffers[1].name, "codes",
+            "buffer(1) should be codes"
+        );
+        assert_eq!(nf4_reg.abi.buffers[1].slot, 1, "buffer(1) slot should be 1");
+        assert_eq!(
+            nf4_reg.abi.buffers[2].name, "scales",
+            "buffer(2) should be scales"
+        );
+        assert_eq!(nf4_reg.abi.buffers[2].slot, 2, "buffer(2) slot should be 2");
+        assert_eq!(
+            nf4_reg.abi.buffers[3].name, "biases",
+            "buffer(3) should be biases"
+        );
+        assert_eq!(nf4_reg.abi.buffers[3].slot, 3, "buffer(3) slot should be 3");
+        assert_eq!(
+            nf4_reg.abi.buffers[4].name, "output",
+            "buffer(4) should be output"
+        );
+        assert_eq!(nf4_reg.abi.buffers[4].slot, 4, "buffer(4) slot should be 4");
+        assert_eq!(
+            nf4_reg.abi.buffers[5].name, "constants",
+            "buffer(5) should be constants (MlpConstants struct)"
+        );
+        assert_eq!(nf4_reg.abi.buffers[5].slot, 5, "buffer(5) slot should be 5");
+        // Kernel uses no Metal function constants — all parameters are passed via buffers
         assert!(
-            nf4_reg.abi.constants.len() >= 3,
-            "linear_nf4 abi should have >=3 constants"
+            nf4_reg.abi.constants.is_empty(),
+            "linear_nf4 should have no function constants (MlpConstants is a buffer at slot 5)"
+        );
+        assert_eq!(
+            nf4_reg.abi.dispatch_geometry,
+            DispatchGeometryPolicy::FromOutputBuffer,
+            "linear_nf4 dispatch should be derived from output buffer size"
+        );
+    }
+
+    #[test]
+    fn test_catalogue_resolves_nf4_linear_with_authoritative_source() {
+        // Prove the catalogue can resolve the NF4 linear kernel with
+        // real source path, entry point, and ABI — the foundation for
+        // migrating production dispatch from include_str! to catalogue lookups.
+        let catalogue = MetalImplementationCatalogue::default();
+
+        // 1. Semantic lookup returns exactly one registration
+        let registrations = catalogue.for_semantic(&KernelSemanticId("prism.linear.nf4.v1".into()));
+        assert_eq!(
+            registrations.len(),
+            1,
+            "expected exactly one NF4 linear registration"
+        );
+
+        // 2. Implementation ID matches
+        let nf4_reg = registrations[0];
+        assert_eq!(nf4_reg.implementation_id.0, "metal.primitive.linear_nf4.v1");
+
+        // 3. Source path is populated and points to the correct template
+        let source_path = nf4_reg
+            .source_path
+            .as_ref()
+            .expect("linear_nf4 should have source_path");
+        assert!(
+            source_path.contains("cimage_linear_nf4.metal"),
+            "source_path should reference cimage_linear_nf4.metal, got: {source_path}"
+        );
+
+        // 4. Entry point matches the kernel function in the .metal file
+        let entry_point = nf4_reg
+            .source_entry_point
+            .as_ref()
+            .expect("linear_nf4 should have source_entry_point");
+        assert_eq!(
+            *entry_point, "cimage_linear_nf4",
+            "entry point should be cimage_linear_nf4"
+        );
+
+        // 5. ABI has the exact 6 buffer slots matching the kernel signature
+        assert_eq!(nf4_reg.abi.buffers.len(), 6);
+        for (i, buf) in nf4_reg.abi.buffers.iter().enumerate() {
+            assert_eq!(
+                buf.slot as usize, i,
+                "buffer slot index should match position for buffer {i}"
+            );
+            assert!(!buf.optional, "all NF4 linear buffers are required");
+        }
+
+        // 6. No function constants — MlpConstants is a constant address-space buffer
+        assert!(nf4_reg.abi.constants.is_empty());
+
+        // 7. Dispatch geometry policy is from output buffer (one thread per output element)
+        assert_eq!(
+            nf4_reg.abi.dispatch_geometry,
+            DispatchGeometryPolicy::FromOutputBuffer
+        );
+
+        // 8. Supported representations include Nf4Tile640
+        assert_eq!(
+            nf4_reg.supported_representations,
+            vec![TensorRepresentation::Nf4Tile640(128)]
         );
     }
 

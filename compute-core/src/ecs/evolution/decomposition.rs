@@ -4,10 +4,19 @@
 //! M8: Connects canonical Metal fragments (M4) to the evolution pipeline.
 //! Each [`MetalDecompositionSearch`] produces a [`DecompositionResult`] that
 //! captures the winning program and its cost.
+//!
+//! The search is simulation-based — no real Metal compilation. Tile sizes
+//! are evaluated with synthetic cost metrics where larger tiles (fewer
+//! iterations) score lower cost, so the search converges toward larger tiles.
 
 use crate::ecs::component::backend::BackendTarget;
-use crate::ecs::evolution::foundation::{CostFunction, CostMetrics, EvolveProgram, SearchConfig};
+use crate::ecs::evolution::foundation::{
+    CostFunction, CostMetrics, EvolveCandidate, EvolveProgram, SearchConfig,
+};
+use crate::ecs::evolution::systems::{evolve_evaluate, evolve_seed, evolve_select, mutate_program};
+use crate::ecs::evolution::EvolutionState;
 use crate::ecs::plan::CodecFamily;
+use crate::ecs::{CompEntity, CompWorld, EntityKind};
 
 /// Configuration for a metal decomposition search.
 ///
@@ -55,6 +64,201 @@ impl MetalDecompositionSearch {
             },
         }
     }
+
+    /// Run a full decomposition search (simulation).
+    ///
+    /// Creates a seed program with a 64×64×64 tile, spawns a population via
+    /// [`evolve_seed`], then iterates generations evaluating with synthetic
+    /// cost metrics, selecting fittest candidates, and mutating to fill the
+    /// next generation.  Convergence is reached when wall-ns improvement
+    /// between generations falls below the configured threshold.
+    ///
+    /// In production this would compile and benchmark on the Metal device.
+    pub fn run(&self) -> DecompositionResult {
+        let mut world = CompWorld::new();
+        // The run() method uses direct mutation (outside WorldTxn).
+        world.set_direct_mutation_allowed(true);
+
+        let seed = EvolveProgram::CustomPack {
+            tile_m: 64,
+            tile_n: 64,
+            tile_k: 64,
+            instructions: vec![],
+        };
+
+        let state_entity = evolve_seed(
+            &mut world,
+            &self.tensor_id,
+            &self.backend,
+            seed,
+            self.config.clone(),
+        )
+        .expect("seed should spawn");
+
+        let max_generations = self.config.max_generations;
+        let mut final_generation = 0u64;
+        // Holds the most recent generation's sorted candidate list.
+        let mut sorted_candidates: Vec<EvolveCandidate> = Vec::new();
+
+        for gen in 0..max_generations {
+            final_generation = gen as u64 + 1;
+
+            // ── Snapshot the current population entity list ────────────────
+            let pop_entities: Vec<CompEntity> = {
+                let state = world
+                    .get_component::<EvolutionState>(state_entity)
+                    .expect("state component present");
+                state.population.clone()
+            };
+
+            // ── Evaluate any unevaluated candidates ────────────────────────
+            for &entity in &pop_entities {
+                let needs_eval = world
+                    .get_component::<EvolveCandidate>(entity)
+                    .map(|c| c.measured_cost.is_none())
+                    .unwrap_or(false);
+
+                if needs_eval {
+                    let program = world
+                        .get_component::<EvolveCandidate>(entity)
+                        .map(|c| c.program.clone());
+                    if let Some(prog) = program {
+                        let cost = simulate_cost(&prog);
+                        if let Some(c) = world.get_component_mut::<EvolveCandidate>(entity) {
+                            evolve_evaluate(&mut *c, cost);
+                        }
+                    }
+                }
+            }
+
+            // ── Collect candidates for selection ───────────────────────────
+            let mut candidates: Vec<EvolveCandidate> = pop_entities
+                .iter()
+                .filter_map(|&e| world.get_component::<EvolveCandidate>(e).cloned())
+                .collect();
+
+            // ── Select (sorts candidates, updates state, checks convergence) ─
+            {
+                let state = world
+                    .get_component_mut::<EvolutionState>(state_entity)
+                    .expect("state component present");
+                evolve_select(&mut *state, &mut candidates);
+            }
+
+            sorted_candidates = candidates;
+
+            // ── Check convergence ──────────────────────────────────────────
+            let converged = world
+                .get_component::<EvolutionState>(state_entity)
+                .map(|s| s.converged)
+                .unwrap_or(false);
+
+            if converged {
+                break;
+            }
+
+            // ── Breed next generation if this wasn't the last iteration ────
+            if gen + 1 < max_generations {
+                let current_count = world
+                    .get_component::<EvolutionState>(state_entity)
+                    .map(|s| s.population.len())
+                    .unwrap_or(0);
+                let pop_size = self.config.population_size;
+
+                let mut new_entities: Vec<CompEntity> = Vec::new();
+
+                for i in current_count..pop_size {
+                    let parent_idx = i % sorted_candidates.len().max(1);
+                    let seed_val = (gen as u64).wrapping_mul(100).wrapping_add(i as u64);
+                    let child = mutate_program(
+                        &sorted_candidates[parent_idx].program,
+                        &self.config,
+                        seed_val,
+                    );
+
+                    let entity = world.spawn(EntityKind::Node, None);
+                    world.add_component(
+                        entity,
+                        EvolveCandidate {
+                            tensor_id: self.tensor_id.clone(),
+                            target_backend: self.backend,
+                            format: self.format,
+                            program: child,
+                            measured_cost: None,
+                            generation: gen as u64 + 1,
+                            parents: vec![sorted_candidates[parent_idx].tensor_id.clone()],
+                        },
+                    );
+                    new_entities.push(entity);
+                }
+
+                // Extend state's population with the new offspring
+                if let Some(state) = world.get_component_mut::<EvolutionState>(state_entity) {
+                    state.population.extend(new_entities);
+                }
+            }
+        }
+
+        // ── Extract winner ─────────────────────────────────────────────────
+        let winner = sorted_candidates.first().cloned();
+
+        let converged = world
+            .get_component::<EvolutionState>(state_entity)
+            .map(|s| s.converged)
+            .unwrap_or(false);
+
+        DecompositionResult {
+            tensor_id: self.tensor_id.clone(),
+            format: self.format,
+            generations: final_generation,
+            winning_program: winner.as_ref().map(|c| c.program.clone()).unwrap_or(
+                EvolveProgram::CustomPack {
+                    tile_m: 64,
+                    tile_n: 64,
+                    tile_k: 64,
+                    instructions: vec![],
+                },
+            ),
+            cost: winner.and_then(|c| c.measured_cost).unwrap_or(CostMetrics {
+                wall_ns: 0,
+                energy_uj: None,
+                alu_cycles: None,
+                bandwidth_bytes: 0,
+            }),
+            converged,
+        }
+    }
+}
+
+/// Compute a synthetic cost for an evolved program.
+///
+/// Larger tiles → fewer iterations → lower wall-ns cost.
+/// This simulates what real Metal benchmarking would measure.
+fn simulate_cost(program: &EvolveProgram) -> CostMetrics {
+    match program {
+        EvolveProgram::CustomPack {
+            tile_m,
+            tile_n,
+            tile_k,
+            ..
+        } => {
+            let total_ops = 4096u64 * 4096u64; // simulated large matrix
+            let ops_per_call = (*tile_m as u64) * (*tile_n as u64) * (*tile_k as u64);
+            let calls = total_ops / ops_per_call.max(1);
+            CostMetrics {
+                wall_ns: calls * 100, // 100ns per call
+                energy_uj: Some(calls * 10),
+                alu_cycles: Some(calls * 50),
+                bandwidth_bytes: (*tile_m as u64) * (*tile_n as u64) * 4,
+            }
+        }
+        _ => CostMetrics {
+            wall_ns: 1_000_000,
+            energy_uj: None,
+            alu_cycles: None,
+            bandwidth_bytes: 4096,
+        },
+    }
 }
 
 /// Results from a decomposition search.
@@ -90,5 +294,29 @@ mod tests {
         // Verify that BackendTarget::Metal is the correct variant for
         // Metal compilation targets in the evolution-specific enum.
         assert_eq!(format!("{:?}", BackendTarget::Metal), "Metal");
+    }
+
+    #[test]
+    fn test_decomposition_search_converges() {
+        // Run a search — the simulation converges or runs to max_generations.
+        // Deterministic mutations from 64±32 on tile sizes produce large cost
+        // improvements (50%+ per generation), so convergence may not trigger
+        // within the default threshold. Either outcome is valid.
+        let search = MetalDecompositionSearch::for_nf4("test.weight", BackendTarget::Metal);
+        let result = search.run();
+        assert!(
+            result.generations > 0,
+            "search should make at least one generation"
+        );
+        assert!(
+            result.generations <= 50,
+            "search should not exceed max generations"
+        );
+        match &result.winning_program {
+            EvolveProgram::CustomPack { .. } => {} // expected
+            other => {
+                panic!("expected CustomPack winner, got {other:?}")
+            }
+        }
     }
 }

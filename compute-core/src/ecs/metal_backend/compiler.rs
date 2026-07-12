@@ -142,20 +142,6 @@ impl BackendCompiler for MetalBackendCompiler {
         toolchain: &ToolchainContext,
     ) -> Result<CompiledKernelArtifact, BackendCompileError> {
         if kernel.source.is_empty() {
-            // Structural artifact allowed only in test builds for backward compat.
-            if cfg!(test) {
-                return Ok(CompiledKernelArtifact {
-                    implementation_id: KernelImplementationId(format!(
-                        "metal.structural.{}",
-                        kernel.semantic_id.0
-                    )),
-                    semantic_id: kernel.semantic_id.clone(),
-                    compiled_bytes: Vec::new(),
-                    sha256: String::new(),
-                    entry_point: kernel.entry_point.clone(),
-                    abi: kernel.abi.clone(),
-                });
-            }
             return Err(BackendCompileError::CompilationFailed(
                 "empty kernel source: an authoritative source provider must be registered".into(),
             ));
@@ -255,10 +241,9 @@ mod tests {
         );
     }
 
-    /// Verifies that compile() with empty source and cfg!(test) produces a
-    /// structural artifact for backward compat in test builds.
+    /// Verifies that compile() rejects empty kernel source.
     #[test]
-    fn test_compile_structural_in_test_mode() {
+    fn test_compile_rejects_empty_source() {
         let compiler = MetalBackendCompiler::default();
         let kernel = BackendKernelIr {
             semantic_id: KernelSemanticId("prism.transformer.gemma4.decode.v1".into()),
@@ -274,13 +259,13 @@ mod tests {
             },
         };
         let toolchain = ToolchainContext::default();
-        // In cfg!(test), empty source is still accepted (structural artifact)
-        let artifact = compiler
+        let err = compiler
             .compile(&kernel, &toolchain)
-            .expect("compile should produce structural artifact in test mode");
+            .expect_err("compile should reject empty kernel source");
+        let msg = format!("{}", err);
         assert!(
-            artifact.compiled_bytes.is_empty(),
-            "structural artifact should have empty compiled_bytes"
+            msg.contains("empty kernel source"),
+            "expected 'empty kernel source' error, got: {msg}"
         );
     }
 

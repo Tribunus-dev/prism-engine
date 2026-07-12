@@ -119,8 +119,14 @@ fn node_from_kind(kind: &str, id: usize) -> Option<DataflowNode> {
             slot: format!("kv_slot_{id}"),
             input: buf_in.clone(),
         },
-        DataflowOpKind::EngramLookup => DataflowOp::KvRead {
-            slot: format!("engram_slot_{id}"),
+        DataflowOpKind::EngramLookup => DataflowOp::EngramLookup {
+            engram_id: format!("engram_slot_{id}"),
+            lookup_params: crate::ecs::training_target::spec::EngramLookupParams {
+                engram_id: format!("engram_slot_{id}"),
+                lookup_policy: crate::ecs::training_target::spec::EngramLookupPolicy::AlwaysApply,
+                retrieval_threshold: None,
+            },
+            weights: buf_in.clone(),
             output: buf_out.clone(),
         },
         DataflowOpKind::AneMatMul => DataflowOp::AneMatMul {
