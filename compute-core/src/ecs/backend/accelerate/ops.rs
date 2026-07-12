@@ -1015,46 +1015,35 @@ impl TensorBackend for AccelerateBackend {
             seen[idx] = true;
         }
 
-        if x_shape.len() == 2 && dims[0] == 1 && dims[1] == 0 {
-            // Fast path: vDSP_mtrans for 2D transpose [1,0]
-            let m = x_shape[0];
-            let n = x_shape[1];
-            let new_shape = vec![n, m];
-            self.make_output(&new_shape, |out| {
-                unsafe {
-                    accelerate_ffi::vDSP_mtrans(x_data.as_ptr(), 1, out.as_mut_ptr(), 1, m, n);
-                }
-                Ok(())
-            })
-        } else {
-            // General transpose via coordinate mapping
-            let new_shape: Vec<i32> = dims.iter().map(|&d| x_shape[d as usize]).collect();
-            let n = x_shape.iter().product::<i32>() as usize;
+        // General transpose via coordinate mapping
+        // (vDSP_mtrans fast path removed — column-major semantics mismatch)
+        // General transpose: works for any rank
+        let new_shape: Vec<i32> = dims.iter().map(|&d| x_shape[d as usize]).collect();
+        let n = x_shape.iter().product::<i32>() as usize;
 
-            // Build strides
-            let mut old_strides = vec![0i32; x_shape.len()];
-            let mut new_strides = vec![0i32; new_shape.len()];
-            old_strides[x_shape.len() - 1] = 1;
-            new_strides[new_shape.len() - 1] = 1;
-            for i in (0..x_shape.len() - 1).rev() {
-                old_strides[i] = old_strides[i + 1] * x_shape[i + 1];
-                new_strides[i] = new_strides[i + 1] * new_shape[i + 1];
-            }
-
-            self.make_output(&new_shape, |out| {
-                for linear in 0..n as i32 {
-                    let mut old_idx = 0i32;
-                    let mut remaining = linear;
-                    for d in 0..x_shape.len() {
-                        let coord = remaining / new_strides[d];
-                        remaining %= new_strides[d];
-                        old_idx += coord * old_strides[dims[d as usize] as usize];
-                    }
-                    out[linear as usize] = x_data[old_idx as usize];
-                }
-                Ok(())
-            })
+        // Build strides
+        let mut old_strides = vec![0i32; x_shape.len()];
+        let mut new_strides = vec![0i32; new_shape.len()];
+        old_strides[x_shape.len() - 1] = 1;
+        new_strides[new_shape.len() - 1] = 1;
+        for i in (0..x_shape.len() - 1).rev() {
+            old_strides[i] = old_strides[i + 1] * x_shape[i + 1];
+            new_strides[i] = new_strides[i + 1] * new_shape[i + 1];
         }
+
+        self.make_output(&new_shape, |out| {
+            for linear in 0..n as i32 {
+                let mut old_idx = 0i32;
+                let mut remaining = linear;
+                for d in 0..x_shape.len() {
+                    let coord = remaining / new_strides[d];
+                    remaining %= new_strides[d];
+                    old_idx += coord * old_strides[dims[d as usize] as usize];
+                }
+                out[linear as usize] = x_data[old_idx as usize];
+            }
+            Ok(())
+        })
     }
 
     fn reshape(&mut self, x: TensorHandle, shape: &[i32]) -> Result<TensorHandle, String> {
@@ -1201,21 +1190,25 @@ impl TensorBackend for AccelerateBackend {
         }
         let ax = ax as usize;
 
+        if indices.is_empty() {
+            return Err("index_select: empty indices not supported by Accelerate backend".into());
+        }
+
         if x_shape.len() == 1 {
-            // 1D: use vDSP_vgathr
+            // 1D: manual gather (vDSP_vgathr + uncached output causes SIGBUS on Apple Silicon)
             let n = indices.len();
             let new_shape = vec![n as i32];
-            let indices_i32: Vec<i32> = indices.iter().map(|&i| i as i32).collect();
             self.make_output(&new_shape, |out| {
-                unsafe {
-                    accelerate_ffi::vDSP_vgathr(
-                        x_data.as_ptr(),
-                        indices_i32.as_ptr(),
-                        1,
-                        out.as_mut_ptr(),
-                        1,
-                        n as i32,
-                    );
+                for (dst_idx, &src_idx) in indices.iter().enumerate() {
+                    let si = src_idx as usize;
+                    if si >= x_data.len() {
+                        return Err(format!(
+                            "index_select: index {} out of bounds for length {}",
+                            src_idx,
+                            x_data.len()
+                        ));
+                    }
+                    out[dst_idx] = x_data[si];
                 }
                 Ok(())
             })

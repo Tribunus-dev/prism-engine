@@ -4,12 +4,12 @@
 //! from compiler policies, evaluating evidence against gates, and producing
 //! feedback for iterative quantization-aware training.
 
-pub mod spec;
-pub mod gates;
-pub mod resolve;
-pub mod feedback;
-pub mod receipts;
 pub mod export;
+pub mod feedback;
+pub mod gates;
+pub mod receipts;
+pub mod resolve;
+pub mod spec;
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -18,39 +18,23 @@ mod tests;
 // ── Re-exports — spec ──────────────────────────────────────────────────
 
 pub use self::spec::{
-    ActivationWeightedObjective,
-    AttentionShapeTrainingTarget,
-    EngramTrainingTarget,
-    KvCacheTrainingTarget,
-    SpeculativeTrainingTarget,
-    TrainingEvidenceGate,
-    TrainingTargetPriority,
-    TrainingTargetSpec,
+    ActivationWeightedObjective, AttentionShapeTrainingTarget, EngramArtifact, EngramLookupParams,
+    EngramLookupPolicy, EngramLookupReceipt, EngramTrainingTarget, KvCacheTrainingTarget,
+    SpeculativeTrainingTarget, TrainingEvidenceGate, TrainingTargetPriority, TrainingTargetSpec,
     WeightTrainingTarget,
 };
 
 // ── Re-exports — gates ─────────────────────────────────────────────────
 
 pub use self::gates::{
-    QuantTrainingMethod,
-    RequiredEvidenceLevel,
-    TargetedLossTerm,
-    TrainingFailureMode,
-    TrainingTargetStatus,
-    WeightTrainingGates,
+    QuantTrainingMethod, RequiredEvidenceLevel, TargetedLossTerm, TrainingFailureMode,
+    TrainingTargetStatus, WeightTrainingGates,
 };
 
 // ── Re-exports — feedback ──────────────────────────────────────────────
 
-pub use self::feedback::{
-    TrainingFeedbackItem,
-    TrainingFeedbackReport,
-    TrainingFeedbackSummary,
-};
+pub use self::feedback::{TrainingFeedbackItem, TrainingFeedbackReport, TrainingFeedbackSummary};
 
 // ── Re-exports — receipts ──────────────────────────────────────────────
 
-pub use self::receipts::{
-    TrainingFeedbackReceipt,
-    TrainingTargetReceipt,
-};
+pub use self::receipts::{TrainingFeedbackReceipt, TrainingTargetReceipt};

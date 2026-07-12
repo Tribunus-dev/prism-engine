@@ -531,6 +531,7 @@ fn op_kind_label(op: &DataflowOp) -> String {
         DataflowOp::StoreActivation { .. } => "StoreActivation",
         DataflowOp::KvRead { .. } => "KvRead",
         DataflowOp::KvWrite { .. } => "KvWrite",
+        DataflowOp::EngramLookup { .. } => "EngramLookup",
         DataflowOp::AneMatMul { .. } => "AneMatMul",
         DataflowOp::AneConv1x1 { .. } => "AneConv1x1",
         DataflowOp::AneLoadWeight { .. } => "AneLoadWeight",

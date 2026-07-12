@@ -5,11 +5,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::execution_plan::CodecFamily;
 use crate::ecs::execution_profile::PhysicalTileLayout;
+use crate::execution_plan::CodecFamily;
 
-use super::gates::{QuantTrainingMethod, WeightTrainingGates};
 use super::gates::TargetedLossTerm;
+use super::gates::{QuantTrainingMethod, WeightTrainingGates};
 
 // ── TrainingTargetSpec ─────────────────────────────────────────────────
 
@@ -84,7 +84,10 @@ impl TrainingTargetSpec {
                 return Err(format!("weight_targets[{}].target_id must not be empty", i));
             }
             if wt.tensor_class.is_empty() {
-                return Err(format!("weight_targets[{}].tensor_class must not be empty", i));
+                return Err(format!(
+                    "weight_targets[{}].tensor_class must not be empty",
+                    i
+                ));
             }
             // Reject negative thresholds.
             let gates = &wt.gates;
@@ -238,6 +241,74 @@ pub struct EngramTrainingTarget {
     pub residency: String,
     /// Priority of this target.
     pub priority: TrainingTargetPriority,
+}
+
+// ── EngramArtifact ────────────────────────────────────────────────────
+
+/// An engram artifact — a trained pattern applied to a tensor insertion point.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngramArtifact {
+    /// Unique engram identifier.
+    pub engram_id: String,
+    /// Tensor class this engram targets (e.g. "attention.q_proj").
+    pub tensor_class: String,
+    /// Where in the compute graph the pattern is inserted.
+    pub insertion_point: String,
+    /// Codec used for the engram payload.
+    pub codec: CodecFamily,
+    /// Size of the engram payload in bytes.
+    pub payload_size: u64,
+    /// SHA-256 digest of the engram payload.
+    pub payload_digest: String,
+    /// The training run that produced this engram.
+    pub training_run_id: String,
+    /// ISO-8601 timestamp of creation.
+    pub created_at: String,
+}
+
+// ── EngramLookupParams ─────────────────────────────────────────────────
+
+/// Parameters for engram lookup during inference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngramLookupParams {
+    /// Target engram identifier.
+    pub engram_id: String,
+    /// How to retrieve and apply the engram.
+    pub lookup_policy: EngramLookupPolicy,
+    /// Optional similarity threshold (for ThresholdGate policy).
+    pub retrieval_threshold: Option<f64>,
+}
+
+// ── EngramLookupPolicy ─────────────────────────────────────────────────
+
+/// How to retrieve and apply an engram.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EngramLookupPolicy {
+    /// Always apply the engram (no threshold check).
+    AlwaysApply,
+    /// Apply only if similarity exceeds threshold.
+    ThresholdGate,
+    /// Apply with learned scaling factor.
+    Scaled,
+}
+
+// ── EngramLookupReceipt ────────────────────────────────────────────────
+
+/// Receipt from an engram lookup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngramLookupReceipt {
+    /// The engram that was looked up.
+    pub engram_id: String,
+    /// Tensor class of the engram.
+    pub tensor_class: String,
+    /// Whether the engram was actually applied.
+    pub looked_up: bool,
+    /// ISO-8601 timestamp of the lookup.
+    pub looked_up_at: String,
+    /// Retrieval latency in nanoseconds, if measured.
+    pub retrieval_latency_ns: Option<u64>,
+    /// Digest of the applied payload, if looked_up.
+    pub payload_digest: Option<String>,
 }
 
 // ── AttentionShapeTrainingTarget ───────────────────────────────────────

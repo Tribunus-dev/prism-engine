@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ecs::execution_profile::{GroupAxis, MetadataLayout, PhysicalTileLayout};
 use crate::ecs::plan::{precision_plan::PrecisionPlan, CodecFamily, DType};
+use crate::ecs::training_target::spec::EngramLookupParams;
 
 // ---------------------------------------------------------------------------
 // Core type aliases
@@ -205,6 +206,13 @@ pub enum DataflowOp {
         slot: String,
         input: DataflowBufferId,
     },
+    /// Look up an engram pattern and apply it.
+    EngramLookup {
+        engram_id: String,
+        lookup_params: EngramLookupParams,
+        weights: DataflowBufferId,
+        output: DataflowBufferId,
+    },
     /// ANE-specific: matrix multiply with SRAM budget constraint.
     AneMatMul {
         lhs: DataflowBufferId,
@@ -250,16 +258,16 @@ impl DataflowOp {
             DataflowOp::StoreActivation { .. } => DataflowOpKind::StoreActivation,
             DataflowOp::KvRead { .. } => DataflowOpKind::KvRead,
             DataflowOp::KvWrite { .. } => DataflowOpKind::KvWrite,
+            DataflowOp::EngramLookup { .. } => DataflowOpKind::EngramLookup,
             DataflowOp::AneMatMul { .. } => DataflowOpKind::AneMatMul,
             DataflowOp::AneConv1x1 { .. } => DataflowOpKind::AneConv1x1,
             DataflowOp::AneLoadWeight { .. } => DataflowOpKind::AneLoadWeight,
             DataflowOp::AneStoreOutput { .. } => DataflowOpKind::AneStoreOutput,
-            // LoadActivation and EngramLookup are not yet defined in DataflowOp.
+            // LoadActivation is not yet defined in DataflowOp.
             // When added, update the match here.
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // FusedGroup

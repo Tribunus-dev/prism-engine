@@ -412,10 +412,11 @@ pub fn ane_planar_lower(group: &FusedGroup) -> Result<PlanarProgramDescriptor, A
                 record_input(tensor, shape.clone(), dtype);
             }
 
-            // ── StoreActivation, KvRead, KvWrite — not in scope ──────
+            // ── StoreActivation, KvRead, KvWrite, EngramLookup — not in scope
             DataflowOp::StoreActivation { slot: _, input: _ }
             | DataflowOp::KvRead { slot: _, output: _ }
-            | DataflowOp::KvWrite { slot: _, input: _ } => {
+            | DataflowOp::KvWrite { slot: _, input: _ }
+            | DataflowOp::EngramLookup { .. } => {
                 return Err(AneLoweringError::UnsupportedOp {
                     detail: format!("{:?}", node.op),
                 });
