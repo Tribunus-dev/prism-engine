@@ -193,7 +193,7 @@ fn bitplane_gemv_decode() {
     let mut r = Rng::new(42);
     let mut nb_direct = Vec::new();
     for _ in 0..1000 {
-        for quad in 0..8 {
+        for _quad in 0..8 {
             let mut byte = 0u8;
             for j in 0..4 {
                 let v = r.f32();
@@ -226,7 +226,7 @@ fn bitplane_gemv_decode() {
     let mut r3 = Rng::new(42);
     let mut nb_all = Vec::new();
     for _ in 0..total_groups {
-        for quad in 0..8 {
+        for _quad in 0..8 {
             let mut byte = 0u8;
             for j in 0..4 {
                 let v = r3.f32();
@@ -243,7 +243,6 @@ fn bitplane_gemv_decode() {
         }
     }
 
-    use std::hint::black_box;
     let mut max_abserr = 0.0f64;
     for row in 0..test_rows {
         let base = row * GROUPS;

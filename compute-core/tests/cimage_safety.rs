@@ -25,6 +25,8 @@ use tribunus_compute_core::compute_image::manifest::{CImageHeader, CIMAGE_MAGIC}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+/// Serialise `CImageHeader` → raw bytes.
+#[allow(dead_code)]
 const HEADER_SIZE: usize = 128;
 
 /// Serialise `CImageHeader` → raw bytes.

@@ -159,6 +159,7 @@ fn f32_to_f16(x: f32) -> F16 {
     s | ((ef as u16) << 10) | ((m >> 13) as u16)
 }
 
+#[allow(dead_code)]
 fn f16_to_f32(x: F16) -> f32 {
     let s = ((x >> 15) & 1) as f32 * -2.0 + 1.0;
     let e = (x >> 10) & 0x1F;
@@ -263,6 +264,7 @@ fn gen_kv_f16() -> Vec<F16> {
     v
 }
 
+#[allow(dead_code)]
 fn fp16b_to_f32(b: [u8; 2]) -> f32 {
     let bits = u16::from_le_bytes(b);
     let s = ((bits >> 15) & 1) as f32 * -2.0 + 1.0;
@@ -280,6 +282,7 @@ fn fp16b_to_f32(b: [u8; 2]) -> f32 {
     s * (1.0 + m as f32 / 1024.0) * 2.0f32.powi(e as i32 - 15)
 }
 
+#[allow(dead_code)]
 fn ifwht_256_plane(buf: &mut [f32], offset: usize) {
     fwht_256_plane(buf, offset);
     for v in buf[offset..offset + 256].iter_mut() {
@@ -288,6 +291,7 @@ fn ifwht_256_plane(buf: &mut [f32], offset: usize) {
 }
 
 /// Verify GPU output by CPU decompression.
+#[allow(dead_code)]
 fn verify_gpu_output(gpu_out: &[u8], cpu_fwht: &[f32], n_heads: usize) -> f64 {
     let mut se = 0.0f64;
     let mut n = 0u64;
@@ -317,7 +321,7 @@ fn verify_gpu_output(gpu_out: &[u8], cpu_fwht: &[f32], n_heads: usize) -> f64 {
         ifwht_256_plane(&mut deq, 0);
 
         // Compare with original pre-FWHT values (from the f32 buffer that was FWHT'd)
-        for i in 0..HEAD_DIM {
+        for _i in 0..HEAD_DIM {
             // deq[0..224] are the original values (padded part deq[224..256] is zero)
             // We compare with the re-derived original from unpacking
             // Actually the best verification: check that GPU pack is bit-exact with CPU pack
@@ -410,7 +414,7 @@ fn metal_kv_compress_micropipeline() {
 
     // CPU-side processing buffer (padded per chunk)
     let mut cpu_f32 = vec![0.0f32; F32_PER_CHUNK];
-    let mut chunk_out = vec![0u8; OUT_PER_CHUNK];
+    let _chunk_out = vec![0u8; OUT_PER_CHUNK];
 
     // ── Warmup ──────────────────────────────────────────────────
     println!("  Warming up...");
@@ -456,7 +460,7 @@ fn metal_kv_compress_micropipeline() {
 
     // ── Benchmark: micro-pipelined execution ────────────────────
     let mut times = Vec::new();
-    let gpu_total = N_CHUNKS as u64;
+    let _gpu_total = N_CHUNKS as u64;
 
     // Save first chunk fwht data for CPU comparison
     let mut ref_fwht = vec![0.0f32; F32_PER_CHUNK];

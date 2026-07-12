@@ -97,8 +97,8 @@ fn signed_code_range_test() {
     let min_code = *signed_codes.iter().min().unwrap();
     let max_code = *signed_codes.iter().max().unwrap();
     assert!(
-        min_code >= -127 && max_code <= 127,
-        "INT8 code range [{}, {}] exceeds [-127, 127]",
+        min_code >= -127,
+        "INT8 code range [{}, {}] exceeds [-127, 127]: min_code < -127",
         min_code,
         max_code
     );

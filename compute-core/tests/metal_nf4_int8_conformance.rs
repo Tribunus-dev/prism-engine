@@ -123,6 +123,7 @@ fn make_params(rows: u32, cols: u32) -> ProjectionParams {
 /// nonzero-offset test below which exercises the real dispatcher path
 /// separately; this helper keeps the explicit offset-zero path for
 /// ABI conformance comparison.
+#[allow(dead_code)]
 fn dispatch_nf4_scaled_gemv(
     registry: &RegistryRef,
     cmd_buf: &CommandBufferRef,

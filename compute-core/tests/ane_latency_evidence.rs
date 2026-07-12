@@ -20,13 +20,11 @@
 
 #![cfg(all(target_os = "macos", feature = "prism-backend"))]
 
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tribunus_compute_core::backend::coreai_iosurface::{
-    CoreAiComputePolicy, CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable,
+    CoreAiComputePolicy,
 };
-use tribunus_compute_core::backend::metal_consumer::MetalConsumer;
 use tribunus_compute_core::backend::placement::ExecutionLane;
 use tribunus_compute_core::compilation::apple_installation::{
     install_apple_tri_lane, warmup_with_arena, AppleInstallationResult,
@@ -34,16 +32,15 @@ use tribunus_compute_core::compilation::apple_installation::{
 use tribunus_compute_core::compilation::epoch_scheduler::EpochScheduler;
 use tribunus_compute_core::compilation::tri_lane::{
     AppleFallbackPlan, AppleHardwareSignature, AppleTriLaneExecutionPlan,
-    AppleTriLaneExecutionReceipt, CoreAiProgramBinding, CpuProgramBinding, EpochRouteOrigin,
+    AppleTriLaneExecutionReceipt, CpuProgramBinding, EpochRouteOrigin,
     LaneCostEstimate, MetalProgramBinding, NumericalPolicy, ShapeClass, TriLaneCostModel,
     TriLaneEvidenceRequirements,
 };
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
     AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, AppleTriLaneArtifactManifest,
-    CoreAiArtifactManifest, CpuArtifactManifest, IOSurfaceSlotManifest, MetalArtifactManifest,
+    CoreAiArtifactManifest, IOSurfaceSlotManifest,
 };
-use tribunus_compute_core::compute_image::apple_shared_arena::AppleSharedArena;
 
 // ── Constants ───────────────────────────────────────────────────────────────
 

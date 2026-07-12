@@ -11,8 +11,7 @@ use tribunus_compute_core::compute_image::compile::int4_pack::{
     quantize_to_ternary_block32, AlignedTernaryBlock32, TernaryBlock32,
 };
 use tribunus_compute_core::compute_image::megakernel::{
-    dispatch_persistent_gemv, PERSISTENT_GEMV_ROWS_PER_TG, PERSISTENT_GEMV_SRC,
-    PERSISTENT_GEMV_THREADS_PER_TG,
+    dispatch_persistent_gemv, PERSISTENT_GEMV_SRC,
 };
 
 const HIDDEN_DIM: usize = 3840;

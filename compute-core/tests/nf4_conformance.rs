@@ -73,7 +73,7 @@ fn nonzero_decoded_tail_code_masking_test() {
     let source = make_source(in_features as usize, out_features as usize);
 
     let format = RuntimeRepresentationClass::Nf4Tile640Base;
-    let (codes, scales, biases, _scale_vec) = pack_candidate(
+    let (codes, scales, _biases, _scale_vec) = pack_candidate(
         &source,
         in_features as usize,
         out_features as usize,

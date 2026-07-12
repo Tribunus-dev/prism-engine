@@ -198,6 +198,7 @@ fn f16_to_f32(x: F16) -> f32 {
     s * (1.0 + m as f32 / 1024.0) * 2.0f32.powi(e as i32 - 15)
 }
 
+#[allow(dead_code)]
 fn fp16b_to_f32(b: [u8; 2]) -> f32 {
     let bits = u16::from_le_bytes(b);
     let s = ((bits >> 15) & 1) as f32 * -2.0 + 1.0;
@@ -232,6 +233,7 @@ fn fwht_32_safe(data: &mut [f32; 32]) {
     }
 }
 
+#[allow(dead_code)]
 fn pack_block_32(input: &[f32; 32]) -> (F16, [u8; 8]) {
     let mut mx = 0.0f32;
     for &v in input {
@@ -259,6 +261,7 @@ fn pack_block_32(input: &[f32; 32]) -> (F16, [u8; 8]) {
     (sf, nb)
 }
 
+#[allow(dead_code)]
 fn cpu_pack_head(f16_input: &[F16]) -> Vec<u8> {
     let mut out = Vec::with_capacity(BPH * 10);
     for bi in 0..BPH {

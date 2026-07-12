@@ -13,21 +13,14 @@
 //! Note: requires mlx-backend for MlxBackend import.
 #![cfg(feature = "mlx-backend")]
 
-use std::collections::HashMap;
-use std::time::Instant;
-
 use tribunus_compute_core::backend::accelerate::AccelerateBackend;
-use tribunus_compute_core::backend::routing::{
-    BackendId, EvidenceDigest, OperationFamily, OperationId, TensorId,
-};
+use tribunus_compute_core::backend::routing::{BackendId, OperationFamily, OperationId, TensorId};
 use tribunus_compute_core::backend::MlxBackend;
 use tribunus_compute_core::backend::TensorBackend;
-use tribunus_compute_core::compiler::ane::fusion::{
-    build_fused_ane_regions, AneFusedArtifact, AneFusionConfig, AneFusionPass,
-};
+use tribunus_compute_core::compiler::ane::fusion::build_fused_ane_regions;
 use tribunus_compute_core::compiler::scheduled::{RegionDependency, RegionId, ScheduledRegion};
 use tribunus_compute_core::config::operation_route::OperationRoute;
-use tribunus_compute_core::config::{AneFusedIsland, ModelExecutionPlan};
+use tribunus_compute_core::config::ModelExecutionPlan;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -401,7 +394,7 @@ fn heterogeneous_compile_pipeline() {
     let mut mlx = MlxBackend::new();
     let a_mlx = mlx.create_f32(&[1.0, 2.0, 3.0], &[3]).unwrap();
     let b_mlx = mlx.create_f32(&[4.0, 5.0, 6.0], &[3]).unwrap();
-    let add_mlx = mlx.add(a_mlx, b_mlx).unwrap();
+    let _add_mlx = mlx.add(a_mlx, b_mlx).unwrap();
     mlx.evaluate(0, &[]).unwrap();
     eprintln!("  MLX: ready (add works)");
 
@@ -409,7 +402,7 @@ fn heterogeneous_compile_pipeline() {
     let mut accel = AccelerateBackend::new();
     let a_acc = accel.create_f32(&[1.0, 2.0, 3.0], &[3]).unwrap();
     let b_acc = accel.create_f32(&[4.0, 5.0, 6.0], &[3]).unwrap();
-    let add_acc = accel.add(a_acc, b_acc).unwrap();
+    let _add_acc = accel.add(a_acc, b_acc).unwrap();
     eprintln!("  Accelerate: ready (add works)");
 
     // CoreML/ANE (via MLModel — compiled models available)

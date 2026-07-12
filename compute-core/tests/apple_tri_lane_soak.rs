@@ -24,6 +24,7 @@
 //!     subsequent cycles
 
 use tribunus_compute_core::backend::placement::ExecutionLane;
+#[allow(unused_imports)]
 use tribunus_compute_core::compute_image::apple_cimage_manifest::{
     AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
     AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, AppleTriLaneArtifactManifest,

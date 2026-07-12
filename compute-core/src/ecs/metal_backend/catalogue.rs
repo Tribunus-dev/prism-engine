@@ -4,7 +4,8 @@
 //! against a semantic contract with its ABI and supported configurations.
 
 use crate::ecs::canonical::kernel_abi::{
-    KernelAbi, KernelImplementationId, KernelSemanticId, MetalImplementationRegistration,
+    BufferBinding, ConstantBinding, DispatchGeometryPolicy, KernelAbi, KernelImplementationId,
+    KernelSemanticId, MetalImplementationRegistration,
 };
 use crate::ecs::canonical::model_ir::ArchitectureId;
 use crate::ecs::canonical::representation::TensorRepresentation;
@@ -70,13 +71,65 @@ impl MetalImplementationCatalogue {
                 TensorRepresentation::Nf4Tile640(128),
                 TensorRepresentation::TernaryTile640,
             ],
+            source_path: Some("src/ecs/compute_image/megakernel/shaders/gemma4_full.metal".into()),
+            source_entry_point: Some("gemma4_full_decode_persistent".into()),
             abi: KernelAbi {
                 version: 1,
-                buffers: vec![],
-                constants: vec![],
+                buffers: vec![
+                    BufferBinding {
+                        slot: 0,
+                        name: "weights".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 1,
+                        name: "activations".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 2,
+                        name: "kv_cache".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 3,
+                        name: "constants".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                ],
+                constants: vec![
+                    ConstantBinding {
+                        index: 0,
+                        name: "hidden_size".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 1,
+                        name: "num_heads".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 2,
+                        name: "head_dim".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 3,
+                        name: "num_layers".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 4,
+                        name: "seq_len".into(),
+                        default_value: None,
+                    },
+                ],
                 threadgroup_memory: vec![],
-                dispatch_geometry:
-                    crate::ecs::canonical::kernel_abi::DispatchGeometryPolicy::FromConstant,
+                dispatch_geometry: DispatchGeometryPolicy::FromConstant,
                 threads_per_threadgroup: (256, 1, 1),
             },
         });
@@ -92,13 +145,51 @@ impl MetalImplementationCatalogue {
                 ArchitectureId("llama".into()),
             ],
             supported_representations: vec![TensorRepresentation::Fp32],
+            source_path: Some(
+                "src/ecs/compute_image/megakernel/shaders/decode_per_layer.metal".into(),
+            ),
+            source_entry_point: Some("decode_per_layer".into()),
             abi: KernelAbi {
                 version: 1,
-                buffers: vec![],
-                constants: vec![],
+                buffers: vec![
+                    BufferBinding {
+                        slot: 0,
+                        name: "weights".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 1,
+                        name: "activations".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 2,
+                        name: "kv_cache".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                ],
+                constants: vec![
+                    ConstantBinding {
+                        index: 0,
+                        name: "hidden_size".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 1,
+                        name: "num_heads".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 2,
+                        name: "head_dim".into(),
+                        default_value: None,
+                    },
+                ],
                 threadgroup_memory: vec![],
-                dispatch_geometry:
-                    crate::ecs::canonical::kernel_abi::DispatchGeometryPolicy::FromOutputBuffer,
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
                 threads_per_threadgroup: (64, 1, 1),
             },
         });
@@ -122,6 +213,8 @@ impl MetalImplementationCatalogue {
                 implementation_id: KernelImplementationId(format!("metal.primitive.{}.v1", name)),
                 supported_architectures: vec![],
                 supported_representations: vec![],
+                source_path: None,
+                source_entry_point: None,
                 abi: KernelAbi {
                     version: 1,
                     buffers: vec![],
@@ -134,6 +227,162 @@ impl MetalImplementationCatalogue {
             });
         }
     }
+
+    /// Register NF4 linear primitive kernel implementation.
+    pub fn register_linear_nf4(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.linear.nf4.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.linear_nf4.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![TensorRepresentation::Nf4Tile640(128)],
+            source_path: Some("src/ecs/compute_image/templates/cimage_linear_nf4.metal".into()),
+            source_entry_point: Some("cimage_linear_nf4".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![
+                    BufferBinding {
+                        slot: 0,
+                        name: "weights_packed".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 1,
+                        name: "scales".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 2,
+                        name: "input".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 3,
+                        name: "output".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                ],
+                constants: vec![
+                    ConstantBinding {
+                        index: 0,
+                        name: "in_features".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 1,
+                        name: "out_features".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 2,
+                        name: "group_size".into(),
+                        default_value: None,
+                    },
+                ],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register ternary GEMV primitive kernel implementation.
+    pub fn register_ternary_gemv(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.ternary.gemv.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.ternary_gemv.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![TensorRepresentation::TernaryTile640],
+            source_path: Some("src/ecs/compute_image/templates/ternary_tile640_gemv.metal".into()),
+            source_entry_point: Some("ternary_tile640_gemv".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![
+                    BufferBinding {
+                        slot: 0,
+                        name: "ternary_weights".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 1,
+                        name: "scales".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 2,
+                        name: "input".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 3,
+                        name: "output".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                ],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register RMSNorm primitive kernel implementation.
+    pub fn register_rmsnorm(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.rmsnorm.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.rmsnorm.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![TensorRepresentation::Fp32],
+            source_path: Some("src/ecs/compute_image/templates/cimage_rmsnorm_f32.metal".into()),
+            source_entry_point: Some("cimage_rmsnorm_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![
+                    BufferBinding {
+                        slot: 0,
+                        name: "input".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 1,
+                        name: "weight".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 2,
+                        name: "output".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                ],
+                constants: vec![
+                    ConstantBinding {
+                        index: 0,
+                        name: "hidden_size".into(),
+                        default_value: None,
+                    },
+                    ConstantBinding {
+                        index: 1,
+                        name: "epsilon_f".into(),
+                        default_value: None,
+                    },
+                ],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
 }
 
 impl Default for MetalImplementationCatalogue {
@@ -141,6 +390,9 @@ impl Default for MetalImplementationCatalogue {
         let mut cat = Self::new();
         cat.register_megakernel();
         cat.register_per_layer();
+        cat.register_linear_nf4();
+        cat.register_ternary_gemv();
+        cat.register_rmsnorm();
         cat.register_primitives();
         cat
     }
@@ -150,41 +402,121 @@ impl Default for MetalImplementationCatalogue {
 mod tests {
     use super::*;
 
-    /// Verifies that the default catalogue has at least one registered
-    /// implementation (megakernel + per-layer + primitives).
-    /// Documents the structural gap: registrations exist but have empty ABIs.
     #[test]
-    fn test_default_catalogue_has_registrations() {
-        let cat = MetalImplementationCatalogue::default();
+    fn test_catalogue_default_has_all_registrations() {
+        let catalogue = MetalImplementationCatalogue::default();
         assert!(
-            cat.len() > 0,
-            "default catalogue should have at least one registration, got {}",
-            cat.len()
+            catalogue.len() >= 12,
+            "expected >=12 registrations, got {}",
+            catalogue.len()
+        );
+
+        // Verify individual registrations exist
+        assert!(
+            catalogue
+                .for_semantic(&KernelSemanticId(
+                    "prism.transformer.gemma4.decode.v1".into()
+                ))
+                .len()
+                > 0,
+            "megakernel should be registered"
+        );
+        assert!(
+            catalogue
+                .for_semantic(&KernelSemanticId("prism.linear.nf4.v1".into()))
+                .len()
+                >= 1,
+            "linear_nf4 should be registered"
+        );
+        assert!(
+            catalogue
+                .for_semantic(&KernelSemanticId("prism.rmsnorm.v1".into()))
+                .len()
+                >= 1,
+            "rmsnorm should be registered"
         );
     }
 
-    /// Verifies that all default-registered implementations have empty
-    /// ABI slots (no buffers, constants, or threadgroup memory).
-    /// Documents the structural gap: ABIs are structural placeholders.
     #[test]
-    fn test_all_registrations_have_empty_abis() {
-        let cat = MetalImplementationCatalogue::default();
-        for reg in cat.iter() {
-            assert!(
-                reg.abi.buffers.is_empty(),
-                "{} should have empty buffers",
-                reg.implementation_id.0
-            );
-            assert!(
-                reg.abi.constants.is_empty(),
-                "{} should have empty constants",
-                reg.implementation_id.0
-            );
-            assert!(
-                reg.abi.threadgroup_memory.is_empty(),
-                "{} should have empty threadgroup memory",
-                reg.implementation_id.0
-            );
-        }
+    fn test_linear_nf4_has_source_path() {
+        let catalogue = MetalImplementationCatalogue::default();
+        let registrations = catalogue.for_semantic(&KernelSemanticId("prism.linear.nf4.v1".into()));
+        let nf4_reg = registrations
+            .iter()
+            .find(|r| r.implementation_id.0 == "metal.primitive.linear_nf4.v1")
+            .expect("linear_nf4 registration should exist");
+        assert!(
+            nf4_reg.source_path.is_some(),
+            "linear_nf4 should have source_path"
+        );
+        assert!(
+            nf4_reg.source_entry_point.is_some(),
+            "linear_nf4 should have entry_point"
+        );
+        assert!(
+            nf4_reg.abi.buffers.len() >= 4,
+            "linear_nf4 abi should have >=4 buffer bindings"
+        );
+        assert!(
+            nf4_reg.abi.constants.len() >= 3,
+            "linear_nf4 abi should have >=3 constants"
+        );
+    }
+
+    #[test]
+    fn test_ternary_gemv_has_source_path() {
+        let catalogue = MetalImplementationCatalogue::default();
+        let registrations =
+            catalogue.for_semantic(&KernelSemanticId("prism.ternary.gemv.v1".into()));
+        let t_reg = registrations
+            .iter()
+            .find(|r| r.implementation_id.0 == "metal.primitive.ternary_gemv.v1")
+            .expect("ternary_gemv registration should exist");
+        assert!(t_reg.source_path.is_some());
+        assert!(t_reg.source_entry_point.is_some());
+    }
+
+    #[test]
+    fn test_rmsnorm_has_source_path() {
+        let catalogue = MetalImplementationCatalogue::default();
+        let registrations = catalogue.for_semantic(&KernelSemanticId("prism.rmsnorm.v1".into()));
+        let r_reg = registrations
+            .iter()
+            .find(|r| r.implementation_id.0 == "metal.primitive.rmsnorm.v1")
+            .expect("rmsnorm registration should exist");
+        assert!(r_reg.source_path.is_some());
+        assert!(r_reg.source_entry_point.is_some());
+        assert!(
+            r_reg.abi.constants.len() >= 2,
+            "rmsnorm abi should have >=2 constants"
+        );
+    }
+
+    #[test]
+    fn test_megakernel_registration_has_source_and_abi() {
+        let catalogue = MetalImplementationCatalogue::default();
+        let m = catalogue
+            .for_semantic(&KernelSemanticId(
+                "prism.transformer.gemma4.decode.v1".into(),
+            ))
+            .into_iter()
+            .find(|r| r.implementation_id.0 == "metal.megakernel.gemma4.decode.v1")
+            .expect("megakernel registration should exist");
+        assert!(
+            m.source_path.is_some(),
+            "megakernel should have source_path"
+        );
+        assert!(
+            m.source_entry_point.is_some(),
+            "megakernel should have entry_point"
+        );
+        assert!(
+            m.abi.buffers.len() >= 4,
+            "megakernel abi should have >=4 buffers"
+        );
+        assert!(
+            m.abi.constants.len() >= 5,
+            "megakernel abi should have >=5 constants"
+        );
     }
 }

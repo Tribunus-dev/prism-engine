@@ -115,6 +115,10 @@ pub struct MetalImplementationRegistration {
     pub supported_architectures: Vec<ArchitectureId>,
     pub supported_representations: Vec<TensorRepresentation>,
     pub abi: KernelAbi,
+    /// Path to the .metal source file (relative to crate root). None for generated kernels.
+    pub source_path: Option<String>,
+    /// Entry point function name in the .metal file.
+    pub source_entry_point: Option<String>,
 }
 
 /// A group of execution operations that are compiled together into one kernel.

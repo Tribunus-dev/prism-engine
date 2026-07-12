@@ -146,6 +146,7 @@ fn simulate_epoch(arena: &mut AppleSharedArena, epoch: u64) {
 
 /// Returns true when every slot is Retired (simulating a clean epoch
 /// where the fallback lane has taken over and completed its work).
+#[allow(dead_code)]
 fn all_slots_retired(arena: &AppleSharedArena, epoch: u64) -> bool {
     arena
         .slots

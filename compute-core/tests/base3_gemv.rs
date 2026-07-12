@@ -114,6 +114,7 @@ fn gen_packed_rows(n_rows: usize) -> (Vec<u32>, Vec<[i8; CHUNK]>) {
 
 // ── CPU GEMV reference ─────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn gemv_cpu_ref(act: &[f32; HEAD_DIM], weights_20: &[[i8; CHUNK]; CHUNKS_PER_ROW]) -> f32 {
     let mut sum = 0.0f32;
     for c in 0..CHUNKS_PER_ROW {

@@ -2285,8 +2285,8 @@ fn build_canonical_outcome(
     output_dir: &str,
 ) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
     use crate::ecs::canonical::{
-        CimageBuildInput, CompileOutcome, CompilePlan, CompilerReceiptSet, ExecutionGraph,
-        KernelPlan, MemoryPlan, RuntimeStatePlan,
+        CimageBuildInput, CompileEventStream, CompileOutcome, CompilePlan, CompilerReceiptSet,
+        ExecutionGraph, KernelPlan, MemoryPlan, RuntimeStatePlan,
     };
 
     let empty_execution_graph = ExecutionGraph {
@@ -2330,9 +2330,9 @@ fn build_canonical_outcome(
         receipts: CompilerReceiptSet {
             receipts: Vec::new(),
         },
+        event_stream: CompileEventStream::new("build_canonical_outcome"),
         output_path: Some(output_dir.to_string()),
     };
-
     Ok((compiled, outcome))
 }
 

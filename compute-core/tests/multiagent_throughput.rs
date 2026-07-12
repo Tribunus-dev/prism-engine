@@ -17,6 +17,7 @@ const LAYERS: usize = 48;
 const WEIGHT_GB: f64 = 2.4; // Base-3 packed weight file
 const KV_MB_PER_AGENT: f64 = 600.0; // Compressed ternary KV cache
 const BUS_GBS: f64 = 68.25; // M1 DRAM bandwidth
+#[allow(dead_code)]
 const THREADGROUP_SRAM: usize = 32768; // 32 KB limit
 const BLOCK_STRIDE: usize = 32;
 const NUM_BLOCKS_X: usize = 6;
@@ -249,7 +250,7 @@ fn multiagent_throughput_scaling() {
         }
         let elapsed = t0.elapsed();
         let per_step = elapsed / iters as u32;
-        let tps = batch as f64 / per_step.as_secs_f64();
+        let _tps = batch as f64 / per_step.as_secs_f64();
 
         // ── Compute model ──────────────────────────────────────
         // Theoretical: weights are 2.4 GB, read once per step regardless of batch
@@ -314,7 +315,7 @@ fn multiagent_throughput_scaling() {
 
     // ── Sweet spot identification ──────────────────────────────
     println!("\n  ── Sweet Spot Analysis ────────────────────────────────────────────────");
-    for (b, tps, step_s, gb) in &results {
+    for (b, tps, _step_s, gb) in &results {
         let bus_limited_tps = BUS_GBS / (*gb) * *b as f64; // theoretical max at this batch
         let compute_tps = 1.0 / (0.000687 / *b as f64); // compute-limited (0.687ms per 48-layer pass)
         let actual_tps = *tps;

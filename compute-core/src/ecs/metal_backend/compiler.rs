@@ -91,8 +91,8 @@ impl BackendCompiler for MetalBackendCompiler {
         group: &KernelGroup,
         _context: &LoweringContext,
     ) -> Result<BackendKernelIr, BackendCompileError> {
-        // Look up the semantic ID in the catalogue to find the implementation.
-        let _registration = self
+        // Look up the first matching implementation in the catalogue.
+        let registration = self
             .catalogue
             .for_semantic(&group.semantic_id)
             .into_iter()
@@ -102,17 +102,37 @@ impl BackendCompiler for MetalBackendCompiler {
                     "no implementation for {}",
                     group.semantic_id.0
                 ))
-            })?;
+            })?
+            .clone();
 
-        // Construct backend IR from the KernelGroup.
-        // Actual source assembly happens in PR G (source consolidation).
-        // For now, the IR carries the semantic identity and ABI so the
-        // compile step can produce the artifact.
+        // Read source from the registration's source_path, or use empty for generated kernels.
+        let source = match &registration.source_path {
+            Some(path) => {
+                let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+                let full_path = base.join(path);
+                match std::fs::read_to_string(&full_path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return Err(BackendCompileError::LoweringFailed(format!(
+                            "cannot read source {}: {}",
+                            full_path.display(),
+                            e
+                        )));
+                    }
+                }
+            }
+            None => String::new(),
+        };
+        // Use the registration's entry point, or derive from semantic_id.
+        let entry_point = registration
+            .source_entry_point
+            .unwrap_or_else(|| format!("{}_kernel", group.semantic_id.0.replace('.', "_")));
+
         Ok(BackendKernelIr {
             semantic_id: group.semantic_id.clone(),
-            source: String::new(), // populated by source provider in PR G
-            entry_point: format!("{}_kernel", group.semantic_id.0.replace('.', "_")),
-            abi: group.abi.clone(),
+            source,
+            entry_point,
+            abi: registration.abi.clone(),
         })
     }
 
@@ -122,18 +142,23 @@ impl BackendCompiler for MetalBackendCompiler {
         toolchain: &ToolchainContext,
     ) -> Result<CompiledKernelArtifact, BackendCompileError> {
         if kernel.source.is_empty() {
-            // No source yet — return a structural artifact for pipeline compat.
-            return Ok(CompiledKernelArtifact {
-                implementation_id: KernelImplementationId(format!(
-                    "metal.structural.{}",
-                    kernel.semantic_id.0
-                )),
-                semantic_id: kernel.semantic_id.clone(),
-                compiled_bytes: Vec::new(),
-                sha256: String::new(),
-                entry_point: kernel.entry_point.clone(),
-                abi: kernel.abi.clone(),
-            });
+            // Structural artifact allowed only in test builds for backward compat.
+            if cfg!(test) {
+                return Ok(CompiledKernelArtifact {
+                    implementation_id: KernelImplementationId(format!(
+                        "metal.structural.{}",
+                        kernel.semantic_id.0
+                    )),
+                    semantic_id: kernel.semantic_id.clone(),
+                    compiled_bytes: Vec::new(),
+                    sha256: String::new(),
+                    entry_point: kernel.entry_point.clone(),
+                    abi: kernel.abi.clone(),
+                });
+            }
+            return Err(BackendCompileError::CompilationFailed(
+                "empty kernel source: an authoritative source provider must be registered".into(),
+            ));
         }
 
         let tc = MetalToolchain::new(
@@ -182,11 +207,10 @@ mod tests {
         DispatchGeometryPolicy, KernelImplementationClass, SpecializationParameters,
     };
 
-    /// Verifies that lowering a KernelGroup whose semantic ID exists in the
-    /// default catalogue produces BackendKernelIr with empty source.
-    /// Documents the structural gap: source assembly is deferred (PR G).
+    /// Verifies that lowering a KernelGroup whose semantic ID has a registered
+    /// source_path reads the actual .metal file into the IR.
     #[test]
-    fn test_lower_produces_empty_source() {
+    fn test_lower_populates_source() {
         let compiler = MetalBackendCompiler::default();
         let group = KernelGroup {
             semantic_id: KernelSemanticId("prism.transformer.gemma4.decode.v1".into()),
@@ -218,18 +242,23 @@ mod tests {
             .lower(&group, &context)
             .expect("lower should succeed for known semantic ID");
         assert!(
-            ir.source.is_empty(),
-            "lowered IR should have empty source, got {} bytes",
-            ir.source.len()
+            !ir.source.is_empty(),
+            "lowered IR for megakernel should have source from .metal file"
+        );
+        assert_eq!(
+            ir.entry_point, "gemma4_full_decode_persistent",
+            "entry_point should come from registration"
+        );
+        assert!(
+            ir.abi.buffers.len() >= 4,
+            "abi buffers should be populated from registration"
         );
     }
 
-    /// Verifies that compile() accepts a BackendKernelIr with empty source
-    /// and returns a structural artifact with empty compiled_bytes.
-    /// Documents the structural gap: real Metal compilation does not run
-    /// until source is populated.
+    /// Verifies that compile() with empty source and cfg!(test) produces a
+    /// structural artifact for backward compat in test builds.
     #[test]
-    fn test_compile_accepts_empty_source() {
+    fn test_compile_structural_in_test_mode() {
         let compiler = MetalBackendCompiler::default();
         let kernel = BackendKernelIr {
             semantic_id: KernelSemanticId("prism.transformer.gemma4.decode.v1".into()),
@@ -245,13 +274,88 @@ mod tests {
             },
         };
         let toolchain = ToolchainContext::default();
+        // In cfg!(test), empty source is still accepted (structural artifact)
         let artifact = compiler
             .compile(&kernel, &toolchain)
-            .expect("compile should succeed with empty source");
+            .expect("compile should produce structural artifact in test mode");
         assert!(
             artifact.compiled_bytes.is_empty(),
-            "compiled artifact should have empty compiled_bytes, got {}",
-            artifact.compiled_bytes.len()
+            "structural artifact should have empty compiled_bytes"
+        );
+    }
+
+    /// Verifies that lower() fails for an unregistered semantic ID.
+    #[test]
+    fn test_lower_fails_unknown_semantic() {
+        let compiler = MetalBackendCompiler::default();
+        let group = KernelGroup {
+            semantic_id: KernelSemanticId("prism.nonexistent.v1".into()),
+            implementation_class: KernelImplementationClass::Primitive,
+            operations: vec![],
+            specialization: SpecializationParameters {
+                tile_m: None,
+                tile_k: None,
+                tile_n: None,
+                group_size: None,
+                metadata_layout: None,
+            },
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+            source_region: RegionId(0),
+            target_lane: ExecutionLane::MetalGpu,
+        };
+        let context = LoweringContext {
+            target: BackendTarget::AppleGpu,
+            metal_language_version: None,
+        };
+        let result = compiler.lower(&group, &context);
+        assert!(result.is_err(), "lower should fail for unknown semantic ID");
+    }
+
+    /// Verifies that lower() for a primitive with source_path: None succeeds
+    /// and returns empty source (for generated/dynamic kernels).
+    #[test]
+    fn test_lower_generated_kernel_has_empty_source() {
+        let compiler = MetalBackendCompiler::default();
+        // "prism.linear.rawf32.v1" uses source_path: None in register_primitives
+        let group = KernelGroup {
+            semantic_id: KernelSemanticId("prism.linear.rawf32.v1".into()),
+            implementation_class: KernelImplementationClass::Primitive,
+            operations: vec![],
+            specialization: SpecializationParameters {
+                tile_m: None,
+                tile_k: None,
+                tile_n: None,
+                group_size: None,
+                metadata_layout: None,
+            },
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+            source_region: RegionId(0),
+            target_lane: ExecutionLane::MetalGpu,
+        };
+        let context = LoweringContext {
+            target: BackendTarget::AppleGpu,
+            metal_language_version: None,
+        };
+        let ir = compiler
+            .lower(&group, &context)
+            .expect("lower should succeed for registered primitive");
+        assert!(
+            ir.source.is_empty(),
+            "generated kernel should have empty source"
         );
     }
 }

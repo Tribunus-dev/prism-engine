@@ -118,6 +118,7 @@ fn fill_weights(ptr: *mut u32, n: usize) {
 }
 struct Rng(u64);
 impl Rng {
+    #[allow(dead_code)]
     fn new(s: u64) -> Self {
         Self(s)
     }
@@ -230,7 +231,7 @@ fn safe_multiagent_occupancy() {
         let total_gb_per_step = WEIGHTS_GB + kv_gb;
         let bus_ms = total_gb_per_step / BUS_GBS * 1000.0;
         let bus_tps = batch as f64 / (bus_ms / 1000.0);
-        let bottleneck = if bus_ms > per_step.as_secs_f64() * 1000.0 {
+        let _bottleneck = if bus_ms > per_step.as_secs_f64() * 1000.0 {
             "bus"
         } else {
             "compute"
@@ -321,7 +322,7 @@ fn safe_multiagent_occupancy() {
 
     // ── Tree speculation projection ────────────────────────────
     println!("\n  ── Tree Speculation: 100% ALU occupancy target ──────────────");
-    let compute_tps_1 = results[0].2; // compute t/s at batch=1
+    let _compute_tps_1 = results[0].2; // compute t/s at batch=1
     let alu_idle = 1.0 - results[0].3 / results[0].2; // bus-limited fraction
     println!(
         "  Single-agent ALU idle: {:.0}% (waiting for memory)",

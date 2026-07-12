@@ -18,6 +18,7 @@ use tribunus_compute_core::compute_image::megakernel::{
 };
 
 const HIDDEN: usize = 3840;
+#[allow(dead_code)]
 const FFN_INTER: usize = 15360;
 const TILE: usize = 640;
 const LAYERS: usize = 48;
