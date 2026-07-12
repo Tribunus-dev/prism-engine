@@ -1057,7 +1057,6 @@ impl CImageMetalRegionRunner {
         }
 
         enc.end_encoding();
-
         let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
 
         let cmd_start = Instant::now();
@@ -1207,7 +1206,6 @@ impl CImageMetalRegionRunner {
         let tg = metal::MTLSize::new(1, 1, 1);
         enc.dispatch_thread_groups(grid, tg);
         enc.end_encoding();
-
         cb.commit();
         cb.wait_until_completed();
 

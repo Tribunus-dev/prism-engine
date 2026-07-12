@@ -4,6 +4,7 @@
 //! from compiler policies, evaluating evidence against gates, and producing
 //! feedback for iterative quantization-aware training.
 
+pub mod engram;
 pub mod export;
 pub mod feedback;
 pub mod gates;
