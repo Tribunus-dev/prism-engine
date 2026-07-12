@@ -17,16 +17,16 @@
 pub mod admission;
 pub mod calibration;
 pub mod contract;
-pub mod sweep;
-pub mod validation;
-/// Ternary substitution pass — replaces primary codecs with ternary on eligible
-/// tensor classes when evidence gates are satisfied.
-pub mod ternary_substitution;
 /// Generalized substitution pipeline — tries ranked codec candidates against
 /// evidence gates and uses the most aggressive one that passes.
 pub mod substitution;
-
-
+pub mod sweep;
+/// Ternary base-weight assimilation — opt-in mutations behind a research-only gate.
+pub mod ternary_assimilation;
+/// Ternary substitution pass — replaces primary codecs with ternary on eligible
+/// tensor classes when evidence gates are satisfied.
+pub mod ternary_substitution;
+pub mod validation;
 
 /// Substitution pass — ranked trial of tile640 codec candidates.
 pub mod substitution_pass;

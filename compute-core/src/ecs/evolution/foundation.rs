@@ -61,7 +61,7 @@ pub struct SearchConfig {
 }
 
 /// How to compute candidate fitness.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CostFunction {
     WallTime,
     Energy,
