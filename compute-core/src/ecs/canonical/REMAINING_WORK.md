@@ -1,6 +1,6 @@
 # Remaining work
 
-> Current snapshot: `23e8a5f`. This document
+> Current snapshot: `d67b09d`. This document
 > distinguishes declared contracts, connected call paths, real execution, and
 > validation against real inputs or hardware.
 
