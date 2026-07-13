@@ -109,6 +109,10 @@ impl GenerationStore {
     pub fn contains(&self, id: &GenerationId) -> bool {
         self.generations.contains_key(id)
     }
+    /// Set the current generation directly (for rollback/initialization).
+    pub fn set_current(&mut self, id: GenerationId) {
+        self.current = Some(id);
+    }
 }
 
 // ---------------------------------------------------------------------------

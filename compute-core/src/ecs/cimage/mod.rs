@@ -5,15 +5,20 @@
 //! It does not depend on `compute_image` or `compile` internals.
 
 pub mod canonical;
+pub mod compatibility;
+pub mod dashboard;
 pub mod error;
+pub mod generation_api;
 pub mod generation_store;
 pub mod header;
 pub mod manifest;
 pub mod mlp_reference;
 pub mod payload;
+pub mod privacy;
 pub mod receipts;
 
 // Implementation modules — written after type definitions.
+pub mod durability;
 pub mod loader;
 pub mod shard_builder;
 pub mod streaming_writer;
