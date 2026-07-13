@@ -2499,6 +2499,7 @@ mod tests {
             square(&x).unwrap(),
             Array::full::<f32>(&[3, 3], array!(4.0)).unwrap(),
             None,
+            None,
             None
         )
         .unwrap()
@@ -2515,6 +2516,7 @@ mod tests {
         assert!(all_close(
             sqrt(&x).unwrap(),
             Array::full::<f32>(&[3, 3], array!(3.0)).unwrap(),
+            None,
             None,
             None
         )
@@ -2540,6 +2542,7 @@ mod tests {
         assert!(all_close(
             reciprocal(&x).unwrap(),
             Array::full::<f32>(&[3, 3], array!(0.5)).unwrap(),
+            None,
             None,
             None
         )

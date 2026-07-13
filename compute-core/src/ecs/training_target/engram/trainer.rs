@@ -51,22 +51,6 @@ impl EngramTrainer {
     ) -> Result<(EngramArtifact, EngramTrainingReceipt), String> {
         let engram_id = format!("engram.{}.v0", self.config.target.target_id);
 
-        // --- Compute payload digest from calibration data ---
-        let mut hasher = Sha256::new();
-        hasher.update(calibration.tensor_id.as_bytes());
-        hasher.update(&calibration.samples_used.to_le_bytes());
-        hasher.update(calibration.method.as_bytes());
-        for (k, v) in &calibration.metrics {
-            hasher.update(k.as_bytes());
-            hasher.update(&v.to_le_bytes());
-        }
-        let digest_bytes = hasher.finalize();
-        let payload_digest: String = digest_bytes.iter().map(|b| format!("{:02x}", b)).collect();
-
-        // --- Estimate payload size: f32 per sample ---
-        let payload_size = (calibration.samples_used * 4) as u64;
-
-        // --- Compute loss from calibration metrics ---
         let nrmse = calibration
             .metrics
             .get("nrmse")
@@ -88,6 +72,40 @@ impl EngramTrainer {
             .map(|d| format!("{:020}", d.as_nanos()))
             .unwrap_or_else(|_| "0".into());
 
+        // --- Build deterministic payload from calibration data ---
+        let mut payload: Vec<u8> = Vec::new();
+        let ordered: BTreeMap<_, _> = calibration.metrics.iter().collect();
+        for (k, v) in &ordered {
+            payload.extend_from_slice(k.as_bytes());
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+        payload.extend_from_slice(calibration.tensor_id.as_bytes());
+        payload.extend_from_slice(&calibration.samples_used.to_le_bytes());
+
+        // Hash the PAYLOAD, not metadata
+        let mut payload_hasher = Sha256::new();
+        payload_hasher.update(&payload);
+        let digest_bytes = payload_hasher.finalize();
+        let payload_digest: String = digest_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+
+        // payload_size = actual payload bytes, not an estimate
+        let payload_size = payload.len() as u64;
+
+        // Metadata hash for training receipt (deterministic via BTreeMap)
+        let mut receipt_hasher = Sha256::new();
+        receipt_hasher.update(calibration.tensor_id.as_bytes());
+        receipt_hasher.update(&calibration.samples_used.to_le_bytes());
+        receipt_hasher.update(calibration.method.as_bytes());
+        let receipt_ordered: BTreeMap<_, _> = calibration.metrics.iter().collect();
+        for (k, v) in &receipt_ordered {
+            receipt_hasher.update(k.as_bytes());
+            receipt_hasher.update(&v.to_le_bytes());
+        }
+        let receipt_digest_bytes = receipt_hasher.finalize();
+        let receipt_digest: String = receipt_digest_bytes
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
         let artifact = EngramArtifact {
             engram_id: engram_id.clone(),
             tensor_class: self.config.target.target_id.clone(),
@@ -108,7 +126,7 @@ impl EngramTrainer {
             final_loss,
             holdout_loss,
             converged,
-            artifact_digest: payload_digest,
+            artifact_digest: receipt_digest,
             trained_at: timestamp,
         };
 
@@ -163,5 +181,14 @@ mod tests {
         );
         assert!(artifact.engram_id.contains("test.engram"));
         assert!(receipt.converged);
+        assert!(
+            artifact.payload_digest != receipt.artifact_digest,
+            "payload digest should differ from metadata digest since payload hashes actual bytes vs metadata"
+        );
+        assert!(
+           artifact.payload_size == 43,
+           "payload_size should be exact serialized calibration data bytes (2 metrics + tensor_id + samples_used), got {}",
+            artifact.payload_size
+        );
     }
 }

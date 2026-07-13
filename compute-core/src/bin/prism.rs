@@ -750,6 +750,12 @@ fn compile_gguf(
         // reference `authority` through the `cfg` block only
         let _ = &authority;
 
+        // Hoist these conversions so they are in scope for all branches.
+        let ane_str = _ane_models_dir.map(|p| p.to_string_lossy().to_string());
+        let metal_str = _metallib_path.map(|p| p.to_string_lossy().to_string());
+        let mlx_str = _mlx_capture_dir.map(|p| p.to_string_lossy().to_string());
+        let target_str = raw_target.map(|s| s.to_string());
+
         let new_pipeline_result = if let Some(draft_path) = draft {
             // Speculative compilation with draft GGUF — routed through PrismCompiler.
             use tribunus_compute_core::ecs::aot::prism_compiler::PrismCompiler;
@@ -761,6 +767,10 @@ fn compile_gguf(
                 quant_mode: raw_quant.map(|s| s.to_string()),
                 authority: Some(authority.to_string()),
                 draft_path: Some(draft_path.to_string_lossy().to_string()),
+                ane_models_dir: ane_str,
+                metallib_path: metal_str,
+                mlx_capture_dir: mlx_str,
+                target_hardware: target_str,
                 ..Default::default()
             };
             compiler
@@ -777,6 +787,10 @@ fn compile_gguf(
                 output_path: Some(output_path.to_string_lossy().to_string()),
                 quant_mode: raw_quant.map(|s| s.to_string()),
                 authority: Some(authority.to_string()),
+                ane_models_dir: ane_str,
+                metallib_path: metal_str,
+                mlx_capture_dir: mlx_str,
+                target_hardware: target_str,
                 ..Default::default()
             };
             compiler
@@ -792,6 +806,10 @@ fn compile_gguf(
                 source_path: gguf_path.to_string_lossy().to_string(),
                 output_path: Some(output_path.to_string_lossy().to_string()),
                 quant_mode: raw_quant.map(|s| s.to_string()),
+                ane_models_dir: ane_str,
+                metallib_path: metal_str,
+                mlx_capture_dir: mlx_str,
+                target_hardware: target_str,
                 ..Default::default()
             };
             compiler

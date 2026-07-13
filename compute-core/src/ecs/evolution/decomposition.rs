@@ -8,6 +8,10 @@
 //! The search is simulation-based — no real Metal compilation. Tile sizes
 //! are evaluated with synthetic cost metrics where larger tiles (fewer
 //! iterations) score lower cost, so the search converges toward larger tiles.
+//!
+//! To support real benchmarking, the search accepts a pluggable
+//! [`Evaluator`] trait. The default [`SyntheticEvaluator`] is a test
+//! fixture; production use requires a measured Metal evaluator.
 
 use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::evolution::foundation::{
@@ -38,6 +42,8 @@ impl MetalDecompositionSearch {
             backend,
             format: CodecFamily::Nf4,
             config: SearchConfig {
+                // Tile dimensions should be capped to Metal limits (typically 1024×1024×1024)
+                // in a real evaluator. The synthetic evaluator does not enforce this.
                 population_size: 8,
                 mutation_rate: 0.3,
                 crossover_rate: 0.2,
@@ -55,6 +61,8 @@ impl MetalDecompositionSearch {
             backend,
             format: CodecFamily::Ternary,
             config: SearchConfig {
+                // Tile dimensions should be capped to Metal limits (typically 1024×1024×1024)
+                // in a real evaluator. The synthetic evaluator does not enforce this.
                 population_size: 8,
                 mutation_rate: 0.3,
                 crossover_rate: 0.2,
@@ -69,12 +77,14 @@ impl MetalDecompositionSearch {
     ///
     /// Creates a seed program with a 64×64×64 tile, spawns a population via
     /// [`evolve_seed`], then iterates generations evaluating with synthetic
-    /// cost metrics, selecting fittest candidates, and mutating to fill the
+    /// cost metrics (via the provided [`Evaluator`]), selecting fittest
+    /// candidates, and mutating to fill the
     /// next generation.  Convergence is reached when wall-ns improvement
     /// between generations falls below the configured threshold.
     ///
-    /// In production this would compile and benchmark on the Metal device.
-    pub fn run(&self) -> DecompositionResult {
+    /// Pass [`SyntheticEvaluator`] for testing or a real Metal-measuring
+    /// evaluator in production.
+    pub fn run(&self, evaluator: &dyn Evaluator) -> DecompositionResult {
         let mut world = CompWorld::new();
         // The run() method uses direct mutation (outside WorldTxn).
         world.set_direct_mutation_allowed(true);
@@ -123,7 +133,7 @@ impl MetalDecompositionSearch {
                         .get_component::<EvolveCandidate>(entity)
                         .map(|c| c.program.clone());
                     if let Some(prog) = program {
-                        let cost = simulate_cost(&prog);
+                        let cost = evaluator.evaluate(&prog);
                         if let Some(c) = world.get_component_mut::<EvolveCandidate>(entity) {
                             evolve_evaluate(&mut *c, cost);
                         }
@@ -261,6 +271,26 @@ fn simulate_cost(program: &EvolveProgram) -> CostMetrics {
     }
 }
 
+/// Evaluator that measures cost of an evolved program on target hardware.
+///
+/// The default implementation is a synthetic test fixture. Production use
+/// requires a measured Metal evaluator that compiles, dispatches, and
+/// benchmarks the candidate on a real GPU.
+pub trait Evaluator {
+    fn evaluate(&self, program: &EvolveProgram) -> CostMetrics;
+}
+
+/// Synthetic evaluator for testing — larger tiles score lower cost.
+/// DOES NOT compile, dispatch, or measure on real Metal.
+#[derive(Default)]
+pub struct SyntheticEvaluator;
+
+impl Evaluator for SyntheticEvaluator {
+    fn evaluate(&self, program: &EvolveProgram) -> CostMetrics {
+        simulate_cost(program)
+    }
+}
+
 /// Results from a decomposition search.
 #[derive(Debug, Clone)]
 pub struct DecompositionResult {
@@ -303,7 +333,7 @@ mod tests {
         // improvements (50%+ per generation), so convergence may not trigger
         // within the default threshold. Either outcome is valid.
         let search = MetalDecompositionSearch::for_nf4("test.weight", BackendTarget::Metal);
-        let result = search.run();
+        let result = search.run(&SyntheticEvaluator);
         assert!(
             result.generations > 0,
             "search should make at least one generation"

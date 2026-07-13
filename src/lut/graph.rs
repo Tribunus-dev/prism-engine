@@ -705,6 +705,7 @@ mod tests {
     #[test]
     fn test_qwen3_5_config() {
         #[derive(Deserialize)]
+        #[allow(dead_code)]
         struct RawHfConfigSimple {
             architectures: Option<Vec<String>>,
             text_config: Option<serde_json::Value>,
@@ -762,7 +763,7 @@ mod tests {
             .iter()
             .filter(|t| t.contains("full"))
             .count();
-        let expected = 1 + (n_lin * 9 + n_full * 12) + 1 + 1;
+        let _expected = 1 + (n_lin * 9 + n_full * 12) + 1 + 1;
         assert_eq!(graph.nodes.len(), 254, "Qwen3.5 node count");
         assert_eq!(graph.num_layers, 24);
 

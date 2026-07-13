@@ -74,6 +74,7 @@ int tribunus_coreai_load_model(void** out_model,
     *out_model = NULL;
 
     @autoreleasepool {
+    try {
     @try {
         NSString* path = [NSString stringWithUTF8String:model_path];
         NSURL* url = [NSURL fileURLWithPath:path];
@@ -116,6 +117,11 @@ int tribunus_coreai_load_model(void** out_model,
         fprintf(stderr, "coreai_load_model EXCEPTION: %s\n",
                 exc.description.UTF8String);
         return -10;
+    }
+    } catch (const std::exception& e) {
+        fprintf(stderr, "coreai_load_model: C++ exception: %s\n", e.what());
+        os_signpost_interval_end(tribunus_coreai_log, 0, "load_model", "cpp-exception=%s", e.what());
+        return -3;
     }
     } // @autoreleasepool
     os_signpost_interval_end(tribunus_coreai_log, 0, "load_model", "ok");

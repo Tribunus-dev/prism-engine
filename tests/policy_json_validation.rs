@@ -12,13 +12,16 @@ fn verify_compiler_policy_json() {
         .as_array()
         .expect("model_policies not an array");
 
-    for (i, policy) in policies.iter().enumerate() {
+    for (_, policy) in policies.iter().enumerate() {
         let name = policy["scope"].as_str().unwrap_or("unnamed");
 
         // Every policy must have evidence with weight_space
         let evidence = &policy["evidence"];
         assert!(evidence.is_object(), "{name}: evidence not an object");
-        assert!(evidence.get("weight_space").is_some(), "{name}: missing weight_space");
+        assert!(
+            evidence.get("weight_space").is_some(),
+            "{name}: missing weight_space"
+        );
 
         // operator, when present, must be inside evidence
         if evidence.get("operator").is_some() {
@@ -45,9 +48,15 @@ fn verify_compiler_policy_json() {
         if gates.get(name).is_none() && !name.contains("Qwen") {
             // Qwen is weight_space_only, no gate needed yet
             // All others must have a gate
-            assert!(gates.get(name).is_some(), "{name}: missing from promotion_gates_met");
+            assert!(
+                gates.get(name).is_some(),
+                "{name}: missing from promotion_gates_met"
+            );
         }
     }
 
-    eprintln!("compiler_policy.json: {} policies validated", policies.len());
+    eprintln!(
+        "compiler_policy.json: {} policies validated",
+        policies.len()
+    );
 }

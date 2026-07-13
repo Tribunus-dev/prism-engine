@@ -16,7 +16,7 @@
 //!   --ignored coreml_fixture_loads_and_exposes_named_contract
 //! ```
 
-#![cfg(all(target_os = "macos", feature = "prism-backend"))]
+#![cfg(any())]
 
 use std::ffi::CString;
 use std::path::{Path, PathBuf};

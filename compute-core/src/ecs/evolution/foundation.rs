@@ -74,7 +74,7 @@ pub enum CostFunction {
 }
 
 /// The program space a search explores.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EvolveProgram {
     MetalShader(String),
     MilProgram(MilProgramFragment),
@@ -88,7 +88,7 @@ pub enum EvolveProgram {
 }
 
 /// A custom instruction for a discovered decomposition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CustomInstruction {
     LoadWeight {
         offset: u64,
@@ -119,7 +119,7 @@ pub enum CustomInstruction {
 }
 
 /// A reference to a codebook (e.g., NF4 lookup table, ternary sign map).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvolveCodebookRef {
     pub name: String,
     pub offset: u64,
@@ -129,7 +129,7 @@ pub struct EvolveCodebookRef {
 // ── MIL (ANE dataflow) types ───────────────────────────────────────────
 
 /// A compiled MIL program fragment for one tensor on the ANE.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MilProgramFragment {
     pub ops: Vec<MilOp>,
     pub schedule: MilSchedule,
@@ -137,7 +137,7 @@ pub struct MilProgramFragment {
 }
 
 /// ANE dataflow operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MilOp {
     MatMul {
         lhs: usize,
@@ -182,14 +182,14 @@ pub enum MilOp {
 }
 
 /// Schedule for one MIL program on the ANE.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MilSchedule {
     pub units: Vec<MilUnit>,
     pub sync_points: Vec<usize>,
 }
 
 /// One neuron/unit assignment in the MIL schedule.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MilUnit {
     pub op_range: Range<usize>,
     pub assigned_neuron: usize,

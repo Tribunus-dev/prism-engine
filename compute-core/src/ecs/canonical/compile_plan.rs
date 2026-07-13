@@ -40,6 +40,20 @@ pub struct CompileRequest {
     pub authority: Option<String>,
     /// Path to a draft GGUF model for speculative decoding
     pub draft_path: Option<String>,
+    /// Directory containing pre-compiled ANE .mlmodelc bundles.
+    /// When set, the compiler skips MIL generation and uses these directly.
+    pub ane_models_dir: Option<String>,
+    /// Path to a pre-compiled .metallib file (Metal inference kernels).
+    /// When set, the compiler embeds this library directly instead of
+    /// compiling shader templates.
+    pub metallib_path: Option<String>,
+    /// Directory containing MLX JIT-captured Metal source (generated.metal)
+    /// for AOT compilation. When set and generated.metal exists, the
+    /// compiler uses it instead of template kernels.
+    pub mlx_capture_dir: Option<String>,
+    /// Target hardware identifier (e.g. "m1", "m1pro", "m2", "m2ultra").
+    /// Auto-detected if None.
+    pub target_hardware: Option<String>,
 }
 
 impl Default for CompileRequest {
@@ -53,6 +67,10 @@ impl Default for CompileRequest {
             quant_mode: None,
             authority: None,
             draft_path: None,
+            ane_models_dir: None,
+            metallib_path: None,
+            mlx_capture_dir: None,
+            target_hardware: None,
         }
     }
 }

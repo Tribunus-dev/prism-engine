@@ -1163,6 +1163,7 @@ impl PrismEngine {
                             hr = h.clone();
                         }
                         TensorRole::GateProj => {
+                            #[cfg_attr(not(feature = "metal-dispatch"), allow(unused_mut))]
                             let mut did_fuse = false;
                             #[cfg(feature = "metal-dispatch")]
                             if _fused_set.contains(&_ni) {

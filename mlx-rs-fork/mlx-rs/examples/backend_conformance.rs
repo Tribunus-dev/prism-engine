@@ -1,6 +1,6 @@
-use mlx_rs::backend::{BackendConformanceRunner, MlxBackendCapabilities};
-
+#[cfg(feature = "evidence")]
 fn main() {
+    use mlx_rs::backend::{BackendConformanceRunner, MlxBackendCapabilities};
     let caps = MlxBackendCapabilities::detect();
     let runner = BackendConformanceRunner::default().with_capabilities(caps);
 
@@ -35,4 +35,10 @@ fn main() {
     if failed {
         std::process::exit(1);
     }
+}
+
+#[cfg(not(feature = "evidence"))]
+fn main() {
+    eprintln!("This example requires the 'evidence' feature");
+    std::process::exit(1);
 }

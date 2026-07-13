@@ -143,6 +143,17 @@ impl PrismCompiler {
     }
 
     /// Compile a model source end-to-end.
+    ///
+    /// ## Gate note
+    /// Real GGUF compilation (via `compile_gguf_to_canonical`) requires the
+    /// `mlx-backend` feature because the pipeline imports from the `emit` module
+    /// which depends on `mlx_rs`.  Without `mlx-backend`, the method falls back
+    /// to producing structural empty artifacts from `plan()`.
+    ///
+    /// ## Authority routing
+    /// When `request.authority == "SealedComputeImage"`, compilation delegates
+    /// to `compile_with_authority`, which enforces validation gates via
+    /// `compile_gguf_with_authority`.  Both paths are behind `mlx-backend`.
     pub fn compile(&self, request: CompileRequest) -> Result<CompileOutcome, String> {
         // ── Authority-gated path ─────────────────────────────────────
         #[cfg(feature = "mlx-backend")]
@@ -172,9 +183,9 @@ impl PrismCompiler {
                     &request.source_path,
                     &output_dir,
                     quant_mode,
-                    None, // ane_models_dir
-                    None, // metallib_path
-                    None, // mlx_capture_dir
+                    request.ane_models_dir.as_deref(),
+                    request.metallib_path.as_deref(),
+                    request.mlx_capture_dir.as_deref(),
                 )
                 .map_err(|e| e.to_string())?;
 
@@ -214,7 +225,10 @@ impl PrismCompiler {
             success: true,
             timestamp: compile_timestamp(),
             duration_ms: 0.0,
-            message: Some("Structural compilation plan produced (no backend)".into()),
+            message: Some(
+                "Real GGUF compilation requires the mlx-backend feature — structural empty plan produced"
+                    .into(),
+            ),
             source_digest: None,
             policy_digest: None,
             artifact_digest: None,
@@ -263,6 +277,7 @@ impl PrismCompiler {
     /// Compile a target + draft GGUF pair for speculative decoding.
     ///
     /// Delegates to compile_gguf_speculative behind the mlx-backend gate.
+    /// Forwards request.target_hardware into the compiled image pipeline.
     #[cfg(feature = "mlx-backend")]
     pub fn compile_speculative(&self, request: CompileRequest) -> Result<CompileOutcome, String> {
         let draft_path = request
@@ -285,13 +300,18 @@ impl PrismCompiler {
 
         let authority = parse_authority(request.authority.as_deref());
 
-        let _compiled_image = crate::ecs::compute_image::compile::compile_gguf_speculative(
+        let target = request
+            .target_hardware
+            .as_deref()
+            .and_then(|s| parse_hardware_target(Some(s)));
+
+        let compiled_image = crate::ecs::compute_image::compile::compile_gguf_speculative(
             &request.source_path,
             draft_path,
             &output_dir,
             authority,
             quant_mode,
-            None, // target — auto-detect
+            target,
         )
         .map_err(|e| e.to_string())?;
 
@@ -313,42 +333,12 @@ impl PrismCompiler {
         });
         event_stream.completed_at = Some(compile_timestamp());
 
-        let plan = self
-            .plan(request.clone())
-            .unwrap_or_else(|_| min_compile_plan());
+        // Build a populated CompileOutcome from the real CompiledImage.
+        let outcome = build_outcome_from_image(&compiled_image, &output_dir, &request);
 
         Ok(CompileOutcome {
-            plan,
-            compiled_kernels: vec![],
-            build_input: CimageBuildInput {
-                model_ir_digest: [0u8; 32],
-                representation_plan: RepresentationPlan {
-                    tensors: std::collections::BTreeMap::new(),
-                    calibration_receipt: None,
-                    admission_receipt: None,
-                    all_raw_f32: true,
-                },
-                execution_graph: ExecutionGraph {
-                    regions: vec![],
-                    edges: vec![],
-                    state: crate::ecs::canonical::execution_graph::RuntimeStatePlan {
-                        max_context_tokens: 0,
-                        kv_cache_bytes_per_token: 0,
-                        total_kv_cache_bytes: 0,
-                    },
-                    memory: crate::ecs::canonical::execution_graph::MemoryPlan {
-                        total_activation_bytes: 0,
-                        total_weight_bytes: 0,
-                        arena_region_count: 0,
-                    },
-                },
-                compiled_kernels: vec![],
-                tensor_payloads: vec![],
-                receipts: event_stream.to_receipt_set(),
-            },
-            receipts: event_stream.to_receipt_set(),
-            output_path: Some(output_dir),
             event_stream,
+            ..outcome
         })
     }
 
@@ -356,6 +346,9 @@ impl PrismCompiler {
     ///
     /// Routes through compile_gguf_with_authority when the request
     /// carries `authority: "sealed"`.
+    ///
+    /// Forwards request fields: ane_models_dir, metallib_path, mlx_capture_dir,
+    /// target_hardware into the compiled image pipeline.
     #[cfg(feature = "mlx-backend")]
     fn compile_with_authority(&self, request: CompileRequest) -> Result<CompileOutcome, String> {
         let output_dir = request.output_path.clone().unwrap_or_else(|| {
@@ -373,15 +366,23 @@ impl PrismCompiler {
 
         let authority = parse_authority(request.authority.as_deref());
 
-        let _compiled_image = crate::ecs::compute_image::compile::compile_gguf_with_authority(
+        let target = request
+            .target_hardware
+            .as_deref()
+            .and_then(|s| parse_hardware_target(Some(s)));
+        let ane_dir = request.ane_models_dir.as_deref();
+        let metal_path = request.metallib_path.as_deref();
+        let mlx_cap = request.mlx_capture_dir.as_deref();
+
+        let compiled_image = crate::ecs::compute_image::compile::compile_gguf_with_authority(
             &request.source_path,
             &output_dir,
             authority,
             quant_mode,
-            None, // target — auto-detect
-            None, // ane_models_dir
-            None, // metallib_path
-            None, // mlx_capture_dir
+            target,
+            ane_dir,
+            metal_path,
+            mlx_cap,
         )
         .map_err(|e| e.to_string())?;
 
@@ -403,42 +404,12 @@ impl PrismCompiler {
         });
         event_stream.completed_at = Some(compile_timestamp());
 
-        let plan = self
-            .plan(request.clone())
-            .unwrap_or_else(|_| min_compile_plan());
+        // Build a populated CompileOutcome from the real CompiledImage.
+        let outcome = build_outcome_from_image(&compiled_image, &output_dir, &request);
 
         Ok(CompileOutcome {
-            plan,
-            compiled_kernels: vec![],
-            build_input: CimageBuildInput {
-                model_ir_digest: [0u8; 32],
-                representation_plan: RepresentationPlan {
-                    tensors: std::collections::BTreeMap::new(),
-                    calibration_receipt: None,
-                    admission_receipt: None,
-                    all_raw_f32: true,
-                },
-                execution_graph: ExecutionGraph {
-                    regions: vec![],
-                    edges: vec![],
-                    state: crate::ecs::canonical::execution_graph::RuntimeStatePlan {
-                        max_context_tokens: 0,
-                        kv_cache_bytes_per_token: 0,
-                        total_kv_cache_bytes: 0,
-                    },
-                    memory: crate::ecs::canonical::execution_graph::MemoryPlan {
-                        total_activation_bytes: 0,
-                        total_weight_bytes: 0,
-                        arena_region_count: 0,
-                    },
-                },
-                compiled_kernels: vec![],
-                tensor_payloads: vec![],
-                receipts: event_stream.to_receipt_set(),
-            },
-            receipts: event_stream.to_receipt_set(),
-            output_path: Some(output_dir),
             event_stream,
+            ..outcome
         })
     }
 }
@@ -453,6 +424,7 @@ mod tests {
 
     /// Mock frontend that returns minimal valid ModelIr.
     /// Documents the structural shape needed for compilation pipeline tests.
+    #[allow(dead_code)]
     struct MockFrontend;
 
     impl ModelFrontend for MockFrontend {
@@ -578,6 +550,10 @@ mod tests {
             quant_mode: None,
             authority: None,
             draft_path: None,
+            ane_models_dir: None,
+            metallib_path: None,
+            mlx_capture_dir: None,
+            target_hardware: None,
         };
         let result = compiler.plan(request);
         assert!(result.is_err(), "plan() should fail without a frontend");
@@ -607,6 +583,10 @@ mod tests {
                 quant_mode: None,
                 authority: None,
                 draft_path: None,
+                ane_models_dir: None,
+                metallib_path: None,
+                mlx_capture_dir: None,
+                target_hardware: None,
             })
             .expect("compile() should succeed with a mock frontend");
 
@@ -643,22 +623,158 @@ fn parse_authority(s: Option<&str>) -> crate::ecs::compute_image::manifest::Comp
         _ => CompilationAuthority::SealedComputeImage,
     }
 }
-
-/// Build a minimal CompilePlan when no frontend is available.
+/// Parse a hardware target string into a HardwareTarget.
 #[cfg(feature = "mlx-backend")]
-fn min_compile_plan() -> CompilePlan {
-    use crate::ecs::canonical::model_ir::{
-        ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, SourceProvenance,
-        SourceType, TensorCatalogue, TokenizerDescriptor,
+fn parse_hardware_target(s: Option<&str>) -> Option<crate::ecs::config::HardwareTarget> {
+    use crate::ecs::config::HardwareTarget;
+    s.and_then(|t| match t.to_lowercase().as_str() {
+        "m1" => Some(HardwareTarget::M1),
+        "m1pro" => Some(HardwareTarget::M1Pro),
+        "m2" => Some(HardwareTarget::M2),
+        "m2ultra" => Some(HardwareTarget::M2Ultra),
+        "m3ultra" => Some(HardwareTarget::M3Ultra),
+        _ => None,
+    })
+}
+
+/// Build a populated CompileOutcome from a CompiledImage returned by the
+/// GGUF pipeline (compile_gguf_with_authority or compile_gguf_speculative).
+///
+/// Populates model_ir_digest, execution_graph (weight bytes from segments),
+/// compiled kernel entries from metal_kernel_artifacts, and receipts from
+/// the compile receipt — avoiding the structural-empty-artifact problem.
+///
+/// The plan field uses the request model name if available, otherwise a
+/// minimal placeholder.
+#[cfg(feature = "mlx-backend")]
+fn build_outcome_from_image(
+    compiled_image: &crate::ecs::compute_image::manifest::CompiledImage,
+    output_dir: &str,
+    request: &CompileRequest,
+) -> CompileOutcome {
+    use crate::ecs::canonical::kernel_abi::{
+        CompiledKernelArtifact, DispatchGeometryPolicy, KernelAbi, KernelImplementationId,
+        KernelSemanticId,
     };
-    CompilePlan {
+    use sha2::{Digest, Sha256};
+
+    // Model IR digest from manifest data
+    let mut hasher = Sha256::new();
+    hasher.update(compiled_image.manifest.image_hash.as_bytes());
+    hasher.update(compiled_image.manifest.source.model_type.as_bytes());
+    let model_ir_digest: [u8; 32] = hasher.finalize().into();
+
+    // Execution graph from manifest segments
+    let total_weight_bytes: u64 = compiled_image
+        .manifest
+        .segments
+        .iter()
+        .map(|s| s.byte_size)
+        .sum();
+
+    let execution_graph = ExecutionGraph {
+        regions: Vec::new(),
+        edges: Vec::new(),
+        state: crate::ecs::canonical::execution_graph::RuntimeStatePlan {
+            max_context_tokens: 0,
+            kv_cache_bytes_per_token: 0,
+            total_kv_cache_bytes: 0,
+        },
+        memory: crate::ecs::canonical::execution_graph::MemoryPlan {
+            total_activation_bytes: 0,
+            total_weight_bytes,
+            arena_region_count: compiled_image.manifest.segments.len(),
+        },
+    };
+
+    // Compiled kernel entries from metal kernel artifacts
+    let compiled_kernels: Vec<crate::ecs::canonical::compile_plan::CompiledKernelEntry> =
+        compiled_image
+            .manifest
+            .metal_kernel_artifacts
+            .iter()
+            .map(|art| {
+                let semi_id = KernelSemanticId(format!("{}:{:?}", art.logical_operation, art.kind));
+                crate::ecs::canonical::compile_plan::CompiledKernelEntry {
+                    artifact: CompiledKernelArtifact {
+                        implementation_id: KernelImplementationId(format!(
+                            "{}|{}",
+                            art.artifact_id, art.gpu_family
+                        )),
+                        semantic_id: semi_id,
+                        compiled_bytes: Vec::new(),
+                        sha256: art.checksum.clone(),
+                        entry_point: art.artifact_id.clone(),
+                        abi: KernelAbi {
+                            version: 1,
+                            buffers: Vec::new(),
+                            constants: Vec::new(),
+                            threadgroup_memory: Vec::new(),
+                            dispatch_geometry: DispatchGeometryPolicy::Fixed(1, 1, 1),
+                            threads_per_threadgroup: (1, 1, 1),
+                        },
+                    },
+                    compile_duration_ms: 0.0,
+                    cache_hit: false,
+                }
+            })
+            .collect();
+
+    // Build the kernel plan artifacts for build_input
+    let build_input_kernels: Vec<CompiledKernelArtifact> = compiled_kernels
+        .iter()
+        .map(|e| e.artifact.clone())
+        .collect();
+
+    // Receipts from compile receipt
+    let cr = &compiled_image.receipt;
+    let receipts = vec![
+        crate::ecs::canonical::compile_plan::CompilerReceipt {
+            stage: CompilerStage::SourceResolved,
+            success: true,
+            duration_ms: 0.0,
+            message: Some(format!("Source config hash: {}", cr.source_config_hash)),
+        },
+        crate::ecs::canonical::compile_plan::CompilerReceipt {
+            stage: CompilerStage::PayloadPacked,
+            success: true,
+            duration_ms: 0.0,
+            message: Some(format!(
+                "{} tensors, {} segments",
+                cr.tensor_count,
+                cr.segment_hashes.len()
+            )),
+        },
+        crate::ecs::canonical::compile_plan::CompilerReceipt {
+            stage: CompilerStage::CimageWritten,
+            success: true,
+            duration_ms: 0.0,
+            message: Some(format!("Complete image hash: {}", cr.complete_image_hash)),
+        },
+    ];
+    let receipt_set = crate::ecs::canonical::compile_plan::CompilerReceiptSet { receipts };
+
+    // Model name from request, or fall back to manifest
+    let model_name = if !request.source_path.is_empty() {
+        std::path::Path::new(&request.source_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "model".to_string())
+    } else {
+        "model".to_string()
+    };
+
+    // Build a minimal plan with the model identity populated
+    let plan = CompilePlan {
         model_ir: ModelIr {
-            identity: ModelIdentity {
-                name: "unknown".into(),
+            identity: crate::ecs::canonical::model_ir::ModelIdentity {
+                name: model_name,
                 revision: None,
             },
-            architecture: ArchitectureId("unknown".into()),
-            configuration: ModelConfiguration {
+            architecture: crate::ecs::canonical::model_ir::ArchitectureId(
+                compiled_image.manifest.source.model_type.clone(),
+            ),
+            configuration: crate::ecs::canonical::model_ir::ModelConfiguration {
                 hidden_size: 0,
                 intermediate_size: 0,
                 num_attention_heads: 0,
@@ -678,25 +794,25 @@ fn min_compile_plan() -> CompilePlan {
                 mtp_hidden_size: None,
                 mtp_intermediate_size: None,
             },
-            tensors: TensorCatalogue {
+            tensors: crate::ecs::canonical::model_ir::TensorCatalogue {
                 by_id: vec![],
                 by_name: std::collections::HashMap::new(),
             },
-            graph: LogicalGraph {
+            graph: crate::ecs::canonical::model_ir::LogicalGraph {
                 ops: vec![],
                 inputs: vec![],
                 outputs: vec![],
             },
-            tokenizer: TokenizerDescriptor {
+            tokenizer: crate::ecs::canonical::model_ir::TokenizerDescriptor {
                 tokenizer_type: "unknown".into(),
                 vocab_size: 0,
                 bos_token_id: None,
                 eos_token_id: None,
                 pad_token_id: None,
             },
-            source_provenance: SourceProvenance {
-                source_type: SourceType::Gguf,
-                source_path: "unknown".into(),
+            source_provenance: crate::ecs::canonical::model_ir::SourceProvenance {
+                source_type: crate::ecs::canonical::model_ir::SourceType::Gguf,
+                source_path: request.source_path.clone(),
                 file_digests: vec![],
             },
         },
@@ -706,21 +822,29 @@ fn min_compile_plan() -> CompilePlan {
             admission_receipt: None,
             all_raw_f32: true,
         },
-        execution_graph: ExecutionGraph {
-            regions: vec![],
-            edges: vec![],
-            state: crate::ecs::canonical::execution_graph::RuntimeStatePlan {
-                max_context_tokens: 0,
-                kv_cache_bytes_per_token: 0,
-                total_kv_cache_bytes: 0,
-            },
-            memory: crate::ecs::canonical::execution_graph::MemoryPlan {
-                total_activation_bytes: 0,
-                total_weight_bytes: 0,
-                arena_region_count: 0,
-            },
-        },
+        execution_graph: execution_graph.clone(),
         kernel_plan: KernelPlan { groups: vec![] },
-        estimated_output_size: 0,
+        estimated_output_size: total_weight_bytes,
+    };
+
+    CompileOutcome {
+        plan,
+        compiled_kernels,
+        build_input: CimageBuildInput {
+            model_ir_digest,
+            representation_plan: RepresentationPlan {
+                tensors: std::collections::BTreeMap::new(),
+                calibration_receipt: None,
+                admission_receipt: None,
+                all_raw_f32: true,
+            },
+            execution_graph,
+            compiled_kernels: build_input_kernels,
+            tensor_payloads: Vec::new(),
+            receipts: receipt_set.clone(),
+        },
+        receipts: receipt_set,
+        output_path: Some(output_dir.to_string()),
+        event_stream: CompileEventStream::new(output_dir),
     }
 }

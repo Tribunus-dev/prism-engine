@@ -2278,58 +2278,135 @@ pub fn compile_gguf_to_canonical(
 }
 
 /// Build the canonical CompileOutcome from a compiled image and canonical IR.
+///
+/// Populates the CompileOutcome with real data from the CompiledImage
+/// (model digest, execution graph with weight bytes, compiled kernel entries
+/// from metal kernel artifacts, compilation receipts) rather than leaving
+/// them as structural empties.
 fn build_canonical_outcome(
     compiled: CompiledImage,
     model_ir: crate::ecs::canonical::ModelIr,
     rep_plan: crate::ecs::canonical::RepresentationPlan,
     output_dir: &str,
 ) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
+    use crate::ecs::canonical::compile_plan::CompilerStage;
+    use crate::ecs::canonical::kernel_abi::{
+        CompiledKernelArtifact, DispatchGeometryPolicy, KernelAbi, KernelImplementationId,
+        KernelSemanticId,
+    };
     use crate::ecs::canonical::{
-        CimageBuildInput, CompileEventStream, CompileOutcome, CompilePlan, CompilerReceiptSet,
-        ExecutionGraph, KernelPlan, MemoryPlan, RuntimeStatePlan,
+        CimageBuildInput, CompileEventStream, CompileOutcome, CompilePlan, CompiledKernelEntry,
+        CompilerReceipt, CompilerReceiptSet, ExecutionGraph, KernelPlan, MemoryPlan,
+        RuntimeStatePlan,
     };
 
-    let empty_execution_graph = ExecutionGraph {
+    // Model IR digest from identity + architecture + configuration
+    let mut hasher = Sha256::new();
+    hasher.update(model_ir.identity.name.as_bytes());
+    hasher.update(model_ir.architecture.0.as_bytes());
+    hasher.update(model_ir.configuration.hidden_size.to_le_bytes());
+    hasher.update(model_ir.configuration.num_hidden_layers.to_le_bytes());
+    hasher.update(model_ir.configuration.max_position_embeddings.to_le_bytes());
+    let digest: [u8; 32] = hasher.finalize().into();
+
+    // Execution graph from manifest segments
+    let total_weight_bytes: u64 = compiled.manifest.segments.iter().map(|s| s.byte_size).sum();
+
+    let execution_graph = ExecutionGraph {
         regions: Vec::new(),
         edges: Vec::new(),
         state: RuntimeStatePlan {
-            max_context_tokens: 0,
+            max_context_tokens: model_ir.configuration.max_position_embeddings,
             kv_cache_bytes_per_token: 0,
             total_kv_cache_bytes: 0,
         },
         memory: MemoryPlan {
             total_activation_bytes: 0,
-            total_weight_bytes: 0,
-            arena_region_count: 0,
+            total_weight_bytes,
+            arena_region_count: compiled.manifest.segments.len(),
         },
     };
 
-    let empty_kernel_plan = KernelPlan { groups: Vec::new() };
+    // Compiled kernel entries from metal kernel artifacts
+    let compiled_kernels: Vec<CompiledKernelEntry> = compiled
+        .manifest
+        .metal_kernel_artifacts
+        .iter()
+        .map(|art| {
+            let semi_id = KernelSemanticId(format!("{}:{:?}", art.logical_operation, art.kind));
+            CompiledKernelEntry {
+                artifact: CompiledKernelArtifact {
+                    implementation_id: KernelImplementationId(format!("{}|{}", art.artifact_id, art.gpu_family)),
+                    semantic_id: semi_id,
+                    compiled_bytes: Vec::new(),
+                    sha256: art.checksum.clone(),
+                    entry_point: art.artifact_id.clone(),
+                    abi: KernelAbi {
+                        version: 1,
+                        buffers: Vec::new(),
+                        constants: Vec::new(),
+                        threadgroup_memory: Vec::new(),
+                        dispatch_geometry: DispatchGeometryPolicy::Fixed(1, 1, 1),
+                        threads_per_threadgroup: (1, 1, 1),
+                    },
+                },
+                compile_duration_ms: 0.0,
+                cache_hit: false,
+            }
+        })
+        .collect();
+
+    // Receipts from compile receipt
+    let cr = &compiled.receipt;
+    let receipts = vec![
+        CompilerReceipt {
+            stage: CompilerStage::SourceResolved,
+            success: true,
+            duration_ms: 0.0,
+            message: Some(format!("Source config hash: {}", cr.source_config_hash)),
+        },
+        CompilerReceipt {
+            stage: CompilerStage::PayloadPacked,
+            success: true,
+            duration_ms: 0.0,
+            message: Some(format!(
+                "{} tensors, {} segments",
+                cr.tensor_count,
+                cr.segment_hashes.len()
+            )),
+        },
+        CompilerReceipt {
+            stage: CompilerStage::CimageWritten,
+            success: true,
+            duration_ms: 0.0,
+            message: Some(format!("Complete image hash: {}", cr.complete_image_hash)),
+        },
+    ];
+    let receipt_set = CompilerReceiptSet { receipts };
 
     let plan = CompilePlan {
         model_ir: model_ir.clone(),
         representation_plan: rep_plan.clone(),
-        execution_graph: empty_execution_graph.clone(),
-        kernel_plan: empty_kernel_plan.clone(),
-        estimated_output_size: 0,
+        execution_graph: execution_graph.clone(),
+        kernel_plan: KernelPlan { groups: Vec::new() },
+        estimated_output_size: total_weight_bytes,
     };
 
     let outcome = CompileOutcome {
         plan,
-        compiled_kernels: Vec::new(),
+        compiled_kernels: compiled_kernels.clone(),
         build_input: CimageBuildInput {
-            model_ir_digest: [0u8; 32],
-            representation_plan: rep_plan.clone(),
-            execution_graph: empty_execution_graph,
-            compiled_kernels: Vec::new(),
+            model_ir_digest: digest,
+            representation_plan: rep_plan,
+            execution_graph,
+            compiled_kernels: compiled_kernels
+                .iter()
+                .map(|e| e.artifact.clone())
+                .collect(),
             tensor_payloads: Vec::new(),
-            receipts: CompilerReceiptSet {
-                receipts: Vec::new(),
-            },
+            receipts: receipt_set.clone(),
         },
-        receipts: CompilerReceiptSet {
-            receipts: Vec::new(),
-        },
+        receipts: receipt_set,
         event_stream: CompileEventStream::new("build_canonical_outcome"),
         output_path: Some(output_dir.to_string()),
     };

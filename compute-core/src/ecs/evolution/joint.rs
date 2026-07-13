@@ -44,6 +44,64 @@ pub struct JointSearchConfig {
     pub kernel_variants: Vec<String>,
 }
 
+/// Crossover two genomes: mix program from parent A, engram_codec from parent B,
+/// insertion point from A, kernel variant from A, and average the thresholds.
+fn joint_crossover(a: &JointGenome, b: &JointGenome) -> JointGenome {
+    JointGenome {
+        program: a.program.clone(),
+        engram_codec: b.engram_codec.clone(),
+        engram_capacity: a.engram_capacity.max(b.engram_capacity),
+        insertion_point: a.insertion_point.clone(),
+        retrieval_threshold: (a.retrieval_threshold + b.retrieval_threshold) / 2.0,
+        tensor_representation: b.tensor_representation.clone(),
+        kernel_variant: a.kernel_variant.clone(),
+    }
+}
+
+/// Mutate a genome: slightly perturb retrieval_threshold or switch to a
+/// different codec/kernel. Uses `seed` as a source of deterministic variation
+/// — no external RNG required.
+fn joint_mutate(genome: &JointGenome, config: &JointSearchConfig, seed: usize) -> JointGenome {
+    let mut result = genome.clone();
+    match seed % 5 {
+        0 => {
+            // Perturb retrieval threshold by a small delta
+            let delta = (seed as f64 * 0.07 - 0.03) * 0.1;
+            result.retrieval_threshold = (result.retrieval_threshold + delta).clamp(0.1, 1.0);
+        }
+        1 => {
+            // Switch to a different engram codec
+            if !config.engram_codecs.is_empty() {
+                let idx = seed % config.engram_codecs.len();
+                result.engram_codec = config.engram_codecs[idx].clone();
+            }
+        }
+        2 => {
+            // Switch insertion point
+            if !config.insertion_points.is_empty() {
+                let idx = seed % config.insertion_points.len();
+                result.insertion_point = config.insertion_points[idx].clone();
+            }
+        }
+        3 => {
+            // Switch kernel variant
+            if !config.kernel_variants.is_empty() {
+                let idx = seed % config.kernel_variants.len();
+                result.kernel_variant = config.kernel_variants[idx].clone();
+            }
+        }
+        _ => {
+            // Toggle tensor representation
+            result.tensor_representation = if result.tensor_representation == "TernaryTile640" {
+                "Int8Tile640".into()
+            } else {
+                "TernaryTile640".into()
+            };
+        }
+    }
+    result
+}
+
 impl JointSearchConfig {
     pub fn for_tensor(tensor_id: &str) -> Self {
         Self {
@@ -77,10 +135,17 @@ impl JointSearchConfig {
     }
 
     /// Run a joint search over engram + representation + kernel space.
+    ///
+    /// Each generation: evaluates all un-scored genomes, sorts by fitness,
+    /// keeps the top N, checks for convergence, then refills the population
+    /// with crossover + mutation offspring so evolution actually progresses.
     pub fn run(&self) -> JointSearchResult {
         let mut population = self.generate_initial_population();
+        let mut generations_completed = 0;
 
         for gen in 0..self.config.max_generations {
+            generations_completed = gen + 1;
+
             // Evaluate each genome
             for genome in &mut population {
                 if genome.fitness.is_none() {
@@ -88,29 +153,52 @@ impl JointSearchConfig {
                 }
             }
 
-            // Sort by fitness
+            // Sort by fitness (lower is better)
             population.sort_by(|a, b| {
                 let af = a.fitness.unwrap_or(f64::MAX);
                 let bf = b.fitness.unwrap_or(f64::MAX);
                 af.partial_cmp(&bf).unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            // Keep top N
+            // Keep top N (selection)
             population.truncate(self.config.population_size);
 
-            // Check convergence
-            if gen > 0
-                && population.first().map(|g| g.fitness.unwrap_or(0.0))
-                    == population.get(1).map(|g| g.fitness.unwrap_or(0.0))
-            {
-                break;
+            // Check convergence using relative threshold, not exact f64 equality
+            if gen > 0 {
+                if let (Some(best), Some(second)) = (
+                    population.first().and_then(|g| g.fitness),
+                    population.get(1).and_then(|g| g.fitness),
+                ) {
+                    if (best - second).abs()
+                        < self.config.convergence_threshold * best.abs().max(1.0)
+                    {
+                        break;
+                    }
+                }
             }
+
+            // Refill population with mutated/crossover offspring so evolution
+            // actually produces diversity each generation.
+            let mut next_gen: Vec<ScoredGenome> = population.clone();
+            let mut i = 0;
+            while next_gen.len() < self.config.population_size {
+                let parent_a = &population[i % population.len()];
+                let parent_b = &population[(i + 1) % population.len()];
+                let child = joint_crossover(&parent_a.genome, &parent_b.genome);
+                let mutated = joint_mutate(&child, self, i);
+                next_gen.push(ScoredGenome {
+                    genome: mutated,
+                    fitness: None,
+                });
+                i += 1;
+            }
+            population = next_gen;
         }
 
         JointSearchResult {
             best_genome: population.first().map(|s| s.genome.clone()),
             population_size: population.len(),
-            generations_completed: self.config.max_generations,
+            generations_completed,
         }
     }
 
@@ -200,5 +288,53 @@ mod tests {
         let result = config.run();
         assert!(result.best_genome.is_some());
         assert!(result.generations_completed > 0);
+    }
+
+    #[test]
+    fn test_joint_crossover() {
+        let a = JointGenome {
+            program: EvolveProgram::MetalShader("tile640_gemv_kernel".into()),
+            engram_codec: "nf4".into(),
+            engram_capacity: 512,
+            insertion_point: "after.linear.q_proj".into(),
+            retrieval_threshold: 0.7,
+            tensor_representation: "TernaryTile640".into(),
+            kernel_variant: "tile640_gemv".into(),
+        };
+        let b = JointGenome {
+            program: EvolveProgram::MetalShader("persistent_gemv_kernel".into()),
+            engram_codec: "int8".into(),
+            engram_capacity: 2048,
+            insertion_point: "after.linear.k_proj".into(),
+            retrieval_threshold: 0.5,
+            tensor_representation: "Int8Tile640".into(),
+            kernel_variant: "persistent_gemv".into(),
+        };
+        let child = joint_crossover(&a, &b);
+        // program from a, engram_codec from b
+        assert_eq!(format!("{:?}", child.program), format!("{:?}", a.program));
+        assert_eq!(child.engram_codec, b.engram_codec);
+        // capacity is max
+        assert_eq!(child.engram_capacity, 2048);
+        // threshold is average
+        assert!((child.retrieval_threshold - 0.6).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_joint_mutate_perturbs_threshold() {
+        let genome = JointGenome {
+            program: EvolveProgram::MetalShader("kernel".into()),
+            engram_codec: "nf4".into(),
+            engram_capacity: 1024,
+            insertion_point: "after.linear.q_proj".into(),
+            retrieval_threshold: 0.7,
+            tensor_representation: "TernaryTile640".into(),
+            kernel_variant: "tile640_gemv".into(),
+        };
+        let config = JointSearchConfig::for_tensor("attention.q_proj");
+        // seed=0 triggers threshold perturbation (seed%5==0)
+        let mutated = joint_mutate(&genome, &config, 0);
+        assert_ne!(mutated.retrieval_threshold, 0.7);
+        assert!((0.1..=1.0).contains(&mutated.retrieval_threshold));
     }
 }

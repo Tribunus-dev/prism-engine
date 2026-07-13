@@ -2,6 +2,9 @@ use prism_mcp_core::{DaemonState, McpHandler, RequestContext, ToolRequest, ToolR
 use serde_json::{json, Value};
 use std::time::Instant;
 use uuid::Uuid;
+/// SQL migration for benchmark baselines table.
+pub const MIGRATION: &str = "CREATE TABLE IF NOT EXISTS benchmark_baselines (baseline_name TEXT PRIMARY KEY, created_at TEXT NOT NULL, baseline_report_id TEXT NOT NULL);";
+
 fn init(s: &DaemonState) -> anyhow::Result<()> {
     s.db.with_writer(|c|{c.execute_batch("CREATE TABLE IF NOT EXISTS prism_bench_plans(id TEXT PRIMARY KEY,name TEXT NOT NULL,spec TEXT NOT NULL); CREATE TABLE IF NOT EXISTS prism_bench_reports(id TEXT PRIMARY KEY,plan_id TEXT NOT NULL,elapsed_ms REAL NOT NULL,exit_code INTEGER NOT NULL,output TEXT NOT NULL); CREATE TABLE IF NOT EXISTS prism_bench_baselines(name TEXT PRIMARY KEY,report_id TEXT NOT NULL)")?;Ok(())})
 }
