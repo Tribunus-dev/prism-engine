@@ -644,11 +644,13 @@ pub use stream::*;
 
 pub(crate) mod constants {
     /// The default length of the stack-allocated vector in `SmallVec<[T; DEFAULT_STACK_VEC_LEN]>`
+    #[allow(dead_code)]
     pub(crate) const DEFAULT_STACK_VEC_LEN: usize = 4;
 }
 
 pub(crate) mod sealed {
     /// A marker trait to prevent external implementations of the `Sealed` trait.
+    #[allow(dead_code)]
     pub trait Sealed {}
 
     impl Sealed for () {}

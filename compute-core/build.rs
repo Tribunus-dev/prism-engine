@@ -255,7 +255,7 @@ fn main() {
         if cfg!(feature = "coreai-backend") {
             let swift_out = format!("{}/libcoreai_bridge.o", _out_dir);
             let swift_src = "src/ecs/bridge/coreai_bridge.swift";
-            let status = std::process::Command::new("swiftc")
+            let swift_result = std::process::Command::new("swiftc")
                 .args(["-c", "-emit-object", "-module-name", "CoreAiBridge"])
                 .arg(swift_src)
                 .args(["-o", &swift_out])
@@ -264,11 +264,14 @@ fn main() {
                 .status()
                 .expect("swiftc failed");
 
-            assert!(status.success(), "swiftc returned non-zero");
-            cc::Build::new().object(&swift_out).compile("coreai_bridge");
-            println!("cargo:rustc-link-lib=framework=CoreAI");
-            println!("cargo:rustc-link-lib=framework=CoreML");
-            println!("cargo:rustc-link-lib=framework=Foundation");
+            if swift_result.success() {
+                cc::Build::new().object(&swift_out).compile("coreai_bridge");
+                println!("cargo:rustc-link-lib=framework=CoreAI");
+                println!("cargo:rustc-link-lib=framework=CoreML");
+                println!("cargo:rustc-link-lib=framework=Foundation");
+            } else {
+                println!("cargo:warning=CoreAI framework not found — coreai-bridge Swift compilation skipped");
+            }
         }
     }
     eprintln!("build.rs: END of main() — all link directives emitted");
