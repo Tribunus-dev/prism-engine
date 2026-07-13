@@ -38,10 +38,12 @@ use crate::execution_plan::backend_capability::BackendLoweringTarget;
 use crate::execution_plan::HardwareProfileId;
 
 use crate::ecs::bitnet::reference::bitnet_decoder_layer_reference;
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::cimage::CImagePayloadRef;
 use crate::ecs::cimage_runtime::bitnet_layer_resolver::BitNetLayerTensorResolver;
 use crate::ecs::cimage_runtime::lower_decoder::DecoderShardRegionBuilder;
 use crate::ecs::cimage_runtime::tensor_store::{RuntimeTensor, RuntimeTensorStore};
+use crate::ecs::metal_backend::catalogue_source_for;
 use crate::quantization::admission::ternary::TernaryMetalExecutionReceipt;
 use crate::ternary::codec::TernaryPackedTensor;
 use crate::ternary::pack::pack_ternary_codes;
@@ -340,23 +342,34 @@ impl CImageMetalRegionRunner {
     /// concatenated together with the 5 decoder shader templates, so every
     /// kernel function lives in one library.
     pub fn new(device: &metal::Device) -> CImageRuntimeResult<Self> {
-        let shader_source = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-            include_str!("../compute_image/templates/cimage_rmsnorm_f32.metal"),
-            include_str!("../compute_image/templates/cimage_linear_rawf32.metal"),
-            include_str!("../compute_image/templates/cimage_linear_int8.metal"),
-            include_str!("../compute_image/templates/cimage_linear_nf4.metal"),
-            include_str!("../compute_image/templates/cimage_silu_f32.metal"),
-            include_str!("../compute_image/templates/cimage_mul_f32.metal"),
-            include_str!("../compute_image/templates/cimage_residual_add_f32.metal"),
-            include_str!("../compute_image/templates/cimage_rope_f32.metal"),
-            include_str!("../compute_image/templates/cimage_kv_append_f32.metal"),
-            include_str!("../compute_image/templates/cimage_attention_scores_f32.metal"),
-            include_str!("../compute_image/templates/cimage_attention_softmax_f32.metal"),
-            include_str!("../compute_image/templates/cimage_attention_apply_f32.metal"),
-            include_str!("../compute_image/templates/cimage_ternary_gemv_v1.metal"),
-            include_str!("../cimage/kernels/f32_to_half.metal"),
-        );
+        let sources: [&str; 14] = [
+            &catalogue_source_for(&KernelSemanticId("prism.rmsnorm.v1".into())).unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.linear.rawf32.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.linear.int8.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.linear.nf4.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.silu.v1".into())).unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.mul.v1".into())).unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.residual_add.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.rope.partial.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.kv.append.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.attention.scores.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.attention.softmax.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.attention.apply.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.ternary.cimage.gemv.v1".into()))
+                .unwrap_or_default(),
+            &catalogue_source_for(&KernelSemanticId("prism.convert.f32_to_half.v1".into()))
+                .unwrap_or_default(),
+        ];
+        let shader_source = sources.join("\n");
 
         let library = device
             .new_library_with_source(&shader_source, &metal::CompileOptions::new())

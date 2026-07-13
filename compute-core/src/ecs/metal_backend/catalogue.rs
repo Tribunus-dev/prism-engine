@@ -9,6 +9,7 @@ use crate::ecs::canonical::kernel_abi::{
 };
 use crate::ecs::canonical::model_ir::ArchitectureId;
 use crate::ecs::canonical::representation::TensorRepresentation;
+use std::sync::LazyLock;
 
 /// Catalogue of all Metal kernel implementations.
 #[derive(Debug, Clone)]
@@ -197,33 +198,128 @@ impl MetalImplementationCatalogue {
 
     /// Register primitive projection kernels (linear, RMSNorm, RoPE, etc.).
     pub fn register_primitives(&mut self) {
-        for (name, semantic) in &[
-            ("linear_rawf32", "prism.linear.rawf32.v1"),
-            ("silu", "prism.silu.v1"),
-            ("rope", "prism.rope.partial.v1"),
-            ("attention_scores", "prism.attention.scores.v1"),
-            ("attention_softmax", "prism.attention.softmax.v1"),
-            ("attention_apply", "prism.attention.apply.v1"),
-            ("residual_add", "prism.residual_add.v1"),
-        ] {
-            self.register(MetalImplementationRegistration {
-                semantic_id: KernelSemanticId(semantic.to_string()),
-                implementation_id: KernelImplementationId(format!("metal.primitive.{}.v1", name)),
-                supported_architectures: vec![],
-                supported_representations: vec![],
-                source_path: None,
-                source_entry_point: None,
-                abi: KernelAbi {
-                    version: 1,
-                    buffers: vec![],
-                    constants: vec![],
-                    threadgroup_memory: vec![],
-                    dispatch_geometry:
-                        crate::ecs::canonical::kernel_abi::DispatchGeometryPolicy::FromOutputBuffer,
-                    threads_per_threadgroup: (64, 1, 1),
-                },
-            });
-        }
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.linear.rawf32.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.linear_rawf32.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/cimage_linear_rawf32.metal".into()),
+            source_entry_point: Some("cimage_linear_rawf32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.silu.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.silu.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/cimage_silu_f32.metal".into()),
+            source_entry_point: Some("cimage_silu_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.rope.partial.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.rope.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/cimage_rope_f32.metal".into()),
+            source_entry_point: Some("cimage_rope_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.attention.scores.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.attention_scores.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some(
+                "src/ecs/compute_image/templates/cimage_attention_scores_f32.metal".into(),
+            ),
+            source_entry_point: Some("cimage_attention_scores_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.attention.softmax.v1".into()),
+            implementation_id: KernelImplementationId(
+                "metal.primitive.attention_softmax.v1".into(),
+            ),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some(
+                "src/ecs/compute_image/templates/cimage_attention_softmax_f32.metal".into(),
+            ),
+            source_entry_point: Some("cimage_attention_softmax_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.attention.apply.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.attention_apply.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some(
+                "src/ecs/compute_image/templates/cimage_attention_apply_f32.metal".into(),
+            ),
+            source_entry_point: Some("cimage_attention_apply_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.residual_add.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.residual_add.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some(
+                "src/ecs/compute_image/templates/cimage_residual_add_f32.metal".into(),
+            ),
+            source_entry_point: Some("cimage_residual_add_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
     }
 
     /// Register NF4 linear primitive kernel implementation.
@@ -377,6 +473,442 @@ impl MetalImplementationCatalogue {
             },
         });
     }
+
+    /// Register palettized GEMV primitive kernel.
+    pub fn register_palettized_gemv(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.palettized.gemv.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.palettized_gemv.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/palettized_gemv.metal".into()),
+            source_entry_point: Some("palettized_gemv".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register palettized SWIGLU primitive kernel.
+    pub fn register_palettized_swiglu(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.palettized.swiglu.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.palettized_swiglu.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/palettized_gemv_swiglu.metal".into()),
+            source_entry_point: Some("palettized_gemv_swiglu".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register palettized GEMM primitive kernel.
+    pub fn register_palettized_gemm(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.palettized.gemm.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.palettized_gemm.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/palettized_gemm.metal".into()),
+            source_entry_point: Some("palettized_gemm".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register NF4 tile640 GEMV primitive kernel.
+    pub fn register_nf4_tile640_gemv(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.nf4.tile640.gemv.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.nf4_tile640_gemv.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/nf4_tile640_gemv.metal".into()),
+            source_entry_point: Some("nf4_tile640_gemv".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register ternary GEMV standard (v2) primitive kernel.
+    pub fn register_ternary_gemv_standard(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.ternary.gemv.v2".into()),
+            implementation_id: KernelImplementationId("metal.primitive.ternary_gemv.v2".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/ternary_gemv.metal".into()),
+            source_entry_point: Some("ternary_gemv".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register ternary GEMM primitive kernel.
+    pub fn register_ternary_gemm(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.ternary.gemm.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.ternary_gemm.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/ternary_gemm.metal".into()),
+            source_entry_point: Some("ternary_gemm".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register Q4 block-sym GEMV primitive kernel.
+    pub fn register_q4_block_sym_gemv(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.q4.block_sym.gemv.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.q4_block_sym_gemv.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/q4_block_sym_gemv.metal".into()),
+            source_entry_point: Some("q4_block_sym_gemv".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register KV mixed primitive kernel.
+    pub fn register_kv_mixed(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.kv.mixed.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.kv_mixed.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/kv_mixed.metal".into()),
+            source_entry_point: Some("kv_mixed".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register fused gate-up projection kernel.
+    pub fn register_fused_gate_up(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.fused.gate_up.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.fused_gate_up.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/fused_gate_up.metal".into()),
+            source_entry_point: Some("fused_gate_up".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register tile640 pack kernels (pack, q8_0_ternary_pack, nf4_tile640_pack).
+    pub fn register_tile640_pack(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.tile640.pack.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.tile640_pack.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/tile640_pack.metal".into()),
+            source_entry_point: Some("tile640_pack".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.tile640.pack.q8_0_ternary.v1".into()),
+            implementation_id: KernelImplementationId(
+                "metal.primitive.tile640_pack_q8_0_ternary.v1".into(),
+            ),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/tile640_pack.metal".into()),
+            source_entry_point: Some("q8_0_ternary_pack".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.tile640.pack.nf4.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.tile640_pack_nf4.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/tile640_pack.metal".into()),
+            source_entry_point: Some("nf4_tile640_pack".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register megakernel INT4 decode kernel.
+    pub fn register_megakernel_int4(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.transformer.gemma4.decode.int4.v1".into()),
+            implementation_id: KernelImplementationId("metal.megakernel.gemma4.decode.int4.v1".into()),
+            supported_architectures: vec![ArchitectureId("gemma4".into())],
+            supported_representations: vec![TensorRepresentation::TernaryTile640],
+            source_path: Some("src/ecs/compute_image/megakernel/shaders/gemma4_full_int4.metal".into()),
+            source_entry_point: Some("gemma4_full_decode_int4".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register persistent GEMV kernel.
+    pub fn register_persistent_gemv(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.persistent.gemv.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.persistent_gemv.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/megakernel/shaders/persistent_gemv.metal".into()),
+            source_entry_point: Some("persistent_gemv".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register vision projection kernel.
+    pub fn register_vision_projection(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.vision.projection.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.vision_projection.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some(
+                "src/ecs/compute_image/megakernel/shaders/vision_projection.metal".into(),
+            ),
+            source_entry_point: Some("vision_patch_embed".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register TTS codec kernel.
+    pub fn register_tts_codec(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.tts.codec.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.tts_codec.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/shaders/tts_codec.metal".into()),
+            source_entry_point: Some("codebook_gather".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register NF4 tile640 dequant-mul kernel.
+    pub fn register_nf4tile640(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.nf4tile640.dequant_mul.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.nf4tile640.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/shaders/nf4tile640.metal".into()),
+            source_entry_point: Some("dequant_mul_nf4tile640".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register linear INT8 primitive kernel.
+    pub fn register_linear_int8(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.linear.int8.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.linear_int8.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/cimage_linear_int8.metal".into()),
+            source_entry_point: Some("cimage_linear_int8".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register mul primitive kernel.
+    pub fn register_mul(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.mul.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.mul.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/cimage_mul_f32.metal".into()),
+            source_entry_point: Some("cimage_mul_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register KV append primitive kernel.
+    pub fn register_kv_append(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.kv.append.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.kv_append.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/cimage_kv_append_f32.metal".into()),
+            source_entry_point: Some("cimage_kv_append_f32".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register ternary CImage GEMV primitive kernel.
+    pub fn register_ternary_cimage_gemv(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.ternary.cimage.gemv.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.ternary_cimage_gemv.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/templates/cimage_ternary_gemv_v1.metal".into()),
+            source_entry_point: Some("cimage_ternary_gemv_v1".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register f32-to-half conversion kernel.
+    pub fn register_f32_to_half(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("prism.convert.f32_to_half.v1".into()),
+            implementation_id: KernelImplementationId("metal.primitive.f32_to_half.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/cimage/kernels/f32_to_half.metal".into()),
+            source_entry_point: Some("f32_to_half".into()),
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
 }
 
 impl Default for MetalImplementationCatalogue {
@@ -388,8 +920,41 @@ impl Default for MetalImplementationCatalogue {
         cat.register_ternary_gemv();
         cat.register_rmsnorm();
         cat.register_primitives();
+        cat.register_palettized_gemv();
+        cat.register_palettized_swiglu();
+        cat.register_palettized_gemm();
+        cat.register_nf4_tile640_gemv();
+        cat.register_ternary_gemv_standard();
+        cat.register_ternary_gemm();
+        cat.register_q4_block_sym_gemv();
+        cat.register_kv_mixed();
+        cat.register_fused_gate_up();
+        cat.register_tile640_pack();
+        cat.register_megakernel_int4();
+        cat.register_persistent_gemv();
+        cat.register_vision_projection();
+        cat.register_tts_codec();
+        cat.register_nf4tile640();
+        cat.register_linear_int8();
+        cat.register_mul();
+        cat.register_kv_append();
+        cat.register_ternary_cimage_gemv();
+        cat.register_f32_to_half();
         cat
     }
+}
+
+/// Static default catalogue for production source resolution.
+static DEFAULT_CATALOGUE: LazyLock<MetalImplementationCatalogue> = LazyLock::new(MetalImplementationCatalogue::default);
+
+/// Retrieve source text for a kernel by semantic ID.
+/// Returns None when the ID is not registered or the file cannot be read.
+pub fn catalogue_source_for(semantic_id: &KernelSemanticId) -> Option<String> {
+    let cat = &*DEFAULT_CATALOGUE;
+    cat.iter()
+        .find(|r| &r.semantic_id == semantic_id)
+        .and_then(|r| r.source_path.as_ref())
+        .and_then(|path| std::fs::read_to_string(path).ok())
 }
 
 #[cfg(test)]
@@ -400,8 +965,8 @@ mod tests {
     fn test_catalogue_default_has_all_registrations() {
         let catalogue = MetalImplementationCatalogue::default();
         assert!(
-            catalogue.len() >= 12,
-            "expected >=12 registrations, got {}",
+            catalogue.len() >= 32,
+            "expected >=32 registrations, got {}",
             catalogue.len()
         );
 

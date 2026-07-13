@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::compute_image::manifest::MetalKernelArtifact;
+use crate::ecs::metal_backend::catalogue_source_for;
 use std::fs;
 use std::io::Write;
 use std::process::Command;
@@ -222,19 +224,19 @@ kernel void quantized_matmul_nf4(
 
 /// Generate Metal source for the palettized GEMV kernel.
 fn generate_palettized_gemv_source(_k: u32, _n: u32) -> String {
-    include_str!("templates/palettized_gemv.metal").to_string()
+    catalogue_source_for(&KernelSemanticId("prism.palettized.gemv.v1".into())).unwrap_or_default()
 }
 
 /// Generate Metal source for the fused palettized SwiGLU MLP kernel.
 #[allow(dead_code)]
 fn generate_palettized_swiglu_source(_k: u32, _n: u32) -> String {
-    include_str!("templates/palettized_gemv_swiglu.metal").to_string()
+    catalogue_source_for(&KernelSemanticId("prism.palettized.swiglu.v1".into())).unwrap_or_default()
 }
 
 /// Generate Metal source for the tiled palettized GEMM kernel.
 #[allow(dead_code)]
 fn generate_palettized_gemm_source(_k: u32, _n: u32) -> String {
-    include_str!("templates/palettized_gemm.metal").to_string()
+    catalogue_source_for(&KernelSemanticId("prism.palettized.gemm.v1".into())).unwrap_or_default()
 }
 
 fn compile_metal_source_to_file(

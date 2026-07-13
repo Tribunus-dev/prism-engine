@@ -20,6 +20,8 @@ use crate::ecs::backend::{
     BackendCapabilities, DType, EvaluationReceipt, MatmulOp, QuantizedMatmulOp,
     QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle,
 };
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use crate::ecs::metal_backend::catalogue_source_for;
 
 /// One live tensor stored in the Metal backend.
 struct MetalTensor {
@@ -129,10 +131,11 @@ impl MetalBackend {
         if self.nf4_pipeline.is_some() {
             return Ok(());
         }
-        let src = include_str!("../../../shaders/nf4tile640.metal");
+        let src = catalogue_source_for(&KernelSemanticId("prism.nf4tile640.dequant_mul.v1".into()))
+            .unwrap_or_else(|| "// nf4tile640 — source unavailable\n".into());
         let lib = self
             .mtl_device
-            .new_library_with_source(src, &metal::CompileOptions::new())
+            .new_library_with_source(&src, &metal::CompileOptions::new())
             .map_err(|e| format!("Metal library compile failed: {e}"))?;
         let kernel = lib
             .get_function(

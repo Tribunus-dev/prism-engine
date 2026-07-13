@@ -136,7 +136,11 @@ fn persistent_gemv_correctness_and_benchmark() {
 
     // Compile kernel
     println!("  Compiling kernel...");
-    let pso = compile_gemv_kernel(&dev, PERSISTENT_GEMV_SRC, "matvec_persistent_t32_coalesced");
+    let pso = compile_gemv_kernel(
+        &dev,
+        PERSISTENT_GEMV_SRC.as_str(),
+        "matvec_persistent_t32_coalesced",
+    );
     let queue = dev.new_command_queue();
 
     // GPU buffers

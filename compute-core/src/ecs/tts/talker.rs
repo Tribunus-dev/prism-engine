@@ -71,7 +71,7 @@ fn compile_tts_kernel(device: &Device) -> Result<ComputePipelineState, String> {
     let air_path = tmp.join("gemma4_full.air");
     let lib_path = tmp.join("gemma4_full.metallib");
 
-    std::fs::write(&src_path, SHADER_SRC)
+    std::fs::write(&src_path, SHADER_SRC.as_str())
         .map_err(|e| format!("failed to write Metal source: {e}"))?;
 
     // Step 1: Compile .metal → .air via metal compiler

@@ -19,6 +19,8 @@
     feature = "prism-backend-ios"
 ))]
 
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use crate::ecs::metal_backend::catalogue_source_for;
 use metal::*;
 
 // ── Helper: compile a Metal function from the shared shader library ────────
@@ -180,10 +182,11 @@ impl MimiCodec {
         codebooks: &[u8],
     ) -> Result<Self, String> {
         // ── Compile shared shader library ────────────────────────────────
-        let src = include_str!("../../../shaders/tts_codec.metal");
+        let src = catalogue_source_for(&KernelSemanticId("prism.tts.codec.v1".into()))
+            .ok_or_else(|| "no source for tts_codec.metal".to_string())?;
         let opts = CompileOptions::new();
         let library = device
-            .new_library_with_source(src, &opts)
+            .new_library_with_source(&src, &opts)
             .map_err(|e| format!("tts_codec.metal library compile failed: {e}"))?;
 
         let queue = device.new_command_queue();

@@ -14,6 +14,8 @@ use std::ffi::c_void;
 
 use super::kernel_types::{KernelReceipt, PageSidecarHeader, ProjectionParams};
 use super::ternary_pipeline::{self, QuantConfig, QuantizedTensor};
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use crate::ecs::metal_backend::catalogue_source_for;
 
 // ── Public types ──────────────────────────────────────────────────────────
 
@@ -285,8 +287,11 @@ fn probe_sequence(seed: u32, num_positions: usize, max_pos: u32) -> Vec<u32> {
 /// Validate `ternary_tile640_gemv` kernel.
 fn validate_ternary_projection(device: &Device) -> ValidationMatrix {
     // Try to compile the kernel — on CI without Metal toolchain, return empty.
-    let src = include_str!("../templates/ternary_tile640_gemv.metal");
-    let lib = match compile_library(device, "ternary_tile640_gemv", src) {
+    let src = match catalogue_source_for(&KernelSemanticId("prism.ternary.gemv.v1".into())) {
+        Some(s) => s,
+        None => return ValidationMatrix::new("ternary_page640_projection"),
+    };
+    let lib = match compile_library(device, "ternary_tile640_gemv", &src) {
         Some(l) => l,
         None => return ValidationMatrix::new("ternary_page640_projection"),
     };
@@ -593,8 +598,11 @@ fn validate_ternary_projection(device: &Device) -> ValidationMatrix {
 
 /// Validate `dense_projection_f16` (fp16 GEMV via `palettized_gemv` with identity codebook).
 fn validate_dense_projection(device: &Device) -> ValidationMatrix {
-    let src = include_str!("../templates/palettized_gemv.metal");
-    let lib = match compile_library(device, "palettized_gemv", src) {
+    let src = match catalogue_source_for(&KernelSemanticId("prism.palettized.gemv.v1".into())) {
+        Some(s) => s,
+        None => return ValidationMatrix::new("dense_projection_f16"),
+    };
+    let lib = match compile_library(device, "palettized_gemv", &src) {
         Some(l) => l,
         None => return ValidationMatrix::new("dense_projection_f16"),
     };

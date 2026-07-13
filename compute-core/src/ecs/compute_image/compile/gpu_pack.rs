@@ -1,5 +1,7 @@
 // GPU-accelerated TernaryTile640 pack via Metal.
 // Included from quantize.rs via `include!()`. Uses the parent module's imports.
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use crate::ecs::metal_backend::catalogue_source_for;
 #[cfg(feature = "metal-dispatch")]
 use metal::*;
 use std::sync::LazyLock;
@@ -7,9 +9,12 @@ use std::sync::LazyLock;
 static METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> =
     LazyLock::new(|| {
         let device = Device::system_default()?;
-        let src = include_str!("../templates/tile640_pack.metal");
+        let src = match catalogue_source_for(&KernelSemanticId("prism.tile640.pack.v1".into())) {
+            Some(s) => s,
+            None => return None,
+        };
         let lib = device
-            .new_library_with_source(src, &CompileOptions::new())
+            .new_library_with_source(&src, &CompileOptions::new())
             .ok()?;
         let kernel = lib.get_function("tile640_pack", None).ok()?;
         let pipeline = device
@@ -21,9 +26,14 @@ static METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> =
 static Q8_METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> =
     LazyLock::new(|| {
         let device = Device::system_default()?;
-        let src = include_str!("../templates/tile640_pack.metal");
+        let src = match catalogue_source_for(&KernelSemanticId(
+            "prism.tile640.pack.q8_0_ternary.v1".into(),
+        )) {
+            Some(s) => s,
+            None => return None,
+        };
         let lib = device
-            .new_library_with_source(src, &CompileOptions::new())
+            .new_library_with_source(&src, &CompileOptions::new())
             .ok()?;
         let kernel = lib.get_function("q8_0_ternary_pack", None).ok()?;
         let pipeline = device
@@ -35,9 +45,13 @@ static Q8_METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> 
 static NF4_METAL: LazyLock<Option<(Device, CommandQueue, ComputePipelineState)>> =
     LazyLock::new(|| {
         let device = Device::system_default()?;
-        let src = include_str!("../templates/tile640_pack.metal");
+        let src = match catalogue_source_for(&KernelSemanticId("prism.tile640.pack.nf4.v1".into()))
+        {
+            Some(s) => s,
+            None => return None,
+        };
         let lib = device
-            .new_library_with_source(src, &CompileOptions::new())
+            .new_library_with_source(&src, &CompileOptions::new())
             .ok()?;
         let kernel = lib.get_function("nf4_tile640_pack", None).ok()?;
         let pipeline = device

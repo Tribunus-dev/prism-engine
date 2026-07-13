@@ -5,6 +5,7 @@ use super::emit::{
     build_source_identity, compile_audio_encoder_tensors, compile_vision_encoder_tensors,
     compute_manifest_hash, emit_binding_set,
 };
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::compute_image::cimage_packer::pack_cimage_from_dir;
 use crate::ecs::compute_image::compatibility::CompatibilityMatrix;
 use crate::ecs::compute_image::compile::hardware::run_hardware_assessment;
@@ -25,6 +26,7 @@ use crate::ecs::compute_image::manifest::{
 use crate::ecs::compute_image::plan::{compile_unchecked_speculative, plan};
 use crate::ecs::config::CompileQuantMode;
 use crate::ecs::config::HardwareTarget;
+use crate::ecs::metal_backend::catalogue_source_for;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -1011,36 +1013,29 @@ fn compile_metal_source_to_metallib(
 
 /// Compile all inference Metal kernel templates into a single .metallib.
 ///
-/// Reads source from embedded templates (`include_str!`) and runs `xcrun metal` +
-/// `xcrun metallib` to produce the library at `output_path`.  The resulting
-/// .metallib contains every inference kernel the runtime needs (palettized GEMV/GEMM,
-/// ternary GEMV/GEMM, Q4 GEMV, fused gate-up, mixed-precision KV attention).
 fn compile_inference_metallib(output_path: &Path) -> Result<(), String> {
     // Every template .metal source, concatenated into one compilation unit.
-    // Order does not matter — each is a separate [[kernel]] function.
-    let source = concat!(
-        include_str!("../templates/palettized_gemv.metal"),
-        "\n",
-        include_str!("../templates/palettized_gemv_swiglu.metal"),
-        "\n",
-        include_str!("../templates/nf4_tile640_gemv.metal"),
-        "\n",
-        include_str!("../templates/ternary_tile640_gemv.metal"),
-        "\n",
-        include_str!("../templates/palettized_gemm.metal"),
-        "\n",
-        include_str!("../templates/fused_gate_up.metal"),
-        "\n",
-        include_str!("../templates/ternary_gemv.metal"),
-        "\n",
-        include_str!("../templates/ternary_gemm.metal"),
-        "\n",
-        include_str!("../templates/q4_block_sym_gemv.metal"),
-        "\n",
-        include_str!("../templates/kv_mixed.metal"),
-        "\n",
-    );
-    compile_metal_source_to_metallib(source, output_path, "inference_kernels")
+    let ids: [&str; 10] = [
+        "prism.palettized.gemv.v1",
+        "prism.palettized.swiglu.v1",
+        "prism.nf4.tile640.gemv.v1",
+        "prism.ternary.gemv.v1",
+        "prism.palettized.gemm.v1",
+        "prism.fused.gate_up.v1",
+        "prism.ternary.gemv.v2",
+        "prism.ternary.gemm.v1",
+        "prism.q4.block_sym.gemv.v1",
+        "prism.kv.mixed.v1",
+    ];
+    let sources: Vec<String> = ids
+        .iter()
+        .map(|id| {
+            catalogue_source_for(&KernelSemanticId(id.to_string()))
+                .unwrap_or_else(|| format!("// {id} — source unavailable\n"))
+        })
+        .collect();
+    let source = sources.join("\n");
+    compile_metal_source_to_metallib(&source, output_path, "inference_kernels")
 }
 
 /// Compile MLX JIT-captured Metal source into a .metallib.

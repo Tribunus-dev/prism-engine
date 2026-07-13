@@ -1,10 +1,18 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Metal kernel source, architecture constants, and on-the-fly compilation.
 //!
 //! Provides the full Gemma 4 48-layer transformer Metal shader source string
 //! alongside Rust-side compilation helpers and shared layout constants.
 
 use metal::*;
+
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use crate::ecs::metal_backend::catalogue_source_for;
+use std::sync::LazyLock;
 
 // ── Architecture constants (Gemma 4 12B Unified) ───────────────────
 #[allow(dead_code)]
@@ -93,13 +101,23 @@ const DOWN_ROWS: u32 = FFN_INTERMEDIATE; // 15360
 //  Metal Shader Source
 // ====================================================================
 
-pub const SHADER_SRC: &str = include_str!("shaders/gemma4_full.metal");
+pub static SHADER_SRC: LazyLock<String> = LazyLock::new(|| {
+    catalogue_source_for(&KernelSemanticId(
+        "prism.transformer.gemma4.decode.v1".into(),
+    ))
+    .unwrap_or_default()
+});
 
 // ====================================================================
 //  INT4 Fused Ternary Variant (M5-optimized, 5-per-byte ternary)
 // ====================================================================
 
-pub const SHADER_SRC_INT4: &str = include_str!("shaders/gemma4_full_int4.metal");
+pub static SHADER_SRC_INT4: LazyLock<String> = LazyLock::new(|| {
+    catalogue_source_for(&KernelSemanticId(
+        "prism.transformer.gemma4.decode.int4.v1".into(),
+    ))
+    .unwrap_or_default()
+});
 
 /// T32 coalesced uint4 GEMV production kernel.
 /// 4 rows per TG, 128 threads (4 SIMD groups × 32 lanes).
@@ -107,7 +125,9 @@ pub const SHADER_SRC_INT4: &str = include_str!("shaders/gemma4_full_int4.metal")
 /// Weights read via uint4 vector loads (32 threads read same block, broadcast).
 /// Per-lane `/3` and `%3` trit extraction (no magic-division overflow).
 /// SRAM-based reduction across SIMD group (no simd_sum issues).
-pub const PERSISTENT_GEMV_SRC: &str = include_str!("shaders/persistent_gemv.metal");
+pub static PERSISTENT_GEMV_SRC: LazyLock<String> = LazyLock::new(|| {
+    catalogue_source_for(&KernelSemanticId("prism.persistent.gemv.v1".into())).unwrap_or_default()
+});
 // ====================================================================
 //  Compilation
 // ====================================================================
@@ -115,13 +135,14 @@ pub const PERSISTENT_GEMV_SRC: &str = include_str!("shaders/persistent_gemv.meta
 /// and return the library. Same xcrun path as the megakernel. Used by the
 /// per-layer parity test and, once migrated, by `decode_fused`.
 pub(crate) fn compile_layer_library(device: &Device) -> Result<metal::Library, String> {
-    const SRC: &str = include_str!("shaders/decode_per_layer.metal");
+    let src = catalogue_source_for(&KernelSemanticId("prism.decoder.per_layer.v1".into()))
+        .unwrap_or_default();
     let tmp = std::env::temp_dir().join("tribunus-decode-per-layer");
     let _ = std::fs::create_dir_all(&tmp);
     let src_path = tmp.join("decode_per_layer.metal");
     let air_path = tmp.join("decode_per_layer.air");
     let lib_path = tmp.join("decode_per_layer.metallib");
-    std::fs::write(&src_path, SRC).map_err(|e| format!("write layer source: {e}"))?;
+    std::fs::write(&src_path, &src).map_err(|e| format!("write layer source: {e}"))?;
     let ok = std::process::Command::new("xcrun")
         .args(["-sdk", "macosx", "metal", "-std=metal4.0", "-O3", "-c"])
         .arg(src_path.to_str().unwrap())
@@ -199,7 +220,11 @@ pub(crate) fn compile_kernel(
     int4: bool,
     taps: bool,
 ) -> Result<ComputePipelineState, String> {
-    let shader_src = if int4 { SHADER_SRC_INT4 } else { SHADER_SRC };
+    let shader_src: &str = if int4 {
+        SHADER_SRC_INT4.as_str()
+    } else {
+        SHADER_SRC.as_str()
+    };
     let tmp = std::env::temp_dir().join("tribunus-full-transformer");
     let _ = std::fs::create_dir_all(&tmp);
 

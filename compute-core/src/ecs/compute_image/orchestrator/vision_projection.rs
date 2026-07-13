@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Metal-accelerated vision embedder projection for Gemma 4 Unified.
 //!
 //! Implements the three-stage vision pipeline:
@@ -9,7 +13,9 @@
 //! This is Phase A (multimodal preparation + projection), separate from
 //! the decoder megakernel (Phase B).
 
+use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::compute_image::megakernel::kernels::HIDDEN_DIM;
+use crate::ecs::metal_backend::catalogue_source_for;
 use metal::*;
 
 /// Vision embedder projection pipeline.
@@ -61,9 +67,11 @@ pub struct VisionEmbedderWeights {
 impl VisionProjectionPipeline {
     /// Compile the vision projection Metal shaders.
     pub fn new(device: &Device) -> Result<Self, String> {
-        let shader_src = include_str!("../megakernel/shaders/vision_projection.metal");
+        let shader_src =
+            catalogue_source_for(&KernelSemanticId("prism.vision.projection.v1".into()))
+                .ok_or_else(|| "no source for vision_projection".to_string())?;
         let library = device
-            .new_library_with_source(shader_src, &CompileOptions::new())
+            .new_library_with_source(&shader_src, &CompileOptions::new())
             .map_err(|e| format!("vision projection shader compile: {}", e))?;
 
         let embed_fn = library
