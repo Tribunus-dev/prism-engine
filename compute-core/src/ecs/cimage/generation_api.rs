@@ -8,8 +8,11 @@
 //! rolling back to a parent generation, and storing content-addressed payloads.
 
 use crate::ecs::canonical::generation::CimageGeneration;
+use crate::ecs::canonical::generation::EngramBinding;
 use crate::ecs::canonical::identity::*;
 use crate::ecs::cimage::generation_store::{ContentStore, GenerationStore, PromotionTransaction};
+use crate::ecs::training_target::spec::EngramArtifact;
+use sha2::{Digest, Sha256};
 
 /// Generation management API — inspect, promote, rollback, list.
 ///
@@ -72,6 +75,36 @@ impl GenerationApi {
     /// Store a content-addressed payload by its canonical digest.
     pub fn store_payload(&mut self, id: PhysicalSegmentId, data: Vec<u8>) {
         self.content_store.store(id, data);
+    }
+
+    /// Store a trained engram payload and atomically promote the generation
+    /// that references it. The artifact digest must be the SHA-256 digest of
+    /// the exact payload bytes.
+    pub fn promote_with_engram(
+        &mut self,
+        mut generation: CimageGeneration,
+        artifact: &EngramArtifact,
+        payload: Vec<u8>,
+    ) -> Result<GenerationId, String> {
+        let digest = Sha256::digest(&payload);
+        let digest = digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        if digest != artifact.artifact_id.0 || digest != artifact.payload_segment.0 {
+            return Err("engram payload digest does not match artifact identity".into());
+        }
+        self.store_payload(artifact.payload_segment.clone(), payload);
+        generation.engram_bindings.insert(
+            artifact.logical_id.clone(),
+            EngramBinding {
+                engram_id: artifact.logical_id.clone(),
+                artifact_id: artifact.artifact_id.clone(),
+                enabled: true,
+                insertion_region: artifact.insertion_contract.region.clone(),
+            },
+        );
+        self.promote(generation)
     }
 }
 
@@ -140,8 +173,59 @@ mod tests {
             created_at: Timestamp("t".into()),
         };
 
-        let result = api.promote(gen);
+        use crate::ecs::canonical::identity::{EngramArtifactId, EngramId, RegionId, TensorShape};
+        use crate::ecs::training_target::spec::{
+            EngramApplication, EngramArtifact, EngramCodec, EngramInsertionContract,
+            EngramMemoryKind, EngramOperation, EngramParameterSchema, EngramRoutingPolicy,
+            PrivacyContract,
+        };
+        let payload = vec![1, 2, 3, 4];
+        let digest = Sha256::digest(&payload)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let artifact = EngramArtifact {
+            artifact_id: EngramArtifactId(digest.clone()),
+            logical_id: EngramId("e1".into()),
+            format_version: 1,
+            memory_kind: EngramMemoryKind::Semantic,
+            codec: EngramCodec::F32,
+            insertion_contract: EngramInsertionContract {
+                region: RegionId("region".into()),
+                operation: EngramOperation::Adapter,
+                input_shape: TensorShape { dims: vec![1] },
+                output_shape: TensorShape { dims: vec![1] },
+                application: EngramApplication::AdditiveResidual,
+                routing: EngramRoutingPolicy::AlwaysOn,
+                maximum_latency_ns: None,
+            },
+            index_segment: None,
+            payload_segment: PhysicalSegmentId(digest.clone()),
+            routing_segment: None,
+            parameter_schema: EngramParameterSchema {
+                parameter_count: 1,
+                bytes_per_parameter: 4,
+                layout: "dense".into(),
+            },
+            training_corpus: CorpusId("corpus".into()),
+            training_receipt: ReceiptId("receipt".into()),
+            privacy_contract: PrivacyContract {
+                purpose: "test".into(),
+                retention: "test".into(),
+                disclosure_class: "internal".into(),
+                assimilation_permitted: false,
+            },
+        };
+        let result = api.promote_with_engram(gen, &artifact, payload);
         assert!(result.is_ok());
+        assert_eq!(
+            api.generation_store
+                .current()
+                .unwrap()
+                .engram_bindings
+                .len(),
+            1
+        );
     }
 
     #[test]

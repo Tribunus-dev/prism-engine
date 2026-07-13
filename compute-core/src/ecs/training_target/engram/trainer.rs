@@ -272,10 +272,26 @@ impl EngramTrainer {
             &dataset.holdout_targets,
             &vec![0.0; width],
         );
+        let validation_loss = mean_squared_residual(
+            &dataset.validation_examples,
+            &dataset.validation_targets,
+            &parameters,
+        );
+        let validation_baseline = mean_squared_residual(
+            &dataset.validation_examples,
+            &dataset.validation_targets,
+            &vec![0.0; width],
+        );
         if holdout_loss > baseline_loss + self.config.convergence_threshold.max(1e-6) {
             return Err(format!(
                 "engram holdout regression {} > baseline {}",
                 holdout_loss, baseline_loss
+            ));
+        }
+        if validation_loss > validation_baseline + self.config.convergence_threshold.max(1e-6) {
+            return Err(format!(
+                "engram validation regression {} > baseline {}",
+                validation_loss, validation_baseline
             ));
         }
 
@@ -286,6 +302,7 @@ impl EngramTrainer {
         let mut metrics = HashMap::new();
         metrics.insert("nrmse".into(), final_loss.sqrt());
         metrics.insert("holdout_loss".into(), holdout_loss);
+        metrics.insert("validation_loss".into(), validation_loss);
         let calibration = CalibrationEvidence {
             tensor_id: self.config.target.target_id.clone(),
             method: "dataset_additive_residual".into(),
