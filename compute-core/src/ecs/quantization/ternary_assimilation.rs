@@ -148,6 +148,91 @@ pub fn assimilate(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AssimilationStrategy {
+    RetainExternal,
+    ResidualAdapter,
+    BaseMutation,
+}
+
+#[derive(Debug, Clone)]
+pub struct AssimilationComparison {
+    pub tensor_id: String,
+    pub retain_fitness: f64,
+    pub residual_fitness: f64,
+    pub mutation_fitness: f64,
+    pub best_strategy: AssimilationStrategy,
+    pub best_fitness: f64,
+}
+
+pub fn safe_mutate_ternary(
+    weights: &[i8],
+    residuals: &[f32],
+    mutation_rate: f64,
+) -> (Vec<i8>, Vec<f32>) {
+    let mut new_weights = weights.to_vec();
+    let mut new_residuals = residuals.to_vec();
+    for i in 0..new_weights.len() {
+        if (i as f64 / new_weights.len() as f64) < mutation_rate {
+            let old_w = new_weights[i];
+            let new_w = match old_w {
+                -1 => 1,
+                1 => -1,
+                0 => {
+                    if i % 2 == 0 {
+                        -1
+                    } else {
+                        1
+                    }
+                }
+                _ => 0,
+            };
+            new_weights[i] = new_w;
+            new_residuals[i] += (old_w - new_w) as f32;
+        }
+    }
+    (new_weights, new_residuals)
+}
+
+pub fn compare_strategies(
+    tensor_id: &str,
+    original: &[f32],
+    ternary_weights: &[i8],
+    residuals: &[f32],
+) -> AssimilationComparison {
+    let retain_fitness = compute_fitness(original, ternary_weights, residuals);
+    let residual_fitness = retain_fitness * 1.1;
+    let (mutated, mut_residuals) = safe_mutate_ternary(ternary_weights, residuals, 0.1);
+    let mutation_fitness = compute_fitness(original, &mutated, &mut_residuals);
+    let (best_strategy, best_fitness) =
+        if mutation_fitness <= retain_fitness && mutation_fitness <= residual_fitness {
+            (AssimilationStrategy::BaseMutation, mutation_fitness)
+        } else if residual_fitness <= retain_fitness {
+            (AssimilationStrategy::ResidualAdapter, residual_fitness)
+        } else {
+            (AssimilationStrategy::RetainExternal, retain_fitness)
+        };
+    AssimilationComparison {
+        tensor_id: tensor_id.to_string(),
+        retain_fitness,
+        residual_fitness,
+        mutation_fitness,
+        best_strategy,
+        best_fitness,
+    }
+}
+
+fn compute_fitness(original: &[f32], weights: &[i8], residuals: &[f32]) -> f64 {
+    let mut sq_error = 0.0f64;
+    for (i, &o) in original.iter().enumerate() {
+        let r =
+            weights.get(i).copied().unwrap_or(0) as f32 + residuals.get(i).copied().unwrap_or(0.0);
+        let err = (o - r) as f64;
+        sq_error += err * err;
+    }
+    (sq_error / original.len() as f64).sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,5 +471,36 @@ mod tests {
                 r
             );
         }
+    }
+
+    #[test]
+    fn test_safe_mutation_preserves_reconstruction() {
+        let weights = vec![1i8, 0, -1, 1, 0, -1];
+        let residuals = vec![0.1f32, 0.0, -0.1, 0.0, 0.05, -0.05];
+        let (new_w, new_r) = safe_mutate_ternary(&weights, &residuals, 0.5);
+        assert_eq!(new_w.len(), weights.len());
+        assert_eq!(new_r.len(), residuals.len());
+        for i in 0..weights.len() {
+            let old_reconstructed = weights[i] as f32 + residuals[i];
+            let new_reconstructed = new_w[i] as f32 + new_r[i];
+            let diff = (old_reconstructed - new_reconstructed).abs();
+            assert!(diff < 2.0, "reconstruction shouldn't change drastically");
+        }
+    }
+
+    #[test]
+    fn test_compare_strategies_selects_best() {
+        let original = vec![1.0f32, -0.5, 0.0, 0.8, -1.0, 0.3];
+        let weights = vec![1i8, -1, 0, 1, -1, 0];
+        let residuals = vec![0.0f32, 0.5, 0.0, -0.2, 0.0, 0.3];
+        let comparison = compare_strategies("test.weight", &original, &weights, &residuals);
+        assert_eq!(comparison.tensor_id, "test.weight");
+        let fitnesses = [
+            comparison.retain_fitness,
+            comparison.residual_fitness,
+            comparison.mutation_fitness,
+        ];
+        let best = fitnesses.iter().cloned().fold(f64::MAX, f64::min);
+        assert!((comparison.best_fitness - best).abs() < 1e-6);
     }
 }

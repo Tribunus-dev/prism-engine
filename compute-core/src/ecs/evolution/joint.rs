@@ -4,18 +4,29 @@
 //! program decomposition, enabling Pareto-optimal tradeoffs between
 //! quality, memory, latency, and energy.
 
-use crate::ecs::evolution::foundation::{CostFunction, EvolveProgram, SearchConfig};
+use crate::ecs::evolution::foundation::{CostFunction, SearchConfig};
+use crate::execution_plan::CodecFamily;
 
-/// A joint genome — program variant plus engram configuration.
+/// Full joint genome — representation, kernel, and engram genes.
 #[derive(Debug, Clone)]
 pub struct JointGenome {
-    pub program: EvolveProgram,
+    // Representation genes
+    pub codec: CodecFamily,
+    pub group_size: usize,
+    pub residual_policy: String, // "none", "dense", "sparse"
+
+    // Kernel genes
+    pub kernel_variant: String, // "tile640_gemv", "persistent_gemv", etc.
+    pub tile_m: usize,
+    pub tile_n: usize,
+    pub tile_k: usize,
+    pub reduction_strategy: String, // "sequential", "split-k", "tree"
+
+    // Engram genes
     pub engram_codec: String,
     pub engram_capacity: usize,
     pub insertion_point: String,
     pub retrieval_threshold: f64,
-    pub tensor_representation: String,
-    pub kernel_variant: String,
 }
 
 /// A genome with optional fitness score.
@@ -48,13 +59,23 @@ pub struct JointSearchConfig {
 /// insertion point from A, kernel variant from A, and average the thresholds.
 fn joint_crossover(a: &JointGenome, b: &JointGenome) -> JointGenome {
     JointGenome {
-        program: a.program.clone(),
-        engram_codec: b.engram_codec.clone(),
+        // Representation: codec from A, group_size from B, residual_policy from A
+        codec: a.codec,
+        group_size: b.group_size,
+        residual_policy: a.residual_policy.clone(),
+
+        // Kernel: variant from B, tiles from A, reduction from B
+        kernel_variant: b.kernel_variant.clone(),
+        tile_m: a.tile_m,
+        tile_n: a.tile_n,
+        tile_k: a.tile_k,
+        reduction_strategy: b.reduction_strategy.clone(),
+
+        // Engram: codec from A, max capacity, insertion from B, averaged threshold
+        engram_codec: a.engram_codec.clone(),
         engram_capacity: a.engram_capacity.max(b.engram_capacity),
-        insertion_point: a.insertion_point.clone(),
+        insertion_point: b.insertion_point.clone(),
         retrieval_threshold: (a.retrieval_threshold + b.retrieval_threshold) / 2.0,
-        tensor_representation: b.tensor_representation.clone(),
-        kernel_variant: a.kernel_variant.clone(),
     }
 }
 
@@ -63,46 +84,97 @@ fn joint_crossover(a: &JointGenome, b: &JointGenome) -> JointGenome {
 /// — no external RNG required.
 fn joint_mutate(genome: &JointGenome, config: &JointSearchConfig, seed: usize) -> JointGenome {
     let mut result = genome.clone();
-    match seed % 5 {
-        0 => {
-            // Perturb retrieval threshold by a small delta
-            let delta = (seed as f64 * 0.07 - 0.03) * 0.1;
-            result.retrieval_threshold = (result.retrieval_threshold + delta).clamp(0.1, 1.0);
-        }
-        1 => {
-            // Switch to a different engram codec
-            if !config.engram_codecs.is_empty() {
-                let idx = seed % config.engram_codecs.len();
-                result.engram_codec = config.engram_codecs[idx].clone();
+    match seed % 7 {
+        n @ 0..=6 => match n {
+            0 => {
+                // Perturb retrieval threshold by a small delta
+                let delta = (seed as f64 * 0.07 - 0.03) * 0.1;
+                result.retrieval_threshold = (result.retrieval_threshold + delta).clamp(0.1, 1.0);
             }
-        }
-        2 => {
-            // Switch insertion point
-            if !config.insertion_points.is_empty() {
-                let idx = seed % config.insertion_points.len();
-                result.insertion_point = config.insertion_points[idx].clone();
+            1 => {
+                // Switch to a different codec family (representation gene)
+                let codecs = [
+                    CodecFamily::Nf4,
+                    CodecFamily::Int8,
+                    CodecFamily::Ternary,
+                    CodecFamily::RawF32,
+                ];
+                let idx = seed % codecs.len();
+                result.codec = codecs[idx];
             }
-        }
-        3 => {
-            // Switch kernel variant
-            if !config.kernel_variants.is_empty() {
-                let idx = seed % config.kernel_variants.len();
-                result.kernel_variant = config.kernel_variants[idx].clone();
+            2 => {
+                // Perturb group_size
+                let sizes = [16usize, 32, 64, 128, 256];
+                let idx = seed % sizes.len();
+                result.group_size = sizes[idx];
             }
-        }
-        _ => {
-            // Toggle tensor representation
-            result.tensor_representation = if result.tensor_representation == "TernaryTile640" {
-                "Int8Tile640".into()
-            } else {
-                "TernaryTile640".into()
-            };
-        }
+            3 => {
+                // Switch residual policy
+                let policies = ["none", "dense", "sparse"];
+                let idx = seed % policies.len();
+                result.residual_policy = policies[idx].to_string();
+            }
+            4 => {
+                // Switch to a different engram codec
+                if !config.engram_codecs.is_empty() {
+                    let idx = seed % config.engram_codecs.len();
+                    result.engram_codec = config.engram_codecs[idx].clone();
+                }
+            }
+            5 => {
+                // Switch insertion point
+                if !config.insertion_points.is_empty() {
+                    let idx = seed % config.insertion_points.len();
+                    result.insertion_point = config.insertion_points[idx].clone();
+                }
+            }
+            6 => {
+                // Switch kernel variant
+                if !config.kernel_variants.is_empty() {
+                    let idx = seed % config.kernel_variants.len();
+                    result.kernel_variant = config.kernel_variants[idx].clone();
+                }
+            }
+            _ => unreachable!(),
+        },
+        _ => {}
     }
     result
 }
 
 impl JointSearchConfig {
+    /// Build a full-search config spanning representation, kernel, and engram dimensions.
+    pub fn for_full_search(tensor_id: &str) -> Self {
+        Self {
+            tensor_id: tensor_id.to_string(),
+            config: SearchConfig {
+                population_size: 20,
+                mutation_rate: 0.25,
+                crossover_rate: 0.25,
+                max_generations: 100,
+                convergence_threshold: 0.01,
+                cost_function: CostFunction::Weighted {
+                    wall: 0.5,
+                    energy: 0.3,
+                    bandwidth: 0.2,
+                },
+            },
+            engram_codecs: vec!["nf4".into(), "ternary".into(), "int8".into()],
+            insertion_points: vec![
+                "after.linear.q_proj".into(),
+                "after.linear.k_proj".into(),
+                "after.linear.v_proj".into(),
+                "after.linear.o_proj".into(),
+            ],
+            retrieval_thresholds: vec![0.5, 0.7, 0.9],
+            kernel_variants: vec![
+                "tile640_gemv".into(),
+                "persistent_gemv".into(),
+                "batched_gemv".into(),
+            ],
+        }
+    }
+
     pub fn for_tensor(tensor_id: &str) -> Self {
         Self {
             tensor_id: tensor_id.to_string(),
@@ -216,13 +288,23 @@ impl JointSearchConfig {
                 for kernel in &self.kernel_variants {
                     pop.push(ScoredGenome {
                         genome: JointGenome {
-                            program: EvolveProgram::MetalShader(format!("{}_kernel", kernel)),
+                            // Representation defaults
+                            codec: CodecFamily::Nf4,
+                            group_size: 32,
+                            residual_policy: "sparse".into(),
+
+                            // Kernel defaults
+                            kernel_variant: kernel.clone(),
+                            tile_m: 64,
+                            tile_n: 64,
+                            tile_k: 64,
+                            reduction_strategy: "sequential".into(),
+
+                            // Engram defaults
                             engram_codec: codec.clone(),
                             engram_capacity: 1024,
                             insertion_point: insertion_point.clone(),
                             retrieval_threshold: 0.7,
-                            tensor_representation: "TernaryTile640".into(),
-                            kernel_variant: kernel.clone(),
                         },
                         fitness: None,
                     });
@@ -233,8 +315,14 @@ impl JointSearchConfig {
     }
 
     fn evaluate(&self, genome: &JointGenome) -> f64 {
-        // Simulated cost: smaller engram_codec + simpler kernel = better
-        let codec_cost = match genome.engram_codec.as_str() {
+        // Simulated cost across all three dimensions
+        let repr_cost = match genome.codec {
+            CodecFamily::Int8 => 3.0,
+            CodecFamily::Nf4 => 2.0,
+            CodecFamily::Ternary => 1.0,
+            _ => 5.0,
+        };
+        let engram_cost = match genome.engram_codec.as_str() {
             "int8" => 3.0,
             "nf4" => 2.0,
             "ternary" => 1.0,
@@ -246,7 +334,34 @@ impl JointSearchConfig {
             "batched_gemv" => 1.5,
             _ => 3.0,
         };
-        codec_cost + kernel_cost
+        repr_cost + engram_cost + kernel_cost
+    }
+}
+
+/// Map a seed codon into a full JointGenome.
+pub fn codon_to_genome(
+    codec: &str,
+    kernel: &str,
+    engram_codec: &str,
+    genome: &JointGenome,
+) -> JointGenome {
+    JointGenome {
+        codec: match codec {
+            "nf4" => CodecFamily::Nf4,
+            "ternary" => CodecFamily::Ternary,
+            _ => genome.codec,
+        },
+        group_size: genome.group_size,
+        residual_policy: genome.residual_policy.clone(),
+        kernel_variant: kernel.to_string(),
+        tile_m: genome.tile_m,
+        tile_n: genome.tile_n,
+        tile_k: genome.tile_k,
+        reduction_strategy: genome.reduction_strategy.clone(),
+        engram_codec: engram_codec.to_string(),
+        engram_capacity: genome.engram_capacity,
+        insertion_point: genome.insertion_point.clone(),
+        retrieval_threshold: genome.retrieval_threshold,
     }
 }
 
@@ -263,18 +378,32 @@ mod tests {
     }
 
     #[test]
-    fn test_joint_genome() {
+    fn test_joint_genome_all_dimensions_present() {
         let genome = JointGenome {
-            program: EvolveProgram::MetalShader("kernel".into()),
+            codec: CodecFamily::Nf4,
+            group_size: 32,
+            residual_policy: "sparse".into(),
+            kernel_variant: "tile640_gemv".into(),
+            tile_m: 64,
+            tile_n: 64,
+            tile_k: 64,
+            reduction_strategy: "sequential".into(),
             engram_codec: "nf4".into(),
             engram_capacity: 1024,
             insertion_point: "after.linear.q_proj".into(),
             retrieval_threshold: 0.7,
-            tensor_representation: "TernaryTile640".into(),
-            kernel_variant: "tile640_gemv".into(),
         };
+        assert_eq!(genome.tile_m, 64);
         assert_eq!(genome.engram_codec, "nf4");
-        assert_eq!(genome.kernel_variant, "tile640_gemv");
+        assert_eq!(genome.reduction_strategy, "sequential");
+    }
+
+    #[test]
+    fn test_full_search_config_has_all_genres() {
+        let config = JointSearchConfig::for_full_search("attention.q_proj");
+        assert_eq!(config.engram_codecs.len(), 3);
+        assert_eq!(config.kernel_variants.len(), 3);
+        assert!(config.config.population_size >= 20);
     }
 
     #[test]
@@ -300,43 +429,61 @@ mod tests {
     #[test]
     fn test_joint_crossover() {
         let a = JointGenome {
-            program: EvolveProgram::MetalShader("tile640_gemv_kernel".into()),
+            codec: CodecFamily::Nf4,
+            group_size: 32,
+            residual_policy: "sparse".into(),
+            kernel_variant: "tile640_gemv".into(),
+            tile_m: 64,
+            tile_n: 128,
+            tile_k: 64,
+            reduction_strategy: "sequential".into(),
             engram_codec: "nf4".into(),
             engram_capacity: 512,
             insertion_point: "after.linear.q_proj".into(),
             retrieval_threshold: 0.7,
-            tensor_representation: "TernaryTile640".into(),
-            kernel_variant: "tile640_gemv".into(),
         };
         let b = JointGenome {
-            program: EvolveProgram::MetalShader("persistent_gemv_kernel".into()),
+            codec: CodecFamily::Int8,
+            group_size: 64,
+            residual_policy: "dense".into(),
+            kernel_variant: "persistent_gemv".into(),
+            tile_m: 128,
+            tile_n: 256,
+            tile_k: 128,
+            reduction_strategy: "split-k".into(),
             engram_codec: "int8".into(),
             engram_capacity: 2048,
             insertion_point: "after.linear.k_proj".into(),
             retrieval_threshold: 0.5,
-            tensor_representation: "Int8Tile640".into(),
-            kernel_variant: "persistent_gemv".into(),
         };
         let child = joint_crossover(&a, &b);
-        // program from a, engram_codec from b
-        assert_eq!(format!("{:?}", child.program), format!("{:?}", a.program));
-        assert_eq!(child.engram_codec, b.engram_codec);
-        // capacity is max
+        // Representation: codec from A, group_size from B
+        assert_eq!(child.codec, CodecFamily::Nf4);
+        assert_eq!(child.group_size, 64);
+        // Kernel: variant from B, tiles from A
+        assert_eq!(child.kernel_variant, "persistent_gemv");
+        assert_eq!(child.tile_m, 64);
+        // Engram: codec from A, max capacity, averaged threshold
+        assert_eq!(child.engram_codec, "nf4");
         assert_eq!(child.engram_capacity, 2048);
-        // threshold is average
         assert!((child.retrieval_threshold - 0.6).abs() < 1e-10);
     }
 
     #[test]
     fn test_joint_mutate_perturbs_threshold() {
         let genome = JointGenome {
-            program: EvolveProgram::MetalShader("kernel".into()),
+            codec: CodecFamily::Nf4,
+            group_size: 32,
+            residual_policy: "sparse".into(),
+            kernel_variant: "tile640_gemv".into(),
+            tile_m: 64,
+            tile_n: 64,
+            tile_k: 64,
+            reduction_strategy: "sequential".into(),
             engram_codec: "nf4".into(),
             engram_capacity: 1024,
             insertion_point: "after.linear.q_proj".into(),
             retrieval_threshold: 0.7,
-            tensor_representation: "TernaryTile640".into(),
-            kernel_variant: "tile640_gemv".into(),
         };
         let config = JointSearchConfig::for_tensor("attention.q_proj");
         // seed=0 triggers threshold perturbation (seed%5==0)
@@ -347,11 +494,6 @@ mod tests {
 
     #[test]
     fn test_offspring_generated() {
-        // Verify that offspring are bred each generation: the elite truncation
-        // (keeping 30%) creates room for crossover+mutate offspring,
-        // which are evaluated in subsequent generations. Without the fix,
-        // the refill loop `while next_gen.len() < population_size` never fires
-        // because `next_gen` starts at full capacity.
         let config = JointSearchConfig::for_tensor("attention.q_proj");
         let result = config.run();
 
@@ -375,6 +517,7 @@ mod tests {
             !best.engram_codec.is_empty(),
             "best genome should have an engram codec"
         );
+        assert_eq!(best.codec, CodecFamily::Nf4);
         assert!(
             !best.kernel_variant.is_empty(),
             "best genome should have a kernel variant"
@@ -386,5 +529,30 @@ mod tests {
              offspring were not bred",
             result.generations_completed,
         );
+    }
+
+    #[test]
+    fn test_codon_to_genome_resolves() {
+        let base = JointGenome {
+            codec: CodecFamily::Nf4,
+            group_size: 32,
+            residual_policy: "sparse".into(),
+            kernel_variant: "tile640_gemv".into(),
+            tile_m: 64,
+            tile_n: 64,
+            tile_k: 64,
+            reduction_strategy: "sequential".into(),
+            engram_codec: "nf4".into(),
+            engram_capacity: 1024,
+            insertion_point: "after.linear.q_proj".into(),
+            retrieval_threshold: 0.7,
+        };
+        let mapped = codon_to_genome("ternary", "persistent_gemv", "int8", &base);
+        assert_eq!(mapped.codec, CodecFamily::Ternary);
+        assert_eq!(mapped.kernel_variant, "persistent_gemv");
+        assert_eq!(mapped.engram_codec, "int8");
+        // Non-overridden fields preserve defaults
+        assert_eq!(mapped.group_size, 32);
+        assert_eq!(mapped.reduction_strategy, "sequential");
     }
 }
