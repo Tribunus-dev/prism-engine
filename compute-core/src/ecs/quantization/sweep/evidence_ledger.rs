@@ -71,9 +71,7 @@ pub fn append_experiment_receipt(
 }
 
 /// Read all experiment receipts from a JSONL ledger.
-pub fn read_experiment_ledger(
-    ledger_path: &Path,
-) -> std::io::Result<Vec<ExperimentReceipt>> {
+pub fn read_experiment_ledger(ledger_path: &Path) -> std::io::Result<Vec<ExperimentReceipt>> {
     let content = std::fs::read_to_string(ledger_path)?;
     Ok(content
         .lines()
@@ -85,7 +83,6 @@ pub fn read_experiment_ledger(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_receipt_roundtrip() {

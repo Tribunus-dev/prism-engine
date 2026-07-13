@@ -3,14 +3,13 @@
 //! Sweeps over group sizes, signed ranges, affine modes, clipping policies,
 //! and scale policies, producing a `FamilyCandidate` per combination.
 
-
 use serde_json::json;
 
+use crate::ecs::quantization::contract::NF4_TILE640_CODE_BYTES;
+use crate::ecs::quantization::sweep::families::FamilyCandidate;
+use crate::ecs::quantization::sweep::spec::{SignedInt4Range, SymInt4SweepGrid};
 use crate::nf4tile640::validate_tile_group_size;
 use crate::nf4tile640::TILE_ELEMENTS;
-use crate::ecs::quantization::contract::NF4_TILE640_CODE_BYTES;
-use crate::ecs::quantization::sweep::spec::{SignedInt4Range, SymInt4SweepGrid};
-use crate::ecs::quantization::sweep::families::FamilyCandidate;
 
 // ── Byte-count estimators ────────────────────────────────────────────────
 
@@ -23,7 +22,9 @@ fn sym_int4_code_bytes(in_features: usize, out_features: usize) -> u64 {
 
 /// SymInt4 metadata bytes with explicit group_size: 8 bytes (scale+bias) per group.
 fn sym_int4_metadata_bytes_with_group_size(
-    in_features: usize, out_features: usize, group_size: usize
+    in_features: usize,
+    out_features: usize,
+    group_size: usize,
 ) -> u64 {
     let groups_per_tile = TILE_ELEMENTS / group_size;
     let tiles_per_row = out_features.div_ceil(TILE_ELEMENTS);
@@ -67,14 +68,22 @@ fn pack_sym_int4_tile_with_range(
             .map(|v| v.abs())
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.0);
-        let scale = if max_abs < 1e-30 { 1.0f32 } else { max_abs / max_code };
+        let scale = if max_abs < 1e-30 {
+            1.0f32
+        } else {
+            max_abs / max_code
+        };
         scales[group] = scale;
         biases[group] = 0.0;
 
         for i in 0..(group_size / 2) {
             let bit_idx = group * bytes_per_group + i;
-            let val0 = (values[base + 2 * i] / scale).round().clamp(clamp_min, clamp_max) as i8;
-            let val1 = (values[base + 2 * i + 1] / scale).round().clamp(clamp_min, clamp_max) as i8;
+            let val0 = (values[base + 2 * i] / scale)
+                .round()
+                .clamp(clamp_min, clamp_max) as i8;
+            let val1 = (values[base + 2 * i + 1] / scale)
+                .round()
+                .clamp(clamp_min, clamp_max) as i8;
             // Map signed value to unsigned 4-bit nibble
             let code0 = (val0 + offset) as u8;
             let code1 = (val1 + offset) as u8;
@@ -174,7 +183,8 @@ fn unpack_sym_int4(
                 let code1 = (packed >> 4) & 0x0F;
 
                 let pos = out_base + 2 * i;
-                if pos < row * out_features + out_features && pos + 1 <= in_features * out_features {
+                if pos < row * out_features + out_features && pos + 1 <= in_features * out_features
+                {
                     output[pos] = decode_sym_int4(code0, signed_range) * scale + bias;
                     if pos + 1 < in_features * out_features {
                         output[pos + 1] = decode_sym_int4(code1, signed_range) * scale + bias;
@@ -248,11 +258,20 @@ pub fn generate_sym_int4_candidates(grid: &SymInt4SweepGrid) -> Vec<FamilyCandid
                         });
 
                         let sr_unpack = *signed_range;
-                        let unpacker = Box::new(move |codes: &[u8], scales: &[f32], biases: &[f32], _extra: &[u8], rows: usize, cols: usize| {
-                            unpack_sym_int4(codes, scales, biases, rows, cols, gs, sr_unpack)
-                        });
+                        let unpacker = Box::new(
+                            move |codes: &[u8],
+                                  scales: &[f32],
+                                  biases: &[f32],
+                                  _extra: &[u8],
+                                  rows: usize,
+                                  cols: usize| {
+                                unpack_sym_int4(codes, scales, biases, rows, cols, gs, sr_unpack)
+                            },
+                        );
 
-                        let meta_fn = move |r: usize, c: usize| sym_int4_metadata_bytes_with_group_size(r, c, gs);
+                        let meta_fn = move |r: usize, c: usize| {
+                            sym_int4_metadata_bytes_with_group_size(r, c, gs)
+                        };
 
                         candidates.push(FamilyCandidate {
                             label: format!(
@@ -317,11 +336,15 @@ mod tests {
         let group_size = 128;
 
         for range in [SignedInt4Range::Neg7ToPos7, SignedInt4Range::Neg8ToPos7] {
-            let (codes, scales, biases) =
-                pack_sym_int4_tile_with_range(&tile, group_size, range);
+            let (codes, scales, biases) = pack_sym_int4_tile_with_range(&tile, group_size, range);
             let unpacked = unpack_sym_int4(
-                &codes, &scales, &biases,
-                1, TILE_ELEMENTS, group_size, range,
+                &codes,
+                &scales,
+                &biases,
+                1,
+                TILE_ELEMENTS,
+                group_size,
+                range,
             );
 
             assert_eq!(
@@ -336,8 +359,13 @@ mod tests {
         let (codes, scales, biases) =
             pack_sym_int4_tile_with_range(&tile, group_size, SignedInt4Range::Neg7ToPos7);
         let unpacked = unpack_sym_int4(
-            &codes, &scales, &biases,
-            1, TILE_ELEMENTS, group_size, SignedInt4Range::Neg7ToPos7,
+            &codes,
+            &scales,
+            &biases,
+            1,
+            TILE_ELEMENTS,
+            group_size,
+            SignedInt4Range::Neg7ToPos7,
         );
 
         for i in 0..TILE_ELEMENTS {
@@ -345,7 +373,8 @@ mod tests {
             assert!(
                 err < 1.0,
                 "Reconstruction error at index {}: {} (expected < 1.0)",
-                i, err
+                i,
+                err
             );
         }
     }

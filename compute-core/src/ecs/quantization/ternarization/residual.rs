@@ -110,8 +110,7 @@ mod tests {
     fn test_encode_sparse_threshold() {
         let original = vec![1.0, 2.0, 3.0, 4.0];
         let reconstructed = vec![1.05, 2.0, 2.5, 4.2];
-        let (indices, values) =
-            ResidualCodec::encode_sparse(&original, &reconstructed, 0.1);
+        let (indices, values) = ResidualCodec::encode_sparse(&original, &reconstructed, 0.1);
         // index 0: error = 0.05 ≤ 0.1 → skipped
         // index 1: error = 0.0 ≤ 0.1 → skipped
         // index 2: error = 0.5 > 0.1 → kept (residual = 0.5)
@@ -128,8 +127,7 @@ mod tests {
     fn test_encode_sparse_all_below_threshold() {
         let original = vec![1.0, 2.0];
         let reconstructed = vec![1.01, 2.01];
-        let (indices, values) =
-            ResidualCodec::encode_sparse(&original, &reconstructed, 0.1);
+        let (indices, values) = ResidualCodec::encode_sparse(&original, &reconstructed, 0.1);
         assert!(indices.is_empty());
         assert!(values.is_empty());
     }

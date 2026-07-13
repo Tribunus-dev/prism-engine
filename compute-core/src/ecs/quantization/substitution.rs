@@ -182,7 +182,7 @@ impl SubstitutionCandidate {
             gates: SubstitutionGates {
                 weight_nrmse_max: Some(0.001), // Tight — FP16 should be nearly exact
                 weight_zero_collapse_max: Some(0.0),
-                operator_nrmse_max: None,      // No operator gate — FP16 is lossless
+                operator_nrmse_max: None, // No operator gate — FP16 is lossless
                 operator_cosine_min: None,
                 operator_max_abs_max: None,
                 requires_hardware_validation: false,
@@ -197,7 +197,8 @@ impl SubstitutionCandidate {
         Self {
             name: "INT8".into(),
             parameters: [("group_size".into(), serde_json::json!(128))]
-                .into_iter().collect(),
+                .into_iter()
+                .collect(),
             gates: SubstitutionGates {
                 weight_nrmse_max: Some(0.01),
                 weight_zero_collapse_max: Some(0.0),
@@ -219,14 +220,16 @@ impl SubstitutionCandidate {
                 ("codebook".into(), serde_json::json!("BitsAndBytesNf4")),
                 ("group_size".into(), serde_json::json!(32)),
                 ("affine_mode".into(), serde_json::json!("ScaleOnly")),
-            ].into_iter().collect(),
+            ]
+            .into_iter()
+            .collect(),
             gates: SubstitutionGates {
                 weight_nrmse_max: Some(0.10),
                 weight_zero_collapse_max: Some(0.001),
                 operator_nrmse_max: Some(0.002),
                 operator_cosine_min: Some(0.999),
                 operator_max_abs_max: Some(0.5),
-                requires_hardware_validation: true,  // ANE validation recommended
+                requires_hardware_validation: true, // ANE validation recommended
                 requires_rollout_validation: false,
             },
             requires_activation_profile: false,
@@ -237,9 +240,9 @@ impl SubstitutionCandidate {
     pub fn sym_int4_g32() -> Self {
         Self {
             name: "SymInt4".into(),
-            parameters: [
-                ("group_size".into(), serde_json::json!(32)),
-            ].into_iter().collect(),
+            parameters: [("group_size".into(), serde_json::json!(32))]
+                .into_iter()
+                .collect(),
             gates: SubstitutionGates {
                 weight_nrmse_max: Some(0.10),
                 weight_zero_collapse_max: Some(0.001),
@@ -260,7 +263,9 @@ impl SubstitutionCandidate {
             parameters: [
                 ("sparsity_target".into(), serde_json::json!(0.5)),
                 ("group_size".into(), serde_json::json!(256)),
-            ].into_iter().collect(),
+            ]
+            .into_iter()
+            .collect(),
             gates: SubstitutionGates {
                 weight_nrmse_max: Some(0.020),
                 weight_zero_collapse_max: Some(0.85),

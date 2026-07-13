@@ -3,18 +3,18 @@
 //! Sweeps over group sizes, codebooks, affine modes, clipping policies, and
 //! group optimizers, producing a `FamilyCandidate` per combination.
 
-use serde_json::{json, Value};
 use rayon::prelude::*;
+use serde_json::{json, Value};
 
-use crate::nf4tile640::{
-    pack_nf4_tile_with_group_size, unpack_nf4_weights_with_group_size_and_codebook,
-    validate_tile_group_size, nf4_codebook, nf4_quantize_with_codebook, TILE_ELEMENTS,
-};
 use crate::ecs::quantization::contract::NF4_TILE640_CODE_BYTES;
 use crate::ecs::quantization::sweep::candidate::PackedTileLayout;
 use crate::ecs::quantization::sweep::families::FamilyCandidate;
 use crate::ecs::quantization::sweep::spec::{
     AffineMode, ClippingPolicy, GroupOptimizer, Nf4CodebookId, Nf4SweepGrid, ScalePolicy,
+};
+use crate::nf4tile640::{
+    nf4_codebook, nf4_quantize_with_codebook, pack_nf4_tile_with_group_size,
+    unpack_nf4_weights_with_group_size_and_codebook, validate_tile_group_size, TILE_ELEMENTS,
 };
 
 // ── Nf4Params ─────────────────────────────────────────────────────────────
@@ -48,7 +48,10 @@ fn apply_group_clipping(values: &[f32], policy: &ClippingPolicy) -> Vec<f32> {
                 let idx = ((abs_vals.len() as f32) * pct / 100.0).ceil() as usize;
                 abs_vals[idx.min(abs_vals.len() - 1)]
             };
-            values.iter().map(|v| v.clamp(-threshold, threshold)).collect()
+            values
+                .iter()
+                .map(|v| v.clamp(-threshold, threshold))
+                .collect()
         }
         ClippingPolicy::StddevMultiple(mult) => {
             let mean = values.iter().sum::<f32>() / values.len() as f32;
@@ -56,7 +59,10 @@ fn apply_group_clipping(values: &[f32], policy: &ClippingPolicy) -> Vec<f32> {
                 values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
             let stddev = variance.sqrt();
             let threshold = mult * stddev;
-            values.iter().map(|v| v.clamp(-threshold, threshold)).collect()
+            values
+                .iter()
+                .map(|v| v.clamp(-threshold, threshold))
+                .collect()
         }
         ClippingPolicy::GridFractionOfMaxAbs(fractions) => {
             // Use the last fraction in the list
@@ -67,7 +73,10 @@ fn apply_group_clipping(values: &[f32], policy: &ClippingPolicy) -> Vec<f32> {
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .unwrap_or(0.0);
             let threshold = max_abs * fraction;
-            values.iter().map(|v| v.clamp(-threshold, threshold)).collect()
+            values
+                .iter()
+                .map(|v| v.clamp(-threshold, threshold))
+                .collect()
         }
     }
 }
@@ -246,8 +255,7 @@ pub fn pack_nf4_matrix_with_params(
     out_features: usize,
     params: &Nf4Params,
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) {
-    validate_tile_group_size(params.group_size)
-        .expect("invalid NF4 tile group_size");
+    validate_tile_group_size(params.group_size).expect("invalid NF4 tile group_size");
     let tiles_per_row = out_features.div_ceil(TILE_ELEMENTS);
     let groups_per_tile = TILE_ELEMENTS / params.group_size;
     let codes_per_tile = TILE_ELEMENTS / 2;
@@ -269,10 +277,13 @@ pub fn pack_nf4_matrix_with_params(
                 let col_start = t * TILE_ELEMENTS;
                 for g in 0..groups_per_tile {
                     let group_start = col_start + g * params.group_size;
-                    let end = (row_base + group_start + params.group_size).min(row_base + out_features);
+                    let end =
+                        (row_base + group_start + params.group_size).min(row_base + out_features);
                     let group = &weights[row_base + group_start..end];
                     let mut buf = vec![0.0f32; params.group_size];
-                    for (i, &v) in group.iter().enumerate() { buf[i] = v; }
+                    for (i, &v) in group.iter().enumerate() {
+                        buf[i] = v;
+                    }
                     let result = pack_nf4_group(&buf, params);
                     row_scales.push(result.scale);
                     if params.affine_mode == AffineMode::ScaleBias {
@@ -286,7 +297,8 @@ pub fn pack_nf4_matrix_with_params(
                 }
             }
             (row_codes, row_scales, row_biases)
-        }).collect();
+        })
+        .collect();
 
     // Serial; concatenate row results into contiguous vecs
     for (row_codes, row_scales, row_biases) in &row_results {
@@ -296,8 +308,6 @@ pub fn pack_nf4_matrix_with_params(
     }
 
     (codes, scales, biases, Vec::new())
-
-
 }
 
 /// Activation-weighted group quantization helper.
@@ -326,7 +336,10 @@ fn quantize_group_weighted(
     let weights = weights.unwrap_or(&[]);
 
     // Simple brute-force over candidate scale/bias to minimize weighted error.
-    let max_cb_abs = codebook.iter().fold(0.0f32, |a, &b| a.max(b.abs())).max(1e-10);
+    let max_cb_abs = codebook
+        .iter()
+        .fold(0.0f32, |a, &b| a.max(b.abs()))
+        .max(1e-10);
     let max_abs = group_values
         .iter()
         .map(|v| v.abs())
@@ -374,17 +387,20 @@ fn quantize_group_weighted(
     }
 
     // Re-evaluate codebook index for the first element with optimal scale/bias.
-    let best_code = group_values.first().map(|&first_val| {
-        let norm = ((first_val - best_bias) / best_scale).clamp(-1.0, 1.0);
-        codebook
-            .iter()
-            .enumerate()
-            .min_by(|(_, a), (_, b)| {
-                (**a - norm).abs().partial_cmp(&(**b - norm).abs()).unwrap()
-            })
-            .map(|(i, _)| i as u8)
-            .unwrap_or(0)
-    }).unwrap_or(0);
+    let best_code = group_values
+        .first()
+        .map(|&first_val| {
+            let norm = ((first_val - best_bias) / best_scale).clamp(-1.0, 1.0);
+            codebook
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| {
+                    (**a - norm).abs().partial_cmp(&(**b - norm).abs()).unwrap()
+                })
+                .map(|(i, _)| i as u8)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
 
     (best_code, best_scale, best_bias)
 }
@@ -474,8 +490,7 @@ pub(crate) fn pack_nf4_matrix(
     out_features: usize,
     group_size: usize,
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) {
-    validate_tile_group_size(group_size)
-        .expect("invalid NF4 tile group_size in pack_nf4_matrix");
+    validate_tile_group_size(group_size).expect("invalid NF4 tile group_size in pack_nf4_matrix");
     let tiles_per_row = out_features.div_ceil(TILE_ELEMENTS);
     let groups_per_tile = TILE_ELEMENTS / group_size;
     let codes_per_tile = TILE_ELEMENTS / 2;
@@ -516,7 +531,9 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
     let mut candidates = Vec::new();
 
     for &gs in &grid.group_sizes {
-        if validate_tile_group_size(gs).is_err() { continue; }
+        if validate_tile_group_size(gs).is_err() {
+            continue;
+        }
         for codebook in &grid.codebooks {
             for affine in &grid.affine_modes {
                 for clip in &grid.clip_policies {
@@ -554,9 +571,18 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
                         let packer = Box::new(move |w: &[f32], r: usize, c: usize| {
                             pack_nf4_matrix_with_params(w, r, c, &pack_params)
                         });
-                        let unpacker = Box::new(move |codes: &[u8], scales: &[f32], biases: &[f32], _extra: &[u8], rows: usize, cols: usize| {
-                            unpack_nf4_weights_with_group_size_and_codebook(codes, scales, biases, rows, cols, gs, cb_array)
-                        });
+                        let unpacker = Box::new(
+                            move |codes: &[u8],
+                                  scales: &[f32],
+                                  biases: &[f32],
+                                  _extra: &[u8],
+                                  rows: usize,
+                                  cols: usize| {
+                                unpack_nf4_weights_with_group_size_and_codebook(
+                                    codes, scales, biases, rows, cols, gs, cb_array,
+                                )
+                            },
+                        );
 
                         let meta_params = params.clone();
                         let metadata_fn = Box::new(move |r: usize, c: usize| {
@@ -585,18 +611,28 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
                             let _aw_cb = nf4_codebook(aw_params.codebook);
                             let _quant_weights: Option<Vec<f32>> = None;
                             let aw_packer: Box<
-                                dyn Fn(&[f32], usize, usize)
-                                    -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>)
-                                    + Send + Sync,
+                                dyn Fn(
+                                        &[f32],
+                                        usize,
+                                        usize,
+                                    )
+                                        -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>)
+                                    + Send
+                                    + Sync,
                             > = Box::new(move |w: &[f32], r: usize, c: usize| {
                                 let _ = &_quant_weights;
                                 pack_nf4_matrix_with_params(w, r, c, &aw_params)
                             });
                             let aw_unpacker = Box::new(
-                                move |codes: &[u8], scales: &[f32], biases: &[f32],
-                                      _extra: &[u8], rows: usize, cols: usize| {
+                                move |codes: &[u8],
+                                      scales: &[f32],
+                                      biases: &[f32],
+                                      _extra: &[u8],
+                                      rows: usize,
+                                      cols: usize| {
                                     unpack_nf4_weights_with_group_size_and_codebook(
-                                        codes, scales, biases, rows, cols, gs, _aw_cb)
+                                        codes, scales, biases, rows, cols, gs, _aw_cb,
+                                    )
                                 },
                             );
                             let aw_meta = params.clone();
@@ -605,10 +641,7 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
                             });
                             let mut aw_json = params_json.clone();
                             if let Some(obj) = aw_json.as_object_mut() {
-                                obj.insert(
-                                    "activation_weighted".to_string(),
-                                    Value::Bool(true),
-                                );
+                                obj.insert("activation_weighted".to_string(), Value::Bool(true));
                             }
                             candidates.push(FamilyCandidate {
                                 label: format!(
@@ -634,13 +667,13 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nf4tile640::{
-        pack_nf4_tile_with_group_size, unpack_nf4_weights_with_group_size,
-        unpack_nf4_weights_with_group_size_and_codebook,
-        validate_tile_group_size, PRISM_NF4_CODEBOOK, TILE_ELEMENTS,
-    };
     use crate::ecs::quantization::contract::NF4_TILE640_CODE_BYTES;
     use crate::ecs::quantization::sweep::spec::Nf4SweepGrid;
+    use crate::nf4tile640::{
+        pack_nf4_tile_with_group_size, unpack_nf4_weights_with_group_size,
+        unpack_nf4_weights_with_group_size_and_codebook, validate_tile_group_size,
+        PRISM_NF4_CODEBOOK, TILE_ELEMENTS,
+    };
 
     fn make_test_tile() -> [f32; 640] {
         // Deterministic linspace from -1 to 1
@@ -666,11 +699,9 @@ mod tests {
         let tile = make_test_tile();
 
         for &group_size in &[32, 64, 128] {
-            let (codes, scales, biases) =
-                pack_nf4_tile_with_group_size(&tile, group_size);
-            let reconstructed = unpack_nf4_weights_with_group_size(
-                &codes, &scales, &biases, 1, 640, group_size,
-            );
+            let (codes, scales, biases) = pack_nf4_tile_with_group_size(&tile, group_size);
+            let reconstructed =
+                unpack_nf4_weights_with_group_size(&codes, &scales, &biases, 1, 640, group_size);
             assert_eq!(
                 reconstructed.len(),
                 tile.len(),
@@ -808,23 +839,34 @@ mod tests {
         let weights = make_test_matrix(1, 640);
         let pairs = [
             (Nf4CodebookId::PrismCurrent, Nf4CodebookId::BitsAndBytesNf4),
-            (Nf4CodebookId::PrismCurrent, Nf4CodebookId::SymmetricNormalFloat),
-            (Nf4CodebookId::BitsAndBytesNf4, Nf4CodebookId::SymmetricNormalFloat),
+            (
+                Nf4CodebookId::PrismCurrent,
+                Nf4CodebookId::SymmetricNormalFloat,
+            ),
+            (
+                Nf4CodebookId::BitsAndBytesNf4,
+                Nf4CodebookId::SymmetricNormalFloat,
+            ),
         ];
         for &(cb_a, cb_b) in &pairs {
             let make_params = |cb| Nf4Params {
-                group_size: 128, codebook: cb,
+                group_size: 128,
+                codebook: cb,
                 affine_mode: AffineMode::ScaleOnly,
                 clip_policy: ClippingPolicy::None,
                 scale_policy: ScalePolicy::MaxAbs,
                 optimizer: GroupOptimizer::None,
                 packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
             };
-            let (codes_a, _, _, _) = pack_nf4_matrix_with_params(&weights, 1, 640, &make_params(cb_a));
-            let (codes_b, _, _, _) = pack_nf4_matrix_with_params(&weights, 1, 640, &make_params(cb_b));
-            assert_ne!(codes_a, codes_b,
+            let (codes_a, _, _, _) =
+                pack_nf4_matrix_with_params(&weights, 1, 640, &make_params(cb_a));
+            let (codes_b, _, _, _) =
+                pack_nf4_matrix_with_params(&weights, 1, 640, &make_params(cb_b));
+            assert_ne!(
+                codes_a, codes_b,
                 "codebook variants {:?} and {:?} produce identical payloads — label-only duplicate",
-                cb_a, cb_b);
+                cb_a, cb_b
+            );
         }
     }
 
@@ -867,7 +909,10 @@ mod tests {
     fn nf4_clip_percentile_clamps_extremes() {
         let values: Vec<f32> = (0..100).map(|i| (i as f32) / 100.0 * 10.0 - 5.0).collect();
         let clipped = apply_group_clipping(&values, &ClippingPolicy::Percentile(90.0));
-        let max_clipped = clipped.iter().map(|v| v.abs()).max_by(|a, b| a.partial_cmp(b).unwrap());
+        let max_clipped = clipped
+            .iter()
+            .map(|v| v.abs())
+            .max_by(|a, b| a.partial_cmp(b).unwrap());
         assert!(max_clipped.is_some());
         assert!(
             max_clipped.unwrap() < 5.0 || (max_clipped.unwrap() - 4.55).abs() < 1.1,
@@ -881,7 +926,8 @@ mod tests {
         let clipped = apply_group_clipping(&values, &ClippingPolicy::StddevMultiple(1.0));
         // All values should be within 1 stddev of mean
         let mean = values.iter().sum::<f32>() / values.len() as f32;
-        let variance: f32 = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
+        let variance: f32 =
+            values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
         let stddev = variance.sqrt();
         for &v in &clipped {
             assert!(v.abs() <= mean.abs() + stddev + 1e-6);
@@ -891,13 +937,15 @@ mod tests {
     #[test]
     fn nf4_clip_grid_fraction() {
         let values = vec![-10.0, -1.0, 0.0, 1.0, 10.0];
-        let clipped = apply_group_clipping(
-            &values,
-            &ClippingPolicy::GridFractionOfMaxAbs(vec![0.5]),
-        );
+        let clipped =
+            apply_group_clipping(&values, &ClippingPolicy::GridFractionOfMaxAbs(vec![0.5]));
         // max_abs = 10, threshold = 5
         for &v in &clipped {
-            assert!(v.abs() <= 5.0 + 1e-6, "value {} should be <= 5.0 after 0.5 fraction clip", v);
+            assert!(
+                v.abs() <= 5.0 + 1e-6,
+                "value {} should be <= 5.0 after 0.5 fraction clip",
+                v
+            );
         }
     }
 
@@ -972,8 +1020,15 @@ mod tests {
         // ScaleOnly should produce zero biases (existing format always stores bias)
         assert!(biases.is_empty(), "ScaleOnly should produce no biases");
 
-        let reconstructed =
-            unpack_nf4_weights_with_group_size_and_codebook(&codes, &scales, &biases, rows, cols, 128, &PRISM_NF4_CODEBOOK);
+        let reconstructed = unpack_nf4_weights_with_group_size_and_codebook(
+            &codes,
+            &scales,
+            &biases,
+            rows,
+            cols,
+            128,
+            &PRISM_NF4_CODEBOOK,
+        );
 
         assert_eq!(reconstructed.len(), weights.len());
         // Should not be all zeros

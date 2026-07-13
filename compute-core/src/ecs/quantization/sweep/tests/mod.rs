@@ -4,8 +4,8 @@ use crate::ecs::quantization::contract::{SourceMatrixLayout, WeightValidationRep
 use crate::ecs::quantization::sweep::runner::default_validation_config;
 use crate::ecs::quantization::sweep::spec::SweepScoringConfig;
 use crate::ecs::quantization::sweep::{
-    ByteAccounting, FamilyPolicyEntry, MatrixShape, PackedTileLayout, PerClassPolicy,
-    QuantFamilyId, QuantSweepReceipt, SweepCandidateStatus, SweepFailureReason, score_receipt,
+    score_receipt, ByteAccounting, FamilyPolicyEntry, MatrixShape, PackedTileLayout,
+    PerClassPolicy, QuantFamilyId, QuantSweepReceipt, SweepCandidateStatus, SweepFailureReason,
 };
 use crate::ecs::quantization::TensorClass;
 
@@ -69,7 +69,10 @@ fn score_ordering_lower_nrmse_higher_score() {
     assert!(
         score_good > score_bad,
         "lower NRMSE ({}) should score higher than higher NRMSE ({}): got {:.6} vs {:.6}",
-        0.05, 0.12, score_good, score_bad
+        0.05,
+        0.12,
+        score_good,
+        score_bad
     );
 }
 
@@ -83,7 +86,7 @@ fn byte_accounting_compression_ratio() {
         &[0u8; 8],   // metadata
         &[0u8; 0],   // residual
         &[0u8; 0],   // routing
-        640,          // elem_count
+        640,         // elem_count
     );
 
     let expected_ratio = accounting.f32_baseline_bytes as f64 / accounting.total_bytes as f64;
@@ -176,7 +179,8 @@ fn test_layout_sweep_grid_serialization() {
         execution_lanes: vec!["MetalFusedGpu".into()],
     };
     let json = serde_json::to_string(&grid).unwrap();
-    let back: crate::quantization::sweep::spec::LayoutSweepGrid = serde_json::from_str(&json).unwrap();
+    let back: crate::quantization::sweep::spec::LayoutSweepGrid =
+        serde_json::from_str(&json).unwrap();
     assert_eq!(back.tile_shapes, vec!["640"]);
     assert_eq!(back.group_axes.len(), 2);
 }

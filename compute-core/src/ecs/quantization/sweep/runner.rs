@@ -12,30 +12,26 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use memmap2::Mmap;
+use rayon::prelude::*;
 use safetensors::SafeTensors;
 use serde_json::json;
 use uuid::Uuid;
-use rayon::prelude::*;
 
+use crate::ecs::quantization::contract::SourceMatrixLayout;
 use crate::ecs::quantization::contract::{
     QuantizationValidationProfile, TensorClass, WeightValidationReport,
 };
 use crate::ecs::quantization::sweep::candidate::{
-    FamilyPolicyEntry, PerClassPolicy, QuantSweepReceipt, QuantFamilyId, ByteAccounting, MatrixShape, PackedTileLayout,
-    quant_family_id_name,
+    quant_family_id_name, ByteAccounting, FamilyPolicyEntry, MatrixShape, PackedTileLayout,
+    PerClassPolicy, QuantFamilyId, QuantSweepReceipt,
 };
-use crate::ecs::quantization::contract::SourceMatrixLayout;
-use crate::ecs::quantization::sweep::families::{
-    generate_all_candidates, FamilyCandidate,
-};
+use crate::ecs::quantization::sweep::families::{generate_all_candidates, FamilyCandidate};
 use crate::ecs::quantization::sweep::spec::{
-    QuantSweepSpec, SweepResourceLimits, SweepScoringConfig,
-    SweepValidationConfig, TensorSelector, PolicyMode,
+    PolicyMode, QuantSweepSpec, SweepResourceLimits, SweepScoringConfig, SweepValidationConfig,
+    TensorSelector,
 };
+use crate::ecs::quantization::sweep::{SweepCandidateStatus, SweepFailureReason};
 use crate::ecs::quantization::validation::validate_weight_space;
-use crate::ecs::quantization::sweep::{
-    SweepCandidateStatus, SweepFailureReason,
-};
 
 /// Fully-resolved tensor metadata from scanning safetensors.
 #[derive(Debug, Clone)]
@@ -73,8 +69,7 @@ pub fn scan_tensors(source_dir: &Path) -> Result<Vec<TensorEntry>, String> {
     if !source_dir.is_dir() {
         return Err(format!("source dir not found: {:?}", source_dir));
     }
-    let mut dir =
-        fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))?;
+    let mut dir = fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))?;
     while let Some(entry) = dir.next().transpose().map_err(|e| format!("entry: {e}"))? {
         let path = entry.path();
         if path.extension().map_or(true, |e| e != "safetensors") {
@@ -82,16 +77,12 @@ pub fn scan_tensors(source_dir: &Path) -> Result<Vec<TensorEntry>, String> {
         }
         let file = fs::File::open(&path).map_err(|e| format!("open {:?}: {e}", path))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
-        let tensors =
-            SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+        let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
         for (key, view) in tensors.tensors() {
             let shape: Vec<usize> = view.shape().to_vec();
             let dtype = format!("{:?}", view.dtype());
             let tensor_class = classify_tensor(&key);
-            let layer_index = key
-                .split('.')
-                .filter_map(|s| s.parse::<u32>().ok())
-                .next();
+            let layer_index = key.split('.').filter_map(|s| s.parse::<u32>().ok()).next();
             entries.push(TensorEntry {
                 key: key.to_string(),
                 dtype,
@@ -124,10 +115,7 @@ fn classify_tensor(key: &str) -> TensorClass {
 }
 
 /// Match tensor selectors against scanned entries.
-pub fn select_tensors(
-    entries: &[TensorEntry],
-    selectors: &[TensorSelector],
-) -> Vec<TensorEntry> {
+pub fn select_tensors(entries: &[TensorEntry], selectors: &[TensorSelector]) -> Vec<TensorEntry> {
     let mut selected = Vec::new();
     for sel in selectors {
         match sel {
@@ -145,10 +133,7 @@ pub fn select_tensors(
                     }
                 }
             }
-            TensorSelector::TensorClass {
-                class,
-                max_tensors,
-            } => {
+            TensorSelector::TensorClass { class, max_tensors } => {
                 let mut count = 0;
                 for e in entries.iter() {
                     if e.tensor_class == *class && count < *max_tensors {
@@ -193,17 +178,22 @@ pub fn select_tensors(
 
 /// Parse "start-end" depth range strings into (usize, usize) pairs.
 fn parse_depth_ranges(ranges: &[String]) -> Result<Vec<(usize, usize)>, String> {
-    ranges.iter().map(|r| {
-        let parts: Vec<&str> = r.split('-').collect();
-        if parts.len() != 2 {
-            return Err(format!("Invalid range: {}", r));
-        }
-        let start: usize = parts[0].parse()
-            .map_err(|_| format!("Invalid start in range: {}", r))?;
-        let end: usize = parts[1].parse()
-            .map_err(|_| format!("Invalid end in range: {}", r))?;
-        Ok((start, end))
-    }).collect()
+    ranges
+        .iter()
+        .map(|r| {
+            let parts: Vec<&str> = r.split('-').collect();
+            if parts.len() != 2 {
+                return Err(format!("Invalid range: {}", r));
+            }
+            let start: usize = parts[0]
+                .parse()
+                .map_err(|_| format!("Invalid start in range: {}", r))?;
+            let end: usize = parts[1]
+                .parse()
+                .map_err(|_| format!("Invalid end in range: {}", r))?;
+            Ok((start, end))
+        })
+        .collect()
 }
 
 /// Check whether a tensor entry falls within any of the given depth ranges.
@@ -218,14 +208,19 @@ fn matches_depth_by_entry(entry: &TensorEntry, depth_ranges: &[(usize, usize)]) 
                 return false;
             };
             let remainder = &entry.key[dot_idx + 7..]; // skip "layers."
-            let num_str: String = remainder.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let num_str: String = remainder
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
             let Ok(n) = num_str.parse::<usize>() else {
                 return false;
             };
             n
         }
     };
-    depth_ranges.iter().any(|(start, end)| layer >= *start && layer <= *end)
+    depth_ranges
+        .iter()
+        .any(|(start, end)| layer >= *start && layer <= *end)
 }
 
 #[cfg(test)]
@@ -352,13 +347,15 @@ mod tests {
 
     #[test]
     fn test_depth_aware_selector_max_tensors() {
-        let entries: Vec<TensorEntry> = (0..20).map(|i| TensorEntry {
-            key: format!("model.layers.{}.self_attn.q_proj.weight", i),
-            dtype: "F32".into(),
-            shape: vec![4096, 4096],
-            tensor_class: TensorClass::DecoderAttentionProjection,
-            layer_index: Some(i),
-        }).collect();
+        let entries: Vec<TensorEntry> = (0..20)
+            .map(|i| TensorEntry {
+                key: format!("model.layers.{}.self_attn.q_proj.weight", i),
+                dtype: "F32".into(),
+                shape: vec![4096, 4096],
+                tensor_class: TensorClass::DecoderAttentionProjection,
+                layer_index: Some(i),
+            })
+            .collect();
         let selector = TensorSelector::DepthAware(DepthAwareSelector {
             tensor_class: String::new(),
             depth_ranges: vec!["0-30".to_string()],
@@ -403,8 +400,7 @@ mod tests {
 }
 /// Load a single tensor's f32 data from safetensors into a Vec<f32>.
 pub fn load_tensor_f32(source_dir: &Path, target_key: &str) -> Result<Vec<f32>, String> {
-    let mut dir =
-        fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))?;
+    let mut dir = fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))?;
     while let Some(entry) = dir.next().transpose().map_err(|e| format!("entry: {e}"))? {
         let path = entry.path();
         if path.extension().map_or(true, |e| e != "safetensors") {
@@ -412,8 +408,7 @@ pub fn load_tensor_f32(source_dir: &Path, target_key: &str) -> Result<Vec<f32>, 
         }
         let file = fs::File::open(&path).map_err(|e| format!("open {:?}: {e}", path))?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("mmap: {e}"))? };
-        let tensors =
-            SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
+        let tensors = SafeTensors::deserialize(&mmap).map_err(|e| format!("deserialize: {e}"))?;
         for (key, view) in tensors.tensors() {
             if key != target_key {
                 continue;
@@ -447,15 +442,11 @@ pub fn load_tensor_f32(source_dir: &Path, target_key: &str) -> Result<Vec<f32>, 
 /// Default scoring config for the sweep.
 pub fn default_scoring_config() -> SweepScoringConfig {
     let mut max_weight_nrmse_by_family = HashMap::new();
-    max_weight_nrmse_by_family
-        .insert("Nf4".to_string(), 0.15);
-    max_weight_nrmse_by_family
-        .insert("SymInt4".to_string(), 0.15);
+    max_weight_nrmse_by_family.insert("Nf4".to_string(), 0.15);
+    max_weight_nrmse_by_family.insert("SymInt4".to_string(), 0.15);
     max_weight_nrmse_by_family.insert("Int8".to_string(), 0.02);
-    max_weight_nrmse_by_family
-        .insert("Ternary".to_string(), 0.90);
-    max_weight_nrmse_by_family
-        .insert("MixedTile".to_string(), 0.10);
+    max_weight_nrmse_by_family.insert("Ternary".to_string(), 0.90);
+    max_weight_nrmse_by_family.insert("MixedTile".to_string(), 0.10);
     SweepScoringConfig {
         max_weight_nrmse_by_family,
         max_zero_collapse: 0.01,
@@ -471,7 +462,7 @@ pub fn default_validation_config() -> SweepValidationConfig {
         run_weight_validation: true,
         max_candidates: None,
         max_candidates_per_tensor: 200,
-       max_total_candidates: None,
+        max_total_candidates: None,
         policy_mode: PolicyMode::ProductionCandidateOnly,
     }
 }
@@ -536,19 +527,16 @@ pub fn run_weight_sweep(
     let entries = scan_tensors(source_dir)?;
     let selected = select_tensors(&entries, &spec.tensor_selectors);
     if selected.is_empty() {
-        return Err(
-            "No tensors matched the provided selectors; check --tensor-regex".into(),
-        );
+        return Err("No tensors matched the provided selectors; check --tensor-regex".into());
     }
 
-    let scoring_config = if spec.scoring.byte_weight > 0.0
-        || !spec.scoring.max_weight_nrmse_by_family.is_empty()
-    {
-        &spec.scoring
-    } else {
-        // Use defaults
-        &default_scoring_config()
-    };
+    let scoring_config =
+        if spec.scoring.byte_weight > 0.0 || !spec.scoring.max_weight_nrmse_by_family.is_empty() {
+            &spec.scoring
+        } else {
+            // Use defaults
+            &default_scoring_config()
+        };
 
     let max_candidates = spec.validation.max_candidates_per_tensor;
     let max_total = spec.validation.max_total_candidates.unwrap_or(usize::MAX);
@@ -559,8 +547,7 @@ pub fn run_weight_sweep(
     // For each tensor, generate candidates and run them.
     for tensor_entry in &selected {
         let _tensor_candidate_count = 0usize;
-        let tensor_count =
-            tensor_count.fetch_add(1, Ordering::SeqCst) + 1;
+        let tensor_count = tensor_count.fetch_add(1, Ordering::SeqCst) + 1;
         eprintln!(
             "  [{}/{}] {} ({})",
             tensor_count, total_tensors, tensor_entry.key, tensor_entry.tensor_class as u8
@@ -593,12 +580,11 @@ pub fn run_weight_sweep(
         let per_tensor_remaining = max_candidates;
         let total_remaining = max_total.saturating_sub(all_receipts.len());
         let remaining = per_tensor_remaining.min(total_remaining);
-        let candidates_slice: Vec<&FamilyCandidate> = family_candidates
-            .iter()
-            .take(remaining)
-            .collect();
+        let candidates_slice: Vec<&FamilyCandidate> =
+            family_candidates.iter().take(remaining).collect();
 
-        let new_receipts: std::sync::Mutex<Vec<QuantSweepReceipt>> = std::sync::Mutex::new(Vec::new());
+        let new_receipts: std::sync::Mutex<Vec<QuantSweepReceipt>> =
+            std::sync::Mutex::new(Vec::new());
 
         // ── Metal batch path for NF4 candidates ──────────────────────────
         // Build (rmse, nrmse, max_abs) lookup from GPU eval, keyed by
@@ -606,33 +592,51 @@ pub fn run_weight_sweep(
         let metal_metrics: std::collections::HashMap<usize, (f64, f64, f64)> = {
             #[cfg(feature = "metal-dispatch")]
             {
-                let nf4_entries: Vec<(usize, [u32; 4])> = candidates_slice.iter().enumerate().filter_map(|(i, fc)| {
-                    if family_id_from_label(&fc.label) != QuantFamilyId::Nf4 { return None; }
-                    // Parse label to extract codebook_id, group_size, affine_mode
-                    let p = &fc.parameters;
-                    // codebook is a JSON string like "PrismCurrent", "BitsAndBytesNf4", "SymmetricNormalFloat"
-                    let cb = p.get("codebook").and_then(|v| v.as_str()).map(|s| match s {
-                        "BitsAndBytesNf4" => 1u32,
-                        "SymmetricNormalFloat" => 2u32,
-                        _ => 0u32, // PrismCurrent or unknown
-                    }).unwrap_or(0);
-                    let gs = p.get("group_size").and_then(|v| v.as_u64()).unwrap_or(128) as u32;
-                    let am = p.get("affine_mode").and_then(|v| v.as_str()).map(|s| if s == "ScaleBias" { 1 } else { 0 }).unwrap_or(0);
-                    Some((i, [cb, gs, am, 0]))
-                }).collect();
+                let nf4_entries: Vec<(usize, [u32; 4])> = candidates_slice
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, fc)| {
+                        if family_id_from_label(&fc.label) != QuantFamilyId::Nf4 {
+                            return None;
+                        }
+                        // Parse label to extract codebook_id, group_size, affine_mode
+                        let p = &fc.parameters;
+                        // codebook is a JSON string like "PrismCurrent", "BitsAndBytesNf4", "SymmetricNormalFloat"
+                        let cb = p
+                            .get("codebook")
+                            .and_then(|v| v.as_str())
+                            .map(|s| match s {
+                                "BitsAndBytesNf4" => 1u32,
+                                "SymmetricNormalFloat" => 2u32,
+                                _ => 0u32, // PrismCurrent or unknown
+                            })
+                            .unwrap_or(0);
+                        let gs = p.get("group_size").and_then(|v| v.as_u64()).unwrap_or(128) as u32;
+                        let am = p
+                            .get("affine_mode")
+                            .and_then(|v| v.as_str())
+                            .map(|s| if s == "ScaleBias" { 1 } else { 0 })
+                            .unwrap_or(0);
+                        Some((i, [cb, gs, am, 0]))
+                    })
+                    .collect();
                 if nf4_entries.is_empty() {
                     std::collections::HashMap::new()
                 } else {
                     let params: Vec<[u32; 4]> = nf4_entries.iter().map(|(_, p)| *p).collect();
                     let indices: Vec<usize> = nf4_entries.iter().map(|(i, _)| *i).collect();
                     match crate::quantization::sweep::metal::evaluate_nf4_batch(
-                        &weights, &params, params.len(), in_features, out_features
+                        &weights,
+                        &params,
+                        params.len(),
+                        in_features,
+                        out_features,
                     ) {
-                        Ok(metrics) => {
-                            indices.into_iter().zip(metrics.into_iter()).map(|(i, m)| {
-                                (i, (m.rmse, m.nrmse, m.max_abs_error))
-                            }).collect()
-                        }
+                        Ok(metrics) => indices
+                            .into_iter()
+                            .zip(metrics.into_iter())
+                            .map(|(i, m)| (i, (m.rmse, m.nrmse, m.max_abs_error)))
+                            .collect(),
                         Err(e) => {
                             eprintln!("    Metal eval failed (falling back to CPU): {e}");
                             std::collections::HashMap::new()
@@ -644,67 +648,88 @@ pub fn run_weight_sweep(
             {
                 std::collections::HashMap::new()
             }
-            };
+        };
 
-        candidates_slice.par_iter().enumerate().for_each(|(idx, fc)| {
-            let t1 = Instant::now();
-            let family_id = family_id_from_label(&fc.label);
+        candidates_slice
+            .par_iter()
+            .enumerate()
+            .for_each(|(idx, fc)| {
+                let t1 = Instant::now();
+                let family_id = family_id_from_label(&fc.label);
 
-            // Conditional pack — skip for Metal-evaluated NF4 candidates
-            let (codes, scales, biases, extra_bytes, _recon): (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>, Vec<f32>) = if metal_metrics.contains_key(&idx) {
-                (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
-            } else {
-                // TODO(imatrix): load per-column quant_weights and pass to packer
-                // for activation-weighted candidates when imatrix data is available.
-                let (c, s, b, e) = (fc.packer)(&weights, in_features, out_features);
-                let r = (fc.unpacker)(&c, &s, &b, &e, in_features, out_features);
-                (c, s, b, e, r)
-            };
+                // Conditional pack — skip for Metal-evaluated NF4 candidates
+                let (codes, scales, biases, extra_bytes, _recon): (
+                    Vec<u8>,
+                    Vec<f32>,
+                    Vec<f32>,
+                    Vec<u8>,
+                    Vec<f32>,
+                ) = if metal_metrics.contains_key(&idx) {
+                    (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                } else {
+                    // TODO(imatrix): load per-column quant_weights and pass to packer
+                    // for activation-weighted candidates when imatrix data is available.
+                    let (c, s, b, e) = (fc.packer)(&weights, in_features, out_features);
+                    let r = (fc.unpacker)(&c, &s, &b, &e, in_features, out_features);
+                    (c, s, b, e, r)
+                };
 
-            // Key thresholds by family_id
-            let family_key = format!("{:?}", family_id);
-            let profile = QuantizationValidationProfile {
-                tensor_class: tensor_entry.tensor_class,
-                phase: crate::quantization::contract::ProfilePhase::Promotion,
-                max_weight_nrmse: scoring_config
-                    .max_weight_nrmse_by_family
-                    .get(&family_key)
-                    .copied()
-                    .unwrap_or(f64::MAX),
-                investigation_nrmse_ceiling: f64::MAX,
-                max_zero_collapse_ratio: scoring_config.max_zero_collapse,
-                max_operator_nrmse: f32::MAX,
-                min_mean_cosine: 0.0,
-                min_worst_cosine: 0.0,
-                max_norm_ratio_drift: f32::MAX,
-            };
+                // Key thresholds by family_id
+                let family_key = format!("{:?}", family_id);
+                let profile = QuantizationValidationProfile {
+                    tensor_class: tensor_entry.tensor_class,
+                    phase: crate::quantization::contract::ProfilePhase::Promotion,
+                    max_weight_nrmse: scoring_config
+                        .max_weight_nrmse_by_family
+                        .get(&family_key)
+                        .copied()
+                        .unwrap_or(f64::MAX),
+                    investigation_nrmse_ceiling: f64::MAX,
+                    max_zero_collapse_ratio: scoring_config.max_zero_collapse,
+                    max_operator_nrmse: f32::MAX,
+                    min_mean_cosine: 0.0,
+                    min_worst_cosine: 0.0,
+                    max_norm_ratio_drift: f32::MAX,
+                };
 
-            // Compute weight report — either from Metal metrics or CPU validation
-            let wr = if let Some(&(rmse, nrmse, max_abs)) = metal_metrics.get(&idx) {
-                // Metal path: metrics already computed on GPU, zero-collapse not available
-                WeightValidationReport { rmse, nrmse, max_abs_error: max_abs, zero_collapse_ratio: 0.0 }
-            } else {
-                let recon = (fc.unpacker)(&codes, &scales, &biases, &extra_bytes, in_features, out_features);
-                validate_weight_space(&weights, &recon, &profile)
-            };
+                // Compute weight report — either from Metal metrics or CPU validation
+                let wr = if let Some(&(rmse, nrmse, max_abs)) = metal_metrics.get(&idx) {
+                    // Metal path: metrics already computed on GPU, zero-collapse not available
+                    WeightValidationReport {
+                        rmse,
+                        nrmse,
+                        max_abs_error: max_abs,
+                        zero_collapse_ratio: 0.0,
+                    }
+                } else {
+                    let recon = (fc.unpacker)(
+                        &codes,
+                        &scales,
+                        &biases,
+                        &extra_bytes,
+                        in_features,
+                        out_features,
+                    );
+                    validate_weight_space(&weights, &recon, &profile)
+                };
 
-            // Determine status
-            let (status, failure_reason) = if wr.passes(&profile) {
-                (SweepCandidateStatus::Passed, SweepFailureReason::None)
-            } else if wr.nrmse <= profile.investigation_nrmse_ceiling
-                && wr.zero_collapse_ratio <= profile.max_zero_collapse_ratio
-            {
-                (
-                    SweepCandidateStatus::InvestigationBand {
-                        warning: format!(
-                            "wNRMSE={:.4} exceeds target {:.4}, within ceiling",
-                            wr.nrmse, profile.max_weight_nrmse
-                        ),
-                    },
-                    SweepFailureReason::None,
-                )
-            } else {
-                let reason = if wr.zero_collapse_ratio > profile.max_zero_collapse_ratio {
+                // Determine status
+                let (status, failure_reason) = if wr.passes(&profile) {
+                    (SweepCandidateStatus::Passed, SweepFailureReason::None)
+                } else if wr.nrmse <= profile.investigation_nrmse_ceiling
+                    && wr.zero_collapse_ratio <= profile.max_zero_collapse_ratio
+                {
+                    (
+                        SweepCandidateStatus::InvestigationBand {
+                            warning: format!(
+                                "wNRMSE={:.4} exceeds target {:.4}, within ceiling",
+                                wr.nrmse, profile.max_weight_nrmse
+                            ),
+                        },
+                        SweepFailureReason::None,
+                    )
+                } else {
+                    let reason = if wr.zero_collapse_ratio > profile.max_zero_collapse_ratio {
                         format!(
                             "zeroCollapse={:.4} > max={:.4}",
                             wr.zero_collapse_ratio, profile.max_zero_collapse_ratio
@@ -715,49 +740,83 @@ pub fn run_weight_sweep(
                             wr.nrmse, profile.investigation_nrmse_ceiling
                         )
                     };
-                let fr = if wr.zero_collapse_ratio > profile.max_zero_collapse_ratio {
-                    SweepFailureReason::ZeroCollapse
-                } else {
-                    SweepFailureReason::WeightNrmse
+                    let fr = if wr.zero_collapse_ratio > profile.max_zero_collapse_ratio {
+                        SweepFailureReason::ZeroCollapse
+                    } else {
+                        SweepFailureReason::WeightNrmse
+                    };
+                    (SweepCandidateStatus::Rejected { reason }, fr)
                 };
-                (SweepCandidateStatus::Rejected { reason }, fr)
-            };
 
-            let elem_count = in_features * out_features;
-            let bytes = if metal_metrics.contains_key(&idx) {
-                let cb = (fc.code_bytes_fn)(in_features, out_features);
-                let mb = (fc.metadata_bytes_fn)(in_features, out_features);
-                ByteAccounting::from_payloads(&vec![0u8; cb as usize], &vec![0u8; mb as usize], &[], &[], elem_count)
-            } else {
-                let mut meta = Vec::with_capacity((scales.len() + biases.len()) * 4);
-                for &s in &scales { meta.extend_from_slice(&s.to_le_bytes()); }
-                for &b in &biases { meta.extend_from_slice(&b.to_le_bytes()); }
-                ByteAccounting::from_payloads(&codes, &meta, &extra_bytes, &[], elem_count)
-            };
+                let elem_count = in_features * out_features;
+                let bytes = if metal_metrics.contains_key(&idx) {
+                    let cb = (fc.code_bytes_fn)(in_features, out_features);
+                    let mb = (fc.metadata_bytes_fn)(in_features, out_features);
+                    ByteAccounting::from_payloads(
+                        &vec![0u8; cb as usize],
+                        &vec![0u8; mb as usize],
+                        &[],
+                        &[],
+                        elem_count,
+                    )
+                } else {
+                    let mut meta = Vec::with_capacity((scales.len() + biases.len()) * 4);
+                    for &s in &scales {
+                        meta.extend_from_slice(&s.to_le_bytes());
+                    }
+                    for &b in &biases {
+                        meta.extend_from_slice(&b.to_le_bytes());
+                    }
+                    ByteAccounting::from_payloads(&codes, &meta, &extra_bytes, &[], elem_count)
+                };
 
-            let score = score_receipt(&QuantSweepReceipt {
-                receipt_version: 1, run_id: run_id.clone(),
-                tensor_key: tensor_entry.key.clone(), tensor_class: tensor_entry.tensor_class,
-                source_shape: tensor_entry.shape.clone(), family: family_id,
-                parameters: fc.parameters.clone(), bytes,
-                source_layout: SourceMatrixLayout::CheckpointOutByIn,
-                logical_shape: MatrixShape { in_features, out_features },
-                packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
-                weight: wr.clone(), status: status.clone(), failure_reason: failure_reason.clone(), score: 0.0,
-                wall_ms: t1.elapsed().as_millis() as u64,
-            }, scoring_config);
+                let score = score_receipt(
+                    &QuantSweepReceipt {
+                        receipt_version: 1,
+                        run_id: run_id.clone(),
+                        tensor_key: tensor_entry.key.clone(),
+                        tensor_class: tensor_entry.tensor_class,
+                        source_shape: tensor_entry.shape.clone(),
+                        family: family_id,
+                        parameters: fc.parameters.clone(),
+                        bytes,
+                        source_layout: SourceMatrixLayout::CheckpointOutByIn,
+                        logical_shape: MatrixShape {
+                            in_features,
+                            out_features,
+                        },
+                        packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
+                        weight: wr.clone(),
+                        status: status.clone(),
+                        failure_reason: failure_reason.clone(),
+                        score: 0.0,
+                        wall_ms: t1.elapsed().as_millis() as u64,
+                    },
+                    scoring_config,
+                );
 
-            new_receipts.lock().unwrap().push(QuantSweepReceipt {
-                receipt_version: 1, run_id: run_id.clone(),
-                tensor_key: tensor_entry.key.clone(), tensor_class: tensor_entry.tensor_class,
-                source_shape: tensor_entry.shape.clone(), family: family_id,
-                parameters: fc.parameters.clone(), bytes,
-                source_layout: SourceMatrixLayout::CheckpointOutByIn,
-                logical_shape: MatrixShape { in_features, out_features },
-                packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
-                weight: wr, status, failure_reason, score, wall_ms: t1.elapsed().as_millis() as u64,
-            });
-        }); // end par_iter for_each
+                new_receipts.lock().unwrap().push(QuantSweepReceipt {
+                    receipt_version: 1,
+                    run_id: run_id.clone(),
+                    tensor_key: tensor_entry.key.clone(),
+                    tensor_class: tensor_entry.tensor_class,
+                    source_shape: tensor_entry.shape.clone(),
+                    family: family_id,
+                    parameters: fc.parameters.clone(),
+                    bytes,
+                    source_layout: SourceMatrixLayout::CheckpointOutByIn,
+                    logical_shape: MatrixShape {
+                        in_features,
+                        out_features,
+                    },
+                    packed_layout: PackedTileLayout::OutputChannelContiguousReductionTiles,
+                    weight: wr,
+                    status,
+                    failure_reason,
+                    score,
+                    wall_ms: t1.elapsed().as_millis() as u64,
+                });
+            }); // end par_iter for_each
         all_receipts.extend(new_receipts.into_inner().unwrap());
     } // end for tensor_entry
 
@@ -790,9 +849,10 @@ pub fn run_weight_sweep(
             // In production mode, only include passed candidates
             let policy_mode = spec.validation.policy_mode;
             let filtered: Vec<(f64, QuantSweepReceipt)> = match policy_mode {
-                PolicyMode::ProductionCandidateOnly => {
-                    receipts.into_iter().filter(|(_, r)| matches!(r.status, SweepCandidateStatus::Passed)).collect()
-                }
+                PolicyMode::ProductionCandidateOnly => receipts
+                    .into_iter()
+                    .filter(|(_, r)| matches!(r.status, SweepCandidateStatus::Passed))
+                    .collect(),
                 PolicyMode::Exploratory => receipts,
             };
             let preferred: Vec<FamilyPolicyEntry> = filtered
@@ -832,8 +892,7 @@ pub fn write_sweep_output(out_dir: &Path, result: &SweepRunResult) -> Result<(),
     fs::create_dir_all(out_dir).map_err(|e| format!("create output dir: {e}"))?;
     fs::create_dir_all(out_dir.join("summaries"))
         .map_err(|e| format!("create summaries dir: {e}"))?;
-    fs::create_dir_all(out_dir.join("best"))
-        .map_err(|e| format!("create best dir: {e}"))?;
+    fs::create_dir_all(out_dir.join("best")).map_err(|e| format!("create best dir: {e}"))?;
 
     // Run manifest
     let manifest = json!({
@@ -878,8 +937,7 @@ pub fn write_sweep_output(out_dir: &Path, result: &SweepRunResult) -> Result<(),
         });
         lines.push(serde_json::to_string(&v).map_err(|e| format!("serialize candidate: {e}"))?);
     }
-    fs::write(&candidates_path, lines.join("\n"))
-        .map_err(|e| format!("write candidates: {e}"))?;
+    fs::write(&candidates_path, lines.join("\n")).map_err(|e| format!("write candidates: {e}"))?;
 
     // Best per-class policy
     let policy_path = out_dir.join("best").join("per_class_policy.json");
@@ -910,8 +968,7 @@ pub fn write_sweep_output(out_dir: &Path, result: &SweepRunResult) -> Result<(),
         .collect();
     fs::write(
         &policy_path,
-        serde_json::to_string_pretty(&policy_json)
-            .map_err(|e| format!("serialize policy: {e}"))?,
+        serde_json::to_string_pretty(&policy_json).map_err(|e| format!("serialize policy: {e}"))?,
     )
     .map_err(|e| format!("write policy: {e}"))?;
 

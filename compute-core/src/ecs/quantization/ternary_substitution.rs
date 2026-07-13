@@ -269,8 +269,14 @@ mod tests {
         let json = serde_json::to_string_pretty(&config).unwrap();
         let decoded: TernarySubstitutionConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(config.enabled, decoded.enabled);
-        assert_eq!(config.eligible_matchers.len(), decoded.eligible_matchers.len());
-        assert_eq!(config.gates.weight_nrmse_max, decoded.gates.weight_nrmse_max);
+        assert_eq!(
+            config.eligible_matchers.len(),
+            decoded.eligible_matchers.len()
+        );
+        assert_eq!(
+            config.gates.weight_nrmse_max,
+            decoded.gates.weight_nrmse_max
+        );
     }
 
     #[test]
@@ -278,7 +284,10 @@ mod tests {
         let rescue = ResidualRescueConfig::default();
         assert_eq!(rescue.max_rescue_fraction, 0.25);
         assert_eq!(rescue.granularity, RescueGranularity::InputColumn);
-        assert_eq!(rescue.selector, RescueSelector::ActivationWeightedContribution);
+        assert_eq!(
+            rescue.selector,
+            RescueSelector::ActivationWeightedContribution
+        );
     }
 
     #[test]

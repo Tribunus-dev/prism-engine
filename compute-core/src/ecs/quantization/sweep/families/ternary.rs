@@ -7,8 +7,8 @@
 use serde_json::json;
 
 use crate::ecs::quantization::embed_cluster::{pack_ternary_weights, unpack_ternary_weights};
-use crate::ecs::quantization::sweep::spec::TernarySweepGrid;
 use crate::ecs::quantization::sweep::families::FamilyCandidate;
+use crate::ecs::quantization::sweep::spec::TernarySweepGrid;
 
 const BLOCK_SIZE: usize = 256;
 const CODES_PER_BLOCK: usize = 64; // 256 × 2 bits / 8
@@ -63,7 +63,12 @@ pub fn generate_ternary_candidates(grid: &TernarySweepGrid) -> Vec<FamilyCandida
                     });
 
                     let unpacker = Box::new(
-                        |codes: &[u8], scales: &[f32], biases: &[f32], _extra: &[u8], rows: usize, cols: usize| {
+                        |codes: &[u8],
+                         scales: &[f32],
+                         biases: &[f32],
+                         _extra: &[u8],
+                         rows: usize,
+                         cols: usize| {
                             unpack_ternary_weights(codes, scales, biases, rows, cols)
                         },
                     );

@@ -9,16 +9,14 @@
 
 use serde_json::json;
 
-use crate::nf4tile640::{
-    pack_nf4_tile_with_group_size, TILE_ELEMENTS,
-};
-use crate::nf4tile640::NF4_CODEBOOK;
-use crate::nf4tile640::nf4_dequantize;
 use crate::ecs::quantization::contract::NF4_TILE640_CODE_BYTES;
+use crate::ecs::quantization::sweep::families::FamilyCandidate;
 use crate::ecs::quantization::sweep::spec::{
     MixedTileSweepGrid, OverlayMode, RescueGranularity, RescueSchedule,
 };
-use crate::ecs::quantization::sweep::families::FamilyCandidate;
+use crate::nf4tile640::nf4_dequantize;
+use crate::nf4tile640::NF4_CODEBOOK;
+use crate::nf4tile640::{pack_nf4_tile_with_group_size, TILE_ELEMENTS};
 
 #[cfg(test)]
 mod tests {
@@ -90,10 +88,7 @@ mod tests {
         // table is the sole authority for identifying rescued tiles. An
         // all-zero weight tile will never be mistaken for a sentinel.
         for (i, &val) in reconstructed.iter().enumerate() {
-            assert!(
-                val.abs() < 1e-6,
-                "expected zero at index {i}, got {val}"
-            );
+            assert!(val.abs() < 1e-6, "expected zero at index {i}, got {val}");
         }
     }
 
@@ -215,8 +210,7 @@ fn deserialize_routing_table(bytes: &[u8]) -> (Vec<MixedTileRoutingEntry>, usize
         if offset + ENTRY_BYTES > bytes.len() {
             break;
         }
-        let unit_id =
-            u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        let unit_id = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
         let granularity = match bytes[offset + 8] {
             0 => RescueGranularity::Group,
             1 => RescueGranularity::Tile640,
@@ -226,12 +220,10 @@ fn deserialize_routing_table(bytes: &[u8]) -> (Vec<MixedTileRoutingEntry>, usize
             0 => OverlayMode::FullReplacement,
             _ => OverlayMode::DeltaCorrection,
         };
-        let rescue_format =
-            u16::from_le_bytes(bytes[offset + 10..offset + 12].try_into().unwrap());
+        let rescue_format = u16::from_le_bytes(bytes[offset + 10..offset + 12].try_into().unwrap());
         let payload_offset =
             u64::from_le_bytes(bytes[offset + 12..offset + 20].try_into().unwrap());
-        let payload_len =
-            u32::from_le_bytes(bytes[offset + 20..offset + 24].try_into().unwrap());
+        let payload_len = u32::from_le_bytes(bytes[offset + 20..offset + 24].try_into().unwrap());
 
         entries.push(MixedTileRoutingEntry {
             unit_id,
@@ -525,38 +517,45 @@ pub fn generate_mixed_tile_candidates(grid: &MixedTileSweepGrid) -> Vec<FamilyCa
     let default_group_size: usize = 128;
 
     for base_policy in &grid.base_policies {
-    for schedule in &grid.schedules {
-        // Extract a scalar rescue fraction from the schedule (total across all rounds).
-        let rf_total: f32 = rescue_fraction_total(schedule);
+        for schedule in &grid.schedules {
+            // Extract a scalar rescue fraction from the schedule (total across all rounds).
+            let rf_total: f32 = rescue_fraction_total(schedule);
 
-        let params = json!({
-            "family": "MixedTile",
-            "base_policy": base_policy,
-            "rescue_fraction": rf_total,
-            "group_size": default_group_size,
-            "rescue_schedule": schedule,
-        });
+            let params = json!({
+                "family": "MixedTile",
+                "base_policy": base_policy,
+                "rescue_fraction": rf_total,
+                "group_size": default_group_size,
+                "rescue_schedule": schedule,
+            });
 
-        let gs = default_group_size;
-        let rf = rf_total;
+            let gs = default_group_size;
+            let rf = rf_total;
 
-        let packer = Box::new(move |w: &[f32], r: usize, c: usize| {
-            pack_mixed_tile_matrix(w, r, c, gs, rf)
-        });
+            let packer = Box::new(move |w: &[f32], r: usize, c: usize| {
+                pack_mixed_tile_matrix(w, r, c, gs, rf)
+            });
 
-        let unpacker = Box::new(move |codes: &[u8], scales: &[f32], biases: &[f32], extra: &[u8], rows: usize, cols: usize| {
-            unpack_mixed_tile(codes, scales, biases, extra, rows, cols, gs, rf)
-        });
+            let unpacker = Box::new(
+                move |codes: &[u8],
+                      scales: &[f32],
+                      biases: &[f32],
+                      extra: &[u8],
+                      rows: usize,
+                      cols: usize| {
+                    unpack_mixed_tile(codes, scales, biases, extra, rows, cols, gs, rf)
+                },
+            );
 
-        candidates.push(FamilyCandidate {
-            label: format!("MixedTile_{}_rescue{:.2}", base_policy.family, rf_total),
-            parameters: params,
-            packer,
-            unpacker,
-            code_bytes_fn: mixed_code_bytes,
-            metadata_bytes_fn: Box::new(mixed_metadata_bytes),
-        });
-    }
+            candidates.push(FamilyCandidate {
+                label: format!("MixedTile_{}_rescue{:.2}", base_policy.family, rf_total),
+                parameters: params,
+                packer,
+                unpacker,
+                code_bytes_fn: mixed_code_bytes,
+                metadata_bytes_fn: Box::new(mixed_metadata_bytes),
+            });
+        }
     }
 
     candidates
@@ -566,7 +565,10 @@ pub fn generate_mixed_tile_candidates(grid: &MixedTileSweepGrid) -> Vec<FamilyCa
 fn rescue_fraction_total(schedule: &RescueSchedule) -> f32 {
     match schedule {
         RescueSchedule::OneShot { fraction } => *fraction as f32,
-        RescueSchedule::FixedPerRound { fraction_per_round, rounds } => (*fraction_per_round * *rounds as f64) as f32,
+        RescueSchedule::FixedPerRound {
+            fraction_per_round,
+            rounds,
+        } => (*fraction_per_round * *rounds as f64) as f32,
         RescueSchedule::Geometric { fractions } => fractions.iter().sum::<f64>() as f32,
     }
 }

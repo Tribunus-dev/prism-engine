@@ -122,9 +122,7 @@ pub enum ScalePolicy {
     /// Max absolute value clip.
     MaxAbs,
     /// MSE-optimal grid search with given number of steps.
-    MseOptimalGrid {
-        steps: u16,
-    },
+    MseOptimalGrid { steps: u16 },
     /// Activation-weighted least-squares scale.
     ActivationWeightedLs,
 }
@@ -148,13 +146,9 @@ pub enum GroupOptimizer {
     /// No group-level optimization.
     None,
     /// Alternating affine optimization for up to `max_iters` iterations.
-    AffineAlternating {
-        max_iters: u8,
-    },
+    AffineAlternating { max_iters: u8 },
     /// Activation-weighted optimization for up to `max_iters` iterations.
-    ActivationWeighted {
-        max_iters: u8,
-    },
+    ActivationWeighted { max_iters: u8 },
 }
 
 /// Signed INT4 range variant.

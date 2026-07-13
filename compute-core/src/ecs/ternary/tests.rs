@@ -113,8 +113,8 @@ fn test_ternary_gemv_reference_matches_raw_reconstruction() {
     // Activations: 8 elements
     let activations: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
 
-    let result = ternary_gemv_reference(&activations, &packed, &scales, rows, cols, group_size)
-        .unwrap();
+    let result =
+        ternary_gemv_reference(&activations, &packed, &scales, rows, cols, group_size).unwrap();
 
     // Manual computation:
     // Row 0:
@@ -133,10 +133,7 @@ fn test_ternary_gemv_reference_matches_raw_reconstruction() {
     let expected: Vec<f32> = vec![-4.5, 12.0];
     assert_eq!(result.len(), expected.len());
     for (a, b) in result.iter().zip(expected.iter()) {
-        assert!(
-            (a - b).abs() < 1e-6,
-            "mismatch: result={a}, expected={b}"
-        );
+        assert!((a - b).abs() < 1e-6, "mismatch: result={a}, expected={b}");
     }
 }
 

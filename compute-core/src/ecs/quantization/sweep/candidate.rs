@@ -5,10 +5,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::ecs::quantization::contract::{
-    TensorClass, WeightValidationReport,
-};
 use crate::ecs::quantization::contract::SourceMatrixLayout;
+use crate::ecs::quantization::contract::{TensorClass, WeightValidationReport};
 use crate::ecs::quantization::sweep::spec::{
     OverlayMode, QuantPolicy, RescueGranularity, RescueSchedule, RescueSelector,
     SweepFailureReason, SweepScoringConfig,
@@ -259,8 +257,7 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                         }
                         Field::Family => {
                             let name: String = map.next_value()?;
-                            family =
-                                Some(parse_quant_family_id(&name).map_err(de::Error::custom)?);
+                            family = Some(parse_quant_family_id(&name).map_err(de::Error::custom)?);
                         }
                         Field::Parameters => {
                             parameters = Some(map.next_value()?);
@@ -312,8 +309,7 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                 let family = family.ok_or_else(|| de::Error::missing_field("family"))?;
                 let parameters =
                     parameters.ok_or_else(|| de::Error::missing_field("parameters"))?;
-                let bytes =
-                    bytes.ok_or_else(|| de::Error::missing_field("bytes"))?;
+                let bytes = bytes.ok_or_else(|| de::Error::missing_field("bytes"))?;
                 let source_layout =
                     source_layout.ok_or_else(|| de::Error::missing_field("source_layout"))?;
                 let logical_shape =
@@ -325,8 +321,7 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
                 let score = score.ok_or_else(|| de::Error::missing_field("score"))?;
                 let wall_ms = wall_ms.ok_or_else(|| de::Error::missing_field("wall_ms"))?;
 
-                let failure_reason =
-                    failure_reason.unwrap_or(SweepFailureReason::None);
+                let failure_reason = failure_reason.unwrap_or(SweepFailureReason::None);
 
                 Ok(QuantSweepReceipt {
                     receipt_version,
@@ -352,7 +347,7 @@ impl<'de> Deserialize<'de> for QuantSweepReceipt {
         deserializer.deserialize_struct(
             "QuantSweepReceipt",
             &[
-                    "failure_reason",
+                "failure_reason",
                 "receipt_version",
                 "run_id",
                 "tensor_key",
@@ -448,10 +443,8 @@ impl<'de> Deserialize<'de> for PerClassPolicy {
 
                 let tensor_class =
                     tensor_class.ok_or_else(|| de::Error::missing_field("tensor_class"))?;
-                let preferred =
-                    preferred.ok_or_else(|| de::Error::missing_field("preferred"))?;
-                let fallback =
-                    fallback.ok_or_else(|| de::Error::missing_field("fallback"))?;
+                let preferred = preferred.ok_or_else(|| de::Error::missing_field("preferred"))?;
+                let fallback = fallback.ok_or_else(|| de::Error::missing_field("fallback"))?;
 
                 Ok(PerClassPolicy {
                     tensor_class,
@@ -641,12 +634,8 @@ fn packed_layout_name(layout: &PackedTileLayout) -> &'static str {
         PackedTileLayout::OutputChannelContiguousReductionTiles => {
             "OutputChannelContiguousReductionTiles"
         }
-        PackedTileLayout::InputChannelContiguousOutputTiles => {
-            "InputChannelContiguousOutputTiles"
-        }
-        PackedTileLayout::ReductionTileInterleavedOutputs => {
-            "ReductionTileInterleavedOutputs"
-        }
+        PackedTileLayout::InputChannelContiguousOutputTiles => "InputChannelContiguousOutputTiles",
+        PackedTileLayout::ReductionTileInterleavedOutputs => "ReductionTileInterleavedOutputs",
     }
 }
 

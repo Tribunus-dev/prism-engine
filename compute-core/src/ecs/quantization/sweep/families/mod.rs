@@ -12,8 +12,8 @@ pub mod ternary;
 use serde_json::Value;
 use std::fmt;
 
+use crate::ecs::quantization::sweep::candidate::{MatrixShape, PackedCandidate, QuantFamilyId};
 use crate::ecs::quantization::sweep::spec::{LayoutSweepGrid, QuantFamilySweep};
-use crate::ecs::quantization::sweep::candidate::{PackedCandidate, QuantFamilyId, MatrixShape};
 
 // ── SweepScratch ────────────────────────────────────────────────────────────────
 
@@ -93,15 +93,14 @@ pub struct FamilyCandidate {
     pub parameters: Value,
     /// Pack weights into (codes, scales, biases, extra).
     /// extra is already LE bytes (Vec<u8>), not Vec<f32>.
-    pub packer: Box<dyn Fn(&[f32], usize, usize) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) + Send + Sync>,
+    pub packer:
+        Box<dyn Fn(&[f32], usize, usize) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) + Send + Sync>,
     /// Reconstruct weights from packed representation.
-    pub unpacker:
-        Box<dyn Fn(&[u8], &[f32], &[f32], &[u8], usize, usize) -> Vec<f32> + Send + Sync>,
+    pub unpacker: Box<dyn Fn(&[u8], &[f32], &[f32], &[u8], usize, usize) -> Vec<f32> + Send + Sync>,
     /// Compute code byte count for given dimensions.
     pub code_bytes_fn: fn(usize, usize) -> u64,
     /// Compute metadata byte count for given dimensions (closure may capture group_size).
-    pub metadata_bytes_fn:
-        Box<dyn Fn(usize, usize) -> u64 + Send + Sync>,
+    pub metadata_bytes_fn: Box<dyn Fn(usize, usize) -> u64 + Send + Sync>,
 }
 impl fmt::Debug for FamilyCandidate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -109,7 +108,7 @@ impl fmt::Debug for FamilyCandidate {
             .field("label", &self.label)
             .field("parameters", &self.parameters)
             .finish_non_exhaustive()
-}
+    }
 }
 
 /// One fully-resolved parameter combination from a layout parameter sweep.
@@ -155,7 +154,9 @@ pub fn generate_all_candidates(families: &[QuantFamilySweep]) -> Vec<FamilyCandi
                 all.extend(super::families::nf4::generate_nf4_candidates(grid));
             }
             QuantFamilySweep::SymInt4(grid) => {
-                all.extend(super::families::sym_int4::generate_sym_int4_candidates(grid));
+                all.extend(super::families::sym_int4::generate_sym_int4_candidates(
+                    grid,
+                ));
             }
             QuantFamilySweep::Int8(grid) => {
                 all.extend(super::families::int8::generate_int8_candidates(grid));
@@ -198,7 +199,9 @@ fn generate_layout_candidates(grid: &LayoutSweepGrid) -> Vec<FamilyCandidate> {
                     candidates.push(FamilyCandidate {
                         label,
                         parameters,
-                        packer: Box::new(|_, _, _| (Vec::new(), Vec::new(), Vec::new(), Vec::new())),
+                        packer: Box::new(|_, _, _| {
+                            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                        }),
                         unpacker: Box::new(|_, _, _, _, _, _| Vec::new()),
                         code_bytes_fn: |_, _| 0,
                         metadata_bytes_fn: Box::new(|_, _| 0),

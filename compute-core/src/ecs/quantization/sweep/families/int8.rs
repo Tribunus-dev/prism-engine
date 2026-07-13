@@ -6,9 +6,9 @@
 
 use serde_json::json;
 
-use crate::nf4tile640::{unpack_int8_weights_with_group_size, TILE_ELEMENTS};
-use crate::ecs::quantization::sweep::spec::Int8SweepGrid;
 use crate::ecs::quantization::sweep::families::FamilyCandidate;
+use crate::ecs::quantization::sweep::spec::Int8SweepGrid;
+use crate::nf4tile640::{unpack_int8_weights_with_group_size, TILE_ELEMENTS};
 
 // ── Byte-count estimators ────────────────────────────────────────────────
 
@@ -19,7 +19,11 @@ fn int8_code_bytes(in_features: usize, out_features: usize) -> u64 {
     (in_features * tile_cols) as u64
 }
 
-fn int8_metadata_bytes_with_group_size(in_features: usize, out_features: usize, group_size: usize) -> u64 {
+fn int8_metadata_bytes_with_group_size(
+    in_features: usize,
+    out_features: usize,
+    group_size: usize,
+) -> u64 {
     let groups_per_tile = TILE_ELEMENTS / group_size;
     let tiles_per_row = out_features.div_ceil(TILE_ELEMENTS);
     let total_tiles = in_features * tiles_per_row;
@@ -68,7 +72,11 @@ pub(crate) fn pack_int8_matrix_with_group_size(
                         max_abs = v;
                     }
                 }
-                let scale = if max_abs > 1e-10 { max_abs / 127.0 } else { 1.0 };
+                let scale = if max_abs > 1e-10 {
+                    max_abs / 127.0
+                } else {
+                    1.0
+                };
                 let scale_idx = (i * num_tiles * groups_per_tile) + (t * groups_per_tile) + g;
                 scales[scale_idx] = scale;
                 biases[scale_idx] = 0.0;
@@ -122,17 +130,22 @@ pub fn generate_int8_candidates(grid: &Int8SweepGrid) -> Vec<FamilyCandidate> {
                     pack_int8_matrix_with_group_size(w, r, c, gs)
                 });
 
-                let unpacker = Box::new(move |codes: &[u8], scales: &[f32], biases: &[f32], _extra: &[u8], rows: usize, cols: usize| {
-                    unpack_int8_weights_with_group_size(codes, scales, biases, rows, cols, gs)
-                });
+                let unpacker = Box::new(
+                    move |codes: &[u8],
+                          scales: &[f32],
+                          biases: &[f32],
+                          _extra: &[u8],
+                          rows: usize,
+                          cols: usize| {
+                        unpack_int8_weights_with_group_size(codes, scales, biases, rows, cols, gs)
+                    },
+                );
 
-                let meta_fn = move |r: usize, c: usize| int8_metadata_bytes_with_group_size(r, c, gs);
+                let meta_fn =
+                    move |r: usize, c: usize| int8_metadata_bytes_with_group_size(r, c, gs);
 
                 candidates.push(FamilyCandidate {
-                    label: format!(
-                        "Int8_g{}_clip{:?}_sp{:?}",
-                        group_size, clip, scale_policy,
-                    ),
+                    label: format!("Int8_g{}_clip{:?}_sp{:?}", group_size, clip, scale_policy,),
                     parameters: params,
                     packer,
                     unpacker,
@@ -157,7 +170,9 @@ mod tests {
         let in_features = 1;
         let out_features = 640;
         let n = in_features * out_features;
-        let weights: Vec<f32> = (0..n).map(|i| (i as f32 - (n as f32 / 2.0)) * 0.01).collect();
+        let weights: Vec<f32> = (0..n)
+            .map(|i| (i as f32 - (n as f32 / 2.0)) * 0.01)
+            .collect();
 
         let (_, scales_128, _, _) =
             pack_int8_matrix_with_group_size(&weights, in_features, out_features, 128);
@@ -187,7 +202,9 @@ mod tests {
         let in_features = 2;
         let out_features = 640;
         let n = in_features * out_features;
-        let weights: Vec<f32> = (0..n).map(|i| (i as f32 - (n as f32 / 2.0)) * 0.01).collect();
+        let weights: Vec<f32> = (0..n)
+            .map(|i| (i as f32 - (n as f32 / 2.0)) * 0.01)
+            .collect();
 
         let group_size = 128;
         let (codes, scales, biases, _extra) =
@@ -228,11 +245,7 @@ mod tests {
             / weights.len() as f64;
 
         let nrmse = (mse.sqrt() as f32) / range;
-        assert!(
-            nrmse < 0.1,
-            "NRMSE {} >= 0.1 after INT8 round-trip",
-            nrmse
-        );
+        assert!(nrmse < 0.1, "NRMSE {} >= 0.1 after INT8 round-trip", nrmse);
     }
 
     #[test]

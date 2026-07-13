@@ -43,7 +43,15 @@ pub fn try_all_candidates(
     let total_elements = (in_f as usize) * (out_f as usize);
 
     for candidate in candidates {
-        let attempt = try_single_candidate(weights, in_f, out_f, candidate, primary_bytes, total_elements, ctx);
+        let attempt = try_single_candidate(
+            weights,
+            in_f,
+            out_f,
+            candidate,
+            primary_bytes,
+            total_elements,
+            ctx,
+        );
         let succeeded = matches!(
             attempt.outcome,
             SubstitutionOutcome::Substituted | SubstitutionOutcome::SubstitutedWithRescue
@@ -80,26 +88,44 @@ fn try_single_candidate(
 
     // ── Step 0: Availability checks ──────────────────────────────────
     if ctx.disallowed_codecs.contains(&candidate.name) {
-        return SubstitutionAttempt { outcome: SubstitutionOutcome::Unavailable, ..result };
+        return SubstitutionAttempt {
+            outcome: SubstitutionOutcome::Unavailable,
+            ..result
+        };
     }
     if candidate.gates.requires_hardware_validation && !ctx.hardware_available {
-        return SubstitutionAttempt { outcome: SubstitutionOutcome::Unavailable, ..result };
+        return SubstitutionAttempt {
+            outcome: SubstitutionOutcome::Unavailable,
+            ..result
+        };
     }
     if candidate.gates.requires_rollout_validation && !ctx.rollout_available {
-        return SubstitutionAttempt { outcome: SubstitutionOutcome::Unavailable, ..result };
+        return SubstitutionAttempt {
+            outcome: SubstitutionOutcome::Unavailable,
+            ..result
+        };
     }
 
     // ── Step 1: Pack ─────────────────────────────────────────────────
     let (codes, metadata, recon) = match pack_for_candidate(weights, in_f, out_f, candidate) {
         Some(p) => p,
-        None => return SubstitutionAttempt { outcome: SubstitutionOutcome::Unavailable, ..result },
+        None => {
+            return SubstitutionAttempt {
+                outcome: SubstitutionOutcome::Unavailable,
+                ..result
+            }
+        }
     };
 
     // ── Step 2: Weight-space gate ────────────────────────────────────
     let weight_evidence = evaluate_weight_gate(weights, &recon, total_elements, candidate);
     if let Some(ref ev) = weight_evidence {
         if !ev.passed {
-            return SubstitutionAttempt { weight_evidence, outcome: SubstitutionOutcome::Rejected, ..result };
+            return SubstitutionAttempt {
+                weight_evidence,
+                outcome: SubstitutionOutcome::Rejected,
+                ..result
+            };
         }
     }
 
@@ -149,7 +175,8 @@ fn pack_for_candidate(
 ) -> Option<(Vec<u8>, Vec<u8>, Vec<f32>)> {
     match candidate.name.as_str() {
         "Ternary" => {
-            let (codes, scales, biases) = pack_ternary_weights(weights, in_f as usize, out_f as usize);
+            let (codes, scales, biases) =
+                pack_ternary_weights(weights, in_f as usize, out_f as usize);
             let mut meta = Vec::with_capacity(scales.len() * 4 + biases.len() * 4);
             for &s in &scales {
                 meta.extend_from_slice(&s.to_le_bytes());
@@ -157,39 +184,75 @@ fn pack_for_candidate(
             for &b in &biases {
                 meta.extend_from_slice(&b.to_le_bytes());
             }
-            let unpacked = unpack_ternary_weights(&codes, &scales, &biases, in_f as usize, out_f as usize);
+            let unpacked =
+                unpack_ternary_weights(&codes, &scales, &biases, in_f as usize, out_f as usize);
             Some((codes, meta, unpacked))
         }
         "NF4" => {
-            let group_size = candidate.parameters.get("group_size")
-                .and_then(|v| v.as_u64()).unwrap_or(32) as usize;
+            let group_size = candidate
+                .parameters
+                .get("group_size")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(32) as usize;
             let (codes, scales, biases, _extra) =
                 crate::quantization::sweep::families::nf4::pack_nf4_matrix(
-                    weights, in_f as usize, out_f as usize, group_size);
+                    weights,
+                    in_f as usize,
+                    out_f as usize,
+                    group_size,
+                );
             let mut meta = Vec::with_capacity(scales.len() * 4 + biases.len() * 4);
-            for &s in &scales { meta.extend_from_slice(&s.to_le_bytes()); }
-            for &b in &biases { meta.extend_from_slice(&b.to_le_bytes()); }
+            for &s in &scales {
+                meta.extend_from_slice(&s.to_le_bytes());
+            }
+            for &b in &biases {
+                meta.extend_from_slice(&b.to_le_bytes());
+            }
             let unpacked = crate::nf4tile640::unpack_nf4_weights_with_group_size(
-                &codes, &scales, &biases, in_f as usize, out_f as usize, group_size);
+                &codes,
+                &scales,
+                &biases,
+                in_f as usize,
+                out_f as usize,
+                group_size,
+            );
             Some((codes, meta, unpacked))
         }
         "INT8" => {
-            let group_size = candidate.parameters.get("group_size")
-                .and_then(|v| v.as_u64()).unwrap_or(128) as usize;
+            let group_size = candidate
+                .parameters
+                .get("group_size")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(128) as usize;
             let (codes, scales, biases, _extra) =
                 crate::quantization::sweep::families::int8::pack_int8_matrix_with_group_size(
-                    weights, in_f as usize, out_f as usize, group_size);
+                    weights,
+                    in_f as usize,
+                    out_f as usize,
+                    group_size,
+                );
             let mut meta = Vec::with_capacity(scales.len() * 4);
-            for &s in &scales { meta.extend_from_slice(&s.to_le_bytes()); }
+            for &s in &scales {
+                meta.extend_from_slice(&s.to_le_bytes());
+            }
             let unpacked = crate::nf4tile640::unpack_int8_weights_with_group_size(
-                &codes, &scales, &biases, in_f as usize, out_f as usize, group_size);
+                &codes,
+                &scales,
+                &biases,
+                in_f as usize,
+                out_f as usize,
+                group_size,
+            );
             Some((codes, meta, unpacked))
         }
         "FP16" => {
-            let codes: Vec<u8> = weights.iter().flat_map(|&w| {
-                let bits = f32_to_f16_bits(w);
-                bits.to_le_bytes().into_iter()
-            }).collect();
+            let codes: Vec<u8> = weights
+                .iter()
+                .flat_map(|&w| {
+                    let bits = f32_to_f16_bits(w);
+                    bits.to_le_bytes().into_iter()
+                })
+                .collect();
             let meta = Vec::new();
             // Real f32 → f16 → f32 roundtrip for evidence
             let f16data: Vec<u16> = weights.iter().map(|&w| f32_to_f16_bits(w)).collect();
@@ -221,18 +284,26 @@ fn evaluate_weight_gate(
         let d = (float_weights[i] - recon[i]) as f64;
         sq_err += d * d;
         let ad = d.abs();
-        if ad > max_abs { max_abs = ad; }
+        if ad > max_abs {
+            max_abs = ad;
+        }
         // Only count as collapse if source was NOT zero but recon IS zero
-        if float_weights[i] != 0.0 && recon[i] == 0.0 { zero_count += 1; }
+        if float_weights[i] != 0.0 && recon[i] == 0.0 {
+            zero_count += 1;
+        }
     }
 
     let nrmse = if total_elements > 0 {
         (sq_err / total_elements as f64).sqrt()
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     let zero_collapse = if total_elements > 0 {
         zero_count as f64 / total_elements as f64
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     let mut metrics = HashMap::new();
     metrics.insert("nrmse".into(), nrmse);
@@ -241,7 +312,9 @@ fn evaluate_weight_gate(
 
     let passed = true
         && gates.weight_nrmse_max.map_or(true, |g| nrmse <= g)
-        && gates.weight_zero_collapse_max.map_or(true, |g| zero_collapse <= g);
+        && gates
+            .weight_zero_collapse_max
+            .map_or(true, |g| zero_collapse <= g);
 
     Some(SubstitutionEvidence {
         tier: EvidenceTier::WeightSpace,
@@ -262,7 +335,10 @@ fn evaluate_operator_gate(
     candidate: &SubstitutionCandidate,
 ) -> Option<SubstitutionEvidence> {
     let gates = &candidate.gates;
-    if gates.operator_nrmse_max.is_none() && gates.operator_cosine_min.is_none() && gates.operator_max_abs_max.is_none() {
+    if gates.operator_nrmse_max.is_none()
+        && gates.operator_cosine_min.is_none()
+        && gates.operator_max_abs_max.is_none()
+    {
         return None;
     }
 
@@ -276,14 +352,18 @@ fn evaluate_operator_gate(
     let ref_out: Vec<f64> = (0..out_f_usize)
         .map(|j| {
             let base = j * in_f_usize;
-            (0..in_f_usize).map(|i| activation[i] as f64 * float_weights[base + i] as f64).sum()
+            (0..in_f_usize)
+                .map(|i| activation[i] as f64 * float_weights[base + i] as f64)
+                .sum()
         })
         .collect();
 
     let q_out: Vec<f64> = (0..out_f_usize)
         .map(|j| {
             let base = j * in_f_usize;
-            (0..in_f_usize).map(|i| activation[i] as f64 * recon[base + i] as f64).sum()
+            (0..in_f_usize)
+                .map(|i| activation[i] as f64 * recon[base + i] as f64)
+                .sum()
         })
         .collect();
 
@@ -297,18 +377,30 @@ fn evaluate_operator_gate(
         let d = q_out[j] - ref_out[j];
         sq_err += d * d;
         let ad = d.abs();
-        if ad > max_abs { max_abs = ad; }
+        if ad > max_abs {
+            max_abs = ad;
+        }
         dot += q_out[j] * ref_out[j];
         q_norm_sq += q_out[j] * q_out[j];
     }
 
     let rmse = (sq_err / out_f_usize as f64).sqrt();
-    let nrmse = if ref_norm > 1e-30 { sq_err.sqrt() / ref_norm } else { 0.0 };
+    let nrmse = if ref_norm > 1e-30 {
+        sq_err.sqrt() / ref_norm
+    } else {
+        0.0
+    };
     let q_norm = q_norm_sq.sqrt();
     let cosine = if q_norm > 1e-30 && ref_norm > 1e-30 {
         dot / (q_norm * ref_norm)
-    } else { 1.0 };
-    let drift = if ref_norm > 1e-30 { q_norm / ref_norm } else { 1.0 };
+    } else {
+        1.0
+    };
+    let drift = if ref_norm > 1e-30 {
+        q_norm / ref_norm
+    } else {
+        1.0
+    };
 
     let mut metrics = HashMap::new();
     metrics.insert("rmse".into(), rmse);
@@ -338,11 +430,19 @@ fn f32_to_f16_bits(x: f32) -> u16 {
     let sign = ((bits >> 31) & 1) as u16;
     let exp = ((bits >> 23) & 0xFF) as i32;
     let mant = bits & 0x7FFFFF;
-    if exp == 0 { return sign << 15; }
-    if exp == 255 { return (sign << 15) | 0x7C00; }
+    if exp == 0 {
+        return sign << 15;
+    }
+    if exp == 255 {
+        return (sign << 15) | 0x7C00;
+    }
     let new_exp = exp - 127 + 15;
-    if new_exp <= 0 { return sign << 15; }
-    if new_exp >= 31 { return (sign << 15) | 0x7C00; }
+    if new_exp <= 0 {
+        return sign << 15;
+    }
+    if new_exp >= 31 {
+        return (sign << 15) | 0x7C00;
+    }
     (sign << 15) | ((new_exp as u16) << 10) | ((mant >> 13) as u16)
 }
 
@@ -375,7 +475,8 @@ mod tests {
     fn test_fp16_substitution_passes() {
         let w = make_test_weights(64, 64);
         let cand = SubstitutionCandidate::fp16();
-        let results = try_all_candidates(&w, 64, 64, &[cand], 100000, &SubstitutionContext::default());
+        let results =
+            try_all_candidates(&w, 64, 64, &[cand], 100000, &SubstitutionContext::default());
         assert_eq!(results[0].outcome, SubstitutionOutcome::Substituted);
     }
 
@@ -388,8 +489,16 @@ mod tests {
         let ev = evaluate_weight_gate(&w, &recon, (64 * 64) as usize, &cand).unwrap();
         assert!(ev.evaluated);
         let nrmse = ev.metrics.get("nrmse").unwrap_or(&0.0);
-        assert!(*nrmse > 0.0, "FP16 roundtrip must have non-zero NRMSE: got {:.10}", nrmse);
-        assert!(*nrmse < 0.001, "FP16 roundtrip NRMSE must be small: got {:.10}", nrmse);
+        assert!(
+            *nrmse > 0.0,
+            "FP16 roundtrip must have non-zero NRMSE: got {:.10}",
+            nrmse
+        );
+        assert!(
+            *nrmse < 0.001,
+            "FP16 roundtrip NRMSE must be small: got {:.10}",
+            nrmse
+        );
     }
 
     #[test]
@@ -399,9 +508,11 @@ mod tests {
         let (_, _, recon) = pack_for_candidate(&w, 64, 64, &cand).unwrap();
         let ev = evaluate_weight_gate(&w, &recon, (64 * 64) as usize, &cand).unwrap();
         assert!(ev.evaluated);
-        println!("ternary: nrmse={:.6} zero_collapse={:.4}",
+        println!(
+            "ternary: nrmse={:.6} zero_collapse={:.4}",
             ev.metrics.get("nrmse").unwrap_or(&0.0),
-            ev.metrics.get("zero_collapse_ratio").unwrap_or(&0.0));
+            ev.metrics.get("zero_collapse_ratio").unwrap_or(&0.0)
+        );
     }
 
     #[test]
@@ -435,7 +546,11 @@ mod tests {
         assert_eq!(results[2].outcome, SubstitutionOutcome::Unavailable);
         // The last result is either INT8 (substituted or rejected) or FP16 (substituted)
         let last_idx = results.len() - 1;
-        assert_eq!(results[last_idx].outcome, SubstitutionOutcome::Substituted, "last candidate must succeed");
+        assert_eq!(
+            results[last_idx].outcome,
+            SubstitutionOutcome::Substituted,
+            "last candidate must succeed"
+        );
     }
 
     #[test]
@@ -449,7 +564,10 @@ mod tests {
             SubstitutionCandidate::fp16(),
         ];
         let results = try_all_candidates(&w, 64, 64, &candidates, 100000, &ctx);
-        assert!(results.is_empty(), "rawf32_required must return empty results");
+        assert!(
+            results.is_empty(),
+            "rawf32_required must return empty results"
+        );
     }
 
     #[test]
@@ -457,7 +575,8 @@ mod tests {
         // Ternary requires_hardware_validation=true but default ctx has hardware_available=false
         let w = make_test_weights(64, 64);
         let cand = SubstitutionCandidate::ternary();
-        let results = try_all_candidates(&w, 64, 64, &[cand], 100000, &SubstitutionContext::default());
+        let results =
+            try_all_candidates(&w, 64, 64, &[cand], 100000, &SubstitutionContext::default());
         assert_eq!(results[0].outcome, SubstitutionOutcome::Unavailable);
     }
 
@@ -466,7 +585,8 @@ mod tests {
         // SymInt4 has no pack implementation, should be Unavailable
         let w = make_test_weights(64, 64);
         let cand = SubstitutionCandidate::sym_int4_g32();
-        let results = try_all_candidates(&w, 64, 64, &[cand], 100000, &SubstitutionContext::default());
+        let results =
+            try_all_candidates(&w, 64, 64, &[cand], 100000, &SubstitutionContext::default());
         assert_eq!(results[0].outcome, SubstitutionOutcome::Unavailable);
     }
 }
