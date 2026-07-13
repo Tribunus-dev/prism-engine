@@ -86,6 +86,20 @@ Remaining work is a real scale/threshold optimizer, native packing, residual
 policy enforcement, executable reconstruction, and replay validation through
 the shared evaluator.
 
+## MLIR first-class ECS capability
+
+Prism now has an additive target-independent MLIR execution contract in
+`ecs/mlir.rs`. It models dialect requirements, quantization attributes,
+transform schedules, lowering targets, deterministic module text, and the
+existing NF4 tile640 workload without coupling the ECS crate to MLIR's C++
+runtime.
+
+Remaining work is a real lowering adapter, beginning with MLIR-shaped NF4
+tile640 output that is compiled and measured through the existing Metal
+evaluator. Vendor-specific lowering, HetGPU packaging, and replacing the
+handwritten Metal path should follow only after that adapter passes the same
+CPU-oracle, numerical, timing, and promotion gates.
+
 ## Generations and promotion
 
 Content-addressed payload storage, promotion transactions, current-generation

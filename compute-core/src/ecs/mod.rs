@@ -80,6 +80,7 @@ pub mod engine_receipts;
 pub mod errors;
 pub mod evidence;
 pub mod evolution;
+pub mod mlir;
 pub mod execution_profile;
 pub mod executor;
 pub mod executor_projection;
