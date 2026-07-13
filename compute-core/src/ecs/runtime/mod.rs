@@ -4,6 +4,7 @@
 pub mod ledger;
 pub mod memory;
 pub mod scheduling;
+pub mod engram;
 
 pub mod agent_slot;
 pub mod ane_multiplexer;

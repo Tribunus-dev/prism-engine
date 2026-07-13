@@ -6,5 +6,8 @@
 //! pipeline applies at the configured insertion point.
 
 pub mod config;
+pub mod dataset;
+pub mod holdout;
+pub mod objective;
 pub mod receipt;
 pub mod trainer;

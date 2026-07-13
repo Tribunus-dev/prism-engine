@@ -5,15 +5,18 @@
 //! weight-space and operator-space behavior before the artifact is sealed.
 //!
 //! ## Module structure
-///!
-///! - `contract` — representation formats, reconstruction contracts, validation
-///!   profiles, and admission pipeline types.
-///! - `validation` — weight-space (RMSE, NRMSE, zero-collapse) and two-layer
-///!   operator-space validation (stress bank + optional activation bank).
-///! - `admission` — candidate generation, packing, reconstruction, and the
-///!   `quantize_tensor` pipeline with dual-layer validation and evidence tracking.
-///! - `calibration` — `StressSuite` (deterministic, always built) and
-///!   `CalibrationSuite` (prerendered, optional for production qualification).
+//!
+//! - `contract` — representation formats, reconstruction contracts, validation
+//!   profiles, and admission pipeline types.
+//! - `validation` — weight-space (RMSE, NRMSE, zero-collapse) and two-layer
+//!   operator-space validation (stress bank + optional activation bank).
+//! - `admission` — candidate generation, packing, reconstruction, and the
+//!   `quantize_tensor` pipeline with dual-layer validation and evidence tracking.
+//! - `calibration` — `StressSuite` (deterministic, always built) and
+//!   `CalibrationSuite` (prerendered, optional for production qualification).
+//! - `ternarization` — ternarization engine: candidate types, scale
+//!   optimization, residual codecs, candidate gates, and packaging.
+
 pub mod admission;
 pub mod calibration;
 pub mod contract;
@@ -21,6 +24,9 @@ pub mod contract;
 /// evidence gates and uses the most aggressive one that passes.
 pub mod substitution;
 pub mod sweep;
+/// Ternarization engine — candidate types, scale optimization, residual
+/// codecs, gates, and physical packaging for ternary representation.
+pub mod ternarization;
 /// Ternary base-weight assimilation — opt-in mutations behind a research-only gate.
 pub mod ternary_assimilation;
 /// Ternary substitution pass — replaces primary codecs with ternary on eligible
