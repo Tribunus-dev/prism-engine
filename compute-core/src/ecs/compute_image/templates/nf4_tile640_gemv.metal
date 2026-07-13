@@ -57,7 +57,7 @@ kernel void fused_gemv_nf4_tile640_fp32(
                 if (col >= in_dim) {
                     continue; // zero-padded tail of a partial last tile
                 }
-                float weight = fma(unpack_nf4(packed_weights, col), scale, bias);
+                float weight = fma(unpack_nf4(packed_weights + row_weight_base, col), scale, bias);
                 row_accumulator += weight * in_vector[col];
             }
         }

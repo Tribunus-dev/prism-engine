@@ -190,7 +190,8 @@ mod tests {
     use super::*;
     use crate::ecs::canonical::execution_graph::{ExecutionLane, RegionId};
     use crate::ecs::canonical::kernel_abi::{
-        DispatchGeometryPolicy, KernelImplementationClass, SpecializationParameters,
+        DispatchGeometryPolicy, KernelImplementationClass, MetalImplementationRegistration,
+        SpecializationParameters,
     };
 
     /// Verifies that lowering a KernelGroup whose semantic ID has a registered
@@ -307,10 +308,30 @@ mod tests {
     /// and returns empty source (for generated/dynamic kernels).
     #[test]
     fn test_lower_generated_kernel_has_empty_source() {
-        let compiler = MetalBackendCompiler::default();
-        // "prism.linear.rawf32.v1" uses source_path: None in register_primitives
+        // Register a test-only dynamic kernel with source_path: None.
+        let mut catalogue = MetalImplementationCatalogue::new();
+        catalogue.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("test.dynamic.kernel.v0".into()),
+            implementation_id: KernelImplementationId("test.dynamic.v0".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: None,
+            source_entry_point: None,
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+        let compiler = MetalBackendCompiler {
+            catalogue,
+            toolchain: MetalToolchain::default(),
+        };
         let group = KernelGroup {
-            semantic_id: KernelSemanticId("prism.linear.rawf32.v1".into()),
+            semantic_id: KernelSemanticId("test.dynamic.kernel.v0".into()),
             implementation_class: KernelImplementationClass::Primitive,
             operations: vec![],
             specialization: SpecializationParameters {

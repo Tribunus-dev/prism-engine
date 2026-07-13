@@ -12,10 +12,41 @@ extern "C" {
     fn vDSP_sve(a: *const f32, a_stride: i32, result: *mut f32, n: i32);
     fn vDSP_vsq(a: *const f32, a_stride: i32, b: *mut f32, b_stride: i32, n: i32);
     fn vDSP_vsdiv(a: *const f32, a_stride: i32, b: *const f32, c: *mut f32, c_stride: i32, n: i32);
-    fn vDSP_vsmsa(a: *const f32, a_stride: i32, b: *const f32, c: *const f32, d: *mut f32, d_stride: i32, n: i32);
-    fn vDSP_vsub(a: *const f32, a_stride: i32, b: *const f32, b_stride: i32, c: *mut f32, c_stride: i32, n: i32);
-    fn vDSP_vmul(a: *const f32, a_stride: i32, b: *const f32, b_stride: i32, c: *mut f32, c_stride: i32, n: i32);
-    fn vDSP_distancesq(a: *const f32, a_stride: i32, b: *const f32, b_stride: i32, result: *mut f32, n: i32);
+    fn vDSP_vsmsa(
+        a: *const f32,
+        a_stride: i32,
+        b: *const f32,
+        c: *const f32,
+        d: *mut f32,
+        d_stride: i32,
+        n: i32,
+    );
+    fn vDSP_vsub(
+        a: *const f32,
+        a_stride: i32,
+        b: *const f32,
+        b_stride: i32,
+        c: *mut f32,
+        c_stride: i32,
+        n: i32,
+    );
+    fn vDSP_vmul(
+        a: *const f32,
+        a_stride: i32,
+        b: *const f32,
+        b_stride: i32,
+        c: *mut f32,
+        c_stride: i32,
+        n: i32,
+    );
+    fn vDSP_distancesq(
+        a: *const f32,
+        a_stride: i32,
+        b: *const f32,
+        b_stride: i32,
+        result: *mut f32,
+        n: i32,
+    );
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -40,9 +71,13 @@ pub fn max_abs_slice(data: &[f32]) -> f32 {
 #[cfg(target_os = "macos")]
 pub fn max_slice(data: &[f32]) -> f32 {
     let n = data.len() as i32;
-    if n <= 0 { return 0.0; }
+    if n <= 0 {
+        return 0.0;
+    }
     let mut result = 0.0f32;
-    unsafe { vDSP_maxv(data.as_ptr(), 1, &mut result, n); }
+    unsafe {
+        vDSP_maxv(data.as_ptr(), 1, &mut result, n);
+    }
     result
 }
 
@@ -50,9 +85,13 @@ pub fn max_slice(data: &[f32]) -> f32 {
 #[cfg(target_os = "macos")]
 pub fn sum_slice(data: &[f32]) -> f32 {
     let n = data.len() as i32;
-    if n <= 0 { return 0.0; }
+    if n <= 0 {
+        return 0.0;
+    }
     let mut result = 0.0f32;
-    unsafe { vDSP_sve(data.as_ptr(), 1, &mut result, n); }
+    unsafe {
+        vDSP_sve(data.as_ptr(), 1, &mut result, n);
+    }
     result
 }
 
@@ -60,8 +99,12 @@ pub fn sum_slice(data: &[f32]) -> f32 {
 #[cfg(target_os = "macos")]
 pub fn vsq(data: &[f32], result: &mut [f32]) {
     let n = data.len() as i32;
-    if n <= 0 { return; }
-    unsafe { vDSP_vsq(data.as_ptr(), 1, result.as_mut_ptr(), 1, n); }
+    if n <= 0 {
+        return;
+    }
+    unsafe {
+        vDSP_vsq(data.as_ptr(), 1, result.as_mut_ptr(), 1, n);
+    }
 }
 
 /// Element-wise multiply-add: `result[i] = a[i] * scale + bias`.
@@ -69,7 +112,9 @@ pub fn vsq(data: &[f32], result: &mut [f32]) {
 #[cfg(target_os = "macos")]
 pub fn vsmsa(a: &[f32], scale: f32, bias: f32, result: &mut [f32]) {
     let n = a.len() as i32;
-    if n <= 0 { return; }
+    if n <= 0 {
+        return;
+    }
     unsafe {
         vDSP_vsmsa(a.as_ptr(), 1, &scale, &bias, result.as_mut_ptr(), 1, n);
     }
@@ -79,16 +124,24 @@ pub fn vsmsa(a: &[f32], scale: f32, bias: f32, result: &mut [f32]) {
 #[cfg(target_os = "macos")]
 pub fn vsub(a: &[f32], b: &[f32], result: &mut [f32]) {
     let n = a.len() as i32;
-    if n <= 0 { return; }
-    unsafe { vDSP_vsub(a.as_ptr(), 1, b.as_ptr(), 1, result.as_mut_ptr(), 1, n); }
+    if n <= 0 {
+        return;
+    }
+    unsafe {
+        vDSP_vsub(a.as_ptr(), 1, b.as_ptr(), 1, result.as_mut_ptr(), 1, n);
+    }
 }
 
 /// Element-wise multiplication: `result[i] = a[i] * b[i]`.
 #[cfg(target_os = "macos")]
 pub fn vmul(a: &[f32], b: &[f32], result: &mut [f32]) {
     let n = a.len() as i32;
-    if n <= 0 { return; }
-    unsafe { vDSP_vmul(a.as_ptr(), 1, b.as_ptr(), 1, result.as_mut_ptr(), 1, n); }
+    if n <= 0 {
+        return;
+    }
+    unsafe {
+        vDSP_vmul(a.as_ptr(), 1, b.as_ptr(), 1, result.as_mut_ptr(), 1, n);
+    }
 }
 
 /// Squared Euclidean distance between two vectors.
@@ -96,9 +149,13 @@ pub fn vmul(a: &[f32], b: &[f32], result: &mut [f32]) {
 #[cfg(target_os = "macos")]
 pub fn distance_sq(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len()) as i32;
-    if n <= 0 { return 0.0; }
+    if n <= 0 {
+        return 0.0;
+    }
     let mut result = 0.0f32;
-    unsafe { vDSP_distancesq(a.as_ptr(), 1, b.as_ptr(), 1, &mut result, n); }
+    unsafe {
+        vDSP_distancesq(a.as_ptr(), 1, b.as_ptr(), 1, &mut result, n);
+    }
     result
 }
 
@@ -106,7 +163,9 @@ pub fn distance_sq(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(target_os = "macos")]
 pub fn rmse(a: &[f32], b: &[f32]) -> f64 {
     let n = a.len().min(b.len());
-    if n == 0 { return 0.0; }
+    if n == 0 {
+        return 0.0;
+    }
     let sq = distance_sq(a, b) as f64;
     (sq / n as f64).sqrt()
 }
@@ -115,12 +174,18 @@ pub fn rmse(a: &[f32], b: &[f32]) -> f64 {
 #[cfg(target_os = "macos")]
 pub fn max_abs_error(a: &[f32], b: &[f32]) -> f64 {
     let n = a.len().min(b.len());
-    if n == 0 { return 0.0; }
+    if n == 0 {
+        return 0.0;
+    }
     // Allocate diff buffer and compute element-wise difference
     let mut diff = vec![0.0f32; n];
-    unsafe { vDSP_vsub(a.as_ptr(), 1, b.as_ptr(), 1, diff.as_mut_ptr(), 1, n as i32); }
+    unsafe {
+        vDSP_vsub(a.as_ptr(), 1, b.as_ptr(), 1, diff.as_mut_ptr(), 1, n as i32);
+    }
     let mut result = 0.0f32;
-    unsafe { vDSP_maxmgv(diff.as_ptr(), 1, &mut result, n as i32); }
+    unsafe {
+        vDSP_maxmgv(diff.as_ptr(), 1, &mut result, n as i32);
+    }
     result as f64
 }
 
@@ -189,23 +254,33 @@ pub fn vmul(a: &[f32], b: &[f32], result: &mut [f32]) {
 
 #[cfg(not(target_os = "macos"))]
 pub fn distance_sq(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(av, bv)| (av - bv).powi(2)).sum()
+    a.iter()
+        .zip(b.iter())
+        .map(|(av, bv)| (av - bv).powi(2))
+        .sum()
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn rmse(a: &[f32], b: &[f32]) -> f64 {
     let n = a.len().min(b.len());
-    if n == 0 { return 0.0; }
-    let sq: f64 = a.iter().zip(b.iter()).map(|(av, bv)| {
-        let d = *av as f64 - *bv as f64;
-        d * d
-    }).sum();
+    if n == 0 {
+        return 0.0;
+    }
+    let sq: f64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(av, bv)| {
+            let d = *av as f64 - *bv as f64;
+            d * d
+        })
+        .sum();
     (sq / n as f64).sqrt()
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn max_abs_error(a: &[f32], b: &[f32]) -> f64 {
-    a.iter().zip(b.iter())
+    a.iter()
+        .zip(b.iter())
         .map(|(av, bv)| (*av as f64 - *bv as f64).abs())
         .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap_or(0.0)

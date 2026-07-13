@@ -53,7 +53,11 @@ pub fn optimize_scale_bias(
 
     // Initial s: max-abs / actual codebook max, not a hardcoded constant.
     let max_abs = weights.iter().map(|w| w.abs()).fold(0.0f32, f32::max);
-    let mut s = if max_abs > 0.0 && max_codebook > 0.0 { max_abs / max_codebook } else { 1.0f32 };
+    let mut s = if max_abs > 0.0 && max_codebook > 0.0 {
+        max_abs / max_codebook
+    } else {
+        1.0f32
+    };
     let mut b = 0.0f32; // Start symmetric for NF4
 
     let sum_a: f32 = activation_weights.iter().sum();
@@ -71,7 +75,8 @@ pub fn optimize_scale_bias(
     let mut best_s = s;
     let mut best_b = b;
     let mut best_codes = *code_indices;
-    let mut best_mse = compute_weighted_mse(weights, &best_codes, best_s, best_b, activation_weights);
+    let mut best_mse =
+        compute_weighted_mse(weights, &best_codes, best_s, best_b, activation_weights);
     let mut prev_mse = best_mse;
 
     for _ in 0..max_iters {
@@ -107,14 +112,24 @@ pub fn optimize_scale_bias(
         }
 
         // Step 4: Re-solve (s, b) with the new code assignments (full joint step)
-        let (num_s2, den_s2) = weights.iter().zip(new_codes.iter()).zip(activation_weights.iter())
+        let (num_s2, den_s2) = weights
+            .iter()
+            .zip(new_codes.iter())
+            .zip(activation_weights.iter())
             .fold((0.0f32, 0.0f32), |(num, den), ((w, &ci), &a)| {
                 let c = codebook[ci as usize];
                 (num + a * c * w, den + a * c * c)
             });
-        if den_s2 > 1e-10 { s = num_s2 / den_s2; }
-        let num_b2 = weights.iter().zip(new_codes.iter()).zip(activation_weights.iter())
-            .fold(0.0f32, |acc, ((w, &ci), &a)| acc + a * (w - s * codebook[ci as usize]));
+        if den_s2 > 1e-10 {
+            s = num_s2 / den_s2;
+        }
+        let num_b2 = weights
+            .iter()
+            .zip(new_codes.iter())
+            .zip(activation_weights.iter())
+            .fold(0.0f32, |acc, ((w, &ci), &a)| {
+                acc + a * (w - s * codebook[ci as usize])
+            });
         b = num_b2 / sum_a;
 
         // Step 5: Check if codes stabilized

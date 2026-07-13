@@ -24,6 +24,20 @@ struct ProfileDescriptor {
     uint  pad;                // align to 16 bytes
 };
 
+// Versioned host/shader dispatch contract. Keep every field 32-bit and the
+// total size a multiple of 16 bytes so Rust and Metal agree without relying on
+// independently allocated inline scalar bindings.
+struct Nf4Tile640DispatchParams {
+    uint abi_version;
+    uint m;
+    uint k;
+    uint n;
+    uint group_size;
+    uint reserved_0;
+    uint reserved_1;
+    uint reserved_2;
+};
+
 // Fused dequantize + matrix multiply for nf4tile640 packed weights.
 //
 // Each thread computes one element of output[row, col] = Σ_k input[row,k] * W_deq[k,col].
@@ -39,23 +53,25 @@ struct ProfileDescriptor {
 //   [2] bias_buffer  — f32 biases, shape [K, ceil(N/640), 5]
 //   [3] input        — activation matrix, row-major f32, shape [M, K]
 //   [4] output       — result matrix, row-major f32, shape [M, N]
-//   [5] M            — number of activation rows (constant uint)
-//   [6] K_dim        — inner dimension (constant uint)
-//   [7] N            — output columns (constant uint)
-//   [8] group_size   — quantization group size (constant ushort, always 128)
+//   [5] params       — versioned Nf4Tile640DispatchParams
+//   [9] profile      — optional adaptive-codebook ProfileDescriptor
 kernel void dequant_mul_nf4tile640(
     device const uchar*  packed_codes   [[buffer(0)]],
     device const float*  scale_buffer   [[buffer(1)]],
     device const float*  bias_buffer    [[buffer(2)]],
     device const float*  input          [[buffer(3)]],
     device float*        output         [[buffer(4)]],
-    constant uint&       M              [[buffer(5)]],
-    constant uint&       K_dim          [[buffer(6)]],
-    constant uint&       N              [[buffer(7)]],
-    constant ushort&     group_size     [[buffer(8)]],
+    constant Nf4Tile640DispatchParams& params [[buffer(5)]],
     constant const void*   profile_buffer   [[buffer(9)]],
     uint2                pos            [[thread_position_in_grid]]
 ) {
+    if (params.abi_version != 1 || params.group_size != 128) { return; }
+
+    const uint M = params.m;
+    const uint K_dim = params.k;
+    const uint N = params.n;
+    const uint group_size = params.group_size;
+
     uint m_idx = pos.y;
     uint n_idx = pos.x;
     if (m_idx >= M || n_idx >= N) { return; }

@@ -2,7 +2,10 @@
 //
 // Linear layer — FP32 weights (no quantization).
 // Each thread computes one output element:
-//   output[j] = Σ_i input[i] × weight[j * in_dim + i]
+//   output[j] = Σ_i input[i] × weight[i * out_dim + j]
+//
+// Physical storage: W_transposed[in_dim, out_dim] row-major.
+// SIMD-coalesced access: adjacent lanes read adjacent addresses.
 //
 // Buffer layout:
 //   [0] input    [in_dim] f32
@@ -41,9 +44,11 @@ kernel void cimage_linear_rawf32(
     if (tid >= out_dim) return;
 
     float acc = 0.0f;
-    uint row_offset = tid * in_dim;
+    // Physical storage: [in_dim, out_dim] row-major.
+    // weights[i * out_dim + tid] gives W_transposed[i][tid] = W[tid][i].
+    // Adjacent lanes (tid, tid+1) access adjacent addresses — coalesced.
     for (uint i = 0; i < in_dim; ++i) {
-        acc = fma(weights[row_offset + i], input[i], acc);
+        acc = fma(weights[i * out_dim + tid], input[i], acc);
     }
     output[tid] = acc;
 }

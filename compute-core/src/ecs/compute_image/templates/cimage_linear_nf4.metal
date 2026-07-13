@@ -1,26 +1,31 @@
-// NF4 decode provided by canonical fragment: fragments/nf4_decode.metal
-//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
-// Linear layer — NF4 quantized weights (packed 4-bit codes, 2 per byte).
-// Each thread computes one output element by dequantizing codes on the fly:
-//   output[j] = Σ_i input[i] × deq(code[j][i], tile, group)
-//   where deq reads a 4-bit code, looks up nf4_codebook[code],
-//   then applies per-group scale/bias.
+// Linear layer — NF4 quantized weights with per-group scale/bias.
+// Each thread computes one output element:
+//   output[j] = Σ_i input[i] × dequant_nf4(codes, i * TILE + j, scales, biases, group_size)
 //
-// Packing: codes[byte_idx] = high_nibble<<4 | low_nibble.
-//   i%2==0 → low nibble, i%2==1 → high nibble
+// Physical storage: Tile640 packed NF4. Each input row occupies one tile
+// (640 outputs), padded with zeros if out_dim < 640. Each tile has 5 groups
+// of 128 elements, each with its own scale and bias.
+// SIMD-coalesced: adjacent lanes read adjacent nibble positions within the
+// same tile — all 5 groups' data is contiguous and sequentially accessed.
 //
 // Buffer layout:
-//   [0] input    [in_dim] f32
-//   [1] codes    [in_dim × padded_out_dim / 2] uint8 (packed 4-bit)
-//   [2] scales   [num_tiles × groups_per_tile] f32
-//   [3] biases   [num_tiles × groups_per_tile] f32
-//   [4] output   [out_dim] f32
-//   [5] constants (MlpConstants)
+//   [0] input      [in_dim] f32
+//   [1] codes      [in_dim × 320] packed uchar (2 nibbles per byte)
+//   [2] scales     [in_dim × 5] f32
+//   [3] biases     [in_dim × 5] f32
+//   [4] output     [out_dim] f32
+//   [5] constants  (MlpConstants)
+//
+// NF4 decode fragment is prepended at build time.
 
 #include <metal_stdlib>
 using namespace metal;
+
+#define NF4_TILE_ELEMENTS 640
+#define NF4_SCALES_PER_TILE 5
+#define NF4_GROUP_SIZE 128
 
 #ifndef MLP_CONSTANTS_DEFINED
 #define MLP_CONSTANTS_DEFINED
@@ -34,7 +39,7 @@ struct MlpConstants {
 };
 #endif
 
-kernel void cimage_linear_nf4(
+kernel void cimage_linear_nf4_f32(
     device const float*     input   [[buffer(0)]],
     device const uchar*     codes   [[buffer(1)]],
     device const float*     scales  [[buffer(2)]],
@@ -43,23 +48,21 @@ kernel void cimage_linear_nf4(
     constant MlpConstants&  c       [[buffer(5)]],
     uint tid                         [[thread_position_in_grid]]
 ) {
-    uint in_dim     = c.hidden_dim;
-    uint out_dim    = c.intermediate_dim;
-    uint group_size = c.group_size;
+    uint in_dim = c.hidden_dim;
+    uint out_dim = c.intermediate_dim;
     if (tid >= out_dim) return;
 
-    uint groups_per_tile = 640 / group_size;
-    uint tile            = tid / 640;
-
     float acc = 0.0f;
-    uint code_row_offset = tid * (in_dim / 2);
+    uint out_group = tid / NF4_GROUP_SIZE;
 
+    // Physical storage: tile-packed NF4 along output dimension.
+    // Each input row occupies one tile (640 outputs).
+    // codes[i * 320 + tid/2] gives the byte for element (i, tid).
+    // scales[i * 5 + out_group] gives the scale.
     for (uint i = 0; i < in_dim; ++i) {
-        uint group = i / group_size;
-        float s = scales[tile * groups_per_tile + group];
-        float b = biases[tile * groups_per_tile + group];
-        float w = fma(unpack_nf4(codes, i), s, b);
-
+        float s = scales[i * NF4_SCALES_PER_TILE + out_group];
+        float b = biases[i * NF4_SCALES_PER_TILE + out_group];
+        float w = fma(unpack_nf4(codes, i * NF4_TILE_ELEMENTS + tid), s, b);
         acc = fma(w, input[i], acc);
     }
     output[tid] = acc;

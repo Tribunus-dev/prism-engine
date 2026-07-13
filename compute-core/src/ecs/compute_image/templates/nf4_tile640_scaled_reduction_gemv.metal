@@ -60,8 +60,6 @@ kernel void fused_gemv_nf4_scaled_reduction_tile640_fp32(
 
     for (uint tile_idx = 0; tile_idx < num_macro_tiles; ++tile_idx) {
         uint meta_base = row_meta_base + tile_idx * GROUPS_PER_TILE;
-        uint weight_base = row_weight_base + tile_idx * BYTES_PER_TILE;
-
         for (uint group = 0; group < GROUPS_PER_TILE; ++group) {
             float scale = tile_scales[meta_base + group];
             float bias = tile_biases[meta_base + group];
@@ -73,7 +71,8 @@ kernel void fused_gemv_nf4_scaled_reduction_tile640_fp32(
                 if (col >= in_dim) {
                     continue; // zero-padded tail of a partial last tile
                 }
-                float weight = fma(unpack_nf4(packed_weights, col), scale, bias);
+                // row_weight_base offsets packed_weights to this row's data.
+                float weight = fma(unpack_nf4(packed_weights + row_weight_base, col), scale, bias);
                 // Load the FP16 reduction scale inline — no materialised buffer.
                 float scaled_activation = in_vector[col] * float(reduction_scales[col]);
                 row_accumulator += weight * scaled_activation;

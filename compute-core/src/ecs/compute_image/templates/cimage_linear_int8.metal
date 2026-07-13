@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
-// Linear layer — INT8 quantized weights with per-tile scale/bias.
+// Linear layer — INT8 quantized weights with per-output-channel scale/bias.
 // Each thread computes one output element:
-//   output[j] = Σ_i input[i] × (int8_weight[j][i] * scale[tile] + bias[tile])
-//   tile = j / 640
+//   output[j] = Σ_i input[i] × (int8_weight[i * out_dim + j] * scale[j] + bias[j])
+//
+// Physical storage: W_transposed[in_dim, out_dim] int8 row-major.
+// scale[bias] are per logical output channel (tid).
+// SIMD-coalesced access: adjacent lanes read adjacent addresses.
 //
 // Buffer layout:
 //   [0] input    [in_dim] f32
-//   [1] weight   [in_dim × padded_out_dim] int8 (row-major, packed)
-//   [2] scales   [num_tiles] f32
-//   [3] biases   [num_tiles] f32
+//   [1] weight   [in_dim × padded_out_dim] int8 (row-major)
+//   [2] scales   [out_dim] f32
+//   [3] biases   [out_dim] f32
 //   [4] output   [out_dim] f32
 //   [5] constants (MlpConstants)
 
@@ -41,14 +44,14 @@ kernel void cimage_linear_int8(
     uint out_dim = c.intermediate_dim;
     if (tid >= out_dim) return;
 
-    uint tile = tid / 640;
-    float scale = scales[tile];
-    float bias  = biases[tile];
+    float scale = scales[tid];
+    float bias  = biases[tid];
 
     float acc = 0.0f;
-    uint row_offset = tid * in_dim;
+    // Physical storage: [in_dim, out_dim] int8 row-major.
+    // weights[i * out_dim + tid] — coalesced across SIMD lanes.
     for (uint i = 0; i < in_dim; ++i) {
-        float w = (float)weights[row_offset + i] * scale + bias;
+        float w = (float)weights[i * out_dim + tid] * scale + bias;
         acc = fma(w, input[i], acc);
     }
     output[tid] = acc;

@@ -839,8 +839,6 @@ impl DenseProjectionDispatcher {
 // ErrorPartialDispatcher
 // ═══════════════════════════════════════════════════════════════════════════
 
-
-
 /// Dispatches the fused teacher-student GEMV kernel.
 /// Computes both forward passes in a single dispatch.
 #[cfg(feature = "metal-dispatch")]
@@ -907,8 +905,16 @@ impl FusedTeacherStudentDispatcher {
         encoder.set_buffer(8, Some(&debug_buf), 0);
         let total = (rows as u64) * (cols as u64);
         encoder.dispatch_threads(
-            MTLSize { width: total, height: 1, depth: 1 },
-            MTLSize { width: 64, height: 1, depth: 1 },
+            MTLSize {
+                width: total,
+                height: 1,
+                depth: 1,
+            },
+            MTLSize {
+                width: 64,
+                height: 1,
+                depth: 1,
+            },
         );
         encoder.end_encoding();
     }

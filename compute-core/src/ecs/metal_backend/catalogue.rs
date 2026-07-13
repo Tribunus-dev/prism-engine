@@ -811,11 +811,54 @@ impl MetalImplementationCatalogue {
             implementation_id: KernelImplementationId("metal.primitive.nf4tile640.v1".into()),
             supported_architectures: vec![],
             supported_representations: vec![],
-            source_path: Some("src/ecs/compute_image/shaders/nf4tile640.metal".into()),
+            source_path: Some("shaders/nf4tile640.metal".into()),
             source_entry_point: Some("dequant_mul_nf4tile640".into()),
             abi: KernelAbi {
-                version: 1,
-                buffers: vec![],
+                version: 2,
+                buffers: vec![
+                    BufferBinding {
+                        slot: 0,
+                        name: "packed_codes".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 1,
+                        name: "scales".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 2,
+                        name: "biases".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 3,
+                        name: "input".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 4,
+                        name: "output".into(),
+                        byte_size: 0,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 5,
+                        name: "dispatch_params_v1".into(),
+                        byte_size: 32,
+                        optional: false,
+                    },
+                    BufferBinding {
+                        slot: 9,
+                        name: "profile_descriptor_v1".into(),
+                        byte_size: 96,
+                        optional: true,
+                    },
+                ],
                 constants: vec![],
                 threadgroup_memory: vec![],
                 dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
@@ -1015,7 +1058,10 @@ pub fn catalogue_source_for(semantic_id: &KernelSemanticId) -> Option<String> {
     cat.iter()
         .find(|r| &r.semantic_id == semantic_id)
         .and_then(|r| r.source_path.as_ref())
-        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|path| {
+            let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+            std::fs::read_to_string(base.join(path)).ok()
+        })
 }
 
 #[cfg(test)]

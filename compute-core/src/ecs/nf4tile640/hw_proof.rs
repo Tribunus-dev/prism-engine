@@ -90,6 +90,23 @@ struct ProfileDescriptor {
     pad: u32,
 }
 
+/// Host half of `Nf4Tile640DispatchParams` in `shaders/nf4tile640.metal`.
+#[cfg(feature = "prism-backend")]
+#[repr(C, align(16))]
+pub(crate) struct Nf4Tile640DispatchParams {
+    abi_version: u32,
+    m: u32,
+    k: u32,
+    n: u32,
+    group_size: u32,
+    reserved: [u32; 3],
+}
+
+#[cfg(feature = "prism-backend")]
+const _: () = assert!(std::mem::size_of::<Nf4Tile640DispatchParams>() == 32);
+#[cfg(feature = "prism-backend")]
+const _: () = assert!(std::mem::align_of::<Nf4Tile640DispatchParams>() == 16);
+
 #[test]
 fn test_hw_proof_fixture_cimage_selection_report() {
     // This test validates the fixture generation and profile selection logic
@@ -243,7 +260,6 @@ fn test_hw_proof_fixture_cimage_selection_report() {
     }
 }
 
-#[ignore = "Metal kernel uses old output-axis tile layout; needs update for input-axis tiling"]
 #[test]
 #[cfg(feature = "prism-backend")]
 fn test_hw_proof_metal_dispatch_with_profile() {
@@ -254,7 +270,8 @@ fn test_hw_proof_metal_dispatch_with_profile() {
     }
 
     // Generate a small attention-like matrix
-    let rows = 2u32;
+    // Four distinct K rows make a truncated accumulation immediately visible.
+    let rows = 4u32;
     let cols = 640u32; // exactly one tile per row
     let attention_w = make_attention_like(rows as usize, cols as usize);
 
@@ -262,8 +279,7 @@ fn test_hw_proof_metal_dispatch_with_profile() {
     let (codes, scales, biases, _p_rows, _p_cols) =
         pack_nf4_weights(&attention_w, rows as usize, cols as usize);
 
-    // Create input vector: shape [1, K] where K = rows = 2.
-    // One batch row, k=2 inner-dim elements.
+    // Create one input vector with four distinct inner-dimension values.
     let input: Vec<f32> = (0..rows)
         .map(|r| (r as f32) / rows as f32 * 2.0 - 1.0)
         .collect();
@@ -360,23 +376,28 @@ fn test_hw_proof_metal_dispatch_with_profile() {
         metal::MTLResourceOptions::StorageModeShared,
     );
 
-    // Set constants
-    let m_val: u32 = 1;
-    let k_val: u32 = rows;
-    let n_val: u32 = cols;
-    let gs_val: u16 = 128;
+    let params = Nf4Tile640DispatchParams {
+        abi_version: 1,
+        m: 1,
+        k: rows,
+        n: cols,
+        group_size: 128,
+        reserved: [0; 3],
+    };
+    let params_buf = device.new_buffer_with_data(
+        &params as *const Nf4Tile640DispatchParams as *const std::ffi::c_void,
+        std::mem::size_of::<Nf4Tile640DispatchParams>() as u64,
+        metal::MTLResourceOptions::StorageModeShared,
+    );
 
     // Bind buffers (slots match shader ABI: 0=codes, 1=scales, 2=biases,
-    // 3=input, 4=output, 5=M, 6=K, 7=N, 8=group_size, 9=profile)
+    // 3=input, 4=output, 5=versioned dispatch params, 9=profile)
     encoder.set_buffer(0, Some(&codes_buf), 0);
     encoder.set_buffer(1, Some(&scales_buf), 0);
     encoder.set_buffer(2, Some(&biases_buf), 0);
     encoder.set_buffer(3, Some(&input_buf), 0);
     encoder.set_buffer(4, Some(&output_buf), 0);
-    encoder.set_bytes(5, 4, &m_val as *const u32 as *const std::ffi::c_void);
-    encoder.set_bytes(6, 4, &k_val as *const u32 as *const std::ffi::c_void);
-    encoder.set_bytes(7, 4, &n_val as *const u32 as *const std::ffi::c_void);
-    encoder.set_bytes(8, 2, &gs_val as *const u16 as *const std::ffi::c_void);
+    encoder.set_buffer(5, Some(&params_buf), 0);
     // buffer[9] is NOT set — this tests the fallback path (profile_id=0)
 
     // Dispatch
@@ -437,10 +458,7 @@ fn test_hw_proof_metal_dispatch_with_profile() {
     encoder2.set_buffer(2, Some(&biases_buf), 0);
     encoder2.set_buffer(3, Some(&input_buf), 0);
     encoder2.set_buffer(4, Some(&output_buf), 0);
-    encoder2.set_bytes(5, 4, &m_val as *const u32 as *const std::ffi::c_void);
-    encoder2.set_bytes(6, 4, &k_val as *const u32 as *const std::ffi::c_void);
-    encoder2.set_bytes(7, 4, &n_val as *const u32 as *const std::ffi::c_void);
-    encoder2.set_bytes(8, 2, &gs_val as *const u16 as *const std::ffi::c_void);
+    encoder2.set_buffer(5, Some(&params_buf), 0);
     encoder2.set_buffer(9, Some(&profile_buf), 0);
 
     encoder2.dispatch_threads(grid_size, threadgroup_size);

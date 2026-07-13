@@ -24,6 +24,19 @@ use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::metal_backend::catalogue_source_for;
 
 /// One live tensor stored in the Metal backend.
+/// Host-side representation of `Nf4Tile640DispatchParams` in `shaders/nf4tile640.metal`.
+#[repr(C, align(16))]
+struct Nf4Tile640DispatchParams {
+    abi_version: u32,
+    m: u32,
+    k: u32,
+    n: u32,
+    group_size: u32,
+    reserved: [u32; 3],
+}
+const _: () = assert!(std::mem::size_of::<Nf4Tile640DispatchParams>() == 32);
+const _: () = assert!(std::mem::align_of::<Nf4Tile640DispatchParams>() == 16);
+
 struct MetalTensor {
     buffer: Option<metal::Buffer>,
     shape: Vec<i32>,
@@ -396,12 +409,12 @@ impl TensorBackend for MetalBackend {
         );
         let scale_buf = self.mtl_device.new_buffer_with_data(
             s_bytes.as_ptr() as *const std::ffi::c_void,
-            s_bytes.len() as u64,
+            std::mem::size_of_val(s_bytes.as_slice()) as u64,
             metal::MTLResourceOptions::StorageModeShared,
         );
         let bias_buf = self.mtl_device.new_buffer_with_data(
             b_bytes.as_ptr() as *const std::ffi::c_void,
-            b_bytes.len() as u64,
+            std::mem::size_of_val(b_bytes.as_slice()) as u64,
             metal::MTLResourceOptions::StorageModeShared,
         );
         let out_buf = self.mtl_device.new_buffer(
@@ -421,25 +434,24 @@ impl TensorBackend for MetalBackend {
         enc.set_buffer(3, Some(&x_buf), 0);
         enc.set_buffer(4, Some(&out_buf), 0);
 
-        let m_val: u32 = m as u32;
-        let k_val: u32 = k as u32;
-        let n_val: u32 = n as u32;
-        let gs_val: u16 = op.group_size as u16;
-        enc.set_bytes(5, 4, &m_val as *const u32 as *const std::ffi::c_void);
-        enc.set_bytes(6, 4, &k_val as *const u32 as *const std::ffi::c_void);
-        enc.set_bytes(7, 4, &n_val as *const u32 as *const std::ffi::c_void);
-        enc.set_bytes(8, 2, &gs_val as *const u16 as *const std::ffi::c_void);
+        // Versioned Nf4Tile640DispatchParams at buffer[5]
+        let params = Nf4Tile640DispatchParams {
+            abi_version: 1,
+            m: m as u32,
+            k: k as u32,
+            n: n as u32,
+            group_size: op.group_size,
+            reserved: [0; 3],
+        };
+        let params_buf = self.mtl_device.new_buffer_with_data(
+            &params as *const Nf4Tile640DispatchParams as *const std::ffi::c_void,
+            std::mem::size_of::<Nf4Tile640DispatchParams>() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        enc.set_buffer(5, Some(&params_buf), 0);
 
-        let grid = metal::MTLSize {
-            width: n as u64,
-            height: m as u64,
-            depth: 1,
-        };
-        let group = metal::MTLSize {
-            width: 16,
-            height: 16,
-            depth: 1,
-        };
+        let grid = metal::MTLSize::new(n as u64, m as u64, 1);
+        let group = metal::MTLSize::new(16, 1, 1);
         enc.dispatch_threads(grid, group);
         enc.end_encoding();
         cmd_buf.commit();

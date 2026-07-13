@@ -33,14 +33,17 @@ static float unpack_nf4(device const uchar* packed, uint index) {
     return nf4_codebook[nibble];
 }
 
+// [[maybe_unused]] — some kernels use unpack_nf4 directly; this helper
+// adds per-group scale+bias dequantization for those that need it.
 // Dequantize one NF4 element:  val = codebook[nibble] * scale + bias.
 // Groups are indexed as  (index / group_size).
 // When `biases` is null the bias term is zero.
-static float dequantize_nf4(device const uchar* packed,
-                     device const float* scales,
-                     device const float* biases,
-                     uint index,
-                     uint group_size) {
+[[maybe_unused]] static float dequantize_nf4(
+    device const uchar* packed,
+    device const float* scales,
+    device const float* biases,
+    uint index,
+    uint group_size) {
     uint group = index / group_size;
     float scale = scales[group];
     float bias = biases ? biases[group] : 0.0f;
