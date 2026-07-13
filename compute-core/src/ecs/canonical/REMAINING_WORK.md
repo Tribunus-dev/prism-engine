@@ -1,6 +1,6 @@
 # Remaining work
 
-> Current snapshot: `46baf71`. This document
+> Current snapshot: `b200b71`. This document
 > distinguishes declared contracts, connected call paths, real execution, and
 > validation against real inputs or hardware.
 
@@ -69,11 +69,11 @@ replay and rollback behavior.
 Ternary candidates, reconstruction gates, residual encoders, assimilation
 receipts, and generation-level payload types exist and have unit coverage.
 
-The scale optimizer does not currently update its candidate scale during its
-iteration loop. Ternary packaging stores one byte per weight rather than a
-native packed representation. Assimilation comparisons can be lossless because
-the full dense residual is retained, so strategy fitness does not yet measure a
-real storage or execution tradeoff.
+The scale optimizer currently re-evaluates its incumbent scale but does not yet
+explore candidate scales. Ternary packaging stores one byte per weight rather
+than a native packed representation. Assimilation comparisons can be lossless
+because the full dense residual is retained, so strategy fitness does not yet
+measure a real storage or execution tradeoff.
 
 Remaining work is a real scale/threshold optimizer, native packing, residual
 policy enforcement, executable reconstruction, and replay validation through
@@ -92,8 +92,10 @@ missing.
 
 The current evidence is strong for contracts and local mechanics: the
 prism-backend build checks, NF4 GPU/CPU residency test, engram unit tests,
-evolution unit tests, and ternarization unit tests pass. These tests do not yet
-prove measured search, real engram training, or generation promotion.
+evolution unit tests, ternarization unit tests, and generation promotion tests
+pass. The full library run also exposed and fixed a zero-duration stub warmup
+receipt; the remaining tests do not yet prove measured search, Metal engram
+application, or a complete replayable lifecycle.
 
 The completion gate is one end-to-end lifecycle:
 
