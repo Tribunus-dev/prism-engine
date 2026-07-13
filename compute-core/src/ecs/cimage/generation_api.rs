@@ -12,6 +12,7 @@ use crate::ecs::canonical::generation::EngramBinding;
 use crate::ecs::canonical::identity::*;
 use crate::ecs::cimage::generation_store::{ContentStore, GenerationStore, PromotionTransaction};
 use crate::ecs::training_target::spec::EngramArtifact;
+use crate::ecs::evolution::evaluator::{NumericalReceipt, PerformanceReceipt};
 use sha2::{Digest, Sha256};
 
 /// Generation management API — inspect, promote, rollback, list.
@@ -21,6 +22,13 @@ use sha2::{Digest, Sha256};
 pub struct GenerationApi {
     pub content_store: ContentStore,
     pub generation_store: GenerationStore,
+}
+
+/// Evidence required before a trained payload can become executable state.
+#[derive(Debug, Clone)]
+pub struct PromotionEvidence {
+    pub numerical: NumericalReceipt,
+    pub performance: PerformanceReceipt,
 }
 
 impl GenerationApi {
@@ -85,7 +93,22 @@ impl GenerationApi {
         mut generation: CimageGeneration,
         artifact: &EngramArtifact,
         payload: Vec<u8>,
+        evidence: &PromotionEvidence,
     ) -> Result<GenerationId, String> {
+        if !evidence.numerical.passed {
+            return Err("engram promotion rejected by numerical gate".into());
+        }
+        if evidence.performance.repetitions == 0
+            || evidence.performance.latency_p50_ns == 0
+            || evidence.performance.latency_p95_ns < evidence.performance.latency_p50_ns
+        {
+            return Err("engram promotion rejected by performance gate".into());
+        }
+        if let Some(limit) = artifact.insertion_contract.maximum_latency_ns {
+            if evidence.performance.latency_p95_ns > limit {
+                return Err("engram promotion exceeds insertion latency budget".into());
+            }
+        }
         let digest = Sha256::digest(&payload);
         let digest = digest
             .iter()
@@ -216,7 +239,26 @@ mod tests {
                 assimilation_permitted: false,
             },
         };
-        let result = api.promote_with_engram(gen, &artifact, payload);
+        let evidence = PromotionEvidence {
+            numerical: NumericalReceipt {
+                candidate_id: CandidateId("candidate".into()),
+                passed: true,
+                max_absolute_error: 0.0,
+                max_relative_error: 0.0,
+                threshold: 0.05,
+            },
+            performance: PerformanceReceipt {
+                candidate_id: CandidateId("candidate".into()),
+                latency_p50_ns: 10,
+                latency_p95_ns: 12,
+                encode_time_ns: 0,
+                sync_time_ns: 12,
+                memory_traffic_bytes: 4,
+                energy_uj: None,
+                repetitions: 3,
+            },
+        };
+        let result = api.promote_with_engram(gen, &artifact, payload, &evidence);
         assert!(result.is_ok());
         assert_eq!(
             api.generation_store
@@ -226,6 +268,18 @@ mod tests {
                 .len(),
             1
         );
+        let stored = api
+            .content_store
+            .get(&artifact.payload_segment)
+            .expect("promoted payload should be retrievable");
+        let mut activation = vec![0.5f32];
+        crate::ecs::runtime::engram::application::apply_cpu(
+            &artifact.insertion_contract.application,
+            &mut activation,
+            stored,
+        )
+        .expect("promoted payload should apply");
+        assert!((activation[0] - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]

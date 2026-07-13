@@ -210,15 +210,13 @@ impl MetalCandidateEvaluator {
     }
 
     #[cfg(feature = "metal-dispatch")]
-    fn dispatch_fixture(
+    fn compile_pipeline(
         &self,
         source: &[u8],
-        fixture: &Nf4Fixture,
-        repetitions: usize,
-    ) -> Result<Vec<f32>, String> {
+    ) -> Result<metal::ComputePipelineState, String> {
         let device = self.device.as_ref().ok_or("no Metal device available")?;
-        let source =
-            std::str::from_utf8(source).map_err(|e| format!("invalid Metal source: {e}"))?;
+        let source = std::str::from_utf8(source)
+            .map_err(|e| format!("invalid Metal source: {e}"))?;
         let library = device
             .new_library_with_source(source, &metal::CompileOptions::new())
             .map_err(|e| format!("Metal library compile failed: {e}"))?;
@@ -228,9 +226,30 @@ impl MetalCandidateEvaluator {
                 None::<metal::FunctionConstantValues>,
             )
             .map_err(|e| format!("Metal kernel lookup failed: {e}"))?;
-        let pipeline = device
+        device
             .new_compute_pipeline_state_with_function(&function)
-            .map_err(|e| format!("Metal pipeline creation failed: {e}"))?;
+            .map_err(|e| format!("Metal pipeline creation failed: {e}"))
+    }
+
+    #[cfg(feature = "metal-dispatch")]
+    fn dispatch_fixture(
+        &self,
+        source: &[u8],
+        fixture: &Nf4Fixture,
+        repetitions: usize,
+    ) -> Result<Vec<f32>, String> {
+        let pipeline = self.compile_pipeline(source)?;
+        self.dispatch_pipeline(&pipeline, fixture, repetitions)
+    }
+
+    #[cfg(feature = "metal-dispatch")]
+    fn dispatch_pipeline(
+        &self,
+        pipeline: &metal::ComputePipelineState,
+        fixture: &Nf4Fixture,
+        repetitions: usize,
+    ) -> Result<Vec<f32>, String> {
+        let device = self.device.as_ref().ok_or("no Metal device available")?;
 
         let buffer = |bytes: &[u8]| {
             device.new_buffer_with_data(
@@ -395,12 +414,13 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
         {
             let fixture = nf4_fixture()?;
             let repetitions = workload.repetitions.max(1);
-            // Establish the pipeline and caches before collecting timing data.
-            self.dispatch_fixture(&candidate.compiled_bytes, &fixture, 1)?;
+            // Compile exactly once. Warm-up and measured repetitions reuse the
+            // same pipeline so the receipt reflects execution rather than
+            // repeatedly paying Metal library and PSO creation costs.
+            let pipeline = self.compile_pipeline(&candidate.compiled_bytes)?;
+            self.dispatch_pipeline(&pipeline, &fixture, 1)?;
             let start = std::time::Instant::now();
-            for _ in 0..repetitions {
-                self.dispatch_fixture(&candidate.compiled_bytes, &fixture, 1)?;
-            }
+            self.dispatch_pipeline(&pipeline, &fixture, repetitions)?;
             let total_ns = start.elapsed().as_nanos() as u64;
             let per_dispatch = (total_ns / repetitions as u64).max(1);
             Ok(PerformanceReceipt {

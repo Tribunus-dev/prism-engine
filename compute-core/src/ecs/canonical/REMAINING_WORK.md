@@ -46,10 +46,12 @@ still uses a hand-written cost function, while `run_measured` now routes
 candidates through static, numerical, and performance receipts and rejects
 failed candidates.
 
-The next required implementation is to generalize the evaluator beyond the
-NF4 fixture, expose its receipts to joint search, and enforce promotion only
-after correctness and performance gates pass. Device-specific limits and
-measured candidate promotion still need to be connected to the search state.
+The evaluator now reuses one compiled Metal pipeline for warm-up and measured
+repetitions, and generation promotion accepts numerical/performance evidence
+and enforces those gates. The next required implementation is to generalize the
+evaluator beyond the NF4 fixture and persist the receipts in the search state.
+Device-specific limits are validated for the current fixture but still need
+broader target coverage.
 
 ## Engram training and runtime
 
@@ -63,9 +65,10 @@ similarity over f32 payload parameters, and CPU application validates payload
 width. Metal application is unimplemented, and
 low-rank, latent-prefix, and adapter application modes remain placeholders.
 
-Remaining work is Metal application and an end-to-end runtime test that executes
-lookup and application after promotion and verifies replay and rollback
-behavior.
+Remaining work is Metal application and a full train-to-promotion orchestration
+test. The generation API now verifies payload retrieval and CPU application
+after promotion; replay and rollback behavior still need to be exercised in the
+same lifecycle test.
 
 ## Ternarization and assimilation
 
