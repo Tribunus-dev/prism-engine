@@ -1,6 +1,6 @@
 # Remaining work
 
-> Current snapshot: `2568391`. This document
+> Current snapshot: `46baf71`. This document
 > distinguishes declared contracts, connected call paths, real execution, and
 > validation against real inputs or hardware.
 
@@ -60,9 +60,9 @@ holdout loss. Lookup uses cosine similarity over f32 payload parameters, and CPU
 application validates payload width. Metal application is unimplemented, and
 low-rank, latent-prefix, and adapter application modes remain placeholders.
 
-Remaining work is interference evaluation, validation-set integration, Metal
-application, and an end-to-end test that stores a trained payload, binds it to a
-generation, executes lookup and application, and verifies promotion and replay.
+Remaining work is interference evaluation, Metal application, and an end-to-end
+runtime test that executes lookup and application after promotion and verifies
+replay and rollback behavior.
 
 ## Ternarization and assimilation
 
@@ -82,11 +82,11 @@ the shared evaluator.
 ## Generations and promotion
 
 Content-addressed payload storage, promotion transactions, current-generation
-selection, and parent rollback exist.
+selection, parent rollback, and digest-checked engram promotion exist.
 
-Generation listing is still a placeholder, rollback does not yet validate the
-target in the store, and no complete train/search/validate/promote/replay flow
-exists.
+The complete train/search/validate/promote/replay flow is still not wired from a
+single orchestration entry point. Runtime execution after promotion is also
+missing.
 
 ## Validation gates
 
