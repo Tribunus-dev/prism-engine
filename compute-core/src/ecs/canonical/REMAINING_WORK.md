@@ -1,146 +1,110 @@
-# Remaining migration work
+# Remaining work
 
-> **Current state snapshot** — Commit 407db0e. All claims annotated with:
-> - **DECLARED**: type/API exists but may be empty
-> - **CONNECTED**: wired into a call chain
-> - **EXECUTED**: produces real output from real input
-> - **VALIDATED**: tested with real data
+> Current snapshot: `b2e89ab` plus the uncommitted evaluator work. This document
+> distinguishes declared contracts, connected call paths, real execution, and
+> validation against real inputs or hardware.
 
-## PR G — Metal Implementation Catalogue
+## Repository state
 
-**Status:** Catalogue and backend compiler exist structurally and are internally wired (`lower()` reads catalogue entries; `compile()` rejects empty source in production), but no production dispatch path consumes them. The legacy `include_str!` / build-time metallib paths remain the only active paths.
+The build and CI configuration, Metal/NF4 changes, cimage runtime changes,
+quantization changes, runtime boundary changes, and test changes are now split
+into reviewable commits. The remaining implementation work is deliberately
+kept separate from those commits.
 
-### What exists
+The Apple Silicon build uses optimized incremental local profiles and a
+non-incremental GitHub Actions profile with sccache. The macOS CI job targets an
+arm64 macOS 26 runner and must still be confirmed by a successful remote run.
 
-**MetalImplementationCatalogue** (DECLARED, CONNECTED). Full catalogue with registrations. Megakernel, NF4 linear, ternary GEMV, and RMSNorm have source paths, entry points, populated ABI buffer/constant fields, and authoritative source resolution tests.
+## Metal catalogue and execution
 
-**MetalBackendCompiler** (DECLARED, CONNECTED). Implements `BackendCompiler`:
-- `lower()`: looks up matching registration in catalogue, reads source from `source_path`, uses `source_entry_point`
-- `compile()`: rejects empty source in production (`Err`). Invokes `MetalToolchain::compile_source` for non-empty source.
+The Metal catalogue is authoritative for source lookup and is consumed by
+several runtime and compilation paths. The NF4 tile640 ABI now uses a typed,
+aligned parameter block, and the real residency test covers M=2, K=4, N=640.
 
-### Gaps
+Remaining work is to route every production kernel creation through the
+backend compiler contract, remove remaining duplicate shader implementations,
+replace zero or symbolic ABI byte sizes with checked contracts, and make
+catalogue source identity part of compiled artifact provenance.
 
-| Claim | Status | Detail |
-|---|---|---|
-| "Catalogue consumed by production dispatch" | NOT CONNECTED | `kernel_registry.rs`, `kernel_dispatch.rs`, `region_runner.rs` still use `include_str!` directly. |
-| "ABI byte_sizes are real" | DECLARED only | All `BufferBinding.byte_size` fields are 0. |
-| "Duplicate NF4/ternary implementations eliminated" | NOT EXECUTED | Three NF4 decode implementations exist. Canonical fragments un-consumed. |
-| "lower() used in production" | NOT CONNECTED | No production caller invokes `lower()`. |
-| "compile() used in production" | NOT CONNECTED | No production caller invokes `compile()`. |
+## Compiler integration
 
-## PR H — PrismCompiler Integration
+The canonical compiler routes GGUF and sealed cimage inputs through the real
+pipeline under the required feature gates. Compile outcomes are populated from
+compiled images and optional request parameters are forwarded.
 
-**Status:** All three CLI paths route through `PrismCompiler`. Real GGUF compilation works under `mlx-backend` feature; `prism-backend`-only builds log a clear message. `CompileOutcome` populated from real `CompiledImage`.
+Remaining work is live event emission from compiler stages and complete source,
+policy, artifact, and toolchain identity digests. The event stream currently
+contains post-hoc reconstruction with missing identities.
 
-### What exists
+## Shared measured evaluator
 
-- **Default GGUF frontend**: registered by default. Parses GGUF header into `ModelIr`. — **EXECUTED**
-- **`PrismCompiler::compile()`**: detects .gguf, delegates to `compile_gguf_to_canonical` behind `mlx-backend` gate. Populates outcome fields from `CompiledImage`. Forwards ane_models_dir, metallib_path, mlx_capture_dir, target_hardware. — **EXECUTED (mlx-backend)**
-- **`compile_with_authority()`**: routes SealedComputeImage through real pipeline, populates outcome. — **EXECUTED**
-- **`compile_speculative()`**: routes draft-model requests. — **EXECUTED**
-- **Compile event stream**: exists but reconstructed post-hoc (all identity digests None). — **DECLARED / CONNECTED**
+Evolutionary search has candidate genomes, mutation, crossover, selection,
+budgets, replay, and Pareto structures. The current Metal evaluator can compile
+source and validate static dimensions, but its numerical and performance
+receipts are nominal. Joint search still uses a hand-written cost function.
 
-### Gaps
+The next required implementation is one shared evaluator that accepts an
+executable workload fixture, produces CPU-oracle output, compiles and dispatches
+the Metal candidate, performs warm-up and repeated timing, validates numerical
+error, records device limits and receipts, and only permits promotion after
+correctness and performance gates pass. Engram training must use the same
+oracle and holdout machinery.
 
-| Claim | Status | Detail |
-|---|---|---|
-| "Single compile() entrypoint" | PARTIAL | Three separate methods, not one. |
-| "Joined compiler-to-execution provenance" | DECLARED | Events lack source/policy/artifact/toolchain identities. |
-| "Live event emission" | NOT CONNECTED | Post-hoc reconstruction, not live. |
+## Engram training and runtime
 
-### Remaining
+Engram contracts, scheduler operations, payload segments, lookup receipts, CPU
+additive and multiplicative application, and generation bindings exist.
 
-1. Live event emission from real stages
-2. Populate source, policy, artifact, toolchain identity digests
+The trainer still serializes calibration metadata instead of optimizing the
+declared `EngramTrainingDataset`. Lookup similarity is currently a constant,
+latency is fabricated, Metal application is unimplemented, and low-rank,
+latent-prefix, and adapter application modes are placeholders.
 
-## Engram (training, lookup, scheduling)
+Remaining work is a real additive-residual or low-rank optimizer, query/payload
+similarity, holdout and interference evaluation, executable payload validation,
+Metal application, and an end-to-end test that stores the payload and promotes
+the resulting generation.
 
-**Status:** Engram data model defined. Scheduler constructs real `EngramLookup`. Trainer consumes calibration to produce deterministic payload bytes.
+## Ternarization and assimilation
 
-### What exists
+Ternary candidates, reconstruction gates, residual encoders, assimilation
+receipts, and generation-level payload types exist and have unit coverage.
 
-- EngramArtifact, EngramLookupParams, EngramLookupPolicy, EngramLookupReceipt — **DECLARED / CONNECTED**
-- DataflowOp::EngramLookup in scheduler — **CONNECTED** (no KvRead alias)
-- EngramTrainer: consumes calibration, builds deterministic payload via BTreeMap, hashes actual payload bytes, computes RMSE from metrics. — **EXECUTED (metadata-based)**
+The scale optimizer does not currently update its candidate scale during its
+iteration loop. Ternary packaging stores one byte per weight rather than a
+native packed representation. Assimilation comparisons can be lossless because
+the full dense residual is retained, so strategy fitness does not yet measure a
+real storage or execution tradeoff.
 
-### Gaps
+Remaining work is a real scale/threshold optimizer, native packing, residual
+policy enforcement, executable reconstruction, and replay validation through
+the shared evaluator.
 
-| Claim | Status | Detail |
-|---|---|---|
-| "Training produces real engram payload" | NOT EXECUTED | Payload is serialized metadata, not trained parameters. |
-| "Engram lookup modulation" | NOT EXECUTED | No runtime implementation for the op. |
-| "Engram digest covers trained data" | NOT EXECUTED | Digest covers calibration metadata. |
+## Generations and promotion
 
-### Remaining
+Content-addressed payload storage, promotion transactions, current-generation
+selection, and parent rollback exist.
 
-1. Real training loop (optimizer, objective, holdout)
-2. Runtime lookup (payload retrieval, modulation)
-3. End-to-end test (encode, store, look up, apply, verify baseline)
+Generation listing is still a placeholder, rollback does not yet validate the
+target in the store, and no complete train/search/validate/promote/replay flow
+exists.
 
-## Evolutionary Search
+## Validation gates
 
-**Status:** Foundation types exist. ECS systems are functional. Mutation perturbs tile dims/shader params, crossover blends features, selection uses CostFunction.
+The current evidence is strong for contracts and local mechanics: the
+prism-backend build checks, NF4 GPU/CPU residency test, engram unit tests,
+evolution unit tests, and ternarization unit tests pass. These tests do not yet
+prove measured search, real engram training, or generation promotion.
 
-### What exists
+The completion gate is one end-to-end lifecycle:
 
-- EvolveCandidate, EvolutionState, CostMetrics, EvolveProgram, SearchConfig — **DECLARED / CONNECTED**
-- evolve_seed, evolve_evaluate, evolve_select, mutate_program, crossover — **EXECUTED**
-- MetalDecompositionSearch with injected Evaluator trait — **DECLARED / CONNECTED**
-- JointSearchConfig with population evolution, threshold convergence — **DECLARED / CONNECTED**
-
-### Gaps
-
-| Claim | Status | Detail |
-|---|---|---|
-| "Real Metal evaluator" | NOT CONNECTED | Uses SyntheticEvaluator (closed-form). |
-| "Production-ready kernel promotion" | NOT EXECUTED | No compilation, parity, or benchmarking. |
-| "Typed parameter genome" | DECLARED | No Metal device-limit validation. |
-| "Joint search with real engram quality" | NOT EXECUTED | Hand-written scoring formula. |
-
-### Remaining
-
-1. Measured Metal evaluator (compile, dispatch, validate, measure)
-2. Device-limit validation
-3. Joint search with real engram metrics
-4. Pareto frontier with verifiable evidence
-
-## Ternary Assimilation
-
-**Status:** `assimilate()` function implemented. RMSE computed over ALL weights. Empty tensor guard. Packed ternary weights and residuals returned.
-
-### What exists
-
-- TernaryAssimilationConfig, TernaryAssimilationResult, TernaryAssimilationGate — **DECLARED / CONNECTED**
-- `assimilate()`: converts all weights to ternary, computes RMSE over all weights, returns ternary_weights (Vec<i8>) and residuals (Vec<f32>), guards empty tensors. — **EXECUTED**
-- 10 tests including full error tracking, weight return, empty rejection. — **VALIDATED**
-
-### Gaps
-
-| Claim | Status | Detail |
-|---|---|---|
-| "Returned artifact is usable" | NOT EXECUTED | No packaging, execution, replay, or rollback path. |
-| "residual_compensation consulted" | NOT EXECUTED | Config field exists but is never used. |
-
-### Remaining
-
-1. Packaging: pack ternary weights + residuals into a portable artifact
-2. Execution: verify the reconstructed tensor is within gate thresholds
-3. Replay: prove the same artifact produces the same result
-
-## Test Coverage
-
-**Status:** 2670+ lib tests pass. Structural tests documenting empty behavior removed or gated.
-
-| Action | Status |
-|---|---|
-| Empty-artifact tests removed | Gated behind not(mlx-backend) |
-| 10 assimilation tests | All pass (full RMSE, weight return, empty guard) |
-| 2 engram tests | Digest deterministic, payload_size = exact bytes |
-| 6 joint search tests | Real evolution, threshold convergence |
-| 6 decomposition tests | Injectable Evaluator, SyntheticEvaluator fixture |
-
-### Gaps
-
-- No real GGUF compilation through canonical API (requires mlx-backend + fixture)
-- No evolved kernel measurement on real Metal
-- No engram lookup end-to-end
+```text
+base generation
+  -> train engram from dataset
+  -> search representation and kernel
+  -> compile and dispatch candidate
+  -> CPU/oracle, holdout, latency, and device gates
+  -> store content-addressed payloads
+  -> promote generation
+  -> replay and rollback
+```
