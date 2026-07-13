@@ -4,11 +4,11 @@
 //! The [`PsoCacheKey`] captures every layout/codec parameter so that no
 //! parameter change silently reuses a stale PSO.
 
-use serde::{Deserialize, Serialize};
 use super::{
-    AffineMode, Axis, CodecFamily, ExecutionPhase, FunctionConstantSet,
-    HardwareProfileId, KernelSpecializationKey, MetadataLayout, TileShape,
+    AffineMode, Axis, CodecFamily, ExecutionPhase, FunctionConstantSet, HardwareProfileId,
+    KernelSpecializationKey, MetadataLayout, TileShape,
 };
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -132,16 +132,19 @@ impl From<&KernelSpecializationKey> for PsoCacheKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_plan::{
-        DType, KernelTemplateId,
-    };
+    use crate::execution_plan::{DType, KernelTemplateId};
 
     fn sample_key() -> KernelSpecializationKey {
         KernelSpecializationKey {
             template_id: KernelTemplateId::Nf4Tile640Gemv,
             execution_phase: ExecutionPhase::Decode,
             codec: CodecFamily::Nf4,
-            tile_shape: TileShape { m: 1, n: 32, k: 128, elements: 640 },
+            tile_shape: TileShape {
+                m: 1,
+                n: 32,
+                k: 128,
+                elements: 640,
+            },
             group_size: 32,
             group_axis: Axis::Output,
             affine_mode: AffineMode::ScaleOnly,
@@ -162,7 +165,15 @@ mod tests {
 
         assert_eq!(cache_key.metal_function_name, "Nf4Tile640Gemv");
         assert_eq!(cache_key.codec_id, 0); // Nf4
-        assert_eq!(cache_key.tile_shape, TileShape { m: 1, n: 32, k: 128, elements: 640 });
+        assert_eq!(
+            cache_key.tile_shape,
+            TileShape {
+                m: 1,
+                n: 32,
+                k: 128,
+                elements: 640
+            }
+        );
         assert_eq!(cache_key.group_size, 32);
         assert_eq!(cache_key.group_axis_id, 0); // Output
         assert_eq!(cache_key.affine_mode_id, 0); // ScaleOnly

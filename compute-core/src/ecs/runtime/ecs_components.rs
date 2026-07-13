@@ -4,8 +4,8 @@
 //! admission → binding → refinement compilation pipeline.  Components are
 //! attached to entities representing individual weight matrices.
 
-use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
 use crate::ecs::compilation::distill_core::OnPolicyRefinementResult;
+use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
 use crate::quantization::contract::{CanonicalShape, RuntimeRepresentationClass};
 
 // ---------------------------------------------------------------------------

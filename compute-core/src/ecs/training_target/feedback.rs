@@ -589,9 +589,7 @@ fn compute_gate_results(
 
         // max_zero_collapse_ratio
         if let Some(thresh) = target.gates.max_zero_collapse_ratio {
-            let pass = merged
-                .observed_zero_collapse
-                .map_or(false, |v| v <= thresh);
+            let pass = merged.observed_zero_collapse.map_or(false, |v| v <= thresh);
             let entry = results
                 .entry("max_zero_collapse_ratio".into())
                 .or_insert((0, 0));
@@ -604,9 +602,7 @@ fn compute_gate_results(
         // max_operator_nrmse
         if let Some(thresh) = target.gates.max_operator_nrmse {
             let pass = merged.observed_nrmse.map_or(false, |v| v <= thresh);
-            let entry = results
-                .entry("max_operator_nrmse".into())
-                .or_insert((0, 0));
+            let entry = results.entry("max_operator_nrmse".into()).or_insert((0, 0));
             if pass {
                 entry.0 += 1;
             }
@@ -719,13 +715,8 @@ mod tests {
             )],
         );
 
-        let report = TrainingFeedbackBuilder::build(
-            &[target],
-            &evidence,
-            "spec-v1",
-            "ckpt-abc",
-            "ev-123",
-        );
+        let report =
+            TrainingFeedbackBuilder::build(&[target], &evidence, "spec-v1", "ckpt-abc", "ev-123");
 
         assert_eq!(report.items.len(), 1, "should have one failure item");
         let item = &report.items[0];
@@ -784,18 +775,10 @@ mod tests {
             )],
         );
 
-        let report = TrainingFeedbackBuilder::build(
-            &[target],
-            &evidence,
-            "spec-v1",
-            "ckpt-abc",
-            "ev-123",
-        );
+        let report =
+            TrainingFeedbackBuilder::build(&[target], &evidence, "spec-v1", "ckpt-abc", "ev-123");
 
-        assert!(
-            report.items.is_empty(),
-            "all gates pass → no failure items"
-        );
+        assert!(report.items.is_empty(), "all gates pass → no failure items");
         assert_eq!(
             report.status,
             TrainingTargetStatus::Satisfied,
@@ -844,13 +827,25 @@ mod tests {
         evidence.insert(
             "good.weight".into(),
             vec![make_evidence_entry(
-                "good.weight", "weight", Some(0.03), None, None, None, None,
+                "good.weight",
+                "weight",
+                Some(0.03),
+                None,
+                None,
+                None,
+                None,
             )],
         );
         evidence.insert(
             "bad.weight".into(),
             vec![make_evidence_entry(
-                "bad.weight", "weight", Some(0.12), None, None, None, None,
+                "bad.weight",
+                "weight",
+                Some(0.12),
+                None,
+                None,
+                None,
+                None,
             )],
         );
 

@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! Core ML backend adapter.
 //!
 //! F32 Vec<f32>-backed ArenaInfo predict. Materialize/compile/load phases real.

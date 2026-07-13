@@ -204,8 +204,8 @@ mod tests {
     fn materialization_limit_enforced() {
         let cap = accelerate_rayon_capability();
         assert!(cap.check_materialization_budget(128 * 1024 * 1024).is_ok());
-        assert!(
-            cap.check_materialization_budget(1024 * 1024 * 1024).is_err()
-        );
+        assert!(cap
+            .check_materialization_budget(1024 * 1024 * 1024)
+            .is_err());
     }
 }

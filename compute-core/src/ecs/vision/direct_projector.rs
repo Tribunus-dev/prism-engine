@@ -1,5 +1,5 @@
-use crate::profiled_model::LoadedProfiledModel;
 use crate::ecs::vision::preprocess::load_resized_rgb_image;
+use crate::profiled_model::LoadedProfiledModel;
 use mlx_rs::Array;
 
 #[cfg(target_os = "macos")]

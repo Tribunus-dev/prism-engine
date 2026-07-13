@@ -51,7 +51,10 @@ pub fn encode_region_from_plan(
     hazard_plan: &HazardPlan,
 ) -> Result<RegionExecutionHandle, RegionEncoderError> {
     if !hazard_plan.safe {
-        return Err(format!("Cannot encode unsafe region: {:?}", region.region_id));
+        return Err(format!(
+            "Cannot encode unsafe region: {:?}",
+            region.region_id
+        ));
     }
 
     let mut encoder_count = 1u32;
@@ -117,12 +120,28 @@ mod tests {
                     bindings: vec![],
                     dependencies: vec![],
                     buffer_uses: vec![BufferUse {
-                        buffer_id: "hidden_a".into(), access: AccessMode::ReadWrite,
-                        lifetime: LifetimeClass::LayerScratch, alias_group: None,
-                        byte_range: Some(ByteRange { start: 0, end: 4096 }),
+                        buffer_id: "hidden_a".into(),
+                        access: AccessMode::ReadWrite,
+                        lifetime: LifetimeClass::LayerScratch,
+                        alias_group: None,
+                        byte_range: Some(ByteRange {
+                            start: 0,
+                            end: 4096,
+                        }),
                     }],
-                    dispatch_shape: DispatchShape { grid_x: 1, grid_y: 1, grid_z: 1, threadgroup_m: 32, threadgroup_n: 1, threadgroup_p: 1 },
-                    estimated_cost: EstimatedKernelCost { compute_us: 5.0, memory_bytes_read: 4096, memory_bytes_written: 4096 },
+                    dispatch_shape: DispatchShape {
+                        grid_x: 1,
+                        grid_y: 1,
+                        grid_z: 1,
+                        threadgroup_m: 32,
+                        threadgroup_n: 1,
+                        threadgroup_p: 1,
+                    },
+                    estimated_cost: EstimatedKernelCost {
+                        compute_us: 5.0,
+                        memory_bytes_read: 4096,
+                        memory_bytes_written: 4096,
+                    },
                     validation_requirements: KernelValidationRequirements::default(),
                 },
                 ScheduledKernelOp {
@@ -134,20 +153,39 @@ mod tests {
                     bindings: vec![],
                     dependencies: vec!["rmsnorm".into()],
                     buffer_uses: vec![BufferUse {
-                        buffer_id: "hidden_b".into(), access: AccessMode::ReadWrite,
-                        lifetime: LifetimeClass::LayerScratch, alias_group: None,
-                        byte_range: Some(ByteRange { start: 0, end: 4096 }),
+                        buffer_id: "hidden_b".into(),
+                        access: AccessMode::ReadWrite,
+                        lifetime: LifetimeClass::LayerScratch,
+                        alias_group: None,
+                        byte_range: Some(ByteRange {
+                            start: 0,
+                            end: 4096,
+                        }),
                     }],
-                    dispatch_shape: DispatchShape { grid_x: 1, grid_y: 1, grid_z: 1, threadgroup_m: 32, threadgroup_n: 1, threadgroup_p: 1 },
-                    estimated_cost: EstimatedKernelCost { compute_us: 3.0, memory_bytes_read: 4096, memory_bytes_written: 4096 },
+                    dispatch_shape: DispatchShape {
+                        grid_x: 1,
+                        grid_y: 1,
+                        grid_z: 1,
+                        threadgroup_m: 32,
+                        threadgroup_n: 1,
+                        threadgroup_p: 1,
+                    },
+                    estimated_cost: EstimatedKernelCost {
+                        compute_us: 3.0,
+                        memory_bytes_read: 4096,
+                        memory_bytes_written: 4096,
+                    },
                     validation_requirements: KernelValidationRequirements::default(),
                 },
             ],
             command_buffer_policy: CommandBufferPolicy::decode_default(),
             hazard_policy: HazardPolicy::Conservative,
             arena_plan: ActivationArenaPlan {
-                arena_id: "test".into(), total_bytes: 4096,
-                allocations: vec![], alias_groups: vec![], peak_live_bytes: 4096,
+                arena_id: "test".into(),
+                total_bytes: 4096,
+                allocations: vec![],
+                alias_groups: vec![],
+                peak_live_bytes: 4096,
             },
             timing_policy: TimingPolicy::Disabled,
         }

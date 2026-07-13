@@ -1,11 +1,11 @@
+use crate::ecs::adapter::CanonicalRole;
 use crate::ecs::component::tensor::{CanonicalRoleComp, CodecFamilyComp, Shape};
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 use crate::ecs::plan::precision_plan::{
     PrecisionOverride, PrecisionOverrideReason, PrecisionPlan, PrecisionScope,
     PrecisionSelectionBasis, PrecisionSelector,
 };
 use crate::ecs::plan::CodecFamily;
-use crate::ecs::adapter::CanonicalRole;
+use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 
 // ── Component wrapper ─────────────────────────────────────────────────────

@@ -165,13 +165,11 @@ pub fn fuse_and_schedule(
                             FusionPattern::Custom([a, b, a])
                         }
                     }
-                    _ => {
-                        FusionPattern::Custom([
-                            candidate[0].op_kind,
-                            candidate[1].op_kind,
-                            candidate[2].op_kind,
-                        ])
-                    }
+                    _ => FusionPattern::Custom([
+                        candidate[0].op_kind,
+                        candidate[1].op_kind,
+                        candidate[2].op_kind,
+                    ]),
                 };
                 if known_patterns.contains(&pattern) {
                     matched = true;

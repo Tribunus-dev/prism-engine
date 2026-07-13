@@ -6,12 +6,14 @@
 //! model for runtime, analysis, and orchestration.
 
 pub use crate::ecs::compiler;
-pub use crate::ecs::compiler::{BackendLowering, LegalityReceipt, LegalityViolation, LoweringReceipt};
+pub use crate::ecs::compiler::{
+    BackendLowering, LegalityReceipt, LegalityViolation, LoweringReceipt,
+};
 pub use crate::ecs::decode_attribution;
 pub use crate::ecs::decode_attribution::graph_catalog::GraphFamily;
 pub use crate::ecs::decode_attribution::suite_manifest::{SuiteRow, SuiteTier};
-pub use crate::session;
 pub use crate::ecs::session::{
     ControlSessionState, GenerationControlSession, InferenceSession, InferenceSessionState,
     SamplerConfig,
 };
+pub use crate::session;

@@ -1,6 +1,6 @@
-use crate::ecs::Component;
-use crate::ecs::plan::CodecFamily;
 use crate::ecs::adapter::CanonicalRole;
+use crate::ecs::plan::CodecFamily;
+use crate::ecs::Component;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

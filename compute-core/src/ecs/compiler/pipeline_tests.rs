@@ -6,7 +6,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::ecs::backend::graph::{BackendLegalityReceipt, GraphBackend, RegionExecutionReceipt};
+    use crate::ecs::backend::graph::{
+        BackendLegalityReceipt, GraphBackend, RegionExecutionReceipt,
+    };
     use crate::ecs::backend::routing::{
         BackendId, CompiledRegionHandle, EvidenceDigest, GraphRegion, LogicalShape,
         OperationFamily, OperationId, Phase, TensorId,
@@ -16,7 +18,9 @@ mod tests {
     use crate::ecs::compiler::semantic::{SemanticModule, SemanticOp, ToleranceClass};
     // Import from compiler module via its public re-exports
     use crate::ecs::compiler::pass::PassIdentity;
-    use crate::ecs::compiler::pass::{NoopPass, TransformPass, TransformPipeline, TransformReceipt};
+    use crate::ecs::compiler::pass::{
+        NoopPass, TransformPass, TransformPipeline, TransformReceipt,
+    };
 
     /// A minimal backend that accepts any non-empty region.
     struct StubBackend;

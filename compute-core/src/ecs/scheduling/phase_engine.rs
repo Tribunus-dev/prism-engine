@@ -4,7 +4,14 @@
 
 use crate::ecs::backend::accelerate_lane::AccelerateLane;
 use crate::ecs::backend::coreai_lane::CoreAiLane;
-use crate::ecs::compute_image::phase_dag::{EmittedPhase, EmittedPhaseGraph, PhaseCompletionStatus};
+use crate::ecs::compute_image::phase_dag::{
+    EmittedPhase, EmittedPhaseGraph, PhaseCompletionStatus,
+};
+use crate::ecs::scheduling::execution_context::ExecutionContext;
+use crate::ecs::scheduling::phase_engine_state::{PhaseLifecycleState, PhaseLifecycleTracker};
+use crate::ecs::scheduling::phase_runner::{PhaseResult, PhaseRunnerRegistry};
+use crate::ecs::scheduling::ready_queue::ReadyQueue;
+use crate::ecs::scheduling::receipts::PhaseReceipt;
 use crate::inference::execution_image_state::ComputeImageState;
 use crate::inference::inference_session_state::InferenceSessionState;
 use crate::inference::inference_step_state::{
@@ -12,11 +19,6 @@ use crate::inference::inference_step_state::{
 };
 use crate::mlx_executor::MlxExecutor;
 use crate::runtime::executable_session::RuntimeBackends;
-use crate::ecs::scheduling::execution_context::ExecutionContext;
-use crate::ecs::scheduling::phase_engine_state::{PhaseLifecycleState, PhaseLifecycleTracker};
-use crate::ecs::scheduling::phase_runner::{PhaseResult, PhaseRunnerRegistry};
-use crate::ecs::scheduling::ready_queue::ReadyQueue;
-use crate::ecs::scheduling::receipts::PhaseReceipt;
 use mlx_rs::Array;
 use std::sync::{Arc, Mutex};
 

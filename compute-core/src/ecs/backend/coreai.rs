@@ -7,8 +7,8 @@
 use std::time::Instant;
 
 use super::graph::*;
-use crate::ecs::backend::routing::*;
 use crate::coreai_bridge::CoreAiModel;
+use crate::ecs::backend::routing::*;
 
 /// Core ML compute-unit policies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

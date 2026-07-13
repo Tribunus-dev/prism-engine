@@ -16,9 +16,13 @@
 
 use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
 use crate::ecs::compute_image::program::phase_program::SerializedPhaseProgram;
-use crate::ecs::compute_image::residency::admission::{ResidencyAdmission, ResidencyAdmissionResult};
+use crate::ecs::compute_image::residency::admission::{
+    ResidencyAdmission, ResidencyAdmissionResult,
+};
 use crate::ecs::compute_image::residency::plan::CompiledResidencyPlan;
-use crate::ecs::compute_image::variants::selection::{select_program_variant, VariantSelectionRefusal};
+use crate::ecs::compute_image::variants::selection::{
+    select_program_variant, VariantSelectionRefusal,
+};
 use crate::ecs::runtime::executable_bindings::ExecutableBindings;
 use crate::ecs::runtime::executable_lane::LaneArtifactRegistry;
 use crate::ecs::runtime::executable_seal::SealVerificationReceipt;

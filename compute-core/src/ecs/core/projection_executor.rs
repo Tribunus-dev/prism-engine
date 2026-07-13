@@ -8,10 +8,10 @@
 //! It translates the descriptor into a [`QuantizedMatmulOp`] and delegates to
 //! the backend's [`TensorBackend::quantized_matmul`].
 
+use crate::crash_breadcrumb;
 use crate::ecs::backend::{
     DType as BackendDType, QuantizedMatmulOp, QuantizedWeightHandle, TensorBackend, TensorHandle,
 };
-use crate::crash_breadcrumb;
 use crate::ecs::projection_identity::ProjectionFamily;
 use serde::Serialize;
 use std::cell::RefCell;

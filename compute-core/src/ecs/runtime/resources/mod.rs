@@ -43,22 +43,28 @@ pub use worker_supervision_config::{EcsWorkerSupervisionConfig, EcsWorkerSupervi
 // ── Stable resource IDs ───────────────────────────────────────────────
 
 pub const WORKER_POOL_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 10;
-pub const WORKER_INGRESS_QUEUE_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 11;
-pub const WORKER_EVENT_SOURCE_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 12;
-pub const WORKER_RESPONSE_REGISTRY_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
-    13;
-pub const WORKER_DIAGNOSTICS_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 14;
+pub const WORKER_INGRESS_QUEUE_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
+    11;
+pub const WORKER_EVENT_SOURCE_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
+    12;
+pub const WORKER_RESPONSE_REGISTRY_RESOURCE:
+    crate::ecs::runtime::scheduling::component_id::ResourceId = 13;
+pub const WORKER_DIAGNOSTICS_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
+    14;
 pub const MONOTONIC_CLOCK_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 15;
-pub const LEGACY_WORKER_BRIDGE_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 16;
-pub const WORKER_SUPERVISION_CONFIG_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
-    17;
+pub const LEGACY_WORKER_BRIDGE_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
+    16;
+pub const WORKER_SUPERVISION_CONFIG_RESOURCE:
+    crate::ecs::runtime::scheduling::component_id::ResourceId = 17;
 
-pub const WORKER_PROCESS_MANAGER_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
-    18;
+pub const WORKER_PROCESS_MANAGER_RESOURCE:
+    crate::ecs::runtime::scheduling::component_id::ResourceId = 18;
 
-pub const KV_CACHE_COORDINATOR_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 19;
+pub const KV_CACHE_COORDINATOR_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
+    19;
 
-pub const NPU_COMPLETION_PORT_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 20;
+pub const NPU_COMPLETION_PORT_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId =
+    20;
 
 pub const AUDIO_ENCODER_RESOURCE: crate::ecs::runtime::scheduling::component_id::ResourceId = 21;
 

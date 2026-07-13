@@ -64,7 +64,9 @@ impl HazardChecker {
                                 after_op_index: w_idx,
                                 reason: format!(
                                     "RAW boundary: {} reads {} written by {}",
-                                    op_id, buf_id, last_write_op.unwrap_or("?")
+                                    op_id,
+                                    buf_id,
+                                    last_write_op.unwrap_or("?")
                                 ),
                             });
                             barriers.push(MemoryBarrier {
@@ -204,16 +206,16 @@ impl ArenaPlanner {
                     continue;
                 }
 
-                let entry = slots.entry(use_.buffer_id.clone()).or_insert_with(|| {
-                    BufferSlot {
+                let entry = slots
+                    .entry(use_.buffer_id.clone())
+                    .or_insert_with(|| BufferSlot {
                         buffer_id: use_.buffer_id.clone(),
                         size_bytes: size,
                         alignment_bytes: 256,
                         first_op: op_idx,
                         last_op: op_idx,
                         alias_group: use_.alias_group.clone(),
-                    }
-                });
+                    });
 
                 entry.size_bytes = entry.size_bytes.max(size);
                 entry.first_op = entry.first_op.min(op_idx);
@@ -257,11 +259,7 @@ impl ArenaPlanner {
         }
 
         // ── Step 4: Compute total bytes and peak live bytes ─────────────────
-        let total_bytes = placed
-            .iter()
-            .map(|p| p.offset + p.size)
-            .max()
-            .unwrap_or(0);
+        let total_bytes = placed.iter().map(|p| p.offset + p.size).max().unwrap_or(0);
 
         let peak_live_bytes = if ops.is_empty() || placed.is_empty() {
             0
@@ -285,7 +283,10 @@ impl ArenaPlanner {
             let mut by_group: HashMap<&str, Vec<&str>> = HashMap::new();
             for a in &allocations {
                 if let Some(ref g) = a.alias_group {
-                    by_group.entry(g.as_str()).or_default().push(a.logical_buffer_id.as_str());
+                    by_group
+                        .entry(g.as_str())
+                        .or_default()
+                        .push(a.logical_buffer_id.as_str());
                 }
             }
             for (gid, members) in &by_group {
@@ -311,7 +312,7 @@ impl ArenaPlanner {
             peak_live_bytes,
         }
     }
-    }
+}
 
 /// A slot that has already been placed in the arena during interval coloring.
 struct PlacedSlot {
@@ -376,11 +377,7 @@ fn find_colored_offset(
     }
 
     // Fallback: place right after the rightmost placed buffer.
-    let max_end = placed
-        .iter()
-        .map(|p| p.offset + p.size)
-        .max()
-        .unwrap_or(0);
+    let max_end = placed.iter().map(|p| p.offset + p.size).max().unwrap_or(0);
     align_up(max_end, align)
 }
 
@@ -506,12 +503,26 @@ mod tests {
             make_op(
                 "op_a",
                 KernelOpKind::RmsNorm,
-                vec![make_use("buf_a", AccessMode::Write, LifetimeClass::OpScratch, None, 0, 4096)],
+                vec![make_use(
+                    "buf_a",
+                    AccessMode::Write,
+                    LifetimeClass::OpScratch,
+                    None,
+                    0,
+                    4096,
+                )],
             ),
             make_op(
                 "op_b",
                 KernelOpKind::QkvProjection,
-                vec![make_use("buf_b", AccessMode::Write, LifetimeClass::OpScratch, None, 0, 4096)],
+                vec![make_use(
+                    "buf_b",
+                    AccessMode::Write,
+                    LifetimeClass::OpScratch,
+                    None,
+                    0,
+                    4096,
+                )],
             ),
         ];
 
@@ -534,8 +545,22 @@ mod tests {
             "op1",
             KernelOpKind::RmsNorm,
             vec![
-                make_use("input", AccessMode::Read, LifetimeClass::RegionInput, None, 0, 512),
-                make_use("scratch", AccessMode::Write, LifetimeClass::OpScratch, None, 0, 4096),
+                make_use(
+                    "input",
+                    AccessMode::Read,
+                    LifetimeClass::RegionInput,
+                    None,
+                    0,
+                    512,
+                ),
+                make_use(
+                    "scratch",
+                    AccessMode::Write,
+                    LifetimeClass::OpScratch,
+                    None,
+                    0,
+                    4096,
+                ),
             ],
         )];
 
@@ -575,12 +600,26 @@ mod tests {
             make_op(
                 "op1",
                 KernelOpKind::AttentionScore,
-                vec![make_use("kv", AccessMode::Read, LifetimeClass::PersistentKvCache, None, 0, 1_000_000)],
+                vec![make_use(
+                    "kv",
+                    AccessMode::Read,
+                    LifetimeClass::PersistentKvCache,
+                    None,
+                    0,
+                    1_000_000,
+                )],
             ),
             make_op(
                 "op2",
                 KernelOpKind::AttentionApply,
-                vec![make_use("scratch", AccessMode::Write, LifetimeClass::LayerScratch, None, 0, 8192)],
+                vec![make_use(
+                    "scratch",
+                    AccessMode::Write,
+                    LifetimeClass::LayerScratch,
+                    None,
+                    0,
+                    8192,
+                )],
             ),
         ];
 
@@ -600,9 +639,42 @@ mod tests {
         // Three ops with independent scratch buffers → interval coloring aliases
         // them so peak_live_bytes < naive sum.
         let ops = vec![
-            make_op("op1", KernelOpKind::RmsNorm, vec![make_use("s1", AccessMode::Write, LifetimeClass::OpScratch, None, 0, 4096)]),
-            make_op("op2", KernelOpKind::QkvProjection, vec![make_use("s2", AccessMode::Write, LifetimeClass::OpScratch, None, 0, 8192)]),
-            make_op("op3", KernelOpKind::AttentionScore, vec![make_use("s3", AccessMode::Write, LifetimeClass::OpScratch, None, 0, 2048)]),
+            make_op(
+                "op1",
+                KernelOpKind::RmsNorm,
+                vec![make_use(
+                    "s1",
+                    AccessMode::Write,
+                    LifetimeClass::OpScratch,
+                    None,
+                    0,
+                    4096,
+                )],
+            ),
+            make_op(
+                "op2",
+                KernelOpKind::QkvProjection,
+                vec![make_use(
+                    "s2",
+                    AccessMode::Write,
+                    LifetimeClass::OpScratch,
+                    None,
+                    0,
+                    8192,
+                )],
+            ),
+            make_op(
+                "op3",
+                KernelOpKind::AttentionScore,
+                vec![make_use(
+                    "s3",
+                    AccessMode::Write,
+                    LifetimeClass::OpScratch,
+                    None,
+                    0,
+                    2048,
+                )],
+            ),
         ];
 
         let plan = ArenaPlanner::plan_arena(&ops, "arena1");
@@ -647,8 +719,30 @@ mod tests {
             layer_index: Some(0),
             phase: ExecutionPhase::Decode,
             ops: vec![
-                make_op("producer", KernelOpKind::RmsNorm, vec![make_use("buf_a", AccessMode::Write, LifetimeClass::LayerScratch, None, 0, 4096)]),
-                make_op("consumer", KernelOpKind::AttentionScore, vec![make_use("buf_a", AccessMode::Read, LifetimeClass::LayerScratch, None, 0, 4096)]),
+                make_op(
+                    "producer",
+                    KernelOpKind::RmsNorm,
+                    vec![make_use(
+                        "buf_a",
+                        AccessMode::Write,
+                        LifetimeClass::LayerScratch,
+                        None,
+                        0,
+                        4096,
+                    )],
+                ),
+                make_op(
+                    "consumer",
+                    KernelOpKind::AttentionScore,
+                    vec![make_use(
+                        "buf_a",
+                        AccessMode::Read,
+                        LifetimeClass::LayerScratch,
+                        None,
+                        0,
+                        4096,
+                    )],
+                ),
             ],
             command_buffer_policy: CommandBufferPolicy::decode_default(),
             hazard_policy: HazardPolicy::Conservative,
@@ -677,8 +771,30 @@ mod tests {
             layer_index: Some(0),
             phase: ExecutionPhase::Decode,
             ops: vec![
-                make_op("op1", KernelOpKind::RmsNorm, vec![make_use("shared", AccessMode::Write, LifetimeClass::OpScratch, None, 0, 1024)]),
-                make_op("op2", KernelOpKind::QkvProjection, vec![make_use("shared", AccessMode::Write, LifetimeClass::OpScratch, None, 0, 1024)]),
+                make_op(
+                    "op1",
+                    KernelOpKind::RmsNorm,
+                    vec![make_use(
+                        "shared",
+                        AccessMode::Write,
+                        LifetimeClass::OpScratch,
+                        None,
+                        0,
+                        1024,
+                    )],
+                ),
+                make_op(
+                    "op2",
+                    KernelOpKind::QkvProjection,
+                    vec![make_use(
+                        "shared",
+                        AccessMode::Write,
+                        LifetimeClass::OpScratch,
+                        None,
+                        0,
+                        1024,
+                    )],
+                ),
             ],
             command_buffer_policy: CommandBufferPolicy::decode_default(),
             hazard_policy: HazardPolicy::Conservative,

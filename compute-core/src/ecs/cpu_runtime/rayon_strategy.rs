@@ -150,7 +150,11 @@ mod tests {
     fn rayon_strategy_defaults() {
         // Default strategy is Auto.
         let s: RayonStrategy = Default::default();
-        assert_eq!(s, RayonStrategy::Auto, "default rayon strategy should be Auto");
+        assert_eq!(
+            s,
+            RayonStrategy::Auto,
+            "default rayon strategy should be Auto"
+        );
 
         // Default threading policy is Hybrid with sensible defaults.
         let p: CpuThreadingPolicy = Default::default();

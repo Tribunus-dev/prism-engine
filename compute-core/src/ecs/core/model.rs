@@ -6,12 +6,12 @@
 
 use crate::attention;
 use crate::ecs::backend::MlxBackend;
-use crate::primitives;
 use crate::ecs::projection_executor::{
     MaterializationClass, ProjectionExecutor, QuantizedProjectionDescriptor, RuntimeMode,
     StorageDtype,
 };
 use crate::ecs::projection_identity::ProjectionFamily;
+use crate::primitives;
 use mlx_rs::error::Result as MlxResult;
 use mlx_rs::Array;
 

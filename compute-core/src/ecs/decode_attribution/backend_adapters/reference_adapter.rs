@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! Pure-Rust f32 reference evaluator for all 8 catalog topologies.
 //!
 //! This is the correctness baseline — simple, deterministic, no SIMD,

@@ -8,14 +8,14 @@ use crate::ecs::ane::hot_row_predictor::HotRowPredictor;
 use crate::ecs::ane::weight_row_cache::WeightRowCache;
 use crate::ecs::backend::MlxBackend;
 use crate::ecs::config::EpiloguePlan;
-use crate::log_warn;
-use crate::primitives;
 use crate::ecs::projection_executor::{
     MaterializationClass, ProjectionExecutor, QuantizedProjectionDescriptor, RuntimeMode,
     StorageDtype,
 };
 use crate::ecs::projection_identity::{dtype_to_storage, ProjectionContext, ProjectionFamily};
 use crate::ecs::session::SamplerConfig;
+use crate::log_warn;
+use crate::primitives;
 use mlx_rs::error::Result as MlxResult;
 use mlx_rs::ops;
 use mlx_rs::ops::indexing::IndexOp;

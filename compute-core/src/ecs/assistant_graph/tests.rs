@@ -1,4 +1,6 @@
-use crate::ecs::assistant_graph::authority::{AuthorityRule, AuthorityRuleKind, RegionAuthorityPolicy};
+use crate::ecs::assistant_graph::authority::{
+    AuthorityRule, AuthorityRuleKind, RegionAuthorityPolicy,
+};
 use crate::ecs::assistant_graph::bridge::{
     BridgeDecl, BridgeValueType, EmotionalRegister, EmphasisSpan, PacingPlan, PronunciationHint,
     SpeakingStyle, SpeechPlan, SpeechUtterance, TurnIntent,

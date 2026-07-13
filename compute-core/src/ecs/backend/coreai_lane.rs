@@ -24,8 +24,8 @@ use crate::ecs::compilation::tri_lane::{
 };
 use tempfile::TempDir;
 
-use crate::ecs::compute_image::hw_assessment::KernelBenchResult;
 use crate::coreai_pipeline;
+use crate::ecs::compute_image::hw_assessment::KernelBenchResult;
 
 /// Compute profile for the Core ML execution lane.
 ///

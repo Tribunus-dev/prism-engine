@@ -774,7 +774,9 @@ impl DiffusionModel {
                     .unwrap_or(4096) as u32,
                 confidence_type: match raw.get("confidence_type").and_then(|v| v.as_str()) {
                     Some("softmax_margin") => crate::ecs::config::ConfidenceType::SoftmaxMargin,
-                    Some("normalized_entropy") => crate::ecs::config::ConfidenceType::NormalizedEntropy,
+                    Some("normalized_entropy") => {
+                        crate::ecs::config::ConfidenceType::NormalizedEntropy
+                    }
                     _ => crate::ecs::config::ConfidenceType::LogProb,
                 },
                 default_confidence_threshold: raw

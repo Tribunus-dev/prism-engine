@@ -266,14 +266,19 @@ mod tests {
     #[test]
     fn decoder_default_has_ternary() {
         let config = StageQuantizationConfig::decoder_default();
-        assert!(config.permitted_formats.contains(
-            &RuntimeRepresentationClass::TernaryTile640Base));
-        assert!(config.zero_collapse_thresholds.contains_key(
-            &RuntimeRepresentationClass::TernaryTile640Base));
+        assert!(config
+            .permitted_formats
+            .contains(&RuntimeRepresentationClass::TernaryTile640Base));
+        assert!(config
+            .zero_collapse_thresholds
+            .contains_key(&RuntimeRepresentationClass::TernaryTile640Base));
         // Ternary zero-collapse gate should be ~0.85, not the NF4 0.0007
-        let ternary_zc = config.zero_collapse_thresholds
-            [&RuntimeRepresentationClass::TernaryTile640Base];
-        assert!(ternary_zc > 0.5, "ternary zero-collapse gate should be wide");
+        let ternary_zc =
+            config.zero_collapse_thresholds[&RuntimeRepresentationClass::TernaryTile640Base];
+        assert!(
+            ternary_zc > 0.5,
+            "ternary zero-collapse gate should be wide"
+        );
     }
 
     #[test]

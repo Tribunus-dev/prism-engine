@@ -17,9 +17,9 @@ use std::fs::File;
 #[cfg(feature = "prism-backend")]
 use std::io::Write;
 
+use crate::config_namespace::resolve_namespace;
 use crate::ecs::config::build_execution_plan;
 use crate::ecs::config::parse_config;
-use crate::config_namespace::resolve_namespace;
 use crate::ecs::lut::graph::{ModelGraph, TensorBlueprint};
 use crate::quantization::cimage::CImageWriter;
 use crate::quantization::palette::palettize_matrix;

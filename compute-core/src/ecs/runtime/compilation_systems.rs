@@ -9,20 +9,20 @@ use crate::ecs::compilation::distill_core::{
 };
 use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
 use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
+pub use crate::ecs::compute_image::compile::ternary::ModelConfig;
+use crate::ecs::runtime::ecs_components::{
+    CodesData, CompilationPhase, CompilationStatus, ReconstructedWeights, RefinementOutcome,
+    SourceWeights, TensorBinding, TensorShape,
+};
+use crate::ecs::runtime::stage_graph::{StageConfig, StageGraph, StageQuantizationConfig};
+use crate::ecs::runtime::world::{Entity, World};
 use crate::quantization::admission::{
     candidate_plan, compute_weight_nrmse, pack_candidate, reconstruct_candidate,
 };
-use crate::quantization::contract::{CanonicalShape, 
-    QuantizationHint, RuntimeRepresentationClass, TensorClass,
+use crate::quantization::contract::{
+    CanonicalShape, QuantizationHint, RuntimeRepresentationClass, TensorClass,
 };
-use crate::ecs::runtime::ecs_components::{
-    CodesData, CompilationPhase, CompilationStatus, ReconstructedWeights,
-    RefinementOutcome, SourceWeights, TensorBinding, TensorShape,
-};
-use crate::ecs::runtime::stage_graph::{StageConfig, StageGraph, StageQuantizationConfig};
 use rayon::prelude::*;
-pub use crate::ecs::compute_image::compile::ternary::ModelConfig;
-use crate::ecs::runtime::world::{Entity, World};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,7 +71,8 @@ pub fn validate_sources(world: &mut World) {
     let entities: Vec<Entity> = world.iter_entities_with::<SourceWeights>().collect();
     for entity in entities {
         // Check if source weights are present and non-empty while borrowing immutably
-        let has_valid_weights = world.get::<SourceWeights>(entity)
+        let has_valid_weights = world
+            .get::<SourceWeights>(entity)
             .map_or(false, |w| !w.0.is_empty());
 
         // Then mutably update status — all immutable borrows dropped
@@ -102,7 +103,9 @@ pub fn validate_sources(world: &mut World) {
 /// If no candidate passes screening, the entity is marked `Failed`.
 pub fn admit_candidates(world: &mut World) {
     // Phase 0 (serial): clone all entity data into plain structs
-    let stage_config = world.get_resource::<StageConfigResource>().map(|r| r.0.clone());
+    let stage_config = world
+        .get_resource::<StageConfigResource>()
+        .map(|r| r.0.clone());
     let stage_config_ref = stage_config.as_ref();
 
     // Build input structs with cloned data for parallel processing
@@ -113,12 +116,17 @@ pub fn admit_candidates(world: &mut World) {
         out_features: usize,
     }
 
-    let inputs: Vec<EntityInput> = world.iter_entities_with::<SourceWeights>()
+    let inputs: Vec<EntityInput> = world
+        .iter_entities_with::<SourceWeights>()
         .filter_map(|entity| {
             // Filter: only entities in SourceValidated or Pending phase
             let _ = match world.get::<CompilationStatus>(entity) {
-                Some(s) if s.phase == CompilationPhase::SourceValidated
-                    || s.phase == CompilationPhase::Pending => s,
+                Some(s)
+                    if s.phase == CompilationPhase::SourceValidated
+                        || s.phase == CompilationPhase::Pending =>
+                {
+                    s
+                }
                 _ => return None,
             };
             // Status dropped, get the data
@@ -168,7 +176,12 @@ pub fn admit_candidates(world: &mut World) {
                 let (codes, scales, biases, scale_vector) =
                     pack_candidate(&input.source, in_features, out_features, format, None);
                 let reconstructed = reconstruct_candidate(
-                    format, &codes, &scales, &biases, in_features, out_features,
+                    format,
+                    &codes,
+                    &scales,
+                    &biases,
+                    in_features,
+                    out_features,
                     scale_vector.as_deref(),
                 );
                 let weight_nrmse = compute_weight_nrmse(&input.source, &reconstructed);
@@ -177,7 +190,12 @@ pub fn admit_candidates(world: &mut World) {
                     return AdmissionResult {
                         entity: input.entity,
                         format: Some(format),
-                        codes_data: Some(CodesData { codes, scales, biases, scale_vector }),
+                        codes_data: Some(CodesData {
+                            codes,
+                            scales,
+                            biases,
+                            scale_vector,
+                        }),
                         reconstructed: Some(reconstructed),
                         phase: CompilationPhase::Admitted,
                         error: None,
@@ -186,16 +204,31 @@ pub fn admit_candidates(world: &mut World) {
             }
 
             // Final fallback: try RawF32 (always passes, NRMSE = 0)
-            let (codes, scales, biases, scale_vector) =
-                pack_candidate(&input.source, in_features, out_features, RuntimeRepresentationClass::RawF32, None);
+            let (codes, scales, biases, scale_vector) = pack_candidate(
+                &input.source,
+                in_features,
+                out_features,
+                RuntimeRepresentationClass::RawF32,
+                None,
+            );
             let reconstructed = reconstruct_candidate(
-                RuntimeRepresentationClass::RawF32, &codes, &scales, &biases, in_features, out_features,
+                RuntimeRepresentationClass::RawF32,
+                &codes,
+                &scales,
+                &biases,
+                in_features,
+                out_features,
                 scale_vector.as_deref(),
             );
             return AdmissionResult {
                 entity: input.entity,
                 format: Some(RuntimeRepresentationClass::RawF32),
-                codes_data: Some(CodesData { codes, scales, biases, scale_vector }),
+                codes_data: Some(CodesData {
+                    codes,
+                    scales,
+                    biases,
+                    scale_vector,
+                }),
                 reconstructed: Some(reconstructed),
                 phase: CompilationPhase::Admitted,
                 error: None,
@@ -239,9 +272,15 @@ pub fn bind_tensors(world: &mut World) {
             Some(f) => f,
             None => continue,
         };
-        let in_features = world.get::<TensorShape>(entity).map_or(u32::MAX, |s| s.0.in_features);
-        let out_features = world.get::<TensorShape>(entity).map_or(u32::MAX, |s| s.0.out_features);
-        if in_features == u32::MAX || out_features == u32::MAX { continue; }
+        let in_features = world
+            .get::<TensorShape>(entity)
+            .map_or(u32::MAX, |s| s.0.in_features);
+        let out_features = world
+            .get::<TensorShape>(entity)
+            .map_or(u32::MAX, |s| s.0.out_features);
+        if in_features == u32::MAX || out_features == u32::MAX {
+            continue;
+        }
         let tiles = ((in_features as u64) + 639) / 640;
         let total_tiles = (out_features as u64) * tiles;
         let (code_tile_bytes, meta_tile_bytes) = tile_byte_sizes(format);
@@ -258,7 +297,7 @@ pub fn bind_tensors(world: &mut World) {
             reduction_tile_size: 640,
             tiles_per_output_channel: tiles as u32,
             tail_reduction_count: (in_features % 640) as u16,
-            macro_layout: 1, // OutputChannelContiguous
+            macro_layout: 1,  // OutputChannelContiguous
             tail_handling: 1, // ActivationZeroPredicationV1
             code_segment: 41, // MatrixContract (placeholder)
             code_offset: 0,
@@ -292,7 +331,6 @@ pub fn bind_tensors(world: &mut World) {
     }
 }
 
-
 // ===========================================================================
 // System 4: Refine tensors (on-policy distillation)
 // ===========================================================================
@@ -323,7 +361,10 @@ pub fn refine_tensors(world: &mut World) {
             Some(c) => c.clone(),
             None => continue,
         };
-        let owned_recon = match world.get::<ReconstructedWeights>(entity).map(|w| w.0.clone()) {
+        let owned_recon = match world
+            .get::<ReconstructedWeights>(entity)
+            .map(|w| w.0.clone())
+        {
             Some(r) => r,
             None => continue,
         };
@@ -340,9 +381,8 @@ pub fn refine_tensors(world: &mut World) {
         let out_features = owned_shape.out_features as usize;
 
         // Compute initial loss (weight-space NRMSE)
-        let initial_loss = crate::quantization::admission::compute_weight_nrmse(
-            &owned_source, &owned_recon,
-        );
+        let initial_loss =
+            crate::quantization::admission::compute_weight_nrmse(&owned_source, &owned_recon);
 
         // Refinement closure — mutably captures cloned data
         let mut codes = owned_codes.codes.clone();
@@ -370,7 +410,9 @@ pub fn refine_tensors(world: &mut World) {
                 // Simple LCG
                 let mut rng = seed;
                 for _ in 0..n_flip {
-                    rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    rng = rng
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
                     let idx = (rng >> 33) as usize % n_coords.max(1);
                     codes[idx] = codes[idx].wrapping_add(1);
                 }
@@ -386,14 +428,15 @@ pub fn refine_tensors(world: &mut World) {
                     scale_vector.as_deref(),
                 );
 
-                let new_loss = crate::quantization::admission::compute_weight_nrmse(
-                    &source, &reconstructed,
-                );
+                let new_loss =
+                    crate::quantization::admission::compute_weight_nrmse(&source, &reconstructed);
 
                 // Activation-parity check: teacher = source, student = reconstructed
                 let rel_tol = 0.05;
                 let acceptance = crate::ecs::compilation::distill_core::block_accept(
-                    &source, &reconstructed, rel_tol,
+                    &source,
+                    &reconstructed,
+                    rel_tol,
                 );
 
                 (new_loss, acceptance)
@@ -448,10 +491,11 @@ pub fn seal_cimage(world: &mut World, model_config: ModelConfig) {
 
         let codes_bytes: Vec<u8> = codes_data.codes.clone();
         // Metadata is stored as serialized f32 scale values
-        let meta_bytes: Vec<u8> = codes_data.scales.iter()
+        let meta_bytes: Vec<u8> = codes_data
+            .scales
+            .iter()
             .flat_map(|s| s.to_le_bytes())
-            .chain(codes_data.biases.iter()
-                .flat_map(|b| b.to_le_bytes()))
+            .chain(codes_data.biases.iter().flat_map(|b| b.to_le_bytes()))
             .collect();
 
         tensors.push(CompiledTensor {
@@ -572,8 +616,6 @@ pub fn compile_tensors(
     results
 }
 
-
-
 /// Compile one stage of a model into a sealed cimage.
 ///
 /// Creates an ECS World, loads stage tensors as entities, inserts the
@@ -643,8 +685,6 @@ pub fn compile_stage(
     (StageCimageResource { stage_id, cimage }, results)
 }
 
-
-
 /// Compile all stages of a model into a vector of sealed per-stage cimages.
 ///
 /// Takes a `StageGraph` describing the model decomposition and a loader
@@ -657,22 +697,15 @@ pub fn compile_stage(
 /// - `F`: a loader closure `(&StageConfig) -> (Vec<TensorInput>, ModelConfig,
 ///        CapabilityRegistry)` that produces the input tensors, model config,
 ///        and capability registry for the given stage.
-pub fn compile_model<F>(
-    graph: &StageGraph,
-    stage_loader: F,
-) -> Vec<StageCimageResource>
+pub fn compile_model<F>(graph: &StageGraph, stage_loader: F) -> Vec<StageCimageResource>
 where
     F: Fn(&StageConfig) -> (Vec<TensorInput>, ModelConfig, CapabilityRegistry),
 {
     let mut outputs = Vec::with_capacity(graph.stages.len());
     for stage in &graph.stages {
         let (tensors, model_config, registry) = stage_loader(stage);
-        let (stage_result, _bindings) = compile_stage(
-            tensors,
-            stage.clone(),
-            model_config,
-            registry,
-        );
+        let (stage_result, _bindings) =
+            compile_stage(tensors, stage.clone(), model_config, registry);
         outputs.push(stage_result);
     }
     outputs
@@ -687,7 +720,11 @@ mod tests {
         let tensor = TensorInput {
             matrix_id: 1,
             weights: vec![1.0, 0.0, 0.0, 1.0],
-            shape: CanonicalShape { in_features: 2, out_features: 2, rank: 2 },
+            shape: CanonicalShape {
+                in_features: 2,
+                out_features: 2,
+                rank: 2,
+            },
         };
         let registry = CapabilityRegistry::default_metal_v1();
         let results = compile_tensors(vec![tensor], registry);
@@ -705,11 +742,14 @@ mod tests {
 
         let entity = world.spawn().unwrap();
         world.insert(entity, SourceWeights(vec![127.0; 4]));
-        world.insert(entity, TensorShape(CanonicalShape {
-            in_features: 4,
-            out_features: 1,
-            rank: 2,
-        }));
+        world.insert(
+            entity,
+            TensorShape(CanonicalShape {
+                in_features: 4,
+                out_features: 1,
+                rank: 2,
+            }),
+        );
         world.insert(entity, CompilationStatus::new());
 
         validate_sources(&mut world);
@@ -732,7 +772,8 @@ mod tests {
         };
         seal_cimage(&mut world, model_config);
 
-        let cimage = world.get_resource::<SealedCimage>()
+        let cimage = world
+            .get_resource::<SealedCimage>()
             .expect("SealedCimage resource should be present")
             .clone();
         assert!(!cimage.0.is_empty(), "cimage should have content");
@@ -743,7 +784,11 @@ mod tests {
         let tensor = TensorInput {
             matrix_id: 2,
             weights: vec![],
-            shape: CanonicalShape { in_features: 0, out_features: 0, rank: 2 },
+            shape: CanonicalShape {
+                in_features: 0,
+                out_features: 0,
+                rank: 2,
+            },
         };
         let registry = CapabilityRegistry::default_metal_v1();
         let results = compile_tensors(vec![tensor], registry);

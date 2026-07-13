@@ -1,9 +1,9 @@
 use crate::ecs::compute_image::phase_dag::EmittedPhase;
 use crate::ecs::compute_image::phase_graph::ResolvedPhaseBinding;
+use crate::ecs::scheduling::phase_engine_state::RuntimeWorkItemHandle;
 use crate::inference::execution_image_state::ComputeImageState;
 use crate::inference::inference_session_state::InferenceSessionState;
 use crate::inference::inference_step_state::InferenceStepState;
-use crate::ecs::scheduling::phase_engine_state::RuntimeWorkItemHandle;
 
 /// Narrow typed invocation object passed to every PhaseRunner.
 ///

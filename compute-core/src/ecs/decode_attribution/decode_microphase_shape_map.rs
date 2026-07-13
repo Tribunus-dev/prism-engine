@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! DECODE-MICROPHASE-SUITE-0001: Decode microphase shape map.
 //!
 //! Maps symbolic dimension names to concrete values for the decode_small_v1

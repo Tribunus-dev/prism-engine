@@ -25,6 +25,12 @@ use std::sync::LazyLock;
 static TEST_BREADCRUMB_PATH: LazyLock<ParkingMutex<Option<std::path::PathBuf>>> =
     LazyLock::new(|| ParkingMutex::new(None));
 
+/// Serializes tests that mutate the process-wide breadcrumb configuration.
+/// This must remain separate from `TEST_BREADCRUMB_PATH` because the tests
+/// call helpers that lock the path override internally.
+#[cfg(test)]
+static BREADCRUMB_TEST_LOCK: LazyLock<ParkingMutex<()>> = LazyLock::new(|| ParkingMutex::new(()));
+
 /// Write a breadcrumb to the breadcrumb file.
 ///
 /// The file path is read from `CML_BREADCRUMB_PATH` env var.
@@ -106,6 +112,7 @@ mod tests {
 
     #[test]
     fn breadcrumb_write_and_read() {
+        let _lifecycle_guard = BREADCRUMB_TEST_LOCK.lock();
         let dir = unique_test_dir();
         let path = dir.join("crumbs.txt");
 
@@ -124,9 +131,10 @@ mod tests {
 
     #[test]
     fn no_env_var_skips_write() {
+        let _lifecycle_guard = BREADCRUMB_TEST_LOCK.lock();
         // If CML_BREADCRUMB_PATH is not set, write_breadcrumb should not panic.
-        // Clear the test-global path first so we don't race with
-        // breadcrumb_write_and_read (which sets TEST_BREADCRUMB_PATH).
+        // Clear the test-global path while holding the lifecycle lock shared
+        // with breadcrumb_write_and_read.
         *TEST_BREADCRUMB_PATH.lock() = None;
         unsafe {
             std::env::remove_var("CML_BREADCRUMB_PATH");

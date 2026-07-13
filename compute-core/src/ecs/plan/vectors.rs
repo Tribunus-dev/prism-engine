@@ -121,18 +121,13 @@ mod tests {
                 value: 0.90,
                 gate: 0.95,
             },
-            DriftStatus::TokenDivergenceExceeded {
-                count: 5,
-                gate: 0,
-            },
+            DriftStatus::TokenDivergenceExceeded { count: 5, gate: 0 },
         ];
         for original in &cases {
             let json = serde_json::to_string(original).expect("serialize");
-            let recovered: DriftStatus =
-                serde_json::from_str(&json).expect("deserialize");
+            let recovered: DriftStatus = serde_json::from_str(&json).expect("deserialize");
             // Roundtrip: re-serialize and compare strings.
-            let json2 =
-                serde_json::to_string(&recovered).expect("re-serialize");
+            let json2 = serde_json::to_string(&recovered).expect("re-serialize");
             assert_eq!(json, json2, "roundtrip mismatch");
         }
     }

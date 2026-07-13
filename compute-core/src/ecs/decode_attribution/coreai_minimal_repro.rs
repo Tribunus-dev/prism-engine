@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! Core ML Minimal Reproducer — diagnostic graphs and structural verifier.
 //!
 //! Two tracks:

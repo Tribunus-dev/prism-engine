@@ -11,7 +11,9 @@
 use std::path::Path;
 
 use crate::ecs::training_target::export::{export_feedback, export_spec};
-use crate::ecs::training_target::feedback::{EvidenceEntry, GateThresholds, TargetWithGates, TrainingFeedbackBuilder};
+use crate::ecs::training_target::feedback::{
+    EvidenceEntry, GateThresholds, TargetWithGates, TrainingFeedbackBuilder,
+};
 use crate::ecs::training_target::resolve::{TrainingTargetResolveOptions, TrainingTargetResolver};
 use crate::ecs::training_target::spec::TrainingTargetSpec;
 
@@ -24,24 +26,26 @@ pub fn training_target_export(policy_path: &Path, output_path: &Path) {
 }
 
 fn do_training_target_export(policy_path: &Path, output_path: &Path) -> Result<String, String> {
-    let policy_bytes = std::fs::read(policy_path)
-        .map_err(|e| format!("read policy: {}", e))?;
-    let policy: serde_json::Value = serde_json::from_slice(&policy_bytes)
-        .map_err(|e| format!("parse policy: {}", e))?;
+    let policy_bytes = std::fs::read(policy_path).map_err(|e| format!("read policy: {}", e))?;
+    let policy: serde_json::Value =
+        serde_json::from_slice(&policy_bytes).map_err(|e| format!("parse policy: {}", e))?;
 
     let resolver = TrainingTargetResolver;
     let options = TrainingTargetResolveOptions::default();
     let specs = resolver
         .resolve(&policy, &options)
         .map_err(|e| format!("resolve: {}", e))?;
-    let spec = specs.into_iter().next().ok_or_else(|| "no targets resolved from policy".to_string())?;
+    let spec = specs
+        .into_iter()
+        .next()
+        .ok_or_else(|| "no targets resolved from policy".to_string())?;
 
     // Validate consistency before exporting.
-    spec.check_consistency().map_err(|e| format!("consistency check: {}", e))?;
+    spec.check_consistency()
+        .map_err(|e| format!("consistency check: {}", e))?;
 
     let digest = spec.digest();
-    export_spec(&spec, output_path)
-        .map_err(|e| format!("export: {}", e))?;
+    export_spec(&spec, output_path).map_err(|e| format!("export: {}", e))?;
 
     Ok(digest)
 }
@@ -68,12 +72,13 @@ pub fn training_target_feedback(
     checkpoint_digest: &str,
     output_path: &Path,
 ) {
-    match do_training_target_feedback(target_spec_path, evidence_path, checkpoint_digest, output_path)
-    {
-        Ok(status) => println!(
-            "[cli] training-target feedback OK — status: {:?}",
-            status
-        ),
+    match do_training_target_feedback(
+        target_spec_path,
+        evidence_path,
+        checkpoint_digest,
+        output_path,
+    ) {
+        Ok(status) => println!("[cli] training-target feedback OK — status: {:?}", status),
         Err(e) => eprintln!("[cli] training-target feedback FAILED: {}", e),
     }
 }
@@ -84,15 +89,14 @@ fn do_training_target_feedback(
     checkpoint_digest: &str,
     output_path: &Path,
 ) -> Result<String, String> {
-    let spec_bytes =
-        std::fs::read(target_spec_path).map_err(|e| format!("read spec: {}", e))?;
+    let spec_bytes = std::fs::read(target_spec_path).map_err(|e| format!("read spec: {}", e))?;
     let spec: TrainingTargetSpec =
         serde_json::from_slice(&spec_bytes).map_err(|e| format!("parse spec: {}", e))?;
 
     let evidence_bytes =
         std::fs::read(evidence_path).map_err(|e| format!("read evidence: {}", e))?;
-    let evidence: Vec<EvidenceEntry> = serde_json::from_slice(&evidence_bytes)
-        .map_err(|e| format!("parse evidence: {}", e))?;
+    let evidence: Vec<EvidenceEntry> =
+        serde_json::from_slice(&evidence_bytes).map_err(|e| format!("parse evidence: {}", e))?;
 
     let spec_digest = spec.digest();
     let evidence_ledger_digest =
@@ -136,8 +140,7 @@ fn do_training_target_feedback(
     );
 
     let status = format!("{:?}", report.status);
-    export_feedback(&report, output_path)
-        .map_err(|e| format!("export feedback: {}", e))?;
+    export_feedback(&report, output_path).map_err(|e| format!("export feedback: {}", e))?;
 
     Ok(status)
 }

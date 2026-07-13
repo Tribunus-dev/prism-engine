@@ -40,7 +40,9 @@ pub fn capture_reference_vector(
             .map_err(|e| format!("load: {:?}", e))?;
 
         for step in 0..config.max_generated_tokens {
-            let output = session.step().map_err(|e| format!("step {}: {:?}", step, e))?;
+            let output = session
+                .step()
+                .map_err(|e| format!("step {}: {:?}", step, e))?;
             greedy_tokens.push(output.argmax_token);
             logits_topk.push(
                 output
@@ -89,8 +91,7 @@ pub fn save_vectors(
     std::fs::create_dir_all(&config.output_dir).map_err(|e| format!("mkdir: {:?}", e))?;
     for vec in vectors {
         let path = config.output_dir.join(format!("{}.json", vec.vector_id));
-        let json =
-            serde_json::to_string_pretty(vec).map_err(|e| format!("ser: {:?}", e))?;
+        let json = serde_json::to_string_pretty(vec).map_err(|e| format!("ser: {:?}", e))?;
         std::fs::write(&path, &json).map_err(|e| format!("write: {:?}", e))?;
     }
     Ok(())
@@ -98,8 +99,7 @@ pub fn save_vectors(
 
 /// Load a reference vector from a JSON file.
 pub fn load_vector(path: &Path) -> Result<ModelReferenceVector, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("read: {:?}", e))?;
+    let content = std::fs::read_to_string(path).map_err(|e| format!("read: {:?}", e))?;
     serde_json::from_str(&content).map_err(|e| format!("parse: {:?}", e))
 }
 
@@ -123,8 +123,7 @@ mod tests {
         };
 
         let json = serde_json::to_string_pretty(&config).expect("serialize");
-        let recovered: CaptureConfig =
-            serde_json::from_str(&json).expect("deserialize");
+        let recovered: CaptureConfig = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(config.output_dir, recovered.output_dir);
         assert_eq!(config.model_digest, recovered.model_digest);
@@ -133,10 +132,7 @@ mod tests {
         assert_eq!(config.prompts[0].id, recovered.prompts[0].id);
         assert_eq!(config.prompts[0].tokens, recovered.prompts[0].tokens);
         assert_eq!(config.prefill_chunk_size, recovered.prefill_chunk_size);
-        assert_eq!(
-            config.max_generated_tokens,
-            recovered.max_generated_tokens
-        );
+        assert_eq!(config.max_generated_tokens, recovered.max_generated_tokens);
     }
 
     #[test]
@@ -195,16 +191,15 @@ mod tests {
         assert_eq!(loaded.tokenizer_digest, vector.tokenizer_digest);
         assert_eq!(loaded.prompt_tokens, vector.prompt_tokens);
         assert_eq!(loaded.prefill_chunk_size, vector.prefill_chunk_size);
-        assert_eq!(
-            loaded.expected_greedy_tokens,
-            vector.expected_greedy_tokens
-        );
+        assert_eq!(loaded.expected_greedy_tokens, vector.expected_greedy_tokens);
         assert_eq!(loaded.logits_topk.len(), vector.logits_topk.len());
         assert_eq!(
             loaded.logits_topk[0][0].token,
             vector.logits_topk[0][0].token
         );
-        assert!((loaded.logits_topk[0][0].logprob - vector.logits_topk[0][0].logprob).abs() < 1e-12);
+        assert!(
+            (loaded.logits_topk[0][0].logprob - vector.logits_topk[0][0].logprob).abs() < 1e-12
+        );
         assert!(loaded.hidden_checkpoints.is_empty());
     }
 }

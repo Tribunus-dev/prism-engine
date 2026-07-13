@@ -254,10 +254,12 @@ impl StatefulPrefillContext {
         // Allocate K/V output arenas on first call
         if self.k_arena.is_none() {
             let kv_elements = (chunk_size * n_kv_heads * head_dim) as u32;
-            let k_arena = crate::ecs::arena::Arena::new(1, kv_elements, crate::ecs::arena::DataType::Float16)
-                .map_err(|e| format!("k_arena alloc: {e}"))?;
-            let v_arena = crate::ecs::arena::Arena::new(1, kv_elements, crate::ecs::arena::DataType::Float16)
-                .map_err(|e| format!("v_arena alloc: {e}"))?;
+            let k_arena =
+                crate::ecs::arena::Arena::new(1, kv_elements, crate::ecs::arena::DataType::Float16)
+                    .map_err(|e| format!("k_arena alloc: {e}"))?;
+            let v_arena =
+                crate::ecs::arena::Arena::new(1, kv_elements, crate::ecs::arena::DataType::Float16)
+                    .map_err(|e| format!("v_arena alloc: {e}"))?;
             self.k_arena = Some(k_arena);
             self.v_arena = Some(v_arena);
         }

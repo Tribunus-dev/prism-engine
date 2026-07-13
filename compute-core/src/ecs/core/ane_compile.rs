@@ -231,12 +231,7 @@ mod tests {
 
     #[test]
     fn schedule_batches_groups_four_same_shaped() {
-        let tensors = vec![
-            (3840, 18432),
-            (3840, 18432),
-            (3840, 18432),
-            (3840, 18432),
-        ];
+        let tensors = vec![(3840, 18432), (3840, 18432), (3840, 18432), (3840, 18432)];
         let groups = schedule_batches(&tensors);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].batch_size, 4);
@@ -279,12 +274,7 @@ mod tests {
 
     #[test]
     fn schedule_batches_different_shapes_separate() {
-        let tensors = vec![
-            (3840, 18432),
-            (768, 3072),
-            (3840, 18432),
-            (768, 3072),
-        ];
+        let tensors = vec![(3840, 18432), (768, 3072), (3840, 18432), (768, 3072)];
         let groups = schedule_batches(&tensors);
         assert_eq!(groups.len(), 2);
         // Both groups should have batch_size 2 (two tensors each)

@@ -8,11 +8,11 @@
 use std::path::Path;
 
 use crate::arena::Arena;
+use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use crate::ecs::coreai::fixture::{
     CoreAiArtifactExecutor, CoreAiArtifactHandle, CoreAiBridgeError, CoreAiExecutionPolicy,
     CoreAiPredictionRequest, CoreAiPredictionResult, LoadedCoreAiArtifact, NamedTensorOutput,
 };
-use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 
 // ── Helper: Map policy to compute units ────────────────────────────────────
 

@@ -49,7 +49,9 @@ impl TransitionLedgerResource {
     }
 
     /// Export the current window as JSONL.
-    pub fn export_jsonl(&self) -> Result<String, crate::ecs::runtime::ledger::error::LedgerExportError> {
+    pub fn export_jsonl(
+        &self,
+    ) -> Result<String, crate::ecs::runtime::ledger::error::LedgerExportError> {
         use crate::ecs::runtime::ledger::error::LedgerExportError;
         let ledger = self.inner.lock().unwrap();
         let mut output = Vec::new();

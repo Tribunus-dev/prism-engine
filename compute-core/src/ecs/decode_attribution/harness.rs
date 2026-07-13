@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! Core orchestration function for the decode attribution harness.
 //!
 //! `run_one()` executes one graph family at one shape profile with one
@@ -784,8 +787,9 @@ fn run_backend_accelerate(
     r.compile_status = "not_applicable".to_string();
     r.load_status = "not_applicable".to_string();
 
-    let tier =
-        crate::ecs::decode_attribution::backend_adapters::accelerate_adapter::support_tier(family.name);
+    let tier = crate::ecs::decode_attribution::backend_adapters::accelerate_adapter::support_tier(
+        family.name,
+    );
     r.backend_support_status = coarse_backend_support_status(tier).to_string();
     r.support_tier = tier.to_string();
 

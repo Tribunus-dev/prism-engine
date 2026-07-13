@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! ANE-backed draft model for speculative decoding.
 //!
 //! Runs a small Core ML language model (100M-500M parameters) entirely on

@@ -125,7 +125,10 @@ impl MultiplexerState {
                     entity,
                     AgentSlot::new(i as u32, (weights.offset as usize) + i * slot_size),
                 );
-                world.insert(entity, crate::ecs::runtime::components::KVCacheRef::new(4096));
+                world.insert(
+                    entity,
+                    crate::ecs::runtime::components::KVCacheRef::new(4096),
+                );
                 world.insert(entity, crate::ecs::runtime::components::ToolRegistry::new());
                 world.insert(entity, crate::ecs::runtime::components::AgentConfig::new());
             }

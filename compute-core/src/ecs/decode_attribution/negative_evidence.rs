@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! Negative-evidence fixture — deliberate load-error capture.
 //!
 //! Runs a valid compilation (same as normal graphs) but then attempts

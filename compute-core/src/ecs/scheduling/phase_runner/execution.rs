@@ -14,11 +14,11 @@ use crate::ecs::compute_image::fusion_receipts::FusedMetalExecutionEvidence;
 use crate::ecs::compute_image::phase_dag::{EmittedPhase, PhaseCompletionStatus, PhaseKind};
 use crate::ecs::config::operation_route::OperationRoute;
 use crate::ecs::config::LayerPlan;
+use crate::ecs::scheduling::execution_context::ExecutionContext;
 use crate::executor;
 use crate::executor::SinkState;
 use crate::projection_identity::{AttentionKind, Phase, ProjectionContext};
 use crate::runtime::executable_session::RuntimeBackends;
-use crate::ecs::scheduling::execution_context::ExecutionContext;
 use mlx_rs::Array;
 
 /// Result of running a single phase.

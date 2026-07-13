@@ -3,7 +3,9 @@ use std::collections::HashSet;
 
 use crate::ecs::state_store::pages::PageDescriptor;
 use crate::ecs::state_store::receipts::{KvAppendReceipt, KvReadReceipt};
-use crate::ecs::state_store::schema::{AccessKind, KvCacheLayout, KvCacheStoreDecl, StateAccessPolicy};
+use crate::ecs::state_store::schema::{
+    AccessKind, KvCacheLayout, KvCacheStoreDecl, StateAccessPolicy,
+};
 
 /// Descriptor for a span of contiguous tokens in the KV cache.
 #[derive(Debug, Clone, Serialize, Deserialize)]

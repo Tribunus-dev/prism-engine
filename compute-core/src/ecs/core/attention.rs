@@ -2,12 +2,12 @@
 //! Gemma 4 attention blocks — 2D inputs (no batch/seq reshape needed).
 
 use crate::ecs::backend::{MlxBackend, QuantizedWeightHandle, TensorHandle};
-use crate::primitives;
 use crate::ecs::projection_executor::{
     MaterializationClass, ProjectionExecutor, QuantizedProjectionDescriptor, RuntimeMode,
     StorageDtype,
 };
 use crate::ecs::projection_identity::ProjectionFamily;
+use crate::primitives;
 use mlx_rs::error::Result as MlxResult;
 use mlx_rs::Array;
 

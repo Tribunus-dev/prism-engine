@@ -15,17 +15,26 @@ pub fn plans_are_logically_equivalent(
     let region_ops: usize = region_batched.regions.iter().map(|r| r.ops.len()).sum();
     let op_ops: usize = op_by_op.regions.iter().map(|r| r.ops.len()).sum();
     if region_ops != op_ops {
-        return Err(format!("op count mismatch: region={} op={}", region_ops, op_ops));
+        return Err(format!(
+            "op count mismatch: region={} op={}",
+            region_ops, op_ops
+        ));
     }
     // Compare op order (should be identical)
     for (ri, region) in region_batched.regions.iter().enumerate() {
         for (oi, op) in region.ops.iter().enumerate() {
             let op_ref = &op_by_op.regions[ri].ops[oi];
             if op.op_id != op_ref.op_id {
-                return Err(format!("op order mismatch at region {} op {}: {} vs {}", ri, oi, op.op_id, op_ref.op_id));
+                return Err(format!(
+                    "op order mismatch at region {} op {}: {} vs {}",
+                    ri, oi, op.op_id, op_ref.op_id
+                ));
             }
             if op.specialization != op_ref.specialization {
-                return Err(format!("specialization mismatch at {} : {:?}", op.op_id, op.specialization));
+                return Err(format!(
+                    "specialization mismatch at {} : {:?}",
+                    op.op_id, op.specialization
+                ));
             }
         }
     }
@@ -34,15 +43,24 @@ pub fn plans_are_logically_equivalent(
 
 /// Get the total number of command buffers needed for a plan.
 pub fn total_command_buffers(plan: &ModelExecutionPlan) -> usize {
-    plan.regions.iter().filter(|r| r.command_buffer_policy.encode_region_as_single_command_buffer).count()
+    plan.regions
+        .iter()
+        .filter(|r| {
+            r.command_buffer_policy
+                .encode_region_as_single_command_buffer
+        })
+        .count()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
-    fn make_plan(region_kind: ExecutionRegionKind, ops: Vec<ScheduledKernelOp>, single_cb: bool) -> ModelExecutionPlan {
+    fn make_plan(
+        region_kind: ExecutionRegionKind,
+        ops: Vec<ScheduledKernelOp>,
+        single_cb: bool,
+    ) -> ModelExecutionPlan {
         ModelExecutionPlan {
             plan_id: "test".into(),
             model_family: "Gemma4".into(),
@@ -61,8 +79,11 @@ mod tests {
                 },
                 hazard_policy: HazardPolicy::Conservative,
                 arena_plan: ActivationArenaPlan {
-                    arena_id: "test".into(), total_bytes: 0,
-                    allocations: vec![], alias_groups: vec![], peak_live_bytes: 0,
+                    arena_id: "test".into(),
+                    total_bytes: 0,
+                    allocations: vec![],
+                    alias_groups: vec![],
+                    peak_live_bytes: 0,
                 },
                 timing_policy: TimingPolicy::Disabled,
             }],
@@ -96,9 +117,25 @@ mod tests {
             bindings: vec![],
             dependencies: vec![],
             buffer_uses: vec![],
-            dispatch_shape: DispatchShape { grid_x: 1, grid_y: 1, grid_z: 1, threadgroup_m: 32, threadgroup_n: 1, threadgroup_p: 1 },
-            estimated_cost: EstimatedKernelCost { compute_us: 1.0, memory_bytes_read: 0, memory_bytes_written: 0 },
-            validation_requirements: KernelValidationRequirements { allows_in_place_input_output: false, requires_zeroed_output: false, requires_aligned_metadata: false, requires_hardware_validation: false },
+            dispatch_shape: DispatchShape {
+                grid_x: 1,
+                grid_y: 1,
+                grid_z: 1,
+                threadgroup_m: 32,
+                threadgroup_n: 1,
+                threadgroup_p: 1,
+            },
+            estimated_cost: EstimatedKernelCost {
+                compute_us: 1.0,
+                memory_bytes_read: 0,
+                memory_bytes_written: 0,
+            },
+            validation_requirements: KernelValidationRequirements {
+                allows_in_place_input_output: false,
+                requires_zeroed_output: false,
+                requires_aligned_metadata: false,
+                requires_hardware_validation: false,
+            },
         }
     }
 

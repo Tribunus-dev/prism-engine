@@ -24,9 +24,9 @@ use mlx_rs::{ops, Array};
 use parking_lot::Mutex;
 
 use crate::ecs::cache::evolkv::{CalibrationSet, EvolKV};
+use crate::ecs::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 use crate::memory::allocator::BlockHandle;
 use crate::quantization::turboquant_kv::{AsymmetricQuantMode, KvQuantMode, TurboQuantKvCache};
-use crate::ecs::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 
 /// Resource ID for KVCacheCoordinator.
 pub const KV_CACHE_COORDINATOR_RESOURCE: ResourceId = 19;

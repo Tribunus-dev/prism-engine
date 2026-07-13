@@ -274,7 +274,9 @@ impl AudioInferenceSystem {
         // Store the feature tensor in the global array registry so downstream
         // text-model systems can retrieve it via AudioFeatures.handle.
         let num_frames = features.shape().get(0).copied().unwrap_or(0) as usize;
-        let handle = crate::ecs::bridge::ARRAY_REGISTRY.write().insert(features, None);
+        let handle = crate::ecs::bridge::ARRAY_REGISTRY
+            .write()
+            .insert(features, None);
 
         // Insert AudioFeatures component onto the entity.
         let audio_feat = AudioFeatures {
@@ -317,7 +319,8 @@ impl AudioInferenceSystem {
             .map_err(|e| format!("TTS synthesize: {e}"))?;
 
         // Encode PCM as WAV bytes.
-        let wav_bytes = crate::ecs::generation::text_to_speech::pcm_to_wav(&pcm_samples, sample_rate);
+        let wav_bytes =
+            crate::ecs::generation::text_to_speech::pcm_to_wav(&pcm_samples, sample_rate);
 
         // Write audio data to WorkerStream via record_output.
         if let Some(stream) = world.get_mut::<WorkerStream>(entity) {

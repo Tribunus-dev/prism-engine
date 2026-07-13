@@ -7,7 +7,6 @@
 //! The backend is a first-class fusion candidate alongside Metal and ANE:
 //! it participates in capability registration, fusion evaluation, and
 /// lowering pipelines.
-
 pub mod capabilities;
 pub mod lowering;
 pub mod rayon_strategy;

@@ -1,10 +1,10 @@
 //! Runtime executable loader — opens, validates, and prepares
 //! SealedComputeImageExecutable images for execution.
 
+pub mod engram;
 pub mod ledger;
 pub mod memory;
 pub mod scheduling;
-pub mod engram;
 
 pub mod agent_slot;
 pub mod ane_multiplexer;

@@ -11,6 +11,7 @@ use coreml_proto::proto::mil_spec::{self, argument, dimension, tensor_value, val
 use prost::Message;
 use sha2::{Digest, Sha256};
 
+use crate::coreai_pipeline::{compile_mlpackage, CoreAiIslandReceipt};
 use crate::ecs::backend::routing::{
     BackendArtifactId, EvidenceDigest, OperationId, TensorId, BACKEND_ANE,
 };
@@ -18,7 +19,6 @@ use crate::ecs::compiler::{
     scheduled::{RegionId, ScheduledRegion},
     BackendLowering, LegalityReceipt, LegalityViolation, LoweringReceipt,
 };
-use crate::coreai_pipeline::{compile_mlpackage, CoreAiIslandReceipt};
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 

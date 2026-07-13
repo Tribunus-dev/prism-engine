@@ -163,6 +163,7 @@ mod tests {
     /// Stress test: heavier concurrent workloads across 4 threads.
     /// Targets the Metal driver race condition documented in MLX 0.31.0-0.31.1.
     #[test]
+    #[ignore = "upstream MLX CPU CommandEncoder registry is not safe under concurrent quantized_matmul evaluation"]
     fn test_concurrent_heavy_mlx_stress() {
         let iterations = 50;
         let in_dim = 256;

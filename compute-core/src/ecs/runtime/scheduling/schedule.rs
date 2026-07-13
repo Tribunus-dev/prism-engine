@@ -626,12 +626,14 @@ impl Schedule {
 
                 // Cooperative dispatch: sequential but with per-system buffers.
                 // True thread-level parallelism requires Send bounds on ErasedSystem.
-                let mut merged_buffer: Vec<crate::ecs::runtime::scheduling::command::StampedCommand> =
-                    Vec::new();
+                let mut merged_buffer: Vec<
+                    crate::ecs::runtime::scheduling::command::StampedCommand,
+                > = Vec::new();
 
                 for &sys_idx in &_batch.system_indices {
-                    let mut local_buffer: Vec<crate::ecs::runtime::scheduling::command::StampedCommand> =
-                        Vec::new();
+                    let mut local_buffer: Vec<
+                        crate::ecs::runtime::scheduling::command::StampedCommand,
+                    > = Vec::new();
                     {
                         let mut writer = CommandWriter::new(
                             &mut local_buffer,

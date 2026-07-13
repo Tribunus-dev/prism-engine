@@ -104,10 +104,7 @@ pub enum CpuLoweringError {
     /// A codec is not supported by the CPU backend.
     UnsupportedCodec(String),
     /// A dense materialization exceeds the backend's size budget.
-    MaterializationTooLarge {
-        requested: u64,
-        max: u64,
-    },
+    MaterializationTooLarge { requested: u64, max: u64 },
     /// A required scratch plan could not be derived.
     MissingScratchPlan(String),
     /// An internal lowering error.
@@ -120,7 +117,10 @@ impl std::fmt::Display for CpuLoweringError {
             Self::UnsupportedOp(op) => write!(f, "unsupported CPU op: {op}"),
             Self::UnsupportedCodec(codec) => write!(f, "unsupported CPU codec: {codec}"),
             Self::MaterializationTooLarge { requested, max } => {
-                write!(f, "materialization {requested} bytes exceeds CPU limit {max}")
+                write!(
+                    f,
+                    "materialization {requested} bytes exceeds CPU limit {max}"
+                )
             }
             Self::MissingScratchPlan(detail) => write!(f, "missing scratch plan: {detail}"),
             Self::Internal(detail) => write!(f, "internal lowering error: {detail}"),
@@ -206,9 +206,7 @@ pub fn accel_rayon_lower(
         })?;
 
     // ── Infer strategy and scratch ───────────────────────────────────────
-    let has_heavy_matmul = cpu_ops
-        .iter()
-        .any(|op| matches!(op, CpuProgramOp::Matmul));
+    let has_heavy_matmul = cpu_ops.iter().any(|op| matches!(op, CpuProgramOp::Matmul));
     let parallel_strategy = infer_parallel_strategy(has_heavy_matmul);
 
     // ── Build accelerator call specs ─────────────────────────────────────
@@ -254,8 +252,8 @@ pub fn build_lowered_group(
 ) -> Result<LoweredGroup, CpuLoweringError> {
     let mut ops: Vec<LoweredOp> = Vec::with_capacity(op_names.len());
     for (i, name) in op_names.iter().enumerate() {
-        let op = parse_cpu_op(name)
-            .ok_or_else(|| CpuLoweringError::UnsupportedOp(name.to_string()))?;
+        let op =
+            parse_cpu_op(name).ok_or_else(|| CpuLoweringError::UnsupportedOp(name.to_string()))?;
         ops.push(LoweredOp {
             op,
             step_name: name.to_string(),
@@ -310,8 +308,7 @@ mod tests {
     #[test]
     fn lower_matmul_gelu_succeeds() {
         let cap = cpu_cap();
-        let group =
-            build_lowered_group(1, &["Matmul", "Gelu"], "RawF32", 64 * 1024).unwrap();
+        let group = build_lowered_group(1, &["Matmul", "Gelu"], "RawF32", 64 * 1024).unwrap();
         let program = accel_rayon_lower(&group, &cap).unwrap();
         assert_eq!(program.ops.len(), 2);
         assert!(matches!(program.ops[0], CpuProgramOp::Matmul));

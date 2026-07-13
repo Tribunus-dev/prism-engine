@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! Graph family catalog — 7 normal + 1 baseline graph builders.
 //!
 //! Every graph uses only ops from the qualified 9-op envelope.

@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! Suite manifest for FULL-INFERENCE-SUITE-QUALIFICATION-0001.
 //!
 //! The manifest is the authority for what the suite intends to run.

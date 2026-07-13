@@ -4,10 +4,11 @@ use sha2::{Digest, Sha256};
 
 use crate::ecs::cimage::receipts::EvidenceReceiptV0;
 use crate::ecs::cimage::{
-    CImageArtifactKind, CImageManifestV0, CImagePayloadKind, CImagePayloadRef,
-    CImageReceiptRef, CImageTensorEntry, CImageWriter,
-    ModelExecutionPlanSummary, PendingPayload, PendingReceipt, PhysicalTileLayout,
+    CImageArtifactKind, CImageManifestV0, CImagePayloadKind, CImagePayloadRef, CImageReceiptRef,
+    CImageTensorEntry, CImageWriter, ModelExecutionPlanSummary, PendingPayload, PendingReceipt,
+    PhysicalTileLayout,
 };
+use crate::ecs::plan::{CodecFamily, DType as PlanDType, HardwareProfileId};
 use crate::ecs::{
     component::{
         backend::CompiledBinary,
@@ -16,7 +17,6 @@ use crate::ecs::{
     },
     CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase,
 };
-use crate::ecs::plan::{CodecFamily, DType as PlanDType, HardwareProfileId};
 
 // ---------------------------------------------------------------------------
 // Helpers

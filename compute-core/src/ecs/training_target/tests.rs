@@ -13,7 +13,6 @@
 
 use std::collections::HashMap;
 
-use crate::execution_plan::CodecFamily;
 use crate::ecs::execution_profile::{
     GroupAxis, MetadataLayout, PhysicalTileLayout, StorageOrder, TileFamily, TileShape,
 };
@@ -29,6 +28,7 @@ use crate::ecs::training_target::resolve::TrainingTargetResolver;
 use crate::ecs::training_target::spec::{
     TrainingEvidenceGate, TrainingTargetPriority, TrainingTargetSpec, WeightTrainingTarget,
 };
+use crate::execution_plan::CodecFamily;
 
 /// Helper: construct a minimal PhysicalTileLayout for test use.
 fn test_tile_layout() -> PhysicalTileLayout {
@@ -105,13 +105,18 @@ fn test_spec_serde_roundtrip() {
     // Serialize to JSON string.
     let json = serde_json::to_string_pretty(&spec).expect("serialize spec");
     assert!(!json.is_empty(), "JSON output must not be empty");
-    assert!(json.contains("spec_version"), "JSON should contain spec_version");
-    assert!(json.contains("gemma-2-9b"), "JSON should contain model_family");
+    assert!(
+        json.contains("spec_version"),
+        "JSON should contain spec_version"
+    );
+    assert!(
+        json.contains("gemma-2-9b"),
+        "JSON should contain model_family"
+    );
     assert!(json.contains("Ternary"), "JSON should contain target codec");
 
     // Deserialize back.
-    let decoded: TrainingTargetSpec =
-        serde_json::from_str(&json).expect("deserialize spec");
+    let decoded: TrainingTargetSpec = serde_json::from_str(&json).expect("deserialize spec");
 
     // Verify top-level fields.
     assert_eq!(decoded.spec_version, 1);
@@ -125,7 +130,10 @@ fn test_spec_serde_roundtrip() {
     let wt = &decoded.weight_targets[0];
     assert_eq!(wt.target_id, "wt_gemm_proj");
     assert_eq!(wt.target_codec, CodecFamily::Ternary);
-    assert!(matches!(wt.training_method, QuantTrainingMethod::ShadowWeightsSte));
+    assert!(matches!(
+        wt.training_method,
+        QuantTrainingMethod::ShadowWeightsSte
+    ));
     assert_eq!(wt.priority, TrainingTargetPriority::Required);
 
     // Verify evidence gate.

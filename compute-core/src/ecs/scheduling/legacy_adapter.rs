@@ -7,13 +7,13 @@
 
 use crate::ecs::config::operation_route::OperationRoute;
 use crate::ecs::config::LayerPlan;
+use crate::ecs::kv_cache::KvCache;
+use crate::ecs::scheduling::activation_binding::CurrentActivation;
 use crate::executor;
 use crate::executor::SinkState;
 use crate::inference::execution_image_state::RopeTables;
-use crate::ecs::kv_cache::KvCache;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 use crate::profiled_model::LayerWeights;
-use crate::ecs::scheduling::activation_binding::CurrentActivation;
 use mlx_rs::Array;
 
 /// Invocation parameters for the legacy MLX layer runner.

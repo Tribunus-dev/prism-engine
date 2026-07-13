@@ -1,11 +1,11 @@
-use crate::ecs::config::TextArchitecture;
+use crate::ecs::adapter::CanonicalRole;
 use crate::ecs::component::memory::MemoryBudget;
 use crate::ecs::component::tensor::{
     CanonicalRoleComp, CodecFamilyComp, ExpertIndex, MoEConfig, Shape,
 };
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::config::TextArchitecture;
 use crate::ecs::plan::CodecFamily;
-use crate::ecs::adapter::CanonicalRole;
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use std::collections::{HashMap, HashSet};
 
 /// Evaluates MoE expert budget against the configured codec and topology.

@@ -9,10 +9,12 @@ use mlx_rs::Array;
 use crate::ecs::arena::Arena;
 use crate::ecs::arena::DataType;
 use crate::ecs::config::operation_route::OperationRoute;
-use crate::log_debug;
 use crate::ecs::memory::allocator::IosurfaceAllocator;
+use crate::log_debug;
 
-use crate::ecs::compute_lane::{spawn_lane, ComputeCommand, ComputeLaneId, DeviceIdentity, LaneHandle};
+use crate::ecs::compute_lane::{
+    spawn_lane, ComputeCommand, ComputeLaneId, DeviceIdentity, LaneHandle,
+};
 use crate::ecs::coreai_bridge::CoreAiModel;
 use parking_lot::Mutex;
 use std::sync::Arc;

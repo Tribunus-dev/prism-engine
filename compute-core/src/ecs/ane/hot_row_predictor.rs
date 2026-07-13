@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! ANE-based next-token predictor for LM head weight prefetch.
 //!
 //! Uses a tiny 1-layer MLP on the Neural Engine that maps the current hidden

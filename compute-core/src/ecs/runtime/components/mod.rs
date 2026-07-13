@@ -24,13 +24,16 @@ pub use worker_stream::WorkerStream;
 // ── Stable component IDs ──────────────────────────────────────────────
 
 pub const WORKER_REQUEST_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId = 10;
-pub const WORKER_ASSIGNMENT_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId = 11;
-pub const WORKER_LIFECYCLE_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId = 12;
+pub const WORKER_ASSIGNMENT_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId =
+    11;
+pub const WORKER_LIFECYCLE_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId =
+    12;
 pub const WORKER_STREAM_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId = 13;
-pub const WORKER_HEARTBEAT_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId = 14;
+pub const WORKER_HEARTBEAT_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId =
+    14;
 pub const WORKER_OUTCOME_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId = 15;
-pub const WORKER_HARDWARE_STREAM_COMPONENT: crate::ecs::runtime::scheduling::component_id::ComponentId =
-    16;
+pub const WORKER_HARDWARE_STREAM_COMPONENT:
+    crate::ecs::runtime::scheduling::component_id::ComponentId = 16;
 
 // ── Stable system IDs ─────────────────────────────────────────────────
 

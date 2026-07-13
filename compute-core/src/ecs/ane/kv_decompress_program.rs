@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! MIL program generation for ANE KV cache decompression and sliding window attention.
 //! Also provides AneCompressor — a manager that loads and runs ANE compression/decompression programs.
 //!

@@ -13,7 +13,9 @@
 //!
 
 use crate::ecs::bridge::ARRAY_REGISTRY;
-use crate::ecs::config::AttentionKind::{self, FullAttention, MiniMaxSparseAttention, SlidingAttention};
+use crate::ecs::config::AttentionKind::{
+    self, FullAttention, MiniMaxSparseAttention, SlidingAttention,
+};
 use mlx_rs::ops::indexing::IndexOp;
 use mlx_rs::Array;
 use mlx_rs::{error::Result as MlxResult, ops};
