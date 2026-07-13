@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Apple tri-lane artifact manifest — sealed CImage extension.
 //!
 //! Contains compile-time metadata for three-lane (ANE/GPU/CPU) heterogeneous

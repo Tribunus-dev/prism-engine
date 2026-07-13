@@ -13,7 +13,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ecs::compilation::phase_ir::{CompilePhaseDescriptor, ShapeClass};
-use crate::ecs::compilation::region_catalogue::{LayoutContract, RegionCatalogue, RegionCatalogueEntry};
+use crate::ecs::compilation::region_catalogue::{
+    LayoutContract, RegionCatalogue, RegionCatalogueEntry,
+};
 use crate::ecs::compilation::tri_lane::AneRejectionReason;
 
 // ── Eligibility result ────────────────────────────────────────────────────

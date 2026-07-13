@@ -7,11 +7,11 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use crate::compute_ir::{ComputeExecutionIR, IROp, IrTensor};
 use crate::ecs::compute_image::tensix::{
     CardCoord, DataFormat, GoldenPath, KernelConfig, KernelType, MathFidelity, TensixArch,
     TensixComputeImage, TensorBinding,
 };
-use crate::compute_ir::{ComputeExecutionIR, IROp, IrTensor};
 use crate::Result;
 
 /// Compile a compute execution IR into a Tensix compute image.

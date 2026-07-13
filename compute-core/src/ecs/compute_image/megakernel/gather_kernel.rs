@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Gather kernel: reads paged TernaryBlock32 fragments from L2,
 //! decompresses to FP16, and scatters into contiguous L1 staging buffer.
 //! Also: scatter kernel for eviction (FP16 L1 → ternary L2).

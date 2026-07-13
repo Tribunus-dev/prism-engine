@@ -1,4 +1,7 @@
-#![cfg(all(target_os = "macos", any(feature = "mlx-backend", feature = "prism-backend")))]
+#![cfg(all(
+    target_os = "macos",
+    any(feature = "mlx-backend", feature = "prism-backend")
+))]
 //! Standalone ANE subgraph compilation for multimodal and MTP (multi-token
 //! prediction) draft subgraphs.
 //!
@@ -14,8 +17,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::ecs::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
 use crate::coreai_pipeline;
+use crate::ecs::compute_image::subgraph_mil::{build_draft_layer_mil, build_matmul_mil};
 use crate::mlpackage::{self, ModelMeta};
 use coreml_proto::proto::mil_spec;
 

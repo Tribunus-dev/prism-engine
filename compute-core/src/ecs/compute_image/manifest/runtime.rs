@@ -423,7 +423,9 @@ impl CompiledImageReader {
                                             name, e
                                         ))
                                     })?;
-                            let handle = crate::ecs::bridge::ARRAY_REGISTRY.write().insert(array, None);
+                            let handle = crate::ecs::bridge::ARRAY_REGISTRY
+                                .write()
+                                .insert(array, None);
                             persistent_handles.insert(name.clone(), handle);
                         }
                     }

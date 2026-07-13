@@ -11,7 +11,9 @@ use crate::ecs::backend::metal_consumer::MetalConsumer;
 use crate::ecs::backend::metal_iosurface::{
     MetalExecutable, MetalResourceFormat, MetalResourceKind, MetalResourceView,
 };
-use crate::ecs::backend::shared_event::{SharedEventAccess, SharedEventBinding, SharedEventContract};
+use crate::ecs::backend::shared_event::{
+    SharedEventAccess, SharedEventBinding, SharedEventContract,
+};
 use crate::ecs::compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
 use crate::ecs::compute_image::apple_cimage_manifest::{
     AppleTriLaneArtifactManifest, IOSurfaceSlotManifest as CimageSlotManifest,
@@ -410,13 +412,15 @@ fn add_generic_coreai_bindings(
     contract_digest: &str,
 ) -> Result<(), String> {
     for slot_id in input_slots {
-        executable.add_input_binding(crate::ecs::backend::coreai_iosurface::CoreAiIOSurfaceBinding {
-            tensor_id: slot_manifest_by_id(slots, *slot_id)?.tensor_id.clone(),
-            slot_id: *slot_id,
-            io_surface_id: 0,
-            byte_offset: 0,
-            contract_digest: contract_digest.into(),
-        })?;
+        executable.add_input_binding(
+            crate::ecs::backend::coreai_iosurface::CoreAiIOSurfaceBinding {
+                tensor_id: slot_manifest_by_id(slots, *slot_id)?.tensor_id.clone(),
+                slot_id: *slot_id,
+                io_surface_id: 0,
+                byte_offset: 0,
+                contract_digest: contract_digest.into(),
+            },
+        )?;
     }
     for slot_id in output_slots {
         executable.add_output_binding(

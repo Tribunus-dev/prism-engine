@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! PRISM-CIMAGE-HETEROGENEOUS-COMPILATION-0001
 //!
 //! Heterogeneous execution image types — the compiler-emitted primary artifact

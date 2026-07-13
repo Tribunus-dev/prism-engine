@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Pure data types for IOSurface arena slot state — no system dependencies.
 //!
 //! These types are used by both the macOS-only IOSurface arena code and by

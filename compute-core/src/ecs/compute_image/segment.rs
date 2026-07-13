@@ -181,7 +181,9 @@ impl ImageRuntime {
 
                 let slice = Self::slice_tensor_bytes(&bytes, entry)?;
                 let array = dtype_to_array(slice, &entry.storage_dtype, &entry.physical_shape)?;
-                let handle = crate::ecs::bridge::ARRAY_REGISTRY.write().insert(array, None);
+                let handle = crate::ecs::bridge::ARRAY_REGISTRY
+                    .write()
+                    .insert(array, None);
                 self.persistent_handles.insert(entry.name.clone(), handle);
             }
         }
@@ -227,7 +229,9 @@ impl ImageRuntime {
 
             let slice = Self::slice_tensor_bytes(&bytes, entry)?;
             let array = dtype_to_array(slice, &entry.storage_dtype, &entry.physical_shape)?;
-            let handle = crate::ecs::bridge::ARRAY_REGISTRY.write().insert(array, None);
+            let handle = crate::ecs::bridge::ARRAY_REGISTRY
+                .write()
+                .insert(array, None);
             handles.push(handle);
         }
 

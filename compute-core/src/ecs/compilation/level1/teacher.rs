@@ -376,7 +376,9 @@ impl Gemma4Teacher {
     }
 
     /// Borrow the underlying orchestrator (e.g. to reset slots between eval docs).
-    pub fn orchestrator_mut(&mut self) -> &mut crate::ecs::compute_image::orchestrator::Orchestrator {
+    pub fn orchestrator_mut(
+        &mut self,
+    ) -> &mut crate::ecs::compute_image::orchestrator::Orchestrator {
         &mut self.orch
     }
 }

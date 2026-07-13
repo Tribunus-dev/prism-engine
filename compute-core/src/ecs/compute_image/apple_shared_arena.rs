@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Live IOSurface arena for ANE-TRI-LANE-REALIZATION-0001 Phase 1.
 //!
 //! Provides sealed arena metadata, live IOSurface arena installation, and

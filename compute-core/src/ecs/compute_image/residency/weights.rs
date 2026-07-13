@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Weight object descriptors and residency classification for
 //! SealedComputeImageExecutable.
 //!
@@ -209,7 +213,8 @@ mod tests {
             quantization: None,
             checksum: ContentHash(0),
             consumers,
-            residency_class: crate::ecs::compute_image::content_store::index::ResidencyClass::DiskOnly,
+            residency_class:
+                crate::ecs::compute_image::content_store::index::ResidencyClass::DiskOnly,
         }
     }
 

@@ -750,8 +750,6 @@ impl MlpShardBuilder {
             receipts: Vec::new(),
         })
     }
-
-
 }
 // ─── Decoder layer builder ─────────────────────────────────────────────────
 

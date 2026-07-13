@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Model loading helpers.
 //!
 //! Loads pre-compiled .mlmodelc models from the `.cimage` auxiliary
@@ -7,8 +11,8 @@
 use super::Orchestrator;
 use crate::arena::Arena;
 use crate::arena::DataType;
-use crate::ecs::compute_image::compaction;
 use crate::coreai_bridge::CoreAiModel;
+use crate::ecs::compute_image::compaction;
 
 impl Orchestrator {
     /// Load a pre-compiled compaction model from embedded .mlmodelc bytes.

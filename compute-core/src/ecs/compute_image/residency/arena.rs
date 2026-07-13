@@ -5,7 +5,9 @@
 //! [`estimate_kv_cache_bytes`] function for quick sizing without the
 //! builder wrapper.
 
-use crate::ecs::compute_image::residency::plan::{ActivationArenaRequirements, KvCacheRequirements};
+use crate::ecs::compute_image::residency::plan::{
+    ActivationArenaRequirements, KvCacheRequirements,
+};
 
 /// Computes activation arena and KV cache requirements.
 ///

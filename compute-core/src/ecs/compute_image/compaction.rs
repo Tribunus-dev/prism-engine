@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! KV cache compaction — StreamingLLM-style heuristic position selection.
 //!
 //! When compressing a long KV cache (e.g. 1M tokens → 20K) for ternary

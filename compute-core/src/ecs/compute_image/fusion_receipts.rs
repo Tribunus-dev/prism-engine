@@ -95,7 +95,9 @@ impl FusedMetalExecutionEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::fusion_abi::{ArtifactHash, MetalFusionFamily, QuantizationContract};
+    use crate::ecs::compute_image::fusion_abi::{
+        ArtifactHash, MetalFusionFamily, QuantizationContract,
+    };
     use std::collections::HashMap;
 
     fn dummy_artifact() -> SealedMetalFusionArtifact {

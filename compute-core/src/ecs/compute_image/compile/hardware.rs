@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! Hardware assessment integration for the ComputeImage compile pipeline.
 //!
 //! Probes the target hardware, runs synthetic benchmarks, selects optimal
@@ -734,8 +738,11 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
         let candidates = crate::ecs::compute_image::compile::coreai::candidate_subgraphs();
         let mut decompositions = Vec::new();
         for (name, ops) in &candidates {
-            let decomp =
-                crate::ecs::compute_image::compile::coreai::decompose_subgraph(name, ops, &concurrency);
+            let decomp = crate::ecs::compute_image::compile::coreai::decompose_subgraph(
+                name,
+                ops,
+                &concurrency,
+            );
             eprintln!(
                 "[hw-assessment] subgraph '{}': {} Core ML ops + {} Accelerate ops",
                 name,

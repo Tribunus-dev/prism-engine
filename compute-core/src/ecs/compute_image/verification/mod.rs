@@ -17,5 +17,9 @@ pub mod numerical;
 ))]
 pub mod phase_graph;
 pub mod residency;
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#[cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 pub mod resource_fit;

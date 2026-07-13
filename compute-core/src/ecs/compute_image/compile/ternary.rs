@@ -1107,7 +1107,6 @@ pub fn requantize_kv_to_swizzled_u8(
     }
 }
 
-
 /// Model hyper-parameters needed to build the cimage header.
 #[derive(Debug, Clone, Copy)]
 pub struct ModelConfig {
@@ -1152,14 +1151,10 @@ pub struct CompiledTensor {
 ///   offset H+M+C: metadata (concatenated per tensor, format-specific SegmentKind)
 ///
 /// Returns the complete cimage as Vec<u8> on success, or a descriptive error.
-pub fn build_cimage(
-    tensors: Vec<CompiledTensor>,
-    config: ModelConfig,
-) -> Result<Vec<u8>, String> {
+pub fn build_cimage(tensors: Vec<CompiledTensor>, config: ModelConfig) -> Result<Vec<u8>, String> {
     // ── Compute MatrixContract segment ──────────────────────────────
-    let mut contract_buf = Vec::with_capacity(
-        4 + tensors.len() * MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH,
-    );
+    let mut contract_buf =
+        Vec::with_capacity(4 + tensors.len() * MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH);
     contract_buf.extend_from_slice(&(tensors.len() as u32).to_le_bytes());
     for tensor in &tensors {
         write_matrix_weight_binding_v1_le(&mut contract_buf, &tensor.binding)
@@ -1168,17 +1163,25 @@ pub fn build_cimage(
     let contract_len = contract_buf.len() as u64;
 
     // PAD to page boundary
-    let pad_to_page = |n: u64| -> u64 {
-        ((n + CIMAGE_PAGE_SIZE - 1) / CIMAGE_PAGE_SIZE) * CIMAGE_PAGE_SIZE
-    };
+    let pad_to_page =
+        |n: u64| -> u64 { ((n + CIMAGE_PAGE_SIZE - 1) / CIMAGE_PAGE_SIZE) * CIMAGE_PAGE_SIZE };
 
     // ── Compute code and metadata payloads per tensor ───────────────
     // Segment kind mapping per representation (code, metadata).
     let segment_kinds = |rep: u8| -> (u32, u32) {
         match rep {
-            0 => (SegmentKind::TernaryWeights as u32, SegmentKind::BlockScales as u32),
-            1 => (SegmentKind::Nf4Tile640Weights as u32, SegmentKind::BlockBiases as u32),
-            2 => (SegmentKind::Int8Tile640Weights as u32, SegmentKind::BlockBiases as u32),
+            0 => (
+                SegmentKind::TernaryWeights as u32,
+                SegmentKind::BlockScales as u32,
+            ),
+            1 => (
+                SegmentKind::Nf4Tile640Weights as u32,
+                SegmentKind::BlockBiases as u32,
+            ),
+            2 => (
+                SegmentKind::Int8Tile640Weights as u32,
+                SegmentKind::BlockBiases as u32,
+            ),
             3 => (SegmentKind::RawF16Weights as u32, 0xFFFFFFFF),
             _ => (0xFFFFFFFF, 0xFFFFFFFF),
         }
@@ -1299,28 +1302,42 @@ pub fn build_cimage(
 
     // Write header
     let mut cursor = std::io::Cursor::new(&mut out);
-use std::io::{Write, Seek};
+    use std::io::{Seek, Write};
     cursor.seek(std::io::SeekFrom::Start(0)).unwrap();
-    write_cimage_header_le(&mut cursor, &header)
-        .map_err(|e| format!("write header: {e}"))?;
+    write_cimage_header_le(&mut cursor, &header).map_err(|e| format!("write header: {e}"))?;
 
     // Write MatrixContract segment
-    cursor.seek(std::io::SeekFrom::Start(contract_offset)).unwrap();
-    cursor.write_all(&contract_buf)
+    cursor
+        .seek(std::io::SeekFrom::Start(contract_offset))
+        .unwrap();
+    cursor
+        .write_all(&contract_buf)
         .map_err(|e| format!("write contract: {e}"))?;
 
     // Write code segments
     for (kind, blob) in &code_blobs {
-        let offset = code_sizes.iter().find(|(k, _, _)| *k == *kind).map(|(_, o, _)| *o).unwrap();
+        let offset = code_sizes
+            .iter()
+            .find(|(k, _, _)| *k == *kind)
+            .map(|(_, o, _)| *o)
+            .unwrap();
         cursor.seek(std::io::SeekFrom::Start(offset)).unwrap();
-        cursor.write_all(blob).map_err(|e| format!("write code seg {kind}: {e}"))?;
+        cursor
+            .write_all(blob)
+            .map_err(|e| format!("write code seg {kind}: {e}"))?;
     }
 
     // Write metadata segments
     for (kind, blob) in &meta_blobs {
-        let offset = meta_sizes.iter().find(|(k, _, _)| *k == *kind).map(|(_, o, _)| *o).unwrap();
+        let offset = meta_sizes
+            .iter()
+            .find(|(k, _, _)| *k == *kind)
+            .map(|(_, o, _)| *o)
+            .unwrap();
         cursor.seek(std::io::SeekFrom::Start(offset)).unwrap();
-        cursor.write_all(blob).map_err(|e| format!("write meta seg {kind}: {e}"))?;
+        cursor
+            .write_all(blob)
+            .map_err(|e| format!("write meta seg {kind}: {e}"))?;
     }
 
     Ok(out)
@@ -1353,11 +1370,21 @@ mod build_cimage_tests {
             tail_reduction_count: (in_f % 640) as u16,
             macro_layout: 1,
             tail_handling: 1,
-            code_segment: match rep { 0 => 1u8, 1 => 26u8, 2 => 39u8, _ => 38u8 },
+            code_segment: match rep {
+                0 => 1u8,
+                1 => 26u8,
+                2 => 39u8,
+                _ => 38u8,
+            },
             code_offset: 0,
             code_length: total_tiles * code_bs,
             code_tile_stride_bytes: code_bs as u32,
-            metadata_segment: match rep { 0 => 2u8, 1 => 27u8, 2 => 27u8, _ => 0u8 },
+            metadata_segment: match rep {
+                0 => 2u8,
+                1 => 27u8,
+                2 => 27u8,
+                _ => 0u8,
+            },
             metadata_offset: 0,
             metadata_length: total_tiles * meta_bs,
             metadata_tile_stride_bytes: meta_bs as u16,
@@ -1377,13 +1404,11 @@ mod build_cimage_tests {
     #[test]
     fn build_basic_cimage() {
         let binding = make_dummy_binding(1, 640, 640);
-        let tensors = vec![
-            CompiledTensor {
-                binding: binding.clone(),
-                codes: vec![0xABu8; 640 * 320],
-                metadata: vec![0xCDu8; 640 * 8],
-            },
-        ];
+        let tensors = vec![CompiledTensor {
+            binding: binding.clone(),
+            codes: vec![0xABu8; 640 * 320],
+            metadata: vec![0xCDu8; 640 * 8],
+        }];
         let result = build_cimage(
             tensors,
             ModelConfig {
@@ -1406,7 +1431,6 @@ mod build_cimage_tests {
         assert!(cimage.len() > 0, "empty cimage");
     }
 }
-
 
 #[cfg(test)]
 mod tests {

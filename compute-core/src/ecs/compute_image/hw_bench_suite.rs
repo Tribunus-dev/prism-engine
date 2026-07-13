@@ -3,7 +3,9 @@
 //! Generates candidate kernel variants, runs synthetic benchmarks against
 //! the target hardware, and selects the best kernels by cost model.
 
-use crate::ecs::compute_image::hw_assessment::{AssessmentReceipt, KernelBenchResult, KernelCandidate};
+use crate::ecs::compute_image::hw_assessment::{
+    AssessmentReceipt, KernelBenchResult, KernelCandidate,
+};
 
 /// Generate the full set of candidate kernel variants to evaluate.
 ///

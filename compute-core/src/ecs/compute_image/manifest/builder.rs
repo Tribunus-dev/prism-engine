@@ -221,7 +221,10 @@ impl ImageBuilder {
 
     /// Finalize and return the complete manifest.
     /// Set the compiler-emitted phase DAG.
-    pub fn set_phase_graph(&mut self, dag: crate::ecs::compute_image::phase_dag::EmittedPhaseGraph) {
+    pub fn set_phase_graph(
+        &mut self,
+        dag: crate::ecs::compute_image::phase_dag::EmittedPhaseGraph,
+    ) {
         self.manifest.phase_dag = Some(dag);
     }
 

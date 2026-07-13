@@ -16,9 +16,9 @@
 //!    serialises it as an `.mlpackage`, and runs `xcrun coremlcompiler`
 //!    to produce a `.mlmodelc` ready for IOSurface-backed inference.
 
+use crate::coreai_pipeline;
 use crate::ecs::compute_image::hw_assessment::ConcurrencyPlan;
 use crate::ecs::compute_image::subgraph_mil;
-use crate::coreai_pipeline;
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 use coreml_proto::proto::mil_spec;

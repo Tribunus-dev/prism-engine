@@ -96,17 +96,26 @@ fn auto_end_encoding<'a>(mut ae: AutoEncoder<'a>) {
 /// | 1     | MlpGateUp        | cimage_linear_rawf32|
 /// | 2     | MlpGateUp        | cimage_linear_rawf32|
 /// | 3     | MlpActivation    | cimage_silu_f32     |
-/// | 4     | MlpDownResidual  | cimage_mul_f32      |
-/// | 5     | MlpDownResidual  | cimage_linear_rawf32|
+/// | 2     | MlpGateUp        | cimage_linear_{rawf32,nf4_f32,int8} (codec-dependent)|
+/// | 5     | MlpDownResidual  | cimage_linear_{rawf32,nf4_f32,int8} (codec-dependent)|
 /// | 6     | MlpDownResidual  | cimage_residual_add_f32 |
-fn op_index_to_function_name(op_index: usize) -> &'static str {
+fn op_index_to_linear_fn_name(
+    op_index: usize,
+    payload: Option<&RuntimeTensorPayload>,
+) -> &'static str {
     match op_index {
-        0 => "cimage_rmsnorm_f32",
-        1 | 2 => "cimage_linear_rawf32",
-        3 => "cimage_silu_f32",
-        4 => "cimage_mul_f32",
-        5 => "cimage_linear_rawf32",
-        6 => "cimage_residual_add_f32",
+        0 | 3 | 4 | 6 => match op_index {
+            0 => "cimage_rmsnorm_f32",
+            3 => "cimage_silu_f32",
+            4 => "cimage_mul_f32",
+            6 => "cimage_residual_add_f32",
+            _ => unreachable!(),
+        },
+        1 | 2 | 5 => match payload {
+            Some(RuntimeTensorPayload::Nf4Packed { .. }) => "cimage_linear_nf4_f32",
+            Some(RuntimeTensorPayload::Int8Packed { .. }) => "cimage_linear_int8",
+            _ => "cimage_linear_rawf32",
+        },
         _ => "cimage_linear_rawf32",
     }
 }
@@ -167,14 +176,18 @@ fn bitnet_decoder_op_index_to_function_name(op_index: usize) -> &'static str {
 }
 
 /// Build the 32-byte MlpConstants struct used by every shader.
-fn build_mlp_constants(hidden_dim: u32, intermediate_dim: u32, epsilon: f32) -> [u8; 32] {
+fn build_mlp_constants(
+    hidden_dim: u32,
+    intermediate_dim: u32,
+    group_size: u32,
+    codec_id: u32,
+    epsilon: f32,
+) -> [u8; 32] {
     let mut out = [0u8; 32];
     out[0..4].copy_from_slice(&hidden_dim.to_le_bytes());
     out[4..8].copy_from_slice(&intermediate_dim.to_le_bytes());
-    // group_size = 0 (not used by RawF32)
-    out[8..12].copy_from_slice(&0u32.to_le_bytes());
-    // codec_id = 0 (RawF32)
-    out[12..16].copy_from_slice(&0u32.to_le_bytes());
+    out[8..12].copy_from_slice(&group_size.to_le_bytes());
+    out[12..16].copy_from_slice(&codec_id.to_le_bytes());
     // epsilon
     out[16..20].copy_from_slice(&epsilon.to_le_bytes());
     // pad[3] = [0, 0, 0] — already zero-initialised
@@ -487,46 +500,101 @@ impl CImageMetalRegionRunner {
             self.buffer_store.insert("rmsnorm_weight".into(), buf);
         }
 
-        if let Some(RuntimeTensorPayload::RawF32(data)) = tensor_by_key.get("gate_proj") {
-            let buf = alloc_f32("gate_proj_codes", data)?;
-            self.buffer_store.insert("gate_proj_codes".into(), buf);
-        }
-        {
-            let buf = alloc_zero("gate_proj_scales", (intermediate_dim as u64) * 4)?;
-            self.buffer_store.insert("gate_proj_scales".into(), buf);
-        }
-        {
-            let buf = alloc_zero("gate_proj_biases", (intermediate_dim as u64) * 4)?;
-            self.buffer_store.insert("gate_proj_biases".into(), buf);
-        }
+        // Helper to allocate a buffer from packed codes bytes.
+        let alloc_codes = |name: &str, codes: &[u8]| -> CImageRuntimeResult<metal::Buffer> {
+            let buf = self.device.new_buffer_with_data(
+                codes.as_ptr() as *const std::ffi::c_void,
+                codes.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 && !codes.is_empty() {
+                return Err(CImageRuntimeError::BufferAllocationFailed(name.to_string()));
+            }
+            Ok(buf)
+        };
+        let alloc_scales_or_biases = |name: &str,
+                                      data: &[f32]|
+         -> CImageRuntimeResult<metal::Buffer> {
+            if data.is_empty() {
+                return alloc_zero(name, 0);
+            }
+            let bytes: &[u8] =
+                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+            let buf = self.device.new_buffer_with_data(
+                bytes.as_ptr() as *const std::ffi::c_void,
+                bytes.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(name.to_string()));
+            }
+            Ok(buf)
+        };
 
-        if let Some(RuntimeTensorPayload::RawF32(data)) = tensor_by_key.get("up_proj") {
-            let buf = alloc_f32("up_proj_codes", data)?;
-            self.buffer_store.insert("up_proj_codes".into(), buf);
-        }
-        {
-            let buf = alloc_zero("up_proj_scales", (intermediate_dim as u64) * 4)?;
-            self.buffer_store.insert("up_proj_scales".into(), buf);
-        }
-        {
-            let buf = alloc_zero("up_proj_biases", (intermediate_dim as u64) * 4)?;
-            self.buffer_store.insert("up_proj_biases".into(), buf);
-        }
+        let mut alloc_proj_buffers =
+            |tensor_key: &str, prefix: &str, zero_count: u64| -> CImageRuntimeResult<()> {
+                match tensor_by_key.get(tensor_key) {
+                    Some(RuntimeTensorPayload::RawF32(data)) => {
+                        let buf = alloc_f32(&format!("{}_codes", prefix), data)?;
+                        self.buffer_store.insert(format!("{}_codes", prefix), buf);
+                    }
+                    Some(RuntimeTensorPayload::Nf4Packed {
+                        codes,
+                        scales,
+                        biases,
+                        ..
+                    }) => {
+                        self.buffer_store.insert(
+                            format!("{}_codes", prefix),
+                            alloc_codes(&format!("{}_codes", prefix), codes)?,
+                        );
+                        self.buffer_store.insert(
+                            format!("{}_scales", prefix),
+                            alloc_scales_or_biases(&format!("{}_scales", prefix), scales)?,
+                        );
+                        self.buffer_store.insert(
+                            format!("{}_biases", prefix),
+                            alloc_scales_or_biases(&format!("{}_biases", prefix), biases)?,
+                        );
+                        return Ok(());
+                    }
+                    Some(RuntimeTensorPayload::Int8Packed {
+                        codes,
+                        scales,
+                        biases,
+                    }) => {
+                        self.buffer_store.insert(
+                            format!("{}_codes", prefix),
+                            alloc_codes(&format!("{}_codes", prefix), codes)?,
+                        );
+                        self.buffer_store.insert(
+                            format!("{}_scales", prefix),
+                            alloc_scales_or_biases(&format!("{}_scales", prefix), scales)?,
+                        );
+                        self.buffer_store.insert(
+                            format!("{}_biases", prefix),
+                            alloc_scales_or_biases(&format!("{}_biases", prefix), biases)?,
+                        );
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+                // Default: zero-filled scales and biases for RawF32 (codes were set above)
+                self.buffer_store.insert(
+                    format!("{}_scales", prefix),
+                    alloc_zero(&format!("{}_scales", prefix), zero_count * 4)?,
+                );
+                self.buffer_store.insert(
+                    format!("{}_biases", prefix),
+                    alloc_zero(&format!("{}_biases", prefix), zero_count * 4)?,
+                );
+                Ok(())
+            };
 
-        if let Some(RuntimeTensorPayload::RawF32(data)) = tensor_by_key.get("down_proj") {
-            let buf = alloc_f32("down_proj_codes", data)?;
-            self.buffer_store.insert("down_proj_codes".into(), buf);
-        }
-        {
-            let buf = alloc_zero("down_proj_scales", (hidden_dim as u64) * 4)?;
-            self.buffer_store.insert("down_proj_scales".into(), buf);
-        }
-        {
-            let buf = alloc_zero("down_proj_biases", (hidden_dim as u64) * 4)?;
-            self.buffer_store.insert("down_proj_biases".into(), buf);
-        }
+        alloc_proj_buffers("gate_proj", "gate_proj", intermediate_dim as u64)?;
+        alloc_proj_buffers("up_proj", "up_proj", intermediate_dim as u64)?;
+        alloc_proj_buffers("down_proj", "down_proj", hidden_dim as u64)?;
 
-        // ── Input buffer ────────────────────────────────────────────────
         {
             let buf = alloc_f32("hidden_in", input)?;
             self.buffer_store.insert("hidden_in".into(), buf);
@@ -555,8 +623,15 @@ impl CImageMetalRegionRunner {
         // ── Constants buffer ────────────────────────────────────────────
         {
             let epsilon: f32 = 1e-6;
-            let constants =
-                build_mlp_constants(hidden_dim as u32, intermediate_dim as u32, epsilon);
+            let group_size = 128u32;
+            let codec_id = 2u32; // NF4
+            let constants = build_mlp_constants(
+                hidden_dim as u32,
+                intermediate_dim as u32,
+                group_size,
+                codec_id,
+                epsilon,
+            );
             let buf = self.device.new_buffer_with_data(
                 constants.as_ptr() as *const std::ffi::c_void,
                 constants.len() as u64,
@@ -655,8 +730,22 @@ impl CImageMetalRegionRunner {
         // Pre-warm PSO cache (requires &mut self) before creating the command
         // buffer so the encode loop only needs immutable lookups.
         let ops = &plan.region.ops;
-        for op_index in 0..ops.len() {
-            self.get_or_create_pso(op_index_to_function_name(op_index))?;
+        let known_linear_names = &[
+            "cimage_linear_rawf32",
+            "cimage_linear_nf4_f32",
+            "cimage_linear_int8",
+        ];
+        let fixed_names = &[
+            "cimage_rmsnorm_f32",
+            "cimage_silu_f32",
+            "cimage_mul_f32",
+            "cimage_residual_add_f32",
+        ];
+        for name in fixed_names {
+            self.get_or_create_pso(name)?;
+        }
+        for name in known_linear_names {
+            self.get_or_create_pso(name)?;
         }
 
         // 6. Encode and dispatch.
@@ -665,7 +754,21 @@ impl CImageMetalRegionRunner {
         let enc = AutoEncoder::new(cb.new_compute_command_encoder());
 
         for (op_index, op) in ops.iter().enumerate() {
-            let fn_name = op_index_to_function_name(op_index);
+            let proj_suffix = match op_index {
+                1 => Some("gate_proj"),
+                2 => Some("up_proj"),
+                5 => Some("down_proj"),
+                _ => None,
+            };
+            let payload = proj_suffix.and_then(|suffix| {
+                resolved
+                    .tensors
+                    .tensors
+                    .values()
+                    .find(|t| t.tensor_key.contains(suffix))
+                    .map(|t| &t.payload)
+            });
+            let fn_name = op_index_to_linear_fn_name(op_index, payload);
 
             // Override rmsnorm grid: single threadgroup (64 threads).
             let grid_x: u32 = if op_index == 0 {
@@ -844,6 +947,32 @@ impl CImageMetalRegionRunner {
                 match tensor_by_key.get(tensor_key) {
                     Some(RuntimeTensorPayload::RawF32(data)) => {
                         let buf = alloc_f32(buffer_id, data)?;
+                        Ok(Some(buf))
+                    }
+                    Some(RuntimeTensorPayload::Nf4Packed { codes, .. }) => {
+                        let buf = self.device.new_buffer_with_data(
+                            codes.as_ptr() as *const std::ffi::c_void,
+                            codes.len() as u64,
+                            metal::MTLResourceOptions::StorageModeShared,
+                        );
+                        if buf.length() == 0 && !codes.is_empty() {
+                            return Err(CImageRuntimeError::BufferAllocationFailed(
+                                buffer_id.to_string(),
+                            ));
+                        }
+                        Ok(Some(buf))
+                    }
+                    Some(RuntimeTensorPayload::Int8Packed { codes, .. }) => {
+                        let buf = self.device.new_buffer_with_data(
+                            codes.as_ptr() as *const std::ffi::c_void,
+                            codes.len() as u64,
+                            metal::MTLResourceOptions::StorageModeShared,
+                        );
+                        if buf.length() == 0 && !codes.is_empty() {
+                            return Err(CImageRuntimeError::BufferAllocationFailed(
+                                buffer_id.to_string(),
+                            ));
+                        }
                         Ok(Some(buf))
                     }
                     _ => Ok(None),
@@ -3326,26 +3455,27 @@ mod tests {
     /// Verify the function name mapping for all 7 ops and the fallback.
     #[test]
     fn test_op_index_function_names() {
-        assert_eq!(op_index_to_function_name(0), "cimage_rmsnorm_f32");
-        assert_eq!(op_index_to_function_name(1), "cimage_linear_rawf32");
-        assert_eq!(op_index_to_function_name(2), "cimage_linear_rawf32");
-        assert_eq!(op_index_to_function_name(3), "cimage_silu_f32");
-        assert_eq!(op_index_to_function_name(4), "cimage_mul_f32");
-        assert_eq!(op_index_to_function_name(5), "cimage_linear_rawf32");
-        assert_eq!(op_index_to_function_name(6), "cimage_residual_add_f32");
-        assert_eq!(op_index_to_function_name(99), "cimage_linear_rawf32");
+        assert_eq!(op_index_to_linear_fn_name(0, None), "cimage_rmsnorm_f32");
+        assert_eq!(op_index_to_linear_fn_name(1, None), "cimage_linear_rawf32");
+        assert_eq!(op_index_to_linear_fn_name(2, None), "cimage_linear_rawf32");
+        assert_eq!(op_index_to_linear_fn_name(3, None), "cimage_silu_f32");
+        assert_eq!(op_index_to_linear_fn_name(4, None), "cimage_mul_f32");
+        assert_eq!(op_index_to_linear_fn_name(5, None), "cimage_linear_rawf32");
+        assert_eq!(
+            op_index_to_linear_fn_name(6, None),
+            "cimage_residual_add_f32"
+        );
     }
 
     /// Verify the MlpConstants struct layout matches the Metal shaders.
     #[test]
     fn test_build_mlp_constants_layout() {
-        let bytes = build_mlp_constants(64, 128, 1e-6);
+        let bytes = build_mlp_constants(64, 128, 128, 2, 1e-6);
         assert_eq!(bytes.len(), 32, "constants must be 32 bytes");
-
         assert_eq!(u32::from_le_bytes(bytes[0..4].try_into().unwrap()), 64);
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 128);
-        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 0);
-        assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 128);
+        assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 2);
         let eps = f32::from_le_bytes(bytes[16..20].try_into().unwrap());
         assert!((eps - 1e-6).abs() < 1e-12);
         assert_eq!(&bytes[20..32], &[0u8; 12]);

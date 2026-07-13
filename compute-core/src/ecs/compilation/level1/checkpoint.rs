@@ -7,7 +7,9 @@
 //! tensor bytes before moving on.
 
 use super::reducer::AccelerateReducer;
-use crate::ecs::compute_image::compile::int4_pack::{quantize_to_ternary_block32, unpack_byte_5_trits};
+use crate::ecs::compute_image::compile::int4_pack::{
+    quantize_to_ternary_block32, unpack_byte_5_trits,
+};
 use crate::ecs::compute_image::compile::source::{
     ensure_tensor_loaded, load_source, LoadedSource, SourceTensor,
 };

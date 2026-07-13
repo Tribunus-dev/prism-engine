@@ -1,4 +1,8 @@
-#![cfg(any(feature = "mlx-backend", feature = "prism-backend", feature = "prism-backend-ios"))]
+#![cfg(any(
+    feature = "mlx-backend",
+    feature = "prism-backend",
+    feature = "prism-backend-ios"
+))]
 //! FALLBACK-ABI-CONTINUITY-0001: ANE lane failure detection and ABI-compatible
 //! Metal fallback activation.
 //!
