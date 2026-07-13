@@ -20,23 +20,36 @@ pub fn apply_cpu(
     activations: &mut [f32],
     payload: &[u8],
 ) -> Result<(), String> {
+    if payload.len() % std::mem::size_of::<f32>() != 0 {
+        return Err("engram payload is not f32 aligned".into());
+    }
+    let values: Vec<f32> = payload
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is four bytes")))
+        .collect();
     match application {
         EngramApplication::AdditiveResidual => {
-            let residual: Vec<f32> = payload
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-                .collect();
-            for (a, r) in activations.iter_mut().zip(residual.iter()) {
+            if values.len() != activations.len() {
+                return Err(format!(
+                    "additive engram width {} does not match activations {}",
+                    values.len(),
+                    activations.len()
+                ));
+            }
+            for (a, r) in activations.iter_mut().zip(&values) {
                 *a += r;
             }
             Ok(())
         }
         EngramApplication::MultiplicativeModulation => {
-            let scales: Vec<f32> = payload
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-                .collect();
-            for (a, s) in activations.iter_mut().zip(scales.iter()) {
+            if values.len() != activations.len() {
+                return Err(format!(
+                    "multiplicative engram width {} does not match activations {}",
+                    values.len(),
+                    activations.len()
+                ));
+            }
+            for (a, s) in activations.iter_mut().zip(&values) {
                 *a *= s;
             }
             Ok(())
@@ -73,6 +86,33 @@ pub fn apply_metal(
     let _ = application;
     let _ = activations;
     Err("Metal engram application not implemented — use CPU path".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(values: &[f32]) -> Vec<u8> {
+        values.iter().flat_map(|v| v.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn additive_application_requires_matching_width() {
+        let mut activations = vec![1.0, 2.0];
+        apply_cpu(
+            &EngramApplication::AdditiveResidual,
+            &mut activations,
+            &payload(&[0.5, -1.0]),
+        )
+        .unwrap();
+        assert_eq!(activations, vec![1.5, 1.0]);
+        assert!(apply_cpu(
+            &EngramApplication::AdditiveResidual,
+            &mut activations,
+            &payload(&[1.0]),
+        )
+        .is_err());
+    }
 }
 
 /// Non-Metal stub when `metal-dispatch` is disabled.

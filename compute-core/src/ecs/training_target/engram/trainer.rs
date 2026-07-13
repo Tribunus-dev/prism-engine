@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 
 use super::config::EngramTrainConfig;
+use super::dataset::EngramTrainingDataset;
 use super::receipt::EngramTrainingReceipt;
 use crate::ecs::canonical::identity::{
     CorpusId, EngramArtifactId, EngramId, PhysicalSegmentId, ReceiptId, RegionId, TensorShape,
@@ -212,11 +213,126 @@ impl EngramTrainer {
             receipt,
         })
     }
+
+    /// Train an additive residual engram from real examples and targets.
+    ///
+    /// The learned parameter vector is the residual correction that minimizes
+    /// mean squared error between `example + parameters` and `target`. The
+    /// vector is optimized with deterministic full-batch gradient descent and
+    /// validated against the dataset holdout before it is serialized.
+    pub fn train_dataset(&self, dataset: &EngramTrainingDataset) -> Result<TrainedEngram, String> {
+        if dataset.train_examples.is_empty() {
+            return Err("engram dataset has no training examples".into());
+        }
+        if dataset.train_examples.len() != dataset.train_targets.len()
+            || dataset.validation_examples.len() != dataset.validation_targets.len()
+            || dataset.holdout_examples.len() != dataset.holdout_targets.len()
+        {
+            return Err("engram dataset example/target counts do not match".into());
+        }
+        let width = dataset.train_examples[0].len();
+        if width == 0
+            || dataset.train_examples.iter().any(|x| x.len() != width)
+            || dataset.train_targets.iter().any(|x| x.len() != width)
+            || dataset.holdout_examples.iter().any(|x| x.len() != width)
+            || dataset.holdout_targets.iter().any(|x| x.len() != width)
+        {
+            return Err("engram dataset rows must have one non-zero consistent width".into());
+        }
+
+        let mut parameters = vec![0.0f32; width];
+        let mut final_loss = f64::INFINITY;
+        let mut iterations = 0;
+        for iteration in 0..self.config.max_iterations.max(1) {
+            let mut gradient = vec![0.0f32; width];
+            for (example, target) in dataset.train_examples.iter().zip(&dataset.train_targets) {
+                for i in 0..width {
+                    gradient[i] += example[i] + parameters[i] - target[i];
+                }
+            }
+            let scale = 2.0 / dataset.train_examples.len() as f32;
+            for i in 0..width {
+                parameters[i] -= self.config.learning_rate as f32 * scale * gradient[i];
+            }
+            final_loss =
+                mean_squared_residual(&dataset.train_examples, &dataset.train_targets, &parameters);
+            iterations = iteration + 1;
+            if final_loss <= self.config.convergence_threshold {
+                break;
+            }
+        }
+
+        let holdout_loss = mean_squared_residual(
+            &dataset.holdout_examples,
+            &dataset.holdout_targets,
+            &parameters,
+        );
+        let baseline_loss = mean_squared_residual(
+            &dataset.holdout_examples,
+            &dataset.holdout_targets,
+            &vec![0.0; width],
+        );
+        if holdout_loss > baseline_loss + self.config.convergence_threshold.max(1e-6) {
+            return Err(format!(
+                "engram holdout regression {} > baseline {}",
+                holdout_loss, baseline_loss
+            ));
+        }
+
+        let mut payload = Vec::with_capacity(width * 4);
+        for value in &parameters {
+            payload.extend_from_slice(&value.to_le_bytes());
+        }
+        let mut metrics = HashMap::new();
+        metrics.insert("nrmse".into(), final_loss.sqrt());
+        metrics.insert("holdout_loss".into(), holdout_loss);
+        let calibration = CalibrationEvidence {
+            tensor_id: self.config.target.target_id.clone(),
+            method: "dataset_additive_residual".into(),
+            samples_used: dataset.train_examples.len(),
+            passed: true,
+            metrics,
+            ordered_metrics: BTreeMap::new(),
+        };
+        let mut trained = self.train(&calibration)?;
+        let digest = Sha256::digest(&payload);
+        let digest = digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        trained.payload = payload;
+        trained.artifact.artifact_id = EngramArtifactId(digest.clone());
+        trained.artifact.payload_segment = PhysicalSegmentId(digest.clone());
+        trained.artifact.parameter_schema.parameter_count = width;
+        trained.receipt.artifact_digest = digest;
+        trained.receipt.final_loss = final_loss;
+        trained.receipt.holdout_loss = holdout_loss;
+        trained.receipt.iterations = iterations;
+        trained.receipt.converged = final_loss <= self.config.convergence_threshold;
+        Ok(trained)
+    }
+}
+
+fn mean_squared_residual(examples: &[Vec<f32>], targets: &[Vec<f32>], parameters: &[f32]) -> f64 {
+    if examples.is_empty() {
+        return 0.0;
+    }
+    let mut loss = 0.0;
+    let mut count = 0usize;
+    for (example, target) in examples.iter().zip(targets) {
+        for i in 0..parameters.len() {
+            let error = (example[i] + parameters[i] - target[i]) as f64;
+            loss += error * error;
+            count += 1;
+        }
+    }
+    loss / count.max(1) as f64
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::training_target::engram::dataset::EngramTrainingDataset;
     use crate::ecs::training_target::spec::{EngramTrainingTarget, TrainingTargetPriority};
     use crate::execution_plan::CodecFamily;
 
@@ -315,6 +431,35 @@ mod tests {
             result.receipt.final_loss
         );
         assert!(result.receipt.converged);
+    }
+
+    #[test]
+    fn test_dataset_training_learns_additive_residual() {
+        let target = make_target();
+        let trainer = EngramTrainer::new(EngramTrainConfig {
+            target,
+            learning_rate: 0.5,
+            max_iterations: 100,
+            convergence_threshold: 1e-6,
+            ..EngramTrainConfig::from_target(&make_target())
+        });
+        let dataset = EngramTrainingDataset {
+            corpus_id: CorpusId("corpus".into()),
+            train_examples: vec![vec![1.0, 2.0], vec![2.0, 3.0]],
+            train_targets: vec![vec![1.25, 1.5], vec![2.25, 2.5]],
+            validation_examples: vec![vec![3.0, 4.0]],
+            validation_targets: vec![vec![3.25, 3.5]],
+            holdout_examples: vec![vec![4.0, 5.0]],
+            holdout_targets: vec![vec![4.25, 4.5]],
+            activation_capture: None,
+        };
+        let result = trainer.train_dataset(&dataset).unwrap();
+        assert_eq!(result.payload.len(), 8);
+        let first = f32::from_le_bytes(result.payload[0..4].try_into().unwrap());
+        let second = f32::from_le_bytes(result.payload[4..8].try_into().unwrap());
+        assert!((first - 0.25).abs() < 1e-3);
+        assert!((second + 0.5).abs() < 1e-3);
+        assert!(result.receipt.holdout_loss < 1e-6);
     }
 
     #[test]

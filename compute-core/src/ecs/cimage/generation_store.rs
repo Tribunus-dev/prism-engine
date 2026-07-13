@@ -109,9 +109,20 @@ impl GenerationStore {
     pub fn contains(&self, id: &GenerationId) -> bool {
         self.generations.contains_key(id)
     }
-    /// Set the current generation directly (for rollback/initialization).
-    pub fn set_current(&mut self, id: GenerationId) {
+    /// Return generation IDs in deterministic order.
+    pub fn ids(&self) -> Vec<GenerationId> {
+        let mut ids: Vec<_> = self.generations.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// Set the current generation after validating that it exists.
+    pub fn set_current(&mut self, id: GenerationId) -> Result<(), String> {
+        if !self.generations.contains_key(&id) {
+            return Err(format!("generation {:?} not found", id));
+        }
         self.current = Some(id);
+        Ok(())
     }
 }
 

@@ -31,10 +31,8 @@ impl GenerationApi {
 
     /// List all generation IDs currently known to the store.
     ///
-    /// Returns a placeholder; a real implementation would iterate
-    /// `GenerationStore.generations`.
     pub fn list_generations(&self) -> Vec<GenerationId> {
-        vec![] // Placeholder — would iterate GenerationStore
+        self.generation_store.ids()
     }
 
     /// Get the current (promoted) generation, if any.
@@ -67,7 +65,7 @@ impl GenerationApi {
             .parent_generation
             .clone()
             .ok_or_else(|| "no parent generation".to_string())?;
-        self.generation_store.set_current(parent.clone());
+        self.generation_store.set_current(parent.clone())?;
         Ok(parent)
     }
 
