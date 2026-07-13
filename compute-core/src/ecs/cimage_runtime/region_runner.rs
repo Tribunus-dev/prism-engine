@@ -342,7 +342,17 @@ impl CImageMetalRegionRunner {
     /// concatenated together with the 5 decoder shader templates, so every
     /// kernel function lives in one library.
     pub fn new(device: &metal::Device) -> CImageRuntimeResult<Self> {
-        let sources: [&str; 14] = [
+        // Fragment headers must come before any consumer that references them.
+        let nf4_fragment =
+            catalogue_source_for(&KernelSemanticId("/prism/fragments/nf4_decode/v1".into()))
+                .unwrap_or_default();
+        let ternary_fragment = catalogue_source_for(&KernelSemanticId(
+            "/prism/fragments/ternary_decode/v1".into(),
+        ))
+        .unwrap_or_default();
+        let sources: [&str; 16] = [
+            &nf4_fragment,
+            &ternary_fragment,
             &catalogue_source_for(&KernelSemanticId("prism.rmsnorm.v1".into())).unwrap_or_default(),
             &catalogue_source_for(&KernelSemanticId("prism.linear.rawf32.v1".into()))
                 .unwrap_or_default(),

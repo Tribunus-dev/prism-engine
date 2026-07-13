@@ -102,10 +102,20 @@ const DOWN_ROWS: u32 = FFN_INTERMEDIATE; // 15360
 // ====================================================================
 
 pub static SHADER_SRC: LazyLock<String> = LazyLock::new(|| {
-    catalogue_source_for(&KernelSemanticId(
+    // Prepend the ternary decode fragment before the megakernel source.
+    let ternary_fragment = catalogue_source_for(&KernelSemanticId(
+        "/prism/fragments/ternary_decode/v1".into(),
+    ))
+    .unwrap_or_default();
+    let megakernel = catalogue_source_for(&KernelSemanticId(
         "prism.transformer.gemma4.decode.v1".into(),
     ))
-    .unwrap_or_default()
+    .unwrap_or_default();
+    if ternary_fragment.is_empty() {
+        megakernel
+    } else {
+        format!("{}\n{}", ternary_fragment, megakernel)
+    }
 });
 
 // ====================================================================

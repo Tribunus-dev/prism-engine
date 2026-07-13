@@ -27,7 +27,7 @@ constant float nf4_codebook[16] = {
 
 // Extract the NF4 value at logical index `index` from a packed nibble array.
 // Low nibble = even index, high nibble = odd index.
-float unpack_nf4(device const uchar* packed, uint index) {
+static float unpack_nf4(device const uchar* packed, uint index) {
     uchar byte = packed[index >> 1];
     uchar nibble = (index & 1) ? (byte >> 4) : (byte & 0x0Fu);
     return nf4_codebook[nibble];
@@ -36,7 +36,7 @@ float unpack_nf4(device const uchar* packed, uint index) {
 // Dequantize one NF4 element:  val = codebook[nibble] * scale + bias.
 // Groups are indexed as  (index / group_size).
 // When `biases` is null the bias term is zero.
-float dequantize_nf4(device const uchar* packed,
+static float dequantize_nf4(device const uchar* packed,
                      device const float* scales,
                      device const float* biases,
                      uint index,

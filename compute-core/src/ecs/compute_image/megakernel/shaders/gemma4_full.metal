@@ -1,3 +1,5 @@
+// Ternary fast-div3/mod3 provided by canonical fragment: fragments/ternary_decode.metal
+//
 #include <metal_stdlib>
 using namespace metal;
 
@@ -115,7 +117,6 @@ constant uint FFN_INTER      = 15360;
 constant uint VOCAB_SIZE      = 262144;
 constant uint MAX_CTX         = 2048;
 #endif
-constant uint MAGIC_DIV3      = 2863311531u;
 constant uint O_ROWS          = NUM_Q_HEADS * HEAD_DIM;
 constant uint DOWN_ROWS       = FFN_INTER;
 constant uint NUM_CENTROIDS   = 256;
@@ -183,13 +184,6 @@ constant uint DOWN_OFF = UP_OFF   + HIDDEN_DIM * FFN_TILES * LANES; // 3840×24�
 constant uint LAYER_STRIDE = DOWN_OFF + DOWN_ROWS * HID_TILES * LANES; // 15360×6×32
 
 // ---- Helpers -------------------------------------------------------
-
-inline uint fast_div3(uint v) {
-    return ((uint64_t)v * (uint64_t)MAGIC_DIV3) >> 33;
-}
-inline uint fast_mod3(uint v) {
-    return v - fast_div3(v) * 3u;
-}
 
 /// Single-thread tile GEMV returning one dot product.
 ///   packed_weights[tile_base + b*LANES + lane_id]  =  u32 holding 20 Base-3 weights

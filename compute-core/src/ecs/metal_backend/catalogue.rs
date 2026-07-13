@@ -498,10 +498,14 @@ impl MetalImplementationCatalogue {
     pub fn register_palettized_swiglu(&mut self) {
         self.register(MetalImplementationRegistration {
             semantic_id: KernelSemanticId("prism.palettized.swiglu.v1".into()),
-            implementation_id: KernelImplementationId("metal.primitive.palettized_swiglu.v1".into()),
+            implementation_id: KernelImplementationId(
+                "metal.primitive.palettized_swiglu.v1".into(),
+            ),
             supported_architectures: vec![],
             supported_representations: vec![],
-            source_path: Some("src/ecs/compute_image/templates/palettized_gemv_swiglu.metal".into()),
+            source_path: Some(
+                "src/ecs/compute_image/templates/palettized_gemv_swiglu.metal".into(),
+            ),
             source_entry_point: Some("palettized_gemv_swiglu".into()),
             abi: KernelAbi {
                 version: 1,
@@ -598,7 +602,9 @@ impl MetalImplementationCatalogue {
     pub fn register_q4_block_sym_gemv(&mut self) {
         self.register(MetalImplementationRegistration {
             semantic_id: KernelSemanticId("prism.q4.block_sym.gemv.v1".into()),
-            implementation_id: KernelImplementationId("metal.primitive.q4_block_sym_gemv.v1".into()),
+            implementation_id: KernelImplementationId(
+                "metal.primitive.q4_block_sym_gemv.v1".into(),
+            ),
             supported_architectures: vec![],
             supported_representations: vec![],
             source_path: Some("src/ecs/compute_image/templates/q4_block_sym_gemv.metal".into()),
@@ -712,10 +718,14 @@ impl MetalImplementationCatalogue {
     pub fn register_megakernel_int4(&mut self) {
         self.register(MetalImplementationRegistration {
             semantic_id: KernelSemanticId("prism.transformer.gemma4.decode.int4.v1".into()),
-            implementation_id: KernelImplementationId("metal.megakernel.gemma4.decode.int4.v1".into()),
+            implementation_id: KernelImplementationId(
+                "metal.megakernel.gemma4.decode.int4.v1".into(),
+            ),
             supported_architectures: vec![ArchitectureId("gemma4".into())],
             supported_representations: vec![TensorRepresentation::TernaryTile640],
-            source_path: Some("src/ecs/compute_image/megakernel/shaders/gemma4_full_int4.metal".into()),
+            source_path: Some(
+                "src/ecs/compute_image/megakernel/shaders/gemma4_full_int4.metal".into(),
+            ),
             source_entry_point: Some("gemma4_full_decode_int4".into()),
             abi: KernelAbi {
                 version: 1,
@@ -735,7 +745,9 @@ impl MetalImplementationCatalogue {
             implementation_id: KernelImplementationId("metal.primitive.persistent_gemv.v1".into()),
             supported_architectures: vec![],
             supported_representations: vec![],
-            source_path: Some("src/ecs/compute_image/megakernel/shaders/persistent_gemv.metal".into()),
+            source_path: Some(
+                "src/ecs/compute_image/megakernel/shaders/persistent_gemv.metal".into(),
+            ),
             source_entry_point: Some("persistent_gemv".into()),
             abi: KernelAbi {
                 version: 1,
@@ -752,7 +764,9 @@ impl MetalImplementationCatalogue {
     pub fn register_vision_projection(&mut self) {
         self.register(MetalImplementationRegistration {
             semantic_id: KernelSemanticId("prism.vision.projection.v1".into()),
-            implementation_id: KernelImplementationId("metal.primitive.vision_projection.v1".into()),
+            implementation_id: KernelImplementationId(
+                "metal.primitive.vision_projection.v1".into(),
+            ),
             supported_architectures: vec![],
             supported_representations: vec![],
             source_path: Some(
@@ -874,10 +888,14 @@ impl MetalImplementationCatalogue {
     pub fn register_ternary_cimage_gemv(&mut self) {
         self.register(MetalImplementationRegistration {
             semantic_id: KernelSemanticId("prism.ternary.cimage.gemv.v1".into()),
-            implementation_id: KernelImplementationId("metal.primitive.ternary_cimage_gemv.v1".into()),
+            implementation_id: KernelImplementationId(
+                "metal.primitive.ternary_cimage_gemv.v1".into(),
+            ),
             supported_architectures: vec![],
             supported_representations: vec![],
-            source_path: Some("src/ecs/compute_image/templates/cimage_ternary_gemv_v1.metal".into()),
+            source_path: Some(
+                "src/ecs/compute_image/templates/cimage_ternary_gemv_v1.metal".into(),
+            ),
             source_entry_point: Some("cimage_ternary_gemv_v1".into()),
             abi: KernelAbi {
                 version: 1,
@@ -886,6 +904,46 @@ impl MetalImplementationCatalogue {
                 threadgroup_memory: vec![],
                 dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
                 threads_per_threadgroup: (64, 1, 1),
+            },
+        });
+    }
+
+    /// Register NF4 decode fragment (header fragment, not a kernel).
+    pub fn register_nf4_decode_fragment(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("/prism/fragments/nf4_decode/v1".into()),
+            implementation_id: KernelImplementationId("metal.fragment.nf4_decode.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/fragments/nf4_decode.metal".into()),
+            source_entry_point: None,
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (1, 1, 1),
+            },
+        });
+    }
+
+    /// Register ternary decode fragment (header fragment, not a kernel).
+    pub fn register_ternary_decode_fragment(&mut self) {
+        self.register(MetalImplementationRegistration {
+            semantic_id: KernelSemanticId("/prism/fragments/ternary_decode/v1".into()),
+            implementation_id: KernelImplementationId("metal.fragment.ternary_decode.v1".into()),
+            supported_architectures: vec![],
+            supported_representations: vec![],
+            source_path: Some("src/ecs/compute_image/fragments/ternary_decode.metal".into()),
+            source_entry_point: None,
+            abi: KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (1, 1, 1),
             },
         });
     }
@@ -915,6 +973,8 @@ impl Default for MetalImplementationCatalogue {
     fn default() -> Self {
         let mut cat = Self::new();
         cat.register_megakernel();
+        cat.register_nf4_decode_fragment();
+        cat.register_ternary_decode_fragment();
         cat.register_per_layer();
         cat.register_linear_nf4();
         cat.register_ternary_gemv();
@@ -945,7 +1005,8 @@ impl Default for MetalImplementationCatalogue {
 }
 
 /// Static default catalogue for production source resolution.
-static DEFAULT_CATALOGUE: LazyLock<MetalImplementationCatalogue> = LazyLock::new(MetalImplementationCatalogue::default);
+static DEFAULT_CATALOGUE: LazyLock<MetalImplementationCatalogue> =
+    LazyLock::new(MetalImplementationCatalogue::default);
 
 /// Retrieve source text for a kernel by semantic ID.
 /// Returns None when the ID is not registered or the file cannot be read.

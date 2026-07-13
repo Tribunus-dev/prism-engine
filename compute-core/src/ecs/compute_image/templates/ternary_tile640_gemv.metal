@@ -1,3 +1,6 @@
+// Ternary decode follows the canonical sequential-extraction pattern documented
+// in fragments/ternary_decode.metal (uses built-in /3/%3, not fast_div3/fast_mod3).
+//
 #include <metal_stdlib>
 using namespace metal;
 

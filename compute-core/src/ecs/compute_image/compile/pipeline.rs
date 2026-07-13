@@ -1015,7 +1015,11 @@ fn compile_metal_source_to_metallib(
 ///
 fn compile_inference_metallib(output_path: &Path) -> Result<(), String> {
     // Every template .metal source, concatenated into one compilation unit.
-    let ids: [&str; 10] = [
+    // Fragment headers must come before any consumer that references them.
+    let mut ids: Vec<&str> = Vec::with_capacity(12);
+    ids.push("/prism/fragments/nf4_decode/v1");
+    ids.push("/prism/fragments/ternary_decode/v1");
+    ids.extend_from_slice(&[
         "prism.palettized.gemv.v1",
         "prism.palettized.swiglu.v1",
         "prism.nf4.tile640.gemv.v1",
@@ -1026,7 +1030,7 @@ fn compile_inference_metallib(output_path: &Path) -> Result<(), String> {
         "prism.ternary.gemm.v1",
         "prism.q4.block_sym.gemv.v1",
         "prism.kv.mixed.v1",
-    ];
+    ]);
     let sources: Vec<String> = ids
         .iter()
         .map(|id| {

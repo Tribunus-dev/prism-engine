@@ -1,16 +1,7 @@
+// NF4 decode provided by canonical fragment: fragments/nf4_decode.metal
+//
 #include <metal_stdlib>
 using namespace metal;
-
-// Symmetric [-1,1] NF4 codebook — MUST match compile/quantize.rs::NF4_CODEBOOK.
-// (Was the asymmetric [-1,2] table, whose indices 13–15 were unreachable and
-// which is what the weights are NO LONGER packed with — using it here would
-// dequant every weight to the wrong value.)
-constant float nf4_table_fp32[16] = {
-    -1.0f, -0.6961928f, -0.5250731f, -0.3949175f,
-    -0.2844414f, -0.1847734f, -0.09105f, 0.0f,
-    0.0795803f, 0.1609302f, 0.2461123f, 0.3379152f,
-    0.4407099f, 0.562617f, 0.7229568f, 1.0f
-};
 
 //  ██████████████████████████████████████████████████████████████████████████
 //  NF4 Tile640 GEMV kernel with per-column FP16 reduction-axis scaling
@@ -74,9 +65,6 @@ kernel void fused_gemv_nf4_scaled_reduction_tile640_fp32(
         for (uint group = 0; group < GROUPS_PER_TILE; ++group) {
             float scale = tile_scales[meta_base + group];
             float bias = tile_biases[meta_base + group];
-            device const ushort* packed_chunk =
-                (device const ushort*)(packed_weights + weight_base + group * 64);
-            ushort raw_bits = packed_chunk[simd_lane];
             uint src_base = tile_idx * TILE + group * GROUP + simd_lane * LANE_VALUES;
 
             #pragma unroll
@@ -85,8 +73,7 @@ kernel void fused_gemv_nf4_scaled_reduction_tile640_fp32(
                 if (col >= in_dim) {
                     continue; // zero-padded tail of a partial last tile
                 }
-                uint nibble = (raw_bits >> (i * 4)) & 0x0Fu;
-                float weight = scale * nf4_table_fp32[nibble] + bias;
+                float weight = fma(unpack_nf4(packed_weights, col), scale, bias);
                 // Load the FP16 reduction scale inline — no materialised buffer.
                 float scaled_activation = in_vector[col] * float(reduction_scales[col]);
                 row_accumulator += weight * scaled_activation;

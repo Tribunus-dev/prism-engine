@@ -1,3 +1,5 @@
+// NF4 decode provided by canonical fragment: fragments/nf4_decode.metal
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //
 // Linear layer — NF4 quantized weights (packed 4-bit codes, 2 per byte).
@@ -32,13 +34,6 @@ struct MlpConstants {
 };
 #endif
 
-constant float nf4_codebook[16] = {
-    -1.0f, -0.6961928009986877f, -0.5250730514526367f, -0.39491748809814453f,
-    -0.28444138169288635f, -0.18477343022823334f, -0.09105003625154495f, 0.0f,
-     0.07958029955625534f,  0.16093020141124725f,  0.24611230194568634f,  0.33791524171829224f,
-     0.44070982933044434f,  0.5626170039176941f,   0.7229568362236023f,   1.0f
-};
-
 kernel void cimage_linear_nf4(
     device const float*     input   [[buffer(0)]],
     device const uchar*     codes   [[buffer(1)]],
@@ -60,18 +55,10 @@ kernel void cimage_linear_nf4(
     uint code_row_offset = tid * (in_dim / 2);
 
     for (uint i = 0; i < in_dim; ++i) {
-        uint byte_idx = code_row_offset + (i >> 1);
-        uint code_val;
-        if ((i & 1) == 0) {
-            code_val = codes[byte_idx] & 0x0Fu;       // low nibble
-        } else {
-            code_val = (codes[byte_idx] >> 4) & 0x0Fu; // high nibble
-        }
-
         uint group = i / group_size;
         float s = scales[tile * groups_per_tile + group];
         float b = biases[tile * groups_per_tile + group];
-        float w = nf4_codebook[code_val] * s + b;
+        float w = fma(unpack_nf4(codes, i), s, b);
 
         acc = fma(w, input[i], acc);
     }

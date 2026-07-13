@@ -79,16 +79,46 @@ fn main() {
         );
 
         // Step 1: compile each .metal -> .air
+        // Fragment sources that must be prepended before consumers.
+        let fragment_dir = std::path::Path::new(&manifest_dir)
+            .join("src")
+            .join("ecs")
+            .join("compute_image")
+            .join("fragments");
+        let nf4_fragment =
+            std::fs::read_to_string(fragment_dir.join("nf4_decode.metal")).unwrap_or_default();
+        // Templates that need nf4_decode.metal prepended:
+        let nf4_consumers = [
+            "nf4_tile640_gemv.metal",
+            "cimage_linear_nf4.metal",
+            "nf4_tile640_scaled_reduction_gemv.metal",
+        ];
+
         let mut air_files = Vec::new();
         for src in metal_sources {
             let sdk = metal_sdk_for_target(&host_target);
             let src_path = template_dir.join(src);
+            let compile_src = if nf4_consumers.contains(&src) && !nf4_fragment.is_empty() {
+                // Prepend nf4_decode fragment so the Metal compiler can resolve
+                // unpack_nf4() and dequantize_nf4() calls.
+                let concat_name = format!("{}_nf4_prepended.metal", src);
+                let concat_path = std::path::Path::new(&out_dir).join(&concat_name);
+                let content = format!(
+                    "{}\n{}",
+                    nf4_fragment,
+                    std::fs::read_to_string(&src_path).unwrap_or_default()
+                );
+                std::fs::write(&concat_path, &content).unwrap_or_default();
+                concat_path
+            } else {
+                src_path
+            };
             let air_file = std::path::Path::new(&out_dir)
                 .join(src)
                 .with_extension("air");
             let status = std::process::Command::new("xcrun")
                 .args(["-sdk", &sdk, "metal", "-c"])
-                .arg(&src_path)
+                .arg(&compile_src)
                 .arg("-o")
                 .arg(&air_file)
                 .status()
