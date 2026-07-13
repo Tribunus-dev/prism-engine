@@ -65,10 +65,11 @@ similarity over f32 payload parameters, and CPU application validates payload
 width. Metal application is unimplemented, and
 low-rank, latent-prefix, and adapter application modes remain placeholders.
 
-Remaining work is Metal application and a full train-to-promotion orchestration
-test. The generation API now verifies payload retrieval and CPU application
-after promotion; replay and rollback behavior still need to be exercised in the
-same lifecycle test.
+The generation API now accepts `TrainedEngram` directly with evaluator evidence,
+and the lifecycle test trains a dataset, promotes the exact payload, retrieves
+and applies it, then rolls back to the parent generation. Remaining work is
+Metal application and wiring this orchestration into the production compiler
+service rather than only the typed API.
 
 ## Ternarization and assimilation
 
