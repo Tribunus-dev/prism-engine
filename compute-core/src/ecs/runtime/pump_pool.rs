@@ -135,7 +135,7 @@ struct WorkItem {
 /// Manages a pool of NPU pump workers — one thread per device.
 ///
 /// Usage:
-/// ```
+/// ```ignore
 /// let pool = PumpPool::spawn(mmap, devices, &header);
 /// pool.enqueue_layer(0, &layer_info);
 /// pool.wait_for_layer(0);

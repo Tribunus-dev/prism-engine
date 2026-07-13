@@ -441,7 +441,7 @@ impl MetalBackend {
             .as_ref()
             .ok_or("Q4 scales have no buffer")?
             .clone();
-        let expected = (op.n as usize) * (op.k as usize) / 8;
+        let expected = (op.n as usize) * (op.k as usize) / 2;
         if packed.len() != expected {
             return Err(format!(
                 "Q4 packed weights size {} != expected {}",
@@ -1975,6 +1975,388 @@ mod shadow_test {
     use crate::ecs::backend::routing::{
         CorrectnessCheckpointPolicy, LogicalShape, OperationId, Phase, PhysicalLayout, TensorShape,
     };
+
+    #[test]
+    fn generated_nf4_runtime_matches_reference() {
+        let Ok(mut backend) = MetalBackend::new() else {
+            return;
+        };
+        let input = backend.create_f32(&[1.0, 2.0, 3.0, 4.0], &[1, 4]).unwrap();
+        let weights = backend.alloc_weight(vec![0x77; 4 * 320]);
+        let scales = backend.create_f32(&[0.0; 20], &[4, 5]).unwrap();
+        let biases = backend.create_f32(&[1.0; 20], &[4, 5]).unwrap();
+
+        let output = backend
+            .dispatch_linear_nf4_cimage(input, weights, scales, biases, 4, 4, 128)
+            .unwrap();
+        let result = backend.read_f32(output).unwrap().data;
+        assert_eq!(result.len(), 4);
+        for (index, value) in result.iter().enumerate() {
+            assert!((value - 10.0).abs() < 1e-4, "output[{index}] = {value}");
+        }
+    }
+
+    #[test]
+    fn generated_int8_runtime_matches_reference() {
+        let Ok(mut backend) = MetalBackend::new() else {
+            return;
+        };
+        let input = backend.create_f32(&[1.0, 2.0, 3.0, 4.0], &[1, 4]).unwrap();
+        let weights = backend.alloc_weight(vec![1i8 as u8; 4 * 4]);
+        let scales = backend.create_f32(&[2.0; 4], &[4]).unwrap();
+        let biases = backend.create_f32(&[0.0; 4], &[4]).unwrap();
+        let op = QuantizedMatmulOp {
+            m: 1,
+            n: 4,
+            k: 4,
+            input_dtype: DType::F32,
+            weight_dtype: DType::I8,
+            scale_dtype: DType::F32,
+            bias_dtype: DType::F32,
+            output_dtype: DType::F32,
+            group_size: 1,
+            bits: 8,
+            transpose: false,
+        };
+
+        let output = backend
+            .quantized_matmul_int8(&op, input, weights, scales, biases)
+            .unwrap();
+        let result = backend.read_f32(output).unwrap().data;
+        assert_eq!(result, vec![20.0; 4]);
+    }
+
+    #[test]
+    fn generated_q4_runtime_matches_reference() {
+        let Ok(mut backend) = MetalBackend::new() else {
+            return;
+        };
+        let half_tensor = |backend: &mut MetalBackend, bits: &[u16], shape: &[i32]| {
+            let buffer = backend.mtl_device.new_buffer_with_data(
+                bits.as_ptr() as *const std::ffi::c_void,
+                (bits.len() * 2) as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            backend.alloc_slot(MetalTensor {
+                buffer: Some(buffer),
+                shape: shape.to_vec(),
+                dtype: DType::F16,
+                generation: 0,
+            })
+        };
+        let input = half_tensor(&mut backend, &[0x3c00; 8], &[1, 8]);
+        let weights = backend.alloc_weight(vec![0x99; 4]);
+        let scales = half_tensor(&mut backend, &[0x4000], &[1]);
+        let op = QuantizedMatmulOp {
+            m: 1,
+            n: 1,
+            k: 8,
+            input_dtype: DType::F16,
+            weight_dtype: DType::U8,
+            scale_dtype: DType::F16,
+            bias_dtype: DType::F16,
+            output_dtype: DType::F16,
+            group_size: 8,
+            bits: 4,
+            transpose: false,
+        };
+
+        let output = backend
+            .quantized_matmul_q4(&op, input, weights, scales)
+            .unwrap();
+        let tensor = backend.slot(output).unwrap();
+        let bits = unsafe { *(tensor.buffer.as_ref().unwrap().contents() as *const u16) };
+        assert_eq!(
+            bits, 0x4c00,
+            "expected half-precision 16.0, got {bits:#06x}"
+        );
+    }
+
+    #[test]
+    fn generated_ternary_runtime_matches_reference() {
+        let Ok(mut backend) = MetalBackend::new() else {
+            return;
+        };
+        let half_tensor = |backend: &mut MetalBackend, bits: &[u16], shape: &[i32]| {
+            let buffer = backend.mtl_device.new_buffer_with_data(
+                bits.as_ptr() as *const std::ffi::c_void,
+                (bits.len() * 2) as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            backend.alloc_slot(MetalTensor {
+                buffer: Some(buffer),
+                shape: shape.to_vec(),
+                dtype: DType::F16,
+                generation: 0,
+            })
+        };
+        let input = half_tensor(&mut backend, &[0x3c00; 4], &[1, 4]);
+        let op = QuantizedMatmulOp {
+            m: 1,
+            n: 1,
+            k: 4,
+            input_dtype: DType::F16,
+            weight_dtype: DType::U8,
+            scale_dtype: DType::F16,
+            bias_dtype: DType::F16,
+            output_dtype: DType::F16,
+            group_size: 4,
+            bits: 2,
+            transpose: false,
+        };
+        let legacy_weights = backend.alloc_weight(vec![0x55]);
+        let legacy = backend
+            .quantized_matmul_ternary_legacy(&op, input, legacy_weights)
+            .unwrap();
+        let legacy_bits = unsafe {
+            *(backend
+                .slot(legacy)
+                .unwrap()
+                .buffer
+                .as_ref()
+                .unwrap()
+                .contents() as *const u16)
+        };
+        assert_eq!(legacy_bits, 0x4400);
+
+        let input = half_tensor(&mut backend, &[0x3c00; 4], &[1, 4]);
+        let scales = half_tensor(&mut backend, &[0x3c00], &[1]);
+        let cimage_weights = backend.alloc_weight(vec![0xaa]);
+        let cimage = backend
+            .quantized_matmul_ternary_cimage(
+                &QuantizedMatmulOp {
+                    group_size: 4,
+                    ..op
+                },
+                input,
+                cimage_weights,
+                scales,
+            )
+            .unwrap();
+        let cimage_bits = unsafe {
+            *(backend
+                .slot(cimage)
+                .unwrap()
+                .buffer
+                .as_ref()
+                .unwrap()
+                .contents() as *const u16)
+        };
+        assert_eq!(cimage_bits, 0x4400);
+    }
+
+    #[test]
+    fn generated_palettized_runtime_matches_reference() {
+        let Ok(mut backend) = MetalBackend::new() else {
+            return;
+        };
+        let half_tensor = |backend: &mut MetalBackend, bits: &[u16], shape: &[i32]| {
+            let buffer = backend.mtl_device.new_buffer_with_data(
+                bits.as_ptr() as *const std::ffi::c_void,
+                (bits.len() * 2) as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            backend.alloc_slot(MetalTensor {
+                buffer: Some(buffer),
+                shape: shape.to_vec(),
+                dtype: DType::F16,
+                generation: 0,
+            })
+        };
+        let input = half_tensor(&mut backend, &[0x3c00; 8], &[1, 8]);
+        let codebook = half_tensor(&mut backend, &[0x4000; 16], &[1, 16]);
+        let indices = backend.alloc_weight(vec![0x00; 4]);
+        let op = QuantizedMatmulOp {
+            m: 1,
+            n: 1,
+            k: 8,
+            input_dtype: DType::F16,
+            weight_dtype: DType::U8,
+            scale_dtype: DType::F16,
+            bias_dtype: DType::F16,
+            output_dtype: DType::F16,
+            group_size: 16,
+            bits: 4,
+            transpose: false,
+        };
+        let output = backend
+            .quantized_matmul_palettized(&op, input, indices, codebook)
+            .unwrap();
+        let bits = unsafe {
+            *(backend
+                .slot(output)
+                .unwrap()
+                .buffer
+                .as_ref()
+                .unwrap()
+                .contents() as *const u16)
+        };
+        assert_eq!(bits, 0x4c00);
+    }
+
+    #[test]
+    fn generated_nf4_tile640_runtime_matches_reference() {
+        let Ok(mut backend) = MetalBackend::new() else {
+            return;
+        };
+        let input = backend.create_f32(&[2.0], &[1, 1]).unwrap();
+        let weights = backend.alloc_weight(vec![0x77; 320]);
+        let scales = backend.create_f32(&[0.0; 5], &[1, 5]).unwrap();
+        let biases = backend.create_f32(&[1.0; 5], &[1, 5]).unwrap();
+        let op = QuantizedMatmulOp {
+            m: 1,
+            n: 640,
+            k: 1,
+            input_dtype: DType::F32,
+            weight_dtype: DType::U8,
+            scale_dtype: DType::F32,
+            bias_dtype: DType::F32,
+            output_dtype: DType::F32,
+            group_size: 128,
+            bits: 4,
+            transpose: false,
+        };
+        let output = backend
+            .quantized_matmul(&op, input, weights, scales, biases)
+            .unwrap();
+        let result = backend.read_f32(output).unwrap().data;
+        assert_eq!(result.len(), 640);
+        for (index, value) in result.iter().enumerate() {
+            assert!((*value - 2.0).abs() < 1e-4, "output[{index}] = {value}");
+        }
+    }
+
+    #[test]
+    fn generated_palettized_gemm_and_swiglu_match_reference() {
+        let Ok(mut backend) = MetalBackend::new() else {
+            return;
+        };
+        let half_tensor = |backend: &mut MetalBackend, bits: &[u16], shape: &[i32]| {
+            let buffer = backend.mtl_device.new_buffer_with_data(
+                bits.as_ptr() as *const std::ffi::c_void,
+                (bits.len() * 2) as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            backend.alloc_slot(MetalTensor {
+                buffer: Some(buffer),
+                shape: shape.to_vec(),
+                dtype: DType::F16,
+                generation: 0,
+            })
+        };
+        let half_to_f32 = |bits: u16| {
+            let sign = if bits & 0x8000 != 0 { -1.0 } else { 1.0 };
+            let exponent = ((bits >> 10) & 0x1f) as i32;
+            let mantissa = (bits & 0x03ff) as u32;
+            if exponent == 0 {
+                sign * (mantissa as f32 / 1024.0) * 2f32.powi(-14)
+            } else {
+                sign * (1.0 + mantissa as f32 / 1024.0) * 2f32.powi(exponent - 15)
+            }
+        };
+
+        let input = half_tensor(&mut backend, &[0x3c00; 2], &[1, 2]);
+        let codebook = half_tensor(&mut backend, &[0x4000; 16], &[1, 16]);
+        let indices = backend.alloc_weight(vec![0]);
+        let gemm_op = QuantizedMatmulOp {
+            m: 1,
+            n: 1,
+            k: 2,
+            input_dtype: DType::F16,
+            weight_dtype: DType::U8,
+            scale_dtype: DType::F16,
+            bias_dtype: DType::F16,
+            output_dtype: DType::F16,
+            group_size: 16,
+            bits: 4,
+            transpose: false,
+        };
+        let gemm = backend
+            .quantized_matmul_palettized_gemm(&gemm_op, input, indices, codebook)
+            .unwrap();
+        let gemm_bits = unsafe {
+            *(backend
+                .slot(gemm)
+                .unwrap()
+                .buffer
+                .as_ref()
+                .unwrap()
+                .contents() as *const u16)
+        };
+        assert!((half_to_f32(gemm_bits) - 4.0).abs() < 0.01);
+
+        let input = half_tensor(&mut backend, &[0x3c00; 2], &[1, 2]);
+        let gate_codebook = half_tensor(&mut backend, &[0x3c00; 16], &[1, 16]);
+        let up_codebook = half_tensor(&mut backend, &[0x3c00; 16], &[1, 16]);
+        let gate_weights = backend.alloc_weight(vec![0]);
+        let up_weights = backend.alloc_weight(vec![0]);
+        let swiglu = backend
+            .dispatch_palettized_swiglu(
+                input,
+                gate_weights,
+                gate_codebook,
+                up_weights,
+                up_codebook,
+                2,
+                1,
+            )
+            .unwrap();
+        let swiglu_bits = unsafe {
+            *(backend
+                .slot(swiglu)
+                .unwrap()
+                .buffer
+                .as_ref()
+                .unwrap()
+                .contents() as *const u16)
+        };
+        let swiglu_value = half_to_f32(swiglu_bits);
+        let expected_swiglu = 2.0 * (1.0 / (1.0 + (-2.0f32).exp())) * 2.0;
+        assert!(
+            (swiglu_value - expected_swiglu).abs() < 0.01,
+            "SwiGLU output = {swiglu_value}, expected {expected_swiglu}"
+        );
+    }
+
+    #[test]
+    fn every_generated_precision_target_dispatches_on_metal() {
+        let Ok(mut backend) = MetalBackend::new() else {
+            return;
+        };
+        let targets = [
+            "prism.linear.rawf32.v1",
+            "prism.linear.nf4.v1",
+            "prism.linear.int8.v1",
+            "prism.ternary.gemv.v1",
+            "prism.ternary.gemv.v2",
+            "prism.ternary.gemm.v1",
+            "prism.nf4.tile640.gemv.v1",
+            "prism.nf4tile640.dequant_mul.v1",
+            "prism.q4.block_sym.gemv.v1",
+            "prism.palettized.gemv.v1",
+            "prism.palettized.swiglu.v1",
+            "prism.palettized.gemm.v1",
+            "prism.ternary.cimage.gemv.v1",
+        ];
+        for semantic_id in targets {
+            let buffers: Vec<metal::Buffer> = (0..10)
+                .map(|_| {
+                    backend
+                        .mtl_device
+                        .new_buffer(1024 * 1024, metal::MTLResourceOptions::StorageModeShared)
+                })
+                .collect();
+            let bindings: Vec<Option<&metal::Buffer>> = buffers.iter().map(Some).collect();
+            backend
+                .dispatch_precision_kernel(
+                    &KernelSemanticId(semantic_id.into()),
+                    &bindings,
+                    metal::MTLSize::new(1, 1, 1),
+                    metal::MTLSize::new(64, 1, 1),
+                )
+                .unwrap_or_else(|error| panic!("{semantic_id} failed Metal dispatch: {error}"));
+        }
+    }
 
     /// NB: These tests are ignored because `mpsgraph` v0.2.0 passes
     /// `MTLCommandQueue*` as a raw pointer (`^v`) where the ObjC runtime

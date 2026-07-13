@@ -3,7 +3,9 @@
 //! Implements the required gates from plan Section 6: reconstruction
 //! fidelity, structural validity, and the combined `check_candidate` gate.
 
+use super::candidate::ResidualPolicy;
 use super::candidate::TernarizationCandidate;
+use super::residual::ResidualCodec;
 
 /// Gates for the candidate process (plan Section 6: Required gates).
 ///
@@ -87,7 +89,21 @@ pub fn check_candidate(
         })
         .collect();
 
-    check_reconstruction(original, &reconstructed, gates.reconstruction_threshold)
+    let post_residual = match &candidate.residual_policy {
+        ResidualPolicy::None => reconstructed,
+        ResidualPolicy::Dense { residuals } => {
+            ResidualCodec::apply_dense(&reconstructed, residuals)
+        }
+        ResidualPolicy::Sparse {
+            indices, values, ..
+        } => {
+            let mut r = reconstructed;
+            ResidualCodec::apply_sparse(&mut r, indices, values);
+            r
+        }
+    };
+
+    check_reconstruction(original, &post_residual, gates.reconstruction_threshold)
 }
 
 #[cfg(test)]
@@ -210,5 +226,85 @@ mod tests {
         };
         assert!((gates.reconstruction_threshold - 0.05).abs() < 1e-12);
         assert!((gates.operator_threshold - 0.1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_check_candidate_dense_zero_residual_equals_none() {
+        // A Dense policy with zero residuals should pass just like None.
+        let original = vec![1.0, -1.0, 0.0, 0.5];
+        let zero_residuals = vec![0.0, 0.0, 0.0, 0.0];
+
+        let candidate_none = TernarizationCandidate {
+            tensor_id: "test".into(),
+            group_id: "g0".into(),
+            weights: vec![1, -1, 0, 1],
+            scales: vec![0.5],
+            group_size: 4,
+            residual_policy: ResidualPolicy::None,
+            physical_layout: PhysicalTileLayout::Tile640,
+            kernel_selection: "ternary_gemv".into(),
+        };
+        let candidate_dense_zero = TernarizationCandidate {
+            tensor_id: "test".into(),
+            group_id: "g0".into(),
+            weights: vec![1, -1, 0, 1],
+            scales: vec![0.5],
+            group_size: 4,
+            residual_policy: ResidualPolicy::Dense {
+                residuals: zero_residuals,
+            },
+            physical_layout: PhysicalTileLayout::Tile640,
+            kernel_selection: "ternary_gemv".into(),
+        };
+        let gates = CandidateGates {
+            reconstruction_threshold: 0.5,
+            operator_threshold: 1.0,
+            layer_threshold: 1.0,
+            rollout_threshold: 1.0,
+        };
+        let r_none = check_candidate(&original, &candidate_none, &gates);
+        let r_dense = check_candidate(&original, &candidate_dense_zero, &gates);
+        assert_eq!(
+            r_none.is_ok(),
+            r_dense.is_ok(),
+            "zero-residual dense should match None"
+        );
+    }
+
+    #[test]
+    fn test_check_candidate_nonzero_residual_improves_rmse() {
+        // Create a case where residual compensation is needed to pass the gate.
+        // Without residual: weights × scales deviates too much.
+        // With residual: the error shrinks and passes.
+        let original = vec![2.0, -2.0, 0.0, 1.0];
+
+        // weights × scales: [0.5, -0.5, 0.0, 0.5] — large error against original
+        let residuals = vec![1.5, -1.5, 0.0, 0.5]; // exactly the error
+
+        let candidate = TernarizationCandidate {
+            tensor_id: "residual".into(),
+            group_id: "g0".into(),
+            weights: vec![1, -1, 0, 1],
+            scales: vec![0.5],
+            group_size: 4,
+            residual_policy: ResidualPolicy::Dense { residuals },
+            physical_layout: PhysicalTileLayout::Tile640,
+            kernel_selection: "ternary_gemv".into(),
+        };
+
+        // Tight threshold that only passes with residual compensation
+        let gates = CandidateGates {
+            reconstruction_threshold: 0.01,
+            operator_threshold: 1.0,
+            layer_threshold: 1.0,
+            rollout_threshold: 1.0,
+        };
+
+        // Without residual: reconstruction = [0.5, -0.5, 0.0, 0.5], RMSE ~1.32 > 0.01
+        // With residual: reconstruction = [2.0, -2.0, 0.0, 1.0], RMSE = 0
+        assert!(
+            check_candidate(&original, &candidate, &gates).is_ok(),
+            "residual compensation should make the candidate pass a tight gate"
+        );
     }
 }

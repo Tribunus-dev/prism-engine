@@ -5,12 +5,12 @@
 //! quality, memory, latency, and energy.
 
 use crate::ecs::canonical::identity::CandidateId;
+use crate::ecs::cimage::PhysicalTileLayout;
 use crate::ecs::evolution::evaluator::{CandidateEvaluator, Workload};
 use crate::ecs::evolution::foundation::{
     CandidateGenome, CandidateStatus, CostFunction, DecompositionStrategy, EvolutionCandidate,
     MemoryConfig, MetalGeometry, SearchConfig,
 };
-use crate::ecs::cimage::PhysicalTileLayout;
 use crate::execution_plan::CodecFamily;
 
 /// Full joint genome — representation, kernel, and engram genes.
@@ -323,8 +323,7 @@ impl JointSearchConfig {
                     let af = a.fitness.unwrap_or(f64::INFINITY);
                     let bf = b.fitness.unwrap_or(f64::INFINITY);
                     if af.is_finite()
-                        && (af - bf).abs()
-                            < self.config.convergence_threshold * af.abs().max(1.0)
+                        && (af - bf).abs() < self.config.convergence_threshold * af.abs().max(1.0)
                     {
                         break;
                     }
@@ -362,8 +361,11 @@ impl JointSearchConfig {
         evaluator: &E,
         workload: &Workload,
     ) -> Result<f64, String> {
-        let candidate = EvolutionCandidate {
-            candidate_id: CandidateId(format!("joint.{}.{}", self.tensor_id, genome.kernel_variant)),
+        let mut candidate = EvolutionCandidate {
+            candidate_id: CandidateId(format!(
+                "joint.{}.{}",
+                self.tensor_id, genome.kernel_variant
+            )),
             parent_ids: vec![],
             generation: 0,
             genome: CandidateGenome {
@@ -408,16 +410,19 @@ impl JointSearchConfig {
             fitness: None,
             status: CandidateStatus::Created,
         };
-        let static_receipt = evaluator.validate_static(&candidate)?;
+        let static_receipt = evaluator.validate_static(&mut candidate)?;
         if !static_receipt.passed {
             return Err(static_receipt.violations.join(", "));
         }
         let compiled = evaluator.compile(&candidate)?;
-        let numerical = evaluator.validate_numerical(&compiled)?;
+        let numerical = evaluator.validate_numerical(&mut candidate, &compiled)?;
         if !numerical.passed {
-            return Err(format!("numerical gate failed: {}", numerical.max_absolute_error));
+            return Err(format!(
+                "numerical gate failed: {}",
+                numerical.max_absolute_error
+            ));
         }
-        let performance = evaluator.measure(&compiled, workload)?;
+        let performance = evaluator.measure(&mut candidate, &compiled, workload)?;
         Ok(performance.latency_p50_ns as f64)
     }
 

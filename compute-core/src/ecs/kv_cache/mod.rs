@@ -15,3 +15,6 @@ pub mod sliding_window;
 
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub use block_table::BlockTable;
+
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub mod layered_cache;

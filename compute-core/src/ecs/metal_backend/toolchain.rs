@@ -77,7 +77,7 @@ impl MetalToolchain {
                 "-sdk",
                 &self.sdk,
                 "metal",
-                &self.metal_std,
+                &format!("-std={}", self.metal_std),
                 &self.optimization,
                 "-c",
             ])

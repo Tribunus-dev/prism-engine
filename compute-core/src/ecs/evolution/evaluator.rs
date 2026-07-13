@@ -4,10 +4,10 @@
 //! static validation → compilation → numerical validation → performance measurement.
 //! Each stage produces a typed receipt.
 
-use serde::{Deserialize, Serialize};
-
 use crate::ecs::canonical::identity::*;
-use crate::ecs::evolution::foundation::EvolutionCandidate;
+use crate::ecs::evolution::foundation::{
+    EvolutionCandidate, NumericalReceipt, PerformanceReceipt, StaticValidationReceipt,
+};
 use crate::ecs::nf4tile640::{dequant_matmul_reference, pack_nf4_weights};
 
 // ── Supporting types ─────────────────────────────────────────────────────────
@@ -73,60 +73,37 @@ fn nf4_fixture() -> Result<Nf4Fixture, String> {
     })
 }
 
-/// Static validation receipt — validates ABI, device limits, constraints.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StaticValidationReceipt {
-    pub candidate_id: CandidateId,
-    pub passed: bool,
-    pub violations: Vec<String>,
-    pub validated_at: String,
-}
-
-/// Numerical validation receipt — compares candidate output to reference.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NumericalReceipt {
-    pub candidate_id: CandidateId,
-    pub passed: bool,
-    pub max_absolute_error: f64,
-    pub max_relative_error: f64,
-    pub threshold: f64,
-}
-
-/// Performance measurement receipt.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PerformanceReceipt {
-    pub candidate_id: CandidateId,
-    pub latency_p50_ns: u64,
-    pub latency_p95_ns: u64,
-    pub encode_time_ns: u64,
-    pub sync_time_ns: u64,
-    pub memory_traffic_bytes: u64,
-    pub energy_uj: Option<u64>,
-    pub repetitions: usize,
-}
-
 // ── Trait ────────────────────────────────────────────────────────────────────
 
 /// Evaluator for search candidates — compiles, validates, measures.
 #[allow(unused_variables)]
 pub trait CandidateEvaluator {
+    /// Return the set of codec formats this evaluator supports.
+    fn supported_formats(&self) -> Vec<CodecFamily> {
+        Vec::new()
+    }
+
     /// Validate a candidate against static constraints (ABI, device limits).
     fn validate_static(
         &self,
-        candidate: &EvolutionCandidate,
+        candidate: &mut EvolutionCandidate,
     ) -> Result<StaticValidationReceipt, String>;
 
     /// Compile a validated candidate into runnable form.
     fn compile(&self, candidate: &EvolutionCandidate) -> Result<CompiledCandidate, String>;
 
     /// Validate numerical correctness against a CPU reference.
-    fn validate_numerical(&self, candidate: &CompiledCandidate)
-        -> Result<NumericalReceipt, String>;
+    fn validate_numerical(
+        &self,
+        candidate: &mut EvolutionCandidate,
+        compiled: &CompiledCandidate,
+    ) -> Result<NumericalReceipt, String>;
 
     /// Measure performance on a target workload.
     fn measure(
         &self,
-        candidate: &CompiledCandidate,
+        candidate: &mut EvolutionCandidate,
+        compiled: &CompiledCandidate,
         workload: &Workload,
     ) -> Result<PerformanceReceipt, String>;
 }
@@ -135,6 +112,7 @@ pub trait CandidateEvaluator {
 
 use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::metal_backend::catalogue_source_for;
+use crate::ecs::plan::CodecFamily;
 
 /// Metal candidate evaluator — compiles through MetalBackendCompiler,
 /// dispatches on GPU, validates numerically against CPU reference,
@@ -165,7 +143,7 @@ impl MetalCandidateEvaluator {
         Self { _private: () }
     }
 
-    fn validate_static_impl(&self, candidate: &EvolutionCandidate) -> StaticValidationReceipt {
+    fn validate_static_impl(&self, candidate: &mut EvolutionCandidate) -> StaticValidationReceipt {
         let mut violations = Vec::new();
 
         // Validate tile dimensions against Metal limits
@@ -194,6 +172,44 @@ impl MetalCandidateEvaluator {
         if geometry.grid_width == 0 || geometry.grid_height == 0 {
             violations.push("grid dimensions must be non-zero".into());
         }
+        // Grid dimensions
+        if geometry.grid_width > 65536 || geometry.grid_height > 65536 {
+            violations.push("grid dimensions exceed Metal maxGridSize of 65536".into());
+        }
+        // SIMD width must be 32 for Apple GPU
+        if geometry.simd_width != 32 {
+            violations.push("simd_width must be 32 for Apple GPU".into());
+        }
+        // Threadgroup staging memory
+        let max_threadgroup_memory = 32768u64;
+        if candidate.genome.memory_config.threadgroup_staging > max_threadgroup_memory {
+            violations.push(format!(
+                "threadgroup_staging {} exceeds maxThreadgroupMemory {}",
+                candidate.genome.memory_config.threadgroup_staging, max_threadgroup_memory,
+            ));
+        }
+        // CodecFamily-specific constraints
+        match candidate.genome.representation {
+            CodecFamily::Ternary => {
+                let group_size = candidate.genome.packing.group_size;
+                if group_size == 0 || group_size % 4 != 0 {
+                    violations.push(format!(
+                        "Ternary group_size {} must be non-zero and multiple of 4 for SIMD packing",
+                        group_size,
+                    ));
+                }
+            }
+            CodecFamily::Nf4 => {
+                let group_size = candidate.genome.packing.group_size;
+                if group_size == 0 || group_size % 32 != 0 {
+                    violations.push(format!(
+                        "NF4 group_size {} must be non-zero and multiple of 32",
+                        group_size,
+                    ));
+                }
+            }
+            _ => {}
+        }
 
         StaticValidationReceipt {
             candidate_id: candidate.candidate_id.clone(),
@@ -210,13 +226,10 @@ impl MetalCandidateEvaluator {
     }
 
     #[cfg(feature = "metal-dispatch")]
-    fn compile_pipeline(
-        &self,
-        source: &[u8],
-    ) -> Result<metal::ComputePipelineState, String> {
+    fn compile_pipeline(&self, source: &[u8]) -> Result<metal::ComputePipelineState, String> {
         let device = self.device.as_ref().ok_or("no Metal device available")?;
-        let source = std::str::from_utf8(source)
-            .map_err(|e| format!("invalid Metal source: {e}"))?;
+        let source =
+            std::str::from_utf8(source).map_err(|e| format!("invalid Metal source: {e}"))?;
         let library = device
             .new_library_with_source(source, &metal::CompileOptions::new())
             .map_err(|e| format!("Metal library compile failed: {e}"))?;
@@ -326,11 +339,17 @@ impl MetalCandidateEvaluator {
 }
 
 impl CandidateEvaluator for MetalCandidateEvaluator {
+    fn supported_formats(&self) -> Vec<CodecFamily> {
+        vec![CodecFamily::Nf4, CodecFamily::Int8, CodecFamily::Ternary]
+    }
+
     fn validate_static(
         &self,
-        candidate: &EvolutionCandidate,
+        candidate: &mut EvolutionCandidate,
     ) -> Result<StaticValidationReceipt, String> {
-        Ok(self.validate_static_impl(candidate))
+        let receipt = self.validate_static_impl(candidate);
+        candidate.correctness_receipt = Some(receipt.clone());
+        Ok(receipt)
     }
 
     fn compile(&self, candidate: &EvolutionCandidate) -> Result<CompiledCandidate, String> {
@@ -371,17 +390,18 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
 
     fn validate_numerical(
         &self,
-        candidate: &CompiledCandidate,
+        candidate: &mut EvolutionCandidate,
+        compiled: &CompiledCandidate,
     ) -> Result<NumericalReceipt, String> {
         #[cfg(not(feature = "metal-dispatch"))]
         {
-            let _ = candidate;
+            let _ = (candidate, compiled);
             return Err("numerical validation requires metal-dispatch".into());
         }
         #[cfg(feature = "metal-dispatch")]
         {
             let fixture = nf4_fixture()?;
-            let output = self.dispatch_fixture(&candidate.compiled_bytes, &fixture, 1)?;
+            let output = self.dispatch_fixture(&compiled.compiled_bytes, &fixture, 1)?;
             let mut max_abs: f64 = 0.0;
             let mut max_rel: f64 = 0.0;
             for (actual, expected) in output.iter().zip(&fixture.reference) {
@@ -390,24 +410,27 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
                 max_rel = max_rel.max(abs / (*expected as f64).abs().max(1e-8));
             }
             let threshold = 0.05;
-            Ok(NumericalReceipt {
-                candidate_id: candidate.candidate_id.clone(),
+            let receipt = NumericalReceipt {
+                candidate_id: compiled.candidate_id.clone(),
                 passed: max_abs <= threshold,
                 max_absolute_error: max_abs,
                 max_relative_error: max_rel,
                 threshold,
-            })
+            };
+            candidate.quality_receipt = Some(receipt.clone());
+            Ok(receipt)
         }
     }
 
     fn measure(
         &self,
-        candidate: &CompiledCandidate,
+        candidate: &mut EvolutionCandidate,
+        compiled: &CompiledCandidate,
         workload: &Workload,
     ) -> Result<PerformanceReceipt, String> {
         #[cfg(not(feature = "metal-dispatch"))]
         {
-            let _ = (candidate, workload);
+            let _ = (candidate, compiled, workload);
             return Err("performance measurement requires metal-dispatch".into());
         }
         #[cfg(feature = "metal-dispatch")]
@@ -417,14 +440,14 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
             // Compile exactly once. Warm-up and measured repetitions reuse the
             // same pipeline so the receipt reflects execution rather than
             // repeatedly paying Metal library and PSO creation costs.
-            let pipeline = self.compile_pipeline(&candidate.compiled_bytes)?;
+            let pipeline = self.compile_pipeline(&compiled.compiled_bytes)?;
             self.dispatch_pipeline(&pipeline, &fixture, 1)?;
             let start = std::time::Instant::now();
             self.dispatch_pipeline(&pipeline, &fixture, repetitions)?;
             let total_ns = start.elapsed().as_nanos() as u64;
             let per_dispatch = (total_ns / repetitions as u64).max(1);
-            Ok(PerformanceReceipt {
-                candidate_id: candidate.candidate_id.clone(),
+            let receipt = PerformanceReceipt {
+                candidate_id: compiled.candidate_id.clone(),
                 latency_p50_ns: per_dispatch,
                 latency_p95_ns: per_dispatch,
                 encode_time_ns: 0,
@@ -435,7 +458,9 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
                     + fixture.reference.len() * 4) as u64,
                 energy_uj: None,
                 repetitions,
-            })
+            };
+            candidate.performance_receipt = Some(receipt.clone());
+            Ok(receipt)
         }
     }
 }
@@ -501,7 +526,7 @@ mod tests {
         let evaluator = MetalCandidateEvaluator::new();
         let mut candidate = make_test_candidate();
         candidate.genome.metal_geometry.threadgroup_width = 99999;
-        let receipt = evaluator.validate_static(&candidate).unwrap();
+        let receipt = evaluator.validate_static(&mut candidate).unwrap();
         assert!(!receipt.passed);
         assert!(!receipt.violations.is_empty());
     }
@@ -519,12 +544,12 @@ mod tests {
         let evaluator = MetalCandidateEvaluator::new();
         let mut candidate = make_test_candidate();
 
-        let receipt = evaluator.validate_static(&candidate).unwrap();
+        let receipt = evaluator.validate_static(&mut candidate).unwrap();
         assert!(receipt.passed);
         assert!(receipt.violations.is_empty());
 
         candidate.genome.metal_geometry.threadgroup_height = 2048;
-        let receipt = evaluator.validate_static(&candidate).unwrap();
+        let receipt = evaluator.validate_static(&mut candidate).unwrap();
         assert!(!receipt.passed);
         assert!(receipt
             .violations
@@ -533,7 +558,7 @@ mod tests {
 
         candidate.genome.metal_geometry.threadgroup_height = 1;
         candidate.genome.metal_geometry.threadgroup_depth = 2048;
-        let receipt = evaluator.validate_static(&candidate).unwrap();
+        let receipt = evaluator.validate_static(&mut candidate).unwrap();
         assert!(!receipt.passed);
         assert!(receipt
             .violations
@@ -544,8 +569,8 @@ mod tests {
     #[test]
     fn test_metal_validate_static_returns_timestamp() {
         let evaluator = MetalCandidateEvaluator::new();
-        let candidate = make_test_candidate();
-        let receipt = evaluator.validate_static(&candidate).unwrap();
+        let mut candidate = make_test_candidate();
+        let receipt = evaluator.validate_static(&mut candidate).unwrap();
         assert!(!receipt.validated_at.is_empty());
         assert!(receipt.validated_at.parse::<u64>().is_ok());
     }
@@ -555,19 +580,23 @@ mod tests {
         let evaluator = MetalCandidateEvaluator::new();
         #[cfg(feature = "metal-dispatch")]
         {
-            let candidate = evaluator.compile(&make_test_candidate()).unwrap();
-            let receipt = evaluator.validate_numerical(&candidate).unwrap();
+            let mut ec = make_test_candidate();
+            let compiled = evaluator.compile(&ec).unwrap();
+            let receipt = evaluator.validate_numerical(&mut ec, &compiled).unwrap();
             assert!(receipt.passed);
             assert!(receipt.max_absolute_error <= receipt.threshold);
+            assert!(ec.quality_receipt.is_some());
         }
         #[cfg(not(feature = "metal-dispatch"))]
-        assert!(evaluator
-            .validate_numerical(&CompiledCandidate {
+        {
+            let mut ec = make_test_candidate();
+            let compiled = CompiledCandidate {
                 candidate_id: crate::ecs::canonical::identity::CandidateId("test".into()),
                 compiled_bytes: vec![],
                 compile_duration_ms: 0,
-            })
-            .is_err());
+            };
+            assert!(evaluator.validate_numerical(&mut ec, &compiled).is_err());
+        }
     }
 
     #[test]
@@ -580,22 +609,23 @@ mod tests {
         };
         #[cfg(feature = "metal-dispatch")]
         {
-            let candidate = evaluator.compile(&make_test_candidate()).unwrap();
-            let receipt = evaluator.measure(&candidate, &workload).unwrap();
+            let mut ec = make_test_candidate();
+            let compiled = evaluator.compile(&ec).unwrap();
+            let receipt = evaluator.measure(&mut ec, &compiled, &workload).unwrap();
             assert!(receipt.latency_p50_ns > 0);
             assert_eq!(receipt.repetitions, 10);
+            assert!(ec.performance_receipt.is_some());
         }
         #[cfg(not(feature = "metal-dispatch"))]
-        assert!(evaluator
-            .measure(
-                &CompiledCandidate {
-                    candidate_id: crate::ecs::canonical::identity::CandidateId("test".into()),
-                    compiled_bytes: vec![],
-                    compile_duration_ms: 0,
-                },
-                &workload
-            )
-            .is_err());
+        {
+            let mut ec = make_test_candidate();
+            let compiled = CompiledCandidate {
+                candidate_id: crate::ecs::canonical::identity::CandidateId("test".into()),
+                compiled_bytes: vec![],
+                compile_duration_ms: 0,
+            };
+            assert!(evaluator.measure(&mut ec, &compiled, &workload).is_err());
+        }
     }
 
     #[test]

@@ -11,9 +11,9 @@ use crate::ecs::canonical::generation::CimageGeneration;
 use crate::ecs::canonical::generation::EngramBinding;
 use crate::ecs::canonical::identity::*;
 use crate::ecs::cimage::generation_store::{ContentStore, GenerationStore, PromotionTransaction};
-use crate::ecs::training_target::spec::EngramArtifact;
+use crate::ecs::evolution::foundation::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::training_target::engram::trainer::TrainedEngram;
-use crate::ecs::evolution::evaluator::{NumericalReceipt, PerformanceReceipt};
+use crate::ecs::training_target::spec::EngramArtifact;
 use sha2::{Digest, Sha256};
 
 /// Generation management API — inspect, promote, rollback, list.
@@ -139,7 +139,12 @@ impl GenerationApi {
         trained: &TrainedEngram,
         evidence: &PromotionEvidence,
     ) -> Result<GenerationId, String> {
-        self.promote_with_engram(generation, &trained.artifact, trained.payload.clone(), evidence)
+        self.promote_with_engram(
+            generation,
+            &trained.artifact,
+            trained.payload.clone(),
+            evidence,
+        )
     }
 }
 
@@ -394,7 +399,9 @@ mod tests {
         use crate::ecs::training_target::engram::config::EngramTrainConfig;
         use crate::ecs::training_target::engram::dataset::EngramTrainingDataset;
         use crate::ecs::training_target::engram::trainer::EngramTrainer;
-        use crate::ecs::training_target::spec::{EngramApplication, EngramTrainingTarget, TrainingTargetPriority};
+        use crate::ecs::training_target::spec::{
+            EngramApplication, EngramTrainingTarget, TrainingTargetPriority,
+        };
 
         let target = EngramTrainingTarget {
             target_id: "lifecycle.engram".into(),
@@ -428,12 +435,30 @@ mod tests {
             generation_id: GenerationId("base".into()),
             parent_generation: None,
             base_model: ModelSourceId("model".into()),
-            compiler_identity: CompilerIdentity { name: "test".into(), version: "1".into(), build_hash: None, build_timestamp: None },
+            compiler_identity: CompilerIdentity {
+                name: "test".into(),
+                version: "1".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
             hardware_profile: HardwareProfileId("apple".into()),
             tensor_bindings: BTreeMap::new(),
             kernel_bindings: BTreeMap::new(),
             engram_bindings: BTreeMap::new(),
-            execution_graph: ExecutionGraph { regions: vec![], edges: vec![], state: RuntimeStatePlan { max_context_tokens: 1, kv_cache_bytes_per_token: 1, total_kv_cache_bytes: 1 }, memory: MemoryPlan { total_activation_bytes: 0, total_weight_bytes: 0, arena_region_count: 0 } },
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 1,
+                    kv_cache_bytes_per_token: 1,
+                    total_kv_cache_bytes: 1,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
             receipt_root: ReceiptId("base-receipt".into()),
             created_at: Timestamp("now".into()),
         };
@@ -442,15 +467,44 @@ mod tests {
         child.generation_id = GenerationId("trained".into());
         child.parent_generation = Some(GenerationId("base".into()));
         let evidence = PromotionEvidence {
-            numerical: NumericalReceipt { candidate_id: CandidateId("nf4".into()), passed: true, max_absolute_error: 0.0, max_relative_error: 0.0, threshold: 0.05 },
-            performance: PerformanceReceipt { candidate_id: CandidateId("nf4".into()), latency_p50_ns: 10, latency_p95_ns: 12, encode_time_ns: 0, sync_time_ns: 12, memory_traffic_bytes: trained.payload.len() as u64, energy_uj: None, repetitions: 3 },
+            numerical: NumericalReceipt {
+                candidate_id: CandidateId("nf4".into()),
+                passed: true,
+                max_absolute_error: 0.0,
+                max_relative_error: 0.0,
+                threshold: 0.05,
+            },
+            performance: PerformanceReceipt {
+                candidate_id: CandidateId("nf4".into()),
+                latency_p50_ns: 10,
+                latency_p95_ns: 12,
+                encode_time_ns: 0,
+                sync_time_ns: 12,
+                memory_traffic_bytes: trained.payload.len() as u64,
+                energy_uj: None,
+                repetitions: 3,
+            },
         };
-        api.promote_trained_engram(child, &trained, &evidence).expect("trained promotion");
-        let binding = api.current_generation().unwrap().engram_bindings.get(&trained.artifact.logical_id).unwrap();
+        api.promote_trained_engram(child, &trained, &evidence)
+            .expect("trained promotion");
+        let binding = api
+            .current_generation()
+            .unwrap()
+            .engram_bindings
+            .get(&trained.artifact.logical_id)
+            .unwrap();
         assert_eq!(binding.artifact_id, trained.artifact.artifact_id);
-        let payload = api.content_store.get(&trained.artifact.payload_segment).unwrap();
+        let payload = api
+            .content_store
+            .get(&trained.artifact.payload_segment)
+            .unwrap();
         let mut activation = vec![1.0];
-        crate::ecs::runtime::engram::application::apply_cpu(&EngramApplication::AdditiveResidual, &mut activation, payload).unwrap();
+        crate::ecs::runtime::engram::application::apply_cpu(
+            &EngramApplication::AdditiveResidual,
+            &mut activation,
+            payload,
+        )
+        .unwrap();
         assert!((activation[0] - 1.25).abs() < 1e-3);
         assert_eq!(api.rollback().unwrap(), GenerationId("base".into()));
     }

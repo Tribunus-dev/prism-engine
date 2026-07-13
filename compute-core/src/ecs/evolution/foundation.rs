@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::canonical::identity::{CandidateId, ReceiptId};
+use crate::ecs::canonical::identity::CandidateId;
 use crate::ecs::canonical::kernel_abi::KernelImplementationId;
 use crate::ecs::cimage::PhysicalTileLayout;
 use crate::ecs::component::backend::BackendTarget;
@@ -51,6 +51,7 @@ pub struct EvolutionState {
     pub best_candidate: Option<CompEntity>,
     pub converged: bool,
     pub search_config: SearchConfig,
+    pub receipt_store: Vec<ReceiptMetadata>,
 }
 
 /// Configuration for one search.
@@ -220,11 +221,52 @@ pub struct EvolutionCandidate {
     pub generation: u64,
     pub genome: CandidateGenome,
     pub compiled_artifacts: Vec<KernelImplementationId>,
-    pub correctness_receipt: Option<ReceiptId>,
-    pub quality_receipt: Option<ReceiptId>,
-    pub performance_receipt: Option<ReceiptId>,
+    pub correctness_receipt: Option<StaticValidationReceipt>,
+    pub quality_receipt: Option<NumericalReceipt>,
+    pub performance_receipt: Option<PerformanceReceipt>,
     pub fitness: Option<FitnessVector>,
     pub status: CandidateStatus,
+}
+
+/// Static validation receipt — validates ABI, device limits, constraints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticValidationReceipt {
+    pub candidate_id: CandidateId,
+    pub passed: bool,
+    pub violations: Vec<String>,
+    pub validated_at: String,
+}
+
+/// Numerical validation receipt — compares candidate output to reference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NumericalReceipt {
+    pub candidate_id: CandidateId,
+    pub passed: bool,
+    pub max_absolute_error: f64,
+    pub max_relative_error: f64,
+    pub threshold: f64,
+}
+
+/// Performance measurement receipt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceReceipt {
+    pub candidate_id: CandidateId,
+    pub latency_p50_ns: u64,
+    pub latency_p95_ns: u64,
+    pub encode_time_ns: u64,
+    pub sync_time_ns: u64,
+    pub memory_traffic_bytes: u64,
+    pub energy_uj: Option<u64>,
+    pub repetitions: usize,
+}
+
+/// Metadata linking evaluation receipts to their candidate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReceiptMetadata {
+    pub candidate_id: CandidateId,
+    pub static_receipt: Option<StaticValidationReceipt>,
+    pub numerical_receipt: Option<NumericalReceipt>,
+    pub performance_receipt: Option<PerformanceReceipt>,
 }
 
 /// The typed genome for a search candidate.

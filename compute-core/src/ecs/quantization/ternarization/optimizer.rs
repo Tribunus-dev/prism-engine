@@ -48,16 +48,28 @@ impl ScaleOptimizer {
             let mut best_loss = f64::MAX;
 
             for _ in 0..self.max_iterations {
-                let scale = best_scale;
-                let mut loss = 0.0f64;
-                for i in start..end {
-                    let w = candidate.weights[i] as f32 * scale;
-                    let err = (original[i] - w) as f64;
-                    loss += err * err;
-                }
-                if loss < best_loss {
-                    best_loss = loss;
-                    best_scale = scale;
+                // Perturb current best scale across a fixed grid and pick the best
+                let candidates = [
+                    best_scale * 0.5,
+                    best_scale * 0.75,
+                    best_scale * 0.9,
+                    best_scale,
+                    best_scale * 1.1,
+                    best_scale * 1.25,
+                    best_scale * 1.5,
+                    best_scale * 2.0,
+                ];
+                for &scale in &candidates {
+                    let mut loss = 0.0f64;
+                    for i in start..end {
+                        let w = candidate.weights[i] as f32 * scale;
+                        let err = (original[i] - w) as f64;
+                        loss += err * err;
+                    }
+                    if loss < best_loss {
+                        best_loss = loss;
+                        best_scale = scale;
+                    }
                 }
             }
 
@@ -88,13 +100,13 @@ mod tests {
 
     #[test]
     fn test_optimize_perfect_fit() {
-        // Weights already match: ternary {-1, 0, +1} with scale = 0.5
-        let original = vec![0.5, -0.5, 0.0, 0.5];
+        // Optimal scale is 2.0 for this tensor; verify optimizer finds it.
+        let original = vec![2.0, -2.0, 0.0, 2.0];
         let mut candidate = TernarizationCandidate {
             tensor_id: "test".into(),
             group_id: "g0".into(),
             weights: vec![1, -1, 0, 1],
-            scales: vec![0.5],
+            scales: vec![1.0],
             group_size: 4,
             residual_policy: ResidualPolicy::None,
             physical_layout: PhysicalTileLayout::Tile640,
@@ -105,6 +117,11 @@ mod tests {
         let rmse = optimizer.optimize(&mut candidate, &original);
         // Perfect reconstruction → RMSE ≈ 0
         assert!(rmse < 1e-6, "expected near-zero RMSE, got {}", rmse);
+        assert!(
+            (candidate.scales[0] - 2.0).abs() < 0.01,
+            "expected scale≈2.0, got {}",
+            candidate.scales[0]
+        );
     }
 
     #[test]
@@ -123,8 +140,12 @@ mod tests {
 
         let optimizer = ScaleOptimizer::new(20, 0.01);
         let rmse = optimizer.optimize(&mut candidate, &original);
-        assert!(rmse < 5.0, "optimizer should converge, got RMSE {}", rmse);
-        assert!(candidate.scales[0] > 0.0);
+        assert!(rmse < 0.2, "optimizer should converge, got RMSE {}", rmse);
+        assert!(
+            (candidate.scales[0] - 2.0).abs() < 0.05,
+            "expected scale≈2.0, got {}",
+            candidate.scales[0]
+        );
     }
 
     #[test]

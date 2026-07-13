@@ -109,6 +109,19 @@ impl BackendCompiler for MetalBackendCompiler {
         group: &KernelGroup,
         _context: &LoweringContext,
     ) -> Result<BackendKernelIr, BackendCompileError> {
+        if let Ok(contract) = crate::ecs::mlir::precision_contract_for_semantic(&group.semantic_id)
+        {
+            let lowered = contract
+                .lower_to_metal()
+                .map_err(BackendCompileError::LoweringFailed)?;
+            return Ok(BackendKernelIr {
+                semantic_id: lowered.semantic_id,
+                source: lowered.source,
+                entry_point: lowered.entry_point,
+                abi: lowered.abi,
+            });
+        }
+
         // Look up the first matching implementation in the catalogue.
         let registration = self
             .catalogue

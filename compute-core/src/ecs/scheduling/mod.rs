@@ -46,9 +46,11 @@ pub mod slot;
 pub mod token_budget;
 #[cfg(all(target_os = "macos", feature = "mlx-backend"))]
 pub mod tri_lane_orchestrator;
+pub mod unified_scheduler;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod weight_residency;
 pub use token_budget::*;
+pub use unified_scheduler::*;
 
 #[cfg(all(
     target_os = "macos",
