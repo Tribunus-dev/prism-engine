@@ -74,10 +74,18 @@ sqlx-postgres = { version = "0.7", optional = true, default-features = false, fe
 duckdb = { version = "1.1", optional = true }
 fred = { version = "10", optional = true, features = ["i-client", "i-keys", "i-scripts"] }
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
+melior = { version = "0.27.2", optional = true }
 
 [features]
 default = []
-prism-backend = ["dep:coreml-proto", "server", "metal-dispatch", "backend-metal", "dep:image"]
+prism-backend = [
+    "dep:coreml-proto",
+    "server",
+    "metal-dispatch",
+    "backend-metal",
+    "dep:image",
+    "mlir-runtime",
+]
 prism-backend-ios = ["prism-backend", "metal-dispatch", "backend-metal", "dep:image"]
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
 research = ["prism-backend", "mlx-backend"]
@@ -104,6 +112,7 @@ coreai-backend = []
 apple-coreml = []
 flux-klein-mlx = []
 backend-metal = ["dep:mpsgraph"]
+mlir-runtime = ["dep:melior"]
 generation-features-moved-to-separate-crates = []
 
 [lints.rust]

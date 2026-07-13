@@ -67,6 +67,24 @@ impl MetalBackendCompiler {
         })
     }
 
+    /// Lower and compile a target-independent MLIR precision contract through
+    /// the same authoritative Metal catalogue used by runtime dispatch.
+    pub fn compile_mlir_contract(
+        &self,
+        contract: &crate::ecs::mlir::MlirExecutionContract,
+    ) -> Result<CompiledKernelArtifact, BackendCompileError> {
+        let lowered = contract
+            .lower_to_metal()
+            .map_err(BackendCompileError::LoweringFailed)?;
+        self.compile_source(
+            &lowered.semantic_id.0,
+            &lowered.source,
+            &lowered.entry_point,
+            &lowered.semantic_id.0,
+            lowered.abi,
+        )
+    }
+
     /// Check whether the Metal toolchain is available.
     pub fn is_available(&self) -> bool {
         self.toolchain.is_available()

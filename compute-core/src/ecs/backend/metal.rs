@@ -21,7 +21,8 @@ use crate::ecs::backend::{
     QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle,
 };
 use crate::ecs::canonical::kernel_abi::KernelSemanticId;
-use crate::ecs::metal_backend::catalogue_source_for;
+use crate::ecs::metal_backend::{catalogue_source_for, MetalImplementationCatalogue};
+use crate::ecs::mlir::runtime_lowering_artifact;
 
 /// One live tensor stored in the Metal backend.
 /// Host-side representation of `Nf4Tile640DispatchParams` in `shaders/nf4tile640.metal`.
@@ -34,8 +35,30 @@ struct Nf4Tile640DispatchParams {
     group_size: u32,
     reserved: [u32; 3],
 }
+
 const _: () = assert!(std::mem::size_of::<Nf4Tile640DispatchParams>() == 32);
 const _: () = assert!(std::mem::align_of::<Nf4Tile640DispatchParams>() == 16);
+
+#[repr(C, align(16))]
+struct MlpConstants {
+    hidden_dim: u32,
+    intermediate_dim: u32,
+    group_size: u32,
+    codec_id: u32,
+    epsilon: f32,
+    pad: [u32; 3],
+}
+
+#[repr(C, align(16))]
+struct TernaryGemvConstants {
+    rows: u32,
+    cols: u32,
+    group_size: u32,
+    groups_per_row: u32,
+    bytes_per_group: u32,
+    output_dtype: u32,
+    padding: [u32; 3],
+}
 
 struct MetalTensor {
     buffer: Option<metal::Buffer>,
@@ -54,10 +77,10 @@ pub struct MetalBackend {
     weight_generations: Vec<u32>,
     #[allow(dead_code)]
     weight_free: Vec<u32>,
-    /// Cached compute pipeline state for the dequant_mul_nf4tile640 kernel.
-    nf4_pipeline: Option<metal::ComputePipelineState>,
-    /// The Metal library must outlive the pipeline state.
-    nf4_library: Option<metal::Library>,
+    /// Cached precision pipelines keyed by the canonical semantic kernel ID.
+    precision_pipelines: HashMap<String, metal::ComputePipelineState>,
+    /// Libraries must outlive their pipeline states.
+    precision_libraries: HashMap<String, metal::Library>,
     /// Owner token → tensor handle for externally bound (IOSurface) tensors.
     external_bindings: HashMap<u64, TensorHandle>,
 }
@@ -74,8 +97,8 @@ impl MetalBackend {
             weight_slots: Vec::new(),
             weight_generations: Vec::new(),
             weight_free: Vec::new(),
-            nf4_pipeline: None,
-            nf4_library: None,
+            precision_pipelines: HashMap::new(),
+            precision_libraries: HashMap::new(),
             external_bindings: HashMap::new(),
         })
     }
@@ -139,30 +162,961 @@ impl MetalBackend {
         }
     }
 
-    /// Lazily compile the NF4 dequantize+matmul kernel and cache the pipeline.
-    fn ensure_nf4_kernel(&mut self) -> Result<(), String> {
-        if self.nf4_pipeline.is_some() {
+    /// Lazily compile any catalogue-registered precision kernel and cache its
+    /// pipeline by semantic identity.
+    pub fn ensure_precision_kernel(
+        &mut self,
+        semantic_id: &KernelSemanticId,
+    ) -> Result<(), String> {
+        if self.precision_pipelines.contains_key(&semantic_id.0) {
             return Ok(());
         }
-        let src = catalogue_source_for(&KernelSemanticId("prism.nf4tile640.dequant_mul.v1".into()))
-            .unwrap_or_else(|| "// nf4tile640 — source unavailable\n".into());
+        let source = catalogue_source_for(semantic_id)
+            .ok_or_else(|| format!("Metal catalogue has no source for {}", semantic_id.0))?;
+        let catalogue = MetalImplementationCatalogue::default();
+        let registration = catalogue
+            .for_semantic(semantic_id)
+            .into_iter()
+            .find(|registration| registration.source_entry_point.is_some())
+            .ok_or_else(|| {
+                format!(
+                    "Metal catalogue has no executable entry point for {}",
+                    semantic_id.0
+                )
+            })?;
+        let entry_point = registration.source_entry_point.clone().unwrap();
+        self.compile_precision_pipeline(semantic_id, &source, &entry_point)
+    }
+
+    fn compile_precision_pipeline(
+        &mut self,
+        semantic_id: &KernelSemanticId,
+        source: &str,
+        entry_point: &str,
+    ) -> Result<(), String> {
+        if self.precision_pipelines.contains_key(&semantic_id.0) {
+            return Ok(());
+        }
         let lib = self
             .mtl_device
-            .new_library_with_source(&src, &metal::CompileOptions::new())
+            .new_library_with_source(source, &metal::CompileOptions::new())
             .map_err(|e| format!("Metal library compile failed: {e}"))?;
         let kernel = lib
-            .get_function(
-                "dequant_mul_nf4tile640",
-                None::<metal::FunctionConstantValues>,
-            )
+            .get_function(entry_point, None::<metal::FunctionConstantValues>)
             .map_err(|e| format!("Metal kernel not found: {e}"))?;
         let pipeline = self
             .mtl_device
             .new_compute_pipeline_state_with_function(&kernel)
             .map_err(|e| format!("Metal pipeline state creation failed: {e}"))?;
-        self.nf4_library = Some(lib);
-        self.nf4_pipeline = Some(pipeline);
+        self.precision_libraries.insert(semantic_id.0.clone(), lib);
+        self.precision_pipelines
+            .insert(semantic_id.0.clone(), pipeline);
         Ok(())
+    }
+
+    /// Dispatch a catalogue-registered precision kernel using its declared
+    /// buffer slots. The caller owns ABI-specific buffer construction; this
+    /// boundary owns semantic selection, pipeline caching, slot binding, and
+    /// synchronization.
+    pub fn dispatch_precision_kernel(
+        &mut self,
+        semantic_id: &KernelSemanticId,
+        buffers: &[Option<&metal::Buffer>],
+        grid: metal::MTLSize,
+        threadgroup: metal::MTLSize,
+    ) -> Result<(), String> {
+        let translated = runtime_lowering_artifact(
+            semantic_id,
+            [grid.width as u32, grid.height as u32, grid.depth as u32],
+            [
+                threadgroup.width as u32,
+                threadgroup.height as u32,
+                threadgroup.depth as u32,
+            ],
+        )?;
+        self.compile_precision_pipeline(semantic_id, &translated.source, &translated.entry_point)?;
+        let pipeline = self
+            .precision_pipelines
+            .get(&semantic_id.0)
+            .ok_or_else(|| format!("pipeline missing after compilation for {}", semantic_id.0))?;
+        let queue = self.mtl_device.new_command_queue();
+        let command = queue.new_command_buffer();
+        let encoder = command.new_compute_command_encoder();
+        encoder.set_compute_pipeline_state(pipeline);
+        for (slot, buffer) in buffers.iter().enumerate() {
+            if let Some(buffer) = buffer {
+                encoder.set_buffer(slot as u64, Some(buffer), 0);
+            }
+        }
+        encoder.dispatch_threads(
+            metal::MTLSize::new(
+                translated.dispatch.grid[0] as u64,
+                translated.dispatch.grid[1] as u64,
+                translated.dispatch.grid[2] as u64,
+            ),
+            metal::MTLSize::new(
+                translated.dispatch.threadgroup[0] as u64,
+                translated.dispatch.threadgroup[1] as u64,
+                translated.dispatch.threadgroup[2] as u64,
+            ),
+        );
+        encoder.end_encoding();
+        command.commit();
+        command.wait_until_completed();
+        Ok(())
+    }
+
+    fn quantized_matmul_int8(
+        &mut self,
+        op: &QuantizedMatmulOp,
+        x: TensorHandle,
+        w: QuantizedWeightHandle,
+        scales: TensorHandle,
+        biases: TensorHandle,
+    ) -> Result<TensorHandle, String> {
+        let x_buf = self
+            .slot(x)?
+            .buffer
+            .as_ref()
+            .ok_or("INT8 input tensor has no buffer")?
+            .clone();
+        let weights = self.get_weight(w)?.to_vec();
+        let scale_buf = self
+            .slot(scales)?
+            .buffer
+            .as_ref()
+            .ok_or("INT8 scales tensor has no buffer")?
+            .clone();
+        let bias_buf = self
+            .slot(biases)?
+            .buffer
+            .as_ref()
+            .ok_or("INT8 biases tensor has no buffer")?
+            .clone();
+        let expected = (op.k as usize).saturating_mul(op.n as usize);
+        if weights.len() != expected {
+            return Err(format!(
+                "INT8 weights size {} != expected {}",
+                weights.len(),
+                expected
+            ));
+        }
+        let weight_buf = self.mtl_device.new_buffer_with_data(
+            weights.as_ptr() as *const std::ffi::c_void,
+            weights.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output_buf = self.mtl_device.new_buffer(
+            (op.m as usize * op.n as usize * std::mem::size_of::<f32>()) as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let constants = MlpConstants {
+            hidden_dim: op.k,
+            intermediate_dim: op.n,
+            group_size: op.group_size,
+            codec_id: 1,
+            epsilon: 0.0,
+            pad: [0; 3],
+        };
+        let constants_buf = self.mtl_device.new_buffer_with_data(
+            &constants as *const MlpConstants as *const std::ffi::c_void,
+            std::mem::size_of::<MlpConstants>() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.linear.int8.v1".into()),
+            &[
+                Some(&x_buf),
+                Some(&weight_buf),
+                Some(&scale_buf),
+                Some(&bias_buf),
+                Some(&output_buf),
+                Some(&constants_buf),
+            ],
+            metal::MTLSize::new(op.n as u64, op.m as u64, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output_buf),
+            shape: vec![op.m as i32, op.n as i32],
+            dtype: DType::F32,
+            generation: 0,
+        }))
+    }
+
+    fn quantized_matmul_ternary_tile640(
+        &mut self,
+        op: &QuantizedMatmulOp,
+        x: TensorHandle,
+        w: QuantizedWeightHandle,
+        page_scales: TensorHandle,
+        lane_scales: TensorHandle,
+    ) -> Result<TensorHandle, String> {
+        if op.m != 1 || op.input_dtype != DType::F16 || op.output_dtype != DType::F16 {
+            return Err("tile640 ternary dispatch requires m=1 and F16 input/output".into());
+        }
+        let input = self
+            .slot(x)?
+            .buffer
+            .as_ref()
+            .ok_or("ternary input has no buffer")?
+            .clone();
+        let packed = self.get_weight(w)?.to_vec();
+        let page = self
+            .slot(page_scales)?
+            .buffer
+            .as_ref()
+            .ok_or("ternary page scales have no buffer")?
+            .clone();
+        let lane = self
+            .slot(lane_scales)?
+            .buffer
+            .as_ref()
+            .ok_or("ternary lane scales have no buffer")?
+            .clone();
+        let output = self.mtl_device.new_buffer(
+            op.n as u64 * std::mem::size_of::<u16>() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let packed_buf = self.mtl_device.new_buffer_with_data(
+            packed.as_ptr() as *const std::ffi::c_void,
+            packed.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let in_dim = self.mtl_device.new_buffer_with_data(
+            &op.k as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let out_dim = self.mtl_device.new_buffer_with_data(
+            &op.n as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.ternary.gemv.v1".into()),
+            &[
+                Some(&packed_buf),
+                Some(&input),
+                Some(&page),
+                Some(&lane),
+                Some(&output),
+                Some(&in_dim),
+                Some(&out_dim),
+            ],
+            metal::MTLSize::new(op.n as u64, 1, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![1, op.n as i32],
+            dtype: DType::F16,
+            generation: 0,
+        }))
+    }
+
+    fn quantized_matmul_q4(
+        &mut self,
+        op: &QuantizedMatmulOp,
+        x: TensorHandle,
+        w: QuantizedWeightHandle,
+        scales: TensorHandle,
+    ) -> Result<TensorHandle, String> {
+        if op.m != 1 || op.input_dtype != DType::F16 || op.output_dtype != DType::F16 {
+            return Err("Q4 block-symmetric dispatch requires m=1 and F16 input/output".into());
+        }
+        if op.k % 8 != 0 || op.k % op.group_size != 0 {
+            return Err("Q4 dimensions must be divisible by 8 and group_size".into());
+        }
+        let input = self
+            .slot(x)?
+            .buffer
+            .as_ref()
+            .ok_or("Q4 input has no buffer")?
+            .clone();
+        let packed = self.get_weight(w)?.to_vec();
+        let scale = self
+            .slot(scales)?
+            .buffer
+            .as_ref()
+            .ok_or("Q4 scales have no buffer")?
+            .clone();
+        let expected = (op.n as usize) * (op.k as usize) / 8;
+        if packed.len() != expected {
+            return Err(format!(
+                "Q4 packed weights size {} != expected {}",
+                packed.len(),
+                expected
+            ));
+        }
+        let weights = self.mtl_device.new_buffer_with_data(
+            packed.as_ptr() as *const std::ffi::c_void,
+            packed.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output = self.mtl_device.new_buffer(
+            op.n as u64 * 2,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let k_buf = self.mtl_device.new_buffer_with_data(
+            &op.k as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let n_buf = self.mtl_device.new_buffer_with_data(
+            &op.n as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let group_buf = self.mtl_device.new_buffer_with_data(
+            &op.group_size as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.q4.block_sym.gemv.v1".into()),
+            &[
+                Some(&input),
+                Some(&weights),
+                Some(&scale),
+                Some(&output),
+                Some(&k_buf),
+                Some(&n_buf),
+                Some(&group_buf),
+            ],
+            metal::MTLSize::new(op.n as u64, 1, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![1, op.n as i32],
+            dtype: DType::F16,
+            generation: 0,
+        }))
+    }
+
+    fn quantized_matmul_palettized(
+        &mut self,
+        op: &QuantizedMatmulOp,
+        x: TensorHandle,
+        w: QuantizedWeightHandle,
+        codebook: TensorHandle,
+    ) -> Result<TensorHandle, String> {
+        if op.m != 1 || op.input_dtype != DType::F16 || op.output_dtype != DType::F16 {
+            return Err("palettized GEMV requires m=1 and F16 input/output".into());
+        }
+        if op.k % 8 != 0 {
+            return Err("palettized GEMV input dimension must be divisible by 8".into());
+        }
+        let input = self
+            .slot(x)?
+            .buffer
+            .as_ref()
+            .ok_or("palette input has no buffer")?
+            .clone();
+        let indices = self.get_weight(w)?.to_vec();
+        let codebook = self
+            .slot(codebook)?
+            .buffer
+            .as_ref()
+            .ok_or("palette codebook has no buffer")?
+            .clone();
+        let expected = (op.n as usize) * (op.k as usize) / 2;
+        if indices.len() != expected {
+            return Err(format!(
+                "palette indices size {} != expected {}",
+                indices.len(),
+                expected
+            ));
+        }
+        let index_buf = self.mtl_device.new_buffer_with_data(
+            indices.as_ptr() as *const std::ffi::c_void,
+            indices.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output = self.mtl_device.new_buffer(
+            op.n as u64 * 2,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let in_dim = self.mtl_device.new_buffer_with_data(
+            &op.k as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let out_dim = self.mtl_device.new_buffer_with_data(
+            &op.n as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.palettized.gemv.v1".into()),
+            &[
+                Some(&input),
+                Some(&codebook),
+                Some(&index_buf),
+                Some(&output),
+                Some(&in_dim),
+                Some(&out_dim),
+            ],
+            metal::MTLSize::new(op.n as u64, 1, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![1, op.n as i32],
+            dtype: DType::F16,
+            generation: 0,
+        }))
+    }
+
+    fn quantized_matmul_palettized_gemm(
+        &mut self,
+        op: &QuantizedMatmulOp,
+        x: TensorHandle,
+        w: QuantizedWeightHandle,
+        codebook: TensorHandle,
+    ) -> Result<TensorHandle, String> {
+        if op.input_dtype != DType::F16 || op.output_dtype != DType::F16 || op.k % 2 != 0 {
+            return Err("palettized GEMM requires F16 tensors and even input dimension".into());
+        }
+        let input = self
+            .slot(x)?
+            .buffer
+            .as_ref()
+            .ok_or("palette input has no buffer")?
+            .clone();
+        let indices = self.get_weight(w)?.to_vec();
+        let cb_buf = self
+            .slot(codebook)?
+            .buffer
+            .as_ref()
+            .ok_or("palette codebook has no buffer")?
+            .clone();
+        let cb_bytes = op.n as usize * 16 * 2;
+        let cb_ptr = cb_buf.contents() as *const u8;
+        let codebook_bytes = unsafe { std::slice::from_raw_parts(cb_ptr, cb_bytes) };
+        let row_stride = 32 + op.k as usize / 2;
+        let expected_indices = op.n as usize * op.k as usize / 2;
+        if indices.len() != expected_indices {
+            return Err(format!(
+                "palette GEMM indices size {} != expected {}",
+                indices.len(),
+                expected_indices
+            ));
+        }
+        let mut arena = vec![0u8; op.n as usize * row_stride];
+        for row in 0..op.n as usize {
+            arena[row * row_stride..row * row_stride + 32]
+                .copy_from_slice(&codebook_bytes[row * 32..row * 32 + 32]);
+            let src = row * (op.k as usize / 2);
+            arena[row * row_stride + 32..(row + 1) * row_stride]
+                .copy_from_slice(&indices[src..src + op.k as usize / 2]);
+        }
+        let arena_buf = self.mtl_device.new_buffer_with_data(
+            arena.as_ptr() as *const std::ffi::c_void,
+            arena.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output = self.mtl_device.new_buffer(
+            op.m as u64 * op.n as u64 * 2,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let m_buf = self.mtl_device.new_buffer_with_data(
+            &op.m as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let k_buf = self.mtl_device.new_buffer_with_data(
+            &op.k as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let n_buf = self.mtl_device.new_buffer_with_data(
+            &op.n as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.palettized.gemm.v1".into()),
+            &[
+                Some(&arena_buf),
+                Some(&input),
+                Some(&output),
+                Some(&m_buf),
+                Some(&k_buf),
+                Some(&n_buf),
+            ],
+            metal::MTLSize::new(op.n.div_ceil(16) as u64, op.m.div_ceil(16) as u64, 1),
+            metal::MTLSize::new(16, 16, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![op.m as i32, op.n as i32],
+            dtype: DType::F16,
+            generation: 0,
+        }))
+    }
+
+    pub fn dispatch_palettized_swiglu(
+        &mut self,
+        input: TensorHandle,
+        gate_weights: QuantizedWeightHandle,
+        gate_codebook: TensorHandle,
+        up_weights: QuantizedWeightHandle,
+        up_codebook: TensorHandle,
+        in_dim: u32,
+        out_dim: u32,
+    ) -> Result<TensorHandle, String> {
+        let input_buf = self
+            .slot(input)?
+            .buffer
+            .as_ref()
+            .ok_or("SwiGLU input has no buffer")?
+            .clone();
+        let make_arena = |backend: &MetalBackend,
+                          weights: QuantizedWeightHandle,
+                          cb: TensorHandle|
+         -> Result<Vec<u8>, String> {
+            let indices = backend.get_weight(weights)?.to_vec();
+            let cb_buf = backend
+                .slot(cb)?
+                .buffer
+                .as_ref()
+                .ok_or("SwiGLU codebook has no buffer")?
+                .clone();
+            let cb_slice = unsafe {
+                std::slice::from_raw_parts(cb_buf.contents() as *const u8, out_dim as usize * 32)
+            };
+            let row_stride = 32 + in_dim as usize / 2;
+            let mut arena = vec![0u8; out_dim as usize * row_stride];
+            for row in 0..out_dim as usize {
+                arena[row * row_stride..row * row_stride + 32]
+                    .copy_from_slice(&cb_slice[row * 32..row * 32 + 32]);
+                let start = row * in_dim as usize / 2;
+                arena[row * row_stride + 32..(row + 1) * row_stride]
+                    .copy_from_slice(&indices[start..start + in_dim as usize / 2]);
+            }
+            Ok(arena)
+        };
+        let gate = make_arena(self, gate_weights, gate_codebook)?;
+        let up = make_arena(self, up_weights, up_codebook)?;
+        let gate_buf = self.mtl_device.new_buffer_with_data(
+            gate.as_ptr() as *const std::ffi::c_void,
+            gate.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let up_buf = self.mtl_device.new_buffer_with_data(
+            up.as_ptr() as *const std::ffi::c_void,
+            up.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output = self.mtl_device.new_buffer(
+            out_dim as u64 * 2,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let in_buf = self.mtl_device.new_buffer_with_data(
+            &in_dim as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let out_buf = self.mtl_device.new_buffer_with_data(
+            &out_dim as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.palettized.swiglu.v1".into()),
+            &[
+                Some(&gate_buf),
+                Some(&up_buf),
+                Some(&input_buf),
+                Some(&output),
+                Some(&in_buf),
+                Some(&out_buf),
+            ],
+            metal::MTLSize::new(out_dim as u64, 1, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![1, out_dim as i32],
+            dtype: DType::F16,
+            generation: 0,
+        }))
+    }
+
+    pub fn dispatch_linear_nf4_cimage(
+        &mut self,
+        input: TensorHandle,
+        weights: QuantizedWeightHandle,
+        scales: TensorHandle,
+        biases: TensorHandle,
+        in_dim: u32,
+        out_dim: u32,
+        group_size: u32,
+    ) -> Result<TensorHandle, String> {
+        if group_size != 128 || out_dim > 640 {
+            return Err("CImage NF4 requires group_size=128 and out_dim<=640".into());
+        }
+        let input_buf = self
+            .slot(input)?
+            .buffer
+            .as_ref()
+            .ok_or("CImage NF4 input has no buffer")?
+            .clone();
+        let scale_buf = self
+            .slot(scales)?
+            .buffer
+            .as_ref()
+            .ok_or("CImage NF4 scales have no buffer")?
+            .clone();
+        let bias_buf = self
+            .slot(biases)?
+            .buffer
+            .as_ref()
+            .ok_or("CImage NF4 biases have no buffer")?
+            .clone();
+        let codes = self.get_weight(weights)?.to_vec();
+        let expected = in_dim as usize * 320;
+        if codes.len() != expected {
+            return Err(format!(
+                "CImage NF4 codes size {} != expected {}",
+                codes.len(),
+                expected
+            ));
+        }
+        let codes_buf = self.mtl_device.new_buffer_with_data(
+            codes.as_ptr() as *const std::ffi::c_void,
+            codes.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output = self.mtl_device.new_buffer(
+            out_dim as u64 * 4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let constants = MlpConstants {
+            hidden_dim: in_dim,
+            intermediate_dim: out_dim,
+            group_size,
+            codec_id: 0,
+            epsilon: 0.0,
+            pad: [0; 3],
+        };
+        let constants_buf = self.mtl_device.new_buffer_with_data(
+            &constants as *const MlpConstants as *const std::ffi::c_void,
+            std::mem::size_of::<MlpConstants>() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.linear.nf4.v1".into()),
+            &[
+                Some(&input_buf),
+                Some(&codes_buf),
+                Some(&scale_buf),
+                Some(&bias_buf),
+                Some(&output),
+                Some(&constants_buf),
+            ],
+            metal::MTLSize::new(out_dim as u64, 1, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![1, out_dim as i32],
+            dtype: DType::F32,
+            generation: 0,
+        }))
+    }
+
+    fn quantized_matmul_ternary_cimage(
+        &mut self,
+        op: &QuantizedMatmulOp,
+        x: TensorHandle,
+        w: QuantizedWeightHandle,
+        scales: TensorHandle,
+    ) -> Result<TensorHandle, String> {
+        if op.m != 1 || op.input_dtype != DType::F16 || op.output_dtype != DType::F16 {
+            return Err("CImage ternary GEMV requires m=1 and F16 input/output".into());
+        }
+        let groups = op.k.div_ceil(op.group_size);
+        let bytes_per_group = op.group_size.div_ceil(4);
+        let codes = self.get_weight(w)?.to_vec();
+        let expected = op.n as usize * groups as usize * bytes_per_group as usize;
+        if codes.len() != expected {
+            return Err(format!(
+                "CImage ternary codes size {} != expected {}",
+                codes.len(),
+                expected
+            ));
+        }
+        let input = self
+            .slot(x)?
+            .buffer
+            .as_ref()
+            .ok_or("CImage ternary input has no buffer")?
+            .clone();
+        let scale = self
+            .slot(scales)?
+            .buffer
+            .as_ref()
+            .ok_or("CImage ternary scales have no buffer")?
+            .clone();
+        let codes_buf = self.mtl_device.new_buffer_with_data(
+            codes.as_ptr() as *const std::ffi::c_void,
+            codes.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output = self.mtl_device.new_buffer(
+            op.n as u64 * 2,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let constants = TernaryGemvConstants {
+            rows: op.n,
+            cols: op.k,
+            group_size: op.group_size,
+            groups_per_row: groups,
+            bytes_per_group,
+            output_dtype: 0,
+            padding: [0; 3],
+        };
+        let constants_buf = self.mtl_device.new_buffer_with_data(
+            &constants as *const TernaryGemvConstants as *const std::ffi::c_void,
+            std::mem::size_of::<TernaryGemvConstants>() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.ternary.cimage.gemv.v1".into()),
+            &[
+                Some(&input),
+                Some(&codes_buf),
+                Some(&scale),
+                Some(&output),
+                Some(&constants_buf),
+            ],
+            metal::MTLSize::new(op.n as u64, 1, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![1, op.n as i32],
+            dtype: DType::F16,
+            generation: 0,
+        }))
+    }
+
+    fn quantized_matmul_ternary_legacy(
+        &mut self,
+        op: &QuantizedMatmulOp,
+        x: TensorHandle,
+        w: QuantizedWeightHandle,
+    ) -> Result<TensorHandle, String> {
+        if op.m != 1
+            || op.input_dtype != DType::F16
+            || op.output_dtype != DType::F16
+            || op.k % 4 != 0
+        {
+            return Err(
+                "legacy ternary GEMV requires m=1, F16 tensors, and K divisible by 4".into(),
+            );
+        }
+        let input = self
+            .slot(x)?
+            .buffer
+            .as_ref()
+            .ok_or("ternary input has no buffer")?
+            .clone();
+        let codes = self.get_weight(w)?.to_vec();
+        let expected = op.n as usize * op.k as usize / 4;
+        if codes.len() != expected {
+            return Err(format!(
+                "ternary packed weights size {} != expected {}",
+                codes.len(),
+                expected
+            ));
+        }
+        let codes_buf = self.mtl_device.new_buffer_with_data(
+            codes.as_ptr() as *const std::ffi::c_void,
+            codes.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output = self.mtl_device.new_buffer(
+            op.n as u64 * 2,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let k_buf = self.mtl_device.new_buffer_with_data(
+            &op.k as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let n_buf = self.mtl_device.new_buffer_with_data(
+            &op.n as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.ternary.gemv.v2".into()),
+            &[
+                Some(&codes_buf),
+                Some(&input),
+                Some(&output),
+                Some(&k_buf),
+                Some(&n_buf),
+            ],
+            metal::MTLSize::new(op.n as u64, 1, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![1, op.n as i32],
+            dtype: DType::F16,
+            generation: 0,
+        }))
+    }
+
+    fn quantized_matmul_ternary_gemm(
+        &mut self,
+        op: &QuantizedMatmulOp,
+        x: TensorHandle,
+        w: QuantizedWeightHandle,
+        scales: TensorHandle,
+    ) -> Result<TensorHandle, String> {
+        if op.input_dtype != DType::F16 || op.output_dtype != DType::F16 || op.k % 16 != 0 {
+            return Err("ternary GEMM requires F16 tensors and K divisible by 16".into());
+        }
+        let input = self
+            .slot(x)?
+            .buffer
+            .as_ref()
+            .ok_or("ternary GEMM input has no buffer")?
+            .clone();
+        let weights = self.get_weight(w)?.to_vec();
+        let scale = self
+            .slot(scales)?
+            .buffer
+            .as_ref()
+            .ok_or("ternary GEMM scales have no buffer")?
+            .clone();
+        let packed_per_row = op.k.div_ceil(16) as usize * 4;
+        let expected_weights = op.n as usize * packed_per_row;
+        if weights.len() != expected_weights {
+            return Err(format!(
+                "ternary GEMM weights size {} != expected {}",
+                weights.len(),
+                expected_weights
+            ));
+        }
+        let weight_buf = self.mtl_device.new_buffer_with_data(
+            weights.as_ptr() as *const std::ffi::c_void,
+            weights.len() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let output = self.mtl_device.new_buffer(
+            op.m as u64 * op.n as u64 * 2,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let m_buf = self.mtl_device.new_buffer_with_data(
+            &op.m as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let k_buf = self.mtl_device.new_buffer_with_data(
+            &op.k as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let n_buf = self.mtl_device.new_buffer_with_data(
+            &op.n as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let group_buf = self.mtl_device.new_buffer_with_data(
+            &op.group_size as *const u32 as *const std::ffi::c_void,
+            4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.ternary.gemm.v1".into()),
+            &[
+                Some(&input),
+                Some(&weight_buf),
+                Some(&scale),
+                Some(&output),
+                Some(&m_buf),
+                Some(&k_buf),
+                Some(&n_buf),
+                Some(&group_buf),
+            ],
+            metal::MTLSize::new(op.m.div_ceil(16) as u64, op.n.div_ceil(16) as u64, 1),
+            metal::MTLSize::new(16, 16, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![op.m as i32, op.n as i32],
+            dtype: DType::F16,
+            generation: 0,
+        }))
+    }
+
+    fn matmul_rawf32_gemv(
+        &mut self,
+        op: &MatmulOp,
+        a: TensorHandle,
+        b: TensorHandle,
+    ) -> Result<TensorHandle, String> {
+        if op.m != 1 {
+            return Err("raw F32 Metal GEMV requires m=1".into());
+        }
+        let input = self
+            .slot(a)?
+            .buffer
+            .as_ref()
+            .ok_or("F32 input has no buffer")?
+            .clone();
+        let weights = self
+            .slot(b)?
+            .buffer
+            .as_ref()
+            .ok_or("F32 weights have no buffer")?
+            .clone();
+        let output = self.mtl_device.new_buffer(
+            op.n as u64 * 4,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let unused = self
+            .mtl_device
+            .new_buffer(4, metal::MTLResourceOptions::StorageModeShared);
+        let constants = MlpConstants {
+            hidden_dim: op.k,
+            intermediate_dim: op.n,
+            group_size: 1,
+            codec_id: 0,
+            epsilon: 0.0,
+            pad: [0; 3],
+        };
+        let constants_buf = self.mtl_device.new_buffer_with_data(
+            &constants as *const MlpConstants as *const std::ffi::c_void,
+            std::mem::size_of::<MlpConstants>() as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        self.dispatch_precision_kernel(
+            &KernelSemanticId("prism.linear.rawf32.v1".into()),
+            &[
+                Some(&input),
+                Some(&weights),
+                Some(&unused),
+                Some(&unused),
+                Some(&output),
+                Some(&constants_buf),
+            ],
+            metal::MTLSize::new(op.n as u64, 1, 1),
+            metal::MTLSize::new(64, 1, 1),
+        )?;
+        Ok(self.alloc_slot(MetalTensor {
+            buffer: Some(output),
+            shape: vec![1, op.n as i32],
+            dtype: DType::F32,
+            generation: 0,
+        }))
     }
 
     /// Bind an externally-owned Metal buffer as a tensor.
@@ -259,6 +1213,9 @@ impl TensorBackend for MetalBackend {
         a: TensorHandle,
         b: TensorHandle,
     ) -> Result<TensorHandle, String> {
+        if op.m == 1 {
+            return self.matmul_rawf32_gemv(op, a, b);
+        }
         let ta = self.slot(a)?;
         let tb = self.slot(b)?;
         let a_buf = ta.buffer.as_ref().ok_or("Tensor A has no buffer")?.clone();
@@ -328,6 +1285,35 @@ impl TensorBackend for MetalBackend {
         scales: TensorHandle,
         biases: TensorHandle,
     ) -> Result<TensorHandle, String> {
+        let semantic_id = op.kernel_semantic_id()?;
+        let nf4_semantic = KernelSemanticId("prism.nf4tile640.dequant_mul.v1".into());
+        if semantic_id != nf4_semantic {
+            if semantic_id.0 == "prism.linear.int8.v1" {
+                return self.quantized_matmul_int8(op, x, w, scales, biases);
+            }
+            if semantic_id.0 == "prism.ternary.gemv.v1" {
+                return self.quantized_matmul_ternary_tile640(op, x, w, scales, biases);
+            }
+            if semantic_id.0 == "prism.ternary.gemm.v1" {
+                return self.quantized_matmul_ternary_gemm(op, x, w, scales);
+            }
+            if semantic_id.0 == "prism.ternary.gemv.v2" {
+                return self.quantized_matmul_ternary_legacy(op, x, w);
+            }
+            if semantic_id.0 == "prism.ternary.cimage.gemv.v1" {
+                return self.quantized_matmul_ternary_cimage(op, x, w, scales);
+            }
+            if semantic_id.0 == "prism.q4.block_sym.gemv.v1" {
+                return self.quantized_matmul_q4(op, x, w, scales);
+            }
+            if semantic_id.0 == "prism.palettized.gemv.v1" {
+                return self.quantized_matmul_palettized(op, x, w, scales);
+            }
+            if semantic_id.0 == "prism.palettized.gemm.v1" {
+                return self.quantized_matmul_palettized_gemm(op, x, w, scales);
+            }
+            return Err(format!("Metal precision kernel {} compiled, but its ABI binder is not yet wired for quantized_matmul", semantic_id.0));
+        }
         let tx = self.slot(x)?;
         let w_data = self.get_weight(w)?;
         let ts = self.slot(scales)?;
@@ -398,9 +1384,6 @@ impl TensorBackend for MetalBackend {
         let _ = ts;
         let _ = tb;
 
-        self.ensure_nf4_kernel()?;
-        let pipeline = self.nf4_pipeline.as_ref().unwrap();
-
         // Create MTLBuffers.
         let codes_buf = self.mtl_device.new_buffer_with_data(
             w_bytes.as_ptr() as *const std::ffi::c_void,
@@ -422,18 +1405,6 @@ impl TensorBackend for MetalBackend {
             metal::MTLResourceOptions::StorageModeShared,
         );
 
-        // Dispatch the compute kernel.
-        let queue = self.mtl_device.new_command_queue();
-        let cmd_buf = queue.new_command_buffer();
-        let enc = cmd_buf.new_compute_command_encoder();
-
-        enc.set_compute_pipeline_state(pipeline);
-        enc.set_buffer(0, Some(&codes_buf), 0);
-        enc.set_buffer(1, Some(&scale_buf), 0);
-        enc.set_buffer(2, Some(&bias_buf), 0);
-        enc.set_buffer(3, Some(&x_buf), 0);
-        enc.set_buffer(4, Some(&out_buf), 0);
-
         // Versioned Nf4Tile640DispatchParams at buffer[5]
         let params = Nf4Tile640DispatchParams {
             abi_version: 1,
@@ -448,14 +1419,19 @@ impl TensorBackend for MetalBackend {
             std::mem::size_of::<Nf4Tile640DispatchParams>() as u64,
             metal::MTLResourceOptions::StorageModeShared,
         );
-        enc.set_buffer(5, Some(&params_buf), 0);
-
-        let grid = metal::MTLSize::new(n as u64, m as u64, 1);
-        let group = metal::MTLSize::new(16, 1, 1);
-        enc.dispatch_threads(grid, group);
-        enc.end_encoding();
-        cmd_buf.commit();
-        cmd_buf.wait_until_completed();
+        self.dispatch_precision_kernel(
+            &nf4_semantic,
+            &[
+                Some(&codes_buf),
+                Some(&scale_buf),
+                Some(&bias_buf),
+                Some(&x_buf),
+                Some(&out_buf),
+                Some(&params_buf),
+            ],
+            metal::MTLSize::new(n as u64, m as u64, 1),
+            metal::MTLSize::new(16, 1, 1),
+        )?;
 
         Ok(self.alloc_slot(MetalTensor {
             buffer: Some(out_buf),
@@ -464,7 +1440,6 @@ impl TensorBackend for MetalBackend {
             generation: 0,
         }))
     }
-
     fn rms_norm(
         &mut self,
         op: &RmsNormOp,

@@ -181,6 +181,42 @@ pub struct QuantizedMatmulOp {
     pub transpose: bool,
 }
 
+impl QuantizedMatmulOp {
+    /// Canonical precision-kernel identity used by MLIR lowering and Metal
+    /// runtime selection. The mapping is derived from the operation contract,
+    /// so callers do not need to duplicate semantic strings.
+    pub fn kernel_semantic_id(
+        &self,
+    ) -> Result<crate::ecs::canonical::kernel_abi::KernelSemanticId, String> {
+        let semantic = match self.bits {
+            2 if self.m > 1 => "prism.ternary.gemm.v1",
+            2 if self.group_size == 640 => "prism.ternary.gemv.v1",
+            2 => "prism.ternary.cimage.gemv.v1",
+            4 if self.weight_dtype == DType::U8 && self.input_dtype == DType::F16 && self.m > 1 => {
+                "prism.palettized.gemm.v1"
+            }
+            4 if self.weight_dtype == DType::U8 && self.input_dtype == DType::F16 => {
+                "prism.palettized.gemv.v1"
+            }
+            4 if self.input_dtype == DType::F16 && self.group_size == 128 => {
+                "prism.q4.block_sym.gemv.v1"
+            }
+            4 if self.group_size == 128 => "prism.nf4tile640.dequant_mul.v1",
+            4 => "prism.linear.nf4.v1",
+            8 => "prism.linear.int8.v1",
+            other => {
+                return Err(format!(
+                    "no Metal precision kernel for {}-bit weights",
+                    other
+                ))
+            }
+        };
+        Ok(crate::ecs::canonical::kernel_abi::KernelSemanticId(
+            semantic.into(),
+        ))
+    }
+}
+
 #[derive(Debug, Clone)]
 /// Describes a standard matrix multiplication (A @ B).
 pub struct MatmulOp {

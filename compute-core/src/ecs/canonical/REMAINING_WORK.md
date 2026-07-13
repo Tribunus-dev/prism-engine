@@ -100,6 +100,25 @@ evaluator. Vendor-specific lowering, HetGPU packaging, and replacing the
 handwritten Metal path should follow only after that adapter passes the same
 CPU-oracle, numerical, timing, and promotion gates.
 
+A deep study of upstream MLIR and Melior (Rust MLIR C API bindings) identified
+10 architectural patterns for this integration (see `local://prism-cross-repo-pattern-synthesis.md`):
+
+**From upstream MLIR (llvm-project/mlir/):**
+- Dialect registry with lazy loading + cross-cutting DialectExtension injection matches prism's additive contract model
+- Nested OpPassManager (nest<T>().addPass()) shows the pipeline nesting prism needs for per-operation-type passes
+- GPU target compilation via GPUTargetAttrInterface::serializeToObject() — target-agnostic gpu.module lowered to per-target binary serialization through externally-compiled toolchains
+- Transform dialect meta-IR for codegen scheduling — handle→payload operation mapping, transform op sequences drive lowering without hardcoded pass schedules
+- ODS/TableGen declarative op definition — traits (Pure, IsolatedFromAbove), assembly format, verifier codegen — all directly useful for prism's op model
+
+**From Melior (Rust MLIR bindings):**
+- Builder pattern for safe IR construction — OperationState → add_results/add_operands → build() maps to prism's DataflowGraph construction
+- PhantomData<&'c Context> lifetime safety — Context-tagged handles prevent use-after-free in concurrent compilation
+- External pass system with C callback trampolines — Rust closures registered as MLIR passes via construct/destroy/initialize/run/clone trampolines; critical for prism's ECS-as-pass adapter
+- Macro-driven codegen from ODS definitions — proc-macro parsing .td files to generate dialect op builders
+- JIT ExecutionEngine — compile pass pipeline then invoke_packed with raw pointer args for dynamic dispatch
+
+The key architectural decision: prism should use Melior's external pass system to wrap ECS systems as MLIR passes, letting the evolutionary search mutate transform dialect schedules (as data) rather than the passes themselves. This preserves the ECS architecture while leveraging MLIR's lowering pipeline.
+
 ## Generations and promotion
 
 Content-addressed payload storage, promotion transactions, current-generation
@@ -131,3 +150,27 @@ base generation
   -> promote generation
   -> replay and rollback
 ```
+
+## Cross-repo pattern study
+
+A systematic study of 11 repos in `~/Developer/GitHub/` (vLLM, SGLang, TensorRT-LLM, LightLLM, LMDeploy, IREE, DS4, MLX, AutoGPTQ, llm-awq, llm-compressor) identified 49 architectural patterns mapped to specific prism ECS modules. The full synthesis is at `local://prism-cross-repo-pattern-synthesis.md`.
+
+### Top patterns by adoption value
+
+**Unified token-budget scheduler (vLLM v1):** Replaces the prefill/decode phase split with a single `max_num_scheduled_tokens` budget distributed across all requests by their `num_computed_tokens` deficit. Chunked prefill, prefix caching, and speculative decoding become parameter changes, not state machine transitions. Maps to a single `ScheduleSystem` in `ecs/scheduling/`.
+
+**Layered KV cache with content-based prefix caching (vLLM + LMDeploy + SGLang):** Three-layer decomposition — BlockPool (flat array + free-list LRU + hash map), per-attention-type managers (FullAttention, SWA, MLA, Mamba), and a top-level Coordinator. Blocks are content-addressed via SHA-256 for prefix sharing. Maps to `KVCacheBlockPool` resource, `KVCacheGroupManager` components, and a `KVCacheAllocationSystem` in `ecs/kv_cache/`.
+
+**Phased MLIR lowering pipeline (IREE):** Uses a phase enum (input → flow → stream → HAL → VM) with the transform dialect encoding GPU codegen schedules as separate scripts. Maps directly to the existing `MlirExecutionContract` and `CompileSession` — the in-progress MLIR→Metal catalogue binding is the first step.
+
+**Speculative decoding pipeline (vLLM):** DraftProposer → TreeAttention → RejectionSampler as three ECS phases. Dynamic per-batch-size token count via dense lookup table. Independent draft KV cache via lookahead blocks. Maps to `ecs/spec_decode/`.
+
+**AWQ + GPTQ two-stage admission pipeline:** AWQ preconditioning (activation-magnitude scale search, once per model) followed by GPTQ per-codec-family Hessian quantization. They compose orthogonally — AWQ scales don't need per-codec recomputation. Maps to `ecs/quantization/sweep/`.
+
+### Remaining work
+
+The next step is to evaluate each top-5 pattern against the existing ECS module structure and begin implementation of the highest-return items: unified scheduler (vLLM pattern) and layered prefix-caching KV cache (vLLM + SGLang + LMDeploy pattern). These two are the most impactful infrastructure changes for multi-turn serving and are also the most structurally well-defined for ECS decomposition.
+
+The IREE phased MLIR lowering is already in progress (4 dirty files binding `MlirExecutionContract` → `MetalBackendCompiler`). The AWQ/GPTQ admission pipeline extends the existing quantization sweep framework with a new preconditioning stage.
+
+Lower-priority patterns (DS4 kernel fusion, MLX allocator strategy, TensorRT-LLM fingerprint weight sharing) should be deferred until the core scheduler and KV cache patterns are landed.
