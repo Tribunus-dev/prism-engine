@@ -76,7 +76,13 @@ pub struct RuntimeLaneConfig {
 
 impl Default for RuntimeLaneConfig {
     fn default() -> Self {
-        Self { use_gpu: true, use_ane: true, use_cpu: true, gpu_priority: true, ane_priority: false }
+        Self {
+            use_gpu: true,
+            use_ane: true,
+            use_cpu: true,
+            gpu_priority: true,
+            ane_priority: false,
+        }
     }
 }
 
@@ -376,7 +382,10 @@ pub struct TileShape {
 
 impl TileShape {
     pub const fn tile640() -> Self {
-        Self { rows: 640, cols: 640 }
+        Self {
+            rows: 640,
+            cols: 640,
+        }
     }
     pub const fn elements(&self) -> u32 {
         self.rows * self.cols
@@ -530,8 +539,6 @@ impl HardwareTargetClass {
 
 // ── Profile builders ─────────────────────────────────────────────────────
 
-
-
 // ── SoC performance projections ────────────────────────────────────────────
 
 /// Full hardware specification for an Apple Silicon SoC.
@@ -559,140 +566,267 @@ pub struct PerPolicyF32 {
 
 impl PerPolicyF32 {
     pub const fn new(r: f32, f: f32, i: f32, n: f32) -> Self {
-        Self { rawf32: r, fp16: f, int8: i, nf4: n }
+        Self {
+            rawf32: r,
+            fp16: f,
+            int8: i,
+            nf4: n,
+        }
     }
 }
 
 pub fn all_soc_performances() -> Vec<SoCPerformance> {
     vec![
         SoCPerformance {
-            label: "Apple M1", memory_options: &[8, 16],
-            bandwidth_gbps: 68, gpu_core_count: 8, total_alus: 1024,
-            gpu_clock_mhz: 1278, ne_tops: 11, process_node: "5nm", cpu_core_config: "4P+4E",
+            label: "Apple M1",
+            memory_options: &[8, 16],
+            bandwidth_gbps: 68,
+            gpu_core_count: 8,
+            total_alus: 1024,
+            gpu_clock_mhz: 1278,
+            ne_tops: 11,
+            process_node: "5nm",
+            cpu_core_config: "4P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(1.8, 3.6, 7.2, 8.6),
         },
         SoCPerformance {
-            label: "Apple M1 Pro", memory_options: &[16, 32],
-            bandwidth_gbps: 200, gpu_core_count: 16, total_alus: 2048,
-            gpu_clock_mhz: 1300, ne_tops: 11, process_node: "5nm", cpu_core_config: "8P+2E",
+            label: "Apple M1 Pro",
+            memory_options: &[16, 32],
+            bandwidth_gbps: 200,
+            gpu_core_count: 16,
+            total_alus: 2048,
+            gpu_clock_mhz: 1300,
+            ne_tops: 11,
+            process_node: "5nm",
+            cpu_core_config: "8P+2E",
             estimated_decode_tok_s: PerPolicyF32::new(5.3, 10.6, 21.2, 25.4),
         },
         SoCPerformance {
-            label: "Apple M1 Max", memory_options: &[32, 64],
-            bandwidth_gbps: 400, gpu_core_count: 32, total_alus: 4096,
-            gpu_clock_mhz: 1300, ne_tops: 11, process_node: "5nm", cpu_core_config: "10P+2E",
+            label: "Apple M1 Max",
+            memory_options: &[32, 64],
+            bandwidth_gbps: 400,
+            gpu_core_count: 32,
+            total_alus: 4096,
+            gpu_clock_mhz: 1300,
+            ne_tops: 11,
+            process_node: "5nm",
+            cpu_core_config: "10P+2E",
             estimated_decode_tok_s: PerPolicyF32::new(10.6, 21.2, 42.4, 50.9),
         },
         SoCPerformance {
-            label: "Apple M1 Ultra", memory_options: &[64, 128],
-            bandwidth_gbps: 800, gpu_core_count: 64, total_alus: 8192,
-            gpu_clock_mhz: 1300, ne_tops: 22, process_node: "5nm×2", cpu_core_config: "20P+4E",
+            label: "Apple M1 Ultra",
+            memory_options: &[64, 128],
+            bandwidth_gbps: 800,
+            gpu_core_count: 64,
+            total_alus: 8192,
+            gpu_clock_mhz: 1300,
+            ne_tops: 22,
+            process_node: "5nm×2",
+            cpu_core_config: "20P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(21.2, 42.4, 84.8, 101.8),
         },
         SoCPerformance {
-            label: "Apple M2", memory_options: &[8, 16, 24],
-            bandwidth_gbps: 100, gpu_core_count: 10, total_alus: 1280,
-            gpu_clock_mhz: 1398, ne_tops: 16, process_node: "N5P", cpu_core_config: "4P+4E",
+            label: "Apple M2",
+            memory_options: &[8, 16, 24],
+            bandwidth_gbps: 100,
+            gpu_core_count: 10,
+            total_alus: 1280,
+            gpu_clock_mhz: 1398,
+            ne_tops: 16,
+            process_node: "N5P",
+            cpu_core_config: "4P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(2.6, 5.2, 10.4, 12.5),
         },
         SoCPerformance {
-            label: "Apple M2 Pro", memory_options: &[16, 32],
-            bandwidth_gbps: 200, gpu_core_count: 19, total_alus: 2432,
-            gpu_clock_mhz: 1398, ne_tops: 16, process_node: "N5P", cpu_core_config: "8P+4E",
+            label: "Apple M2 Pro",
+            memory_options: &[16, 32],
+            bandwidth_gbps: 200,
+            gpu_core_count: 19,
+            total_alus: 2432,
+            gpu_clock_mhz: 1398,
+            ne_tops: 16,
+            process_node: "N5P",
+            cpu_core_config: "8P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(5.3, 10.6, 21.2, 25.4),
         },
         SoCPerformance {
-            label: "Apple M2 Max", memory_options: &[32, 64, 96],
-            bandwidth_gbps: 400, gpu_core_count: 38, total_alus: 4864,
-            gpu_clock_mhz: 1398, ne_tops: 16, process_node: "N5P", cpu_core_config: "8P+4E",
+            label: "Apple M2 Max",
+            memory_options: &[32, 64, 96],
+            bandwidth_gbps: 400,
+            gpu_core_count: 38,
+            total_alus: 4864,
+            gpu_clock_mhz: 1398,
+            ne_tops: 16,
+            process_node: "N5P",
+            cpu_core_config: "8P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(10.6, 21.2, 42.4, 50.9),
         },
         SoCPerformance {
-            label: "Apple M2 Ultra", memory_options: &[64, 128, 192],
-            bandwidth_gbps: 800, gpu_core_count: 76, total_alus: 9728,
-            gpu_clock_mhz: 1398, ne_tops: 32, process_node: "N5P×2", cpu_core_config: "16P+8E",
+            label: "Apple M2 Ultra",
+            memory_options: &[64, 128, 192],
+            bandwidth_gbps: 800,
+            gpu_core_count: 76,
+            total_alus: 9728,
+            gpu_clock_mhz: 1398,
+            ne_tops: 32,
+            process_node: "N5P×2",
+            cpu_core_config: "16P+8E",
             estimated_decode_tok_s: PerPolicyF32::new(21.2, 42.4, 84.8, 101.8),
         },
         SoCPerformance {
-            label: "Apple M3", memory_options: &[8, 16, 24],
-            bandwidth_gbps: 100, gpu_core_count: 10, total_alus: 1280,
-            gpu_clock_mhz: 1380, ne_tops: 18, process_node: "N3B", cpu_core_config: "4P+4E",
+            label: "Apple M3",
+            memory_options: &[8, 16, 24],
+            bandwidth_gbps: 100,
+            gpu_core_count: 10,
+            total_alus: 1280,
+            gpu_clock_mhz: 1380,
+            ne_tops: 18,
+            process_node: "N3B",
+            cpu_core_config: "4P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(2.6, 5.2, 10.4, 12.5),
         },
         SoCPerformance {
-            label: "Apple M3 Pro", memory_options: &[18, 36],
-            bandwidth_gbps: 150, gpu_core_count: 18, total_alus: 2304,
-            gpu_clock_mhz: 1380, ne_tops: 18, process_node: "N3B", cpu_core_config: "6P+6E",
+            label: "Apple M3 Pro",
+            memory_options: &[18, 36],
+            bandwidth_gbps: 150,
+            gpu_core_count: 18,
+            total_alus: 2304,
+            gpu_clock_mhz: 1380,
+            ne_tops: 18,
+            process_node: "N3B",
+            cpu_core_config: "6P+6E",
             estimated_decode_tok_s: PerPolicyF32::new(4.0, 8.0, 15.9, 19.1),
         },
         SoCPerformance {
             label: "Apple M3 Max (14c GPU, 300G/s)",
             memory_options: &[36, 48, 64, 128],
-            bandwidth_gbps: 300, gpu_core_count: 30, total_alus: 3840,
-            gpu_clock_mhz: 1380, ne_tops: 18, process_node: "N3B", cpu_core_config: "12P+4E",
+            bandwidth_gbps: 300,
+            gpu_core_count: 30,
+            total_alus: 3840,
+            gpu_clock_mhz: 1380,
+            ne_tops: 18,
+            process_node: "N3B",
+            cpu_core_config: "12P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(8.0, 15.9, 31.8, 38.2),
         },
         SoCPerformance {
             label: "Apple M3 Max (16c GPU, 400G/s)",
             memory_options: &[36, 48, 64, 128],
-            bandwidth_gbps: 400, gpu_core_count: 40, total_alus: 5120,
-            gpu_clock_mhz: 1380, ne_tops: 18, process_node: "N3B", cpu_core_config: "12P+4E",
+            bandwidth_gbps: 400,
+            gpu_core_count: 40,
+            total_alus: 5120,
+            gpu_clock_mhz: 1380,
+            ne_tops: 18,
+            process_node: "N3B",
+            cpu_core_config: "12P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(10.6, 21.2, 42.4, 50.9),
         },
         SoCPerformance {
-            label: "Apple M3 Ultra", memory_options: &[64, 128, 256, 512],
-            bandwidth_gbps: 819, gpu_core_count: 80, total_alus: 10240,
-            gpu_clock_mhz: 1380, ne_tops: 36, process_node: "N3B×2", cpu_core_config: "24P+8E",
+            label: "Apple M3 Ultra",
+            memory_options: &[64, 128, 256, 512],
+            bandwidth_gbps: 819,
+            gpu_core_count: 80,
+            total_alus: 10240,
+            gpu_clock_mhz: 1380,
+            ne_tops: 36,
+            process_node: "N3B×2",
+            cpu_core_config: "24P+8E",
             estimated_decode_tok_s: PerPolicyF32::new(21.7, 43.4, 86.8, 104.2),
         },
         SoCPerformance {
-            label: "Apple M4", memory_options: &[16, 24],
-            bandwidth_gbps: 120, gpu_core_count: 10, total_alus: 1280,
-            gpu_clock_mhz: 1470, ne_tops: 38, process_node: "N3E", cpu_core_config: "4P+6E",
+            label: "Apple M4",
+            memory_options: &[16, 24],
+            bandwidth_gbps: 120,
+            gpu_core_count: 10,
+            total_alus: 1280,
+            gpu_clock_mhz: 1470,
+            ne_tops: 38,
+            process_node: "N3E",
+            cpu_core_config: "4P+6E",
             estimated_decode_tok_s: PerPolicyF32::new(3.2, 6.4, 12.8, 15.4),
         },
         SoCPerformance {
-            label: "Apple M4 Pro", memory_options: &[24, 48, 64],
-            bandwidth_gbps: 273, gpu_core_count: 20, total_alus: 2560,
-            gpu_clock_mhz: 1470, ne_tops: 38, process_node: "N3E", cpu_core_config: "10P+4E",
+            label: "Apple M4 Pro",
+            memory_options: &[24, 48, 64],
+            bandwidth_gbps: 273,
+            gpu_core_count: 20,
+            total_alus: 2560,
+            gpu_clock_mhz: 1470,
+            ne_tops: 38,
+            process_node: "N3E",
+            cpu_core_config: "10P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(7.2, 14.4, 28.8, 34.6),
         },
         SoCPerformance {
             label: "Apple M4 Max (32c GPU, 410G/s)",
             memory_options: &[36, 48, 64, 128],
-            bandwidth_gbps: 410, gpu_core_count: 32, total_alus: 4096,
-            gpu_clock_mhz: 1470, ne_tops: 38, process_node: "N3E", cpu_core_config: "12P+4E",
+            bandwidth_gbps: 410,
+            gpu_core_count: 32,
+            total_alus: 4096,
+            gpu_clock_mhz: 1470,
+            ne_tops: 38,
+            process_node: "N3E",
+            cpu_core_config: "12P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(10.9, 21.8, 43.6, 52.3),
         },
         SoCPerformance {
             label: "Apple M4 Max (40c GPU, 546G/s)",
             memory_options: &[36, 48, 64, 128],
-            bandwidth_gbps: 546, gpu_core_count: 40, total_alus: 5120,
-            gpu_clock_mhz: 1470, ne_tops: 38, process_node: "N3E", cpu_core_config: "12P+4E",
+            bandwidth_gbps: 546,
+            gpu_core_count: 40,
+            total_alus: 5120,
+            gpu_clock_mhz: 1470,
+            ne_tops: 38,
+            process_node: "N3E",
+            cpu_core_config: "12P+4E",
             estimated_decode_tok_s: PerPolicyF32::new(14.5, 29.0, 58.0, 69.6),
         },
         SoCPerformance {
-            label: "Apple M5", memory_options: &[16, 24],
-            bandwidth_gbps: 153, gpu_core_count: 10, total_alus: 1280,
-            gpu_clock_mhz: 1470, ne_tops: 38, process_node: "N3E", cpu_core_config: "4P+6E",
+            label: "Apple M5",
+            memory_options: &[16, 24],
+            bandwidth_gbps: 153,
+            gpu_core_count: 10,
+            total_alus: 1280,
+            gpu_clock_mhz: 1470,
+            ne_tops: 38,
+            process_node: "N3E",
+            cpu_core_config: "4P+6E",
             estimated_decode_tok_s: PerPolicyF32::new(4.1, 8.1, 16.3, 19.5),
         },
         SoCPerformance {
-            label: "Apple M5 Pro", memory_options: &[24, 48, 64],
-            bandwidth_gbps: 307, gpu_core_count: 20, total_alus: 2560,
-            gpu_clock_mhz: 1470, ne_tops: 38, process_node: "N3E", cpu_core_config: "TBD",
+            label: "Apple M5 Pro",
+            memory_options: &[24, 48, 64],
+            bandwidth_gbps: 307,
+            gpu_core_count: 20,
+            total_alus: 2560,
+            gpu_clock_mhz: 1470,
+            ne_tops: 38,
+            process_node: "N3E",
+            cpu_core_config: "TBD",
             estimated_decode_tok_s: PerPolicyF32::new(8.2, 16.4, 32.8, 39.4),
         },
         SoCPerformance {
-            label: "Apple M5 Max", memory_options: &[48, 64, 128],
-            bandwidth_gbps: 614, gpu_core_count: 40, total_alus: 5120,
-            gpu_clock_mhz: 1470, ne_tops: 38, process_node: "N3E", cpu_core_config: "TBD",
+            label: "Apple M5 Max",
+            memory_options: &[48, 64, 128],
+            bandwidth_gbps: 614,
+            gpu_core_count: 40,
+            total_alus: 5120,
+            gpu_clock_mhz: 1470,
+            ne_tops: 38,
+            process_node: "N3E",
+            cpu_core_config: "TBD",
             estimated_decode_tok_s: PerPolicyF32::new(16.3, 32.6, 65.2, 78.2),
         },
         SoCPerformance {
-            label: "Apple M5 Ultra", memory_options: &[128, 256],
-            bandwidth_gbps: 1200, gpu_core_count: 80, total_alus: 10240,
-            gpu_clock_mhz: 1470, ne_tops: 76, process_node: "N3E?", cpu_core_config: "TBD",
+            label: "Apple M5 Ultra",
+            memory_options: &[128, 256],
+            bandwidth_gbps: 1200,
+            gpu_core_count: 80,
+            total_alus: 10240,
+            gpu_clock_mhz: 1470,
+            ne_tops: 76,
+            process_node: "N3E?",
+            cpu_core_config: "TBD",
             estimated_decode_tok_s: PerPolicyF32::new(31.8, 63.6, 127.2, 152.6),
         },
     ]
@@ -713,18 +847,27 @@ pub fn format_soc_performance_table() -> String {
     for soc in all_soc_performances() {
         let p = &soc.estimated_decode_tok_s;
         let tok_range = format!("{:.0}-{:.0}", p.rawf32, p.nf4);
-        let ram = soc.memory_options.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(",");
+        let ram = soc
+            .memory_options
+            .iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         s.push_str(&format!(
             "{:<34} {:>5}GB  {:>4}G {:>4} {:>4}K {:>4} {:>4}T {:>6} {:>8}\n",
-            soc.label, ram, soc.bandwidth_gbps,
-            soc.gpu_core_count, soc.total_alus / 1000,
-            soc.gpu_clock_mhz, soc.ne_tops,
-            soc.process_node, tok_range,
+            soc.label,
+            ram,
+            soc.bandwidth_gbps,
+            soc.gpu_core_count,
+            soc.total_alus / 1000,
+            soc.gpu_clock_mhz,
+            soc.ne_tops,
+            soc.process_node,
+            tok_range,
         ));
     }
     s
 }
-
 
 impl ExecutionProfile {
     /// A — RawF32 everywhere (baseline).
@@ -749,7 +892,9 @@ impl ExecutionProfile {
             hardware_target: HardwareTarget::UnknownCpu,
             runtime_lanes: RuntimeLaneConfig::default(),
             kv_cache_policy: KvCachePolicy::Fp16,
-            substitution_mode: SubstitutionMode::Enabled { aggressiveness: "conservative".into() },
+            substitution_mode: SubstitutionMode::Enabled {
+                aggressiveness: "conservative".into(),
+            },
             validation_mode: ValidationMode::WeightSpaceOnly,
             fusion_mode: FusionMode::Disabled,
         }
@@ -763,7 +908,9 @@ impl ExecutionProfile {
             hardware_target: HardwareTarget::UnknownCpu,
             runtime_lanes: RuntimeLaneConfig::default(),
             kv_cache_policy: KvCachePolicy::Fp16,
-            substitution_mode: SubstitutionMode::Enabled { aggressiveness: "balanced".into() },
+            substitution_mode: SubstitutionMode::Enabled {
+                aggressiveness: "balanced".into(),
+            },
             validation_mode: ValidationMode::SyntheticOperator,
             fusion_mode: FusionMode::Disabled,
         }
@@ -777,7 +924,9 @@ impl ExecutionProfile {
             hardware_target: HardwareTarget::UnknownCpu,
             runtime_lanes: RuntimeLaneConfig::default(),
             kv_cache_policy: KvCachePolicy::Fp16,
-            substitution_mode: SubstitutionMode::Enabled { aggressiveness: "aggressive".into() },
+            substitution_mode: SubstitutionMode::Enabled {
+                aggressiveness: "aggressive".into(),
+            },
             validation_mode: ValidationMode::FullHardware,
             fusion_mode: FusionMode::Disabled,
         }
@@ -794,7 +943,9 @@ impl ExecutionProfile {
                 ..RuntimeLaneConfig::default()
             },
             kv_cache_policy: KvCachePolicy::Compressed { bits: 8 },
-            substitution_mode: SubstitutionMode::Enabled { aggressiveness: "aggressive".into() },
+            substitution_mode: SubstitutionMode::Enabled {
+                aggressiveness: "aggressive".into(),
+            },
             validation_mode: ValidationMode::FullHardware,
             fusion_mode: FusionMode::Disabled,
         }
@@ -833,17 +984,13 @@ pub struct LayoutResolver;
 
 impl LayoutResolver {
     /// Resolve the physical layout for a single tensor.
-    pub fn resolve(
-        request: &LayoutRequest,
-    ) -> LayoutResolution {
+    pub fn resolve(request: &LayoutRequest) -> LayoutResolution {
         // Default tile family from target class
         let tile_family = match request.target_class {
-            HardwareTargetClass::A18Neo | HardwareTargetClass::MBase | HardwareTargetClass::MPro => {
-                TileFamily::tile640()
-            }
-            HardwareTargetClass::MMax | HardwareTargetClass::MUltra => {
-                TileFamily::tile640()
-            }
+            HardwareTargetClass::A18Neo
+            | HardwareTargetClass::MBase
+            | HardwareTargetClass::MPro => TileFamily::tile640(),
+            HardwareTargetClass::MMax | HardwareTargetClass::MUltra => TileFamily::tile640(),
         };
 
         // Infer group_axis from tensor class patterns
@@ -856,7 +1003,9 @@ impl LayoutResolver {
         };
 
         // Group size from codec params or default
-        let group_size = request.codec_params.get("group_size")
+        let group_size = request
+            .codec_params
+            .get("group_size")
             .and_then(|v| v.as_u64())
             .unwrap_or(32) as u32;
 
@@ -970,8 +1119,6 @@ impl ProfileRunConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthSamplerConfig {}
 
-
-
 /// Results of a single profile benchmark execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileRunResult {
@@ -986,7 +1133,11 @@ pub struct ProfileRunResult {
 impl ProfileRunResult {
     /// Calculate overall status from quality, health, and execution gates.
     pub fn overall_status(&self) -> String {
-        let q = self.quality.as_ref().map(|q| q.quality_retention).unwrap_or(0.0);
+        let q = self
+            .quality
+            .as_ref()
+            .map(|q| q.quality_retention)
+            .unwrap_or(0.0);
         let h = &self.health;
         if h.oom_kill || h.watchdog_exit {
             return "rejected".into();
@@ -1034,7 +1185,11 @@ pub fn run_profile(config: &ProfileRunConfig) -> ProfileRunResult {
         quality: Some(QualityDriftReceipt {
             baseline_profile_id: "A_raw_f32".into(),
             candidate_profile_id: config.profile.id.clone(),
-            quality_retention: if config.profile.id == "A_raw_f32" { 1.0 } else { 0.995 },
+            quality_retention: if config.profile.id == "A_raw_f32" {
+                1.0
+            } else {
+                0.995
+            },
             ..quality_template()
         }),
         health,
@@ -1135,40 +1290,59 @@ pub(crate) fn quality_template() -> QualityDriftReceipt {
 // ── Profile comparison matrix ────────────────────────────────────────────
 
 /// Build a comparison matrix from multiple profile results.
-pub fn build_comparison_matrix(results: &[ProfileRunResult], baseline_id: &str) -> Vec<ProfileComparisonRow> {
-    let baseline = results.iter().find(|r| r.execution.profile_id == baseline_id);
-    let baseline_tok = baseline.map(|b| b.execution.decode_tok_per_s).filter(|&t| t > 0.0).unwrap_or(1.0);
+pub fn build_comparison_matrix(
+    results: &[ProfileRunResult],
+    baseline_id: &str,
+) -> Vec<ProfileComparisonRow> {
+    let baseline = results
+        .iter()
+        .find(|r| r.execution.profile_id == baseline_id);
+    let baseline_tok = baseline
+        .map(|b| b.execution.decode_tok_per_s)
+        .filter(|&t| t > 0.0)
+        .unwrap_or(1.0);
 
-    results.iter().map(|r| {
-        let tok_s = r.execution.decode_tok_per_s;
-        let speedup = if baseline_id != r.execution.profile_id && baseline_tok > 0.0 {
-            Some(tok_s / baseline_tok)
-        } else {
-            None
-        };
-        let quality = r.quality.as_ref();
-        let rss_mb = r.health.peak_rss_bytes as f64 / 1_000_000.0;
-        let swap_mb = r.health.swap_delta_bytes.unwrap_or(0) as f64 / 1_000_000.0;
+    results
+        .iter()
+        .map(|r| {
+            let tok_s = r.execution.decode_tok_per_s;
+            let speedup = if baseline_id != r.execution.profile_id && baseline_tok > 0.0 {
+                Some(tok_s / baseline_tok)
+            } else {
+                None
+            };
+            let quality = r.quality.as_ref();
+            let rss_mb = r.health.peak_rss_bytes as f64 / 1_000_000.0;
+            let swap_mb = r.health.swap_delta_bytes.unwrap_or(0) as f64 / 1_000_000.0;
 
-        ProfileComparisonRow {
-            profile_id: r.execution.profile_id.clone(),
-            policy_digest: r.execution.policy_digest.clone(),
-            weight_bytes: r.memory.resident_total_bytes,
-            resident_bytes: r.health.peak_rss_bytes,
-            compression_ratio: r.memory.compression_ratio_vs_raw,
-            first_token_ms: r.execution.first_token_ms,
-            prefill_tok_s: r.execution.prefill_tok_per_s,
-            decode_tok_s: tok_s,
-            speedup_vs_raw: speedup,
-            logits_kl: quality.map(|q| q.logits_kl_mean),
-            top1_agreement: quality.map(|q| q.top1_agreement),
-            peak_rss_mb: rss_mb,
-            swap_delta_mb: swap_mb,
-            quality_status: quality.map(|q| if q.quality_retention >= 0.98 { "pass".into() } else { "fail".into() }).unwrap_or("unknown".into()),
-            stability_status: r.health.stability_status,
-            overall_status: r.overall_status(),
-        }
-    }).collect()
+            ProfileComparisonRow {
+                profile_id: r.execution.profile_id.clone(),
+                policy_digest: r.execution.policy_digest.clone(),
+                weight_bytes: r.memory.resident_total_bytes,
+                resident_bytes: r.health.peak_rss_bytes,
+                compression_ratio: r.memory.compression_ratio_vs_raw,
+                first_token_ms: r.execution.first_token_ms,
+                prefill_tok_s: r.execution.prefill_tok_per_s,
+                decode_tok_s: tok_s,
+                speedup_vs_raw: speedup,
+                logits_kl: quality.map(|q| q.logits_kl_mean),
+                top1_agreement: quality.map(|q| q.top1_agreement),
+                peak_rss_mb: rss_mb,
+                swap_delta_mb: swap_mb,
+                quality_status: quality
+                    .map(|q| {
+                        if q.quality_retention >= 0.98 {
+                            "pass".into()
+                        } else {
+                            "fail".into()
+                        }
+                    })
+                    .unwrap_or("unknown".into()),
+                stability_status: r.health.stability_status,
+                overall_status: r.overall_status(),
+            }
+        })
+        .collect()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -1250,9 +1424,15 @@ mod tests {
         let c = ExecutionProfile::production_policy_v2();
         assert_eq!(c.id, "C_production_v2");
         let d = ExecutionProfile::aggressive_substitution();
-        assert!(matches!(d.substitution_mode, SubstitutionMode::Enabled { .. }));
+        assert!(matches!(
+            d.substitution_mode,
+            SubstitutionMode::Enabled { .. }
+        ));
         let e = ExecutionProfile::research_activation_weighted();
-        assert!(matches!(e.kv_cache_policy, KvCachePolicy::Compressed { bits: 8 }));
+        assert!(matches!(
+            e.kv_cache_policy,
+            KvCachePolicy::Compressed { bits: 8 }
+        ));
         assert!(e.runtime_lanes.ane_priority);
     }
 
