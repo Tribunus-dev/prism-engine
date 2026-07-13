@@ -1,6 +1,6 @@
 # Remaining work
 
-> Current snapshot: `b200b71`. This document
+> Current snapshot: `23e8a5f`. This document
 > distinguishes declared contracts, connected call paths, real execution, and
 > validation against real inputs or hardware.
 
@@ -91,9 +91,10 @@ the shared evaluator.
 Content-addressed payload storage, promotion transactions, current-generation
 selection, parent rollback, and digest-checked engram promotion exist.
 
-The complete train/search/validate/promote/replay flow is still not wired from a
-single orchestration entry point. Runtime execution after promotion is also
-missing.
+The typed generation API now provides a single trained-engram promotion entry
+point, and the lifecycle test covers training, promotion, retrieval, CPU
+application, replay, and rollback. Production compiler-service wiring and
+runtime execution on Metal remain separate work.
 
 ## Validation gates
 
@@ -101,8 +102,8 @@ The current evidence is strong for contracts and local mechanics: the
 prism-backend build checks, NF4 GPU/CPU residency test, engram unit tests,
 evolution unit tests, ternarization unit tests, and generation promotion tests
 pass. The full library run also exposed and fixed a zero-duration stub warmup
-receipt; the remaining tests do not yet prove measured search, Metal engram
-application, or a complete replayable lifecycle.
+receipt. The remaining tests do not yet prove Metal engram application,
+production-service orchestration, or generalized multi-format search.
 
 The completion gate is one end-to-end lifecycle:
 
