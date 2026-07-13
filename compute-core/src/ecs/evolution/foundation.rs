@@ -261,6 +261,12 @@ pub enum DecompositionStrategy {
     ReductionTree(u32),
     /// Single sequential pass.
     Sequential,
+    /// Warp-level reduction — uses warp shuffle instructions for fast intra-warp reduction.
+    WarpReduction,
+    /// Partial dot product — decomposes matmul into partial dot products accumulated across threadgroups.
+    PartialDotProduct,
+    /// Fused gate-up — combines element-wise gating with the reduction in a single kernel.
+    FusedGateUp,
 }
 
 /// Memory configuration for a kernel.

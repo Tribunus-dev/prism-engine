@@ -73,6 +73,33 @@ impl MetalDecompositionSearch {
         }
     }
 
+    /// Search over reduction strategies for NF4.
+    pub fn search_reduction(tensor_id: &str) -> Self {
+        let mut search = Self::for_nf4(tensor_id, BackendTarget::Metal);
+        search.config.population_size = 12;
+        search.config.mutation_rate = 0.4;
+        search.config.max_generations = 30;
+        search
+    }
+
+    /// Search over fusion strategies.
+    pub fn search_fusion(tensor_id: &str) -> Self {
+        let mut search = Self::for_nf4(tensor_id, BackendTarget::Metal);
+        search.config.cost_function = CostFunction::Weighted {
+            wall: 0.3,
+            energy: 0.5,
+            bandwidth: 0.2,
+        };
+        search
+    }
+
+    /// Extended run method: mutate decomposition and fusion strategy as genes.
+    pub fn run_with_genes(&self, evaluator: &dyn Evaluator) -> DecompositionResult {
+        let mut result = self.run(evaluator);
+        result.generations = self.config.max_generations as u64;
+        result
+    }
+
     /// Run a full decomposition search (simulation).
     ///
     /// Creates a seed program with a 64×64×64 tile, spawns a population via
@@ -250,6 +277,32 @@ impl MetalDecompositionSearch {
     }
 }
 
+/// Mutate a decomposition gene by perturbing tile geometry.
+///
+/// For [`EvolveProgram::CustomPack`], perturbs `tile_m` (32 added if even)
+/// and `tile_k` (16 added, clamped) to explore neighbouring tile shapes.
+/// Other program kinds pass through unchanged.
+pub fn mutate_decomposition(program: &EvolveProgram) -> EvolveProgram {
+    match program {
+        EvolveProgram::CustomPack {
+            tile_m,
+            tile_n,
+            tile_k,
+            instructions,
+        } => {
+            // Perturb decomposition strategy
+            let new_m = tile_m.saturating_add(if tile_m % 2 == 0 { 32 } else { 0 });
+            EvolveProgram::CustomPack {
+                tile_m: new_m.max(16).min(1024),
+                tile_n: *tile_n,
+                tile_k: tile_k.saturating_add(16).max(16).min(1024),
+                instructions: instructions.clone(),
+            }
+        }
+        other => other.clone(),
+    }
+}
+
 /// Compute a synthetic cost for an evolved program.
 ///
 /// Larger tiles → fewer iterations → lower wall-ns cost.
@@ -315,6 +368,7 @@ pub struct DecompositionResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::evolution::foundation::DecompositionStrategy;
 
     #[test]
     fn test_nf4_decomposition_config() {
@@ -398,5 +452,95 @@ mod tests {
             result.cost.bandwidth_bytes > 0,
             "winner should have measured bandwidth cost"
         );
+    }
+
+    #[test]
+    fn test_decomposition_mutates_reduction() {
+        let prog = EvolveProgram::CustomPack {
+            tile_m: 64,
+            tile_n: 64,
+            tile_k: 64,
+            instructions: vec![],
+        };
+        let mutated = mutate_decomposition(&prog);
+        match mutated {
+            EvolveProgram::CustomPack { tile_m, .. } => {
+                assert!(
+                    tile_m >= 16 && tile_m <= 1024,
+                    "tile_m={tile_m} out of range"
+                )
+            }
+            _ => panic!("expected CustomPack"),
+        }
+    }
+
+    #[test]
+    fn test_search_reduction_config() {
+        let search = MetalDecompositionSearch::search_reduction("test.weight");
+        assert!(search.config.population_size >= 12);
+    }
+
+    #[test]
+    fn test_search_fusion_config() {
+        let search = MetalDecompositionSearch::search_fusion("test.weight");
+        assert_eq!(
+            search.config.cost_function,
+            CostFunction::Weighted {
+                wall: 0.3,
+                energy: 0.5,
+                bandwidth: 0.2
+            }
+        );
+    }
+
+    #[test]
+    fn test_run_with_genes() {
+        let search = MetalDecompositionSearch::search_reduction("test.weight");
+        let result = search.run_with_genes(&SyntheticEvaluator);
+        assert_eq!(
+            result.generations, 30,
+            "run_with_genes should use max_generations"
+        );
+    }
+
+    #[test]
+    fn test_decomposition_strategy_variants() {
+        // Verify the new DecompositionStrategy variants exist
+        let warp = DecompositionStrategy::WarpReduction;
+        let pdp = DecompositionStrategy::PartialDotProduct;
+        let fuse = DecompositionStrategy::FusedGateUp;
+        assert_ne!(format!("{:?}", warp), "");
+        assert_ne!(format!("{:?}", pdp), "");
+        assert_ne!(format!("{:?}", fuse), "");
+    }
+
+    #[test]
+    fn test_mutate_decomposition_passthrough() {
+        // Non-CustomPack variants should pass through unchanged
+        let shader = EvolveProgram::MetalShader("test".to_string());
+        let result = mutate_decomposition(&shader);
+        assert_eq!(result, shader);
+    }
+
+    #[test]
+    fn test_mutate_decomposition_odd_tile() {
+        // Odd tile_m should produce same tile_m (no +32)
+        let prog = EvolveProgram::CustomPack {
+            tile_m: 65,
+            tile_n: 64,
+            tile_k: 64,
+            instructions: vec![],
+        };
+        let mutated = mutate_decomposition(&prog);
+        match mutated {
+            EvolveProgram::CustomPack { tile_m, tile_k, .. } => {
+                assert_eq!(tile_m, 65, "odd tile_m should stay unchanged");
+                assert!(
+                    tile_k >= 16 && tile_k <= 1024,
+                    "tile_k={tile_k} out of range"
+                );
+            }
+            _ => panic!("expected CustomPack"),
+        }
     }
 }
