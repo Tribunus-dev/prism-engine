@@ -160,10 +160,9 @@ impl JointSearchConfig {
                 af.partial_cmp(&bf).unwrap_or(std::cmp::Ordering::Equal)
             });
 
-            // Keep top N (selection)
-            population.truncate(self.config.population_size);
-
-            // Check convergence using relative threshold, not exact f64 equality
+            // Check convergence on the FULL sorted population BEFORE elite
+            // truncation — otherwise the small elite pool can look artificially
+            // converged and the refill never fires.
             if gen > 0 {
                 if let (Some(best), Some(second)) = (
                     population.first().and_then(|g| g.fitness),
@@ -177,22 +176,30 @@ impl JointSearchConfig {
                 }
             }
 
+            // Keep only elite subset (30%) — makes room for offspring
+            let budget = self.config.population_size;
+            let elite_count = (budget as f64 * 0.3).ceil() as usize;
+            let elite_count = elite_count.max(1).min(budget.saturating_sub(1));
+            population.truncate(elite_count);
+
             // Refill population with mutated/crossover offspring so evolution
             // actually produces diversity each generation.
-            let mut next_gen: Vec<ScoredGenome> = population.clone();
             let mut i = 0;
-            while next_gen.len() < self.config.population_size {
-                let parent_a = &population[i % population.len()];
-                let parent_b = &population[(i + 1) % population.len()];
-                let child = joint_crossover(&parent_a.genome, &parent_b.genome);
-                let mutated = joint_mutate(&child, self, i);
-                next_gen.push(ScoredGenome {
+            while population.len() < budget {
+                let idx_a = i % population.len();
+                let idx_b = (i + 1) % population.len();
+                let child_genome = {
+                    let parent_a = &population[idx_a];
+                    let parent_b = &population[idx_b];
+                    joint_crossover(&parent_a.genome, &parent_b.genome)
+                };
+                let mutated = joint_mutate(&child_genome, self, i);
+                population.push(ScoredGenome {
                     genome: mutated,
                     fitness: None,
                 });
                 i += 1;
             }
-            population = next_gen;
         }
 
         JointSearchResult {
@@ -336,5 +343,48 @@ mod tests {
         let mutated = joint_mutate(&genome, &config, 0);
         assert_ne!(mutated.retrieval_threshold, 0.7);
         assert!((0.1..=1.0).contains(&mutated.retrieval_threshold));
+    }
+
+    #[test]
+    fn test_offspring_generated() {
+        // Verify that offspring are bred each generation: the elite truncation
+        // (keeping 30%) creates room for crossover+mutate offspring,
+        // which are evaluated in subsequent generations. Without the fix,
+        // the refill loop `while next_gen.len() < population_size` never fires
+        // because `next_gen` starts at full capacity.
+        let config = JointSearchConfig::for_tensor("attention.q_proj");
+        let result = config.run();
+
+        assert!(
+            result.generations_completed > 0,
+            "search should complete at least one generation"
+        );
+        assert!(
+            result.best_genome.is_some(),
+            "search should produce a best genome"
+        );
+        // With elite truncation the population should be refilled to budget
+        assert_eq!(
+            result.population_size, 10,
+            "population should be at budget ({}) after breeding, got {}",
+            10, result.population_size,
+        );
+
+        let best = result.best_genome.unwrap();
+        assert!(
+            !best.engram_codec.is_empty(),
+            "best genome should have an engram codec"
+        );
+        assert!(
+            !best.kernel_variant.is_empty(),
+            "best genome should have a kernel variant"
+        );
+        // With elite truncation, multiple generations should run
+        assert!(
+            result.generations_completed > 1,
+            "search should run multiple generations (got {}): \
+             offspring were not bred",
+            result.generations_completed,
+        );
     }
 }

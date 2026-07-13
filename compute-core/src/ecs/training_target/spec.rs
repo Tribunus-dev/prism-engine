@@ -5,6 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ecs::canonical::identity::{
+    CorpusId, EngramArtifactId, EngramId, PhysicalSegmentId, ReceiptId, RegionId, TensorShape,
+};
 use crate::ecs::execution_profile::PhysicalTileLayout;
 use crate::execution_plan::CodecFamily;
 
@@ -242,28 +245,123 @@ pub struct EngramTrainingTarget {
     /// Priority of this target.
     pub priority: TrainingTargetPriority,
 }
+// ── EngramMemoryKind ───────────────────────────────────────────────────
+
+/// Classification of engram memory type.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EngramMemoryKind {
+    /// Episodic — records of specific events/occurrences.
+    Episodic,
+    /// Semantic — general knowledge and concepts.
+    Semantic,
+    /// Procedural — how-to knowledge / skill patterns.
+    Procedural,
+    /// Working — temporary task context.
+    Working,
+    /// Custom memory kind.
+    Custom(String),
+}
+
+// ── EngramCodec ─────────────────────────────────────────────────────────
+
+/// Codec used to encode an engram payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EngramCodec {
+    Nf4,
+    Ternary,
+    Int8,
+    F32,
+}
+
+// ── EngramOperation ─────────────────────────────────────────────────────
+
+/// Type of operation an engram performs at its insertion point.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EngramOperation {
+    Adapter,
+    Modulation,
+    Projection,
+    Prefix,
+    Custom(String),
+}
+
+// ── EngramApplication ───────────────────────────────────────────────────
+
+/// How an engram's payload is applied to the target tensor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EngramApplication {
+    AdditiveResidual,
+    MultiplicativeModulation,
+    LowRankProjection,
+    LatentPrefix,
+    AdapterActivation,
+}
+
+// ── EngramRoutingPolicy ─────────────────────────────────────────────────
+
+/// Policy for when an engram is activated during inference.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum EngramRoutingPolicy {
+    AlwaysOn,
+    ThresholdedSimilarity(f64),
+    TopK(usize),
+    Learned,
+    PolicyControlled,
+}
+
+// ── EngramParameterSchema ───────────────────────────────────────────────
+
+/// Schema describing the parameters of an engram.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngramParameterSchema {
+    pub parameter_count: usize,
+    pub bytes_per_parameter: usize,
+    pub layout: String,
+}
+
+// ── PrivacyContract ─────────────────────────────────────────────────────
+
+/// Privacy contract governing an engram's usage and disclosure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrivacyContract {
+    pub purpose: String,
+    pub retention: String,
+    pub disclosure_class: String,
+    pub assimilation_permitted: bool,
+}
+
+// ── EngramInsertionContract ─────────────────────────────────────────────
+
+/// Contract specifying where and how an engram is applied.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngramInsertionContract {
+    pub region: RegionId,
+    pub operation: EngramOperation,
+    pub input_shape: TensorShape,
+    pub output_shape: TensorShape,
+    pub application: EngramApplication,
+    pub routing: EngramRoutingPolicy,
+    pub maximum_latency_ns: Option<u64>,
+}
 
 // ── EngramArtifact ────────────────────────────────────────────────────
 
-/// An engram artifact — a trained pattern applied to a tensor insertion point.
+/// A trained engram artifact — a pattern applied to a tensor insertion point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngramArtifact {
-    /// Unique engram identifier.
-    pub engram_id: String,
-    /// Tensor class this engram targets (e.g. "attention.q_proj").
-    pub tensor_class: String,
-    /// Where in the compute graph the pattern is inserted.
-    pub insertion_point: String,
-    /// Codec used for the engram payload.
-    pub codec: CodecFamily,
-    /// Size of the engram payload in bytes.
-    pub payload_size: u64,
-    /// SHA-256 digest of the engram payload.
-    pub payload_digest: String,
-    /// The training run that produced this engram.
-    pub training_run_id: String,
-    /// ISO-8601 timestamp of creation.
-    pub created_at: String,
+    pub artifact_id: EngramArtifactId,
+    pub logical_id: EngramId,
+    pub format_version: u32,
+    pub memory_kind: EngramMemoryKind,
+    pub codec: EngramCodec,
+    pub insertion_contract: EngramInsertionContract,
+    pub index_segment: Option<PhysicalSegmentId>,
+    pub payload_segment: PhysicalSegmentId,
+    pub routing_segment: Option<PhysicalSegmentId>,
+    pub parameter_schema: EngramParameterSchema,
+    pub training_corpus: CorpusId,
+    pub training_receipt: ReceiptId,
+    pub privacy_contract: PrivacyContract,
 }
 
 // ── EngramLookupParams ─────────────────────────────────────────────────
@@ -381,3 +479,10 @@ pub struct MixedPrecisionTrainingTarget {
     /// Loss terms that apply to this target during training.
     pub loss_terms: Vec<TargetedLossTerm>,
 }
+// ── Identity types ──────────────────────────────────────────────────────
+//
+// Identity types (EngramArtifactId, EngramId, PhysicalSegmentId, CorpusId,
+// RegionId, TensorShape, ReceiptId) are now imported from
+// crate::ecs::canonical::identity.
+
+// ── EngramMemoryKind ───────────────────────────────────────────────────

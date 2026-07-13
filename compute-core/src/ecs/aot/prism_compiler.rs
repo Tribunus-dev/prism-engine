@@ -221,7 +221,7 @@ impl PrismCompiler {
         // Build a basic event stream for the non-pipeline path.
         let mut event_stream = CompileEventStream::new(&plan.model_ir.identity.name);
         event_stream.push(CompileEvent {
-            stage: CompilerStage::SourceResolved,
+            stage: CompilerStage::SourceResolution,
             success: true,
             timestamp: compile_timestamp(),
             duration_ms: 0.0,
@@ -317,7 +317,7 @@ impl PrismCompiler {
 
         let mut event_stream = CompileEventStream::new(&request.source_path);
         event_stream.push(CompileEvent {
-            stage: CompilerStage::CimageWritten,
+            stage: CompilerStage::CimageAssembly,
             success: true,
             timestamp: compile_timestamp(),
             duration_ms: 0.0,
@@ -388,7 +388,7 @@ impl PrismCompiler {
 
         let mut event_stream = CompileEventStream::new(&request.source_path);
         event_stream.push(CompileEvent {
-            stage: CompilerStage::CimageWritten,
+            stage: CompilerStage::CimageAssembly,
             success: true,
             timestamp: compile_timestamp(),
             duration_ms: 0.0,
@@ -730,13 +730,13 @@ fn build_outcome_from_image(
     let cr = &compiled_image.receipt;
     let receipts = vec![
         crate::ecs::canonical::compile_plan::CompilerReceipt {
-            stage: CompilerStage::SourceResolved,
+            stage: CompilerStage::SourceResolution,
             success: true,
             duration_ms: 0.0,
             message: Some(format!("Source config hash: {}", cr.source_config_hash)),
         },
         crate::ecs::canonical::compile_plan::CompilerReceipt {
-            stage: CompilerStage::PayloadPacked,
+            stage: CompilerStage::PayloadPacking,
             success: true,
             duration_ms: 0.0,
             message: Some(format!(
@@ -746,7 +746,7 @@ fn build_outcome_from_image(
             )),
         },
         crate::ecs::canonical::compile_plan::CompilerReceipt {
-            stage: CompilerStage::CimageWritten,
+            stage: CompilerStage::CimageAssembly,
             success: true,
             duration_ms: 0.0,
             message: Some(format!("Complete image hash: {}", cr.complete_image_hash)),

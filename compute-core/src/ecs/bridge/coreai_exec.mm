@@ -16,6 +16,7 @@ static os_log_t tribunus_coreai_log = os_log_create("com.tribunus.compute", "cor
 
 #import <CoreML/CoreML.h> // TODO(#coreai): replace with <CoreAI/CoreAI.h>
 #import <Foundation/Foundation.h>
+#include <exception>
 #import <CoreVideo/CoreVideo.h>
 #import <stdint.h>
 #import <string.h>

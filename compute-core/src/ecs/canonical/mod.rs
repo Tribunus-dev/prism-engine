@@ -13,12 +13,20 @@
 
 pub mod compile_plan;
 pub mod execution_graph;
+pub mod generation;
+pub mod identity;
 pub mod kernel_abi;
 pub mod model_ir;
 pub mod representation;
 
 pub use compile_plan::*;
 pub use execution_graph::*;
+pub use generation::*;
+pub use identity::{
+    CandidateId, CompilerIdentity, CorpusId, EngramArtifactId, EngramId, GenerationId,
+    HardwareProfileId, LogicalTensorId, ModelSourceId, PhysicalSegmentId, ReceiptId,
+    RepresentationId, TensorShape, Timestamp,
+};
 pub use kernel_abi::*;
 pub use model_ir::*;
 pub use representation::*;

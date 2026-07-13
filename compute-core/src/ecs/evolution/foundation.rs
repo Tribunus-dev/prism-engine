@@ -7,10 +7,14 @@
 
 use std::ops::Range;
 
+use serde::{Deserialize, Serialize};
+
+use crate::ecs::canonical::identity::{CandidateId, ReceiptId};
+use crate::ecs::canonical::kernel_abi::KernelImplementationId;
+use crate::ecs::cimage::PhysicalTileLayout;
 use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::plan::CodecFamily;
 use crate::ecs::CompEntity;
-use serde::{Deserialize, Serialize};
 
 // ── Search infrastructure ───────────────────────────────────────────────
 
@@ -204,4 +208,117 @@ pub struct EvolutionProvenance {
     pub parent_candidates: Vec<String>,
     pub best_cost: CostMetrics,
     pub generation_count: u64,
+}
+
+// ── Typed EvolutionCandidate (Sections 3.5, 10) ─────────────────────────
+
+/// A search candidate with a typed genome and evaluation receipts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvolutionCandidate {
+    pub candidate_id: CandidateId,
+    pub parent_ids: Vec<CandidateId>,
+    pub generation: u64,
+    pub genome: CandidateGenome,
+    pub compiled_artifacts: Vec<KernelImplementationId>,
+    pub correctness_receipt: Option<ReceiptId>,
+    pub quality_receipt: Option<ReceiptId>,
+    pub performance_receipt: Option<ReceiptId>,
+    pub fitness: Option<FitnessVector>,
+    pub status: CandidateStatus,
+}
+
+/// The typed genome for a search candidate.
+/// Representation, packing, Metal geometry, decomposition, memory, fusion, engram, and runtime genes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateGenome {
+    pub representation: CodecFamily,
+    pub packing: PhysicalTileLayout,
+    pub metal_geometry: MetalGeometry,
+    pub decomposition: DecompositionStrategy,
+    pub memory_config: MemoryConfig,
+    pub fusion_strategy: Option<FusionStrategy>,
+    pub engram_config: Option<EngramGene>,
+    pub kernel_variant: String,
+}
+
+/// Metal dispatch geometry for a kernel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetalGeometry {
+    pub grid_width: u32,
+    pub grid_height: u32,
+    pub simd_width: u32,
+    pub threadgroup_width: u32,
+    pub threadgroup_height: u32,
+    pub threadgroup_depth: u32,
+}
+
+/// How a kernel is decomposed across the GPU.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DecompositionStrategy {
+    /// Split K dimension into the given number of tiles.
+    SplitK(u32),
+    /// Reduction tree with given branching factor.
+    ReductionTree(u32),
+    /// Single sequential pass.
+    Sequential,
+}
+
+/// Memory configuration for a kernel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    pub vector_width: u32,
+    pub cache_policy: String,
+    pub threadgroup_staging: u64,
+}
+
+/// How operations are fused together.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FusionStrategy {
+    /// Group a set of named operations together.
+    OperationGrouping(Vec<String>),
+    /// A named fused region.
+    FusedRegion(String),
+    /// No fusion.
+    None,
+}
+
+/// Engram configuration gene — codec, capacity, insertion point, routing threshold.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngramGene {
+    pub codec: String,
+    pub capacity: usize,
+    pub insertion_point: String,
+    pub routing_threshold: f64,
+}
+
+/// Lifecycle status of an evolution candidate.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CandidateStatus {
+    /// Candidate created but not yet validated.
+    Created,
+    /// Genome validated, artifacts not yet compiled.
+    Validated,
+    /// Artifacts compiled successfully.
+    Compiled,
+    /// Correctness validated against reference.
+    Correct,
+    /// Performance measured on target hardware.
+    Measured,
+    /// Validation failed at some stage.
+    Failed,
+    /// Promoted to the next generation.
+    Promoted,
+}
+
+/// Multi-dimensional fitness for an evolution candidate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FitnessVector {
+    pub task_quality: f64,
+    pub interference: f64,
+    pub operator_error: f64,
+    pub memory_bytes: u64,
+    pub latency_p50_ns: u64,
+    pub latency_p95_ns: u64,
+    pub energy_uj: Option<u64>,
+    pub compile_cost_ms: u64,
 }

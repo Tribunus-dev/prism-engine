@@ -2336,7 +2336,10 @@ fn build_canonical_outcome(
             let semi_id = KernelSemanticId(format!("{}:{:?}", art.logical_operation, art.kind));
             CompiledKernelEntry {
                 artifact: CompiledKernelArtifact {
-                    implementation_id: KernelImplementationId(format!("{}|{}", art.artifact_id, art.gpu_family)),
+                    implementation_id: KernelImplementationId(format!(
+                        "{}|{}",
+                        art.artifact_id, art.gpu_family
+                    )),
                     semantic_id: semi_id,
                     compiled_bytes: Vec::new(),
                     sha256: art.checksum.clone(),
@@ -2360,13 +2363,13 @@ fn build_canonical_outcome(
     let cr = &compiled.receipt;
     let receipts = vec![
         CompilerReceipt {
-            stage: CompilerStage::SourceResolved,
+            stage: CompilerStage::SourceResolution,
             success: true,
             duration_ms: 0.0,
             message: Some(format!("Source config hash: {}", cr.source_config_hash)),
         },
         CompilerReceipt {
-            stage: CompilerStage::PayloadPacked,
+            stage: CompilerStage::PayloadPacking,
             success: true,
             duration_ms: 0.0,
             message: Some(format!(
@@ -2376,7 +2379,7 @@ fn build_canonical_outcome(
             )),
         },
         CompilerReceipt {
-            stage: CompilerStage::CimageWritten,
+            stage: CompilerStage::CimageAssembly,
             success: true,
             duration_ms: 0.0,
             message: Some(format!("Complete image hash: {}", cr.complete_image_hash)),

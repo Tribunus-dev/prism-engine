@@ -169,22 +169,31 @@ impl MetalDecompositionSearch {
 
             // ── Breed next generation if this wasn't the last iteration ────
             if gen + 1 < max_generations {
-                let current_count = world
-                    .get_component::<EvolutionState>(state_entity)
-                    .map(|s| s.population.len())
-                    .unwrap_or(0);
                 let pop_size = self.config.population_size;
 
-                let mut new_entities: Vec<CompEntity> = Vec::new();
+                // ── Keep only elite subset (30%) of sorted candidates ──
+                let elite_count = (sorted_candidates.len() as f64 * 0.3).ceil() as usize;
+                let elite_count = elite_count
+                    .max(1)
+                    .min(sorted_candidates.len().saturating_sub(1));
+                let elites: Vec<EvolveCandidate> = sorted_candidates.drain(..elite_count).collect();
 
-                for i in current_count..pop_size {
-                    let parent_idx = i % sorted_candidates.len().max(1);
+                // Truncate state population to match
+                {
+                    let state = world
+                        .get_component_mut::<EvolutionState>(state_entity)
+                        .expect("state component present");
+                    state.population.truncate(elite_count);
+                }
+
+                // ── Breed offspring from elites to fill remaining slots ──
+                let mut new_entities: Vec<CompEntity> = Vec::new();
+                let mut i = 0;
+                while elite_count + new_entities.len() < pop_size {
+                    let parent_a = &elites[i % elites.len()];
+                    let parent_b = &elites[(i + 1) % elites.len()];
                     let seed_val = (gen as u64).wrapping_mul(100).wrapping_add(i as u64);
-                    let child = mutate_program(
-                        &sorted_candidates[parent_idx].program,
-                        &self.config,
-                        seed_val,
-                    );
+                    let child = mutate_program(&parent_a.program, &self.config, seed_val);
 
                     let entity = world.spawn(EntityKind::Node, None);
                     world.add_component(
@@ -196,10 +205,11 @@ impl MetalDecompositionSearch {
                             program: child,
                             measured_cost: None,
                             generation: gen as u64 + 1,
-                            parents: vec![sorted_candidates[parent_idx].tensor_id.clone()],
+                            parents: vec![parent_a.tensor_id.clone(), parent_b.tensor_id.clone()],
                         },
                     );
                     new_entities.push(entity);
+                    i += 1;
                 }
 
                 // Extend state's population with the new offspring
@@ -328,10 +338,6 @@ mod tests {
 
     #[test]
     fn test_decomposition_search_converges() {
-        // Run a search — the simulation converges or runs to max_generations.
-        // Deterministic mutations from 64±32 on tile sizes produce large cost
-        // improvements (50%+ per generation), so convergence may not trigger
-        // within the default threshold. Either outcome is valid.
         let search = MetalDecompositionSearch::for_nf4("test.weight", BackendTarget::Metal);
         let result = search.run(&SyntheticEvaluator);
         assert!(
@@ -348,5 +354,49 @@ mod tests {
                 panic!("expected CustomPack winner, got {other:?}")
             }
         }
+    }
+
+    #[test]
+    fn test_offspring_produced() {
+        let search = MetalDecompositionSearch::for_nf4("test.weight", BackendTarget::Metal);
+        let result = search.run(&SyntheticEvaluator);
+
+        assert!(
+            result.generations > 0,
+            "search should complete at least one generation"
+        );
+
+        match &result.winning_program {
+            EvolveProgram::CustomPack {
+                tile_m,
+                tile_n,
+                tile_k,
+                ..
+            } => {
+                // Offspring must have been bred: after 50 generations the
+                // winning tiles will have diverged from seed (64,64,64).
+                assert!(
+                    *tile_m != 64 || *tile_n != 64 || *tile_k != 64,
+                    "winning tiles ({},{},{}) should differ from seed (64,64,64): \
+                     offspring were not produced",
+                    tile_m,
+                    tile_n,
+                    tile_k
+                );
+            }
+            _ => {
+                panic!(
+                    "expected CustomPack winner, got {:?}",
+                    result.winning_program
+                );
+            }
+        }
+
+        // With very large tiles, integer division may give wall_ns=0.
+        // Check bandwidth_bytes instead as a proof of evaluation.
+        assert!(
+            result.cost.bandwidth_bytes > 0,
+            "winner should have measured bandwidth cost"
+        );
     }
 }

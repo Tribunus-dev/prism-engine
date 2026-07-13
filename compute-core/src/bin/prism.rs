@@ -756,67 +756,30 @@ fn compile_gguf(
         let mlx_str = _mlx_capture_dir.map(|p| p.to_string_lossy().to_string());
         let target_str = raw_target.map(|s| s.to_string());
 
-        let new_pipeline_result = if let Some(draft_path) = draft {
-            // Speculative compilation with draft GGUF — routed through PrismCompiler.
-            use tribunus_compute_core::ecs::aot::prism_compiler::PrismCompiler;
-            use tribunus_compute_core::ecs::canonical::compile_plan::CompileRequest;
-            let compiler = PrismCompiler::default();
-            let request = CompileRequest {
-                source_path: gguf_path.to_string_lossy().to_string(),
-                output_path: Some(output_path.to_string_lossy().to_string()),
-                quant_mode: raw_quant.map(|s| s.to_string()),
-                authority: Some(authority.to_string()),
-                draft_path: Some(draft_path.to_string_lossy().to_string()),
-                ane_models_dir: ane_str,
-                metallib_path: metal_str,
-                mlx_capture_dir: mlx_str,
-                target_hardware: target_str,
-                ..Default::default()
-            };
-            compiler
-                .compile_speculative(request)
-                .map(|_| ())
-                .map_err(|e| tribunus_compute_core::Error::from_reason(e))
-        } else if matches!(authority, CompilationAuthority::SealedComputeImage) {
-            // Authority-gated compilation — routed through PrismCompiler.
-            use tribunus_compute_core::ecs::aot::prism_compiler::PrismCompiler;
-            use tribunus_compute_core::ecs::canonical::compile_plan::CompileRequest;
-            let compiler = PrismCompiler::default();
-            let request = CompileRequest {
-                source_path: gguf_path.to_string_lossy().to_string(),
-                output_path: Some(output_path.to_string_lossy().to_string()),
-                quant_mode: raw_quant.map(|s| s.to_string()),
-                authority: Some(authority.to_string()),
-                ane_models_dir: ane_str,
-                metallib_path: metal_str,
-                mlx_capture_dir: mlx_str,
-                target_hardware: target_str,
-                ..Default::default()
-            };
-            compiler
-                .compile(request)
-                .map(|_| ())
-                .map_err(|e| tribunus_compute_core::Error::from_reason(e))
-        } else {
-            // Unchecked default path — canonical PrismCompiler API.
-            use tribunus_compute_core::ecs::aot::prism_compiler::PrismCompiler;
-            use tribunus_compute_core::ecs::canonical::compile_plan::CompileRequest;
-            let compiler = PrismCompiler::default();
-            let request = CompileRequest {
-                source_path: gguf_path.to_string_lossy().to_string(),
-                output_path: Some(output_path.to_string_lossy().to_string()),
-                quant_mode: raw_quant.map(|s| s.to_string()),
-                ane_models_dir: ane_str,
-                metallib_path: metal_str,
-                mlx_capture_dir: mlx_str,
-                target_hardware: target_str,
-                ..Default::default()
-            };
-            compiler
-                .compile(request)
-                .map(|_| ())
-                .map_err(|e| tribunus_compute_core::Error::from_reason(e))
+        // Single PrismCompiler API call — compile() dispatches on request fields.
+        use tribunus_compute_core::ecs::aot::prism_compiler::PrismCompiler;
+        use tribunus_compute_core::ecs::canonical::compile_plan::CompileRequest;
+        let compiler = PrismCompiler::default();
+        let request = CompileRequest {
+            source_path: gguf_path.to_string_lossy().to_string(),
+            output_path: Some(output_path.to_string_lossy().to_string()),
+            quant_mode: raw_quant.map(|s| s.to_string()),
+            authority: if matches!(authority, CompilationAuthority::SealedComputeImage) {
+                Some(authority.to_string())
+            } else {
+                None
+            },
+            draft_path: draft.map(|p| p.to_string_lossy().to_string()),
+            ane_models_dir: ane_str,
+            metallib_path: metal_str,
+            mlx_capture_dir: mlx_str,
+            target_hardware: target_str,
+            ..Default::default()
         };
+        let new_pipeline_result = compiler
+            .compile(request)
+            .map(|_| ())
+            .map_err(|e| tribunus_compute_core::Error::from_reason(e));
 
         match new_pipeline_result {
             Ok(()) => {

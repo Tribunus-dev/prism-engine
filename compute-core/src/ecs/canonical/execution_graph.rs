@@ -5,12 +5,14 @@
 //! per-layer planning, fused-region planning, CPU fallback, and ANE
 //! subgraph extraction.
 
+use serde::{Deserialize, Serialize};
+
 /// Unique identifier for a region within an execution graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RegionId(pub usize);
 
 /// Identifies which execution lane (backend) a region targets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ExecutionLane {
     /// Apple GPU via Metal.
     MetalGpu,
@@ -27,7 +29,7 @@ pub enum ExecutionLane {
 }
 
 /// A value that flows between execution operations (a buffer reference).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BufferValue {
     pub name: String,
     pub byte_size: u64,
@@ -35,7 +37,7 @@ pub struct BufferValue {
 }
 
 /// A single executable operation within a region.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionOp {
     pub name: String,
     pub kind: ExecutionOpKind,
@@ -45,7 +47,7 @@ pub struct ExecutionOp {
 }
 
 /// Kinds of executable operations.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExecutionOpKind {
     RmsNorm,
     LayerNorm,
@@ -57,20 +59,19 @@ pub enum ExecutionOpKind {
     Mul,
     Add,
     Softmax,
-    Softcap,
-    Transpose,
-    Reshape,
-    Cast,
-    Embedding,
-    Argmax,
-    FusedGateUpSiLU,
-    FusedAttention,
-    FusedMlp,
+    RotaryEmbedding,
+    Gather,
+    ScalarAdd,
+    Scale,
+    Fp32Dequant,
+    Nf4Dequant,
+    Int8Dequant,
+    TernaryDequant,
     Other(String),
 }
 
 /// Constraints that guide fusion decisions for a region.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FusionConstraints {
     /// Maximum operations that can be fused into one kernel.
     pub max_fused_ops: Option<usize>,
@@ -81,7 +82,7 @@ pub struct FusionConstraints {
 }
 
 /// A single execution region — a group of operations that execute together.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionRegion {
     pub id: RegionId,
     pub name: String,
@@ -93,7 +94,7 @@ pub struct ExecutionRegion {
 }
 
 /// A directed edge between execution regions (data dependency).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionEdge {
     pub source_region: RegionId,
     pub source_output: String,
@@ -102,7 +103,7 @@ pub struct ExecutionEdge {
 }
 
 /// Plan for runtime state (KV cache, etc.).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeStatePlan {
     pub max_context_tokens: usize,
     pub kv_cache_bytes_per_token: u64,
@@ -110,7 +111,7 @@ pub struct RuntimeStatePlan {
 }
 
 /// Plan for memory allocation across regions.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryPlan {
     pub total_activation_bytes: u64,
     pub total_weight_bytes: u64,
@@ -118,7 +119,7 @@ pub struct MemoryPlan {
 }
 
 /// ExecutionGraph — the complete execution-oriented representation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub regions: Vec<ExecutionRegion>,
     pub edges: Vec<ExecutionEdge>,
@@ -129,9 +130,5 @@ pub struct ExecutionGraph {
 impl ExecutionGraph {
     pub fn region_count(&self) -> usize {
         self.regions.len()
-    }
-
-    pub fn get_region(&self, id: RegionId) -> Option<&ExecutionRegion> {
-        self.regions.iter().find(|r| r.id == id)
     }
 }

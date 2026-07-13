@@ -124,20 +124,28 @@ pub struct CompilerReceipt {
 /// Named stages in the compiler pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompilerStage {
-    SourceResolved,
-    SourceFileVerified,
-    ModelInspected,
-    ModelNormalized,
-    RepresentationPlanned,
-    ExecutionGraphBuilt,
-    KernelLoweringStarted,
-    KernelCompiled,
-    KernelVerified,
-    PayloadPacked,
-    CimageWritten,
-    CimageVerified,
-    CimageSealed,
-    CompilationFailed,
+    /// Source located and parsed into a handle.
+    SourceResolution,
+    /// Model imported through the frontend into canonical ModelIr.
+    FrontendImport,
+    /// Representation plan produced (quantization strategy, codec selection).
+    RepresentationPlanning,
+    /// Execution plan produced (regions, lanes, memory plan).
+    ExecutionPlanning,
+    /// Kernels selected and mapped to backends.
+    KernelSelection,
+    /// Backend lowers kernels to concrete artifacts (Metal, MLX, ANE).
+    BackendLowering,
+    /// Payloads packed into segments with alignment and metadata.
+    PayloadPacking,
+    /// Cimage assembled from segments, kernels, and manifest.
+    CimageAssembly,
+    /// Compiled image verified for integrity and structural correctness.
+    Verification,
+    /// Image sealed with policy attestation.
+    Sealing,
+    /// Image registered in the local catalog.
+    Registration,
 }
 
 /// Set of receipts covering an entire compilation.

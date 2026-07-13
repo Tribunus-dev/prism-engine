@@ -7,6 +7,7 @@
 //! No Metal entry-point names, buffer indices, or device-specific layout
 //! information belongs in ModelIr.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Stable identity for a model instance.
@@ -46,7 +47,7 @@ pub struct ModelConfiguration {
 }
 
 /// Unique identifier for a tensor within a ModelIr.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TensorId(pub usize);
 
 /// Describes a single tensor in the model: its name, shape, and data source.
