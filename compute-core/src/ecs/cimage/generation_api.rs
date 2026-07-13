@@ -239,6 +239,11 @@ mod tests {
                 assimilation_permitted: false,
             },
         };
+        let mut base = gen.clone();
+        base.generation_id = GenerationId("gen0".into());
+        api.promote(base).expect("base generation should promote");
+        let mut gen = gen;
+        gen.parent_generation = Some(GenerationId("gen0".into()));
         let evidence = PromotionEvidence {
             numerical: NumericalReceipt {
                 candidate_id: CandidateId("candidate".into()),
@@ -280,6 +285,10 @@ mod tests {
         )
         .expect("promoted payload should apply");
         assert!((activation[0] - 0.5).abs() < f32::EPSILON);
+        assert_eq!(
+            api.rollback().expect("child generation should roll back"),
+            GenerationId("gen0".into())
+        );
     }
 
     #[test]
