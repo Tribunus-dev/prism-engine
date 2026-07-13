@@ -1,6 +1,6 @@
 # Remaining work
 
-> Current snapshot: `b2e89ab` plus the uncommitted evaluator work. This document
+> Current snapshot: `2568391`. This document
 > distinguishes declared contracts, connected call paths, real execution, and
 > validation against real inputs or hardware.
 
@@ -21,7 +21,7 @@ The Metal catalogue is authoritative for source lookup and is consumed by
 several runtime and compilation paths. The NF4 tile640 ABI now uses a typed,
 aligned parameter block, and the real residency test covers M=2, K=4, N=640.
 
-Remaining work is to route every production kernel creation through the
+Remaining work is to route every remaining production kernel creation through the
 backend compiler contract, remove remaining duplicate shader implementations,
 replace zero or symbolic ABI byte sizes with checked contracts, and make
 catalogue source identity part of compiled artifact provenance.
@@ -39,31 +39,30 @@ contains post-hoc reconstruction with missing identities.
 ## Shared measured evaluator
 
 Evolutionary search has candidate genomes, mutation, crossover, selection,
-budgets, replay, and Pareto structures. The current Metal evaluator can compile
-source and validate static dimensions, but its numerical and performance
-receipts are nominal. Joint search still uses a hand-written cost function.
+budgets, replay, and Pareto structures. The NF4 tile640 Metal evaluator now
+compiles catalogue source, dispatches a real fixture, compares against the CPU
+oracle, warms the path, and records repeated timing. Joint search still uses a
+hand-written cost function and does not yet consume evaluator receipts.
 
-The next required implementation is one shared evaluator that accepts an
-executable workload fixture, produces CPU-oracle output, compiles and dispatches
-the Metal candidate, performs warm-up and repeated timing, validates numerical
-error, records device limits and receipts, and only permits promotion after
-correctness and performance gates pass. Engram training must use the same
-oracle and holdout machinery.
+The next required implementation is to generalize the evaluator beyond the
+NF4 fixture, expose its receipts to joint search, and enforce promotion only
+after correctness and performance gates pass. Device-specific limits and
+measured candidate promotion still need to be connected to the search state.
 
 ## Engram training and runtime
 
 Engram contracts, scheduler operations, payload segments, lookup receipts, CPU
 additive and multiplicative application, and generation bindings exist.
 
-The trainer still serializes calibration metadata instead of optimizing the
-declared `EngramTrainingDataset`. Lookup similarity is currently a constant,
-latency is fabricated, Metal application is unimplemented, and low-rank,
-latent-prefix, and adapter application modes are placeholders.
+The trainer now has a deterministic additive-residual optimizer over the
+declared `EngramTrainingDataset`, emits parameter payload bytes, and checks
+holdout loss. Lookup uses cosine similarity over f32 payload parameters, and CPU
+application validates payload width. Metal application is unimplemented, and
+low-rank, latent-prefix, and adapter application modes remain placeholders.
 
-Remaining work is a real additive-residual or low-rank optimizer, query/payload
-similarity, holdout and interference evaluation, executable payload validation,
-Metal application, and an end-to-end test that stores the payload and promotes
-the resulting generation.
+Remaining work is interference evaluation, validation-set integration, Metal
+application, and an end-to-end test that stores a trained payload, binds it to a
+generation, executes lookup and application, and verifies promotion and replay.
 
 ## Ternarization and assimilation
 

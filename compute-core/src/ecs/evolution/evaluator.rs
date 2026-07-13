@@ -178,6 +178,22 @@ impl MetalCandidateEvaluator {
         if candidate.genome.metal_geometry.threadgroup_depth > 1024 {
             violations.push("threadgroup_depth exceeds Metal limit of 1024".into());
         }
+        let geometry = &candidate.genome.metal_geometry;
+        let total_threads = (geometry.threadgroup_width as u64)
+            .saturating_mul(geometry.threadgroup_height as u64)
+            .saturating_mul(geometry.threadgroup_depth as u64);
+        if total_threads > 1024 {
+            violations.push(format!(
+                "threadgroup size {} exceeds Metal maxTotalThreadsPerThreadgroup 1024",
+                total_threads
+            ));
+        }
+        if geometry.simd_width == 0 || geometry.threadgroup_width % geometry.simd_width != 0 {
+            violations.push("threadgroup_width must be a positive multiple of simd_width".into());
+        }
+        if geometry.grid_width == 0 || geometry.grid_height == 0 {
+            violations.push("grid dimensions must be non-zero".into());
+        }
 
         StaticValidationReceipt {
             candidate_id: candidate.candidate_id.clone(),
