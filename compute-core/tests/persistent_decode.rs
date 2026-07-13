@@ -136,11 +136,8 @@ constant char trit2_lut[9][2] = {
 constant uint HIDDEN = 3840;
 constant uint BPR = 120;
 
-constant uint Q_R  = 4096;
-constant uint KV_R = 2048;
-constant uint G_R  = 15360;
-
-// Weight buffer offsets within one layer (in blocks)
+// Weight buffer offsets within one layer (in blocks).
+// Row counts used inline: Q=4096, K=2048, V=2048, O=4096, G=15360, U=15360.
 constant uint Q_OFF  = 0;
 constant uint K_OFF  = Q_OFF  + 4096 * BPR;
 constant uint V_OFF  = K_OFF  + 2048 * BPR;

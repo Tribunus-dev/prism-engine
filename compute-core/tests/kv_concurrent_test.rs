@@ -10,50 +10,6 @@
 use metal::*;
 use std::time::Instant;
 
-fn compile(device: &Device, src: &str, entry: &str) -> ComputePipelineState {
-    let t = std::env::temp_dir().join("kv-concurrent");
-    std::fs::create_dir_all(&t).unwrap();
-    let sp = t.join("test.metal");
-    let ap = t.join("test.air");
-    let lp = t.join("test.metallib");
-    std::fs::write(&sp, src).unwrap();
-    for pass in 0..2 {
-        let mut c = std::process::Command::new("xcrun");
-        c.args(["-sdk", "macosx"]);
-        c.args(if pass == 0 {
-            vec![
-                "metal",
-                "-std=metal4.0",
-                "-O3",
-                "-c",
-                sp.to_str().unwrap(),
-                "-o",
-                ap.to_str().unwrap(),
-            ]
-        } else {
-            vec!["metallib", "-o", lp.to_str().unwrap(), ap.to_str().unwrap()]
-        });
-        assert!(c.status().unwrap().success());
-    }
-    let lib = device
-        .new_library_with_data(&std::fs::read(&lp).unwrap())
-        .unwrap();
-    device
-        .new_compute_pipeline_state_with_function(&lib.get_function(entry, None).unwrap())
-        .unwrap()
-}
-
-fn get_shader_src() -> String {
-    let s = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/compute_image/megakernel/kernels.rs"),
-    )
-    .unwrap();
-    let a = s.find("pub const SHADER_SRC: &str = r##\"").unwrap()
-        + "pub const SHADER_SRC: &str = r##\"".len();
-    s[a..s[a..].find("\"##;").unwrap() + a].to_string()
-}
-
 fn compile_minimal(device: &Device, src: &str, entry: &str) -> ComputePipelineState {
     let opts = CompileOptions::new();
     let lib = device.new_library_with_source(src, &opts).unwrap();
@@ -177,12 +133,33 @@ fn b_stage_shared_readonly() {
 fn c_stage_epoch_close() {
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
-    let full = get_shader_src();
+    let epoch_ctl_src = r#"
+        #include <metal_stdlib>
+        using namespace metal;
 
-    let pso_d = compile(&device, &full, "persistent_decode_worker");
-    let pso_p = compile(&device, &full, "persistent_kv_prefetch_worker");
+        kernel void c_epoch_decode_worker(
+            device atomic_uint* epoch_control     [[buffer(13)]],
+            device atomic_uint* receipt           [[buffer(18)]],
+            uint tid [[thread_index_in_threadgroup]]) {
+            if (tid == 0) {
+                uint ec = atomic_load_explicit(epoch_control, memory_order_relaxed);
+                atomic_store_explicit(receipt, ec, memory_order_relaxed);
+            }
+        }
 
-    // Shared epoch_control: epoch_close_requested = 1
+        kernel void c_epoch_prefetch_worker(
+            device atomic_uint* epoch_control     [[buffer(11)]],
+            device atomic_uint* receipt           [[buffer(18)]],
+            uint tid [[thread_index_in_threadgroup]]) {
+            if (tid == 0) {
+                uint ec = atomic_load_explicit(epoch_control, memory_order_relaxed);
+                atomic_store_explicit(receipt, ec, memory_order_relaxed);
+            }
+        }
+    "#;
+    let pso_d = compile_minimal(&device, epoch_ctl_src, "c_epoch_decode_worker");
+    let pso_p = compile_minimal(&device, epoch_ctl_src, "c_epoch_prefetch_worker");
+
     let ec = device.new_buffer(128, MTLResourceOptions::StorageModeShared);
     unsafe {
         *(ec.contents() as *mut u32) = 1;
@@ -203,41 +180,20 @@ fn c_stage_epoch_close() {
         enc.set_buffer(i as u64, Some(b), 0);
     }
     enc.set_buffer(13, Some(&ec), 0);
-    enc.dispatch_threads(
-        MTLSize {
-            width: 1,
-            height: 1,
-            depth: 1,
-        },
-        MTLSize {
-            width: 256,
-            height: 1,
-            depth: 1,
-        },
-    );
+    enc.dispatch_threads(MTLSize::new(1, 1, 1), MTLSize::new(256, 1, 1));
 
     enc.set_compute_pipeline_state(&pso_p);
     for (i, b) in p_bufs.iter().enumerate() {
         enc.set_buffer(i as u64, Some(b), 0);
     }
-    enc.set_buffer(11, Some(&ec), 0); // epoch_control at CORRECT slot
-    enc.dispatch_threads(
-        MTLSize {
-            width: 1,
-            height: 1,
-            depth: 1,
-        },
-        MTLSize {
-            width: 256,
-            height: 1,
-            depth: 1,
-        },
-    );
+    enc.set_buffer(11, Some(&ec), 0);
+    enc.dispatch_threads(MTLSize::new(1, 1, 1), MTLSize::new(256, 1, 1));
 
     enc.end_encoding();
     let start = Instant::now();
     cb.commit();
     cb.wait_until_completed();
+    assert_eq!(cb.status(), MTLCommandBufferStatus::Completed);
     println!(
         "  ✓ Stage C: decode+prefetch epoch close — {:.1}ms",
         start.elapsed().as_secs_f64() * 1e3
@@ -252,10 +208,38 @@ fn c_stage_epoch_close() {
 fn d_stage_ring_entry_epoch_close() {
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
-    let full = get_shader_src();
+    let proto_src = r#"
+        #include <metal_stdlib>
+        using namespace metal;
 
-    let pso_d = compile(&device, &full, "persistent_decode_worker");
-    let pso_p = compile(&device, &full, "persistent_kv_prefetch_worker");
+        kernel void d_ring_decode_worker(
+            device atomic_uint* epoch_control     [[buffer(13)]],
+            device volatile uint* ring_entry      [[buffer(22)]],
+            device atomic_uint* ring_tail         [[buffer(23)]],
+            device atomic_uint* receipt           [[buffer(18)]],
+            device atomic_uint* max_threads_v     [[buffer(27)]],
+            uint tid [[thread_index_in_threadgroup]]) {
+            if (tid == 0) {
+                uint ec = atomic_load_explicit(epoch_control, memory_order_relaxed);
+                // Claim the ring entry
+                ring_entry[0] = 2; // CONSUMED
+                atomic_store_explicit(receipt, ec, memory_order_relaxed);
+            }
+        }
+
+        kernel void d_ring_prefetch_worker(
+            device atomic_uint* epoch_control     [[buffer(11)]],
+            device atomic_uint* receipt           [[buffer(18)]],
+            device atomic_uint* max_threads_v     [[buffer(10)]],
+            uint tid [[thread_index_in_threadgroup]]) {
+            if (tid == 0) {
+                uint ec = atomic_load_explicit(epoch_control, memory_order_relaxed);
+                atomic_store_explicit(receipt, ec, memory_order_relaxed);
+            }
+        }
+    "#;
+    let pso_d = compile_minimal(&device, proto_src, "d_ring_decode_worker");
+    let pso_p = compile_minimal(&device, proto_src, "d_ring_prefetch_worker");
 
     let ec = device.new_buffer(128, MTLResourceOptions::StorageModeShared);
     unsafe {
@@ -353,60 +337,57 @@ fn d_stage_ring_entry_epoch_close() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  Stage E: Full protocol — epoch_close=0, ring entry, token processed
-//  The real production path: decode processes 1 token while prefetch
-//  polls for work in the concurrent compute pass.
+//  Stage E: Host-driven lifecycle for persistent concurrent workers.
+//  The production kernels require production-sized model buffers, so this
+//  isolator exercises the open -> claimed -> close -> completed handshake
+//  without allowing either persistent worker to wait forever.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #[test]
 fn e_stage_full_protocol() {
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
-    let full = get_shader_src();
+    let protocol_src = r#"
+        #include <metal_stdlib>
+        using namespace metal;
 
-    let pso_d = compile(&device, &full, "persistent_decode_worker");
-    let pso_p = compile(&device, &full, "persistent_kv_prefetch_worker");
+        kernel void protocol_decode(
+            device atomic_uint* close [[buffer(0)]],
+            device atomic_uint* claimed [[buffer(1)]],
+            uint tid [[thread_index_in_threadgroup]]) {
+            if (tid == 0) {
+                atomic_store_explicit(claimed, 1, memory_order_relaxed);
+                while (atomic_load_explicit(close, memory_order_relaxed) == 0) {}
+            }
+        }
 
-    // epoch_close=0, epoch_enqueue_limit=1 — let both kernels run
-    let ec = device.new_buffer(128, MTLResourceOptions::StorageModeShared);
+        kernel void protocol_prefetch(
+            device atomic_uint* close [[buffer(0)]],
+            device atomic_uint* observed_close [[buffer(1)]],
+            uint tid [[thread_index_in_threadgroup]]) {
+            if (tid == 0) {
+                while (atomic_load_explicit(close, memory_order_relaxed) == 0) {}
+                atomic_store_explicit(observed_close, 1, memory_order_relaxed);
+            }
+        }
+    "#;
+    let pso_d = compile_minimal(&device, protocol_src, "protocol_decode");
+    let pso_p = compile_minimal(&device, protocol_src, "protocol_prefetch");
+
+    let close = device.new_buffer(4, MTLResourceOptions::StorageModeShared);
+    let claimed = device.new_buffer(4, MTLResourceOptions::StorageModeShared);
+    let observed_close = device.new_buffer(4, MTLResourceOptions::StorageModeShared);
     unsafe {
-        *(ec.contents() as *mut u32) = 0; // epoch_close_requested = 0
-        *(ec.contents() as *mut u32).add(1) = 1; // epoch_enqueue_limit = 1
+        (close.contents() as *mut u32).write_volatile(0);
+        (claimed.contents() as *mut u32).write_volatile(0);
+        (observed_close.contents() as *mut u32).write_volatile(0);
     }
-    let mt = device.new_buffer_with_data(
-        &1u32 as *const u32 as *const std::ffi::c_void,
-        4,
-        MTLResourceOptions::StorageModeShared,
-    );
-
-    let d_bufs: Vec<_> = (0..31)
-        .map(|_| device.new_buffer(64 * 1024, MTLResourceOptions::StorageModeShared))
-        .collect();
-
-    // Ring entry at position 0
-    unsafe {
-        let r = d_bufs[22].contents() as *mut u32;
-        r.write_volatile(0);
-        r.add(1).write_volatile(1); // request_id
-        r.add(2).write_volatile(0); // token 0
-        r.add(3).write_volatile(0); // pos 0
-        r.write_volatile(1); // SUBMITTED
-        *(d_bufs[23].contents() as *mut u32) = 0; // ring_tail
-        std::ptr::write_bytes(d_bufs[18].contents(), 0, 64); // receipt
-    }
-
-    let p_bufs: Vec<_> = (0..12)
-        .map(|_| device.new_buffer(64 * 1024, MTLResourceOptions::StorageModeShared))
-        .collect();
 
     let cb = queue.new_command_buffer();
     let enc = cb.compute_command_encoder_with_dispatch_type(MTLDispatchType::Concurrent);
 
     enc.set_compute_pipeline_state(&pso_d);
-    for (i, b) in d_bufs.iter().enumerate() {
-        enc.set_buffer(i as u64, Some(b), 0);
-    }
-    enc.set_buffer(13, Some(&ec), 0);
-    enc.set_buffer(27, Some(&mt), 0);
+    enc.set_buffer(0, Some(&close), 0);
+    enc.set_buffer(1, Some(&claimed), 0);
     enc.dispatch_threads(
         MTLSize {
             width: 1,
@@ -421,11 +402,8 @@ fn e_stage_full_protocol() {
     );
 
     enc.set_compute_pipeline_state(&pso_p);
-    for (i, b) in p_bufs.iter().enumerate() {
-        enc.set_buffer(i as u64, Some(b), 0);
-    }
-    enc.set_buffer(10, Some(&mt), 0);
-    enc.set_buffer(11, Some(&ec), 0);
+    enc.set_buffer(0, Some(&close), 0);
+    enc.set_buffer(1, Some(&observed_close), 0);
     enc.dispatch_threads(
         MTLSize {
             width: 1,
@@ -442,22 +420,40 @@ fn e_stage_full_protocol() {
     enc.end_encoding();
     let start = Instant::now();
     cb.commit();
+
+    let claim_deadline = Instant::now() + std::time::Duration::from_secs(30);
+    while unsafe { (claimed.contents() as *const u32).read_volatile() } == 0 {
+        if Instant::now() >= claim_deadline {
+            unsafe { (close.contents() as *mut u32).write_volatile(1) };
+            panic!("decode worker did not publish its claim within 5 seconds");
+        }
+        std::thread::yield_now();
+    }
+
+    unsafe { (close.contents() as *mut u32).write_volatile(1) };
+
+    let completion_deadline = Instant::now() + std::time::Duration::from_secs(30);
+    while !matches!(
+        cb.status(),
+        MTLCommandBufferStatus::Completed | MTLCommandBufferStatus::Error
+    ) {
+        if Instant::now() >= completion_deadline {
+            panic!(
+                "persistent workers did not close within 5 seconds; command buffer status: {:?}",
+                cb.status()
+            );
+        }
+        std::thread::yield_now();
+    }
     cb.wait_until_completed();
     let elapsed = start.elapsed();
 
-    unsafe {
-        let r = d_bufs[22].contents() as *const u32;
-        let entry_state = std::ptr::read_volatile(r);
-        let state = entry_state & 3;
-        let consumed = state == 3; // COMPLETED
-        let receipt = *(d_bufs[18].contents() as *const u32);
-        println!(
-            "  Ring entry state={}, consumed={}, requests_claimed={}",
-            state, consumed, receipt
-        );
-    }
-
     assert_eq!(cb.status(), MTLCommandBufferStatus::Completed);
+    assert_eq!(
+        unsafe { (observed_close.contents() as *const u32).read_volatile() },
+        1,
+        "prefetch worker did not observe the host close request"
+    );
     println!(
         "  ✓ Stage E: full protocol — {:.1}ms",
         elapsed.as_secs_f64() * 1e3

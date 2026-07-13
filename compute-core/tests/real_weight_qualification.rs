@@ -48,7 +48,8 @@ fn run_tokens(deployment: &CimageDeployment, interleaved: bool, context_len: u32
     let device = Device::system_default().unwrap();
     let queue = device.new_command_queue();
 
-    let mut mk = Megakernel::new(&device, &queue, deployment, false, TapMode::Untapped).expect("Megakernel::new");
+    let mut mk = Megakernel::new(&device, &queue, deployment, false, TapMode::Untapped)
+        .expect("Megakernel::new");
 
     // Set interleave mode before launch
     mk.kv_prefetch_enabled = interleaved;
@@ -104,6 +105,7 @@ fn print_stats(label: &str, times: &[Duration]) {
 }
 
 #[test]
+#[ignore = "requires gemma4_12b_v4.cimage model file — set CIMAGE_PATH or place at models/gemma4-12b-it/gemma4_12b_v4.cimage"]
 fn real_weight_qualification() {
     let cimage_path = find_cimage().expect("cimage file not found. Set CIMAGE_PATH or place at models/gemma4-12b-it/gemma4_12b_v4.cimage");
     let file_size = std::fs::metadata(&cimage_path).unwrap().len();

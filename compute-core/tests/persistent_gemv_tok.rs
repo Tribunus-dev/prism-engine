@@ -250,8 +250,10 @@ fn decode_tok_benchmark() {
         "
   Compiling 3840-dim kernel..."
     );
-    let (pso_3840, queue, dev) =
-        compile_kernel(PERSISTENT_GEMV_SRC.as_str(), "matvec_persistent_batched");
+    let (pso_3840, queue, dev) = compile_kernel(
+        PERSISTENT_GEMV_SRC.as_str(),
+        "matvec_persistent_t32_coalesced",
+    );
     println!("  Compiling 640-dim kernel (Down)...");
     let (pso_640, _, _) = compile_kernel(PERSISTENT_GEMV_SRC_640, "matvec_persistent_batched_640");
 

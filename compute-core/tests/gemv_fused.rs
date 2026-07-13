@@ -103,12 +103,6 @@ using namespace metal;
 constant uint HIDDEN_DIM = 3840;
 constant uint BPR = HIDDEN_DIM / 32;
 
-// Row counts per projection (max 15360, quantized to 4-row groups)
-constant uint Q_TG     = 4096 / 4;
-constant uint KV_TG    = 2048 / 4;
-constant uint GATE_TG  = 15360 / 4;
-
-// Weight buffer offsets (in blocks, set from Rust side)
 // Q: 0..4096*120, K: 4096*120..(4096+2048)*120, V: .., O: .., Gate: .., Up: ..
 
 kernel void fused_projections(

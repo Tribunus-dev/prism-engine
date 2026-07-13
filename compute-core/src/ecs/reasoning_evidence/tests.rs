@@ -42,8 +42,7 @@ fn default_guardrail() -> DistillationGuardrail {
 fn epistemic_marker_receipt_serializes() {
     let receipt = clean_epistemic_receipt();
     let json = serde_json::to_string(&receipt).expect("serialize");
-    let deserialized: EpistemicBehaviorReceipt =
-        serde_json::from_str(&json).expect("deserialize");
+    let deserialized: EpistemicBehaviorReceipt = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(deserialized.receipt_id, "r1");
     assert_eq!(deserialized.model_or_partition_id, "model-a");
     assert_eq!(deserialized.trace_count, 500);
@@ -73,10 +72,7 @@ fn distillation_guard_rejects_trace_collapse_with_ood_drop() {
         .reasons
         .iter()
         .any(|r| r.contains("Reasoning trace length")));
-    assert!(result
-        .reasons
-        .iter()
-        .any(|r| r.contains("OOD accuracy")));
+    assert!(result.reasons.iter().any(|r| r.contains("OOD accuracy")));
 }
 
 // ---------------------------------------------------------------------------
@@ -101,10 +97,7 @@ fn purified_opsd_metadata_marks_residual_pmi_training_as_promotion_eligible() {
 
     let result = guard.check_promotion(&epistemic, &Some(distillation));
     assert!(result.promotion_eligible);
-    assert!(result
-        .reasons
-        .iter()
-        .any(|r| r.contains("Purified OPSD")));
+    assert!(result.reasons.iter().any(|r| r.contains("Purified OPSD")));
 }
 
 // ---------------------------------------------------------------------------
@@ -119,9 +112,7 @@ fn epistemic_marker_set_default_contains_markers() {
     assert!(!markers.self_correction_markers.is_empty());
     assert!(!markers.reformulation_markers.is_empty());
     assert!(markers.uncertainty_markers.contains(&"maybe".into()));
-    assert!(markers
-        .self_correction_markers
-        .contains(&"actually".into()));
+    assert!(markers.self_correction_markers.contains(&"actually".into()));
     assert!(markers
         .reformulation_markers
         .contains(&"in other words".into()));
@@ -168,8 +159,7 @@ fn serde_roundtrip_distillation_signal_decomposition_receipt() {
         promotion_eligible: false,
     };
     let json = serde_json::to_string(&receipt).unwrap();
-    let recovered: DistillationSignalDecompositionReceipt =
-        serde_json::from_str(&json).unwrap();
+    let recovered: DistillationSignalDecompositionReceipt = serde_json::from_str(&json).unwrap();
     assert_eq!(recovered.teacher_id, "t1");
     assert!(recovered.has_reference_conditioned_teacher);
     assert!(!recovered.uses_pmi_target_distribution);
@@ -230,7 +220,10 @@ fn serde_roundtrip_epistemic_degradation_flag() {
     let json = serde_json::to_string(&flags).unwrap();
     let recovered: Vec<EpistemicDegradationFlag> = serde_json::from_str(&json).unwrap();
     assert_eq!(recovered.len(), 5);
-    assert_eq!(recovered[0], EpistemicDegradationFlag::SuppressedUncertaintyMarkers);
+    assert_eq!(
+        recovered[0],
+        EpistemicDegradationFlag::SuppressedUncertaintyMarkers
+    );
     assert_eq!(recovered[4], EpistemicDegradationFlag::SelfCorrectionDrop);
 }
 
@@ -244,7 +237,11 @@ fn promotion_check_passes_for_clean_profile() {
     let epistemic = clean_epistemic_receipt();
 
     let result = guard.check_promotion(&epistemic, &None);
-    assert!(result.promotion_eligible, "clean profile should pass: {:?}", result.reasons);
+    assert!(
+        result.promotion_eligible,
+        "clean profile should pass: {:?}",
+        result.reasons
+    );
 }
 
 #[test]
@@ -292,10 +289,7 @@ fn promotion_check_fails_on_indomain_gain_with_ood_loss() {
 
     let result = guard.check_promotion(&epistemic, &None);
     assert!(!result.promotion_eligible);
-    assert!(result
-        .reasons
-        .iter()
-        .any(|r| r.contains("In-domain gain")));
+    assert!(result.reasons.iter().any(|r| r.contains("In-domain gain")));
 }
 
 #[test]
@@ -391,6 +385,12 @@ fn degradation_flags_recorded_in_promotion_check() {
     let result = guard.check_promotion(&epistemic, &None);
     // Degradation flags are recorded but don't alone cause rejection
     // (the promotion rules check the actual rates/values, not just flags)
-    assert!(result.reasons.iter().any(|r| r.contains("SuppressedUncertaintyMarkers")));
-    assert!(result.reasons.iter().any(|r| r.contains("SelfCorrectionDrop")));
+    assert!(result
+        .reasons
+        .iter()
+        .any(|r| r.contains("SuppressedUncertaintyMarkers")));
+    assert!(result
+        .reasons
+        .iter()
+        .any(|r| r.contains("SelfCorrectionDrop")));
 }

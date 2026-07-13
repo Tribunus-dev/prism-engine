@@ -18,7 +18,9 @@ pub fn sandbox_execute(
     let root = sandbox_root(root);
     let result = match call.name.as_str() {
         "read_file" => crate::ecs::tools::sandbox::tool_read_file(&root, &call.arguments),
-        "read_file_lines" => crate::ecs::tools::sandbox::tool_read_file_lines(&root, &call.arguments),
+        "read_file_lines" => {
+            crate::ecs::tools::sandbox::tool_read_file_lines(&root, &call.arguments)
+        }
         "write_file" => crate::ecs::tools::sandbox::tool_write_file(&root, &call.arguments),
         "edit_file" => crate::ecs::tools::sandbox::tool_edit_file(&root, &call.arguments),
         "list_directory" => crate::ecs::tools::sandbox::tool_list_directory(&root, &call.arguments),

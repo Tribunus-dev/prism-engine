@@ -53,15 +53,8 @@ fn mtl_compile(device: &Device, src: &str, entry: &str) -> ComputePipelineState 
 }
 
 fn get_shader_src() -> String {
-    let s = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/compute_image/megakernel/kernels.rs"),
-    )
-    .unwrap();
-    let start = s.find("pub const SHADER_SRC: &str = r##\"").unwrap()
-        + "pub const SHADER_SRC: &str = r##\"".len();
-    let end = s[start..].find("\"##;").unwrap() + start;
-    s[start..end].to_string()
+    use tribunus_compute_core::ecs::compute_image::megakernel::kernels::SHADER_SRC;
+    SHADER_SRC.to_string()
 }
 
 fn allocate_decode_bufs(device: &Device) -> Vec<metal::Buffer> {

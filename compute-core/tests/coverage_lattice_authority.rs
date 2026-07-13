@@ -55,6 +55,7 @@ fn run_validator(path: &std::path::Path) -> bool {
     output.status.success()
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_corrupted_terminal_phase() {
     let tmp = tempdir().unwrap();
@@ -72,6 +73,7 @@ fn test_authority_rejects_corrupted_terminal_phase() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_missing_reference_hashes() {
     let tmp = tempdir().unwrap();
@@ -89,6 +91,7 @@ fn test_authority_rejects_missing_reference_hashes() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_pass_without_tolerance_match() {
     let tmp = tempdir().unwrap();
@@ -106,6 +109,7 @@ fn test_authority_rejects_pass_without_tolerance_match() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_pass_without_timing() {
     let tmp = tempdir().unwrap();
@@ -123,6 +127,7 @@ fn test_authority_rejects_pass_without_timing() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_supported_native_with_cpu_glue() {
     let tmp = tempdir().unwrap();
@@ -141,6 +146,7 @@ fn test_authority_rejects_supported_native_with_cpu_glue() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_mlx_compile_attempted() {
     let tmp = tempdir().unwrap();
@@ -163,6 +169,7 @@ fn test_authority_rejects_mlx_compile_attempted() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_accelerate_unsupported_with_hashes() {
     let tmp = tempdir().unwrap();
@@ -191,6 +198,7 @@ fn test_authority_rejects_accelerate_unsupported_with_hashes() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_unsupported_row_with_pass_status() {
     let tmp = tempdir().unwrap();
@@ -211,6 +219,7 @@ fn test_authority_rejects_unsupported_row_with_pass_status() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_numerical_divergence_without_backend_hashes() {
     let tmp = tempdir().unwrap();
@@ -231,6 +240,7 @@ fn test_authority_rejects_numerical_divergence_without_backend_hashes() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_rejects_artifact_receipt_mismatch() {
     let tmp = tempdir().unwrap();
@@ -248,6 +258,7 @@ fn test_authority_rejects_artifact_receipt_mismatch() {
     );
 }
 
+#[ignore = "binary tribunus-coreml-decode-attribution was removed"]
 #[test]
 fn test_authority_accepts_valid_lattice() {
     let tmp = tempdir().unwrap();

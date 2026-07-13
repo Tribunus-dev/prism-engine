@@ -12,8 +12,8 @@
 //! 4.  `FunctionConstantSet` — each constant maps to a documented shader
 //!     `constant_id` slot.
 
-use tribunus_compute_core::execution_plan::*;
 use tribunus_compute_core::execution_plan::pso_cache::PsoCacheKey;
+use tribunus_compute_core::execution_plan::*;
 
 // ═══════════════════════════════════════════════════════════════════════
 // Test 1: KernelSpecializationKey serializes every format-dependent field
@@ -38,28 +38,40 @@ fn test_kernel_specialization_key_covers_all_format_params() {
     };
 
     // Serialize to JSON — serde must round-trip every field.
-    let json = serde_json::to_value(&key).expect("KernelSpecializationKey must be JSON-serializable");
+    let json =
+        serde_json::to_value(&key).expect("KernelSpecializationKey must be JSON-serializable");
 
     // Every field that affects PSO compilation MUST appear in the JSON output.
     // If a field is added to the struct but not checked here, the test fails.
-    assert!(json.get("template_id").is_some(),    "missing template_id");
-    assert!(json.get("execution_phase").is_some(),"missing execution_phase");
-    assert!(json.get("codec").is_some(),          "missing codec");
-    assert!(json.get("tile_shape").is_some(),     "missing tile_shape");
-    assert!(json.get("group_size").is_some(),     "missing group_size");
-    assert!(json.get("group_axis").is_some(),     "missing group_axis");
-    assert!(json.get("affine_mode").is_some(),    "missing affine_mode");
-    assert!(json.get("metadata_layout").is_some(),"missing metadata_layout");
-    assert!(json.get("input_dtype").is_some(),    "missing input_dtype");
-    assert!(json.get("output_dtype").is_some(),   "missing output_dtype");
-    assert!(json.get("hardware_profile").is_some(),"missing hardware_profile");
-    assert!(json.get("mode_flags").is_some(),     "missing mode_flags");
+    assert!(json.get("template_id").is_some(), "missing template_id");
+    assert!(
+        json.get("execution_phase").is_some(),
+        "missing execution_phase"
+    );
+    assert!(json.get("codec").is_some(), "missing codec");
+    assert!(json.get("tile_shape").is_some(), "missing tile_shape");
+    assert!(json.get("group_size").is_some(), "missing group_size");
+    assert!(json.get("group_axis").is_some(), "missing group_axis");
+    assert!(json.get("affine_mode").is_some(), "missing affine_mode");
+    assert!(
+        json.get("metadata_layout").is_some(),
+        "missing metadata_layout"
+    );
+    assert!(json.get("input_dtype").is_some(), "missing input_dtype");
+    assert!(json.get("output_dtype").is_some(), "missing output_dtype");
+    assert!(
+        json.get("hardware_profile").is_some(),
+        "missing hardware_profile"
+    );
+    assert!(json.get("mode_flags").is_some(), "missing mode_flags");
 
     // Verify round-trip deserialization preserves equality.
     let deserialized: KernelSpecializationKey =
         serde_json::from_value(json).expect("KernelSpecializationKey must round-trip through JSON");
-    assert_eq!(key, deserialized,
-        "KernelSpecializationKey round-trip must preserve semantic equality");
+    assert_eq!(
+        key, deserialized,
+        "KernelSpecializationKey round-trip must preserve semantic equality"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -93,16 +105,76 @@ fn test_pso_cache_key_fully_deterministic() {
     // (baked into the Metal function name), not cache-key fields,
     // so they are intentionally not tested here.
     for (label, varied) in [
-        ("template_id",         KernelSpecializationKey { template_id:    KernelTemplateId::Int8Tile640Gemv,        ..base.clone() }),
-        ("execution_phase",     KernelSpecializationKey { execution_phase: ExecutionPhase::Prefill,                  ..base.clone() }),
-        ("codec",               KernelSpecializationKey { codec:           CodecFamily::Int8,                       ..base.clone() }),
-        ("tile_shape",          KernelSpecializationKey { tile_shape:      TileShape::tile256_decode(),             ..base.clone() }),
-        ("group_size",          KernelSpecializationKey { group_size:      64,                                       ..base.clone() }),
-        ("group_axis",          KernelSpecializationKey { group_axis:      Axis::Input,                             ..base.clone() }),
-        ("affine_mode",         KernelSpecializationKey { affine_mode:     AffineMode::ScaleBias,                    ..base.clone() }),
-        ("metadata_layout",     KernelSpecializationKey { metadata_layout: MetadataLayout::SeparatedManifest,        ..base.clone() }),
-        ("hardware_profile",    KernelSpecializationKey { hardware_profile: HardwareProfileId::AppleMProBalanced,     ..base.clone() }),
-        ("mode_flags",          KernelSpecializationKey { mode_flags:      1,                                        ..base.clone() }),
+        (
+            "template_id",
+            KernelSpecializationKey {
+                template_id: KernelTemplateId::Int8Tile640Gemv,
+                ..base.clone()
+            },
+        ),
+        (
+            "execution_phase",
+            KernelSpecializationKey {
+                execution_phase: ExecutionPhase::Prefill,
+                ..base.clone()
+            },
+        ),
+        (
+            "codec",
+            KernelSpecializationKey {
+                codec: CodecFamily::Int8,
+                ..base.clone()
+            },
+        ),
+        (
+            "tile_shape",
+            KernelSpecializationKey {
+                tile_shape: TileShape::tile256_decode(),
+                ..base.clone()
+            },
+        ),
+        (
+            "group_size",
+            KernelSpecializationKey {
+                group_size: 64,
+                ..base.clone()
+            },
+        ),
+        (
+            "group_axis",
+            KernelSpecializationKey {
+                group_axis: Axis::Input,
+                ..base.clone()
+            },
+        ),
+        (
+            "affine_mode",
+            KernelSpecializationKey {
+                affine_mode: AffineMode::ScaleBias,
+                ..base.clone()
+            },
+        ),
+        (
+            "metadata_layout",
+            KernelSpecializationKey {
+                metadata_layout: MetadataLayout::SeparatedManifest,
+                ..base.clone()
+            },
+        ),
+        (
+            "hardware_profile",
+            KernelSpecializationKey {
+                hardware_profile: HardwareProfileId::AppleMProBalanced,
+                ..base.clone()
+            },
+        ),
+        (
+            "mode_flags",
+            KernelSpecializationKey {
+                mode_flags: 1,
+                ..base.clone()
+            },
+        ),
     ] {
         let cache_varied: PsoCacheKey = (&varied).into();
         assert_ne!(
@@ -135,11 +207,31 @@ fn test_nf4_tile640_gemv_template_bindings_match_shader_abi() {
         id: KernelTemplateId::Nf4Tile640Gemv,
         metal_function_name: "fused_gemv_nf4_tile640_fp32".into(),
         expected_bindings: vec![
-            BindingSpec { index: 0, purpose: "packed_weights".into(), required: true },
-            BindingSpec { index: 1, purpose: "scales".into(),           required: true },
-            BindingSpec { index: 2, purpose: "biases".into(),           required: false },  // unused in NF4 (always 0)
-            BindingSpec { index: 3, purpose: "in_vector".into(),        required: true },
-            BindingSpec { index: 4, purpose: "out_vector".into(),       required: true },
+            BindingSpec {
+                index: 0,
+                purpose: "packed_weights".into(),
+                required: true,
+            },
+            BindingSpec {
+                index: 1,
+                purpose: "scales".into(),
+                required: true,
+            },
+            BindingSpec {
+                index: 2,
+                purpose: "biases".into(),
+                required: false,
+            }, // unused in NF4 (always 0)
+            BindingSpec {
+                index: 3,
+                purpose: "in_vector".into(),
+                required: true,
+            },
+            BindingSpec {
+                index: 4,
+                purpose: "out_vector".into(),
+                required: true,
+            },
         ],
         supported_phases: vec![ExecutionPhase::Decode],
         supported_codecs: vec![CodecFamily::Nf4],
@@ -166,7 +258,8 @@ fn test_nf4_tile640_gemv_template_bindings_match_shader_abi() {
 
     // The metal function name follows the fused_{codec}_tile{size}_{op} naming convention.
     assert!(
-        tmpl.metal_function_name.starts_with("fused_gemv_nf4_tile640_"),
+        tmpl.metal_function_name
+            .starts_with("fused_gemv_nf4_tile640_"),
         "Nf4Tile640Gemv metal function name should follow fused_gemv_nf4_tile640_* pattern"
     );
 }
@@ -181,11 +274,31 @@ fn test_int8_tile640_gemv_template_bindings_valid() {
         id: KernelTemplateId::Int8Tile640Gemv,
         metal_function_name: "fused_gemv_int8_tile640_fp32".into(),
         expected_bindings: vec![
-            BindingSpec { index: 0, purpose: "packed_weights".into(), required: true },
-            BindingSpec { index: 1, purpose: "scales".into(),           required: true },
-            BindingSpec { index: 2, purpose: "biases".into(),           required: false },
-            BindingSpec { index: 3, purpose: "in_vector".into(),        required: true },
-            BindingSpec { index: 4, purpose: "out_vector".into(),       required: true },
+            BindingSpec {
+                index: 0,
+                purpose: "packed_weights".into(),
+                required: true,
+            },
+            BindingSpec {
+                index: 1,
+                purpose: "scales".into(),
+                required: true,
+            },
+            BindingSpec {
+                index: 2,
+                purpose: "biases".into(),
+                required: false,
+            },
+            BindingSpec {
+                index: 3,
+                purpose: "in_vector".into(),
+                required: true,
+            },
+            BindingSpec {
+                index: 4,
+                purpose: "out_vector".into(),
+                required: true,
+            },
         ],
         supported_phases: vec![ExecutionPhase::Decode],
         supported_codecs: vec![CodecFamily::Int8],
@@ -200,7 +313,8 @@ fn test_int8_tile640_gemv_template_bindings_valid() {
 
     // Validate NameMatches
     assert!(
-        tmpl.metal_function_name.starts_with("fused_gemv_int8_tile640_"),
+        tmpl.metal_function_name
+            .starts_with("fused_gemv_int8_tile640_"),
         "Int8Tile640Gemv metal function name should follow fused_gemv_int8_tile640_*"
     );
 }
