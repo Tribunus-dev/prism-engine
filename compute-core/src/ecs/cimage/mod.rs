@@ -6,6 +6,7 @@
 
 pub mod canonical;
 pub mod error;
+pub mod generation_store;
 pub mod header;
 pub mod manifest;
 pub mod mlp_reference;
