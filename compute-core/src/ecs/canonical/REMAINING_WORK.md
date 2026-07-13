@@ -41,8 +41,10 @@ contains post-hoc reconstruction with missing identities.
 Evolutionary search has candidate genomes, mutation, crossover, selection,
 budgets, replay, and Pareto structures. The NF4 tile640 Metal evaluator now
 compiles catalogue source, dispatches a real fixture, compares against the CPU
-oracle, warms the path, and records repeated timing. Joint search still uses a
-hand-written cost function and does not yet consume evaluator receipts.
+oracle, warms the path, and records repeated timing. The legacy `run` path
+still uses a hand-written cost function, while `run_measured` now routes
+candidates through static, numerical, and performance receipts and rejects
+failed candidates.
 
 The next required implementation is to generalize the evaluator beyond the
 NF4 fixture, expose its receipts to joint search, and enforce promotion only
@@ -56,13 +58,14 @@ additive and multiplicative application, and generation bindings exist.
 
 The trainer now has a deterministic additive-residual optimizer over the
 declared `EngramTrainingDataset`, emits parameter payload bytes, and checks
-holdout loss. Lookup uses cosine similarity over f32 payload parameters, and CPU
-application validates payload width. Metal application is unimplemented, and
+holdout, validation, and explicit interference loss. Lookup uses cosine
+similarity over f32 payload parameters, and CPU application validates payload
+width. Metal application is unimplemented, and
 low-rank, latent-prefix, and adapter application modes remain placeholders.
 
-Remaining work is interference evaluation, Metal application, and an end-to-end
-runtime test that executes lookup and application after promotion and verifies
-replay and rollback behavior.
+Remaining work is Metal application and an end-to-end runtime test that executes
+lookup and application after promotion and verifies replay and rollback
+behavior.
 
 ## Ternarization and assimilation
 

@@ -236,6 +236,7 @@ impl EngramTrainer {
             || dataset.train_targets.iter().any(|x| x.len() != width)
             || dataset.holdout_examples.iter().any(|x| x.len() != width)
             || dataset.holdout_targets.iter().any(|x| x.len() != width)
+            || dataset.interference_examples.iter().any(|x| x.len() != width)
         {
             return Err("engram dataset rows must have one non-zero consistent width".into());
         }
@@ -282,6 +283,25 @@ impl EngramTrainer {
             &dataset.validation_targets,
             &vec![0.0; width],
         );
+        let interference_loss = dataset
+            .interference_examples
+            .iter()
+            .map(|example| {
+                example
+                    .iter()
+                    .zip(&parameters)
+                    .map(|(_, correction)| (*correction as f64).powi(2))
+                    .sum::<f64>()
+                    / width as f64
+            })
+            .sum::<f64>()
+            / dataset.interference_examples.len().max(1) as f64;
+        if interference_loss > self.config.convergence_threshold.max(1e-6) {
+            return Err(format!(
+                "engram interference loss {} exceeds gate",
+                interference_loss
+            ));
+        }
         if holdout_loss > baseline_loss + self.config.convergence_threshold.max(1e-6) {
             return Err(format!(
                 "engram holdout regression {} > baseline {}",
@@ -303,6 +323,7 @@ impl EngramTrainer {
         metrics.insert("nrmse".into(), final_loss.sqrt());
         metrics.insert("holdout_loss".into(), holdout_loss);
         metrics.insert("validation_loss".into(), validation_loss);
+        metrics.insert("interference_loss".into(), interference_loss);
         let calibration = CalibrationEvidence {
             tensor_id: self.config.target.target_id.clone(),
             method: "dataset_additive_residual".into(),
@@ -468,6 +489,7 @@ mod tests {
             validation_targets: vec![vec![3.25, 3.5]],
             holdout_examples: vec![vec![4.0, 5.0]],
             holdout_targets: vec![vec![4.25, 4.5]],
+            interference_examples: vec![],
             activation_capture: None,
         };
         let result = trainer.train_dataset(&dataset).unwrap();

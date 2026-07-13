@@ -13,5 +13,7 @@ pub struct EngramTrainingDataset {
     pub validation_targets: Vec<Vec<f32>>,
     pub holdout_examples: Vec<Vec<f32>>,
     pub holdout_targets: Vec<Vec<f32>>,
+    /// Examples that should remain unchanged when the engram is applied.
+    pub interference_examples: Vec<Vec<f32>>,
     pub activation_capture: Option<Vec<u8>>,
 }

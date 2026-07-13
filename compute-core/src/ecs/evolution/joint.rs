@@ -4,7 +4,13 @@
 //! program decomposition, enabling Pareto-optimal tradeoffs between
 //! quality, memory, latency, and energy.
 
-use crate::ecs::evolution::foundation::{CostFunction, SearchConfig};
+use crate::ecs::canonical::identity::CandidateId;
+use crate::ecs::evolution::evaluator::{CandidateEvaluator, Workload};
+use crate::ecs::evolution::foundation::{
+    CandidateGenome, CandidateStatus, CostFunction, DecompositionStrategy, EvolutionCandidate,
+    MemoryConfig, MetalGeometry, SearchConfig,
+};
+use crate::ecs::cimage::PhysicalTileLayout;
 use crate::execution_plan::CodecFamily;
 
 /// Full joint genome — representation, kernel, and engram genes.
@@ -279,6 +285,140 @@ impl JointSearchConfig {
             population_size: population.len(),
             generations_completed,
         }
+    }
+
+    /// Run the same population search against an executable evaluator. A
+    /// candidate is admitted to selection only when static, numerical, and
+    /// performance receipts all pass; failed candidates receive infinite
+    /// fitness and cannot win by synthetic cost estimates.
+    pub fn run_measured<E: CandidateEvaluator>(
+        &self,
+        evaluator: &E,
+    ) -> Result<JointSearchResult, String> {
+        let mut population = self.generate_initial_population();
+        let workload = Workload {
+            tensor_id: crate::ecs::canonical::identity::LogicalTensorId(self.tensor_id.clone()),
+            shape: vec![2, 4, 640],
+            repetitions: 3,
+        };
+        let mut generations_completed = 0;
+        for gen in 0..self.config.max_generations {
+            generations_completed = gen + 1;
+            for scored in &mut population {
+                if scored.fitness.is_none() {
+                    scored.fitness = Some(
+                        self.measured_fitness(&scored.genome, evaluator, &workload)
+                            .unwrap_or(f64::INFINITY),
+                    );
+                }
+            }
+            population.sort_by(|a, b| {
+                a.fitness
+                    .unwrap_or(f64::INFINITY)
+                    .partial_cmp(&b.fitness.unwrap_or(f64::INFINITY))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            if gen > 0 {
+                if let (Some(a), Some(b)) = (population.first(), population.get(1)) {
+                    let af = a.fitness.unwrap_or(f64::INFINITY);
+                    let bf = b.fitness.unwrap_or(f64::INFINITY);
+                    if af.is_finite()
+                        && (af - bf).abs()
+                            < self.config.convergence_threshold * af.abs().max(1.0)
+                    {
+                        break;
+                    }
+                }
+            }
+            let budget = self.config.population_size.max(1);
+            let elite_count = ((budget as f64 * 0.3).ceil() as usize)
+                .max(1)
+                .min(budget.saturating_sub(1).max(1));
+            population.truncate(elite_count);
+            let mut i = 0;
+            while population.len() < budget {
+                let a = population[i % population.len()].genome.clone();
+                let b = population[(i + 1) % population.len()].genome.clone();
+                population.push(ScoredGenome {
+                    genome: joint_mutate(&joint_crossover(&a, &b), self, i + gen),
+                    fitness: None,
+                });
+                i += 1;
+            }
+        }
+        Ok(JointSearchResult {
+            best_genome: population
+                .first()
+                .filter(|x| x.fitness.is_some_and(|f| f.is_finite()))
+                .map(|x| x.genome.clone()),
+            population_size: population.len(),
+            generations_completed,
+        })
+    }
+
+    fn measured_fitness<E: CandidateEvaluator>(
+        &self,
+        genome: &JointGenome,
+        evaluator: &E,
+        workload: &Workload,
+    ) -> Result<f64, String> {
+        let candidate = EvolutionCandidate {
+            candidate_id: CandidateId(format!("joint.{}.{}", self.tensor_id, genome.kernel_variant)),
+            parent_ids: vec![],
+            generation: 0,
+            genome: CandidateGenome {
+                representation: genome.codec,
+                packing: PhysicalTileLayout {
+                    tile_m: genome.tile_m as u32,
+                    tile_n: genome.tile_n as u32,
+                    tiles_per_row: 1,
+                    total_tiles: 1,
+                    padded_cols: genome.tile_n as u32,
+                    group_size: genome.group_size as u32,
+                    groups_per_tile: 1,
+                    packed_bytes_per_tile: 0,
+                    metadata_f32_per_tile: 0,
+                },
+                metal_geometry: MetalGeometry {
+                    grid_width: 1,
+                    grid_height: 1,
+                    simd_width: 32,
+                    threadgroup_width: 256,
+                    threadgroup_height: 1,
+                    threadgroup_depth: 1,
+                },
+                decomposition: match genome.reduction_strategy.as_str() {
+                    "split-k" => DecompositionStrategy::SplitK(genome.tile_k as u32),
+                    "tree" => DecompositionStrategy::ReductionTree(2),
+                    _ => DecompositionStrategy::Sequential,
+                },
+                memory_config: MemoryConfig {
+                    vector_width: 32,
+                    cache_policy: "writeback".into(),
+                    threadgroup_staging: 32768,
+                },
+                fusion_strategy: None,
+                engram_config: None,
+                kernel_variant: genome.kernel_variant.clone(),
+            },
+            compiled_artifacts: vec![],
+            correctness_receipt: None,
+            quality_receipt: None,
+            performance_receipt: None,
+            fitness: None,
+            status: CandidateStatus::Created,
+        };
+        let static_receipt = evaluator.validate_static(&candidate)?;
+        if !static_receipt.passed {
+            return Err(static_receipt.violations.join(", "));
+        }
+        let compiled = evaluator.compile(&candidate)?;
+        let numerical = evaluator.validate_numerical(&compiled)?;
+        if !numerical.passed {
+            return Err(format!("numerical gate failed: {}", numerical.max_absolute_error));
+        }
+        let performance = evaluator.measure(&compiled, workload)?;
+        Ok(performance.latency_p50_ns as f64)
     }
 
     fn generate_initial_population(&self) -> Vec<ScoredGenome> {
