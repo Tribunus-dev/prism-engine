@@ -8,32 +8,78 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # sccache hashes complete compiler invocations; Rust incremental objects are
+  # deliberately disabled in ephemeral CI while remaining enabled locally.
+  CARGO_INCREMENTAL: "0"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # macOS (Apple Silicon) — full Metal + ANE build
   macos-build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Cache Cargo inputs
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: macos-arm64-prism-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'compute-core/Cargo.toml', '.cargo/config.toml') }}
+          restore-keys: |
+            macos-arm64-prism-
+      - name: Verify Apple Silicon and macOS 26 runner
+        run: |
+          test "$(uname -m)" = arm64
+          test "$(sw_vers -productVersion | cut -d. -f1)" = 26
       - name: Build (prism-backend)
         run: cargo build -p tribunus-compute-core --features prism-backend
       - name: Test lib (embed_cluster, no GPU)
         run: cargo test -p tribunus-compute-core --lib --features prism-backend
+      - name: Report sccache statistics
+        if: always()
+        run: sccache --show-stats
 
   # Linux — CPU-only backend
   linux-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Cache Cargo inputs
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: linux-x64-cpu-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'compute-core/Cargo.toml', '.cargo/config.toml') }}
+          restore-keys: |
+            linux-x64-cpu-
       - name: Build (backend-cpu)
         run: cargo build -p tribunus-compute-core --features backend-cpu
       - name: Test lib (embed_cluster, pure Rust tests)
         run: cargo test -p tribunus-compute-core --lib --features backend-cpu -- embed_cluster
       - name: Clippy (lib only, skip broken bins/tests)
         run: cargo clippy -p tribunus-compute-core --features backend-cpu --lib -- -D warnings
+      - name: Report sccache statistics
+        if: always()
+        run: sccache --show-stats

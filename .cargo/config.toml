@@ -5,5 +5,16 @@
 [target.'cfg(all())']
 rustflags = ["-A", "uninhabited-static"]
 
+# Prism's local Apple-Silicon artifacts target the deployment machine rather
+# than a generic AArch64 baseline. Keep the existing third-party allowance in
+# this target-specific override because Cargo selects only one rustflags table.
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-A",
+    "uninhabited-static",
+    "-C",
+    "target-cpu=apple-m1",
+]
+
 [future-incompat-report]
 frequency = "never"
