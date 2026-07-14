@@ -4,7 +4,9 @@ use crate::ecs::constitutional::system_desc::ReadDependency;
 pub use crate::ecs::constitutional::types::*;
 use crate::ecs::CompWorld;
 use crate::ecs::EntityKind;
+use crate::ecs::PendingEntity;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Access kind for concurrency control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -140,6 +142,9 @@ pub struct WorldTxn {
     pub(crate) removes: Vec<StagedRemove>,
     /// Staged entity spawns
     pub(crate) spawns: Vec<StagedSpawn>,
+    /// Pending operations keyed by pending token (1-indexed).
+    /// Resolved into real inserts/removes during `prepare_inner()`.
+    pub(crate) pending_resolutions: HashMap<u64, Vec<PendingOp>>,
     /// Domain events to emit after successful commit
     pub(crate) events: Vec<DomainEvent>,
     /// Read dependencies for OCC validation
@@ -153,6 +158,8 @@ pub struct WorldTxn {
 pub(crate) struct StagedSpawn {
     pub entity: u64,
     pub kind: EntityKind,
+    /// If true, `prepare_inner()` will assign a fresh ID from the world allocator.
+    pub is_pending: bool,
     pub preflight: Box<dyn Fn(&CompWorld) -> Result<(), WorldTxnError> + Send + Sync>,
     pub apply: Box<dyn FnOnce(&mut CompWorld) + Send>,
 }
@@ -196,6 +203,23 @@ pub(crate) struct StagedRemove {
     pub preflight: Box<dyn Fn(&ComponentStore) -> Result<(), WorldTxnError> + Send + Sync>,
 }
 
+/// A pending component operation, stored by token for resolution during
+/// `prepare_inner()`. Contains metadata and a monomorphized closure that
+/// produces a `StagedInsert` once the real entity ID is known.
+pub(crate) struct PendingOp {
+    #[allow(dead_code)]
+    schema_id: ComponentSchemaId,
+    #[allow(dead_code)]
+    schema_version: SchemaVersion,
+    #[allow(dead_code)]
+    type_id: std::any::TypeId,
+    #[allow(dead_code)]
+    is_durable: bool,
+    /// Consumed during `prepare_inner()`: given a resolved entity ID, returns
+    /// the fully-formed `StagedInsert`.
+    resolve: Box<dyn FnOnce(u64) -> StagedInsert + Send>,
+}
+
 use crate::ecs::ComponentStore;
 
 impl WorldTxn {
@@ -205,6 +229,7 @@ impl WorldTxn {
             inserts: Vec::new(),
             removes: Vec::new(),
             spawns: Vec::new(),
+            pending_resolutions: HashMap::new(),
             events: Vec::new(),
             read_deps: Vec::new(),
             expected_epoch: world.current_epoch(),
@@ -221,6 +246,7 @@ impl WorldTxn {
         self.spawns.push(StagedSpawn {
             entity,
             kind,
+            is_pending: false,
             preflight: Box::new(move |world: &CompWorld| {
                 if world.has_entity(crate::ecs::CompEntity(entity)) {
                     return Err(WorldTxnError::InvalidEntity(entity));
@@ -237,9 +263,181 @@ impl WorldTxn {
         self.spawns.len()
     }
 
+    /// Stage an entity spawn with a pending token. The real entity ID is
+    /// assigned during `prepare_inner()` from the world allocator.
+    ///
+    /// Returns a `PendingEntity` token that can be used with
+    /// `add_component_pending()`, `put_durable_pending()`, or
+    /// `put_transient_pending()`.
+    pub fn spawn_pending(&mut self, kind: EntityKind) -> PendingEntity {
+        let token = self.spawns.len() + 1; // 1-indexed token
+        self.spawns.push(StagedSpawn {
+            entity: 0, // placeholder, resolved during prepare_inner()
+            kind,
+            is_pending: true,
+            preflight: Box::new(|_| Ok(())), // pending IDs are always fresh
+            apply: Box::new(|_| {}),         // placeholder, replaced in prepare_inner()
+        });
+        PendingEntity(token as u64)
+    }
+
+    /// Stage a component insert against a pending entity token.
+    /// Resolved to a concrete entity ID during `prepare_inner()`.
+    pub fn add_component_pending<T: crate::ecs::Component>(
+        &mut self,
+        pending: PendingEntity,
+        schema_id: ComponentSchemaId,
+        schema_version: SchemaVersion,
+        component: T,
+    ) {
+        let token = pending.0;
+        let type_id = std::any::TypeId::of::<T>();
+        let schema_key = SchemaKey {
+            namespace: "",
+            id: schema_id.0 as u32,
+            version: schema_version.0,
+        };
+
+        let resolve: Box<dyn FnOnce(u64) -> StagedInsert + Send> = Box::new(move |entity| {
+            let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
+            StagedInsert {
+                entity,
+                schema_id,
+                schema_version,
+                schema_key,
+                type_id,
+                is_durable: true,
+                apply: Box::new(move |store: &mut ComponentStore| {
+                    store.insert::<T>(entity, component);
+                }),
+                preflight: Box::new(move |store: &ComponentStore| {
+                    if let Some(b) = store.data.get(&col_type_id) {
+                        if b.downcast_ref::<crate::ecs::Column<T>>().is_none() {
+                            return Err(WorldTxnError::SchemaMismatch {
+                                schema_id,
+                                expected: std::any::type_name::<T>().to_string(),
+                            });
+                        }
+                    }
+                    Ok(())
+                }),
+            }
+        });
+
+        self.pending_resolutions
+            .entry(token)
+            .or_default()
+            .push(PendingOp {
+                schema_id,
+                schema_version,
+                type_id,
+                is_durable: true,
+                resolve,
+            });
+    }
+
+    /// Stage a durable component insert against a pending entity token.
+    pub fn put_durable_pending<T: DurableComponent>(
+        &mut self,
+        pending: PendingEntity,
+        component: T,
+    ) {
+        let key = T::SCHEMA_KEY;
+        let token = pending.0;
+        let type_id = std::any::TypeId::of::<T>();
+
+        let resolve: Box<dyn FnOnce(u64) -> StagedInsert + Send> = Box::new(move |entity| {
+            let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
+            StagedInsert {
+                entity,
+                schema_id: ComponentSchemaId(key.id as u64),
+                schema_version: SchemaVersion(key.version),
+                schema_key: key,
+                type_id,
+                is_durable: true,
+                apply: Box::new(move |store: &mut ComponentStore| {
+                    store.insert::<T>(entity, component);
+                }),
+                preflight: Box::new(move |store: &ComponentStore| {
+                    if let Some(b) = store.data.get(&col_type_id) {
+                        if b.downcast_ref::<crate::ecs::Column<T>>().is_none() {
+                            return Err(WorldTxnError::SchemaMismatch {
+                                schema_id: ComponentSchemaId(key.id as u64),
+                                expected: std::any::type_name::<T>().to_string(),
+                            });
+                        }
+                    }
+                    Ok(())
+                }),
+            }
+        });
+
+        self.pending_resolutions
+            .entry(token)
+            .or_default()
+            .push(PendingOp {
+                schema_id: ComponentSchemaId(key.id as u64),
+                schema_version: SchemaVersion(key.version),
+                type_id,
+                is_durable: true,
+                resolve,
+            });
+    }
+
+    /// Stage a transient component insert against a pending entity token.
+    pub fn put_transient_pending<T: TransientComponent>(
+        &mut self,
+        pending: PendingEntity,
+        component: T,
+    ) {
+        let token = pending.0;
+        let type_id = std::any::TypeId::of::<T>();
+
+        let resolve: Box<dyn FnOnce(u64) -> StagedInsert + Send> = Box::new(move |entity| {
+            let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
+            StagedInsert {
+                entity,
+                schema_id: ComponentSchemaId(0),
+                schema_version: SchemaVersion(0),
+                schema_key: SchemaKey {
+                    namespace: "",
+                    id: 0,
+                    version: 0,
+                },
+                type_id,
+                is_durable: false,
+                apply: Box::new(move |store: &mut ComponentStore| {
+                    store.insert::<T>(entity, component);
+                }),
+                preflight: Box::new(move |store: &ComponentStore| {
+                    if let Some(b) = store.data.get(&col_type_id) {
+                        if b.downcast_ref::<crate::ecs::Column<T>>().is_none() {
+                            return Err(WorldTxnError::SchemaMismatch {
+                                schema_id: ComponentSchemaId(0),
+                                expected: std::any::type_name::<T>().to_string(),
+                            });
+                        }
+                    }
+                    Ok(())
+                }),
+            }
+        });
+
+        self.pending_resolutions
+            .entry(token)
+            .or_default()
+            .push(PendingOp {
+                schema_id: ComponentSchemaId(0),
+                schema_version: SchemaVersion(0),
+                type_id,
+                is_durable: false,
+                resolve,
+            });
+    }
+
     /// The old-style add_component — gated as pub(crate) for replay/migration only.
     /// Prefer put_durable() or put_transient() for new code.
-    pub(crate) fn add_component<T: 'static + Send + Sync>(
+    pub(crate) fn add_component<T: crate::ecs::Component>(
         &mut self,
         entity: u64,
         schema_id: ComponentSchemaId,
@@ -262,7 +460,7 @@ impl WorldTxn {
 
     /// The old-style remove_component — gated as pub(crate) for replay/migration only.
     #[allow(dead_code)]
-    pub(crate) fn remove_component<T: 'static + Send + Sync>(
+    pub(crate) fn remove_component<T: crate::ecs::Component>(
         &mut self,
         entity: u64,
         schema_id: ComponentSchemaId,
@@ -338,7 +536,7 @@ impl WorldTxn {
 
     // ── Shared push helpers ────────────────────────────────────────────
 
-    fn push_insert<T: 'static + Send + Sync>(
+    fn push_insert<T: crate::ecs::Component>(
         &mut self,
         entity: u64,
         schema_id: ComponentSchemaId,
@@ -347,8 +545,8 @@ impl WorldTxn {
         component: T,
         is_durable: bool,
     ) {
-        use std::collections::HashMap;
         let type_id = std::any::TypeId::of::<T>();
+        let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
         self.inserts.push(StagedInsert {
             entity,
             schema_id,
@@ -357,17 +555,11 @@ impl WorldTxn {
             type_id,
             is_durable,
             apply: Box::new(move |store: &mut ComponentStore| {
-                let map: &mut HashMap<u64, T> = store
-                    .data
-                    .entry(type_id)
-                    .or_insert_with(|| Box::new(HashMap::<u64, T>::new()))
-                    .downcast_mut::<HashMap<u64, T>>()
-                    .expect("type mismatch in ComponentStore");
-                map.insert(entity, component);
+                store.insert::<T>(entity, component);
             }),
             preflight: Box::new(move |store: &ComponentStore| {
-                if let Some(b) = store.data.get(&type_id) {
-                    if b.downcast_ref::<HashMap<u64, T>>().is_none() {
+                if let Some(b) = store.data.get(&col_type_id) {
+                    if b.downcast_ref::<crate::ecs::Column<T>>().is_none() {
                         return Err(WorldTxnError::SchemaMismatch {
                             schema_id,
                             expected: std::any::type_name::<T>().to_string(),
@@ -379,7 +571,7 @@ impl WorldTxn {
         });
     }
 
-    fn push_remove<T: 'static + Send + Sync>(
+    fn push_remove<T: crate::ecs::Component>(
         &mut self,
         entity: u64,
         schema_id: ComponentSchemaId,
@@ -388,6 +580,7 @@ impl WorldTxn {
         is_durable: bool,
     ) {
         let type_id = std::any::TypeId::of::<T>();
+        let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
         self.removes.push(StagedRemove {
             entity,
             schema_id,
@@ -396,20 +589,11 @@ impl WorldTxn {
             type_id,
             is_durable,
             apply: Box::new(move |store: &mut crate::ecs::ComponentStore| {
-                if let Some(b) = store.data.get_mut(&type_id) {
-                    if let Some(map) = b.downcast_mut::<std::collections::HashMap<u64, T>>() {
-                        map.remove(&entity);
-                    }
-                }
+                store.remove::<T>(entity);
             }),
             preflight: Box::new(move |store: &ComponentStore| {
-                // Check column type compatibility only.
-                // Entity-level existence is not checked here because the component
-                // may be inserted in the same transaction (pending insert apply).
-                if let Some(b) = store.data.get(&type_id) {
-                    if b.downcast_ref::<std::collections::HashMap<u64, T>>()
-                        .is_none()
-                    {
+                if let Some(b) = store.data.get(&col_type_id) {
+                    if b.downcast_ref::<crate::ecs::Column<T>>().is_none() {
                         return Err(WorldTxnError::SchemaMismatch {
                             schema_id,
                             expected: std::any::type_name::<T>().to_string(),
@@ -512,7 +696,7 @@ impl WorldTxn {
     /// Validates all invariants against the world WITHOUT mutating it.
     /// On success, returns a PreparedWorldTxn containing the resolved closures.
     pub(crate) fn prepare_inner(
-        self,
+        mut self,
         world: &CompWorld,
         catalogue: Option<&SchemaCatalogue>,
     ) -> Result<PreparedWorldTxn, WorldTxnError> {
@@ -525,6 +709,38 @@ impl WorldTxn {
                 expected: self.expected_epoch,
                 current: world.current_epoch(),
             });
+        }
+
+        // 1aa. Resolve pending entities and operations
+        if !self.pending_resolutions.is_empty() || self.spawns.iter().any(|s| s.is_pending) {
+            let allocator_base = world.next_entity_id();
+
+            // Assign real entity IDs to pending spawns
+            for (i, spawn) in self.spawns.iter_mut().enumerate() {
+                if spawn.is_pending {
+                    let resolved_id = allocator_base + i as u64;
+                    let kind = spawn.kind;
+                    spawn.entity = resolved_id;
+                    spawn.preflight = Box::new(move |world: &CompWorld| {
+                        if world.has_entity(CompEntity(resolved_id)) {
+                            return Err(WorldTxnError::InvalidEntity(resolved_id));
+                        }
+                        Ok(())
+                    });
+                    spawn.apply = Box::new(move |world: &mut CompWorld| {
+                        world.spawn_entity_with_id(resolved_id, kind);
+                    });
+                }
+            }
+
+            // Resolve pending component operations against their assigned entity IDs
+            for (token, ops) in std::mem::take(&mut self.pending_resolutions) {
+                let resolved_id = allocator_base + (token - 1);
+                for op in ops {
+                    let insert = (op.resolve)(resolved_id);
+                    self.inserts.push(insert);
+                }
+            }
         }
 
         // 1b. Validate spawn preflights (entity doesn't already exist)
