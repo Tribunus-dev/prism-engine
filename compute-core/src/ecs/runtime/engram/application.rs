@@ -5,6 +5,82 @@
 //! multiplicative, low-rank projection, latent prefix, or adapter activation).
 
 use crate::ecs::training_target::spec::EngramApplication;
+use sha2::{Digest, Sha256};
+
+#[cfg(feature = "metal-dispatch")]
+use crate::ecs::canonical::kernel_abi::{DispatchGeometryPolicy, KernelAbi};
+#[cfg(feature = "metal-dispatch")]
+use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
+
+/// Dispatch engram application to the authoritative runtime path.
+///
+/// Uses `apply_metal` when the `metal-dispatch` feature is enabled,
+/// falling back to `apply_cpu` otherwise. Modes that are not yet
+/// implemented for production (LowRankProjection, LatentPrefix,
+/// AdapterActivation) return an error instead of silently no-opping.
+pub fn apply(
+    application: &EngramApplication,
+    activations: &mut [f32],
+    payload: &[u8],
+) -> Result<(), String> {
+    match application {
+        EngramApplication::AdditiveResidual | EngramApplication::MultiplicativeModulation => {
+            #[cfg(feature = "metal-dispatch")]
+            {
+                apply_metal(application, activations, payload)
+            }
+            #[cfg(not(feature = "metal-dispatch"))]
+            {
+                apply_cpu(application, activations, payload)
+            }
+        }
+        mode @ (EngramApplication::LowRankProjection
+        | EngramApplication::LatentPrefix
+        | EngramApplication::AdapterActivation) => Err(format!(
+            "{mode:?} is not yet implemented — removed from production admission"
+        )),
+    }
+}
+
+/// Apply an engram with payload digest validation.
+///
+/// First verifies the payload byte length matches `activations.len() * 4`
+/// (f32 alignment), then checks the computed SHA-256 digest against
+/// `expected_digest` (when `Some`), and finally dispatches to `apply`.
+pub fn apply_with_digest(
+    application: &EngramApplication,
+    activations: &mut [f32],
+    payload: &[u8],
+    expected_digest: Option<&str>,
+) -> Result<(), String> {
+    let expected_byte_len = activations
+        .len()
+        .checked_mul(4)
+        .ok_or_else(|| "activation count overflow".to_string())?;
+    if payload.len() != expected_byte_len {
+        return Err(format!(
+            "engram payload byte length {} does not match activation length {} * 4 = {}",
+            payload.len(),
+            activations.len(),
+            expected_byte_len,
+        ));
+    }
+    if let Some(digest_hex) = expected_digest {
+        let mut hasher = Sha256::new();
+        hasher.update(payload);
+        let computed: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if computed != digest_hex {
+            return Err(format!(
+                "engram payload digest mismatch: computed {computed}, expected {digest_hex}"
+            ));
+        }
+    }
+    apply(application, activations, payload)
+}
 
 /// Apply an engram payload to activations on the CPU.
 ///
@@ -12,9 +88,8 @@ use crate::ecs::training_target::spec::EngramApplication;
 /// - `AdditiveResidual` — payload is `f32` residuals added element-wise.
 /// - `MultiplicativeModulation` — payload is `f32` scales multiplied
 ///   element-wise.
-/// - `LowRankProjection` — placeholder for LoRA-style A/B matrix application.
-/// - `LatentPrefix` — placeholder.
-/// - `AdapterActivation` — placeholder.
+/// - `LowRankProjection`, `LatentPrefix`, `AdapterActivation` —
+///   return an error (removed from production admission).
 pub fn apply_cpu(
     application: &EngramApplication,
     activations: &mut [f32],
@@ -54,19 +129,13 @@ pub fn apply_cpu(
             }
             Ok(())
         }
-        EngramApplication::LowRankProjection => {
-            // Simple low-rank adaptation (LoRA-style)
-            // payload = [A_matrix_bytes, B_matrix_bytes]
-            // TODO: actual matrix-multiply when the decomposition format is settled.
-            Ok(())
-        }
-        EngramApplication::LatentPrefix => {
-            // TODO: prepend or splice latent prefix tokens.
-            Ok(())
-        }
-        EngramApplication::AdapterActivation => {
-            // TODO: run a small adapter MLP.
-            Ok(())
+        EngramApplication::LowRankProjection
+        | EngramApplication::LatentPrefix
+        | EngramApplication::AdapterActivation => {
+            return Err(format!(
+                "{:?} is not yet implemented — removed from production admission",
+                application
+            ))
         }
     }
 }
@@ -110,17 +179,33 @@ pub fn apply_metal(
         ),
         _ => {
             return Err(format!(
-                "Metal engram {:?} not yet implemented",
+                "{:?} is not yet implemented — removed from production admission",
                 application
             ))
         }
     };
 
     // Compile the kernel
-    let opts = metal::CompileOptions::new();
+    let compiler = MetalBackendCompiler::new();
+    let artifact = compiler
+        .compile_source(
+            &format!("engram_{}", kernel_name),
+            src,
+            kernel_name,
+            &format!("prism.engram.{}.v1", kernel_name),
+            KernelAbi {
+                version: 1,
+                buffers: Vec::new(),
+                constants: Vec::new(),
+                threadgroup_memory: Vec::new(),
+                dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                threads_per_threadgroup: (1, 1, 1),
+            },
+        )
+        .map_err(|e| format!("Metal backend compile error: {e:?}"))?;
     let lib = device
-        .new_library_with_source(src, &opts)
-        .map_err(|e| format!("Metal compile error: {:?}", e))?;
+        .new_library_with_data(&artifact.compiled_bytes)
+        .map_err(|e| format!("Metal library load error: {e:?}"))?;
 
     let function = lib
         .get_function(kernel_name, None::<metal::FunctionConstantValues>)
@@ -187,6 +272,10 @@ pub fn apply_metal(
 mod tests {
     use super::*;
 
+    
+    
+    use sha2::{Digest, Sha256};
+
     fn payload(values: &[f32]) -> Vec<u8> {
         values.iter().flat_map(|v| v.to_le_bytes()).collect()
     }
@@ -207,6 +296,179 @@ mod tests {
             &payload(&[1.0]),
         )
         .is_err());
+    }
+    #[test]
+    fn apply_rejects_unimplemented_modes() {
+        let mut activations = vec![1.0, 2.0];
+        let p = payload(&[0.5, -1.0]);
+        // LowRankProjection
+        assert!(apply(&EngramApplication::LowRankProjection, &mut activations, &p).is_err());
+        // LatentPrefix
+        assert!(apply(&EngramApplication::LatentPrefix, &mut activations, &p).is_err());
+        // AdapterActivation
+        assert!(apply(&EngramApplication::AdapterActivation, &mut activations, &p).is_err());
+    }
+
+    #[test]
+    fn apply_with_digest_rejects_wrong_payload_length() {
+        let mut activations = vec![1.0, 2.0];
+        // Payload has 3 f32 values (12 bytes) but activations has 2 (needs 8 bytes)
+        let p = payload(&[1.0, 2.0, 3.0]);
+        let result = apply_with_digest(
+            &EngramApplication::AdditiveResidual,
+            &mut activations,
+            &p,
+            None,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not match"));
+    }
+
+    #[test]
+    fn apply_with_digest_verifies_sha256() {
+        let mut activations = vec![1.0, 2.0];
+        let p = payload(&[0.25, -0.5]);
+        let mut hasher = Sha256::new();
+        hasher.update(&p);
+        let expected_digest: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        // Correct digest should pass
+        apply_with_digest(
+            &EngramApplication::AdditiveResidual,
+            &mut activations,
+            &p,
+            Some(&expected_digest),
+        )
+        .unwrap();
+        assert_eq!(activations, vec![1.25, 1.5]);
+    }
+
+    #[test]
+    fn apply_with_digest_rejects_wrong_digest() {
+        let mut activations = vec![1.0, 2.0];
+        let p = payload(&[0.25, -0.5]);
+        let result = apply_with_digest(
+            &EngramApplication::AdditiveResidual,
+            &mut activations,
+            &p,
+            Some("deadbeef"),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("digest mismatch"));
+    }
+
+    #[test]
+    fn apply_additive_residual_cpu_produces_correct_result() {
+        let mut activations = vec![1.0, 2.0, 3.0];
+        apply_cpu(
+            &EngramApplication::AdditiveResidual,
+            &mut activations,
+            &payload(&[0.5, -1.0, 0.0]),
+        )
+        .unwrap();
+        assert_eq!(activations, vec![1.5, 1.0, 3.0]);
+    }
+
+    #[test]
+    fn apply_multiplicative_modulation_cpu_produces_correct_result() {
+        let mut activations = vec![1.0, 2.0, 3.0];
+        apply_cpu(
+            &EngramApplication::MultiplicativeModulation,
+            &mut activations,
+            &payload(&[2.0, 0.5, 1.0]),
+        )
+        .unwrap();
+        assert_eq!(activations, vec![2.0, 1.0, 3.0]);
+    }
+
+    /// Test that Metal and CPU produce matching results for additive/multiplicative.
+    ///
+    /// When `metal-dispatch` is enabled, this verifies the GPU path is the
+    /// production-authoritative path and matches the CPU reference.
+    /// When `metal-dispatch` is not available, only the CPU path is tested.
+    #[test]
+    fn apply_metal_cpu_match_additive_residual() {
+        let input = [1.0, 2.0, 3.0, 5.0, 8.0];
+        let residual = [0.5, -0.25, 0.0, -2.0, 0.125];
+        let p = payload(&residual);
+        let mut cpu_result = input;
+        apply_cpu(&EngramApplication::AdditiveResidual, &mut cpu_result, &p).unwrap();
+
+        #[cfg(feature = "metal-dispatch")]
+        {
+            let mut metal_result = input;
+            apply_metal(&EngramApplication::AdditiveResidual, &mut metal_result, &p).unwrap();
+            let max_diff = cpu_result
+                .iter()
+                .zip(&metal_result)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(
+                max_diff < 1e-6,
+                "Metal and CPU additive residual differ by {max_diff}"
+            );
+        }
+
+        #[cfg(not(feature = "metal-dispatch"))]
+        {
+            let _ = input; // suppress unused warning in non-metal build
+                           // Only CPU is tested when Metal is unavailable
+        }
+    }
+
+    #[test]
+    fn apply_metal_cpu_match_multiplicative_modulation() {
+        let input = [1.0, 2.0, 3.0, 5.0, 8.0];
+        let scales = [2.0, 0.5, 1.0, 0.0, 0.125];
+        let p = payload(&scales);
+        let mut cpu_result = input;
+        apply_cpu(
+            &EngramApplication::MultiplicativeModulation,
+            &mut cpu_result,
+            &p,
+        )
+        .unwrap();
+
+        #[cfg(feature = "metal-dispatch")]
+        {
+            let mut metal_result = input;
+            apply_metal(
+                &EngramApplication::MultiplicativeModulation,
+                &mut metal_result,
+                &p,
+            )
+            .unwrap();
+            let max_diff = cpu_result
+                .iter()
+                .zip(&metal_result)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(
+                max_diff < 1e-6,
+                "Metal and CPU multiplicative modulation differ by {max_diff}"
+            );
+        }
+
+        #[cfg(not(feature = "metal-dispatch"))]
+        {
+            let _ = input;
+        }
+    }
+
+    /// Test the top-level `apply` dispatcher routes additive to CPU (or Metal).
+    #[test]
+    fn apply_dispatcher_additive_residual() {
+        let mut activations = vec![1.0, 2.0];
+        apply(
+            &EngramApplication::AdditiveResidual,
+            &mut activations,
+            &payload(&[0.5, -1.0]),
+        )
+        .unwrap();
+        assert_eq!(activations, vec![1.5, 1.0]);
     }
 }
 

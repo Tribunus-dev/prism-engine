@@ -9,6 +9,8 @@
 pub mod activation_arena;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod activation_binding;
+#[cfg(feature = "mlx-backend")]
+pub mod activation_transaction;
 pub mod ane_artifact_cache;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod batch;
@@ -125,6 +127,8 @@ pub struct SchedulerConfig {
     pub pause_threshold: usize,
     /// Default backend_id for new slots (0=MLX).
     pub default_backend_id: u32,
+    /// Token budget per scheduling step for the unified scheduler.
+    pub max_num_scheduled_tokens: usize,
     /// KV cache length per slot in tokens.
     pub kv_cache_length: usize,
     /// Maximum KV cache memory pool in bytes (0 = unlimited).
@@ -143,6 +147,7 @@ impl Default for SchedulerConfig {
             prefill_many_ratio: 0.5,
             pause_threshold: 2048,
             default_backend_id: 0,
+            max_num_scheduled_tokens: 256,
             kv_cache_length: 4096,
             kv_cache_pool_bytes: 256 * 1024 * 1024,
             kv_cache_pages_per_slot: 64,

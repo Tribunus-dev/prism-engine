@@ -167,6 +167,8 @@ mod tests {
             status,
             duration_us,
             fused_evidence,
+            compiler_session_id: None,
+            compiler_event_digest: None,
         }
     }
 

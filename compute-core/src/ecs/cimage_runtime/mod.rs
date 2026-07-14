@@ -5,6 +5,7 @@
 //! existing execution_plan types (ScheduledKernelOp, ExecutionRegion, etc.)
 //! and the Metal runtime (metal_runtime/).
 
+pub mod context;
 pub mod error;
 pub mod receipts;
 pub mod resolver;
@@ -23,6 +24,7 @@ pub mod metal_buffers;
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub mod region_runner;
 
+pub use context::CimageRuntimeContext;
 pub use error::{CImageRuntimeError, CImageRuntimeResult};
 pub use receipts::{
     BandwidthEstimate, CImageBindingReceipt, CImageKernelBindingInfo, CImageLayerTiming,

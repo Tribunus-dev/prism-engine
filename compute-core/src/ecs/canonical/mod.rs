@@ -17,6 +17,8 @@ pub mod generation;
 pub mod identity;
 pub mod kernel_abi;
 pub mod model_ir;
+pub mod provenance;
+pub mod receipt_store;
 pub mod representation;
 
 pub use compile_plan::*;

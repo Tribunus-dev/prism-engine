@@ -37,7 +37,7 @@ pub struct LogicalTensorId(pub String);
 pub struct RepresentationId(pub String);
 
 /// Content digest of packed tensor bytes.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PhysicalSegmentId(pub String);
 
 /// Stable operation contract such as NF4 Tile640 GEMV.
@@ -63,6 +63,22 @@ pub struct GenerationId(pub String);
 /// Digest of canonical receipt content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ReceiptId(pub String);
+
+/// Toolchain identity — name, version, and target triple.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ToolchainIdentity {
+    pub name: String,
+    pub version: String,
+    pub target_triple: String,
+}
+
+/// Target hardware identity — arch and feature flags.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct TargetIdentity {
+    pub name: String,
+    pub arch: String,
+    pub features: Vec<String>,
+}
 
 /// Digest of the ordered training, calibration, and holdout manifests.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]

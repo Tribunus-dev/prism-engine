@@ -41,6 +41,27 @@ impl ActivationArena {
         self.allocated_bytes = 0;
     }
 
+    /// Returns the current number of allocated bytes.
+    pub fn allocated_bytes(&self) -> u64 {
+        self.allocated_bytes
+    }
+
+    /// Set the allocated-bytes watermark (used by [`ActivationTransaction`]
+    /// for rollback).
+    pub fn set_allocated_bytes(&mut self, watermark: u64) {
+        self.allocated_bytes = watermark;
+    }
+
+    /// Returns the total arena size.
+    pub fn total_bytes(&self) -> u64 {
+        self.total_bytes
+    }
+
+    /// Returns the remaining available bytes.
+    pub fn available_bytes(&self) -> u64 {
+        self.total_bytes.saturating_sub(self.allocated_bytes)
+    }
+
     pub fn utilization(&self) -> f64 {
         if self.total_bytes == 0 {
             0.0

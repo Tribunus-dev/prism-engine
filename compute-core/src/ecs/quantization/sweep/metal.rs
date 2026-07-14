@@ -25,6 +25,8 @@
 
 #![cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 
+use crate::ecs::canonical::kernel_abi::{DispatchGeometryPolicy, KernelAbi};
+use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 use metal::*;
 
 use crate::nf4tile640::{BNB_NF4_CODEBOOK, PRISM_NF4_CODEBOOK, SYMMETRIC_NORMAL_FLOAT_CODEBOOK};
@@ -145,9 +147,27 @@ pub fn evaluate_nf4_batch(
     let lib_source = std::fs::read_to_string(&lib_path)
         .map_err(|e| format!("failed to read Metal shader '{}': {e}", lib_path.display()))?;
 
+    let compiler = MetalBackendCompiler::new();
+    let artifact = compiler
+        .compile_source(
+            "sweep_eval_nf4",
+            &lib_source,
+            "sweep_eval_nf4",
+            "prism.quantization.sweep.nf4.v1",
+            KernelAbi {
+                version: 1,
+                buffers: vec![],
+                constants: vec![],
+                threadgroup_memory: vec![],
+                dispatch_geometry: DispatchGeometryPolicy::FromConstant,
+                threads_per_threadgroup: (32, 1, 1),
+            },
+        )
+        .map_err(|e| format!("Metal backend compile failed: {e:?}"))?;
+
     let library = device
-        .new_library_with_source(&lib_source, &CompileOptions::new())
-        .map_err(|e| format!("Metal shader compile failed: {e:?}"))?;
+        .new_library_with_data(&artifact.compiled_bytes)
+        .map_err(|e| format!("Metal library load failed: {e:?}"))?;
 
     let nf4_fn = library
         .get_function("sweep_eval_nf4", None)

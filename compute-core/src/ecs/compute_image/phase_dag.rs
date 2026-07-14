@@ -8,6 +8,8 @@
 //! a concurrency hint. The graph is guaranteed acyclic at emission time
 //! (see [`EmittedPhaseGraph::validate`]).
 
+use crate::ecs::canonical::KernelSemanticId;
+use crate::ecs::canonical::LogicalTensorId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -123,6 +125,35 @@ pub struct EmittedPhase {
     pub estimated_ops: u64,
     /// Compiler-extended metadata key-value pairs.
     pub metadata: HashMap<String, String>,
+}
+
+impl EmittedPhase {
+    /// Derive a [`KernelSemanticId`] for binding lookup.
+    ///
+    /// Checks the compiler-annotated `"kernel_semantic_id"` key in
+    /// [`Self::metadata`] first. Falls back to a synthetic ID formed
+    /// from the phase's own identity when no annotation is present.
+    pub fn kernel_semantic_id(&self) -> KernelSemanticId {
+        self.metadata
+            .get("kernel_semantic_id")
+            .cloned()
+            .map(KernelSemanticId)
+            .unwrap_or_else(|| KernelSemanticId(format!("phase:{}", self.phase_id)))
+    }
+
+    /// Derive the primary weight [`LogicalTensorId`] for binding lookup.
+    ///
+    /// Checks the compiler-annotated `"weight_tensor"` key in
+    /// [`Self::metadata`] first. Falls back to the first entry in
+    /// [`Self::ops`], or `"unknown"` when no ops are present.
+    pub fn primary_weight_tensor(&self) -> LogicalTensorId {
+        self.metadata
+            .get("weight_tensor")
+            .cloned()
+            .map(LogicalTensorId)
+            .or_else(|| self.ops.first().cloned().map(LogicalTensorId))
+            .unwrap_or_else(|| LogicalTensorId("unknown".to_string()))
+    }
 }
 
 /// A directed edge between two emitted phases.

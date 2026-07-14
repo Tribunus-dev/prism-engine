@@ -12,7 +12,9 @@
 pub mod ane;
 pub mod backend_assessment;
 pub mod compile_schedule;
+pub mod event_emitter;
 pub mod graph_optimizer;
+pub mod lifecycle_coordinator;
 pub mod lowering;
 pub mod pass;
 pub mod scheduled;

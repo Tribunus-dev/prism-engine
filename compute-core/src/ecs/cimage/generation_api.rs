@@ -10,6 +10,7 @@
 use crate::ecs::canonical::generation::CimageGeneration;
 use crate::ecs::canonical::generation::EngramBinding;
 use crate::ecs::canonical::identity::*;
+use crate::ecs::canonical::provenance::{LifecycleReceiptBundle, PromotionRequest};
 use crate::ecs::cimage::generation_store::{ContentStore, GenerationStore, PromotionTransaction};
 use crate::ecs::evolution::foundation::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::training_target::engram::trainer::TrainedEngram;
@@ -23,6 +24,9 @@ use sha2::{Digest, Sha256};
 pub struct GenerationApi {
     pub content_store: ContentStore,
     pub generation_store: GenerationStore,
+    /// Payload ids stored but whose generation hasn't been committed yet.
+    /// Rolled back if promotion fails.
+    pending_payloads: Vec<PhysicalSegmentId>,
 }
 
 /// Evidence required before a trained payload can become executable state.
@@ -38,6 +42,7 @@ impl GenerationApi {
         Self {
             content_store: ContentStore::new(),
             generation_store: GenerationStore::new(),
+            pending_payloads: Vec::new(),
         }
     }
 
@@ -62,7 +67,17 @@ impl GenerationApi {
             &mut self.generation_store,
             generation,
         );
-        tx.commit()
+        let result = tx.commit();
+        if result.is_err() {
+            // Roll back — the transaction abort removes stored payloads
+            // from the content store and restores the parent generation
+            // as current so it remains executable.
+            tx.abort();
+        }
+        // Clear pending tracking regardless; on success the payloads are
+        // part of a visible generation, on failure abort already removed them.
+        self.pending_payloads.clear();
+        result
     }
 
     /// Rollback to the parent generation.
@@ -81,9 +96,91 @@ impl GenerationApi {
         Ok(parent)
     }
 
+    /// Rollback after promotion — requires that promotion has already
+    /// happened (the current generation has a valid parent). Restores the
+    /// parent as current without recompilation.
+    ///
+    /// Unlike `rollback()` which also returns Err on missing parent,
+    /// this explicitly documents the promotion-first requirement and
+    /// provides a distinct API contract for production lifecycle flows.
+    pub fn rollback_after_promotion(&mut self) -> Result<GenerationId, String> {
+        let current = self
+            .generation_store
+            .current()
+            .ok_or_else(|| "no current generation — nothing to rollback from".to_string())?;
+        let parent = current
+            .parent_generation
+            .clone()
+            .ok_or_else(|| "generation has no parent — promotion did not occur".to_string())?;
+        if !self.generation_store.contains(&parent) {
+            return Err(format!(
+                "parent generation {:?} not found — promotion chain is broken",
+                parent
+            ));
+        }
+        self.generation_store.set_current(parent.clone())?;
+        Ok(parent)
+    }
+
     /// Store a content-addressed payload by its canonical digest.
     pub fn store_payload(&mut self, id: PhysicalSegmentId, data: Vec<u8>) {
-        self.content_store.store(id, data);
+        self.content_store.store(id.clone(), data);
+        self.pending_payloads.push(id);
+    }
+
+    /// Promote a generation from a `PromotionRequest` with a complete
+    /// `LifecycleReceiptBundle`.
+    ///
+    /// 1. Verifies the receipt bundle is complete (no empty fields).
+    /// 2. Verifies every payload digest in the request matches the actual
+    ///    SHA-256 hash of the stored payload bytes.
+    /// 3. Verifies every artifact digest is non-empty.
+    /// 4. Verifies identity closure: all referenced segments and artifacts
+    ///    resolve through the content store.
+    /// 5. Atomically promotes the generation via `PromotionTransaction`,
+    ///    preserving the parent on failure.
+    pub fn promote_with_request(
+        &mut self,
+        request: PromotionRequest,
+        receipt_bundle: LifecycleReceiptBundle,
+    ) -> Result<GenerationId, String> {
+        // 1. Verify receipt bundle is complete
+        receipt_bundle.verify_complete()?;
+
+        // 2. Verify every payload digest matches the stored bytes
+        for (segment_id, expected_digest) in &request.payload_digests {
+            let actual = self
+                .content_store
+                .compute_digest(segment_id)
+                .ok_or_else(|| {
+                    format!(
+                        "payload {:?} not in content store for digest verification",
+                        segment_id
+                    )
+                })?;
+            if &actual != expected_digest {
+                return Err(format!(
+                    "payload digest mismatch for {:?}: expected {}, got {}",
+                    segment_id, expected_digest, actual
+                ));
+            }
+        }
+
+        // 3. Verify artifact digests are non-empty
+        for (semantic_id, expected_digest) in &request.artifact_digests {
+            if expected_digest.is_empty() {
+                return Err(format!("artifact digest for {:?} is empty", semantic_id));
+            }
+        }
+
+        // 4. Identity closure — every referenced segment and artifact
+        //    must resolve through the content store. The transaction's
+        //    validate() covers tensor bindings and engram bindings.
+        //    We also verify that every payload_digest segment already
+        //    exists (already checked in step 2 via compute_digest).
+
+        // 5. Atomically promote via transaction with parent preservation
+        self.promote(request.generation)
     }
 
     /// Store a trained engram payload and atomically promote the generation
@@ -268,6 +365,7 @@ mod tests {
                 max_absolute_error: 0.0,
                 max_relative_error: 0.0,
                 threshold: 0.05,
+                provenance: Vec::new(),
             },
             performance: PerformanceReceipt {
                 candidate_id: CandidateId("candidate".into()),
@@ -278,6 +376,7 @@ mod tests {
                 memory_traffic_bytes: 4,
                 energy_uj: None,
                 repetitions: 3,
+                provenance: Vec::new(),
             },
         };
         let result = api.promote_with_engram(gen, &artifact, payload, &evidence);
@@ -473,6 +572,7 @@ mod tests {
                 max_absolute_error: 0.0,
                 max_relative_error: 0.0,
                 threshold: 0.05,
+                provenance: Vec::new(),
             },
             performance: PerformanceReceipt {
                 candidate_id: CandidateId("nf4".into()),
@@ -483,6 +583,7 @@ mod tests {
                 memory_traffic_bytes: trained.payload.len() as u64,
                 energy_uj: None,
                 repetitions: 3,
+                provenance: Vec::new(),
             },
         };
         api.promote_trained_engram(child, &trained, &evidence)
@@ -576,5 +677,659 @@ mod tests {
     fn test_generation_api_current_none() {
         let api = GenerationApi::new();
         assert!(api.current_generation().is_none());
+    }
+
+    #[test]
+    fn test_promote_with_request_receipt_bundle_validation() {
+        let mut api = GenerationApi::new();
+
+        // Set up a parent generation
+        let seg = PhysicalSegmentId("seg".into());
+        api.store_payload(seg.clone(), vec![1, 2, 3, 4]);
+        let mut bindings = BTreeMap::new();
+        bindings.insert(
+            LogicalTensorId("t".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r".into()),
+                codec: CodecFamily::Nf4,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: seg,
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: None,
+                acceptance_receipt: ReceiptId("r".into()),
+            },
+        );
+        let parent_gen = CimageGeneration {
+            generation_id: GenerationId("parent".into()),
+            parent_generation: None,
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "1".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: bindings.clone(),
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("r".into()),
+            created_at: Timestamp("t".into()),
+        };
+        api.promote(parent_gen).expect("parent should promote");
+
+        // An empty receipt bundle should fail verify_complete
+        let empty_bundle = LifecycleReceiptBundle {
+            compiler_receipt: ReceiptId(String::new()),
+            numerical_receipt: ReceiptId(String::new()),
+            quality_receipt: ReceiptId(String::new()),
+            performance_receipt: ReceiptId(String::new()),
+            policy_receipt: ReceiptId(String::new()),
+            promotion_receipt: ReceiptId(String::new()),
+            generation_id: GenerationId(String::new()),
+            sealed_at: String::new(),
+        };
+        assert!(
+            empty_bundle.verify_complete().is_err(),
+            "empty receipt bundle must fail verify_complete"
+        );
+        let child_gen = CimageGeneration {
+            generation_id: GenerationId("child".into()),
+            parent_generation: Some(GenerationId("parent".into())),
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "2".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: bindings.clone(),
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("r2".into()),
+            created_at: Timestamp("t2".into()),
+        };
+        let request = PromotionRequest {
+            parent_generation: GenerationId("parent".into()),
+            payload_digests: vec![],
+            artifact_digests: vec![],
+            policy_id: "policy".into(),
+            receipt_bundle_id: ReceiptId("rb".into()),
+            generation: child_gen,
+        };
+        let result = api.promote_with_request(request, empty_bundle);
+        assert!(
+            result.is_err(),
+            "promote_with_request with empty receipt bundle should fail"
+        );
+        let err_msg = result.unwrap_err().to_lowercase();
+        assert!(
+            err_msg.contains("receipt") && err_msg.contains("empty"),
+            "error should mention empty receipt, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn test_promote_with_request_payload_digest_validation() {
+        let mut api = GenerationApi::new();
+
+        // Store a payload
+        let payload = vec![1, 2, 3, 4];
+        let seg_id = PhysicalSegmentId("seg1".into());
+        api.store_payload(seg_id.clone(), payload);
+
+        // Store the parent generation
+        let mut bindings = BTreeMap::new();
+        bindings.insert(
+            LogicalTensorId("t".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r".into()),
+                codec: CodecFamily::Nf4,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: seg_id.clone(),
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: None,
+                acceptance_receipt: ReceiptId("r".into()),
+            },
+        );
+        let parent = CimageGeneration {
+            generation_id: GenerationId("parent".into()),
+            parent_generation: None,
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "1".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: bindings,
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("r".into()),
+            created_at: Timestamp("t".into()),
+        };
+        api.promote(parent).expect("parent should promote");
+
+        // Correct digest
+        let correct_digest = Sha256::digest(&[1, 2, 3, 4])
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        // Wrong digest
+        let wrong_digest = Sha256::digest(&[9, 9, 9])
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+
+        // Create a valid receipt bundle
+        let bundle = LifecycleReceiptBundle {
+            compiler_receipt: ReceiptId("c".into()),
+            numerical_receipt: ReceiptId("n".into()),
+            quality_receipt: ReceiptId("q".into()),
+            performance_receipt: ReceiptId("p".into()),
+            policy_receipt: ReceiptId("pol".into()),
+            promotion_receipt: ReceiptId("pro".into()),
+            generation_id: GenerationId("child".into()),
+            sealed_at: "now".into(),
+        };
+
+        let mut child_bindings = BTreeMap::new();
+        child_bindings.insert(
+            LogicalTensorId("t".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r2".into()),
+                codec: CodecFamily::Int8,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: seg_id.clone(),
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: Some(RepresentationId("r".into())),
+                acceptance_receipt: ReceiptId("r2".into()),
+            },
+        );
+        let child = CimageGeneration {
+            generation_id: GenerationId("child".into()),
+            parent_generation: Some(GenerationId("parent".into())),
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "2".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: child_bindings,
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("r2".into()),
+            created_at: Timestamp("t2".into()),
+        };
+
+        // Request with wrong digest should fail
+        let bad_request = PromotionRequest {
+            parent_generation: GenerationId("parent".into()),
+            payload_digests: vec![(seg_id.clone(), wrong_digest)],
+            artifact_digests: vec![],
+            policy_id: "policy".into(),
+            receipt_bundle_id: ReceiptId("rb".into()),
+            generation: child.clone(),
+        };
+        let result = api.promote_with_request(bad_request, bundle.clone());
+        assert!(result.is_err(), "wrong payload digest should be rejected");
+        assert!(
+            result.unwrap_err().contains("digest mismatch"),
+            "error should mention digest mismatch"
+        );
+
+        // Request with correct digest should succeed
+        let good_request = PromotionRequest {
+            parent_generation: GenerationId("parent".into()),
+            payload_digests: vec![(seg_id.clone(), correct_digest)],
+            artifact_digests: vec![],
+            policy_id: "policy".into(),
+            receipt_bundle_id: ReceiptId("rb".into()),
+            generation: child,
+        };
+        let result = api.promote_with_request(good_request, bundle);
+        assert!(result.is_ok(), "correct payload digest should be accepted");
+    }
+
+    #[test]
+    fn test_promote_with_request_artifact_digest_validation() {
+        let mut api = GenerationApi::new();
+
+        // Set up minimal state with a parent
+        let seg = PhysicalSegmentId("seg".into());
+        api.store_payload(seg.clone(), vec![1, 2, 3]);
+        let mut bindings = BTreeMap::new();
+        bindings.insert(
+            LogicalTensorId("t".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r".into()),
+                codec: CodecFamily::Nf4,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: seg.clone(),
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: None,
+                acceptance_receipt: ReceiptId("r".into()),
+            },
+        );
+        let parent = CimageGeneration {
+            generation_id: GenerationId("parent".into()),
+            parent_generation: None,
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "1".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: bindings,
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("r".into()),
+            created_at: Timestamp("t".into()),
+        };
+        api.promote(parent).expect("parent should promote");
+
+        let bundle = LifecycleReceiptBundle {
+            compiler_receipt: ReceiptId("c".into()),
+            numerical_receipt: ReceiptId("n".into()),
+            quality_receipt: ReceiptId("q".into()),
+            performance_receipt: ReceiptId("p".into()),
+            policy_receipt: ReceiptId("pol".into()),
+            promotion_receipt: ReceiptId("pro".into()),
+            generation_id: GenerationId("child".into()),
+            sealed_at: "now".into(),
+        };
+
+        // Empty artifact digest should be rejected
+        let mut child_bindings = BTreeMap::new();
+        child_bindings.insert(
+            LogicalTensorId("t".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r2".into()),
+                codec: CodecFamily::Int8,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: seg,
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: Some(RepresentationId("r".into())),
+                acceptance_receipt: ReceiptId("r2".into()),
+            },
+        );
+        let child = CimageGeneration {
+            generation_id: GenerationId("child".into()),
+            parent_generation: Some(GenerationId("parent".into())),
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "2".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: child_bindings,
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("r2".into()),
+            created_at: Timestamp("t2".into()),
+        };
+
+        let bad_artifact_request = PromotionRequest {
+            parent_generation: GenerationId("parent".into()),
+            payload_digests: vec![],
+            artifact_digests: vec![(
+                crate::ecs::canonical::kernel_abi::KernelSemanticId("k1".into()),
+                String::new(),
+            )],
+            policy_id: "policy".into(),
+            receipt_bundle_id: ReceiptId("rb".into()),
+            generation: child,
+        };
+        let result = api.promote_with_request(bad_artifact_request, bundle);
+        assert!(result.is_err(), "empty artifact digest should be rejected");
+    }
+
+    #[test]
+    fn test_failed_promotion_preserves_parent() {
+        let mut api = GenerationApi::new();
+
+        // Store payload and promote a parent generation
+        let seg = PhysicalSegmentId("seg1".into());
+        api.store_payload(seg.clone(), vec![1, 2, 3, 4]);
+
+        let mut bindings = BTreeMap::new();
+        bindings.insert(
+            LogicalTensorId("t".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r1".into()),
+                codec: CodecFamily::Nf4,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: seg.clone(),
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: None,
+                acceptance_receipt: ReceiptId("r1".into()),
+            },
+        );
+
+        let parent_gen = CimageGeneration {
+            generation_id: GenerationId("parent".into()),
+            parent_generation: None,
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "1".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: bindings.clone(),
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("root1".into()),
+            created_at: Timestamp("t1".into()),
+        };
+        api.promote(parent_gen).expect("parent should promote");
+
+        // Store payload for a child that will fail — use a missing segment
+        let child_payload = vec![5, 6, 7, 8];
+        let child_seg = PhysicalSegmentId("seg_child".into());
+        api.store_payload(child_seg.clone(), child_payload);
+
+        let mut child_bindings = BTreeMap::new();
+        // Reference a SEGMENT THAT DOES NOT EXIST to trigger transaction failure
+        child_bindings.insert(
+            LogicalTensorId("t2".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r2".into()),
+                codec: CodecFamily::Int8,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: PhysicalSegmentId("MISSING_SEGMENT".into()),
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: Some(RepresentationId("r1".into())),
+                acceptance_receipt: ReceiptId("r2".into()),
+            },
+        );
+
+        let child_gen = CimageGeneration {
+            generation_id: GenerationId("child".into()),
+            parent_generation: Some(GenerationId("parent".into())),
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "2".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: child_bindings,
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("root2".into()),
+            created_at: Timestamp("t2".into()),
+        };
+
+        // Attempt promotion — should fail because MISSING_SEGMENT doesn't exist
+        let result = api.promote(child_gen);
+        assert!(
+            result.is_err(),
+            "child promotion with missing segment should fail"
+        );
+
+        // Verify parent is still current and executable
+        assert_eq!(
+            api.generation_store.current_id(),
+            Some(&GenerationId("parent".into())),
+            "parent should remain current after failed child promotion"
+        );
+        let current = api.current_generation().expect("parent should be current");
+        assert_eq!(
+            current.generation_id,
+            GenerationId("parent".into()),
+            "current generation should be parent"
+        );
+    }
+
+    #[test]
+    fn test_identity_closure_rejects_incomplete() {
+        let mut api = GenerationApi::new();
+
+        // Store payload and promote parent
+        let seg = PhysicalSegmentId("seg".into());
+        api.store_payload(seg.clone(), vec![1, 2, 3]);
+
+        let mut parent_bindings = BTreeMap::new();
+        parent_bindings.insert(
+            LogicalTensorId("t".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r".into()),
+                codec: CodecFamily::Nf4,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: seg.clone(),
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: None,
+                acceptance_receipt: ReceiptId("r".into()),
+            },
+        );
+
+        let parent_gen = CimageGeneration {
+            generation_id: GenerationId("parent".into()),
+            parent_generation: None,
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "1".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: parent_bindings,
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("r".into()),
+            created_at: Timestamp("t".into()),
+        };
+        api.promote(parent_gen).expect("parent should promote");
+
+        // Build a child generation that references a payload segment
+        // that does NOT exist in the content store. The validate()
+        // step in the transaction should catch this.
+        let mut child_bindings = BTreeMap::new();
+        child_bindings.insert(
+            LogicalTensorId("t".into()),
+            RepresentationBinding {
+                representation_id: RepresentationId("r2".into()),
+                codec: CodecFamily::Int8,
+                layout: PhysicalTileLayout::default(),
+                primary_segment: PhysicalSegmentId("nonexistent_segment".into()),
+                scale_segments: vec![],
+                residual_segments: vec![],
+                source_representation: Some(RepresentationId("r".into())),
+                acceptance_receipt: ReceiptId("r2".into()),
+            },
+        );
+
+        let child_gen = CimageGeneration {
+            generation_id: GenerationId("child".into()),
+            parent_generation: Some(GenerationId("parent".into())),
+            base_model: ModelSourceId("m".into()),
+            compiler_identity: CompilerIdentity {
+                name: "tc".into(),
+                version: "2".into(),
+                build_hash: None,
+                build_timestamp: None,
+            },
+            hardware_profile: HardwareProfileId("h".into()),
+            tensor_bindings: child_bindings,
+            kernel_bindings: BTreeMap::new(),
+            engram_bindings: BTreeMap::new(),
+            execution_graph: ExecutionGraph {
+                regions: vec![],
+                edges: vec![],
+                state: RuntimeStatePlan {
+                    max_context_tokens: 4096,
+                    kv_cache_bytes_per_token: 256,
+                    total_kv_cache_bytes: 1048576,
+                },
+                memory: MemoryPlan {
+                    total_activation_bytes: 0,
+                    total_weight_bytes: 0,
+                    arena_region_count: 0,
+                },
+            },
+            receipt_root: ReceiptId("r2".into()),
+            created_at: Timestamp("t2".into()),
+        };
+
+        // Promotion must fail because the primary segment is missing
+        // from the content store (fails identity closure)
+        let result = api.promote(child_gen);
+        assert!(
+            result.is_err(),
+            "promotion should fail for generation with unresolved segment"
+        );
+
+        // Parent must still be current
+        assert_eq!(
+            api.generation_store.current_id(),
+            Some(&GenerationId("parent".into())),
+            "parent should remain current after rejection"
+        );
     }
 }

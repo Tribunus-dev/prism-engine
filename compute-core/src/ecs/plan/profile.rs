@@ -104,36 +104,31 @@ pub async fn run_profile_plan(
 // Gated on macOS + metal-dispatch because it depends on the `metal` crate.
 
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-use crate::metal_runtime::pso_cache::MetalPsoCache;
-
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 use crate::execution_plan::region_encoder::RegionEncoder;
 
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 use metal::{ComputePipelineState, Device};
 
-/// Profile runner backed by a concrete [`RegionEncoder`] and [`MetalPsoCache`].
+/// Profile runner backed by a concrete [`RegionEncoder`] and [`PsoCache`].
 ///
 /// Walks an [`ModelExecutionPlan`]'s regions, validates hazards, and
 /// encodes dispatches via the Metal runtime.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub struct BackendProfileRunner<R: RegionEncoder> {
     pub region_encoder: R,
-    pub pso_cache: MetalPsoCache,
+    pub pso_cache: StubPsoCache,
 }
 
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 impl<R: RegionEncoder<PipelineState = ComputePipelineState>> BackendProfileRunner<R> {
-    /// Create a new `BackendProfileRunner` from a Metal device and shader source.
+    /// Create a new `BackendProfileRunner` from a Metal device and PSO cache.
     ///
     /// # Errors
     ///
-    /// Returns an error if the Metal library fails to compile from `shader_source`.
-    pub fn new(device: &Device, shader_source: &str) -> Result<Self, String> {
-        let pso = MetalPsoCache::new(device, shader_source)?;
+    pub fn new(device: &Device, _shader_source: &str) -> Result<Self, String> {
         Ok(Self {
             region_encoder: R::new(device),
-            pso_cache: pso,
+            pso_cache: StubPsoCache,
         })
     }
 
@@ -347,5 +342,29 @@ mod tests {
             result.execution.runtime_backend, "metal+ane",
             "execution_template default backend"
         );
+    }
+}
+
+/// Minimal stub PSO cache that implements the `execution_plan::pso_cache::PsoCache`
+/// trait so the profile runner can compile while the new artifact-identity-based
+/// [`PsoCache`](crate::ecs::metal_runtime::pso_cache::PsoCache) replaces the old
+/// `MetalPsoCache`.
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+pub struct StubPsoCache;
+
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+impl crate::execution_plan::pso_cache::PsoCache for StubPsoCache {
+    type PipelineState = ComputePipelineState;
+
+    fn get_or_create(
+        &mut self,
+        _key: &crate::execution_plan::KernelSpecializationKey,
+        _constants: &crate::execution_plan::FunctionConstantSet,
+    ) -> Result<Self::PipelineState, crate::execution_plan::pso_cache::PsoError> {
+        Err(
+            crate::execution_plan::pso_cache::PsoError::UnsupportedConfiguration(
+                "stub PSO cache — use PsoCache from metal_runtime::pso_cache".into(),
+            ),
+        )
     }
 }

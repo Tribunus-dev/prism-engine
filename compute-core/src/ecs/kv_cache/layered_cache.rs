@@ -15,6 +15,9 @@
 
 use std::collections::HashMap;
 
+use crate::ecs::scheduling::kv_transaction::KvBlockTransaction;
+use crate::ecs::scheduling::SchedulerState;
+
 // ---------------------------------------------------------------------------
 // BlockPool
 // ---------------------------------------------------------------------------
@@ -336,6 +339,77 @@ impl KVCacheCoordinator {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Integration layer — bridge between layered KVCacheCoordinator and
+// the unified scheduler (vLLM v1 token-budget model).
+// ---------------------------------------------------------------------------
+
+/// Allocate KV cache blocks for a request via the layered KVCacheCoordinator.
+///
+/// Delegates to [`KVCacheCoordinator::allocate_slots`], reserving `num_tokens`
+/// blocks in the specified attention group.  Returns the allocated block IDs.
+pub fn allocate_with_layered_cache(
+    coord: &mut KVCacheCoordinator,
+    req_id: &str,
+    num_tokens: usize,
+    group_type: CacheGroupType,
+) -> Result<Vec<u64>, String> {
+    coord.allocate_slots(req_id, num_tokens, group_type)
+}
+
+/// Free all KV cache blocks owned by a request.
+///
+/// Delegates to [`KVCacheCoordinator::free_request`], cleaning up block
+/// tables across every attention group.
+pub fn free_with_layered_cache(coord: &mut KVCacheCoordinator, req_id: &str) {
+    coord.free_request(req_id);
+}
+
+/// Pre-execution system: read scheduling requirements from [`SchedulerState`]
+/// and pre-allocate layered KV cache blocks for every running request.
+///
+/// For each running request, computes the token deficit (remaining tokens to
+/// compute) and allocates a block for each missing token.  Returns an error
+/// if a running request is missing from the request map or block allocation
+/// fails.
+pub fn kv_cache_prepare_system(
+    scheduler: &mut SchedulerState,
+    cache_coord: &mut KVCacheCoordinator,
+) -> Result<(), String> {
+    for req_id in &scheduler.running.clone() {
+        let data = scheduler
+            .requests
+            .get(req_id)
+            .ok_or_else(|| format!("request {req_id} not found"))?;
+        let needed = (data.num_tokens_with_spec - data.num_computed_tokens)
+            .saturating_sub(1) // one token worth of blocks already allocated
+            .max(1);
+        // Wrap the allocation in a transaction so failure or early return
+        // cannot leak blocks.  If allocation succeeds, commit makes the
+        // blocks permanent.  If the Result early-returns (via ?), the
+        // transaction drops and rolls back any partially allocated blocks.
+        let mut tx = KvBlockTransaction::new_for(req_id, cache_coord);
+        tx.allocate(needed, CacheGroupType::FullAttention)
+            .map_err(|e| format!("KV allocation failed for {req_id}: {e}"))?;
+        tx.commit()
+            .map_err(|e| format!("KV commit failed for {req_id}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Post-completion system: free all KV cache blocks for a request that is
+/// being removed from the scheduler (completed, cancelled, or preempted).
+///
+/// Call this after [`SchedulerState::remove_request`] to return blocks to
+/// the pool for reuse.
+pub fn kv_cache_cleanup_system(coord: &mut KVCacheCoordinator, req_id: &str) {
+    coord.free_request(req_id);
+}
+
+// ---------------------------------------------------------------------------
+// Tests — layered KV cache (BlockPool, CacheGroupManager, KVCacheCoordinator)
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,5 +709,72 @@ mod tests {
         // Pool capacity 10 - 4 (req-b) = 6 free.
         coord.free_request("req-a");
         assert_eq!(coord.pool.free_queue.len(), 6);
+    }
+
+    #[test]
+    fn test_kv_cache_prepare_system_allocates_for_running() {
+        let mut scheduler = SchedulerState::new(128, 8);
+        scheduler.add_request("req-1", 100, 0);
+        scheduler.add_request("req-2", 50, 0);
+
+        // Move both to running
+        let _ = scheduler.schedule_once();
+
+        let mut coord = KVCacheCoordinator::new(200);
+
+        let result = kv_cache_prepare_system(&mut scheduler, &mut coord);
+        assert!(result.is_ok(), "prepare should succeed: {:?}", result);
+
+        // Each request should have blocks allocated
+        let fa_mgr = coord.groups.get(&CacheGroupType::FullAttention).unwrap();
+        assert!(fa_mgr.req_to_blocks.contains_key("req-1"));
+        assert!(fa_mgr.req_to_blocks.contains_key("req-2"));
+        assert!(!fa_mgr.req_to_blocks.get("req-1").unwrap().is_empty());
+        assert!(!fa_mgr.req_to_blocks.get("req-2").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_kv_cache_cleanup_system_frees_blocks() {
+        let mut coord = KVCacheCoordinator::new(10);
+        coord
+            .allocate_slots("req-1", 3, CacheGroupType::FullAttention)
+            .unwrap();
+
+        assert!(coord
+            .groups
+            .get(&CacheGroupType::FullAttention)
+            .unwrap()
+            .req_to_blocks
+            .contains_key("req-1"));
+
+        kv_cache_cleanup_system(&mut coord, "req-1");
+
+        assert!(!coord
+            .groups
+            .get(&CacheGroupType::FullAttention)
+            .unwrap()
+            .req_to_blocks
+            .contains_key("req-1"));
+        assert_eq!(coord.pool.free_queue.len(), 10);
+    }
+
+    #[test]
+    fn test_allocate_with_layered_cache_delegates() {
+        let mut coord = KVCacheCoordinator::new(5);
+        let slots =
+            allocate_with_layered_cache(&mut coord, "test-req", 3, CacheGroupType::FullAttention)
+                .expect("allocation should work");
+        assert_eq!(slots.len(), 3);
+    }
+
+    #[test]
+    fn test_free_with_layered_cache_delegates() {
+        let mut coord = KVCacheCoordinator::new(5);
+        coord
+            .allocate_slots("to-free", 2, CacheGroupType::FullAttention)
+            .unwrap();
+
+        free_with_layered_cache(&mut coord, "to-free");
+        assert_eq!(coord.pool.free_queue.len(), 5);
     }
 }

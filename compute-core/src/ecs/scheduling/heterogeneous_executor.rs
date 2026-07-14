@@ -37,7 +37,9 @@ use crate::ecs::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
 use crate::ecs::compilation::phase_ir::PhaseId;
 use crate::ecs::scheduling::accelerate_lane_executor::AccelerateLaneExecutor;
 use crate::ecs::scheduling::ane_lane_executor::AneLaneExecutor;
-use crate::ecs::scheduling::backpressure::{BackpressureController, BackpressureLevel};
+use crate::ecs::scheduling::backpressure::{
+    BackpressureEventController, BackpressureLevel, BatchCompletionRecord, SchedulingMetrics,
+};
 use crate::ecs::scheduling::completion_bridge::work_completion_to_event;
 use crate::ecs::scheduling::lane_capacity::{LaneCapacityConfig, LaneCapacityManager, LanePermit};
 use crate::ecs::scheduling::lane_work::{
@@ -175,6 +177,12 @@ pub struct ExecutorConfig {
     pub global_pending_limit: usize,
     /// Lane-specific capacity configuration.
     pub lane_capacity: LaneCapacityConfig,
+    /// Maximum window (microseconds) before latency backpressure engages.
+    /// When a batch's completed_at timestamp falls within this window,
+    /// is_backpressure() returns true and new admissions are throttled.
+    pub latency_backpressure_window_us: u64,
+    /// Target occupancy (0.0–1.0) for the latency backpressure controller.
+    pub latency_target_occupancy: f32,
 }
 
 impl Default for ExecutorConfig {
@@ -185,6 +193,8 @@ impl Default for ExecutorConfig {
             per_session_pending_limit: 128,
             global_pending_limit: 4096,
             lane_capacity: LaneCapacityConfig::default(),
+            latency_backpressure_window_us: 50_000, // 50ms default
+            latency_target_occupancy: 0.9,
         }
     }
 }
@@ -206,7 +216,8 @@ pub struct HeterogeneousExecutor {
     capacity: LaneCapacityManager,
     registry: WorkRegistry,
     slot_leases: SlotLeaseManager,
-    backpressure: BackpressureController,
+    backpressure: BackpressureEventController,
+    scheduling_metrics: SchedulingMetrics,
 
     // ── Completion plumbing ──────────────────────────────────────────
     /// Receiver for raw [`WorkCompletion`] from lane executors.
@@ -280,7 +291,11 @@ impl HeterogeneousExecutor {
             capacity: LaneCapacityManager::new(config.lane_capacity.clone()),
             registry: WorkRegistry::new(),
             slot_leases: SlotLeaseManager::new(),
-            backpressure: BackpressureController::new(),
+            backpressure: BackpressureEventController::new(),
+            scheduling_metrics: SchedulingMetrics::new(
+                config.latency_backpressure_window_us,
+                config.latency_target_occupancy,
+            ),
             internal_completion_rx,
             internal_completion_tx,
             active_permits: HashMap::new(),
@@ -363,7 +378,8 @@ impl HeterogeneousExecutor {
             }
 
             // Select best admissible variant.
-            let (variant_idx, variant) = self.select_best_variant(phase_set, request.lane_preference)?;
+            let (variant_idx, variant) =
+                self.select_best_variant(phase_set, request.lane_preference)?;
 
             // Reserve lane capacity.
             let permit = self
@@ -635,7 +651,25 @@ impl HeterogeneousExecutor {
         self.receipts.record(receipt);
 
         // ── Backpressure feedback ──────────────────────────────────
-        // TODO: feed backpressure events based on completion timing.
+        // ── Record latency-based backpressure ──────────────────────
+        let current_wall_ns = wall_instant_to_ns(received_at);
+        if wc.success {
+            let latency_ns = wc
+                .timing
+                .backend_end_ns
+                .saturating_sub(wc.timing.backend_start_ns);
+            self.scheduling_metrics
+                .backpressure
+                .record_completion(BatchCompletionRecord {
+                    request_id: work_key.session_id,
+                    tokens_completed: 1,
+                    latency_ns,
+                    completed_at: current_wall_ns,
+                });
+
+            // Update the token budget based on current backpressure state
+            self.scheduling_metrics.update_token_budget(current_wall_ns);
+        }
     }
 
     /// Construct a [`WorkKey`] from a [`WorkCompletion`] by consulting

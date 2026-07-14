@@ -6,6 +6,8 @@
 
 use sha2::{Digest, Sha256};
 
+use tempfile::TempDir;
+
 /// Result of compiling a Metal source file.
 #[derive(Debug, Clone)]
 pub struct MetalCompileOutput {
@@ -61,8 +63,9 @@ impl MetalToolchain {
             return Err(format!("xcrun not found — cannot compile '{name}'"));
         }
 
-        let tmp = std::env::temp_dir().join(format!("tribunus-metal-{}", name));
-        let _ = std::fs::create_dir_all(&tmp);
+        let tmp_dir =
+            TempDir::new().map_err(|e| format!("failed to create temp dir for '{name}': {e}"))?;
+        let tmp = tmp_dir.path().to_path_buf();
 
         let src_path = tmp.join("kernel.metal");
         let air_path = tmp.join("kernel.air");
@@ -88,7 +91,6 @@ impl MetalToolchain {
             .map_err(|e| format!("xcrun metal: {e}"))?;
 
         if !status.success() {
-            let _ = std::fs::remove_dir_all(&tmp);
             return Err(format!("metal compile failed for '{name}'"));
         }
 
@@ -102,7 +104,6 @@ impl MetalToolchain {
             .map_err(|e| format!("xcrun metallib: {e}"))?;
 
         if !status.success() {
-            let _ = std::fs::remove_dir_all(&tmp);
             return Err(format!("metallib link failed for '{name}'"));
         }
 
@@ -111,7 +112,6 @@ impl MetalToolchain {
 
         // Validate MTLB magic
         if bytes.len() < 4 || &bytes[0..4] != b"MTLB" {
-            let _ = std::fs::remove_dir_all(&tmp);
             return Err(format!("'{name}' .metallib missing MTLB magic"));
         }
 
@@ -119,8 +119,6 @@ impl MetalToolchain {
         hasher.update(&bytes);
         let sha256 = format!("{:x}", hasher.finalize());
         let byte_length = bytes.len() as u64;
-
-        let _ = std::fs::remove_dir_all(&tmp);
 
         Ok(MetalCompileOutput {
             metallib_bytes: bytes,

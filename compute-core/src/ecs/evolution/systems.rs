@@ -99,6 +99,7 @@ pub fn evolve_seed(
             target_backend: *target_backend,
             seed_program: seed.clone(),
             population: Vec::new(),
+            records: Vec::new(),
             generation: 0,
             best_cost: None,
             best_candidate: None,
@@ -1170,19 +1171,26 @@ mod tests {
 
     #[test]
     fn test_evolve_select_picks_lowest_cost() {
-        let mut state = EvolutionState { tensor_id: "test".to_string(),
-        target_backend: BackendTarget::Metal,
-        seed_program: EvolveProgram::MetalShader("kernel void foo() {}".into()),
-        population: Vec::new(),
-        generation: 0,
-        best_cost: None,
-        best_candidate: None,
-        converged: false, search_config: SearchConfig { population_size: 4,
-        mutation_rate: 0.3,
-        crossover_rate: 0.2,
-        max_generations: 100,
-        convergence_threshold: 0.5,
-        cost_function: CostFunction::WallTime, }, receipt_store: Vec::new(),  };
+        let mut state = EvolutionState {
+            tensor_id: "test".to_string(),
+            target_backend: BackendTarget::Metal,
+            seed_program: EvolveProgram::MetalShader("kernel void foo() {}".into()),
+            population: Vec::new(),
+            records: Vec::new(),
+            generation: 0,
+            best_cost: None,
+            best_candidate: None,
+            converged: false,
+            search_config: SearchConfig {
+                population_size: 4,
+                mutation_rate: 0.3,
+                crossover_rate: 0.2,
+                max_generations: 100,
+                convergence_threshold: 0.5,
+                cost_function: CostFunction::WallTime,
+            },
+            receipt_store: Vec::new(),
+        };
 
         let mut pop: Vec<EvolveCandidate> = vec![
             EvolveCandidate {
@@ -1239,19 +1247,26 @@ mod tests {
 
     #[test]
     fn test_evolve_select_converges_on_small_improvement() {
-        let mut state = EvolutionState { tensor_id: "test".to_string(),
-        target_backend: BackendTarget::Metal,
-        seed_program: EvolveProgram::MetalShader("kernel void foo() {}".into()),
-        population: Vec::new(),
-        generation: 0,
-        best_cost: None,
-        best_candidate: None,
-        converged: false, search_config: SearchConfig { population_size: 4,
-        mutation_rate: 0.3,
-        crossover_rate: 0.2,
-        max_generations: 100,
-        convergence_threshold: 0.5, // requires 50% improvement
-        cost_function: CostFunction::WallTime, }, receipt_store: Vec::new(),  };
+        let mut state = EvolutionState {
+            tensor_id: "test".to_string(),
+            target_backend: BackendTarget::Metal,
+            seed_program: EvolveProgram::MetalShader("kernel void foo() {}".into()),
+            population: Vec::new(),
+            records: Vec::new(),
+            generation: 0,
+            best_cost: None,
+            best_candidate: None,
+            converged: false,
+            search_config: SearchConfig {
+                population_size: 4,
+                mutation_rate: 0.3,
+                crossover_rate: 0.2,
+                max_generations: 100,
+                convergence_threshold: 0.5, // requires 50% improvement
+                cost_function: CostFunction::WallTime,
+            },
+            receipt_store: Vec::new(),
+        };
 
         let mut pop: Vec<EvolveCandidate> = vec![EvolveCandidate {
             tensor_id: "test".into(),
@@ -1285,23 +1300,30 @@ mod tests {
 
     #[test]
     fn test_evolve_select_uses_cost_function() {
-        let mut state = EvolutionState { tensor_id: "test".to_string(),
-        target_backend: BackendTarget::Metal,
-        seed_program: EvolveProgram::MetalShader("kernel void foo() {}".into()),
-        population: Vec::new(),
-        generation: 0,
-        best_cost: None,
-        best_candidate: None,
-        converged: false, search_config: SearchConfig { population_size: 4,
-        mutation_rate: 0.3,
-        crossover_rate: 0.2,
-        max_generations: 100,
-        convergence_threshold: 0.5,
-        cost_function: CostFunction::Weighted {
-            wall: 0.0,
-            energy: 1.0,
-            bandwidth: 0.0,
-        }, }, receipt_store: Vec::new(),  };
+        let mut state = EvolutionState {
+            tensor_id: "test".to_string(),
+            target_backend: BackendTarget::Metal,
+            seed_program: EvolveProgram::MetalShader("kernel void foo() {}".into()),
+            population: Vec::new(),
+            records: Vec::new(),
+            generation: 0,
+            best_cost: None,
+            best_candidate: None,
+            converged: false,
+            search_config: SearchConfig {
+                population_size: 4,
+                mutation_rate: 0.3,
+                crossover_rate: 0.2,
+                max_generations: 100,
+                convergence_threshold: 0.5,
+                cost_function: CostFunction::Weighted {
+                    wall: 0.0,
+                    energy: 1.0,
+                    bandwidth: 0.0,
+                },
+            },
+            receipt_store: Vec::new(),
+        };
 
         let mut pop: Vec<EvolveCandidate> = vec![
             EvolveCandidate {
@@ -1353,19 +1375,26 @@ mod tests {
 
     #[test]
     fn test_evolve_winner_returns_first_after_sort() {
-        let state = EvolutionState { tensor_id: "test".to_string(),
-        target_backend: BackendTarget::Metal,
-        seed_program: EvolveProgram::MetalShader("k".into()),
-        population: Vec::new(),
-        generation: 0,
-        best_cost: None,
-        best_candidate: None,
-        converged: false, search_config: SearchConfig { population_size: 4,
-        mutation_rate: 0.3,
-        crossover_rate: 0.2,
-        max_generations: 100,
-        convergence_threshold: 0.01,
-        cost_function: CostFunction::WallTime, }, receipt_store: Vec::new(),  };
+        let state = EvolutionState {
+            tensor_id: "test".to_string(),
+            target_backend: BackendTarget::Metal,
+            seed_program: EvolveProgram::MetalShader("k".into()),
+            population: Vec::new(),
+            records: Vec::new(),
+            generation: 0,
+            best_cost: None,
+            best_candidate: None,
+            converged: false,
+            search_config: SearchConfig {
+                population_size: 4,
+                mutation_rate: 0.3,
+                crossover_rate: 0.2,
+                max_generations: 100,
+                convergence_threshold: 0.01,
+                cost_function: CostFunction::WallTime,
+            },
+            receipt_store: Vec::new(),
+        };
 
         let pop = vec![EvolveCandidate {
             tensor_id: "test".into(),

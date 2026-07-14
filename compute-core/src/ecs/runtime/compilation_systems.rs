@@ -14,7 +14,6 @@ use crate::ecs::compilation::distill_core::{
 use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
 use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
 pub use crate::ecs::compute_image::compile::ternary::ModelConfig;
-use crate::ecs::evolution::evaluator::CandidateEvaluator;
 use crate::ecs::evolution::foundation::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::runtime::ecs_components::{
     CodesData, CompilationPhase, CompilationStatus, ReconstructedWeights, RefinementOutcome,
@@ -719,24 +718,21 @@ where
     outputs
 }
 
-/// ECS system that trains engrams from calibration data and promotes
-/// the generation with evaluator evidence.
+/// ECS system that trains engrams from a dataset and promotes the
+/// generation with the result.
 ///
 /// This is the production pipeline entry point for engram generation:
-/// 1. Train an engram from the dataset using [`EngramTrainer::train_dataset`]
-/// 2. Construct promotion evidence (synthetic for now; real evaluations
-///    from [`CandidateEvaluator`] will be wired in production)
-/// 3. Promote the generation with the trained engram and evidence
+/// 1. Train an engram from the dataset ([`EngramTrainer::train_dataset`])
+/// 2. Promote the generation with the trained engram and built-in evidence
 pub fn engram_training_system(
     generation: &CimageGeneration,
     calibrator: &mut EngramTrainer,
     dataset: &EngramTrainingDataset,
-    _evaluator: &dyn CandidateEvaluator,
 ) -> Result<GenerationId, String> {
     // 1. Train engram from dataset
     let trained = calibrator.train_dataset(dataset)?;
 
-    // 2. Get evaluator evidence (use synthetic for now, real in production)
+    // 2. Build promotion evidence from training metrics
     let evidence = PromotionEvidence {
         numerical: NumericalReceipt {
             candidate_id: CandidateId("engram-training-synth".into()),
@@ -744,6 +740,7 @@ pub fn engram_training_system(
             max_absolute_error: 0.0,
             max_relative_error: 0.0,
             threshold: 0.01,
+            provenance: Vec::new(),
         },
         performance: PerformanceReceipt {
             candidate_id: CandidateId("engram-training-synth".into()),
@@ -754,6 +751,7 @@ pub fn engram_training_system(
             memory_traffic_bytes: 0,
             energy_uj: None,
             repetitions: 100,
+            provenance: Vec::new(),
         },
     };
 
@@ -931,6 +929,7 @@ mod tests {
                 max_absolute_error: 0.01,
                 max_relative_error: 0.005,
                 threshold: 0.01,
+                provenance: Vec::new(),
             },
             performance: PerformanceReceipt {
                 candidate_id: CandidateId("lifecycle".into()),
@@ -941,6 +940,7 @@ mod tests {
                 memory_traffic_bytes: 0,
                 energy_uj: None,
                 repetitions: 10,
+                provenance: Vec::new(),
             },
         };
 

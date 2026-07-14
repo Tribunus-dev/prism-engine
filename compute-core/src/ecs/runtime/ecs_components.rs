@@ -4,8 +4,12 @@
 //! admission → binding → refinement compilation pipeline.  Components are
 //! attached to entities representing individual weight matrices.
 
+use crate::ecs::canonical::generation::CimageGeneration;
+use crate::ecs::cimage::generation_store::ContentStore;
+use crate::ecs::cimage_runtime::context::CimageRuntimeContext;
 use crate::ecs::compilation::distill_core::OnPolicyRefinementResult;
 use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
+use crate::ecs::runtime::world::{Entity, World};
 use crate::quantization::contract::{CanonicalShape, RuntimeRepresentationClass};
 
 // ---------------------------------------------------------------------------
@@ -92,3 +96,31 @@ pub struct TensorBinding(pub MatrixWeightBindingV1);
 /// Result of on-policy refinement for a bound matrix.
 #[derive(Debug, Clone)]
 pub struct RefinementOutcome(pub OnPolicyRefinementResult);
+
+// ---------------------------------------------------------------------------
+// Load generation into ECS world
+// ---------------------------------------------------------------------------
+
+/// Load a [`CimageGeneration`] from a [`ContentStore`] and attach the
+/// resulting [`CimageRuntimeContext`] to a new ECS entity.
+///
+/// Resolves every tensor binding's physical segments through the content
+/// store, decodes them into runtime tensor payloads, and spawns an entity
+/// carrying the fully-loaded context. Returns `Err` describing the first
+/// missing segment.
+///
+/// The returned entity owns the generation reference, resolved weight/scale
+/// payload bytes, and a pre-built [`RuntimeTensorStore`] — ready for Metal
+/// buffer creation or CPU fallback execution.
+pub fn load_from_generation(
+    world: &mut World,
+    generation: CimageGeneration,
+    store: &ContentStore,
+) -> Result<Entity, String> {
+    let context = CimageRuntimeContext::load_from_generation(generation, store)?;
+    let entity = world.spawn().ok_or_else(|| {
+        "ECS world at capacity: cannot spawn entity for loaded generation".to_string()
+    })?;
+    world.insert(entity, context);
+    Ok(entity)
+}

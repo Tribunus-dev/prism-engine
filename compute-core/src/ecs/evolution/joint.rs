@@ -5,11 +5,12 @@
 //! quality, memory, latency, and energy.
 
 use crate::ecs::canonical::identity::CandidateId;
+use crate::ecs::canonical::provenance::MeasuredCandidateRecord;
 use crate::ecs::cimage::PhysicalTileLayout;
 use crate::ecs::evolution::evaluator::{CandidateEvaluator, Workload};
 use crate::ecs::evolution::foundation::{
     CandidateGenome, CandidateStatus, CostFunction, DecompositionStrategy, EvolutionCandidate,
-    MemoryConfig, MetalGeometry, SearchConfig,
+    EvolutionState, MemoryConfig, MetalGeometry, SearchConfig,
 };
 use crate::execution_plan::CodecFamily;
 
@@ -48,6 +49,8 @@ pub struct JointSearchResult {
     pub best_genome: Option<JointGenome>,
     pub population_size: usize,
     pub generations_completed: usize,
+    /// Persisted candidate records from the search, keyed by evaluation order.
+    pub records: Vec<MeasuredCandidateRecord>,
 }
 
 /// Configuration for a joint search.
@@ -227,7 +230,7 @@ impl JointSearchConfig {
             // Evaluate each genome
             for genome in &mut population {
                 if genome.fitness.is_none() {
-                    genome.fitness = Some(self.evaluate(&genome.genome));
+                    genome.fitness = Some(self.synthetic_fitness(&genome.genome));
                 }
             }
 
@@ -284,6 +287,7 @@ impl JointSearchConfig {
             best_genome: population.first().map(|s| s.genome.clone()),
             population_size: population.len(),
             generations_completed,
+            records: Vec::new(),
         }
     }
 
@@ -294,6 +298,7 @@ impl JointSearchConfig {
     pub fn run_measured<E: CandidateEvaluator>(
         &self,
         evaluator: &E,
+        state: &mut EvolutionState,
     ) -> Result<JointSearchResult, String> {
         let mut population = self.generate_initial_population();
         let workload = Workload {
@@ -306,10 +311,38 @@ impl JointSearchConfig {
             generations_completed = gen + 1;
             for scored in &mut population {
                 if scored.fitness.is_none() {
-                    scored.fitness = Some(
-                        self.measured_fitness(&scored.genome, evaluator, &workload)
-                            .unwrap_or(f64::INFINITY),
-                    );
+                    match self.measured_fitness(&scored.genome, evaluator, &workload, state) {
+                        Ok(f) => scored.fitness = Some(f),
+                        Err(e) => {
+                            let rid = crate::ecs::canonical::identity::ReceiptId("n/a".into());
+                            let now = format!(
+                                "{:020}",
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_nanos())
+                                    .unwrap_or(0)
+                            );
+                            state.add_candidate_record(
+                                MeasuredCandidateRecord {
+                                    candidate_id: CandidateId(format!(
+                                        "joint.{}.{}",
+                                        self.tensor_id, scored.genome.kernel_variant
+                                    )),
+                                    provenance: Vec::new(),
+                                    numerical_receipt_id: rid.clone(),
+                                    performance_receipt_id: rid.clone(),
+                                    quality_receipt_id: rid,
+                                    rejection_reason: Some(e),
+                                    pareto_rank: None,
+                                    created_at: now,
+                                },
+                                None,
+                                None,
+                                None,
+                            );
+                            scored.fitness = Some(f64::INFINITY);
+                        }
+                    }
                 }
             }
             population.sort_by(|a, b| {
@@ -352,6 +385,7 @@ impl JointSearchConfig {
                 .map(|x| x.genome.clone()),
             population_size: population.len(),
             generations_completed,
+            records: state.records.clone(),
         })
     }
 
@@ -360,6 +394,7 @@ impl JointSearchConfig {
         genome: &JointGenome,
         evaluator: &E,
         workload: &Workload,
+        state: &mut EvolutionState,
     ) -> Result<f64, String> {
         let mut candidate = EvolutionCandidate {
             candidate_id: CandidateId(format!(
@@ -423,6 +458,46 @@ impl JointSearchConfig {
             ));
         }
         let performance = evaluator.measure(&mut candidate, &compiled, workload)?;
+
+        // Persist the evaluated candidate record with all receipts
+        let now = || {
+            format!(
+                "{:020}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            )
+        };
+        let record = MeasuredCandidateRecord {
+            candidate_id: candidate.candidate_id.clone(),
+            provenance: compiled.provenance.clone(),
+            numerical_receipt_id: crate::ecs::canonical::identity::ReceiptId(format!(
+                "numerical.{}",
+                now()
+            )),
+            performance_receipt_id: crate::ecs::canonical::identity::ReceiptId(format!(
+                "performance.{}",
+                now()
+            )),
+            quality_receipt_id: crate::ecs::canonical::identity::ReceiptId(format!(
+                "quality.{}",
+                now()
+            )),
+            rejection_reason: None,
+            pareto_rank: None,
+            created_at: now(),
+        };
+        let static_receipt_opt = candidate.correctness_receipt.clone();
+        let numerical_receipt_opt = candidate.quality_receipt.clone();
+        let performance_receipt_opt = candidate.performance_receipt.clone();
+        state.add_candidate_record(
+            record,
+            static_receipt_opt,
+            numerical_receipt_opt,
+            performance_receipt_opt,
+        );
+
         Ok(performance.latency_p50_ns as f64)
     }
 
@@ -459,8 +534,9 @@ impl JointSearchConfig {
         pop
     }
 
-    fn evaluate(&self, genome: &JointGenome) -> f64 {
-        // Simulated cost across all three dimensions
+    /// Synthetic fitness for the non-evaluator search path (`run()`).
+    /// Uses heuristic cost estimates across representation, engram, and kernel dimensions.
+    fn synthetic_fitness(&self, genome: &JointGenome) -> f64 {
         let repr_cost = match genome.codec {
             CodecFamily::Int8 => 3.0,
             CodecFamily::Nf4 => 2.0,

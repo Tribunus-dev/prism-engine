@@ -21,6 +21,74 @@ use crate::projection_identity::{AttentionKind, Phase, ProjectionContext};
 use crate::runtime::executable_session::RuntimeBackends;
 use mlx_rs::Array;
 
+// ── Cimage offset resolution helpers ─────────────────────────────────────
+//
+// These resolve weight, scale, and kernel payload data from a loaded cimage
+// content store using offset bindings produced by the compiler pipeline.
+// The phase engine calls them when constructing an ExecutionBindings-aware
+// dispatch path.
+
+use crate::ecs::canonical::identity::{LogicalTensorId, PhysicalSegmentId};
+use crate::ecs::canonical::provenance::ExecutionBindings;
+use crate::ecs::cimage::generation_store::ContentStore;
+
+/// Resolve weight data from a loaded cimage generation.
+///
+/// Looks up `weight_tensor_id` in the bindings to find the segment, byte
+/// offset, and length, then reads the raw payload bytes from the content
+/// store. Returns an error if the tensor is unbound or the payload is
+/// missing or too small.
+pub fn resolve_weights(
+    bindings: &ExecutionBindings,
+    content_store: &ContentStore,
+    weight_tensor_id: &LogicalTensorId,
+) -> Result<Vec<u8>, String> {
+    let (segment_id, offset, length) = bindings
+        .weight_offsets
+        .get(weight_tensor_id)
+        .ok_or_else(|| format!("no weight binding for {weight_tensor_id:?}"))?;
+    let payload = content_store
+        .get(segment_id)
+        .ok_or_else(|| format!("payload {segment_id:?} not found in content store"))?;
+    if *offset as usize + *length as usize > payload.len() {
+        return Err(format!(
+            "weight offset+length exceeds payload ({} + {} > {})",
+            offset,
+            length,
+            payload.len()
+        ));
+    }
+    Ok(payload[*offset as usize..*offset as usize + *length as usize].to_vec())
+}
+
+/// Resolve scale data from a loaded cimage generation.
+///
+/// Same as [`resolve_weights`] but reads from `scale_offsets` in the
+/// execution bindings. Scale data is typically a separate packed segment
+/// of quantization scale factors.
+pub fn resolve_scales(
+    bindings: &ExecutionBindings,
+    content_store: &ContentStore,
+    scale_tensor_id: &LogicalTensorId,
+) -> Result<Vec<u8>, String> {
+    let (segment_id, offset, length) = bindings
+        .scale_offsets
+        .get(scale_tensor_id)
+        .ok_or_else(|| format!("no scale binding for {scale_tensor_id:?}"))?;
+    let payload = content_store
+        .get(segment_id)
+        .ok_or_else(|| format!("payload {segment_id:?} not found in content store"))?;
+    if *offset as usize + *length as usize > payload.len() {
+        return Err(format!(
+            "scale offset+length exceeds payload ({} + {} > {})",
+            offset,
+            length,
+            payload.len()
+        ));
+    }
+    Ok(payload[*offset as usize..*offset as usize + *length as usize].to_vec())
+}
+
 /// Result of running a single phase.
 pub struct PhaseResult {
     pub phase_id: String,
@@ -247,58 +315,14 @@ impl PhaseRunner for AccelMatMulRunner {
         PhaseKind::AccelMatMul
     }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let backend = ctx
-            .backend
-            .as_ref()
-            .ok_or_else(|| "AccelMatMul: no backend context".to_string())?;
-        let rb = backend
-            .downcast_ref::<RuntimeBackends>()
-            .ok_or_else(|| "AccelMatMul: backend is not RuntimeBackends".to_string())?;
-
-        let dim: usize = phase
-            .metadata
-            .get("dim")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        let k: usize = phase
-            .metadata
-            .get("k")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-
-        if dim == 0 || k == 0 {
-            return Err(format!(
-                "AccelMatMul: missing dim/k metadata on {}",
-                phase.phase_id
-            ));
-        }
-
-        // Get input from hidden_state
-        let hidden = ctx
-            .hidden_state
-            .as_ref()
-            .ok_or_else(|| "AccelMatMul: hidden_state is None".to_string())?;
-
-        // Extract f32 slice from the MLX array
-        let hidden_slice = hidden.as_slice::<f32>();
-
-        // Allocate output buffer
-        let n = dim; // output dimension
-        let mut c = vec![0.0f32; n * (hidden_slice.len() / k.max(1))];
-
-        // Call Accelerate matmul
-        rb.accelerate_state.matmul(
-            &mut c,
-            hidden_slice,
-            &vec![0.0f32; k * n], // weight placeholder — in real impl, load from metadata
-            k,
-        )?;
-
-        eprintln!(
-            "[runner] AccelMatMul: {} dim={} k={} dispatched via AccelerateLane::matmul",
-            phase.phase_id, dim, k
-        );
-        Ok(())
+        // AccelMatMul requires weight data from ExecutionBindings.
+        // Use execute_with_bindings which supplies real weight bytes via
+        // resolve_weights/resolve_scales. Unavailable through the legacy
+        // ExecutionContext path.
+        Err(
+            "AccelMatMul: real weight data required — use execute_with_bindings (not legacy ExecutionContext)"
+                .to_string(),
+        )
     }
 }
 
@@ -309,62 +333,13 @@ impl PhaseRunner for AccelElementWiseRunner {
         PhaseKind::AccelElementWise
     }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let backend = ctx
-            .backend
-            .as_ref()
-            .ok_or_else(|| "AccelElementWise: no backend context".to_string())?;
-        let rb = backend
-            .downcast_ref::<RuntimeBackends>()
-            .ok_or_else(|| "AccelElementWise: backend is not RuntimeBackends".to_string())?;
-
-        let op = phase.ops.first().map(|s| s.as_str()).unwrap_or("add");
-        let dim: usize = phase
-            .metadata
-            .get("dim")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-
-        let hidden = ctx
-            .hidden_state
-            .as_ref()
-            .ok_or_else(|| "AccelElementWise: hidden_state is None".to_string())?;
-        let slice = hidden.as_slice::<f32>();
-
-        match op {
-            "mul" | "multiply" => {
-                let mut out = vec![0.0f32; slice.len()];
-                rb.accelerate_state
-                    .mul(slice, &vec![1.0f32; slice.len()], &mut out)?;
-                eprintln!(
-                    "[runner] AccelElementWise: {} mul (len={})",
-                    phase.phase_id,
-                    slice.len()
-                );
-            }
-            "rms_norm" => {
-                // Use AccelerateLane::rms_norm
-                let eps: f32 = phase
-                    .metadata
-                    .get("eps")
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(1e-6);
-                let weight = &vec![1.0f32; dim]; // placeholder weight
-                let mut out = vec![0.0f32; slice.len()];
-                rb.accelerate_state.rms_norm(slice, weight, &mut out, eps)?;
-                eprintln!(
-                    "[runner] AccelElementWise: {} rms_norm (dim={})",
-                    phase.phase_id, dim
-                );
-            }
-            _ => {
-                // Default: add
-                let mut out = vec![0.0f32; slice.len()];
-                rb.accelerate_state
-                    .add(slice, &vec![0.0f32; slice.len()], &mut out)?;
-                eprintln!("[runner] AccelElementWise: {} add dispatch", phase.phase_id);
-            }
-        }
-        Ok(())
+        // AccelElementWise requires weight data from ExecutionBindings.
+        // The mul/rms_norm/add operations need real weight tensors that
+        // are not available in the legacy ExecutionContext path.
+        Err(
+            "AccelElementWise: real weight data required — use execute_with_bindings (not legacy ExecutionContext)"
+                .to_string(),
+        )
     }
 }
 
@@ -454,55 +429,13 @@ impl PhaseRunner for ResidualRmsNormRunner {
         PhaseKind::ResidualRmsNorm
     }
     fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
-        let backend = ctx
-            .backend
-            .as_ref()
-            .ok_or_else(|| "ResidualRmsNorm: no backend context".to_string())?;
-        let rb = backend
-            .downcast_ref::<RuntimeBackends>()
-            .ok_or_else(|| "ResidualRmsNorm: backend is not RuntimeBackends".to_string())?;
-
-        let dim: usize = phase
-            .metadata
-            .get("dim")
-            .and_then(|v| v.parse().ok())
-            .ok_or_else(|| {
-                format!(
-                    "ResidualRmsNorm: missing dim metadata on {}",
-                    phase.phase_id
+        // ResidualRmsNorm requires a real RMS norm weight from the
+        // ExecutionBindings path. The weight is not available through
+        // the legacy ExecutionContext.
+        Err(
+            "ResidualRmsNorm: real weight data required — use execute_with_bindings (not legacy ExecutionContext)"
+                .to_string(),
                 )
-            })?;
-        let eps: f32 = phase
-            .metadata
-            .get("eps")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1e-6);
-
-        let hidden = ctx
-            .hidden_state
-            .as_ref()
-            .ok_or_else(|| "ResidualRmsNorm: hidden_state is None".to_string())?;
-        let hidden_slice = hidden.as_slice::<f32>();
-
-        // Save residual (original input before RMSNorm)
-        let residual = hidden_slice.to_vec();
-
-        // RMSNorm: out[i] = x[i] / sqrt(mean(x^2) + eps) * weight[i]
-        let weight = vec![1.0f32; dim]; // placeholder — load from metadata in real impl
-        let mut rms_out = vec![0.0f32; hidden_slice.len()];
-        rb.accelerate_state
-            .rms_norm(hidden_slice, &weight, &mut rms_out, eps)?;
-
-        // Element-wise add residual back: output = rms_norm(x) + x
-        let mut final_out = vec![0.0f32; hidden_slice.len()];
-        rb.accelerate_state
-            .add(&rms_out, &residual, &mut final_out)?;
-
-        eprintln!(
-            "[runner] ResidualRmsNorm: {} rms_norm+residual (dim={})",
-            phase.phase_id, dim
-        );
-        Ok(())
     }
 }
 

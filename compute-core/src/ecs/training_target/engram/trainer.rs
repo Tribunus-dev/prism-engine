@@ -214,6 +214,70 @@ impl EngramTrainer {
         })
     }
 
+    /// Compute the mean squared residual (validation loss) between the
+    /// dataset holdout targets and the corrected examples using the given
+    /// parameter vector.
+    ///
+    /// A high validation loss indicates the engram parameters do not
+    /// generalise to unseen data.
+    pub fn compute_validation_loss(
+        &self,
+        dataset: &EngramTrainingDataset,
+        parameters: &[f32],
+    ) -> f64 {
+        mean_squared_residual(
+            &dataset.holdout_examples,
+            &dataset.holdout_targets,
+            parameters,
+        )
+    }
+
+    /// Measure interference — the mean squared magnitude of parameter
+    /// corrections applied to reference inputs that should remain unchanged.
+    ///
+    /// This computes the average per-element squared parameter value over
+    /// all `interference_examples` in the dataset. A non-zero result means
+    /// the engram would distort unrelated activations.
+    pub fn compute_interference(&self, dataset: &EngramTrainingDataset, parameters: &[f32]) -> f64 {
+        if dataset.interference_examples.is_empty() || parameters.is_empty() {
+            return 0.0;
+        }
+        let width = parameters.len();
+        let total: f64 = dataset
+            .interference_examples
+            .iter()
+            .map(|example| {
+                example
+                    .iter()
+                    .zip(parameters)
+                    .map(|(_, correction)| (*correction as f64).powi(2))
+                    .sum::<f64>()
+                    / width as f64
+            })
+            .sum();
+        total / dataset.interference_examples.len() as f64
+    }
+
+    /// Check whether the interference level exceeds the configured gate.
+    ///
+    /// Returns `Ok(())` when `compute_interference` is below the
+    /// convergence threshold, or an `Err` with the measured value on
+    /// failure.
+    pub fn check_interference_gate(
+        &self,
+        dataset: &EngramTrainingDataset,
+        parameters: &[f32],
+    ) -> Result<(), String> {
+        let interference = self.compute_interference(dataset, parameters);
+        if interference > self.config.convergence_threshold.max(1e-6) {
+            return Err(format!(
+                "engram interference loss {interference} exceeds gate {}",
+                self.config.convergence_threshold
+            ));
+        }
+        Ok(())
+    }
+
     /// Train an additive residual engram from real examples and targets.
     ///
     /// The learned parameter vector is the residual correction that minimizes
@@ -236,7 +300,10 @@ impl EngramTrainer {
             || dataset.train_targets.iter().any(|x| x.len() != width)
             || dataset.holdout_examples.iter().any(|x| x.len() != width)
             || dataset.holdout_targets.iter().any(|x| x.len() != width)
-            || dataset.interference_examples.iter().any(|x| x.len() != width)
+            || dataset
+                .interference_examples
+                .iter()
+                .any(|x| x.len() != width)
         {
             return Err("engram dataset rows must have one non-zero consistent width".into());
         }
@@ -543,5 +610,101 @@ mod tests {
             result.artifact.logical_id.0.contains("test.engram"),
             "logical id should reference target"
         );
+    }
+
+    #[test]
+    fn test_compute_validation_loss() {
+        let target = make_target();
+        let config = EngramTrainConfig::from_target(&target);
+        let trainer = EngramTrainer::new(config);
+        let dataset = EngramTrainingDataset {
+            corpus_id: CorpusId("corpus".into()),
+            train_examples: vec![],
+            train_targets: vec![],
+            validation_examples: vec![],
+            validation_targets: vec![],
+            holdout_examples: vec![vec![1.0, 2.0]],
+            holdout_targets: vec![vec![2.0, 3.0]],
+            interference_examples: vec![],
+            activation_capture: None,
+        };
+        // parameters = [1.0, 1.0] → residuals of zero
+        let loss = trainer.compute_validation_loss(&dataset, &[1.0, 1.0]);
+        assert!(
+            loss < 1e-12,
+            "zero-residual validation loss should be near zero, got {loss}"
+        );
+        // parameters = [0.0, 0.0] → residuals of [1.0, 1.0] = MSE of 1.0
+        let loss2 = trainer.compute_validation_loss(&dataset, &[0.0, 0.0]);
+        assert!(
+            (loss2 - 1.0).abs() < 1e-12,
+            "identity validation loss should be 1.0, got {loss2}"
+        );
+    }
+
+    #[test]
+    fn test_compute_interference() {
+        let target = make_target();
+        let config = EngramTrainConfig::from_target(&target);
+        let trainer = EngramTrainer::new(config);
+        let dataset = EngramTrainingDataset {
+            corpus_id: CorpusId("corpus".into()),
+            train_examples: vec![],
+            train_targets: vec![],
+            validation_examples: vec![],
+            validation_targets: vec![],
+            holdout_examples: vec![],
+            holdout_targets: vec![],
+            interference_examples: vec![vec![1.0, 2.0], vec![3.0, 4.0]],
+            activation_capture: None,
+        };
+        // No parameters → no interference
+        let zero = trainer.compute_interference(&dataset, &[0.0, 0.0]);
+        assert!(
+            zero < 1e-12,
+            "zero-parameter interference should be zero, got {zero}"
+        );
+        // parameters [2.0, 0.0] → per-example avg = (4+0)/2 = 2.0, averaged over 2 examples = 2.0
+        let val = trainer.compute_interference(&dataset, &[2.0, 0.0]);
+        assert!(
+            (val - 2.0).abs() < 1e-12,
+            "interference with [2,0] should be 2.0, got {val}"
+        );
+        // Large parameters fail the interference gate
+        let result = trainer.check_interference_gate(&dataset, &[10.0, 10.0]);
+        assert!(
+            result.is_err(),
+            "large parameters should fail interference gate"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("interference"),
+            "error should mention interference"
+        );
+    }
+
+    #[test]
+    fn test_check_interference_gate_passes() {
+        let target = make_target();
+        let config = EngramTrainConfig {
+            convergence_threshold: 1e-2,
+            ..EngramTrainConfig::from_target(&target)
+        };
+        let trainer = EngramTrainer::new(config);
+        let dataset = EngramTrainingDataset {
+            corpus_id: CorpusId("corpus".into()),
+            train_examples: vec![],
+            train_targets: vec![],
+            validation_examples: vec![],
+            validation_targets: vec![],
+            holdout_examples: vec![],
+            holdout_targets: vec![],
+            interference_examples: vec![vec![1.0, 2.0]],
+            activation_capture: None,
+        };
+        // parameters [0.001, 0.001] → MS = 1e-6 per example, below 1e-2 threshold
+        trainer
+            .check_interference_gate(&dataset, &[0.001, 0.001])
+            .expect("small parameters should pass interference gate");
     }
 }

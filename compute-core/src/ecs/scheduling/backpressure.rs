@@ -7,9 +7,9 @@
 //! The controller translates active events into a single [`BackpressureLevel`]
 //! used by the scheduler to throttle or cancel work.
 
-use std::time::Instant;
-
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::time::Instant;
 
 use crate::ecs::backend::placement::ExecutionLane;
 
@@ -106,17 +106,17 @@ pub enum BackpressureLevel {
 // BackpressureController — tracks state across all resources
 // ---------------------------------------------------------------------------
 
-/// Tracks backpressure state across all resources.
+/// Tracks resource-level backpressure events across all resources.
 ///
 /// Maintains a vector of active [`BackpressureEvent`]s and derives a current
 /// [`BackpressureLevel`] based on the most severe category present.
-pub struct BackpressureController {
+pub struct BackpressureEventController {
     active_events: Vec<BackpressureEvent>,
     level: BackpressureLevel,
     max_events: usize,
 }
 
-impl BackpressureController {
+impl BackpressureEventController {
     /// Creates a new controller with default capacity (256 events).
     pub fn new() -> Self {
         Self {
@@ -215,9 +215,124 @@ impl BackpressureController {
     }
 }
 
-impl Default for BackpressureController {
+impl Default for BackpressureEventController {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BatchCompletionRecord — tracks a single batch's completion metrics
+// ---------------------------------------------------------------------------
+
+/// A record of a completed batch for latency-based backpressure tracking.
+#[derive(Debug, Clone)]
+pub struct BatchCompletionRecord {
+    pub request_id: String,
+    pub tokens_completed: usize,
+    pub latency_ns: u64,
+    pub completed_at: u64, // timestamp
+}
+
+// ---------------------------------------------------------------------------
+// BackpressureController — latency-based batch completion backpressure
+// ---------------------------------------------------------------------------
+
+/// Latency-based backpressure controller that tracks batch completion
+/// records and determines whether to throttle new admissions based on
+/// recent completion latency vs a target window.
+///
+/// This is distinct from [`BackpressureEventController`]: the event
+/// controller tracks resource-level events (Metal capacity, ANE, etc.),
+/// while this controller tracks actual batch completion latencies to
+/// detect when the system is taking too long per batch.
+pub struct BackpressureController {
+    pub max_pending_microseconds: u64,
+    pub pending_batches: VecDeque<BatchCompletionRecord>,
+    pub target_occupancy: f32,
+}
+
+impl BackpressureController {
+    pub fn new(max_pending_us: u64, target_occupancy: f32) -> Self {
+        Self {
+            max_pending_microseconds: max_pending_us,
+            pending_batches: VecDeque::with_capacity(1000),
+            target_occupancy,
+        }
+    }
+
+    pub fn record_completion(&mut self, record: BatchCompletionRecord) {
+        self.pending_batches.push_back(record);
+        // Keep last N records
+        while self.pending_batches.len() > 1000 {
+            self.pending_batches.pop_front();
+        }
+    }
+
+    /// Whether the scheduler should pause new work
+    pub fn is_backpressure(&self, current_time_ns: u64) -> bool {
+        if let Some(oldest) = self.pending_batches.front() {
+            return (current_time_ns - oldest.completed_at) < self.max_pending_microseconds * 1000;
+        }
+        false
+    }
+
+    /// Current average latency in ns
+    pub fn avg_latency_ns(&self) -> f64 {
+        if self.pending_batches.is_empty() {
+            return 0.0;
+        }
+        let total: u64 = self.pending_batches.iter().map(|r| r.latency_ns).sum();
+        total as f64 / self.pending_batches.len() as f64
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SchedulingMetrics — high-level metrics for scheduler admission decisions
+// ---------------------------------------------------------------------------
+
+/// High-level scheduling metrics that feed admission decisions.
+///
+/// Combines token budget tracking, running request counts, average
+/// latency measurements, KV cache pressure, and the latency-based
+/// [`BackpressureController`] into a single struct for the scheduler's
+/// admission gate.
+#[derive(Debug, Clone)]
+pub struct SchedulingMetrics {
+    pub max_num_scheduled_tokens: usize,
+    pub num_running_requests: usize,
+    pub avg_prefill_latency_ns: f64,
+    pub avg_decode_latency_ns: f64,
+    pub kv_cache_usage_pct: f64,
+    pub backpressure: BackpressureController,
+}
+
+impl SchedulingMetrics {
+    /// Create new scheduling metrics with the given backpressure config.
+    pub fn new(max_pending_us: u64, target_occupancy: f32) -> Self {
+        Self {
+            max_num_scheduled_tokens: 4096,
+            num_running_requests: 0,
+            avg_prefill_latency_ns: 0.0,
+            avg_decode_latency_ns: 0.0,
+            kv_cache_usage_pct: 0.0,
+            backpressure: BackpressureController::new(max_pending_us, target_occupancy),
+        }
+    }
+
+    /// Update the scheduled token budget based on backpressure.
+    ///
+    /// When recent batches exceed the latency window (is_backpressure true),
+    /// gradually reduce `max_num_scheduled_tokens`. When latency is healthy,
+    /// gradually restore it.
+    pub fn update_token_budget(&mut self, current_time_ns: u64) {
+        if self.backpressure.is_backpressure(current_time_ns) {
+            // Under backpressure: reduce token budget by 25% (minimum 64)
+            self.max_num_scheduled_tokens = (self.max_num_scheduled_tokens / 4 * 3).max(64);
+        } else {
+            // Healthy: gradually restore toward a default (4096)
+            self.max_num_scheduled_tokens = (self.max_num_scheduled_tokens + 256).min(4096);
+        }
     }
 }
 
@@ -296,14 +411,14 @@ mod tests {
 
     #[test]
     fn test_default_level_is_none() {
-        let ctrl = BackpressureController::new();
+        let ctrl = BackpressureEventController::new();
         assert_eq!(ctrl.level(), BackpressureLevel::None);
         assert!(ctrl.events().is_empty());
     }
 
     #[test]
     fn test_report_artifact_cold_is_mild() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::ArtifactCold,
             lane: None,
@@ -317,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_report_iosurface_pool_is_moderate() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::IOSurfacePool,
             lane: Some(ExecutionLane::CoreAiAne),
@@ -330,7 +445,7 @@ mod tests {
 
     #[test]
     fn test_report_activation_slots_is_moderate() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::ActivationSlots,
             lane: None,
@@ -343,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_report_lane_capacity_is_severe() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::MetalCapacity,
             lane: Some(ExecutionLane::MlxGpu),
@@ -356,7 +471,7 @@ mod tests {
 
     #[test]
     fn test_report_session_quota_is_critical() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::SessionQuota,
             lane: None,
@@ -369,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_report_global_queue_is_critical() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::GlobalQueue,
             lane: None,
@@ -382,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_highest_priority_wins() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::ArtifactCold,
             lane: None,
@@ -425,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_clear_before_removes_old_events() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         let now = Instant::now();
 
         ctrl.report(BackpressureEvent {
@@ -455,7 +570,7 @@ mod tests {
 
     #[test]
     fn test_clear_resets_to_none() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::GlobalQueue,
             lane: None,
@@ -472,14 +587,14 @@ mod tests {
 
     #[test]
     fn test_set_level_manual_override() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.set_level(BackpressureLevel::Severe);
         assert_eq!(ctrl.level(), BackpressureLevel::Severe);
     }
 
     #[test]
     fn test_summary_aggregates_reasons_and_lanes() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
 
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::MetalCapacity,
@@ -514,7 +629,7 @@ mod tests {
 
     #[test]
     fn test_with_max_events_caps_buffer() {
-        let mut ctrl = BackpressureController::with_max_events(3);
+        let mut ctrl = BackpressureEventController::with_max_events(3);
         for i in 0..5 {
             ctrl.report(BackpressureEvent {
                 reason: BackpressureReason::ArtifactCold,
@@ -542,7 +657,7 @@ mod tests {
 
     #[test]
     fn test_multiple_severe_lanes_stay_severe() {
-        let mut ctrl = BackpressureController::new();
+        let mut ctrl = BackpressureEventController::new();
         ctrl.report(BackpressureEvent {
             reason: BackpressureReason::MetalCapacity,
             lane: Some(ExecutionLane::MlxGpu),
@@ -569,7 +684,8 @@ mod tests {
 
     #[test]
     fn test_default_impl() {
-        let ctrl = BackpressureController::default();
+        let ctrl = BackpressureEventController::default();
         assert_eq!(ctrl.level(), BackpressureLevel::None);
     }
 }
+use std::collections::VecDeque;

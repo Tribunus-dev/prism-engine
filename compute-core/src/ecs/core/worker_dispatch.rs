@@ -34,6 +34,20 @@ pub struct MetalPipelineState {
 }
 
 impl LoadedMetalKernel {
+    /// Create a LoadedMetalKernel directly from in-memory compiled bytes
+    /// without reading from disk. Used by the lifecycle coordinator to
+    /// dispatch kernels immediately after compilation.
+    pub fn from_memory(artifact: MetalKernelArtifact, library_data: Vec<u8>) -> Self {
+        let function_name = artifact.dispatch.entry_point.clone();
+        Self {
+            artifact,
+            pipeline_state: MetalPipelineState {
+                library_data,
+                function_name,
+            },
+        }
+    }
+
     /// Accessor for the pipeline state metadata.
     pub fn pipeline_state(&self) -> &MetalPipelineState {
         &self.pipeline_state

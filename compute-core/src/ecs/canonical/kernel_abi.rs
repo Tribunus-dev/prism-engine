@@ -6,6 +6,7 @@
 //! semantic catalogue and the same ABI.
 
 use super::execution_graph::{ExecutionLane, ExecutionOp, RegionId};
+use super::identity::{TargetIdentity, ToolchainIdentity};
 use super::model_ir::ArchitectureId;
 use super::representation::TensorRepresentation;
 use serde::{Deserialize, Serialize};
@@ -19,7 +20,7 @@ pub struct KernelSemanticId(pub String);
 pub struct KernelImplementationId(pub String);
 
 /// How a kernel group is implemented.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum KernelImplementationClass {
     /// A single persistent transformer kernel handling all layers.
     PersistentTransformer,
@@ -38,7 +39,7 @@ pub enum KernelImplementationClass {
 }
 
 /// A buffer binding slot in a kernel's ABI.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BufferBinding {
     /// Metal buffer index ([[buffer(N)]]).
     pub slot: u32,
@@ -51,7 +52,7 @@ pub struct BufferBinding {
 }
 
 /// A function constant binding in a kernel's ABI.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstantBinding {
     /// Metal constant index.
     pub index: u32,
@@ -62,14 +63,14 @@ pub struct ConstantBinding {
 }
 
 /// A threadgroup memory allocation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ThreadgroupAllocation {
     /// Byte size of threadgroup memory.
     pub byte_size: u32,
 }
 
 /// How dispatch geometry is determined.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DispatchGeometryPolicy {
     /// Fixed grid dimensions (width, height, depth).
     Fixed(u32, u32, u32),
@@ -80,7 +81,7 @@ pub enum DispatchGeometryPolicy {
 }
 
 /// KernelAbi — the complete interface contract for a compiled kernel.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KernelAbi {
     pub version: u32,
     pub buffers: Vec<BufferBinding>,
@@ -154,7 +155,7 @@ impl KernelPlan {
 }
 
 /// A compiled kernel artifact (e.g. a .metallib with metadata).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompiledKernelArtifact {
     pub implementation_id: KernelImplementationId,
     pub semantic_id: KernelSemanticId,
@@ -162,6 +163,41 @@ pub struct CompiledKernelArtifact {
     pub sha256: String,
     pub entry_point: String,
     pub abi: KernelAbi,
+}
+
+/// Provenance chain for a compiled artifact.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactProvenance {
+    pub semantic_id: KernelSemanticId,
+    pub implementation_id: KernelImplementationId,
+    pub source_digest: Option<String>,
+    pub mlir_digest: Option<String>,
+    pub abi_digest: [u8; 32],
+    pub toolchain: ToolchainIdentity,
+    pub target: TargetIdentity,
+    pub compiled_byte_digest: String,
+}
+
+impl ArtifactProvenance {
+    pub fn new(
+        artifact: &CompiledKernelArtifact,
+        source_digest: Option<String>,
+        mlir_digest: Option<String>,
+        toolchain: ToolchainIdentity,
+        target: TargetIdentity,
+    ) -> Self {
+        let abi_digest = compute_abi_digest(&artifact.abi);
+        Self {
+            semantic_id: artifact.semantic_id.clone(),
+            implementation_id: artifact.implementation_id.clone(),
+            source_digest,
+            mlir_digest,
+            abi_digest,
+            toolchain,
+            target,
+            compiled_byte_digest: artifact.sha256.clone(),
+        }
+    }
 }
 
 /// Generate Metal `#define` constants for buffer indices from a KernelAbi.

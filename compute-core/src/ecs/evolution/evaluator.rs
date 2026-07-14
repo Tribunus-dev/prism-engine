@@ -5,9 +5,15 @@
 //! Each stage produces a typed receipt.
 
 use crate::ecs::canonical::identity::*;
+#[cfg(feature = "metal-dispatch")]
+use crate::ecs::canonical::kernel_abi::{DispatchGeometryPolicy, KernelAbi};
 use crate::ecs::evolution::foundation::{
-    EvolutionCandidate, NumericalReceipt, PerformanceReceipt, StaticValidationReceipt,
+    EvolutionCandidate, NumericalReceipt, PerformanceReceipt, RepeatabilityConfig,
+    StaticValidationReceipt,
 };
+#[cfg(feature = "metal-dispatch")]
+use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
+#[cfg(feature = "metal-dispatch")]
 use crate::ecs::nf4tile640::{dequant_matmul_reference, pack_nf4_weights};
 
 // ── Supporting types ─────────────────────────────────────────────────────────
@@ -26,6 +32,8 @@ pub struct CompiledCandidate {
     pub candidate_id: CandidateId,
     pub compiled_bytes: Vec<u8>,
     pub compile_duration_ms: u64,
+    /// Provenance chain for compiled artifacts.
+    pub provenance: Vec<ArtifactProvenance>,
 }
 
 #[cfg(feature = "metal-dispatch")]
@@ -106,10 +114,24 @@ pub trait CandidateEvaluator {
         compiled: &CompiledCandidate,
         workload: &Workload,
     ) -> Result<PerformanceReceipt, String>;
+
+    /// Generate representative input for a given precision format and shape,
+    /// producing the CPU oracle output.
+    ///
+    /// Returns (random_input, cpu_forward_reference).
+    fn generate_fixture(
+        &self,
+        format: &CodecFamily,
+        shape: &[usize],
+    ) -> Result<(Vec<f32>, Vec<f32>), String> {
+        let _ = (format, shape);
+        Err("generate_fixture not implemented for this evaluator".into())
+    }
 }
 
 // ── MetalCandidateEvaluator ────────────────────────────────────────────────────
 
+use crate::ecs::canonical::kernel_abi::ArtifactProvenance;
 use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::metal_backend::catalogue_source_for;
 use crate::ecs::plan::CodecFamily;
@@ -126,6 +148,8 @@ pub struct MetalCandidateEvaluator {
     device: Option<metal::Device>,
     #[cfg(not(feature = "metal-dispatch"))]
     _private: (),
+    /// Repeatability configuration for performance measurements.
+    pub repeatability: RepeatabilityConfig,
 }
 
 impl MetalCandidateEvaluator {
@@ -135,12 +159,18 @@ impl MetalCandidateEvaluator {
         let device = metal::Device::system_default();
         #[cfg(not(target_os = "macos"))]
         let device = None;
-        Self { device }
+        Self {
+            device,
+            repeatability: RepeatabilityConfig::default(),
+        }
     }
 
     #[cfg(not(feature = "metal-dispatch"))]
     pub fn new() -> Self {
-        Self { _private: () }
+        Self {
+            _private: (),
+            repeatability: RepeatabilityConfig::default(),
+        }
     }
 
     fn validate_static_impl(&self, candidate: &mut EvolutionCandidate) -> StaticValidationReceipt {
@@ -222,17 +252,19 @@ impl MetalCandidateEvaluator {
                     .map(|d| d.as_nanos())
                     .unwrap_or(0)
             ),
+            provenance: Vec::new(),
         }
     }
 
     #[cfg(feature = "metal-dispatch")]
-    fn compile_pipeline(&self, source: &[u8]) -> Result<metal::ComputePipelineState, String> {
+    fn compile_pipeline(
+        &self,
+        compiled_bytes: &[u8],
+    ) -> Result<metal::ComputePipelineState, String> {
         let device = self.device.as_ref().ok_or("no Metal device available")?;
-        let source =
-            std::str::from_utf8(source).map_err(|e| format!("invalid Metal source: {e}"))?;
         let library = device
-            .new_library_with_source(source, &metal::CompileOptions::new())
-            .map_err(|e| format!("Metal library compile failed: {e}"))?;
+            .new_library_with_data(compiled_bytes)
+            .map_err(|e| format!("Metal library load failed: {e}"))?;
         let function = library
             .get_function(
                 "dequant_mul_nf4tile640",
@@ -336,6 +368,84 @@ impl MetalCandidateEvaluator {
             .map(|i| unsafe { *ptr.add(i) })
             .collect())
     }
+
+    /// Dispatch the pipeline once and return elapsed nanoseconds.
+    #[cfg(feature = "metal-dispatch")]
+    fn dispatch_single_timed(
+        &self,
+        pipeline: &metal::ComputePipelineState,
+        fixture: &Nf4Fixture,
+    ) -> Result<u64, String> {
+        let device = self.device.as_ref().ok_or("no Metal device available")?;
+
+        let buffer = |bytes: &[u8]| {
+            device.new_buffer_with_data(
+                bytes.as_ptr() as *const std::ffi::c_void,
+                bytes.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            )
+        };
+        let input_bytes = unsafe {
+            std::slice::from_raw_parts(
+                fixture.input.as_ptr() as *const u8,
+                fixture.input.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        let scale_bytes = unsafe {
+            std::slice::from_raw_parts(
+                fixture.scales.as_ptr() as *const u8,
+                fixture.scales.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        let bias_bytes = unsafe {
+            std::slice::from_raw_parts(
+                fixture.biases.as_ptr() as *const u8,
+                fixture.biases.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        let codes_buf = buffer(&fixture.codes);
+        let scales_buf = buffer(scale_bytes);
+        let biases_buf = buffer(bias_bytes);
+        let input_buf = buffer(input_bytes);
+        let _output_buf = device.new_buffer(
+            (fixture.reference.len() * std::mem::size_of::<f32>()) as u64,
+            metal::MTLResourceOptions::StorageModeShared,
+        );
+        let params = Nf4Tile640DispatchParams {
+            abi_version: 1,
+            m: fixture.m as u32,
+            k: fixture.k as u32,
+            n: fixture.n as u32,
+            group_size: 128,
+            reserved: [0; 3],
+        };
+        let params_buf = buffer(unsafe {
+            std::slice::from_raw_parts(
+                &params as *const _ as *const u8,
+                std::mem::size_of::<Nf4Tile640DispatchParams>(),
+            )
+        });
+
+        let queue = device.new_command_queue();
+        let start = std::time::Instant::now();
+        let command = queue.new_command_buffer();
+        let encoder = command.new_compute_command_encoder();
+        encoder.set_compute_pipeline_state(&pipeline);
+        encoder.set_buffer(0, Some(&codes_buf), 0);
+        encoder.set_buffer(1, Some(&scales_buf), 0);
+        encoder.set_buffer(2, Some(&biases_buf), 0);
+        encoder.set_buffer(3, Some(&input_buf), 0);
+        encoder.set_buffer(4, Some(&_output_buf), 0);
+        encoder.set_buffer(5, Some(&params_buf), 0);
+        encoder.dispatch_threads(
+            metal::MTLSize::new(fixture.n as u64, fixture.m as u64, 1),
+            metal::MTLSize::new(16, 1, 1),
+        );
+        encoder.end_encoding();
+        command.commit();
+        command.wait_until_completed();
+        Ok(start.elapsed().as_nanos() as u64)
+    }
 }
 
 impl CandidateEvaluator for MetalCandidateEvaluator {
@@ -353,7 +463,7 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
     }
 
     fn compile(&self, candidate: &EvolutionCandidate) -> Result<CompiledCandidate, String> {
-        let (semantic_id, entry_point) = match candidate.genome.kernel_variant.as_str() {
+        let (semantic_id, _entry_point) = match candidate.genome.kernel_variant.as_str() {
             "prism.linear.nf4.v1" | "tile640_gemv" | "gemv_nf4_tile640" => (
                 KernelSemanticId("prism.nf4tile640.dequant_mul.v1".into()),
                 "dequant_mul_nf4tile640",
@@ -371,18 +481,31 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
         {
             let source = catalogue_source_for(&semantic_id)
                 .ok_or_else(|| format!("no catalogue entry for {:?}", semantic_id))?;
-            let device = self.device.as_ref().ok_or("no Metal device available")?;
+            let source_digest = Some(blake3::hash(source.as_bytes()).to_hex().to_string());
             let start = std::time::Instant::now();
-            let library = device
-                .new_library_with_source(&source, &metal::CompileOptions::new())
+            let compiler = MetalBackendCompiler::new();
+            let artifact = compiler
+                .compile_source(
+                    &semantic_id.0,
+                    &source,
+                    _entry_point,
+                    &semantic_id.0,
+                    KernelAbi {
+                        version: 1,
+                        buffers: vec![],
+                        constants: vec![],
+                        threadgroup_memory: vec![],
+                        dispatch_geometry: DispatchGeometryPolicy::FromConstant,
+                        threads_per_threadgroup: (16, 1, 1),
+                    },
+                )
                 .map_err(|e| format!("Metal compile failed: {e}"))?;
-            let _function = library
-                .get_function(entry_point, None)
-                .map_err(|e| format!("kernel not found: {e}"))?;
             let dur = start.elapsed().as_millis() as u64;
+            let provenance = vec![compiler.compute_provenance(&artifact, source_digest, None)];
             Ok(CompiledCandidate {
                 candidate_id: candidate.candidate_id.clone(),
-                compiled_bytes: source.into_bytes(),
+                compiled_bytes: artifact.compiled_bytes,
+                provenance,
                 compile_duration_ms: dur,
             })
         }
@@ -416,6 +539,7 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
                 max_absolute_error: max_abs,
                 max_relative_error: max_rel,
                 threshold,
+                provenance: compiled.provenance.clone(),
             };
             candidate.quality_receipt = Some(receipt.clone());
             Ok(receipt)
@@ -436,20 +560,55 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
         #[cfg(feature = "metal-dispatch")]
         {
             let fixture = nf4_fixture()?;
-            let repetitions = workload.repetitions.max(1);
-            // Compile exactly once. Warm-up and measured repetitions reuse the
-            // same pipeline so the receipt reflects execution rather than
-            // repeatedly paying Metal library and PSO creation costs.
+            let cfg = &self.repeatability;
+            let warm_up = cfg.warm_up_repetitions.max(1);
+            let min_reps = workload.repetitions.max(cfg.min_repetitions);
             let pipeline = self.compile_pipeline(&compiled.compiled_bytes)?;
-            self.dispatch_pipeline(&pipeline, &fixture, 1)?;
-            let start = std::time::Instant::now();
-            self.dispatch_pipeline(&pipeline, &fixture, repetitions)?;
-            let total_ns = start.elapsed().as_nanos() as u64;
-            let per_dispatch = (total_ns / repetitions as u64).max(1);
+            // Warm-up: pipeline + device are cold; execute warm-up reps before
+            // measuring so the GPU reaches steady-state dispatch latency.
+            for _ in 0..warm_up {
+                self.dispatch_single_timed(&pipeline, &fixture)?;
+            }
+            // Measured runs: collect per-dispatch latencies for variance check.
+            let mut per_run_ns: Vec<u64> = Vec::with_capacity(min_reps);
+            for _ in 0..min_reps {
+                per_run_ns.push(self.dispatch_single_timed(&pipeline, &fixture)?);
+            }
+            // Compute aggregate statistics
+            let total_ns: u64 = per_run_ns.iter().sum();
+            let count = per_run_ns.len();
+            let mean_ns = (total_ns as f64 / count as f64) as u64;
+            // Compute standard deviation for variance check
+            let variance: f64 = if count > 1 {
+                let mean_f = total_ns as f64 / count as f64;
+                per_run_ns
+                    .iter()
+                    .map(|&v| {
+                        let d = v as f64 - mean_f;
+                        d * d
+                    })
+                    .sum::<f64>()
+                    / (count - 1) as f64
+            } else {
+                0.0
+            };
+            let std_dev = variance.sqrt();
+            let cv = if mean_ns > 0 {
+                std_dev / mean_ns as f64
+            } else {
+                0.0
+            };
+            // Fail if variance exceeds the configured maximum
+            if cv > cfg.max_variance && count >= cfg.min_repetitions {
+                return Err(format!(
+                    "performance variance too high: cv={:.4} > max_variance={:.4} after {} runs",
+                    cv, cfg.max_variance, count,
+                ));
+            }
             let receipt = PerformanceReceipt {
                 candidate_id: compiled.candidate_id.clone(),
-                latency_p50_ns: per_dispatch,
-                latency_p95_ns: per_dispatch,
+                latency_p50_ns: mean_ns,
+                latency_p95_ns: mean_ns,
                 encode_time_ns: 0,
                 sync_time_ns: total_ns,
                 memory_traffic_bytes: (fixture.codes.len()
@@ -457,10 +616,119 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
                     + fixture.input.len() * 4
                     + fixture.reference.len() * 4) as u64,
                 energy_uj: None,
-                repetitions,
+                repetitions: count,
+                provenance: compiled.provenance.clone(),
             };
             candidate.performance_receipt = Some(receipt.clone());
             Ok(receipt)
+        }
+    }
+
+    fn generate_fixture(
+        &self,
+        format: &CodecFamily,
+        shape: &[usize],
+    ) -> Result<(Vec<f32>, Vec<f32>), String> {
+        if shape.len() < 2 {
+            return Err("shape must have at least 2 dimensions (M, K, [N])".into());
+        }
+        let m = shape[0];
+        let k = shape[1];
+        let n = *shape.get(2).unwrap_or(&k);
+        // Deterministic seed so fixtures are reproducible
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        format.hash(&mut hasher);
+        m.hash(&mut hasher);
+        k.hash(&mut hasher);
+        n.hash(&mut hasher);
+        let seed = hasher.finish();
+
+        // Generate deterministic input and weights
+        let rng = |i: usize| {
+            ((seed.wrapping_mul(i as u64 + 1) ^ 0x9e3779b9) as f64 * 0.03125).sin() as f32
+        };
+        let input: Vec<f32> = (0..m * k).map(|i| rng(i)).collect();
+        let weights: Vec<f32> = (0..k * n).map(|i| rng(i + 9999)).collect();
+
+        match format {
+            CodecFamily::Nf4 => {
+                #[cfg(feature = "metal-dispatch")]
+                {
+                    let (codes, scales, biases, _, _) =
+                        crate::ecs::nf4tile640::pack_nf4_weights(&weights, k, n);
+                    let mut reference = vec![0.0; m * n];
+                    crate::ecs::nf4tile640::dequant_matmul_reference(
+                        &input,
+                        &codes,
+                        &scales,
+                        &biases,
+                        m,
+                        k,
+                        n,
+                        &mut reference,
+                    )?;
+                    return Ok((input, reference));
+                }
+                #[cfg(not(feature = "metal-dispatch"))]
+                {
+                    let _: &mut Vec<f32> = &mut (vec![]);
+                    let _ = (format, shape, &input, &weights);
+                    Err("NF4 fixture requires metal-dispatch feature".into())
+                }
+            }
+            CodecFamily::Int8 => {
+                // Simple INT8 reference: quantize weights to i8, matmul in f32
+                let scale_factor: f32 = 127.0
+                    / weights
+                        .iter()
+                        .map(|w| w.abs())
+                        .fold(0.0_f32, f32::max)
+                        .max(1e-8);
+                let qw: Vec<i8> = weights
+                    .iter()
+                    .map(|&w| (w * scale_factor).round().clamp(-128.0, 127.0) as i8)
+                    .collect();
+                let mut reference = vec![0.0; m * n];
+                for i in 0..m {
+                    for j in 0..n {
+                        let mut dot = 0.0f64;
+                        for t in 0..k {
+                            dot += input[i * k + t] as f64 * qw[t * n + j] as f64;
+                        }
+                        reference[i * n + j] = (dot / scale_factor as f64) as f32;
+                    }
+                }
+                Ok((input, reference))
+            }
+            CodecFamily::Ternary => {
+                // Simple ternary reference: {-1, 0, +1} weights
+                let qw: Vec<i8> = weights
+                    .iter()
+                    .map(|&w| {
+                        if w > 0.3 {
+                            1
+                        } else if w < -0.3 {
+                            -1
+                        } else {
+                            0
+                        }
+                    })
+                    .collect();
+                let mut reference = vec![0.0; m * n];
+                for i in 0..m {
+                    for j in 0..n {
+                        let mut dot = 0.0f64;
+                        for t in 0..k {
+                            dot += input[i * k + t] as f64 * qw[t * n + j] as f64;
+                        }
+                        reference[i * n + j] = dot as f32;
+                    }
+                }
+                Ok((input, reference))
+            }
+            other => Err(format!("generate_fixture not implemented for {:?}", other)),
         }
     }
 }
@@ -594,6 +862,7 @@ mod tests {
                 candidate_id: crate::ecs::canonical::identity::CandidateId("test".into()),
                 compiled_bytes: vec![],
                 compile_duration_ms: 0,
+                provenance: vec![],
             };
             assert!(evaluator.validate_numerical(&mut ec, &compiled).is_err());
         }
@@ -623,6 +892,7 @@ mod tests {
                 candidate_id: crate::ecs::canonical::identity::CandidateId("test".into()),
                 compiled_bytes: vec![],
                 compile_duration_ms: 0,
+                provenance: vec![],
             };
             assert!(evaluator.measure(&mut ec, &compiled, &workload).is_err());
         }

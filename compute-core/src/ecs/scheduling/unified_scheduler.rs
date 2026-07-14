@@ -8,6 +8,7 @@
 //! These types define the data model for a future `ScheduleSystem`. They
 //! coexist with the existing struct-based continuous-batching scheduler.
 
+use super::SchedulerConfig;
 use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,14 @@ impl SchedulerState {
             preempted: Vec::new(),
             requests: HashMap::new(),
         }
+    }
+
+    /// Create a new scheduler state from a [`SchedulerConfig`].
+    ///
+    /// Extracts `max_num_scheduled_tokens` and `max_batch_size` from the
+    /// config and delegates to [`new`](Self::new).
+    pub fn new_with_config(config: &SchedulerConfig) -> Self {
+        Self::new(config.max_num_scheduled_tokens, config.max_batch_size)
     }
 
     /// Add a request to the waiting pool.
@@ -251,6 +260,54 @@ impl SchedulerState {
         }
 
         lowest_id
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SchedulerRunner — runtime integration wrapper
+// ---------------------------------------------------------------------------
+
+/// Runtime wrapper that integrates [`SchedulerState`] with the execution
+/// pipeline.
+///
+/// Provides a lifecycle-oriented API:
+/// - [`step`](Self::step) — one scheduling cycle
+/// - [`submit_request`](Self::submit_request) — enqueue a new request
+/// - [`complete_request`](Self::complete_request) — finalise and remove a
+///   finished request
+///
+/// The existing [`crate::ecs::scheduling::Scheduler`] (in `scheduler.rs`)
+/// remains for backwards compatibility with the MLX continuous-batching path.
+/// This runner is the authoritative scheduling interface for the unified
+/// token-budget path.
+#[derive(Debug, Clone)]
+pub struct SchedulerRunner {
+    /// The underlying scheduler state.
+    pub state: SchedulerState,
+}
+
+impl SchedulerRunner {
+    /// Create a new runner from a [`SchedulerConfig`].
+    pub fn new(config: &SchedulerConfig) -> Self {
+        Self {
+            state: SchedulerState::new_with_config(config),
+        }
+    }
+
+    /// One scheduling step: run [`schedule_once`] and return the assignments
+    /// for the next batch.
+    pub fn step(&mut self) -> Result<ScheduleOutput, String> {
+        Ok(self.state.schedule_once())
+    }
+
+    /// Add a new request to the waiting pool.
+    pub fn submit_request(&mut self, id: &str, tokens: usize, priority: usize) {
+        self.state.add_request(id, tokens, priority);
+    }
+
+    /// Mark a request as complete and remove it from all scheduler state.
+    pub fn complete_request(&mut self, id: &str) {
+        self.state.remove_request(id);
     }
 }
 

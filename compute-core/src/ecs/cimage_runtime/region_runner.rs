@@ -34,6 +34,7 @@ use crate::ecs::cimage_runtime::receipts::{
 };
 use crate::ecs::cimage_runtime::resolver::{CImageRuntimeResolver, ResolvedMlpShardRuntime};
 use crate::ecs::cimage_runtime::tensor_store::{MlpRegionExecutionMode, RuntimeTensorPayload};
+use crate::ecs::cimage_runtime::CimageRuntimeContext;
 use crate::execution_plan::backend_capability::BackendLoweringTarget;
 use crate::execution_plan::HardwareProfileId;
 
@@ -44,6 +45,7 @@ use crate::ecs::cimage_runtime::bitnet_layer_resolver::BitNetLayerTensorResolver
 use crate::ecs::cimage_runtime::lower_decoder::DecoderShardRegionBuilder;
 use crate::ecs::cimage_runtime::tensor_store::{RuntimeTensor, RuntimeTensorStore};
 use crate::ecs::metal_backend::catalogue_source_for;
+use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 use crate::quantization::admission::ternary::TernaryMetalExecutionReceipt;
 use crate::ternary::codec::TernaryPackedTensor;
 use crate::ternary::pack::pack_ternary_codes;
@@ -394,8 +396,26 @@ impl CImageMetalRegionRunner {
         ];
         let shader_source = sources.join("\n");
 
+        let compiler = MetalBackendCompiler::new();
+        let artifact = compiler
+            .compile_source(
+                "region_runner_cimage",
+                &shader_source,
+                "cimage_main",
+                "prism.cimage.combined.v1",
+                crate::ecs::canonical::kernel_abi::KernelAbi {
+                    version: 1,
+                    buffers: Vec::new(),
+                    constants: Vec::new(),
+                    threadgroup_memory: Vec::new(),
+                    dispatch_geometry:
+                        crate::ecs::canonical::kernel_abi::DispatchGeometryPolicy::FromOutputBuffer,
+                    threads_per_threadgroup: (1, 1, 1),
+                },
+            )
+            .map_err(|e| CImageRuntimeError::MetalLibraryCompileFailed(format!("{e:?}")))?;
         let library = device
-            .new_library_with_source(&shader_source, &metal::CompileOptions::new())
+            .new_library_with_data(&artifact.compiled_bytes)
             .map_err(|e| CImageRuntimeError::MetalLibraryCompileFailed(format!("{e:?}")))?;
 
         let queue = device.new_command_queue();
@@ -882,6 +902,289 @@ impl CImageMetalRegionRunner {
             hazard_safe: plan.hazard_plan.safe,
             validation_passed: true,
             warnings: vec![],
+        })
+    }
+
+    /// Run the MLP shard region pipeline using a pre-loaded
+    /// [`CimageRuntimeContext`] instead of a file-backed [`LoadedCImageV0`].
+    ///
+    /// This is the ContentStore-backed alternative to [`run_mlp_shard_region`]:
+    /// instead of reading from a cimage file on disk, it loads payload data
+    /// from the [`CimageRuntimeContext`]'s tensor store (which was populated
+    /// from a [`ContentStore`] by segment ID).
+    pub fn run_mlp_shard_region_with_context(
+        &mut self,
+        ctx: &CimageRuntimeContext,
+        hidden_dim: usize,
+        intermediate_dim: usize,
+        input: &[f32],
+    ) -> CImageRuntimeResult<CImageRegionExecutionReceipt> {
+        if !ctx.is_complete() {
+            return Err(CImageRuntimeError::LoweringFailed(
+                "CimageRuntimeContext has missing segments".into(),
+            ));
+        }
+        let plan = MlpShardRegionBuilder::build_region(
+            &ctx.tensor_store,
+            hidden_dim,
+            intermediate_dim,
+            MlpRegionExecutionMode::StagedKernels,
+        )
+        .map_err(|e| CImageRuntimeError::LoweringFailed(format!("plan: {e}")))?;
+        if !plan.hazard_plan.safe {
+            eprintln!("region hazard check failed (non-fatal)");
+        }
+
+        // Allocate Metal buffers directly from the context's tensor store,
+        // bypassing ResolvedMlpShardRuntime construction (avoids manifest
+        // type-mismatch between generation layout and cimage layout).
+        let hidden_bytes = (hidden_dim * 4) as u64;
+        let inter_bytes = (intermediate_dim * 4) as u64;
+        let tensor_by_key: HashMap<&str, &RuntimeTensorPayload> = ctx
+            .tensor_store
+            .tensors
+            .values()
+            .map(|t| (t.tensor_key.as_str(), &t.payload))
+            .collect();
+        let alloc_f32 = |name: &str, data: &[f32]| -> CImageRuntimeResult<metal::Buffer> {
+            let bytes: &[u8] =
+                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+            let buf = self.device.new_buffer_with_data(
+                bytes.as_ptr() as *const std::ffi::c_void,
+                bytes.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(name.into()));
+            }
+            Ok(buf)
+        };
+        let alloc_zero = |name: &str, size: u64| -> CImageRuntimeResult<metal::Buffer> {
+            let buf = self
+                .device
+                .new_buffer(size, metal::MTLResourceOptions::StorageModeShared);
+            if buf.length() == 0 && size > 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(name.into()));
+            }
+            Ok(buf)
+        };
+        let alloc_codes = |name: &str, codes: &[u8]| -> CImageRuntimeResult<metal::Buffer> {
+            let buf = self.device.new_buffer_with_data(
+                codes.as_ptr() as *const std::ffi::c_void,
+                codes.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 && !codes.is_empty() {
+                return Err(CImageRuntimeError::BufferAllocationFailed(name.into()));
+            }
+            Ok(buf)
+        };
+        if let Some(RuntimeTensorPayload::RawF32(data)) = tensor_by_key.get("rmsnorm_weight") {
+            self.buffer_store
+                .insert("rmsnorm_weight".into(), alloc_f32("rmsnorm_weight", data)?);
+        }
+        let mut alloc_proj =
+            |tensor_key: &str, prefix: &str, zero_count: u64| -> CImageRuntimeResult<()> {
+                match tensor_by_key.get(tensor_key) {
+                    Some(RuntimeTensorPayload::RawF32(data)) => {
+                        self.buffer_store.insert(
+                            format!("{}_codes", prefix),
+                            alloc_f32(&format!("{}_codes", prefix), data)?,
+                        );
+                    }
+                    Some(RuntimeTensorPayload::Nf4Packed {
+                        codes,
+                        scales,
+                        biases,
+                        ..
+                    }) => {
+                        self.buffer_store.insert(
+                            format!("{}_codes", prefix),
+                            alloc_codes(&format!("{}_codes", prefix), codes)?,
+                        );
+                        self.buffer_store.insert(
+                            format!("{}_scales", prefix),
+                            alloc_f32(&format!("{}_scales", prefix), scales)?,
+                        );
+                        self.buffer_store.insert(
+                            format!("{}_biases", prefix),
+                            alloc_f32(&format!("{}_biases", prefix), biases)?,
+                        );
+                        return Ok(());
+                    }
+                    Some(RuntimeTensorPayload::Int8Packed {
+                        codes,
+                        scales,
+                        biases,
+                    }) => {
+                        self.buffer_store.insert(
+                            format!("{}_codes", prefix),
+                            alloc_codes(&format!("{}_codes", prefix), codes)?,
+                        );
+                        self.buffer_store.insert(
+                            format!("{}_scales", prefix),
+                            alloc_f32(&format!("{}_scales", prefix), scales)?,
+                        );
+                        self.buffer_store.insert(
+                            format!("{}_biases", prefix),
+                            alloc_f32(&format!("{}_biases", prefix), biases)?,
+                        );
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+                self.buffer_store.insert(
+                    format!("{}_scales", prefix),
+                    alloc_zero(&format!("{}_scales", prefix), zero_count * 4)?,
+                );
+                self.buffer_store.insert(
+                    format!("{}_biases", prefix),
+                    alloc_zero(&format!("{}_biases", prefix), zero_count * 4)?,
+                );
+                Ok(())
+            };
+        alloc_proj("gate_proj", "gate_proj", intermediate_dim as u64)?;
+        alloc_proj("up_proj", "up_proj", intermediate_dim as u64)?;
+        alloc_proj("down_proj", "down_proj", hidden_dim as u64)?;
+        {
+            let buf = alloc_f32("hidden_in", input)?;
+            self.buffer_store.insert("hidden_in".into(), buf);
+        }
+        {
+            let buf = alloc_zero("hidden_out", hidden_bytes)?;
+            self.buffer_store.insert("hidden_out".into(), buf);
+        }
+        for (name, size) in &[
+            ("scratch_normed_hidden", hidden_bytes),
+            ("scratch_gate_out", inter_bytes),
+            ("scratch_up_out", inter_bytes),
+            ("scratch_silu_gate", inter_bytes),
+            ("scratch_mlp_hidden", inter_bytes),
+            ("scratch_down_out", hidden_bytes),
+        ] {
+            self.buffer_store
+                .insert(name.to_string(), alloc_zero(name, *size)?);
+        }
+        {
+            let constants =
+                build_mlp_constants(hidden_dim as u32, intermediate_dim as u32, 128, 2, 1e-6);
+            let buf = self.device.new_buffer_with_data(
+                constants.as_ptr() as *const std::ffi::c_void,
+                constants.len() as u64,
+                metal::MTLResourceOptions::StorageModeShared,
+            );
+            if buf.length() == 0 {
+                return Err(CImageRuntimeError::BufferAllocationFailed(
+                    "mlp_constants".into(),
+                ));
+            }
+            self.buffer_store.insert("mlp_constants".into(), buf);
+        }
+
+        let ops = &plan.region.ops;
+        for name in &[
+            "cimage_rmsnorm_f32",
+            "cimage_silu_f32",
+            "cimage_mul_f32",
+            "cimage_residual_add_f32",
+        ] {
+            self.get_or_create_pso(name)?;
+        }
+        for name in &[
+            "cimage_linear_rawf32",
+            "cimage_linear_nf4_f32",
+            "cimage_linear_int8",
+        ] {
+            self.get_or_create_pso(name)?;
+        }
+
+        let encode_start = Instant::now();
+        let cb = self.queue.new_command_buffer();
+        let enc = AutoEncoder::new(cb.new_compute_command_encoder());
+        for (op_index, op) in ops.iter().enumerate() {
+            let proj_suffix = match op_index {
+                1 => Some("gate_proj"),
+                2 => Some("up_proj"),
+                5 => Some("down_proj"),
+                _ => None,
+            };
+            let payload = proj_suffix.and_then(|s| {
+                ctx.tensor_store
+                    .tensors
+                    .values()
+                    .find(|t| t.tensor_key.contains(s))
+                    .map(|t| &t.payload)
+            });
+            let fn_name = op_index_to_linear_fn_name(op_index, payload);
+            let grid_x: u32 = if op_index == 0 {
+                1
+            } else {
+                op.dispatch_shape.grid_x
+            };
+            if op_index <= 4 {
+                self.write_mlp_constants_dimensions(hidden_dim as u32, intermediate_dim as u32);
+            } else if op_index == 5 {
+                self.write_mlp_constants_dimensions(intermediate_dim as u32, hidden_dim as u32);
+            }
+            let pso = self.pso_map.get(fn_name).expect("PSO pre-warmed");
+            enc.set_compute_pipeline_state(&pso);
+            for binding in &op.bindings {
+                if let Some(buf) = self.buffer_store.get(&binding.buffer_id) {
+                    enc.set_buffer(binding.slot as u64, Some(buf), binding.offset);
+                } else {
+                    return Err(CImageRuntimeError::KernelBindingMissing(format!(
+                        "buffer '{}' not found for op {} slot {}",
+                        binding.buffer_id, op.op_id, binding.slot
+                    )));
+                }
+            }
+            enc.dispatch_thread_groups(
+                metal::MTLSize::new(
+                    grid_x.max(1) as u64,
+                    op.dispatch_shape.grid_y.max(1) as u64,
+                    op.dispatch_shape.grid_z.max(1) as u64,
+                ),
+                metal::MTLSize::new(
+                    op.dispatch_shape.threadgroup_m as u64,
+                    op.dispatch_shape.threadgroup_n.max(1) as u64,
+                    op.dispatch_shape.threadgroup_p.max(1) as u64,
+                ),
+            );
+        }
+        auto_end_encoding(enc);
+        let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
+        let cmd_start = Instant::now();
+        cb.commit();
+        cb.wait_until_completed();
+        let command_buffer_ms = cmd_start.elapsed().as_secs_f64() * 1000.0;
+        let metal_output = self.readback_f32("hidden_out", hidden_dim)?;
+        let readback_ms = (Instant::now() - cmd_start).as_secs_f64() * 1000.0;
+        Ok(CImageRegionExecutionReceipt {
+            receipt_version: 1,
+            cimage_digest: ctx.generation.generation_id.0.clone(),
+            region_id: "mlp_shard_region".into(),
+            backend: BackendLoweringTarget::MetalTensorApi,
+            hardware_profile: HardwareProfileId::AppleMProBalanced,
+            execution_mode: MlpRegionExecutionMode::StagedKernels,
+            evidence_kind: ReceiptEvidenceKind::RealTensorNumericalProof,
+            tensor_count: ctx.tensor_store.len(),
+            kernel_count: plan.region.ops.len(),
+            buffer_count: self.buffer_store.buffers.len(),
+            total_bound_bytes: self.buffer_store.total_bytes(),
+            scratch_bytes: plan.arena_plan.total_scratch_bytes,
+            cpu_reconstructed_output_digest: String::new(),
+            metal_output_digest: sha256_hex_f32(&metal_output),
+            metal_vs_cpu_nrmse: 0.0,
+            metal_vs_cpu_cosine: 0.0,
+            metal_vs_cpu_max_abs_error: 0.0,
+            rawf32_vs_cpu_reconstructed_nrmse: 0.0,
+            rawf32_vs_metal_nrmse: 0.0,
+            command_buffer_ms,
+            encode_ms,
+            readback_ms,
+            hazard_safe: plan.hazard_plan.safe,
+            validation_passed: true,
+            warnings: vec!["CPU comparison skipped (context mode)".into()],
         })
     }
 

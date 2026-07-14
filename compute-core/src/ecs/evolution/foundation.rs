@@ -10,7 +10,8 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 
 use crate::ecs::canonical::identity::CandidateId;
-use crate::ecs::canonical::kernel_abi::KernelImplementationId;
+use crate::ecs::canonical::kernel_abi::{ArtifactProvenance, KernelImplementationId};
+use crate::ecs::canonical::provenance::MeasuredCandidateRecord;
 use crate::ecs::cimage::PhysicalTileLayout;
 use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::plan::CodecFamily;
@@ -52,6 +53,8 @@ pub struct EvolutionState {
     pub converged: bool,
     pub search_config: SearchConfig,
     pub receipt_store: Vec<ReceiptMetadata>,
+    /// Persisted candidate records for every evaluated candidate.
+    pub records: Vec<MeasuredCandidateRecord>,
 }
 
 /// Configuration for one search.
@@ -235,6 +238,8 @@ pub struct StaticValidationReceipt {
     pub passed: bool,
     pub violations: Vec<String>,
     pub validated_at: String,
+    /// Provenance chain for compiled artifacts linked to this receipt.
+    pub provenance: Vec<ArtifactProvenance>,
 }
 
 /// Numerical validation receipt — compares candidate output to reference.
@@ -245,6 +250,8 @@ pub struct NumericalReceipt {
     pub max_absolute_error: f64,
     pub max_relative_error: f64,
     pub threshold: f64,
+    /// Provenance chain for compiled artifacts linked to this receipt.
+    pub provenance: Vec<ArtifactProvenance>,
 }
 
 /// Performance measurement receipt.
@@ -258,6 +265,8 @@ pub struct PerformanceReceipt {
     pub memory_traffic_bytes: u64,
     pub energy_uj: Option<u64>,
     pub repetitions: usize,
+    /// Provenance chain for compiled artifacts linked to this receipt.
+    pub provenance: Vec<ArtifactProvenance>,
 }
 
 /// Metadata linking evaluation receipts to their candidate.
@@ -369,4 +378,55 @@ pub struct FitnessVector {
     pub latency_p95_ns: u64,
     pub energy_uj: Option<u64>,
     pub compile_cost_ms: u64,
+}
+
+// ── RepeatabilityConfig ─────────────────────────────────────────────────
+
+/// Configuration for repeatability checks during performance measurement.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepeatabilityConfig {
+    /// Number of warm-up repetitions before measured runs begin.
+    pub warm_up_repetitions: usize,
+    /// Minimum repetitions required for a valid measurement.
+    pub min_repetitions: usize,
+    /// Maximum acceptable coefficient of variation (std/mean) across measured runs.
+    pub max_variance: f64,
+}
+
+impl Default for RepeatabilityConfig {
+    fn default() -> Self {
+        Self {
+            warm_up_repetitions: 3,
+            min_repetitions: 3,
+            max_variance: 0.15,
+        }
+    }
+}
+
+impl EvolutionState {
+    /// Add a measured candidate record and its linked receipts to the evolution state.
+    ///
+    /// Persists the candidate evidence so the search, frontier, replay, and promotion
+    /// paths all reference the same data.
+    pub fn add_candidate_record(
+        &mut self,
+        record: MeasuredCandidateRecord,
+        static_receipt: Option<StaticValidationReceipt>,
+        numerical_receipt: Option<NumericalReceipt>,
+        performance_receipt: Option<PerformanceReceipt>,
+    ) {
+        self.records.push(record);
+        self.receipt_store.push(ReceiptMetadata {
+            candidate_id: static_receipt
+                .as_ref()
+                .map(|r| &r.candidate_id)
+                .or_else(|| numerical_receipt.as_ref().map(|r| &r.candidate_id))
+                .or_else(|| performance_receipt.as_ref().map(|r| &r.candidate_id))
+                .cloned()
+                .unwrap_or_else(|| CandidateId("unknown".into())),
+            static_receipt,
+            numerical_receipt,
+            performance_receipt,
+        });
+    }
 }

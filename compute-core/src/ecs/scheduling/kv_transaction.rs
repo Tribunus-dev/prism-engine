@@ -156,3 +156,150 @@ mod tests {
         assert_eq!(receipt.bytes_written, 2048);
     }
 }
+
+// ── KvBlockTransaction ───────────────────────────────────────────────────
+// Block-level allocation transaction guard for KV cache.
+
+/// Transaction guard for KV block allocations.
+///
+/// On drop, rolls back (frees all allocated blocks) if not committed.
+/// Use the builder-style API:
+///
+/// ```ignore
+/// let tx = KvBlockTransaction::new_for("req-1", &mut coord)
+///     .allocate(5, CacheGroupType::FullAttention)?
+///     .commit()?;
+/// ```
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+pub struct KvBlockTransaction {
+    request_id: String,
+    coord: *mut crate::ecs::kv_cache::layered_cache::KVCacheCoordinator,
+    committed: bool,
+}
+
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+impl KvBlockTransaction {
+    /// Create a new transaction for the given request.
+    ///
+    /// No blocks are allocated yet; call [`allocate`](Self::allocate) to
+    /// reserve blocks within the transaction scope.
+    pub fn new_for(
+        request_id: &str,
+        coord: &mut crate::ecs::kv_cache::layered_cache::KVCacheCoordinator,
+    ) -> Self {
+        Self {
+            request_id: request_id.to_string(),
+            coord: coord as *mut crate::ecs::kv_cache::layered_cache::KVCacheCoordinator,
+            committed: false,
+        }
+    }
+
+    /// Allocate `num_tokens` worth of KV cache blocks for the request.
+    ///
+    /// Uses the raw-pointer coordinator captured at construction time.
+    /// Returns `self` for chaining.
+    pub fn allocate(
+        &mut self,
+        num_tokens: usize,
+        group_type: crate::ecs::kv_cache::layered_cache::CacheGroupType,
+    ) -> Result<&mut Self, String> {
+        let blocks =
+            unsafe { (*self.coord).allocate_slots(&self.request_id, num_tokens, group_type)? };
+        // Blocks are registered with the coordinator — on drop, free_request
+        // releases them all by request_id.
+        let _ = blocks;
+        Ok(self)
+    }
+
+    /// Commit the transaction — marks the allocation as permanent.
+    ///
+    /// Consumes `self` so the Drop impl skips rollback.
+    pub fn commit(mut self) -> Result<(), String> {
+        self.committed = true;
+        Ok(())
+    }
+
+    /// Returns true if the transaction has been committed.
+    pub fn is_committed(&self) -> bool {
+        self.committed
+    }
+}
+
+#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+impl Drop for KvBlockTransaction {
+    fn drop(&mut self) {
+        if !self.committed {
+            unsafe {
+                (*self.coord).free_request(&self.request_id);
+            }
+        }
+    }
+}
+
+// ── KvBlockTransaction tests ─────────────────────────────────────────────
+
+#[cfg(all(test, any(feature = "mlx-backend", feature = "prism-backend")))]
+mod kv_block_transaction_tests {
+    use super::*;
+    use crate::ecs::kv_cache::layered_cache::{CacheGroupType, KVCacheCoordinator};
+
+    #[test]
+    fn test_kv_block_transaction_rolls_back_on_drop() {
+        let mut coord = KVCacheCoordinator::new(10);
+        let initial_free = coord.pool.free_queue.len();
+
+        {
+            // Scope: allocate without commit → transaction drops → rollback
+            let mut tx = KvBlockTransaction::new_for("req-drop", &mut coord);
+            tx.allocate(3, CacheGroupType::FullAttention)
+                .expect("allocate should succeed");
+        }
+
+        // All 3 blocks should be returned to the pool
+        assert_eq!(coord.pool.free_queue.len(), initial_free);
+        // req should not be tracked in any group
+        let fa = coord.groups.get(&CacheGroupType::FullAttention);
+        assert!(fa.is_none() || !fa.unwrap().req_to_blocks.contains_key("req-drop"));
+    }
+
+    #[test]
+    fn test_kv_block_transaction_commit_keeps_blocks() {
+        let mut coord = KVCacheCoordinator::new(10);
+        let initial_free = coord.pool.free_queue.len();
+
+        {
+            // Scope: allocate and commit → blocks survive the drop
+            let mut tx = KvBlockTransaction::new_for("req-keep", &mut coord);
+            tx.allocate(3, CacheGroupType::FullAttention)
+                .expect("allocate should succeed");
+            tx.commit().expect("commit should succeed");
+        }
+
+        // 3 blocks should be removed from the pool
+        assert_eq!(coord.pool.free_queue.len(), initial_free - 3);
+        // req should be tracked
+        let fa = coord.groups.get(&CacheGroupType::FullAttention).unwrap();
+        assert!(fa.req_to_blocks.contains_key("req-keep"));
+        assert_eq!(fa.req_to_blocks["req-keep"].len(), 3);
+    }
+
+    #[test]
+    fn test_kv_block_transaction_handles_allocate_failure() {
+        let mut coord = KVCacheCoordinator::new(2);
+        // Fill the pool
+        let _slots = coord
+            .allocate_slots("filler", 2, CacheGroupType::FullAttention)
+            .expect("fill should succeed");
+
+        // Attempt an allocation that will fail — no panic on drop
+        let mut tx = KvBlockTransaction::new_for("req-fail", &mut coord);
+        let result = tx.allocate(3, CacheGroupType::FullAttention);
+        assert!(result.is_err(), "should fail on exhausted pool");
+        // tx drops — no blocks were allocated for req-fail, so no-op cleanup
+
+        // Filler blocks still intact
+        let fa = coord.groups.get(&CacheGroupType::FullAttention).unwrap();
+        assert!(fa.req_to_blocks.contains_key("filler"));
+        assert_eq!(coord.pool.free_queue.len(), 0);
+    }
+}
