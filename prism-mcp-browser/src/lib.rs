@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail, Result};
 use parking_lot::Mutex;
 use prism_mcp_core::{
-    ArtifactRepository, DaemonState, EvidenceReceipt, EvidenceStatus, EvidenceStore, McpHandler,
-    MetricSet, RequestContext, ToolInvocationId, ToolRequest, ToolResult,
+    ArtifactRepository, DaemonState, EvidenceReceipt, EvidenceStatus, EvidenceStore, FileLock,
+    McpHandler, MetricSet, RequestContext, ToolInvocationId, ToolRequest, ToolResult,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -100,15 +100,13 @@ impl BrowserSession {
                 .rsplit(':')
                 .next()
                 .unwrap_or("4444");
-            let child = Command::new("safaridriver")
-                .args(["--port", port])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .ok();
             let deadline = Instant::now() + Duration::from_millis(self.config.startup_timeout_ms);
             let agent = ureq::Agent::new();
+            let mut child = None;
+            let startup_lock = FileLock::new(
+                &std::env::temp_dir().join("prism-mcp-browser-safaridriver.lock"),
+            );
+            let _startup_guard = startup_lock.lock()?;
             while Instant::now() < deadline {
                 if let Ok(response) = agent
                     .get(&format!("{}/status", self.config.webdriver_url))
@@ -117,6 +115,15 @@ impl BrowserSession {
                     if response.status() < 500 {
                         break;
                     }
+                }
+                if child.is_none() {
+                    child = Command::new("safaridriver")
+                        .args(["--port", port])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .ok();
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
