@@ -6,6 +6,7 @@ use prism_mcp_core::{DaemonState, McpHandler};
 // ── Inline handler modules ────────────────────────────────────────
 mod cimage_handler;
 mod doctor_handler;
+mod job_handler;
 mod kb_handler;
 mod repo_handler;
 
@@ -133,6 +134,11 @@ pub fn register_stateful(
             map.insert(h.name(), h);
         }
     }
+
+    map.insert(
+        "run_job",
+        Arc::new(job_handler::JobHandler::new(state.job_manager.clone())),
+    );
 
     Ok(map)
 }

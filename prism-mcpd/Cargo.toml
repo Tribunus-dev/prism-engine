@@ -21,6 +21,7 @@ prism-mcp-lab = { path = "../prism-mcp-lab" }
 serde_json = "1"
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
+uuid.workspace = true
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"

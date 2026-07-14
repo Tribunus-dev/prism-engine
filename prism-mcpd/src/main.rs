@@ -6,6 +6,7 @@ mod trifecta_store;
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -158,6 +159,7 @@ fn spawn_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .process_group(0)
         .spawn()?;
     Ok(())
 }
