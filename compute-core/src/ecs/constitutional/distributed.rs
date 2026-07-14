@@ -36,6 +36,8 @@ pub struct PeerIdentity {
 /// Cluster membership — which cluster a node belongs to and when it joined.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeMembership {
+    /// Entity ID of the node in the distributed ECS world. See [`Entity`] for
+    /// the canonical generational entity handle.
     pub node_id: u64,
     pub cluster_name: String,
     pub joined_epoch: WorldEpoch,
@@ -49,6 +51,8 @@ pub struct PeerCapabilities(pub Vec<String>);
 /// Topology information for a node.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeTopology {
+    /// Entity ID of the node this topology describes. See [`Entity`] for the
+    /// canonical generational entity handle.
     pub node_entity: u64,
     pub role: String,
     pub region: String,
@@ -100,7 +104,11 @@ pub enum WorkerHealth {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteLease {
     pub lease_id: u64,
+    /// Entity ID of the worker executing this lease. See [`Entity`] for the
+    /// canonical generational entity handle.
     pub worker_entity: u64,
+    /// Entity ID of the session that issued this lease. See [`Entity`] for the
+    /// canonical generational entity handle.
     pub session_entity: u64,
     pub issued_at: Timestamp,
     pub expires_at: Timestamp,
@@ -110,6 +118,8 @@ pub struct RemoteLease {
 /// An observation about a remote worker's capability — NOT a trusted canonical fact until validated.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteCapabilityObservation {
+    /// Entity ID of the worker being observed. See [`Entity`] for the canonical
+    /// generational entity handle.
     pub worker_entity: u64,
     pub observed_capability: String,
     pub observed_at: Timestamp,
@@ -390,6 +400,8 @@ impl RegisterPeerCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObserveWorkerCapabilityCommand {
     pub id: MessageId,
+    /// Entity ID of the worker to observe. See [`Entity`] for the canonical
+    /// generational entity handle.
     pub worker_entity: u64,
     pub capability: String,
 }
@@ -468,6 +480,8 @@ impl ObserveWorkerCapabilityCommand {
 pub enum DistributedError {
     #[error("peer already registered: {0}")]
     PeerAlreadyRegistered(String),
+    /// The referenced worker entity (u64) was not found. See [`Entity`] for the
+    /// canonical generational entity handle.
     #[error("worker not found: {0}")]
     WorkerNotFound(u64),
     #[error("schema error: {0}")]

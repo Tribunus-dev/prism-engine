@@ -8,7 +8,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{CompWorld, EntityKind};
+use crate::ecs::{CompWorld, Entity, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -34,15 +34,26 @@ pub struct SessionConfig {
 }
 
 /// Set of model entities this session uses.
+///
+/// The `u64` values correspond to entity identifiers. The canonical Entity
+/// equivalent is `Entity(model_id, gen)`. Callers should migrate to using
+/// `Entity` for type-safe entity references.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionModels(pub Vec<u64>);
 
 /// Set of device entities this session targets.
+///
+/// The `u64` values correspond to entity identifiers. The canonical Entity
+/// equivalent is `Entity(device_id, gen)`. Callers should migrate to using
+/// `Entity` for type-safe entity references.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionDevices(pub Vec<u64>);
 
 /// Typed relationship: links a residency entity to the model it was built from.
 /// Needed for session admission to find which models are resident on which devices.
+///
+/// The `u64` fields correspond to entity identifiers. The canonical Entity
+/// equivalent is `Entity(residency_id, gen)` / `Entity(model_id, gen)`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResidencyModelRef {
     pub residency_id: u64,
@@ -52,6 +63,10 @@ pub struct ResidencyModelRef {
 // ── CreateSessionCommand ──────────────────────────────────────────────────
 
 /// Command to admit a new session.
+///
+/// Entity fields (`model_entities`, `device_entities`) use `u64` identifiers.
+/// The canonical Entity equivalent is `Entity(id, gen)`. New callers should
+/// prefer `Entity` for type safety.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateSessionCommand {
     pub id: MessageId,
@@ -284,6 +299,9 @@ impl CreateSessionCommand {
 // ── SessionLifecycleTransition ────────────────────────────────────────────
 
 /// Command to transition a session lifecycle state.
+///
+/// The `session_entity` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(session_id, gen)`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransitionSessionCommand {
     pub id: MessageId,
@@ -461,6 +479,19 @@ impl crate::ecs::Component for SessionModels {}
 impl crate::ecs::Component for SessionDevices {}
 impl crate::ecs::Component for SessionLifecycle {}
 impl crate::ecs::Component for ResidencyModelRef {}
+
+// ── Entity conversion helper ────────────────────────────────────────────────
+
+/// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
+///
+/// Uses generation `0` for backward compatibility with the legacy
+/// `CompWorld`/`CompEntity` storage. Callers migrating to the new
+/// `World`+`Entity(u64, u32)` API should replace this with proper
+/// generation-aware entity construction.
+#[allow(dead_code)]
+pub(crate) fn as_entity(id: u64) -> Entity {
+    Entity(id, 0)
+}
 
 // ── Constitutional classification ────────────────────────────────────────
 

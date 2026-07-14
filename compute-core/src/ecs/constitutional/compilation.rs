@@ -5,6 +5,8 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
 use crate::ecs::CompWorld;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use serde::{Deserialize, Serialize};
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -27,7 +29,10 @@ pub const SCHEMA_CIMAGE_PROMOTION: u64 = 38;
 /// A compilation job — a unit of work to compile a model artifact into a target binary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompilationJob {
+    /// Logical job identifier.
     pub job_id: u64,
+    /// Entity ID of the model artifact being compiled. See [`Entity`] for the
+    /// canonical generational entity handle.
     pub target_artifact: u64,
     pub target_device_profile: String,
     pub created_at: Timestamp,
@@ -36,6 +41,8 @@ pub struct CompilationJob {
 /// Input specification for a compilation job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobInput {
+    /// Entity ID of the model artifact to compile. See [`Entity`] for the
+    /// canonical generational entity handle.
     pub model_artifact: u64,
     pub source_format: String,
     pub quantization_profile: Option<String>,
@@ -52,6 +59,8 @@ pub struct JobConfig {
 /// Output of a compilation job — populated on completion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobOutput {
+    /// Entity ID of the compiled CImage, if available. See [`Entity`] for the
+    /// canonical generational entity handle.
     pub cimage_entity: Option<u64>,
     pub output_digest: Option<ArtifactDigest>,
     pub size_bytes: u64,
@@ -246,7 +255,10 @@ pub fn validate_compilation_schemas(reg: &SchemaRegistry) -> Result<(), String> 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateCompilationJobCommand {
     pub id: MessageId,
+    /// Logical job identifier.
     pub job_id: u64,
+    /// Entity ID of the model artifact to compile. See [`Entity`] for the
+    /// canonical generational entity handle.
     pub model_artifact: u64,
     pub target_profile: String,
     pub config: JobConfig,
@@ -353,6 +365,8 @@ impl CreateCompilationJobCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmitValidationReceiptCommand {
     pub id: MessageId,
+    /// Entity ID of the job receiving the validation receipt. See [`Entity`]
+    /// for the canonical generational entity handle.
     pub job_entity: u64,
     pub receipt: ValidationReceipt,
 }
@@ -424,7 +438,11 @@ impl SubmitValidationReceiptCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromoteCimageCommand {
     pub id: MessageId,
+    /// Entity ID of the CImage to promote. See [`Entity`] for the canonical
+    /// generational entity handle.
     pub cimage_entity: u64,
+    /// Entity IDs of the validation receipts that must pass before promotion.
+    /// See [`Entity`] for the canonical generational entity handle.
     pub receipt_ids: Vec<u64>,
 }
 
@@ -520,12 +538,19 @@ pub enum CompilationError {
     #[error("schema error: {0}")]
     SchemaError(String),
 
+    /// The model artifact entity (u64 ID) was not found. See [`Entity`] for
+    /// the canonical generational entity handle.
     #[error("model artifact {0} not found")]
     ModelArtifactNotFound(u64),
 
+    /// The job entity (u64 ID) was not found. See [`Entity`] for the canonical
+    /// generational entity handle.
     #[error("job entity {0} not found")]
     JobNotFound(u64),
 
+    /// The job is in an invalid lifecycle state for the requested operation.
+    /// `job_id` refers to the entity ID. See [`Entity`] for the canonical
+    /// generational entity handle.
     #[error("invalid state for job {job_id}: expected {expected:?}, actual {actual:?}")]
     InvalidState {
         job_id: u64,
@@ -533,6 +558,8 @@ pub enum CompilationError {
         actual: JobLifecycle,
     },
 
+    /// A required validation receipt entity (u64 ID) was not found. See
+    /// [`Entity`] for the canonical generational entity handle.
     #[error("missing validation receipt for cimage {0}")]
     MissingReceipt(u64),
 
@@ -549,6 +576,9 @@ pub enum CompilationError {
 /// Restores: CompilationJob, JobInput, JobConfig, JobLifecycle (Pending).
 /// Ephemeral state is not restored; the job starts Pending and will
 /// await fresh commands to progress.
+///
+/// Returns the committed epoch and the entity ID (u64) of the reconstructed
+/// job entity. See [`Entity`] for the canonical generational entity handle.
 pub fn replay_compilation_job_created(
     world: &mut CompWorld,
     event: &DomainEvent,

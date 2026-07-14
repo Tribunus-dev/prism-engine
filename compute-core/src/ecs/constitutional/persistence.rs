@@ -1,6 +1,8 @@
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::types::*;
 use crate::ecs::CompWorld;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -83,9 +85,17 @@ impl ReplayEngine {
 }
 
 /// Function signature for replaying a single event.
+///
+/// Internally processes entity data via `CompWorld`. The canonical entity type
+/// [`Entity`](crate::ecs::Entity) `(u64, u32)` is preferred for new replay
+/// code outside the constitutional domain.
 pub type ReplayApplier = fn(&mut CompWorld, &DomainEvent) -> Result<(), String>;
 
 /// Registry mapping event kind strings to replay applier functions.
+///
+/// Internally dispatches to `ReplayApplier` functions that operate on
+/// `CompEntity` handles. For new code, prefer the canonical
+/// [`Entity`](crate::ecs::Entity) type.
 pub struct ReplayRegistry {
     appliers: HashMap<String, ReplayApplier>,
 }

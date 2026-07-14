@@ -7,6 +7,8 @@ use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
 use crate::ecs::CompWorld;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use serde::{Deserialize, Serialize};
 
 /// Stable hardware identity — backend-specific but deterministic.
@@ -206,6 +208,9 @@ impl DiscoverDevicesCommand {
 
 /// Find a device entity by its stable ID.
 /// Linear scan — in production, maintain a reverse index.
+///
+/// Returns the entity ID of the matching device, if any. See [`Entity`] for the
+/// canonical generational entity handle.
 pub fn find_device_by_stable_id(_world: &CompWorld, _stable_id: &DeviceStableId) -> Option<u64> {
     // TODO: maintain StableId → EntityId reverse index
     None
@@ -217,6 +222,8 @@ pub fn find_device_by_stable_id(_world: &CompWorld, _stable_id: &DeviceStableId)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InitializeDeviceCommand {
     pub id: MessageId,
+    /// Entity ID of the device to initialize. Referenced via [`Entity`] in the
+    /// canonical API.
     pub device_entity: u64,
     pub factory_name: String,
 }
@@ -236,6 +243,9 @@ impl InitializeDeviceCommand {
 // ── Replay ────────────────────────────────────────────────────────────────
 
 /// Replay a `device_discovered` event to reconstruct a device entity.
+///
+/// Returns the committed epoch and the entity ID (u64) of the reconstructed
+/// device entity. See [`Entity`] for the canonical generational handle.
 pub fn replay_device_discovered(
     world: &mut CompWorld,
     event: &DomainEvent,

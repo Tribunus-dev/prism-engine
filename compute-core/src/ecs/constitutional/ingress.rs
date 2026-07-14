@@ -4,7 +4,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{CompWorld, EntityKind};
+use crate::ecs::{CompWorld, Entity, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs (63-68) ──────────────────────────────────────────
@@ -149,6 +149,9 @@ pub fn validate_ingress_schemas(reg: &SchemaRegistry) -> Result<(), String> {
 /// Transports (HTTP, Swift, JS, P2P, CLI) all resolve through this same
 /// constitutional command regardless of origin. The transport adapter contains
 /// no domain authority — restarting the server does not alter the canonical world.
+///
+/// The `ingress_entity` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(ingress_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmitIngressRequestCommand {
     pub id: MessageId,
@@ -253,6 +256,9 @@ impl SubmitIngressRequestCommand {
 // ── ResolveIngressCommand ─────────────────────────────────────────────────
 
 /// Mark an ingress request as resolved to a specific constitutional command.
+///
+/// The `ingress_entity` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(ingress_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolveIngressCommand {
     pub id: MessageId,
@@ -341,6 +347,9 @@ impl ResolveIngressCommand {
 
 /// Directly transition an ingress request lifecycle (e.g. Authenticated,
 /// Queued, Rejected, Completed).
+///
+/// The `ingress_entity` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(ingress_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IngressLifecycleTransitionCommand {
     pub id: MessageId,
@@ -436,6 +445,19 @@ impl crate::ecs::Component for RateLimiterState {}
 impl crate::ecs::Component for RequestQueue {}
 impl crate::ecs::Component for TransportSession {}
 impl crate::ecs::Component for IngressLifecycle {}
+
+// ── Entity conversion helper ────────────────────────────────────────────────
+
+/// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
+///
+/// Uses generation `0` for backward compatibility with the legacy
+/// `CompWorld`/`CompEntity` storage. Callers migrating to the new
+/// `World`+`Entity(u64, u32)` API should replace this with proper
+/// generation-aware entity construction.
+#[allow(dead_code)]
+pub(crate) fn as_entity(id: u64) -> Entity {
+    Entity(id, 0)
+}
 
 impl ClassifiedComponent for IngressRequest {
     type Class = DurableClass;

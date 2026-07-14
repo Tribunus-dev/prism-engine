@@ -9,7 +9,7 @@ use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, TransientClass,
     TransientComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{CompWorld, EntityKind};
+use crate::ecs::{CompWorld, Entity, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -62,6 +62,9 @@ impl ModelLifecycle {
 // ── Residency Components ─────────────────────────────────────────────────
 
 /// References the device this residency is placed on.
+///
+/// The `device_id` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(device_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResidencyDeviceRef {
     pub device_id: u64,
@@ -99,6 +102,10 @@ impl AllocationToken {
 // ── DeployModelCommand ───────────────────────────────────────────────────
 
 /// Command to deploy a model from a canonical artifact onto a device.
+///
+/// The `artifact_entity` and `device_entity` fields use `u64` identifiers.
+/// The canonical Entity equivalents are `Entity(artifact_id, gen)` and
+/// `Entity(device_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeployModelCommand {
     pub id: MessageId,
@@ -613,6 +620,19 @@ impl crate::ecs::Component for ResidencyFormat {}
 impl crate::ecs::Component for AllocationToken {}
 
 // ── ClassifiedComponent / (Durable|Transient)Component impls ─────────────
+
+// ── Entity conversion helper ────────────────────────────────────────────────
+
+/// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
+///
+/// Uses generation `0` for backward compatibility with the legacy
+/// `CompWorld`/`CompEntity` storage. Callers migrating to the new
+/// `World`+`Entity(u64, u32)` API should replace this with proper
+/// generation-aware entity construction.
+#[allow(dead_code)]
+pub(crate) fn as_entity(id: u64) -> Entity {
+    Entity(id, 0)
+}
 
 impl ClassifiedComponent for ModelId {
     type Class = DurableClass;

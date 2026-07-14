@@ -6,6 +6,8 @@ use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
 use crate::ecs::CompWorld;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use serde::{Deserialize, Serialize};
 
 // ── Component Types ───────────────────────────────────────────────────────
@@ -243,6 +245,10 @@ impl LoadArtifactCommand {
 // ── Replay ────────────────────────────────────────────────────────────────
 
 /// Replay an `artifact_loaded` event to reconstruct an artifact entity.
+///
+/// This function uses `CompEntity` for entity identity internally.
+/// The canonical entity type [`Entity`](crate::ecs::Entity) `(u64, u32)`
+/// is preferred for new code outside this module.
 pub fn replay_artifact_loaded(
     world: &mut CompWorld,
     event: &DomainEvent,

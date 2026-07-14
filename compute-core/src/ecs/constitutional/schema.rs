@@ -1,4 +1,6 @@
 use crate::ecs::constitutional::types::*;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -95,6 +97,10 @@ impl SchemaRegistry {
 // ═══════════════════════════════════════════════════════════════════════
 
 /// Registration for a single durable schema, provided at startup.
+///
+/// The `replay_apply` callback uses `CompEntity` for entity identity internally.
+/// The canonical entity type [`Entity`](crate::ecs::Entity) `(u64, u32)` is
+/// preferred for new code outside the constitutional domain.
 #[derive(Clone)]
 pub struct DurableSchemaRegistration {
     pub key: SchemaKey,
@@ -199,6 +205,11 @@ impl SchemaCatalogue {
     }
 
     /// Look up a replay applier for the given schema key.
+    ///
+    /// Returns a function that applies a persisted component value to an
+    /// entity in the world. Internally uses `CompEntity`; the canonical
+    /// [`Entity`](crate::ecs::Entity) `(u64, u32)` type is preferred for
+    /// new code outside the constitutional domain.
     pub fn replay_applier(
         &self,
         key: &SchemaKey,

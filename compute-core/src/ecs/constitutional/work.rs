@@ -1,8 +1,16 @@
+//! Work item subsystem — work items, leases, prerequisites, and output.
+//!
+//! Uses `CompWorld`/`CompEntity` from the legacy ECS store internally.
+//! The canonical [`Entity`](crate::ecs::Entity) type is available for new
+//! consumer code that prefers generation-safe handles over the legacy
+//! `CompEntity(u64)`.
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompWorld, Component, EntityKind};
 use serde::{Deserialize, Serialize};
 

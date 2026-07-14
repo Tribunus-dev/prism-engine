@@ -1,3 +1,9 @@
+//! Agent execution subsystem — agent runs, tasks, phases, and tool invocations.
+//!
+//! Uses `CompWorld`/`CompEntity` from the legacy ECS store internally.
+//! The canonical [`Entity`](crate::ecs::Entity) type is available for new
+//! consumer code that prefers generation-safe handles over the legacy
+//! `CompEntity(u64)`.
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::lifecycle::SessionLifecycle;
 use crate::ecs::constitutional::schema::SchemaRegistry;
@@ -5,6 +11,8 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, EntityKind};
 use serde::{Deserialize, Serialize};
 

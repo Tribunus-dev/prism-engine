@@ -4,7 +4,7 @@ use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn};
-use crate::ecs::{CompWorld, EntityKind};
+use crate::ecs::{CompWorld, Entity, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -44,6 +44,9 @@ impl DurableComponent for Pipeline {
 }
 
 /// A stage within a pipeline.
+///
+/// The `model_entity` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(model_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PipelineStage {
     pub stage_index: u32,
@@ -79,6 +82,19 @@ pub enum PipelineModality {
     Multimodal(String),
 }
 
+// ── Entity conversion helper ────────────────────────────────────────────────
+
+/// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
+///
+/// Uses generation `0` for backward compatibility with the legacy
+/// `CompWorld`/`CompEntity` storage. Callers migrating to the new
+/// `World`+`Entity(u64, u32)` API should replace this with proper
+/// generation-aware entity construction.
+#[allow(dead_code)]
+pub(crate) fn as_entity(id: u64) -> Entity {
+    Entity(id, 0)
+}
+
 impl crate::ecs::Component for PipelineModality {}
 
 impl ClassifiedComponent for PipelineModality {
@@ -93,6 +109,9 @@ impl DurableComponent for PipelineModality {
 }
 
 /// Artifact used as input to a pipeline stage.
+///
+/// The `artifact_id` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(artifact_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputArtifactRef {
     pub artifact_id: u64,
@@ -114,6 +133,9 @@ impl DurableComponent for InputArtifactRef {
 }
 
 /// Artifact produced by a pipeline stage.
+///
+/// The `artifact_id` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(artifact_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputArtifactRef {
     pub artifact_id: Option<u64>,
@@ -194,6 +216,9 @@ impl PipelineLifecycle {
 }
 
 /// Links a work lease to a pipeline stage.
+///
+/// The `work_entity` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(work_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkLeaseRef {
     pub lease_id: u64,
@@ -217,6 +242,9 @@ impl DurableComponent for WorkLeaseRef {
 // ── CreatePipelineCommand ─────────────────────────────────────────────────
 
 /// Command to create a multimodal pipeline with stage list.
+///
+/// The `session_entity` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(session_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreatePipelineCommand {
     pub id: MessageId,
@@ -371,6 +399,9 @@ impl CreatePipelineCommand {
 // ── SubmitStageOutputCommand ──────────────────────────────────────────────
 
 /// Command to record pipeline stage completion with an output artifact.
+///
+/// The `pipeline_entity` field uses a `u64` identifier. The canonical Entity
+/// equivalent is `Entity(pipeline_id, gen)`. New callers should prefer `Entity`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmitStageOutputCommand {
     pub id: MessageId,
