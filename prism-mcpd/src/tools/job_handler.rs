@@ -10,14 +10,48 @@ use std::sync::{Arc, OnceLock};
 
 struct ManagedJob {
     child: Child,
+    command: String,
     stdout_path: std::path::PathBuf,
     stderr_path: std::path::PathBuf,
 }
 
 static JOBS: OnceLock<Mutex<HashMap<String, ManagedJob>>> = OnceLock::new();
+static CACHE: OnceLock<Mutex<HashMap<String, (i32, String, String)>>> = OnceLock::new();
 
 fn jobs() -> &'static Mutex<HashMap<String, ManagedJob>> {
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cache() -> &'static Mutex<HashMap<String, (i32, String, String)>> {
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cache_key(command: &str, cwd: &std::path::Path) -> Option<String> {
+    if !command.starts_with("cargo ") && !command.contains(" cargo ") {
+        return None;
+    }
+    let mut material = command.as_bytes().to_vec();
+    material.extend_from_slice(cwd.to_string_lossy().as_bytes());
+    for file in ["Cargo.toml", "Cargo.lock"] {
+        if let Ok(bytes) = std::fs::read(cwd.join(file)) {
+            material.extend_from_slice(&bytes);
+        }
+    }
+    if let Ok(output) = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(cwd)
+        .output()
+    {
+        material.extend_from_slice(&output.stdout);
+    }
+    if let Ok(output) = Command::new("git")
+        .args(["diff", "--no-ext-diff"])
+        .current_dir(cwd)
+        .output()
+    {
+        material.extend_from_slice(&output.stdout);
+    }
+    Some(blake3::hash(&material).to_hex().to_string())
 }
 
 pub struct JobHandler {
@@ -40,6 +74,16 @@ impl JobHandler {
         if let Some(job) = managed.get_mut(&key) {
             output = read_output(&job.stdout_path, &job.stderr_path);
             if let Some(status) = job.child.try_wait()? {
+                if let Some(key) = cache_key(&job.command, &std::env::current_dir()?) {
+                    cache().lock().insert(
+                        key,
+                        (
+                            status.code().unwrap_or(-1),
+                            output.0.clone(),
+                            output.1.clone(),
+                        ),
+                    );
+                }
                 let state = if status.success() {
                     JobState::Succeeded
                 } else {
@@ -51,7 +95,7 @@ impl JobHandler {
         }
         let record = self.store.get_job(id)?;
         Self::result(
-            json!({"job_id":key,"status":record.state.as_str(),"command":record.operation,"exit_code":null,"stdout_tail":tail(&output.0),"stderr_tail":tail(&output.1)}),
+            json!({"job_id":key,"status":record.state.as_str(),"command":record.operation,"exit_code":null,"stdout":output.0,"stderr":output.1,"stdout_tail":tail(&output.0),"stderr_tail":tail(&output.1)}),
         )
     }
 }
@@ -86,6 +130,24 @@ impl McpHandler for JobHandler {
                     .and_then(Value::as_str)
                     .filter(|v| !v.trim().is_empty())
                     .ok_or_else(|| anyhow::anyhow!("command is required"))?;
+                let cwd = std::env::current_dir()?;
+                let key = cache_key(command, &cwd);
+                if let Some(key_value) = &key {
+                    if let Some((exit_code, stdout, stderr)) =
+                        cache().lock().get(key_value).cloned()
+                    {
+                        return Self::result(
+                            json!({"status":"cache_hit","cache_key":key_value,"command":command,"exit_code":exit_code,"stdout":stdout,"stderr":stderr,"stdout_tail":tail(&stdout),"stderr_tail":tail(&stderr)}),
+                        );
+                    }
+                    if let Some(existing) =
+                        jobs().lock().values().find(|job| job.command == command)
+                    {
+                        return Self::result(
+                            json!({"status":"already_running","job_id":existing.child.id().to_string(),"command":command,"cache_key":key_value}),
+                        );
+                    }
+                }
                 let id = self.store.create_job("run_job", command)?;
                 let dir = std::env::temp_dir().join("prism-mcpd-jobs");
                 std::fs::create_dir_all(&dir)?;
@@ -103,7 +165,7 @@ impl McpHandler for JobHandler {
                     .open(&stderr_path)?;
                 let child = Command::new("/bin/zsh")
                     .args(["-lc", command])
-                    .current_dir(std::env::current_dir()?)
+                    .current_dir(cwd)
                     .stdout(Stdio::from(stdout))
                     .stderr(Stdio::from(stderr))
                     .spawn()?;
@@ -112,6 +174,7 @@ impl McpHandler for JobHandler {
                     id.to_string(),
                     ManagedJob {
                         child,
+                        command: command.to_string(),
                         stdout_path,
                         stderr_path,
                     },
