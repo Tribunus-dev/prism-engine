@@ -2,14 +2,14 @@ use anyhow::Result;
 use prism_mcp_core::{DaemonState, McpHandler, RequestContext, ToolRequest, ToolResult};
 use serde_json::{json, Value};
 
-pub struct CoordinationHandler;
+pub struct CoordinationHandler { pub name: &'static str, pub action: &'static str }
 impl McpHandler for CoordinationHandler {
-    fn name(&self) -> &'static str { "coordination" }
-    fn description(&self) -> &'static str { "TD-compatible durable agent sessions, work claims, and path locks." }
-    fn input_schema(&self) -> Value { json!({"type":"object","properties":{"action":{"type":"string","enum":["start_session","heartbeat","close_session","create_work","list_work","claim_work","release_claim","acquire_path","release_path","recover"]},"session_id":{"type":"string"},"agent_id":{"type":"string"},"work_id":{"type":"string"},"work_title":{"type":"string"},"claim_id":{"type":"string"},"lock_id":{"type":"string"},"path":{"type":"string"},"lock_kind":{"type":"string","enum":["read","write"]},"ttl_seconds":{"type":"integer"}} ,"required":["action"]}) }
+    fn name(&self) -> &'static str { self.name }
+    fn description(&self) -> &'static str { "Native Prism agent coordination primitive backed by the daemon trifecta." }
+    fn input_schema(&self) -> Value { json!({"type":"object","properties":{"session_id":{"type":"string"},"agent_id":{"type":"string"},"purpose":{"type":"string"},"work_id":{"type":"string"},"work_title":{"type":"string"},"priority":{"type":"integer"},"status":{"type":"string"},"claim_id":{"type":"string"},"lock_id":{"type":"string"},"path":{"type":"string"},"lock_kind":{"type":"string","enum":["read","write"]},"ttl_seconds":{"type":"integer"}},"additionalProperties":false}) }
     fn call(&self, request: ToolRequest<'_>, _context: &RequestContext, state: &DaemonState) -> Result<ToolResult> {
         let store = state.coordination_store.as_ref().ok_or_else(|| anyhow::anyhow!("coordination requires the trifecta storage profile"))?;
-        let a = request.args.get("action").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("action is required"))?;
+        let a = self.action;
         let s = |n: &str| request.args.get(n).and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!(format!("{n} is required")));
         let ttl = request.args.get("ttl_seconds").and_then(Value::as_i64).unwrap_or(300);
         let out = match a {

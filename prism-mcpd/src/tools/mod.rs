@@ -16,7 +16,20 @@ mod repo_handler;
 pub fn register_basic() -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>>
 {
     let mut map: HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>> = HashMap::new();
-    map.insert("coordination", Arc::new(coordination_handler::CoordinationHandler));
+    for (name, action) in [
+        ("agent_session_start", "start_session"),
+        ("agent_session_heartbeat", "heartbeat"),
+        ("agent_session_close", "close_session"),
+        ("agent_work_create", "create_work"),
+        ("agent_work_list", "list_work"),
+        ("agent_work_claim", "claim_work"),
+        ("agent_work_release", "release_claim"),
+        ("agent_path_lock", "acquire_path"),
+        ("agent_path_unlock", "release_path"),
+        ("agent_coordination_recover", "recover"),
+    ] {
+        map.insert(name, Arc::new(coordination_handler::CoordinationHandler { name, action }));
+    }
 
     // ── Knowledge base operations ──────────────────────────────────
     let search = kb_handler::SearchKbHandler::new()?;
