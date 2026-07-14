@@ -99,6 +99,14 @@ fn initializes_lists_tools_and_exits_after_stdin_closes() {
         .unwrap()
         .iter()
         .any(|tool| tool["name"] == "validate_model_assets"));
+    let tool_names: std::collections::HashSet<&str> = lines[1]["result"]["tools"]
+        .as_array().unwrap().iter().filter_map(|tool| tool["name"].as_str()).collect();
+    for name in [
+        "agent_session_start", "agent_session_heartbeat", "agent_session_close",
+        "agent_work_create", "agent_work_list", "agent_work_claim", "agent_work_release",
+        "agent_work_handoff", "agent_path_lock", "agent_path_unlock",
+        "agent_coordination_event", "agent_coordination_status", "agent_coordination_recover",
+    ] { assert!(tool_names.contains(name), "missing native coordination tool {name}"); }
     let inspect = lines[1]["result"]["tools"]
         .as_array()
         .unwrap()
