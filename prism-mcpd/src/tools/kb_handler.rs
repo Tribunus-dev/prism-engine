@@ -40,45 +40,7 @@ impl McpHandler for SearchKbHandler {
         }
         let limit = request.args["limit"].as_i64().unwrap_or(10) as usize;
 
-        let results = state.db.with_reader(|conn| {
-            // FTS5 query — wrap each term in quotes for AND matching
-            let fts_query = query
-                .split_whitespace()
-                .map(|w| format!("\"{}\"", w))
-                .collect::<Vec<_>>()
-                .join(" AND ");
-
-            let sql = "SELECT s.id, s.document_id, s.heading, s.word_count,
-                              d.title, d.doc_type,
-                              snippet(sections_fts, 1, '<mark>', '</mark>', '...', 32),
-                              rank
-                       FROM sections_fts
-                       JOIN sections s ON sections_fts.rowid = s.rowid
-                       JOIN documents d ON s.document_id = d.id
-                       WHERE sections_fts MATCH ?1
-                       ORDER BY rank
-                       LIMIT ?2";
-
-            let mut stmt = conn.prepare(sql)?;
-            let results = stmt.query_map(rusqlite::params![fts_query, limit as i64], |row| {
-                Ok(SearchResultRow {
-                    section_id: row.get::<_, String>(0)?,
-                    document_id: row.get::<_, String>(1)?,
-                    heading: row.get::<_, String>(2)?,
-                    word_count: row.get::<_, i64>(3)?,
-                    doc_title: row.get::<_, String>(4)?,
-                    doc_type: row.get::<_, String>(5)?,
-                    snippet: row.get::<_, String>(6)?,
-                    rank: row.get::<_, f64>(7)?,
-                })
-            })?;
-
-            let mut rows = Vec::new();
-            for r in results {
-                rows.push(r?);
-            }
-            Ok(rows)
-        })?;
+        let results = state.knowledge_store.search(query, limit)?;
 
         if results.is_empty() {
             return Ok(ToolResult::text(format!("No results found for: {}", query)));
@@ -132,27 +94,11 @@ impl McpHandler for GetDocumentHandler {
             return Err(anyhow::anyhow!("id is required"));
         }
 
-        state.db.with_reader(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, title, doc_type, content_md, version, status, created_at FROM documents WHERE id = ?1"
-            )?;
-            let mut rows = stmt.query(rusqlite::params![id])?;
-            match rows.next()? {
-                Some(row) => {
-                    let title: String = row.get(1)?;
-                    let doc_type: String = row.get(2)?;
-                    let content: String = row.get(3)?;
-                    let version: i64 = row.get(4)?;
-                    let status: String = row.get(5)?;
-                    let created: String = row.get(6)?;
-                    Ok(ToolResult::text(format!(
-                        "# {} ({})\n\n**Type:** {} | **Status:** {} | **Version:** {} | **Created:** {}\n\n---\n{}",
-                        title, id, doc_type, status, version, created, content
-                    )))
-                }
-                None => Err(anyhow::anyhow!("Document not found: {}", id)),
-            }
-        })
+        let document = state
+            .knowledge_store
+            .get_document(id)?
+            .ok_or_else(|| anyhow::anyhow!("Document not found: {id}"))?;
+        Ok(ToolResult::text(format!("# {} ({})\n\n**Type:** {} | **Status:** {} | **Version:** {} | **Created:** {}\n\n---\n{}", document.title, document.id, document.doc_type, document.status, document.version, document.created_at, document.content)))
     }
 }
 
@@ -186,33 +132,16 @@ impl McpHandler for ListDocumentsHandler {
                 .and_then(|s| if s.is_empty() { None } else { Some(s) });
         let limit = request.args["limit"].as_i64().unwrap_or(50) as i64;
 
-        state.db.with_reader(|conn| {
-            let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(dt) = doc_type {
-                ("SELECT id, title, doc_type, version, status, updated_at FROM documents WHERE doc_type = ?1 ORDER BY updated_at DESC LIMIT ?2".into(),
-                 vec![Box::new(dt.to_string()), Box::new(limit)])
-            } else {
-                ("SELECT id, title, doc_type, version, status, updated_at FROM documents ORDER BY updated_at DESC LIMIT ?1".into(),
-                 vec![Box::new(limit)])
-            };
-
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })?;
-
-            let mut output = String::from("Documents:\n");
-            for r in rows {
-                let (id, title, dt, ver, status, updated) = r?;
-                output.push_str(&format!("  [{}] {} ({}) v{} {} — {}\n", dt, title, id, ver, status, updated));
-            }
-            Ok(ToolResult::text(output))
-        })
+        let rows = state
+            .knowledge_store
+            .list_documents(doc_type, limit as usize)?;
+        let mut output = String::from("Documents:\n");
+        for row in rows {
+            output.push_str(&format!(
+                "  [{}] {} ({}) v{} {} — {}\n",
+                row.doc_type, row.title, row.id, row.version, row.status, row.updated_at
+            ));
+        }
+        Ok(ToolResult::text(output))
     }
 }

@@ -91,17 +91,6 @@ impl McpHandler for AnalyzeTensorHandler {
         let artifact_list = state.artifact_store.list(None).ok();
         let artifact_count = artifact_list.as_ref().map(|l| l.len()).unwrap_or(0);
 
-        // Query the DB for any tensor-metadata tables that may be present.
-        let schema_info: Vec<String> = state
-            .db
-            .with_reader(|conn| {
-                let mut stmt = conn
-                    .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")?;
-                let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-                rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-            })
-            .unwrap_or_default();
-
         // Check whether the tensor has an existing admission entry.
         let existing_admission = state
             .evidence_ledger
@@ -117,7 +106,6 @@ impl McpHandler for AnalyzeTensorHandler {
             "artifact_ref": artifact_ref,
             "analyzed_at_ms": now_ms(),
             "artifact_count": artifact_count,
-            "db_tables": schema_info,
             "existing_admissions": existing_admission,
             "statistics": {
                 "min": null,
@@ -430,15 +418,6 @@ impl McpHandler for ValidateAdmissionCandidateHandler {
             .filter(|r| r.target.as_deref() == Some(candidate_id))
             .count();
 
-        // Query DB for any validator-state table.
-        let validation_records: Vec<String> = state.db.with_reader(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%valid%' ORDER BY name"
-            )?;
-            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-        }).unwrap_or_default();
-
         let result = json!({
             "tool": "validate_admission_candidate",
             "candidate_id": candidate_id,
@@ -455,7 +434,6 @@ impl McpHandler for ValidateAdmissionCandidateHandler {
                 "measured_latency_us": null
             },
             "prior_validations": prior_validations_for,
-            "validation_tables_found": validation_records,
             "status": "pending_validation"
         });
 

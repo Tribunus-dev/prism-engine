@@ -6,7 +6,6 @@ use prism_mcp_core::{
     DaemonState, ExperimentId, McpHandler, RequestContext, ToolRequest, ToolResult,
 };
 use serde_json::Value;
-use uuid::Uuid;
 
 fn get_str<'a>(args: &'a Value, field: &str) -> Result<&'a str> {
     args.get(field)
@@ -39,30 +38,43 @@ CREATE TABLE IF NOT EXISTS experiment_steps (
 ";
 
 fn load_experiment(state: &DaemonState, id: &str) -> Result<(ExperimentSpec, String)> {
-    let r: (String, String) = state.db.with_reader(|conn| {
-        conn.query_row(
-            "SELECT spec_json,state FROM experiments WHERE id=?1",
-            rusqlite::params![id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .map_err(anyhow::Error::from)
-    })?;
-    Ok((serde_json::from_str(&r.0)?, r.1))
+    let document = state
+        .experiment_store
+        .get_experiment(id)?
+        .ok_or_else(|| anyhow::anyhow!("experiment not found: {id}"))?;
+    Ok((
+        serde_json::from_value(
+            document
+                .get("spec")
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("experiment document missing spec"))?,
+        )?,
+        document
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("pending")
+            .to_string(),
+    ))
 }
 
 fn save_experiment_raw(state: &DaemonState, id: &str, spec_json: &str, es: &str) -> Result<()> {
-    state.db.with_writer(|conn| -> anyhow::Result<_> { Ok(conn.execute(
-        "UPDATE experiments SET spec_json=?1,state=?2,updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?3",
-        rusqlite::params![spec_json, es, id],
-    )?) })?;
+    let mut document = state
+        .experiment_store
+        .get_experiment(id)?
+        .ok_or_else(|| anyhow::anyhow!("experiment not found: {id}"))?;
+    document["spec"] = serde_json::from_str(spec_json)?;
+    document["state"] = Value::String(es.to_string());
+    state.experiment_store.put_experiment(id, &document)?;
     Ok(())
 }
 
 fn update_exp_state(state: &DaemonState, id: &str, es: &str) -> Result<()> {
-    state.db.with_writer(|conn| -> anyhow::Result<_> { Ok(conn.execute(
-        "UPDATE experiments SET state=?1,updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?2",
-        rusqlite::params![es, id],
-    )?) })?;
+    let mut document = state
+        .experiment_store
+        .get_experiment(id)?
+        .ok_or_else(|| anyhow::anyhow!("experiment not found: {id}"))?;
+    document["state"] = Value::String(es.to_string());
+    state.experiment_store.put_experiment(id, &document)?;
     Ok(())
 }
 
@@ -73,12 +85,20 @@ fn update_step_state(
     st: &str,
     smr: Option<&str>,
 ) -> Result<()> {
-    state.db.with_writer(|conn| {
-        Ok(conn.execute(
-        "UPDATE experiment_steps SET state=?1,result_summary=?2 WHERE experiment_id=?3 AND name=?4",
-        rusqlite::params![st, smr, eid, sn],
-    )?)
-    })?;
+    let mut document = state
+        .experiment_store
+        .get_experiment(eid)?
+        .ok_or_else(|| anyhow::anyhow!("experiment not found: {eid}"))?;
+    if let Some(steps) = document.get_mut("steps").and_then(Value::as_array_mut) {
+        if let Some(step) = steps
+            .iter_mut()
+            .find(|step| step.get("name").and_then(Value::as_str) == Some(sn))
+        {
+            step["state"] = Value::String(st.to_string());
+            step["result_summary"] = smr.map(Value::from).unwrap_or(Value::Null);
+        }
+    }
+    state.experiment_store.put_experiment(eid, &document)?;
     Ok(())
 }
 
@@ -233,16 +253,11 @@ impl McpHandler for CreateExperiment {
         };
         let id = ExperimentId::new();
         let sc = spec.steps.len();
-        state.db.with_writer(|conn| {
-            conn.execute("INSERT INTO experiments(id,name,description,state,spec_json,tags_json)VALUES(?1,?2,?3,'pending',?4,?5)",
-                rusqlite::params![id.to_string(),spec.name,spec.description,serde_json::to_string(&spec)?,serde_json::to_string(&spec.tags)?])?;
-            for (i,s) in spec.steps.iter().enumerate() {
-                conn.execute("INSERT INTO experiment_steps(id,experiment_id,name,tool_name,state,depends_on_json,gates_json,args_json,sort_order)VALUES(?1,?2,?3,?4,'pending',?5,?6,?7,?8)",
-                    rusqlite::params![Uuid::new_v4().to_string(),id.to_string(),s.name,s.tool_name,
-                        serde_json::to_string(&s.depends_on)?,serde_json::to_string(&s.gates)?,serde_json::to_string(&s.args)?,i])?;
-            }
-            Ok(())
-        })?;
+        let steps = spec.steps.iter().map(|step| serde_json::json!({"name":step.name,"tool_name":step.tool_name,"state":"pending","depends_on":step.depends_on,"gates":step.gates,"args":step.args,"result_summary":null})).collect::<Vec<_>>();
+        state.experiment_store.put_experiment(
+            &id.to_string(),
+            &serde_json::json!({"spec":spec,"state":"pending","steps":steps}),
+        )?;
         Ok(text_result(
             serde_json::json!({"experiment_id":id.to_string(),"name":spec.name,"step_count":sc}),
         ))
@@ -383,30 +398,15 @@ impl McpHandler for GetExperiment {
     ) -> Result<ToolResult> {
         let id = get_str(req.args, "experiment_id")?;
         let (spec, db_state) = load_experiment(state, id)?;
-        let steps: Vec<Value> = state.db.with_reader(|conn| {
-            let mut st = conn.prepare(
-                "SELECT name,tool_name,state,depends_on_json,gates_json,args_json,result_summary FROM experiment_steps WHERE experiment_id=?1 ORDER BY sort_order"
-            )?;
-            let r = st.query_map(rusqlite::params![id], |row| {
-                let n: String = row.get(0)?;
-                let tn: String = row.get(1)?;
-                let st: String = row.get(2)?;
-                let dj: String = row.get(3)?;
-                let gj: String = row.get(4)?;
-                let aj: String = row.get(5)?;
-                let rs: Option<String> = row.get(6)?;
-                Ok(serde_json::json!({
-                    "name": n,
-                    "tool_name": tn,
-                    "state": st,
-                    "depends_on": serde_json::from_str::<Vec<String>>(&dj).unwrap_or_default(),
-                    "gates": serde_json::from_str::<Vec<GateCondition>>(&gj).unwrap_or_default(),
-                    "args": serde_json::from_str::<serde_json::Value>(&aj).unwrap_or_default(),
-                    "result_summary": rs,
-                }))
-            })?;
-            Ok(r.collect::<std::result::Result<Vec<_>,_>>()?)
-        })?;
+        let document = state
+            .experiment_store
+            .get_experiment(id)?
+            .ok_or_else(|| anyhow::anyhow!("experiment not found: {id}"))?;
+        let steps: Vec<Value> = document
+            .get("steps")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         Ok(text_result(
             serde_json::json!({"experiment_id":id,"name":spec.name,"description":spec.description,"state":db_state,"result":spec.result,"steps":steps}),
         ))
@@ -435,20 +435,31 @@ impl McpHandler for ListExperiments {
         let tf = get_opt_str(req.args, "tag");
         let limit: i64 = req.args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as i64;
         let off: i64 = req.args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as i64;
-        let rows: Vec<Value> = state.db.with_reader(|conn| {
-            let mut sql = "SELECT id,name,state,created_at,updated_at FROM experiments WHERE 1=1".to_string();
-            let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-            if let Some(st)=sf { sql.push_str(" AND state=?"); p.push(Box::new(st.to_string())); }
-            if let Some(t)=tf { sql.push_str(" AND tags_json LIKE ?"); p.push(Box::new(format!("%{}%",t))); }
-            sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
-            p.push(Box::new(limit)); p.push(Box::new(off));
-            let mut st = conn.prepare(&sql)?;
-            let pr: Vec<&dyn rusqlite::types::ToSql> = p.iter().map(|p|p.as_ref()).collect();
-            let r = st.query_map(pr.as_slice(), |r| Ok(serde_json::json!({
-                "experiment_id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"state":r.get::<_,String>(2)?,
-            })))?;
-            Ok(r.collect::<std::result::Result<Vec<_>,_>>()?)
-        })?;
+        let mut rows: Vec<Value> = state
+            .experiment_store
+            .list_experiments()?
+            .into_iter()
+            .filter_map(|(id, document)| {
+                let state = document
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("pending");
+                let spec = document.get("spec")?;
+                if sf.is_some_and(|filter| filter != state) {
+                    return None;
+                }
+                if tf.is_some_and(|filter| {
+                    !spec
+                        .get("tags")
+                        .map_or(false, |tags| tags.to_string().contains(filter))
+                }) {
+                    return None;
+                }
+                Some(serde_json::json!({"experiment_id":id,"name":spec.get("name"),"state":state}))
+            })
+            .collect();
+        let start = (off as usize).min(rows.len());
+        rows = rows.into_iter().skip(start).take(limit as usize).collect();
         Ok(text_result(
             serde_json::json!({"experiments":rows,"count":rows.len()}),
         ))
@@ -558,11 +569,12 @@ impl McpHandler for PromoteExperimentResult {
             anyhow::bail!("only completed can be promoted");
         }
         let rv = serde_json::json!({"experiment_name":spec.name,"promoted_by":pb,"promoted_at":chrono::Utc::now().to_rfc3339()});
-        state.db.with_writer(|conn| {
-            conn.execute("UPDATE experiments SET result_json=?1,updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?2",
-                rusqlite::params![serde_json::to_string(&rv)?,id])?;
-            Ok(())
-        })?;
+        let mut document = state
+            .experiment_store
+            .get_experiment(id)?
+            .ok_or_else(|| anyhow::anyhow!("experiment not found: {id}"))?;
+        document["result"] = rv.clone();
+        state.experiment_store.put_experiment(id, &document)?;
         Ok(text_result(
             serde_json::json!({"experiment_id":id,"promoted_by":pb,"result":rv}),
         ))

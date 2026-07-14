@@ -4,7 +4,8 @@ use std::fs;
 use uuid::Uuid;
 
 fn init(s: &DaemonState) -> anyhow::Result<()> {
-    s.db.with_writer(|c|{c.execute_batch("CREATE TABLE IF NOT EXISTS prism_replays(id TEXT PRIMARY KEY, payload TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT(datetime('now')))")?;Ok(())})
+    let _ = s;
+    Ok(())
 }
 fn arg<'a>(a: &'a Value, k: &str) -> anyhow::Result<&'a str> {
     a.get(k)
@@ -16,13 +17,11 @@ fn result(v: Value) -> anyhow::Result<ToolResult> {
     Ok(ToolResult::text(serde_json::to_string_pretty(&v)?))
 }
 fn stored(s: &DaemonState, id: &str) -> anyhow::Result<(String, String)> {
-    s.db.with_reader(|c| {
-        Ok(c.query_row(
-            "SELECT payload,status FROM prism_replays WHERE id=?1",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?)
-    })
+    let (status, payload) = s
+        .projection_store
+        .get_replay(id)?
+        .ok_or_else(|| anyhow::anyhow!("replay not found: {id}"))?;
+    Ok((serde_json::to_string(&payload)?, status))
 }
 
 pub struct CaptureReplayHandler;
@@ -48,13 +47,8 @@ impl McpHandler for CaptureReplayHandler {
         let payload = serde_json::to_string(
             &json!({"invocation_id":inv,"payload":r.args.get("payload").cloned().unwrap_or(json!({}))}),
         )?;
-        s.db.with_writer(|c| {
-            c.execute(
-                "INSERT INTO prism_replays(id,payload,status)VALUES(?1,?2,'captured')",
-                [&id, &payload],
-            )?;
-            Ok(())
-        })?;
+        s.projection_store
+            .put_replay(&id, "captured", &serde_json::from_str(&payload)?)?;
         result(json!({"replay_id":id,"status":"captured"}))
     }
 }
@@ -108,14 +102,7 @@ impl McpHandler for MinimizeReplayHandler {
             obj.retain(|k, _| k == "input" || k == "operation");
         }
         let out = Uuid::new_v4().to_string();
-        let p = serde_json::to_string(&v)?;
-        s.db.with_writer(|c| {
-            c.execute(
-                "INSERT INTO prism_replays(id,payload,status)VALUES(?1,?2,'minimized')",
-                [&out, &p],
-            )?;
-            Ok(())
-        })?;
+        s.projection_store.put_replay(&out, "minimized", &v)?;
         result(json!({"replay_id":out,"source":id,"status":"minimized","payload":v}))
     }
 }
@@ -195,13 +182,7 @@ impl McpHandler for ImportReplayHandler {
         let p = fs::read_to_string(source)?;
         let v: Value = serde_json::from_str(&p)?;
         let id = Uuid::new_v4().to_string();
-        s.db.with_writer(|c| {
-            c.execute(
-                "INSERT INTO prism_replays(id,payload,status)VALUES(?1,?2,'imported')",
-                [&id, &p],
-            )?;
-            Ok(())
-        })?;
+        s.projection_store.put_replay(&id, "imported", &v)?;
         result(json!({"replay_id":id,"source":source,"status":"imported","payload":v}))
     }
 }

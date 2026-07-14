@@ -13,11 +13,10 @@ pub mod handlers;
 
 /// Shared dependencies injected into all kernel handler calls.
 pub struct ToolDependencies {
-    pub db: Arc<prism_mcp_core::DbManager>,
-    pub artifact_store: prism_mcp_core::ArtifactStore,
-    pub evidence_ledger: prism_mcp_core::EvidenceLedger,
-    pub job_manager: prism_mcp_core::JobManager,
-    pub resource_leases: prism_mcp_core::ResourceLeaseManager,
+    pub artifact_store: Arc<dyn prism_mcp_core::ArtifactRepository>,
+    pub evidence_ledger: Arc<dyn prism_mcp_core::EvidenceStore>,
+    pub job_manager: Arc<dyn prism_mcp_core::JobStore>,
+    pub resource_leases: Arc<dyn prism_mcp_core::LeaseStore>,
     pub scheduler_handle: prism_mcp_core::SchedulerHandle,
     pub tools: Arc<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>>,
 }

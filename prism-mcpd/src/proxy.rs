@@ -52,8 +52,14 @@ pub fn run_proxy(socket_path: &str) -> anyhow::Result<()> {
         })
     };
 
-    stdin_handle.join().ok();
-    let _ = reader.shutdown(Shutdown::Both);
+    // The daemon-side socket is the proxy's liveness authority. Joining stdin
+    // first can hang forever when the daemon disappears while the parent keeps
+    // the pipe open. Normal stdin EOF half-closes the socket, which lets the
+    // daemon drain responses and close the read side; daemon failure closes the
+    // read side directly. In either case, stdout completion terminates proxy
+    // mode without waiting on an uninterruptible stdin read.
     stdout_handle.join().ok();
+    let _ = reader.shutdown(Shutdown::Both);
+    drop(stdin_handle);
     Ok(())
 }

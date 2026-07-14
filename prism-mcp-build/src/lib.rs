@@ -6,9 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use prism_mcp_core::{
-    ArtifactStore, DbManager, EvidenceLedger, JobManager, ResourceLeaseManager, SchedulerHandle,
-};
+use prism_mcp_core::SchedulerHandle;
 pub use prism_mcp_core::{DaemonState, McpHandler, RequestContext, ToolRequest, ToolResult};
 
 pub mod handlers;
@@ -17,11 +15,10 @@ pub mod handlers;
 /// Each crate defines its own `ToolDependencies` to avoid coupling
 /// to the full daemon state.
 pub struct ToolDependencies {
-    pub db: Arc<DbManager>,
-    pub artifact_store: ArtifactStore,
-    pub evidence_ledger: EvidenceLedger,
-    pub job_manager: JobManager,
-    pub resource_leases: ResourceLeaseManager,
+    pub artifact_store: Arc<dyn prism_mcp_core::ArtifactRepository>,
+    pub evidence_ledger: Arc<dyn prism_mcp_core::EvidenceStore>,
+    pub job_manager: Arc<dyn prism_mcp_core::JobStore>,
+    pub resource_leases: Arc<dyn prism_mcp_core::LeaseStore>,
     pub scheduler_handle: SchedulerHandle,
     pub tools: Arc<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>>,
 }

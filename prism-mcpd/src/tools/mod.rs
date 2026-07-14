@@ -74,7 +74,6 @@ pub fn register_stateful(
     {
         use prism_mcp_build::ToolDependencies;
         let deps = ToolDependencies {
-            db: state.db.clone(),
             artifact_store: state.artifact_store.clone(),
             evidence_ledger: state.evidence_ledger.clone(),
             job_manager: state.job_manager.clone(),
@@ -91,7 +90,6 @@ pub fn register_stateful(
     {
         use prism_mcp_kernel::ToolDependencies;
         let deps = ToolDependencies {
-            db: state.db.clone(),
             artifact_store: state.artifact_store.clone(),
             evidence_ledger: state.evidence_ledger.clone(),
             job_manager: state.job_manager.clone(),
@@ -108,7 +106,6 @@ pub fn register_stateful(
     {
         use prism_mcp_admission::ToolDependencies;
         let deps = ToolDependencies {
-            db: state.db.clone(),
             artifact_store: state.artifact_store.clone(),
             evidence_ledger: state.evidence_ledger.clone(),
             job_manager: state.job_manager.clone(),
@@ -125,7 +122,6 @@ pub fn register_stateful(
     {
         use prism_mcp_replay::ToolDependencies;
         let deps = ToolDependencies {
-            db: state.db.clone(),
             artifact_store: state.artifact_store.clone(),
             evidence_ledger: state.evidence_ledger.clone(),
             job_manager: state.job_manager.clone(),

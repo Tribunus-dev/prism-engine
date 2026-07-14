@@ -776,11 +776,9 @@ impl McpHandler for RegisterKernel {
         let file_size = meta.len();
         let bytes = std::fs::read(binary_path)?;
         let digest = blake3::hash(&bytes).to_hex().to_string();
-        _state.db.with_writer(|conn| {
-            conn.execute_batch("CREATE TABLE IF NOT EXISTS kernel_registry (name TEXT PRIMARY KEY, backend TEXT NOT NULL, artifact_hash TEXT NOT NULL, byte_len INTEGER NOT NULL, target TEXT, registered_at TEXT NOT NULL DEFAULT(datetime('now')))")?;
-            conn.execute("INSERT INTO kernel_registry(name,backend,artifact_hash,byte_len,target) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(name) DO UPDATE SET backend=excluded.backend,artifact_hash=excluded.artifact_hash,byte_len=excluded.byte_len,target=excluded.target", rusqlite::params![name, backend, digest, file_size as i64, binary_path])?;
-            Ok(())
-        })?;
+        _state
+            .projection_store
+            .record_kernel(name, backend, &digest, file_size, binary_path)?;
 
         let result = json!({
             "name": name,

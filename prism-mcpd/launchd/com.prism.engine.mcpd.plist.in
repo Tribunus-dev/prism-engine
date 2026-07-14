@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.prism.engine.mcpd</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__BINARY__</string>
+        <string>--daemon</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>PRISM_MCPD_STATE_DIR</key>
+        <string>__STATE_DIR__</string>
+        <key>PRISM_MCPD_ARTIFACT_DIR</key>
+        <string>__ARTIFACT_DIR__</string>
+        <key>PRISM_MCPD_STORAGE</key>
+        <string>trifecta</string>
+        <key>PRISM_MCPD_POSTGRES_URL</key>
+        <string>__POSTGRES_URL__</string>
+        <key>PRISM_MCPD_VALKEY_URL</key>
+        <string>__VALKEY_URL__</string>
+        <key>PRISM_MCPD_DUCKDB_PATH</key>
+        <string>__DUCKDB_PATH__</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/prism-mcpd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/prism-mcpd.error.log</string>
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+</dict>
+</plist>
