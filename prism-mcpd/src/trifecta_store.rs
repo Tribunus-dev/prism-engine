@@ -122,7 +122,8 @@ impl PostgresCoordinationStore {
 impl CoordinationStore for PostgresCoordinationStore {
     fn start_session(&self, id: &str, agent: &str, purpose: Option<&str>) -> Result<CoordinationSession> {
         let c = self.client.lock(); let now = chrono::Utc::now().to_rfc3339();
-        self.runtime.block_on(c.execute("INSERT INTO prism_coord_sessions(session_id,agent_id,purpose,last_heartbeat_at) VALUES($1,$2,$3,$4) ON CONFLICT(session_id) DO UPDATE SET status='active',last_heartbeat_at=EXCLUDED.last_heartbeat_at", &[&id,&agent,&purpose,&now]))?;
+        let purpose_value = purpose.unwrap_or("").to_string();
+        self.runtime.block_on(c.execute("INSERT INTO prism_coord_sessions(session_id,agent_id,purpose,last_heartbeat_at) VALUES($1,$2,$3,$4) ON CONFLICT(session_id) DO UPDATE SET status='active',last_heartbeat_at=EXCLUDED.last_heartbeat_at", &[&id,&agent,&purpose_value,&now]))?;
         Ok(CoordinationSession { session_id:id.into(), agent_id:agent.into(), status:"active".into(), last_heartbeat_at:now })
     }
     fn heartbeat(&self, id: &str) -> Result<()> { let c=self.client.lock(); let now=chrono::Utc::now().to_rfc3339(); self.runtime.block_on(c.execute("UPDATE prism_coord_sessions SET last_heartbeat_at=$1,status='active' WHERE session_id=$2 AND status <> 'closed'", &[&now,&id]))?; Ok(()) }
