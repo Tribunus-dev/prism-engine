@@ -106,6 +106,7 @@ fn initializes_lists_tools_and_exits_after_stdin_closes() {
         .filter_map(|tool| tool["name"].as_str())
         .collect();
     for name in [
+        "resolve_path",
         "agent_session_start",
         "agent_session_heartbeat",
         "agent_session_close",

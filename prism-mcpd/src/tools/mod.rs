@@ -10,6 +10,7 @@ mod doctor_handler;
 mod job_handler;
 mod kb_handler;
 mod repo_handler;
+mod resolve_path_handler;
 
 /// Phase 1: register handlers that do NOT need DaemonState.
 /// Returns a `HashMap` for insertion into DaemonState before Phase 2.
@@ -31,7 +32,10 @@ pub fn register_basic() -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandl
         ("agent_coordination_event", "event"),
         ("agent_coordination_status", "status"),
     ] {
-        map.insert(name, Arc::new(coordination_handler::CoordinationHandler { name, action }));
+        map.insert(
+            name,
+            Arc::new(coordination_handler::CoordinationHandler { name, action }),
+        );
     }
 
     // ── Knowledge base operations ──────────────────────────────────
@@ -53,6 +57,10 @@ pub fn register_basic() -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandl
     // ── Repo ───────────────────────────────────────────────────────
     let repo = repo_handler::RepoHandler::new();
     map.insert(repo.name(), Arc::new(repo));
+    map.insert(
+        "resolve_path",
+        Arc::new(resolve_path_handler::ResolvePathHandler),
+    );
 
     // ── CImage ─────────────────────────────────────────────────────
     let cimage = cimage_handler::CImageHandler::new();
@@ -160,7 +168,9 @@ pub fn register_stateful(
             resource_leases: state.resource_leases.clone(),
             tools: state.tools.clone(),
         };
-        for h in prism_mcp_browser::handlers(&deps) { map.insert(h.name(), h); }
+        for h in prism_mcp_browser::handlers(&deps) {
+            map.insert(h.name(), h);
+        }
     }
 
     map.insert(
