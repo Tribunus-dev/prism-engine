@@ -20,6 +20,7 @@ members = [
     "prism-mcp-replay",
     "prism-mcp-trace",
     "prism-mcp-lab",
+    "prism-mcp-browser",
     "prism-mcp-core",
     "prism-mcpd",
 ]

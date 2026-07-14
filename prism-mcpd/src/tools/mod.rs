@@ -153,6 +153,16 @@ pub fn register_stateful(
         }
     }
 
+    {
+        let deps = prism_mcp_browser::ToolDependencies {
+            artifact_store: state.artifact_store.clone(),
+            evidence_ledger: state.evidence_ledger.clone(),
+            resource_leases: state.resource_leases.clone(),
+            tools: state.tools.clone(),
+        };
+        for h in prism_mcp_browser::handlers(&deps) { map.insert(h.name(), h); }
+    }
+
     map.insert(
         "run_job",
         Arc::new(job_handler::JobHandler::new(state.job_manager.clone())),
