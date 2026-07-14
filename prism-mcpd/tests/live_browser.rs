@@ -1,7 +1,7 @@
 #![cfg(feature = "live-browser")]
 
 use serde_json::{json, Value};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
 struct DaemonCleanup(std::path::PathBuf);
@@ -69,6 +69,8 @@ fn call_sequence(
         .spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut output = BufReader::new(stdout);
     writeln!(input, "{}", json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"live-dom","version":"1"}}})).unwrap();
     writeln!(
         input,
@@ -76,8 +78,33 @@ fn call_sequence(
         json!({"jsonrpc":"2.0","method":"notifications/initialized"})
     )
     .unwrap();
-    for (id, (name, args)) in calls.iter().enumerate() {
-        writeln!(input, "{}", json!({"jsonrpc":"2.0","id":id + 2,"method":"tools/call","params":{"name":name,"arguments":args}})).unwrap();
+    let mut line = String::new();
+    loop {
+        line.clear();
+        output.read_line(&mut line).unwrap();
+        if serde_json::from_str::<Value>(&line)
+            .ok()
+            .and_then(|v| v["id"].as_u64())
+            == Some(1)
+        {
+            break;
+        }
+    }
+    let mut results = Vec::new();
+    for (index, (name, args)) in calls.iter().enumerate() {
+        let id = index as u64 + 2;
+        writeln!(input, "{}", json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}})).unwrap();
+        input.flush().unwrap();
+        loop {
+            line.clear();
+            output.read_line(&mut line).unwrap();
+            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                if value["id"].as_u64() == Some(id) {
+                    results.push(value["result"].clone());
+                    break;
+                }
+            }
+        }
     }
     drop(input);
     let output = child.wait_with_output().unwrap();
@@ -86,13 +113,7 @@ fn call_sequence(
         "browser sequence failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let mut responses = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter(|v| v.get("id").and_then(Value::as_u64).unwrap_or_default() >= 2)
-        .collect::<Vec<_>>();
-    responses.sort_by_key(|v| v["id"].as_u64().unwrap_or_default());
-    responses.into_iter().map(|v| v["result"].clone()).collect()
+    results
 }
 
 #[test]
@@ -191,4 +212,44 @@ fn safari_dom_revision_and_typed_handle_gate() {
     assert_eq!(results[2]["structuredContent"]["nodes"][0]["role"], "link");
     assert_eq!(results[3]["isError"], false);
     assert_eq!(results[4]["isError"], true);
+}
+
+#[test]
+fn safari_owner_tabs_are_isolated() {
+    assert!(Command::new("safaridriver")
+        .arg("--version")
+        .status()
+        .unwrap()
+        .success());
+    let state = tempfile::tempdir().unwrap();
+    let artifacts = tempfile::tempdir().unwrap();
+    let _cleanup = DaemonCleanup(state.path().to_owned());
+    let results = call_sequence(
+        state.path(),
+        artifacts.path(),
+        &[
+            (
+                "browser_navigate",
+                json!({"url":"https://example.com","session_owner":"agent-a"}),
+            ),
+            (
+                "browser_navigate",
+                json!({"url":"https://example.com/second","session_owner":"agent-b"}),
+            ),
+            ("browser_get_tabs", json!({"session_owner":"agent-b"})),
+            ("browser_current_url", json!({"session_owner":"agent-a"})),
+            ("browser_current_url", json!({"session_owner":"agent-b"})),
+        ],
+    );
+    assert_eq!(results[0]["isError"], false);
+    assert_eq!(results[1]["isError"], false);
+    assert_eq!(results[2]["isError"], false);
+    assert_eq!(
+        results[3]["structuredContent"].as_str(),
+        Some("https://example.com/")
+    );
+    assert_eq!(
+        results[4]["structuredContent"].as_str(),
+        Some("https://example.com/second")
+    );
 }

@@ -112,18 +112,16 @@ impl BrowserSession {
                 .or_insert(dom::DomRevision(0));
             return Ok(());
         }
-        let handle = if self.owner_tabs.is_empty() {
-            self.command("GET", "/window", None)?
-        } else {
-            self.command("POST", "/window/new", Some(json!({"type":"tab"})))?
-                .get("handle")
-                .cloned()
-                .ok_or_else(|| anyhow!("WebDriver did not return a new tab handle"))?
-        };
+        let handle = self
+            .command("POST", "/window/new", Some(json!({"type":"tab"})))?
+            .get("handle")
+            .cloned()
+            .ok_or_else(|| anyhow!("WebDriver did not return a new tab handle"))?;
         let handle = handle
             .as_str()
             .ok_or_else(|| anyhow!("WebDriver returned an invalid tab handle"))?
             .to_owned();
+        self.command("POST", "/window", Some(json!({"handle": handle})))?;
         self.owner_tabs.insert(owner.to_owned(), handle);
         self.active_owner = Some(owner.to_owned());
         self.dom_revision = *self
@@ -406,6 +404,18 @@ impl McpHandler for BrowserHandler {
                     .ok_or_else(|| anyhow!("url is required"))?;
                 browser.validate_url(url)?;
                 browser.command("POST", "/url", Some(json!({"url":url})))?;
+                let deadline = Instant::now() + Duration::from_millis(2_000);
+                while Instant::now() < deadline {
+                    if browser
+                        .command("GET", "/url", None)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_owned))
+                        .is_some_and(|current| current.starts_with(url))
+                    {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
                 browser.bump_dom_revision();
                 json!({"url":url,"status":"navigated","revision":browser.current_dom_revision()})
             }
