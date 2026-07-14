@@ -99,6 +99,16 @@ impl Default for ResourceLeaseManager {
     }
 }
 
+impl crate::storage::LeaseStore for ResourceLeaseManager {
+    fn acquire(&self, _key: &str, _owner: &str, _ttl_seconds: u64) -> anyhow::Result<bool> {
+        Ok(true)
+    }
+
+    fn release(&self, _key: &str, _owner: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
 fn num_cpus() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())

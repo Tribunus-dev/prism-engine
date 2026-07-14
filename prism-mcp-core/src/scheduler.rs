@@ -1,7 +1,8 @@
 use crossbeam_channel::Receiver;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::protocol::{
     DaemonState, McpHandler, RequestContext, RequestEnvelope, ResponseFrame, ToolRequest,
@@ -79,6 +80,7 @@ pub struct Scheduler {
     state: Arc<DaemonState>,
     policy: ToolConcurrencyPolicy,
     active: Arc<Mutex<HashMap<String, usize>>>,
+    heartbeat_ms: Arc<AtomicU64>,
 }
 
 impl Scheduler {
@@ -93,16 +95,23 @@ impl Scheduler {
             state,
             policy: ToolConcurrencyPolicy::new(),
             active: Arc::new(Mutex::new(HashMap::new())),
+            heartbeat_ms: Arc::new(AtomicU64::new(now_ms())),
         }
+    }
+
+    pub fn heartbeat(&self) -> Arc<AtomicU64> {
+        self.heartbeat_ms.clone()
     }
 
     /// Run the dispatch loop. Frames arrive from the work queue. For each
     /// valid `tools/call`, we try to acquire a permit and spawn a worker.
     pub fn run(&self) {
         loop {
-            let envelope = match self.work_queue.recv() {
+            self.heartbeat_ms.store(now_ms(), Ordering::Relaxed);
+            let envelope = match self.work_queue.recv_timeout(Duration::from_secs(1)) {
                 Ok(e) => e,
-                Err(_) => break,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
             };
 
             let response_tx = &envelope.response_tx;
@@ -316,4 +325,11 @@ impl Scheduler {
             },
         );
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }

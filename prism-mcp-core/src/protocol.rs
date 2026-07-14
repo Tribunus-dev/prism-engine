@@ -255,28 +255,30 @@ pub struct RequestContext {
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::artifact::ArtifactStore;
-use crate::db::DbManager;
-use crate::evidence::EvidenceLedger;
 use crate::file_lock::FileLock;
-use crate::job::JobManager;
-use crate::lease::ResourceLeaseManager;
 use crate::scheduler::SchedulerHandle;
+use crate::storage::{
+    ArtifactRepository, BenchmarkStore, EvidenceStore, ExperimentStore, JobStore, KnowledgeStore,
+    LeaseStore, ProjectionStore,
+};
 use crate::subprocess::ProcessCache;
 use crate::work_journal::WorkJournal;
 
 /// Shared state accessible to every tool handler.
 pub struct DaemonState {
     pub tools: Arc<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>>,
-    pub db: Arc<DbManager>,
-    pub artifact_store: ArtifactStore,
-    pub evidence_ledger: EvidenceLedger,
+    pub artifact_store: Arc<dyn ArtifactRepository>,
+    pub evidence_ledger: Arc<dyn EvidenceStore>,
     pub file_lock: FileLock,
     pub work_journal: WorkJournal,
     pub process_cache: ProcessCache,
     pub scheduler_handle: SchedulerHandle,
-    pub job_manager: JobManager,
-    pub resource_leases: ResourceLeaseManager,
+    pub job_manager: Arc<dyn JobStore>,
+    pub resource_leases: Arc<dyn LeaseStore>,
+    pub projection_store: Arc<dyn ProjectionStore>,
+    pub experiment_store: Arc<dyn ExperimentStore>,
+    pub benchmark_store: Arc<dyn BenchmarkStore>,
+    pub knowledge_store: Arc<dyn KnowledgeStore>,
     pub connection_count: Arc<AtomicU64>,
     pub idle_generation: Arc<AtomicU64>,
 }

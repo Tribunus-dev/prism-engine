@@ -216,3 +216,17 @@ impl EvidenceLedger {
         })
     }
 }
+
+impl crate::storage::EvidenceStore for EvidenceLedger {
+    fn record(&self, receipt: &EvidenceReceipt) -> Result<()> {
+        self.record(receipt)
+    }
+    fn query(
+        &self,
+        tool: &str,
+        operation: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<EvidenceReceipt>> {
+        self.query(tool, operation, limit)
+    }
+}

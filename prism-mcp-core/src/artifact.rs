@@ -294,3 +294,17 @@ impl ArtifactStore {
         })
     }
 }
+
+impl crate::storage::ArtifactRepository for ArtifactStore {
+    fn put(
+        &self,
+        data: &[u8],
+        kind: ArtifactKind,
+        producer: &ToolInvocationId,
+    ) -> Result<ArtifactId> {
+        self.put(data, kind, producer)
+    }
+    fn list(&self, kind: Option<&ArtifactKind>) -> Result<Vec<ArtifactRecord>> {
+        self.list(kind)
+    }
+}

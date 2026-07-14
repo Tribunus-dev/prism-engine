@@ -2,9 +2,11 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use prism_mcp_core::{
@@ -13,6 +15,7 @@ use prism_mcp_core::{
     WorkJournal,
 };
 
+use crate::backends::{self, BackendHealth};
 use crate::tools;
 
 struct StatePaths {
@@ -22,6 +25,64 @@ struct StatePaths {
     file_lock_path: String,
     db_path: String,
     staging_dir: String,
+}
+
+struct RuntimeFiles {
+    socket_path: String,
+    pid_path: String,
+}
+
+#[derive(Clone)]
+struct HealthState {
+    db_path: String,
+    artifact_dir: String,
+    artifact_db_path: String,
+    scheduler_heartbeat_ms: Arc<AtomicU64>,
+    work_tx: Sender<RequestEnvelope>,
+    connection_count: Arc<AtomicU64>,
+    backend_health: BackendHealth,
+}
+
+impl HealthState {
+    fn snapshot(&self) -> serde_json::Value {
+        let heartbeat_age_ms =
+            now_ms().saturating_sub(self.scheduler_heartbeat_ms.load(Ordering::Relaxed));
+        let database_ok = self.backend_health.profile != "sqlite-local"
+            || sqlite_quick_check(Path::new(&self.db_path));
+        let artifact_database_ok = self.backend_health.profile != "sqlite-local"
+            || sqlite_quick_check(Path::new(&self.artifact_db_path));
+        let artifacts_ok = std::fs::metadata(&self.artifact_dir)
+            .map(|metadata| metadata.is_dir() && !metadata.permissions().readonly())
+            .unwrap_or(false);
+        let scheduler_ok = heartbeat_age_ms < 3_000;
+        let status = if database_ok && artifact_database_ok && artifacts_ok && scheduler_ok {
+            "healthy"
+        } else {
+            "unhealthy"
+        };
+        serde_json::json!({
+            "status": status,
+            "protocol": 1,
+            "build_id": env!("PRISM_MCPD_BUILD_ID"),
+            "pid": std::process::id(),
+            "database_ok": database_ok,
+            "artifact_database_ok": artifact_database_ok,
+            "artifacts_ok": artifacts_ok,
+            "scheduler_ok": scheduler_ok,
+            "scheduler_heartbeat_age_ms": heartbeat_age_ms,
+            "queue_depth": self.work_tx.len(),
+            "queue_capacity": self.work_tx.capacity(),
+            "connections": self.connection_count.load(Ordering::Relaxed)
+            ,"storage": self.backend_health.as_json()
+        })
+    }
+}
+
+impl Drop for RuntimeFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.socket_path);
+        let _ = std::fs::remove_file(&self.pid_path);
+    }
 }
 
 impl StatePaths {
@@ -41,6 +102,9 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     let paths = StatePaths::new(state_dir);
     std::fs::create_dir_all(state_dir)?;
     std::fs::create_dir_all(artifact_dir)?;
+    let backend_config = backends::BackendConfig::from_env();
+    let backend_health = backends::validate(&backend_config)?;
+    backends::initialize(&backend_config)?;
 
     // Singleton lock
     let singleton_lock = FileLock::new(Path::new(&paths.lock_path));
@@ -51,14 +115,80 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
         )
     })?;
     let _ = std::fs::remove_file(&paths.socket_path);
+    let _runtime_files = RuntimeFiles {
+        socket_path: paths.socket_path.clone(),
+        pid_path: paths.pid_path.clone(),
+    };
+    let terminate = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGTERM, terminate.clone())?;
+    signal_hook::flag::register(signal_hook::consts::SIGINT, terminate.clone())?;
 
     // Open database
     let db_path = Path::new(&paths.db_path);
     let schema = include_str!("../migrations/001_schema.sql");
-    let db = Arc::new(DbManager::open(db_path, schema, 8)?);
+    let db = if backend_config.profile == "sqlite" {
+        let database = Arc::new(DbManager::open(db_path, schema, 8)?);
+        if !sqlite_quick_check(db_path) {
+            anyhow::bail!(
+                "knowledge database failed SQLite integrity check: {}",
+                db_path.display()
+            );
+        }
+        Some(database)
+    } else {
+        None
+    };
 
-    let artifact_store = ArtifactStore::open(Path::new(artifact_dir))?;
-    let evidence_ledger = EvidenceLedger::open(db.clone())?; // Arc clone — shares the DbManager
+    let artifact_store: Arc<dyn prism_mcp_core::ArtifactRepository> =
+        if backend_config.profile == "trifecta" {
+            #[cfg(feature = "trifecta")]
+            {
+                crate::trifecta_store::PostgresArtifactRepository::connect(
+                    Path::new(artifact_dir),
+                    backend_config
+                        .postgres_url
+                        .as_deref()
+                        .expect("validated PostgreSQL URL"),
+                )?
+            }
+            #[cfg(not(feature = "trifecta"))]
+            {
+                anyhow::bail!("trifecta artifact storage requires the `trifecta` feature")
+            }
+        } else {
+            Arc::new(ArtifactStore::open(Path::new(artifact_dir))?)
+        };
+    let artifact_db_path = if backend_config.profile == "trifecta" {
+        Path::new(
+            backend_config
+                .duckdb_path
+                .as_deref()
+                .expect("validated DuckDB path"),
+        )
+        .to_path_buf()
+    } else {
+        Path::new(artifact_dir).join("metadata.db")
+    };
+    let evidence_ledger: Arc<dyn prism_mcp_core::EvidenceStore> =
+        if backend_config.profile == "trifecta" {
+            #[cfg(feature = "trifecta")]
+            {
+                crate::trifecta_store::PostgresEvidenceStore::connect(
+                    backend_config
+                        .postgres_url
+                        .as_deref()
+                        .expect("validated PostgreSQL URL"),
+                )?
+            }
+            #[cfg(not(feature = "trifecta"))]
+            {
+                anyhow::bail!("trifecta evidence storage requires the `trifecta` feature")
+            }
+        } else {
+            Arc::new(EvidenceLedger::open(
+                db.as_ref().expect("local database").clone(),
+            )?)
+        };
     let file_lock = FileLock::new(Path::new(&paths.file_lock_path));
     let work_journal = WorkJournal::new(Path::new(&paths.staging_dir));
     let process_cache = ProcessCache::new(32);
@@ -75,14 +205,120 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     let idle_gen = Arc::new(AtomicU64::new(0));
 
     // Create job manager and resource leases
-    let job_manager = JobManager::new(db.clone())?;
-    let resource_leases = ResourceLeaseManager::new();
+    let job_manager: Arc<dyn prism_mcp_core::JobStore> = if backend_config.profile == "trifecta" {
+        #[cfg(feature = "trifecta")]
+        {
+            crate::trifecta_store::PostgresJobStore::connect(
+                backend_config
+                    .postgres_url
+                    .as_deref()
+                    .expect("validated PostgreSQL URL"),
+            )?
+        }
+        #[cfg(not(feature = "trifecta"))]
+        {
+            anyhow::bail!("trifecta job storage requires the `trifecta` feature")
+        }
+    } else {
+        Arc::new(JobManager::new(
+            db.as_ref().expect("local database").clone(),
+        )?)
+    };
+    let resource_leases: Arc<dyn prism_mcp_core::LeaseStore> =
+        if backend_config.profile == "trifecta" {
+            #[cfg(feature = "trifecta")]
+            {
+                crate::trifecta_store::ValkeyLeaseStore::connect(
+                    backend_config
+                        .valkey_url
+                        .as_deref()
+                        .expect("validated Valkey URL"),
+                )?
+            }
+            #[cfg(not(feature = "trifecta"))]
+            {
+                anyhow::bail!("trifecta lease storage requires the `trifecta` feature")
+            }
+        } else {
+            Arc::new(ResourceLeaseManager::new())
+        };
+    let projection_store: Arc<dyn prism_mcp_core::ProjectionStore> =
+        if backend_config.profile == "trifecta" {
+            #[cfg(feature = "trifecta")]
+            {
+                crate::trifecta_store::DuckDbProjectionStore::open(
+                    backend_config
+                        .duckdb_path
+                        .as_deref()
+                        .expect("validated DuckDB path"),
+                )?
+            }
+            #[cfg(not(feature = "trifecta"))]
+            {
+                anyhow::bail!("trifecta projections require the `trifecta` feature")
+            }
+        } else {
+            db.as_ref().expect("local database").clone()
+        };
+    let experiment_store: Arc<dyn prism_mcp_core::ExperimentStore> =
+        if backend_config.profile == "trifecta" {
+            #[cfg(feature = "trifecta")]
+            {
+                crate::trifecta_store::PostgresExperimentStore::connect(
+                    backend_config
+                        .postgres_url
+                        .as_deref()
+                        .expect("validated PostgreSQL URL"),
+                )?
+            }
+            #[cfg(not(feature = "trifecta"))]
+            {
+                anyhow::bail!("trifecta experiment storage requires the `trifecta` feature")
+            }
+        } else {
+            db.as_ref().expect("local database").clone()
+        };
+    let benchmark_store: Arc<dyn prism_mcp_core::BenchmarkStore> =
+        if backend_config.profile == "trifecta" {
+            #[cfg(feature = "trifecta")]
+            {
+                crate::trifecta_store::PostgresBenchmarkStore::connect(
+                    backend_config
+                        .postgres_url
+                        .as_deref()
+                        .expect("validated PostgreSQL URL"),
+                )?
+            }
+            #[cfg(not(feature = "trifecta"))]
+            {
+                anyhow::bail!("trifecta benchmark storage requires the `trifecta` feature")
+            }
+        } else {
+            db.as_ref().expect("local database").clone()
+        };
+    let knowledge_store: Arc<dyn prism_mcp_core::KnowledgeStore> =
+        if backend_config.profile == "trifecta" {
+            #[cfg(feature = "trifecta")]
+            {
+                crate::trifecta_store::PostgresKnowledgeStore::connect(
+                    backend_config
+                        .postgres_url
+                        .as_deref()
+                        .expect("validated PostgreSQL URL"),
+                )?
+            }
+            #[cfg(not(feature = "trifecta"))]
+            {
+                anyhow::bail!("trifecta knowledge storage requires the `trifecta` feature")
+            }
+        } else {
+            db.as_ref().expect("local database").clone()
+        };
 
     // Build DaemonState with Phase 1 tools, then register stateful handlers
     let partial_tools = Arc::new(tools_map.clone());
     let mut state = DaemonState {
         tools: partial_tools.clone(),
-        db,
         artifact_store,
         evidence_ledger,
         file_lock,
@@ -93,6 +329,10 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
         },
         job_manager,
         resource_leases,
+        projection_store,
+        experiment_store,
+        benchmark_store,
+        knowledge_store,
         connection_count: conn_count.clone(),
         idle_generation: idle_gen.clone(),
     };
@@ -106,6 +346,15 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
 
     // Start scheduler in its own thread
     let sched = Scheduler::new(work_rx, tools, state.clone());
+    let health = HealthState {
+        db_path: paths.db_path.clone(),
+        artifact_dir: artifact_dir.to_string(),
+        artifact_db_path: artifact_db_path.to_string_lossy().into_owned(),
+        scheduler_heartbeat_ms: sched.heartbeat(),
+        work_tx: work_tx.clone(),
+        connection_count: conn_count.clone(),
+        backend_health,
+    };
     std::thread::spawn(move || {
         sched.run();
     });
@@ -120,10 +369,9 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     // Accept loop (non-blocking)
     listener.set_nonblocking(true)?;
     // Track connections to restore blocking mode after accept
-    loop {
+    while !terminate.load(Ordering::Relaxed) {
         if conn_count.load(Ordering::Relaxed) == 0 {
             idle_gen.fetch_add(1, Ordering::Relaxed);
-            std::thread::sleep(Duration::from_secs(1));
         }
 
         match listener.accept() {
@@ -138,11 +386,19 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
                 conn_count.fetch_add(1, Ordering::Relaxed);
                 let conn_count_clone = conn_count.clone();
                 let work_tx_clone = work_tx.clone();
+                let health_clone = health.clone();
                 let conn_id = ConnectionId::new();
                 let (response_tx, response_rx) = bounded::<ResponseFrame>(64);
 
                 std::thread::spawn(move || {
-                    handle_connection(stream, conn_id, work_tx_clone, response_tx, response_rx);
+                    handle_connection(
+                        stream,
+                        conn_id,
+                        work_tx_clone,
+                        response_tx,
+                        response_rx,
+                        health_clone,
+                    );
                     conn_count_clone.fetch_sub(1, Ordering::Relaxed);
                 });
             }
@@ -155,6 +411,7 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
 }
 
 fn set_blocking(stream: &UnixStream) -> std::io::Result<()> {
@@ -175,6 +432,7 @@ fn handle_connection(
     work_tx: Sender<RequestEnvelope>,
     response_tx: Sender<ResponseFrame>,
     response_rx: Receiver<ResponseFrame>,
+    health: HealthState,
 ) {
     let reader = match stream.try_clone() {
         Ok(s) => s,
@@ -195,6 +453,26 @@ fn handle_connection(
                 if line.trim().is_empty() {
                     line.clear();
                     continue;
+                }
+                if let Ok(frame) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                    if frame["method"] == "prism/health" {
+                        let json = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": frame["id"],
+                            "result": health.snapshot()
+                        });
+                        if response_tx
+                            .send(ResponseFrame {
+                                connection_id: conn_id,
+                                json: json.to_string(),
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                        line.clear();
+                        continue;
+                    }
                 }
                 let env = RequestEnvelope {
                     connection_id: conn_id,
@@ -222,4 +500,23 @@ fn handle_connection(
 
     let _ = reader_handle.join();
     let _ = writer_handle.join();
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn sqlite_quick_check(path: &Path) -> bool {
+    let Ok(db) = rusqlite::Connection::open(path) else {
+        return false;
+    };
+    if db.busy_timeout(Duration::from_millis(100)).is_err() {
+        return false;
+    }
+    db.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+        .map(|result| result == "ok")
+        .unwrap_or(false)
 }

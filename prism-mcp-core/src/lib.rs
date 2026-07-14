@@ -11,6 +11,7 @@ pub mod log;
 pub mod protocol;
 pub mod scheduler;
 pub mod schema;
+pub mod storage;
 pub mod subprocess;
 pub mod work_journal;
 
@@ -31,5 +32,10 @@ pub use protocol::{
 };
 pub use scheduler::{Scheduler, SchedulerHandle, ToolConcurrencyPolicy, ToolLimit};
 pub use schema::SchemaHeader;
+pub use storage::{
+    ArtifactRepository, BenchmarkStore, EvidenceStore, ExperimentStore, JobStore,
+    KnowledgeDocument, KnowledgeListRow, KnowledgeSearchResult, KnowledgeStore, LeaseStore,
+    ProjectionStore,
+};
 pub use subprocess::{run_with_timeout, ProcessCache};
 pub use work_journal::{JournalEntry, JournalPhase, WorkJournal};

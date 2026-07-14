@@ -231,6 +231,33 @@ impl JobManager {
     }
 }
 
+impl crate::storage::JobStore for JobManager {
+    fn create_job(&self, tool: &str, operation: &str) -> Result<JobId> {
+        self.create_job(tool, operation)
+    }
+    fn update_state(&self, id: &JobId, state: JobState) -> Result<()> {
+        self.update_state(id, state)
+    }
+    fn update_progress(&self, id: &JobId, progress: JobProgress) -> Result<()> {
+        self.update_progress(id, progress)
+    }
+    fn get_job(&self, id: &JobId) -> Result<JobRecord> {
+        self.get_job(id)
+    }
+    fn list_jobs(&self, tool: Option<&str>) -> Result<Vec<JobRecord>> {
+        self.list_jobs(tool)
+    }
+    fn cancel_job(&self, id: &JobId) -> Result<()> {
+        self.cancel_job(id)
+    }
+    fn push_event(&self, job_id: &JobId, event_type: &str, message: &str) -> Result<()> {
+        self.push_event(job_id, event_type, message)
+    }
+    fn get_events(&self, job_id: &JobId) -> Result<Vec<JobEvent>> {
+        self.get_events(job_id)
+    }
+}
+
 fn parse_state(state: &str, _detail: &Option<String>) -> JobState {
     match state {
         "Queued" => JobState::Queued,

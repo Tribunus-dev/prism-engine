@@ -11,3 +11,16 @@ _insert_soc.py
 # BitNet model checkpoint (1.18 GB, not tracked in git)
 models/bitnet-b1.58-2B-4T/
 AMD-Dev-Cloud-Key
+
+# Generated repository review and semantic packet artifacts
+/prism-engine-full-packet.zip
+/prism-engine-semantic-packet.zip
+/tribunus-source-review/02_file_index.json
+/semantic-packet/02_file_index.json
+/inventory.json
+/test_cfg
+
+# Local transcripts and downloaded example datasets
+/Local AI models destroyed by further Distillation.en.vtt
+/mlx-rs-fork/examples/mnist/data/train-images.idx3-ubyte
+/mlx-rs-fork/examples/mnist/data/t10k-images.idx3-ubyte
