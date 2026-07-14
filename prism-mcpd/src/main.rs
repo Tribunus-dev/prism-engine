@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(750);
 const START_TIMEOUT: Duration = Duration::from_secs(5);
-const BUILD_ID: &str = env!("PRISM_MCPD_BUILD_ID");
 
 fn default_state_dir() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
@@ -110,7 +109,7 @@ fn daemon_is_healthy(socket_path: &str) -> bool {
         .is_some_and(|value| {
             value["id"] == "health"
                 && value["result"]["protocol"] == 1
-                && value["result"]["build_id"] == BUILD_ID
+                && value["result"]["status"] == "healthy"
         })
 }
 

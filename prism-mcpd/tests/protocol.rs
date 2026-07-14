@@ -169,6 +169,44 @@ fn daemon_removes_runtime_files_after_sigterm() {
 }
 
 #[test]
+fn same_state_directory_allows_only_one_daemon_owner() {
+    let state = tempfile::tempdir().expect("state directory");
+    let artifacts = tempfile::tempdir().expect("artifact directory");
+    let mut first = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_STORAGE", "sqlite")
+        .arg("--daemon")
+        .env("PRISM_MCPD_STATE_DIR", state.path())
+        .env("PRISM_MCPD_ARTIFACT_DIR", artifacts.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start first daemon");
+    let socket = state.path().join("mcpd.sock");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline && !socket.exists() {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(socket.exists(), "first daemon did not create its socket");
+
+    let mut second = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_STORAGE", "sqlite")
+        .arg("--daemon")
+        .env("PRISM_MCPD_STATE_DIR", state.path())
+        .env("PRISM_MCPD_ARTIFACT_DIR", artifacts.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start second daemon");
+    assert!(wait_for_exit(&mut second, Duration::from_secs(3)));
+    assert_ne!(second.wait().unwrap().code(), Some(0));
+
+    unsafe {
+        libc::kill(first.id() as i32, libc::SIGTERM);
+    }
+    assert!(wait_for_exit(&mut first, Duration::from_secs(3)));
+}
+
+#[test]
 fn concurrent_proxies_converge_on_one_daemon() {
     let state = tempfile::tempdir().expect("state directory");
     let artifacts = tempfile::tempdir().expect("artifact directory");
