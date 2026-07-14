@@ -4,7 +4,11 @@
   "policy_updated": "2026-07-08T07:45:00Z",
   "generated_by": "QuantSweep with Metal GPU acceleration + ANE operator validation",
   "evidence_model": {
-    "tiers": ["weight_space", "operator", "rollout"],
+    "tiers": [
+      "weight_space",
+      "operator",
+      "rollout"
+    ],
     "promotion_gates": {
       "operator_nrmse": 0.002,
       "cosine_similarity": 0.999,
@@ -52,7 +56,9 @@
   },
   "substitution": {
     "enabled": false,
-    "default_candidates": ["FP16"],
+    "default_candidates": [
+      "FP16"
+    ],
     "candidate_profiles": {
       "FP16": {
         "weight_nrmse_max": 0.001,
@@ -73,7 +79,7 @@
         "requires_rollout_validation": false
       },
       "NF4": {
-        "weight_nrmse_max": 0.10,
+        "weight_nrmse_max": 0.1,
         "weight_zero_collapse_max": 0.001,
         "operator_nrmse_max": 0.002,
         "operator_cosine_min": 0.999,
@@ -82,7 +88,7 @@
         "requires_rollout_validation": false
       },
       "SymInt4": {
-        "weight_nrmse_max": 0.10,
+        "weight_nrmse_max": 0.1,
         "weight_zero_collapse_max": 0.001,
         "operator_nrmse_max": 0.002,
         "operator_cosine_min": 0.999,
@@ -91,7 +97,7 @@
         "requires_rollout_validation": false
       },
       "Ternary": {
-        "weight_nrmse_max": 0.020,
+        "weight_nrmse_max": 0.02,
         "weight_zero_collapse_max": 0.85,
         "operator_nrmse_max": 0.005,
         "operator_cosine_min": 0.999,
@@ -108,12 +114,24 @@
   "model_policies": [
     {
       "scope": "Gemma4.DecoderAttentionProjection",
-      "match": ["q_proj", "k_proj", "v_proj", "o_proj"],
+      "match": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj"
+      ],
       "source": {
         "sweep": "/tmp/sweep-gemma-decoder-depth",
         "tensors": 41,
         "candidates": 2050,
-        "depth_layers": [0, 10, 20, 30, 40, 47]
+        "depth_layers": [
+          0,
+          10,
+          20,
+          30,
+          40,
+          47
+        ]
       },
       "primary": {
         "family": "NF4",
@@ -150,12 +168,23 @@
     },
     {
       "scope": "Gemma4.DecoderMlpProjection",
-      "match": ["gate_proj", "up_proj", "down_proj"],
+      "match": [
+        "gate_proj",
+        "up_proj",
+        "down_proj"
+      ],
       "source": {
         "sweep": "/tmp/sweep-gemma-decoder-depth",
         "tensors": 18,
         "candidates": 900,
-        "depth_layers": [0, 10, 20, 30, 40, 47]
+        "depth_layers": [
+          0,
+          10,
+          20,
+          30,
+          40,
+          47
+        ]
       },
       "primary": {
         "family": "NF4",
@@ -196,7 +225,14 @@
         "sweep": "/tmp/sweep-qwen-tts-full",
         "tensors": 40,
         "candidates": 4000,
-        "modules": ["talker", "code_predictor", "codec_head", "codec_embedding", "text_projection", "small_to_mtp"]
+        "modules": [
+          "talker",
+          "code_predictor",
+          "codec_head",
+          "codec_embedding",
+          "text_projection",
+          "small_to_mtp"
+        ]
       },
       "primary": {
         "family": "INT8",
@@ -205,7 +241,11 @@
       "fallback": {
         "family": "RawF32"
       },
-      "disallow": ["NF4", "SymInt4", "Ternary"],
+      "disallow": [
+        "NF4",
+        "SymInt4",
+        "Ternary"
+      ],
       "evidence": {
         "weight_space": {
           "avg_nrmse": 0.0068,
@@ -219,20 +259,38 @@
           "max_abs_error": 0.0033,
           "status": "promotable",
           "representative_tensors": [
-            {"class": "DecoderAttentionProjection", "op_nrmse": 0.000756, "max_abs": 0.001373},
-            {"class": "DecoderMlpProjection", "op_nrmse": 0.000845, "max_abs": 0.007637},
-            {"class": "TokenEmbedding (codec_embedding)", "op_nrmse": 0.000842, "max_abs": 0.001786},
-            {"class": "projection (text_projection.linear_fc1)", "op_nrmse": 0.000738, "max_abs": 0.002499}
+            {
+              "class": "DecoderAttentionProjection",
+              "op_nrmse": 0.000756,
+              "max_abs": 0.001373
+            },
+            {
+              "class": "DecoderMlpProjection",
+              "op_nrmse": 0.000845,
+              "max_abs": 0.007637
+            },
+            {
+              "class": "TokenEmbedding (codec_embedding)",
+              "op_nrmse": 0.000842,
+              "max_abs": 0.001786
+            },
+            {
+              "class": "projection (text_projection.linear_fc1)",
+              "op_nrmse": 0.000738,
+              "max_abs": 0.002499
+            }
           ],
           "evidence_path": "/tmp/sweep-qwen-tts-ane/operator_validation.json"
         }
       },
       "validation_status": "operator_validated",
-      "notes": "INT8 g128 is operator-validated across all Qwen3-TTS projection classes. NF4/SymInt4/Ternary remain disallowed because 4-bit weight NRMSE (~0.087) is 13x worse than INT8 (~0.007) — no evidence that operator-level error cancellation brings 4-bit into an acceptable range for speech. Keep INT8 for production until audio perceptual validation exists."
+      "notes": "INT8 g128 is operator-validated across all Qwen3-TTS projection classes. NF4/SymInt4/Ternary remain disallowed because 4-bit weight NRMSE (~0.087) is 13x worse than INT8 (~0.007) \u2014 no evidence that operator-level error cancellation brings 4-bit into an acceptable range for speech. Keep INT8 for production until audio perceptual validation exists."
     },
     {
       "scope": "Gemma4.VisionPatchProjection",
-      "match": ["patch_dense"],
+      "match": [
+        "patch_dense"
+      ],
       "source": {
         "sweep": "/tmp/sweep-gemma-bridge",
         "tensors": 1,
@@ -255,7 +313,7 @@
           "int8_g128_op_nrmse": 0.001092,
           "int8_g128_max_abs_error": 3.896973,
           "status": "rawf32_required",
-          "reason": "INT8 relative error passes (nrmse=0.001, cosine=1.0) but absolute operator max_abs=3.9 exceeds 0.5 gate. Column rescue would require keeping 6862/6912 input columns as F32 to satisfy max_abs<=0.5, eliminating practical compression benefit — only 50 of 6912 columns can be INT8 before max_abs exceeds 0.5. RawF32 is the only safe first-build option.",
+          "reason": "INT8 relative error passes (nrmse=0.001, cosine=1.0) but absolute operator max_abs=3.9 exceeds 0.5 gate. Column rescue would require keeping 6862/6912 input columns as F32 to satisfy max_abs<=0.5, eliminating practical compression benefit \u2014 only 50 of 6912 columns can be INT8 before max_abs exceeds 0.5. RawF32 is the only safe first-build option.",
           "evidence_path": "/tmp/sweep-bridge-ane/operator_validation.json"
         }
       },
@@ -264,7 +322,9 @@
     },
     {
       "scope": "Gemma4.CrossModalBridge",
-      "match": ["embedding_projection"],
+      "match": [
+        "embedding_projection"
+      ],
       "source": {
         "sweep": "/tmp/sweep-gemma-bridge",
         "tensors": 2,
@@ -308,7 +368,8 @@
       "Gemma4.DecoderAttentionProjection": true,
       "Gemma4.DecoderMlpProjection": true,
       "Gemma4.CrossModalBridge": true,
-      "Qwen3TTS.Projection": true
+      "Qwen3TTS.Projection": true,
+      "Gemma4.VisionPatchProjection": false
     }
   }
 }
