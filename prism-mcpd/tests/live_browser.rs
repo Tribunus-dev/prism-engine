@@ -4,6 +4,16 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+struct DaemonCleanup(std::path::PathBuf);
+
+impl Drop for DaemonCleanup {
+    fn drop(&mut self) {
+        if let Ok(pid) = std::fs::read_to_string(self.0.join("mcpd.pid")) {
+            let _ = Command::new("kill").args(["-TERM", pid.trim()]).status();
+        }
+    }
+}
+
 fn call(state: &std::path::Path, artifacts: &std::path::Path, name: &str, args: Value) -> Value {
     let mut child = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
         .env("PRISM_MCPD_STORAGE", "sqlite")
@@ -94,6 +104,7 @@ fn safari_browser_production_gate() {
         .success());
     let state = tempfile::tempdir().unwrap();
     let artifacts = tempfile::tempdir().unwrap();
+    let _cleanup = DaemonCleanup(state.path().to_owned());
     let owner = "live-browser";
     let nav = call(
         state.path(),
@@ -157,6 +168,7 @@ fn safari_dom_revision_and_typed_handle_gate() {
         .success());
     let state = tempfile::tempdir().unwrap();
     let artifacts = tempfile::tempdir().unwrap();
+    let _cleanup = DaemonCleanup(state.path().to_owned());
     let owner = "live-dom";
     let node = json!({"id":{"tab":"current","revision":1,"ordinal":0},"tag":"a","role":"link","name":"More information...","text":"More information...","selector":"a","visible":true,"enabled":true,"x":0.0,"y":0.0,"width":100.0,"height":20.0});
     let results = call_sequence(

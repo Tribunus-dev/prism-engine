@@ -76,6 +76,9 @@ pub struct BrowserSession {
     config: BrowserConfig,
     driver: Option<Driver>,
     dom_revision: dom::DomRevision,
+    owner_tabs: HashMap<String, String>,
+    owner_revisions: HashMap<String, dom::DomRevision>,
+    active_owner: Option<String>,
 }
 
 impl BrowserSession {
@@ -84,13 +87,50 @@ impl BrowserSession {
             config,
             driver: None,
             dom_revision: dom::DomRevision(0),
+            owner_tabs: HashMap::new(),
+            owner_revisions: HashMap::new(),
+            active_owner: None,
         }
     }
     fn bump_dom_revision(&mut self) {
         self.dom_revision.0 = self.dom_revision.0.saturating_add(1);
+        if let Some(owner) = self.active_owner.as_ref() {
+            self.owner_revisions
+                .insert(owner.clone(), self.dom_revision);
+        }
     }
     fn current_dom_revision(&self) -> dom::DomRevision {
         self.dom_revision
+    }
+    fn activate_owner_tab(&mut self, owner: &str) -> Result<()> {
+        if let Some(handle) = self.owner_tabs.get(owner).cloned() {
+            self.command("POST", "/window", Some(json!({"handle": handle})))?;
+            self.active_owner = Some(owner.to_owned());
+            self.dom_revision = *self
+                .owner_revisions
+                .entry(owner.to_owned())
+                .or_insert(dom::DomRevision(0));
+            return Ok(());
+        }
+        let handle = if self.owner_tabs.is_empty() {
+            self.command("GET", "/window", None)?
+        } else {
+            self.command("POST", "/window/new", Some(json!({"type":"tab"})))?
+                .get("handle")
+                .cloned()
+                .ok_or_else(|| anyhow!("WebDriver did not return a new tab handle"))?
+        };
+        let handle = handle
+            .as_str()
+            .ok_or_else(|| anyhow!("WebDriver returned an invalid tab handle"))?
+            .to_owned();
+        self.owner_tabs.insert(owner.to_owned(), handle);
+        self.active_owner = Some(owner.to_owned());
+        self.dom_revision = *self
+            .owner_revisions
+            .entry(owner.to_owned())
+            .or_insert(dom::DomRevision(0));
+        Ok(())
     }
     fn ensure(&mut self) -> Result<&mut Driver> {
         if self.driver.is_none() {
@@ -103,9 +143,8 @@ impl BrowserSession {
             let deadline = Instant::now() + Duration::from_millis(self.config.startup_timeout_ms);
             let agent = ureq::Agent::new();
             let mut child = None;
-            let startup_lock = FileLock::new(
-                &std::env::temp_dir().join("prism-mcp-browser-safaridriver.lock"),
-            );
+            let startup_lock =
+                FileLock::new(&std::env::temp_dir().join("prism-mcp-browser-safaridriver.lock"));
             let _startup_guard = startup_lock.lock()?;
             while Instant::now() < deadline {
                 if let Ok(response) = agent
@@ -203,6 +242,7 @@ impl BrowserSession {
         Ok(result)
     }
     fn close(&mut self) -> Result<()> {
+        self.owner_tabs.clear();
         if let Some(mut d) = self.driver.take() {
             let _ = self.request("DELETE", &format!("/session/{}", d.session_id), None);
             if let Some(mut child) = d.child.take() {
@@ -213,7 +253,18 @@ impl BrowserSession {
     }
 
     fn dom_snapshot(&mut self) -> Result<Value> {
-        let raw = self.execute_js(DOM_SNAPSHOT, vec![])?;
+        let mut raw = self.execute_js(DOM_SNAPSHOT, vec![])?;
+        for _ in 0..20 {
+            if raw["nodes"]
+                .as_array()
+                .is_some_and(|nodes| !nodes.is_empty())
+                || raw["url"].as_str() == Some("about:blank")
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            raw = self.execute_js(DOM_SNAPSHOT, vec![])?;
+        }
         let tab = self
             .command("GET", "/window", None)
             .ok()
@@ -296,8 +347,14 @@ fn session(_state: &DaemonState) -> Result<Arc<Mutex<BrowserSession>>> {
         .get_or_init(|| Arc::new(Mutex::new(BrowserSession::new(BrowserConfig::default()))))
         .clone())
 }
+fn lease_key(owner: &str) -> String {
+    format!("browser:safari:tab:{owner}")
+}
 fn lease(state: &DaemonState, owner: &str) -> Result<()> {
-    if state.resource_leases.acquire("browser:safari", owner, 30)? {
+    if state
+        .resource_leases
+        .acquire(&lease_key(owner), owner, 30)?
+    {
         Ok(())
     } else {
         bail!("browser session is leased by another agent")
@@ -332,6 +389,10 @@ impl McpHandler for BrowserHandler {
         lease(state, owner)?;
         let browser = session(state)?;
         let mut browser = browser.lock();
+        if let Err(error) = browser.activate_owner_tab(owner) {
+            let _ = state.resource_leases.release(&lease_key(owner), owner);
+            return Err(error);
+        }
         let value = match self.name {
             "browser_session_close" => {
                 browser.close()?;
@@ -462,7 +523,7 @@ impl McpHandler for BrowserHandler {
             }
             _ => bail!("unknown browser tool {}", self.name),
         };
-        let _ = state.resource_leases.release("browser:safari", owner);
+        let _ = state.resource_leases.release(&lease_key(owner), owner);
         let _ = self.evidence.record(&EvidenceReceipt {
             invocation_id: ToolInvocationId::new(),
             tool: "prism-mcp-browser".into(),
