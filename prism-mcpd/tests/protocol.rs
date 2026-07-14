@@ -107,7 +107,7 @@ fn initializes_lists_tools_and_exits_after_stdin_closes() {
         "agent_work_handoff", "agent_path_lock", "agent_path_unlock",
         "agent_coordination_event", "agent_coordination_status", "agent_coordination_recover",
     ] { assert!(tool_names.contains(name), "missing native coordination tool {name}"); }
-    for name in ["browser_navigate", "browser_page_source", "browser_page_text", "browser_current_url", "browser_execute_js", "browser_screenshot", "browser_structured_extract", "browser_interactive_regions", "browser_structured_view", "browser_click_region", "browser_type_at", "browser_find_element", "browser_get_tabs", "browser_session_close"] {
+    for name in ["browser_navigate", "browser_page_source", "browser_page_text", "browser_current_url", "browser_execute_js", "browser_validate_js", "browser_screenshot", "browser_structured_extract", "browser_interactive_regions", "browser_structured_view", "browser_click_region", "browser_type_at", "browser_find_element", "browser_get_tabs", "browser_session_close"] {
         assert!(tool_names.contains(name), "missing browser tool {name}");
     }
     let inspect = lines[1]["result"]["tools"]

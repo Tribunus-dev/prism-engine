@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+mod sandbox;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrowserConfig { pub webdriver_url: String, pub startup_timeout_ms: u64, pub max_script_bytes: usize, pub max_result_bytes: usize, pub allowed_hosts: Vec<String> }
@@ -78,6 +79,7 @@ impl McpHandler for BrowserHandler {
             "browser_page_source" => browser.command("GET", "/source", None)?,
             "browser_page_text" => browser.execute_js("return document.body ? document.body.innerText : '';", vec![])?,
             "browser_execute_js" => browser.execute_js(request.args.get("code").and_then(Value::as_str).ok_or_else(||anyhow!("code is required"))?, vec![])?,
+            "browser_validate_js" => { let code=request.args.get("code").and_then(Value::as_str).ok_or_else(||anyhow!("code is required"))?; sandbox::validate_script(code, browser.config.max_script_bytes)?; json!({"valid":true}) }
             "browser_screenshot" => { let raw=browser.command("GET", "/screenshot", None)?; let data=raw.as_str().unwrap_or_default(); json!({"base64_png":data}) }
             "browser_structured_extract" | "browser_structured_view" | "browser_interactive_regions" => browser.execute_js(STRUCTURED_EXTRACT, vec![])? ,
             "browser_click_region" => { let selector=request.args.get("id").and_then(Value::as_str).ok_or_else(||anyhow!("id is required"))?; browser.execute_js("const e=document.querySelector(arguments[0]); if(!e) throw new Error('not found'); e.click(); return true;", vec![json!(selector)])?; json!({"clicked":true}) }
@@ -94,7 +96,7 @@ impl McpHandler for BrowserHandler {
 
 const STRUCTURED_EXTRACT: &str = r#"return {title:document.title,url:location.href,text:document.body?.innerText||'',links:[...document.querySelectorAll('a,button,input,textarea,select')].slice(0,500).map((e)=>{const selector=e.id?'#'+e.id:e.tagName.toLowerCase();return {id:selector,tag:e.tagName.toLowerCase(),text:(e.innerText||e.value||'').slice(0,1000),selector,x:e.getBoundingClientRect().x,y:e.getBoundingClientRect().y,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height}}),forms:[]};"#;
 
-pub fn handlers(deps: &ToolDependencies) -> Vec<Arc<dyn McpHandler + Sync + Send>> { ["browser_navigate","browser_page_source","browser_page_text","browser_current_url","browser_execute_js","browser_screenshot","browser_structured_extract","browser_interactive_regions","browser_structured_view","browser_click_region","browser_type_at","browser_find_element","browser_get_tabs","browser_session_close"].into_iter().map(|name| Arc::new(BrowserHandler{name, evidence:deps.evidence_ledger.clone()}) as Arc<dyn McpHandler + Sync + Send>).collect() }
+pub fn handlers(deps: &ToolDependencies) -> Vec<Arc<dyn McpHandler + Sync + Send>> { ["browser_navigate","browser_page_source","browser_page_text","browser_current_url","browser_execute_js","browser_validate_js","browser_screenshot","browser_structured_extract","browser_interactive_regions","browser_structured_view","browser_click_region","browser_type_at","browser_find_element","browser_get_tabs","browser_session_close"].into_iter().map(|name| Arc::new(BrowserHandler{name, evidence:deps.evidence_ledger.clone()}) as Arc<dyn McpHandler + Sync + Send>).collect() }
 
 pub fn session_from_env() -> Arc<Mutex<BrowserSession>> { Arc::new(Mutex::new(BrowserSession::new(BrowserConfig::default()))) }
 
@@ -113,5 +115,10 @@ mod tests {
     fn script_limit_is_enforced_before_transport() {
         let mut session = BrowserSession::new(BrowserConfig { max_script_bytes: 3, ..Default::default() });
         assert!(session.execute_js("1234", vec![]).is_err());
+    }
+    #[test]
+    fn deno_sandbox_rejects_external_capabilities() {
+        assert!(sandbox::validate_script("fetch('https://example.com')", 1024).is_err());
+        assert!(sandbox::validate_script("const answer = 40 + 2;", 1024).is_ok());
     }
 }

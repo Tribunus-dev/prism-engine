@@ -31,6 +31,7 @@ fn safari_browser_production_gate() {
     let owner = "live-browser";
     let nav = call(state.path(), artifacts.path(), "browser_navigate", json!({"url":"https://example.com","session_owner":owner}));
     assert_eq!(nav["status"], "navigated");
+    assert_eq!(call(state.path(), artifacts.path(), "browser_validate_js", json!({"code":"const answer = 40 + 2;","session_owner":owner}))["valid"], true);
     let dom = call(state.path(), artifacts.path(), "browser_structured_extract", json!({"session_owner":owner}));
     assert_eq!(dom["title"], "Example Domain");
     assert!(dom["text"].as_str().unwrap_or_default().contains("documentation examples"));
