@@ -144,7 +144,10 @@ pub fn initialize(config: &BackendConfig) -> anyhow::Result<()> {
         tokio::spawn(async move {
             let _ = connection.await;
         });
-        client.batch_execute(POSTGRES_SCHEMA).await
+        client.batch_execute("SET lock_timeout = '5s'; SELECT pg_advisory_lock(hashtextextended('prism-mcpd-schema-v1', 0));").await?;
+        let result = client.batch_execute(POSTGRES_SCHEMA).await;
+        let _ = client.batch_execute("SELECT pg_advisory_unlock(hashtextextended('prism-mcpd-schema-v1', 0));").await;
+        result
     })?;
 
     let mut valkey = redis::Client::open(valkey_url)?.get_connection()?;

@@ -155,10 +155,14 @@ fn spawn_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     cmd.arg("--daemon");
     cmd.env("PRISM_MCPD_STATE_DIR", state_dir);
     cmd.env("PRISM_MCPD_ARTIFACT_DIR", artifact_dir);
-    // Detach — don't wait
+    std::fs::create_dir_all(state_dir)?;
+    let log_path = Path::new(state_dir).join("daemon.log");
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
+    let log_err = log.try_clone()?;
+    // Detach — don't wait, but retain durable diagnostics for startup/recovery.
     cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(log))
+        .stderr(std::process::Stdio::from(log_err))
         .process_group(0)
         .spawn()?;
     Ok(())
