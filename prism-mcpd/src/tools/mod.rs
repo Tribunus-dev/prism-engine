@@ -5,6 +5,7 @@ use prism_mcp_core::{DaemonState, McpHandler};
 
 // ── Inline handler modules ────────────────────────────────────────
 mod cimage_handler;
+mod coordination_handler;
 mod doctor_handler;
 mod job_handler;
 mod kb_handler;
@@ -15,6 +16,7 @@ mod repo_handler;
 pub fn register_basic() -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>>
 {
     let mut map: HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>> = HashMap::new();
+    map.insert("coordination", Arc::new(coordination_handler::CoordinationHandler));
 
     // ── Knowledge base operations ──────────────────────────────────
     let search = kb_handler::SearchKbHandler::new()?;

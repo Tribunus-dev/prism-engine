@@ -261,11 +261,13 @@ use crate::storage::{
     ArtifactRepository, BenchmarkStore, EvidenceStore, ExperimentStore, JobStore, KnowledgeStore,
     LeaseStore, ProjectionStore,
 };
+use crate::coordination::CoordinationStore;
 use crate::subprocess::ProcessCache;
 use crate::work_journal::WorkJournal;
 
 /// Shared state accessible to every tool handler.
 pub struct DaemonState {
+    pub coordination_store: Option<Arc<dyn CoordinationStore>>,
     pub tools: Arc<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>>,
     pub artifact_store: Arc<dyn ArtifactRepository>,
     pub evidence_ledger: Arc<dyn EvidenceStore>,

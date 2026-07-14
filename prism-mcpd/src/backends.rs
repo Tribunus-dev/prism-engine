@@ -205,6 +205,12 @@ CREATE TABLE IF NOT EXISTS prism_leases (
     expires_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS prism_coord_sessions (session_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', purpose TEXT, last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(), closed_at TIMESTAMPTZ);
+CREATE TABLE IF NOT EXISTS prism_coord_work (work_id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', priority INTEGER NOT NULL DEFAULT 0, created_by TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS prism_coord_claims (claim_id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES prism_coord_work(work_id), session_id TEXT NOT NULL REFERENCES prism_coord_sessions(session_id), status TEXT NOT NULL DEFAULT 'active', claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, released_at TIMESTAMPTZ);
+CREATE UNIQUE INDEX IF NOT EXISTS prism_coord_active_claim ON prism_coord_claims(work_id) WHERE status='active';
+CREATE TABLE IF NOT EXISTS prism_coord_locks (lock_id TEXT PRIMARY KEY, path TEXT NOT NULL, lock_kind TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES prism_coord_sessions(session_id), status TEXT NOT NULL DEFAULT 'active', expires_at TIMESTAMPTZ NOT NULL, acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(), released_at TIMESTAMPTZ);
+CREATE INDEX IF NOT EXISTS prism_coord_lock_path ON prism_coord_locks(path) WHERE status='active';
 CREATE TABLE IF NOT EXISTS prism_projection_events (
     id BIGSERIAL PRIMARY KEY,
     record_id TEXT NOT NULL,

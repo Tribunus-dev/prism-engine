@@ -2,6 +2,7 @@
 
 pub mod artifact;
 pub mod db;
+pub mod coordination;
 pub mod evidence;
 pub mod file_lock;
 pub mod ident;
@@ -37,5 +38,6 @@ pub use storage::{
     KnowledgeDocument, KnowledgeListRow, KnowledgeSearchResult, KnowledgeStore, LeaseStore,
     ProjectionStore,
 };
+pub use coordination::{ClaimResult, CoordinationSession, CoordinationStore, LockResult, PathLock, WorkItem};
 pub use subprocess::{run_with_timeout, ProcessCache};
 pub use work_journal::{JournalEntry, JournalPhase, WorkJournal};
