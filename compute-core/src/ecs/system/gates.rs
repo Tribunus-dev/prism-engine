@@ -11,6 +11,7 @@ use crate::coreai_bridge::CoreAiComputeUnits;
 use crate::ecs::compilation::phase_ir::{ANEArtifactKey, CompilePhaseDescriptor, DeviceSignature};
 use crate::ecs::compilation::tri_lane::{AneAdmission, AneRejectionReason};
 use crate::ecs::component::compilation::{AdmissionGate, EvidenceId, QualificationGate};
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------

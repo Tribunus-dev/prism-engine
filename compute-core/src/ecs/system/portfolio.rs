@@ -7,6 +7,7 @@
 ))]
 
 use crate::ecs::component::model_source::PortfolioArtifactsComp;
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use std::path::PathBuf;
 

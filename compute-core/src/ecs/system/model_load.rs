@@ -4,6 +4,8 @@ use crate::ecs::config::{
     AttentionKind, ConfidenceType, DiffusionConfig, MoEConfig as ArchMoEConfig, NoiseScheduleType,
     RopeSpec, TextArchitecture,
 };
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde_json::Value;
 use std::collections::BTreeSet;

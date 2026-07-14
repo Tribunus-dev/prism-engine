@@ -8,6 +8,8 @@ use crate::ecs::component::model_source::CimageBinaryComp;
 use crate::ecs::compute_image::compile::ternary::{
     write_cimage_header_le, CimageHeader, SegmentEntry, SegmentKind, CIMAGE_SEGMENT_CAPACITY,
 };
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use sha2::{Digest, Sha256};
 

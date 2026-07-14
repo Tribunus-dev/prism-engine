@@ -9,14 +9,16 @@ use crate::ecs::cimage::{
     PhysicalTileLayout,
 };
 use crate::ecs::plan::{CodecFamily, DType as PlanDType, HardwareProfileId};
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{
-    component::{
-        backend::CompiledBinary,
-        quality::{AOTProfileMatch, AdmissionReceipt, QualityGateResult},
-        tensor::{CanonicalRoleComp, CodecFamilyComp, DataType, LayerIndex, Shape},
-    },
-    CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase,
-};
+        component::{
+            backend::CompiledBinary,
+            quality::{AOTProfileMatch, AdmissionReceipt, QualityGateResult},
+            tensor::{CanonicalRoleComp, CodecFamilyComp, DataType, LayerIndex, Shape},
+        },
+        CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase,
+    };
 
 // ---------------------------------------------------------------------------
 // Helpers

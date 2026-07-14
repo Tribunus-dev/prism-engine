@@ -2,6 +2,8 @@ use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::component::memory::{BufferLifetime, MemoryDomain, MemoryPool, PoolPolicy};
 use crate::ecs::component::tensor::{CanonicalRoleComp, CodecFamilyComp, Shape};
 use crate::ecs::plan::CodecFamily;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 // ── Helpers ────────────────────────────────────────────────────────────────

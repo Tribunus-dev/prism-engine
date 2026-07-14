@@ -1,4 +1,6 @@
 use crate::ecs::component::scheduling::PhaseDagState;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Ticks the phase engine state machine — advances `PhaseDagState.current_phase`

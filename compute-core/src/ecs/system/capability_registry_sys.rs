@@ -6,6 +6,8 @@
 use crate::ecs::component::model_source::CapabilityKeyComp;
 use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
 use crate::ecs::Component;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Singleton entity id for the capability registry resource.

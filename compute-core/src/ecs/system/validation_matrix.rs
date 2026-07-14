@@ -7,6 +7,7 @@
 
 use crate::ecs::component::model_source::{ValidationReportComp, ValidationResultSummary};
 use crate::ecs::compute_image::compile::validation_matrix::{ValidationMatrix, ValidationResult};
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Run validation tests on every Kernel entity in the world.

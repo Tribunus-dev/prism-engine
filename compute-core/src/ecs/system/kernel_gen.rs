@@ -4,6 +4,8 @@ use crate::ecs::component::backend::{BackendTarget, GPUArch, KernelSource};
 use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::component::tensor::{CodecFamilyComp, Shape};
 use crate::ecs::plan::{CodecFamily, KernelTemplateId};
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use std::collections::{HashMap, HashSet};
 

@@ -3,6 +3,8 @@ use crate::ecs::component::backend::{
     BinaryFormat, CompiledBinary, ExecutableFormat, KernelSource,
 };
 use crate::ecs::component::quality::QualityGateResult;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Packages compiled kernel binaries into Executable entities for the CImage.

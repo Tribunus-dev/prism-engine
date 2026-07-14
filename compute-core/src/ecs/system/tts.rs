@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use crate::ecs::component::model_source::TtsWeightsComp;
 use crate::ecs::compute_image::compile::tts_compile::pack_tts_weights;
+use crate::ecs::Entity;
 use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Pack TTS weights into nf4tile640 cimage segment files.

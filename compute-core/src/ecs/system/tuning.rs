@@ -109,6 +109,8 @@ const AMD_PROFILES: &[GpuProfile] = &[
 ];
 use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::component::quality::AOTProfileMatch;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Match an AMD device by compute-unit proximity with a 20% threshold.

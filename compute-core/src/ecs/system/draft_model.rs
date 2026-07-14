@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 use crate::ecs::component::model_source::DraftWeightsComp;
 use crate::ecs::compute_image::compile::draft_loader::load_draft_weights;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Load draft model weights and attach as `DraftWeightsComp` on the model entity.

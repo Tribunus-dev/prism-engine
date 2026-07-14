@@ -20,6 +20,8 @@ use crate::ecs::plan::fusion_scheduler_types::{
     LoweringCost as SchedLoweringCost,
 };
 use crate::ecs::plan::CodecFamily;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 // ── Helpers ────────────────────────────────────────────────────────────────

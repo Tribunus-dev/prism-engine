@@ -1,6 +1,8 @@
 use crate::ecs::component::scheduling::{
     BackpressureComponent, BackpressureLevel, ReadyQueueState, WorkRegistryComponent, WorkState,
 };
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Ticks the work dispatch loop — scans entities with pending items

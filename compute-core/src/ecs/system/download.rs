@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::ecs::component::model_source::{DownloadedSourceComp, HfDownloadComp};
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Parse a HuggingFace source string ("hf:org/model" or "hf:org/model@revision")

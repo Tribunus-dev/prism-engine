@@ -17,6 +17,8 @@ use crate::ecs::compiler::pass::TransformPass;
 use crate::ecs::compiler::scheduled::ScheduledModule;
 use crate::ecs::component::compilation::{GraphNode, GraphNodeKind, NodeId};
 use crate::ecs::config::ModelExecutionPlan;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------

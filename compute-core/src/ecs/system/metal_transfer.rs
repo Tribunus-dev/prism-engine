@@ -1,4 +1,6 @@
 use crate::ecs::component::backend::{BackendComponent, MetalDeviceState, TensorComponent};
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Manages buffer transfers between backends — scans Tensor entities

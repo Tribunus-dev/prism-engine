@@ -1,4 +1,6 @@
 use crate::ecs::component::backend::MetalDeviceState;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Cleans up Metal resources — removes `MetalDeviceState` components

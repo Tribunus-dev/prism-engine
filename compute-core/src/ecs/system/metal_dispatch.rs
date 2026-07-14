@@ -1,4 +1,6 @@
 use crate::ecs::component::scheduling::WorkRegistryComponent;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Dispatches Metal compute kernels — scans Tensor entities with pending

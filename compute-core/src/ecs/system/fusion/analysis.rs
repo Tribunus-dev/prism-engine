@@ -6,6 +6,8 @@ use crate::ecs::plan::fusion::{
     MatMulContract, ValueResidency,
 };
 use crate::ecs::plan::DType;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 use std::collections::HashMap;

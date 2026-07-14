@@ -1,4 +1,6 @@
 use crate::ecs::component::scheduling::SessionState;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Initializes an inference session — spawns a session entity with

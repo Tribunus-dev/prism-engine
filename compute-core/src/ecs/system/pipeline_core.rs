@@ -18,6 +18,7 @@ use crate::ecs::component::compilation::{
     ProfitabilityScore,
 };
 use crate::ecs::config::{LayerPlan, ModelExecutionPlan};
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------

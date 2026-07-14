@@ -5,6 +5,8 @@ use crate::ecs::plan::precision_plan::{
     PrecisionSelectionBasis, PrecisionSelector,
 };
 use crate::ecs::plan::CodecFamily;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 

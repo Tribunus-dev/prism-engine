@@ -10,6 +10,8 @@ use crate::ecs::component::engine::{
 };
 use crate::ecs::core::model_store::ModelStore;
 use crate::ecs::streaming::GenerationEvent;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------

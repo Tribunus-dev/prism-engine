@@ -11,6 +11,8 @@
 use crate::ecs::component::executor::{
     AneStore, ExecutorStage, ExecutorState, ExecutorStep, RouteStore, WeightStore,
 };
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// The single ECS system that drives the sequential decoder loop for all

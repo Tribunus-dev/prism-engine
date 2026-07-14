@@ -1,4 +1,6 @@
 use crate::ecs::component::scheduling::{WorkRegistryComponent, WorkState};
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 

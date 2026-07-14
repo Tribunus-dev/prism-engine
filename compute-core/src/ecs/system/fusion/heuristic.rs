@@ -4,6 +4,8 @@ use crate::ecs::plan::backend_capability::{
 };
 use crate::ecs::plan::fusion::DataflowOpKind;
 use crate::ecs::plan::fusion_scheduler_types::FusionPolicy;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, SchedulePhase};
 
 // ── Op kind string parser ──────────────────────────────────────────────

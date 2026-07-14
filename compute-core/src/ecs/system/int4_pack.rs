@@ -10,6 +10,8 @@ use crate::ecs::compute_image::compile::int4_pack::{
     quantize_to_ternary_block32, repack_ternary_tensor,
 };
 use crate::ecs::Component;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Raw f32 weight data for a tensor — populated by source loading or

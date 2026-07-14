@@ -8,6 +8,8 @@
 use crate::ecs::component::aot::{CompEntityRef, KernelVariantEntityData};
 use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::plan::KernelTemplateId;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 use std::fmt;

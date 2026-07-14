@@ -1,4 +1,6 @@
 use crate::ecs::component::backend::{BackendComponent, TensorComponent};
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Dispatches tensor operations to the appropriate backend.

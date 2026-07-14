@@ -8,6 +8,8 @@ use crate::ecs::component::tensor::LayerIndex;
 use crate::ecs::compute_image::compile::execution_graph::{
     ExecutionGraphDescriptor, LayerExecutionNode,
 };
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Build the execution graph from the ECS world's layer/tensor state.

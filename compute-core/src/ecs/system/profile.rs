@@ -14,6 +14,8 @@ use crate::ecs::execution_profile::{
     RuntimeHealthReceipt, StabilityStatus,
 };
 use crate::ecs::plan::ModelExecutionPlan;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// ECS system that executes a profile plan on a backend and produces

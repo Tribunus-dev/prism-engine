@@ -1,4 +1,6 @@
 use crate::ecs::component::backend::{BackendComponent, MetalDeviceState};
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Initializes the Metal device — creates a Backend entity with

@@ -8,6 +8,8 @@
 
 use crate::ecs::component::aot::{KernelVariantEntityData, SelectedVariant};
 use crate::ecs::component::backend::GPUArch;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

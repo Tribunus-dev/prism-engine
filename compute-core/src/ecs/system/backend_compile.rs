@@ -16,6 +16,8 @@ pub enum CompileError {
     Io { details: String },
 }
 
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use sha2::{Digest, Sha256};
 

@@ -1,5 +1,7 @@
 use crate::ecs::component::fusion::{TileSize, WorkgroupCount};
 use crate::ecs::component::tensor::Shape;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 pub struct ScalarDispatchSystem;

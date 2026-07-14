@@ -1,6 +1,8 @@
 use crate::ecs::component::fusion::DataflowGraphHandle;
 use crate::ecs::component::memory::{BufferLifetime, MemoryPool, PoolPolicy, ScratchConfig};
 use crate::ecs::plan::fusion::DataflowGraph;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 use std::collections::{HashMap, VecDeque};

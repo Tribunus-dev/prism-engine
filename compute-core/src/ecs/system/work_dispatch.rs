@@ -1,6 +1,8 @@
 use crate::ecs::component::scheduling::{
     BackpressureComponent, BackpressureLevel, WorkRegistryComponent, WorkState,
 };
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Dispatches work from the registry to lane queues.

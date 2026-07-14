@@ -6,6 +6,8 @@
 //! (`Compilation`).
 
 use crate::ecs::component::aot::{SelectedVariant, ValidationReceipt};
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Runs held-out shape validation for each selected variant.
