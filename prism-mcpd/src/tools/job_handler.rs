@@ -74,9 +74,9 @@ impl JobHandler {
         if let Some(job) = managed.get_mut(&key) {
             output = read_output(&job.stdout_path, &job.stderr_path);
             if let Some(status) = job.child.try_wait()? {
-                if let Some(key) = cache_key(&job.command, &std::env::current_dir()?) {
+                if let Some(cache_key_value) = cache_key(&job.command, &std::env::current_dir()?) {
                     cache().lock().insert(
-                        key,
+                        cache_key_value,
                         (
                             status.code().unwrap_or(-1),
                             output.0.clone(),
