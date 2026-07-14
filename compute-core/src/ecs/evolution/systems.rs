@@ -9,6 +9,8 @@ use crate::ecs::evolution::foundation::{
     CostMetrics, EvolutionState, EvolveCandidate, EvolveProgram, SearchConfig,
 };
 use crate::ecs::plan::CodecFamily;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, Component, EntityKind};
 
 // ── Deterministic PRNG (SplitMix64) ─────────────────────────────────────────

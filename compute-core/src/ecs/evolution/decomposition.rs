@@ -20,6 +20,8 @@ use crate::ecs::evolution::foundation::{
 use crate::ecs::evolution::systems::{evolve_evaluate, evolve_seed, evolve_select, mutate_program};
 use crate::ecs::evolution::EvolutionState;
 use crate::ecs::plan::CodecFamily;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use crate::ecs::{CompEntity, CompWorld, EntityKind};
 
 /// Configuration for a metal decomposition search.

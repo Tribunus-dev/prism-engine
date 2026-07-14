@@ -272,8 +272,6 @@ pub fn apply_metal(
 mod tests {
     use super::*;
 
-    
-    
     use sha2::{Digest, Sha256};
 
     fn payload(values: &[f32]) -> Vec<u8> {

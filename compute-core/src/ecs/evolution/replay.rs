@@ -4,6 +4,8 @@ use crate::ecs::canonical::provenance::ReplayManifest;
 use crate::ecs::evolution::foundation::EvolutionCandidate;
 use crate::ecs::metal_backend::catalogue_source_for;
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::time::Instant;

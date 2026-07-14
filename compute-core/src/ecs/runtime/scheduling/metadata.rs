@@ -13,6 +13,8 @@ use crate::ecs::runtime::scheduling::command::CommandWriter;
 use crate::ecs::runtime::scheduling::component_id::{ComponentMask, ResourceMask};
 use crate::ecs::runtime::scheduling::error::ScheduleError;
 use crate::ecs::runtime::world::World;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------

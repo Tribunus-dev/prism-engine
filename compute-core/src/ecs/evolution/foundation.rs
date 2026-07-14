@@ -17,6 +17,8 @@ use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::plan::CodecFamily;
 use crate::ecs::quantization::contract::TernaryCandidateRecipe;
 use crate::ecs::CompEntity;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 
 // ── Search infrastructure ───────────────────────────────────────────────
 

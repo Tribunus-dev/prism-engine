@@ -4,20 +4,22 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::ecs::runtime::scheduling::command::CommandWriter;
 use crate::ecs::runtime::scheduling::component_id::{
-    ComponentId, ComponentMask, ComponentRegistry, ResourceId, ResourceMask,
-    SchedulableComponent, SchedulableResource,
+    ComponentId, ComponentMask, ComponentRegistry, ResourceId, ResourceMask, SchedulableComponent,
+    SchedulableResource,
 };
 use crate::ecs::runtime::scheduling::error::MaskError;
 use crate::ecs::runtime::scheduling::error::{RegistryError, ScheduleError};
 use crate::ecs::runtime::scheduling::manifest::MANIFEST_SCHEMA_VERSION;
 use crate::ecs::runtime::scheduling::metadata::{
-    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId,
-    SystemMetadata, SystemResult,
+    ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
+    SystemResult,
 };
 use crate::ecs::runtime::scheduling::schedule::Schedule;
 use crate::ecs::runtime::world::World;
-use crate::ecs::runtime::scheduling::command::CommandWriter;
+#[allow(unused_imports)]
+use crate::ecs::Entity;
 
 use lazy_static::lazy_static;
 
@@ -62,11 +64,7 @@ impl ErasedSystem for SysWrapper {
     fn metadata(&self) -> &SystemMetadata {
         self.0
     }
-    fn run(
-        &mut self,
-        _world: &mut World,
-        _commands: &mut CommandWriter,
-    ) -> SystemResult {
+    fn run(&mut self, _world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
         self.1.fetch_add(1, Ordering::SeqCst);
         SystemResult::ok()
     }
@@ -117,17 +115,31 @@ fn gate01_registry_rejects_out_of_range() {
 #[test]
 fn gate02_duplicate_system_id_rejected() {
     let a = register_meta(SystemMetadata {
-        id: SystemId(1), name: "sys_a", stage: Stage::Intake, order: 0,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(1),
+        name: "sys_a",
+        stage: Stage::Intake,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::Reject,
     });
     let b = register_meta(SystemMetadata {
-        id: SystemId(1), name: "sys_b", stage: Stage::Intake, order: 1,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(1),
+        name: "sys_b",
+        stage: Stage::Intake,
+        order: 1,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::Reject,
     });
     let err = Schedule::compile(vec![make_sys(a), make_sys(b)]).unwrap_err();
@@ -137,17 +149,31 @@ fn gate02_duplicate_system_id_rejected() {
 #[test]
 fn gate02_duplicate_name_rejected() {
     let a = register_meta(SystemMetadata {
-        id: SystemId(1), name: "same", stage: Stage::Intake, order: 0,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(1),
+        name: "same",
+        stage: Stage::Intake,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::Reject,
     });
     let b = register_meta(SystemMetadata {
-        id: SystemId(2), name: "same", stage: Stage::Intake, order: 1,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(2),
+        name: "same",
+        stage: Stage::Intake,
+        order: 1,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::Reject,
     });
     let err = Schedule::compile(vec![make_sys(a), make_sys(b)]).unwrap_err();
@@ -161,18 +187,31 @@ fn gate02_duplicate_name_rejected() {
 #[test]
 fn gate03_stage_inversion_rejected() {
     let decode = register_meta(SystemMetadata {
-        id: SystemId(10), name: "decode", stage: Stage::Decode, order: 0,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
+        id: SystemId(10),
+        name: "decode",
+        stage: Stage::Decode,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
         after: &[SystemId(11)], // decode after receipt — inversion!
-        before: &[], execution_class: ExecutionClass::Serial,
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::ExplicitOnly,
     });
     let receipt = register_meta(SystemMetadata {
-        id: SystemId(11), name: "receipt", stage: Stage::Receipt, order: 0,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(11),
+        name: "receipt",
+        stage: Stage::Receipt,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::ExplicitOnly,
     });
     let err = Schedule::compile(vec![make_sys(decode), make_sys(receipt)]);
@@ -186,26 +225,44 @@ fn gate03_stage_inversion_rejected() {
 #[test]
 fn gate04_cycle_detected() {
     let a = register_meta(SystemMetadata {
-        id: SystemId(20), name: "cycle_a", stage: Stage::Intake, order: 0,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[SystemId(22)], before: &[],
+        id: SystemId(20),
+        name: "cycle_a",
+        stage: Stage::Intake,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[SystemId(22)],
+        before: &[],
         execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::ExplicitOnly,
     });
     let b = register_meta(SystemMetadata {
-        id: SystemId(21), name: "cycle_b", stage: Stage::Intake, order: 0,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[SystemId(20)], before: &[],
+        id: SystemId(21),
+        name: "cycle_b",
+        stage: Stage::Intake,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[SystemId(20)],
+        before: &[],
         execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::ExplicitOnly,
     });
     let c = register_meta(SystemMetadata {
-        id: SystemId(22), name: "cycle_c", stage: Stage::Intake, order: 0,
-        reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[SystemId(21)], before: &[],
+        id: SystemId(22),
+        name: "cycle_c",
+        stage: Stage::Intake,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[SystemId(21)],
+        before: &[],
         execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::ExplicitOnly,
     });
@@ -228,22 +285,39 @@ fn gate05_undeclared_write_overlap_rejected() {
     let mut w = ComponentMask::empty();
     w.insert(0).unwrap();
     let a = register_meta(SystemMetadata {
-        id: SystemId(30), name: "writer_a", stage: Stage::Intake, order: 0,
-        reads: ComponentMask::empty(), writes: w,
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(30),
+        name: "writer_a",
+        stage: Stage::Intake,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: w,
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::Reject,
     });
     let b = register_meta(SystemMetadata {
-        id: SystemId(31), name: "writer_b", stage: Stage::Intake, order: 0,
-        reads: ComponentMask::empty(), writes: w,
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(31),
+        name: "writer_b",
+        stage: Stage::Intake,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: w,
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::Reject,
     });
     let err = Schedule::compile(vec![make_sys(a), make_sys(b)]);
     assert!(err.is_err());
-    assert!(matches!(err.unwrap_err(), ScheduleError::IllegalHazard { .. }));
+    assert!(matches!(
+        err.unwrap_err(),
+        ScheduleError::IllegalHazard { .. }
+    ));
 }
 
 // ===================================================================
@@ -255,17 +329,31 @@ fn gate06_shared_reads_no_edges() {
     let mut r = ComponentMask::empty();
     r.insert(3).unwrap();
     let a = register_meta(SystemMetadata {
-        id: SystemId(40), name: "reader_a", stage: Stage::Intake, order: 0,
-        reads: r, writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(40),
+        name: "reader_a",
+        stage: Stage::Intake,
+        order: 0,
+        reads: r,
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::Commutative,
     });
     let b = register_meta(SystemMetadata {
-        id: SystemId(41), name: "reader_b", stage: Stage::Intake, order: 0,
-        reads: r, writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(41),
+        name: "reader_b",
+        stage: Stage::Intake,
+        order: 0,
+        reads: r,
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::Commutative,
     });
     let sched = Schedule::compile(vec![make_sys(a), make_sys(b)]);
@@ -287,17 +375,30 @@ fn gate07_producer_consumer_respected() {
     let mut r = ComponentMask::empty();
     r.insert(0).unwrap();
     let prod = register_meta(SystemMetadata {
-        id: SystemId(50), name: "producer", stage: Stage::Prefill, order: 0,
-        reads: ComponentMask::empty(), writes: w,
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[], before: &[], execution_class: ExecutionClass::Serial,
+        id: SystemId(50),
+        name: "producer",
+        stage: Stage::Prefill,
+        order: 0,
+        reads: ComponentMask::empty(),
+        writes: w,
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[],
+        before: &[],
+        execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::ExplicitOnly,
     });
     let cons = register_meta(SystemMetadata {
-        id: SystemId(51), name: "consumer", stage: Stage::Prefill, order: 0,
-        reads: r, writes: ComponentMask::empty(),
-        reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-        after: &[SystemId(50)], before: &[], // explicit after producer
+        id: SystemId(51),
+        name: "consumer",
+        stage: Stage::Prefill,
+        order: 0,
+        reads: r,
+        writes: ComponentMask::empty(),
+        reads_resources: ResourceMask::empty(),
+        writes_resources: ResourceMask::empty(),
+        after: &[SystemId(50)],
+        before: &[], // explicit after producer
         execution_class: ExecutionClass::Serial,
         serialization: SerializationPolicy::ExplicitOnly,
     });
@@ -316,10 +417,17 @@ fn gate07_producer_consumer_respected() {
 fn gate08_manifest_reproducible() {
     let sys = |id: u32, name: &'static str, stage: Stage| {
         register_meta(SystemMetadata {
-            id: SystemId(id), name, stage, order: 0,
-            reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-            reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-            after: &[], before: &[], execution_class: ExecutionClass::Serial,
+            id: SystemId(id),
+            name,
+            stage,
+            order: 0,
+            reads: ComponentMask::empty(),
+            writes: ComponentMask::empty(),
+            reads_resources: ResourceMask::empty(),
+            writes_resources: ResourceMask::empty(),
+            after: &[],
+            before: &[],
+            execution_class: ExecutionClass::Serial,
             serialization: SerializationPolicy::Reject,
         })
     };
@@ -344,10 +452,17 @@ fn gate08_manifest_reproducible() {
 fn gate09_schedule_run_no_panic() {
     let sys = |id: u32, name: &'static str, stage: Stage| {
         register_meta(SystemMetadata {
-            id: SystemId(id), name, stage, order: 0,
-            reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-            reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-            after: &[], before: &[], execution_class: ExecutionClass::Serial,
+            id: SystemId(id),
+            name,
+            stage,
+            order: 0,
+            reads: ComponentMask::empty(),
+            writes: ComponentMask::empty(),
+            reads_resources: ResourceMask::empty(),
+            writes_resources: ResourceMask::empty(),
+            after: &[],
+            before: &[],
+            execution_class: ExecutionClass::Serial,
             serialization: SerializationPolicy::Commutative,
         })
     };
@@ -375,10 +490,17 @@ fn gate09_schedule_run_no_panic() {
 fn gate10_stage_ordering_enforced() {
     let sys = |id: u32, name: &'static str, stage: Stage| {
         register_meta(SystemMetadata {
-            id: SystemId(id), name, stage, order: 0,
-            reads: ComponentMask::empty(), writes: ComponentMask::empty(),
-            reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-            after: &[], before: &[], execution_class: ExecutionClass::Serial,
+            id: SystemId(id),
+            name,
+            stage,
+            order: 0,
+            reads: ComponentMask::empty(),
+            writes: ComponentMask::empty(),
+            reads_resources: ResourceMask::empty(),
+            writes_resources: ResourceMask::empty(),
+            after: &[],
+            before: &[],
+            execution_class: ExecutionClass::Serial,
             serialization: SerializationPolicy::Commutative,
         })
     };
@@ -409,10 +531,17 @@ fn stable_order_hazard_deterministic() {
     w.insert(0).unwrap();
     let make = |id: u32, name: &'static str| {
         register_meta(SystemMetadata {
-            id: SystemId(id), name, stage: Stage::Intake, order: 0,
-            reads: ComponentMask::empty(), writes: w,
-            reads_resources: ResourceMask::empty(), writes_resources: ResourceMask::empty(),
-            after: &[], before: &[], execution_class: ExecutionClass::Serial,
+            id: SystemId(id),
+            name,
+            stage: Stage::Intake,
+            order: 0,
+            reads: ComponentMask::empty(),
+            writes: w,
+            reads_resources: ResourceMask::empty(),
+            writes_resources: ResourceMask::empty(),
+            after: &[],
+            before: &[],
+            execution_class: ExecutionClass::Serial,
             serialization: SerializationPolicy::StableOrder,
         })
     };

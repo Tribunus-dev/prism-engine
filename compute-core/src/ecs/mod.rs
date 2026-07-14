@@ -13,7 +13,6 @@ pub mod receipt_bus;
 pub mod system;
 #[cfg(test)]
 mod tests;
-pub mod world;
 
 pub mod agent;
 pub mod amd_rocm;
