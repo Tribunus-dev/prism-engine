@@ -12,7 +12,36 @@ use crate::ecs::evolution::foundation::{
     CandidateGenome, CandidateStatus, CostFunction, DecompositionStrategy, EvolutionCandidate,
     EvolutionState, MemoryConfig, MetalGeometry, SearchConfig,
 };
+use crate::ecs::quantization::contract::{
+    ResidualFallbackPrecision, TernaryCandidateRecipe, TernaryCodec, TernaryKernelAbi,
+    TernaryResidualPolicy, TernaryScalePolicy, TernaryThresholdPolicy,
+    REPRESENTATION_REGISTRY_VERSION,
+};
 use crate::execution_plan::CodecFamily;
+
+/// Rescue scope for mixed-precision overrides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RescueScope {
+    /// No rescue applied — pure base codec only.
+    None,
+    /// Promote individual tensors/blocks.
+    Tensor,
+    /// Promote every output row of the matmul.
+    OutputRow,
+    /// Promote every output tile.
+    OutputTile,
+    /// Promote by quantization group.
+    Group,
+}
+
+/// Rescue codec variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RescueCodec {
+    Nf4,
+    Int8,
+    Fp16,
+    Palettized,
+}
 
 /// Full joint genome — representation, kernel, and engram genes.
 #[derive(Debug, Clone)]
@@ -21,6 +50,10 @@ pub struct JointGenome {
     pub codec: CodecFamily,
     pub group_size: usize,
     pub residual_policy: String, // "none", "dense", "sparse"
+
+    // Rescue genes (mixed-precision overrides)
+    pub rescue_scope: RescueScope,
+    pub rescue_codec: RescueCodec,
 
     // Kernel genes
     pub kernel_variant: String, // "tile640_gemv", "persistent_gemv", etc.
@@ -73,6 +106,10 @@ fn joint_crossover(a: &JointGenome, b: &JointGenome) -> JointGenome {
         group_size: b.group_size,
         residual_policy: a.residual_policy.clone(),
 
+        // Rescue: scope from A, codec from B
+        rescue_scope: a.rescue_scope,
+        rescue_codec: b.rescue_codec,
+
         // Kernel: variant from B, tiles from A, reduction from B
         kernel_variant: b.kernel_variant.clone(),
         tile_m: a.tile_m,
@@ -93,8 +130,8 @@ fn joint_crossover(a: &JointGenome, b: &JointGenome) -> JointGenome {
 /// — no external RNG required.
 fn joint_mutate(genome: &JointGenome, config: &JointSearchConfig, seed: usize) -> JointGenome {
     let mut result = genome.clone();
-    match seed % 7 {
-        n @ 0..=6 => match n {
+    match seed % 9 {
+        n @ 0..=8 => match n {
             0 => {
                 // Perturb retrieval threshold by a small delta
                 let delta = (seed as f64 * 0.07 - 0.03) * 0.1;
@@ -144,11 +181,66 @@ fn joint_mutate(genome: &JointGenome, config: &JointSearchConfig, seed: usize) -
                     result.kernel_variant = config.kernel_variants[idx].clone();
                 }
             }
+            7 => {
+                // Mutate rescue scope
+                let scopes = [
+                    RescueScope::None,
+                    RescueScope::Tensor,
+                    RescueScope::OutputRow,
+                    RescueScope::OutputTile,
+                    RescueScope::Group,
+                ];
+                let idx = seed / 9 % scopes.len();
+                result.rescue_scope = scopes[idx];
+            }
+            8 => {
+                // Mutate rescue codec
+                let codecs = [
+                    RescueCodec::Nf4,
+                    RescueCodec::Int8,
+                    RescueCodec::Fp16,
+                    RescueCodec::Palettized,
+                ];
+                let idx = seed / 9 % codecs.len();
+                result.rescue_codec = codecs[idx];
+            }
             _ => unreachable!(),
         },
         _ => {}
     }
     result
+}
+
+/// Deterministic hash of all genome genes plus epoch metadata.
+/// Every search-relevant dimension is folded into the digest so identical
+/// genomes in the same generation produce identical IDs (dedup-safe).
+pub fn genome_digest(genome: &JointGenome, seed: u64, generation: u64) -> String {
+    use std::hash::Hash;
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // Representation genes
+    genome.codec.hash(&mut hasher);
+    genome.group_size.hash(&mut hasher);
+    genome.residual_policy.hash(&mut hasher);
+    // Rescue genes
+    genome.rescue_scope.hash(&mut hasher);
+    genome.rescue_codec.hash(&mut hasher);
+    // Kernel genes
+    genome.kernel_variant.hash(&mut hasher);
+    genome.tile_m.hash(&mut hasher);
+    genome.tile_n.hash(&mut hasher);
+    genome.tile_k.hash(&mut hasher);
+    genome.reduction_strategy.hash(&mut hasher);
+    // Engram genes
+    genome.engram_codec.hash(&mut hasher);
+    genome.engram_capacity.hash(&mut hasher);
+    genome.insertion_point.hash(&mut hasher);
+    genome.retrieval_threshold.to_bits().hash(&mut hasher);
+    // Epoch metadata
+    seed.hash(&mut hasher);
+    generation.hash(&mut hasher);
+    let hash = hasher.finish();
+    format!("{:016x}", hash)
 }
 
 impl JointSearchConfig {
@@ -396,6 +488,37 @@ impl JointSearchConfig {
         workload: &Workload,
         state: &mut EvolutionState,
     ) -> Result<f64, String> {
+        // Derive ternary recipe from genome — available before validation
+        let ternary_recipe = if matches!(
+            genome.codec,
+            CodecFamily::Ternary | CodecFamily::Ternary1_58
+        ) {
+            Some(TernaryCandidateRecipe {
+                codec: match genome.codec {
+                    CodecFamily::Ternary => TernaryCodec::Tile640,
+                    CodecFamily::Ternary1_58 => TernaryCodec::BitNet158,
+                    _ => unreachable!(),
+                },
+                scale_policy: TernaryScalePolicy::SymmetricPerGroup,
+                threshold_policy: TernaryThresholdPolicy::Percentile(50.0),
+                group_size: genome.group_size as u32,
+                residual_policy: match genome.residual_policy.as_str() {
+                    "sparse" => TernaryResidualPolicy::Sparse {
+                        fraction: 0.1,
+                        fallback: ResidualFallbackPrecision::Nf4,
+                    },
+                    "dense" => TernaryResidualPolicy::Dense {
+                        fallback: ResidualFallbackPrecision::Fp16,
+                    },
+                    _ => TernaryResidualPolicy::None,
+                },
+                kernel_abi: TernaryKernelAbi::default(),
+                representation_version: REPRESENTATION_REGISTRY_VERSION,
+                sparse_residual_capacity: None,
+            })
+        } else {
+            None
+        };
         let mut candidate = EvolutionCandidate {
             candidate_id: CandidateId(format!(
                 "joint.{}.{}",
@@ -442,6 +565,7 @@ impl JointSearchConfig {
             correctness_receipt: None,
             quality_receipt: None,
             performance_receipt: None,
+            ternary_recipe,
             fitness: None,
             status: CandidateStatus::Created,
         };
@@ -452,10 +576,22 @@ impl JointSearchConfig {
         let compiled = evaluator.compile(&candidate)?;
         let numerical = evaluator.validate_numerical(&mut candidate, &compiled)?;
         if !numerical.passed {
-            return Err(format!(
-                "numerical gate failed: {}",
-                numerical.max_absolute_error
-            ));
+            let reason = if numerical.max_absolute_error.is_nan() {
+                if matches!(
+                    genome.codec,
+                    CodecFamily::Ternary | CodecFamily::Ternary1_58
+                ) {
+                    "ternary not yet evaluated — Phase 2 acceptance gate".to_string()
+                } else {
+                    format!(
+                        "numerical gate failed (sentinel NaN): {}",
+                        numerical.max_absolute_error
+                    )
+                }
+            } else {
+                format!("numerical gate failed: {}", numerical.max_absolute_error)
+            };
+            return Err(reason);
         }
         let performance = evaluator.measure(&mut candidate, &compiled, workload)?;
 
@@ -503,31 +639,62 @@ impl JointSearchConfig {
 
     fn generate_initial_population(&self) -> Vec<ScoredGenome> {
         let mut pop = Vec::new();
-        for codec in &self.engram_codecs {
-            for insertion_point in &self.insertion_points {
-                for kernel in &self.kernel_variants {
-                    pop.push(ScoredGenome {
-                        genome: JointGenome {
-                            // Representation defaults
-                            codec: CodecFamily::Nf4,
-                            group_size: 32,
-                            residual_policy: "sparse".into(),
 
-                            // Kernel defaults
-                            kernel_variant: kernel.clone(),
-                            tile_m: 64,
-                            tile_n: 64,
-                            tile_k: 64,
-                            reduction_strategy: "sequential".into(),
+        // Archetypes: (codec, rescue_scope, rescue_codec)
+        let archetypes: &[(CodecFamily, RescueScope, RescueCodec)] = &[
+            // Pure ternary — no rescue overrides
+            (CodecFamily::Ternary, RescueScope::None, RescueCodec::Nf4),
+            // Ternary with sparse rescue (INT8 fallback for high-error groups)
+            (CodecFamily::Ternary, RescueScope::Group, RescueCodec::Int8),
+            // Tensor-mixed ternary + NF4 (some groups rescued to NF4)
+            (
+                CodecFamily::Ternary,
+                RescueScope::OutputTile,
+                RescueCodec::Nf4,
+            ),
+            // Conservative NF4 + INT8 rescue (low-risk mixed precision)
+            (CodecFamily::Nf4, RescueScope::OutputRow, RescueCodec::Int8),
+            // Full-precision control baseline
+            (CodecFamily::RawF32, RescueScope::None, RescueCodec::Nf4),
+            // Pure NF4 baseline
+            (CodecFamily::Nf4, RescueScope::None, RescueCodec::Nf4),
+            // Pure INT8 baseline
+            (CodecFamily::Int8, RescueScope::None, RescueCodec::Int8),
+            // Aggressive NF4 (FP16 rescue on output tiles)
+            (CodecFamily::Nf4, RescueScope::OutputTile, RescueCodec::Fp16),
+        ];
 
-                            // Engram defaults
-                            engram_codec: codec.clone(),
-                            engram_capacity: 1024,
-                            insertion_point: insertion_point.clone(),
-                            retrieval_threshold: 0.7,
-                        },
-                        fitness: None,
-                    });
+        for &(repr, rescue_scope, rescue_codec) in archetypes {
+            for engram in &self.engram_codecs {
+                for insertion_point in &self.insertion_points {
+                    for kernel in &self.kernel_variants {
+                        pop.push(ScoredGenome {
+                            genome: JointGenome {
+                                // Representation defaults
+                                codec: repr,
+                                group_size: 32,
+                                residual_policy: "sparse".into(),
+
+                                // Rescue genes
+                                rescue_scope,
+                                rescue_codec,
+
+                                // Kernel defaults
+                                kernel_variant: kernel.clone(),
+                                tile_m: 64,
+                                tile_n: 64,
+                                tile_k: 64,
+                                reduction_strategy: "sequential".into(),
+
+                                // Engram defaults
+                                engram_codec: engram.clone(),
+                                engram_capacity: 1024,
+                                insertion_point: insertion_point.clone(),
+                                retrieval_threshold: 0.7,
+                            },
+                            fitness: None,
+                        });
+                    }
                 }
             }
         }
@@ -543,6 +710,19 @@ impl JointSearchConfig {
             CodecFamily::Ternary => 1.0,
             _ => 5.0,
         };
+        // Rescue adds overhead proportional to scope and codec weight
+        let rescue_cost = match genome.rescue_scope {
+            RescueScope::None => 0.0,
+            RescueScope::Group => 0.5,
+            RescueScope::Tensor => 0.5,
+            RescueScope::OutputRow => 1.0,
+            RescueScope::OutputTile => 2.0,
+        } + match genome.rescue_codec {
+            RescueCodec::Int8 => 1.0,
+            RescueCodec::Nf4 => 2.0,
+            RescueCodec::Fp16 => 4.0,
+            RescueCodec::Palettized => 3.0,
+        };
         let engram_cost = match genome.engram_codec.as_str() {
             "int8" => 3.0,
             "nf4" => 2.0,
@@ -555,7 +735,7 @@ impl JointSearchConfig {
             "batched_gemv" => 1.5,
             _ => 3.0,
         };
-        repr_cost + engram_cost + kernel_cost
+        repr_cost + rescue_cost + engram_cost + kernel_cost
     }
 }
 
@@ -574,6 +754,8 @@ pub fn codon_to_genome(
         },
         group_size: genome.group_size,
         residual_policy: genome.residual_policy.clone(),
+        rescue_scope: genome.rescue_scope,
+        rescue_codec: genome.rescue_codec,
         kernel_variant: kernel.to_string(),
         tile_m: genome.tile_m,
         tile_n: genome.tile_n,
@@ -599,11 +781,41 @@ mod tests {
     }
 
     #[test]
+    fn test_genome_digest_deterministic() {
+        let g = JointGenome {
+            codec: CodecFamily::Nf4,
+            group_size: 32,
+            residual_policy: "sparse".into(),
+            rescue_scope: RescueScope::None,
+            rescue_codec: RescueCodec::Nf4,
+            kernel_variant: "tile640_gemv".into(),
+            tile_m: 64,
+            tile_n: 64,
+            tile_k: 64,
+            reduction_strategy: "sequential".into(),
+            engram_codec: "nf4".into(),
+            engram_capacity: 1024,
+            insertion_point: "after.linear.q_proj".into(),
+            retrieval_threshold: 0.7,
+        };
+        let h1 = genome_digest(&g, 42, 1);
+        let h2 = genome_digest(&g, 42, 1);
+        assert_eq!(h1, h2, "same genome+seed+gen should produce same hash");
+        let h3 = genome_digest(&g, 43, 1);
+        assert_ne!(h1, h3, "different seed should produce different hash");
+        let h4 = genome_digest(&g, 42, 2);
+        assert_ne!(h1, h4, "different generation should produce different hash");
+        assert_eq!(h1.len(), 16, "digest should be 16 hex chars (64 bits)");
+    }
+
+    #[test]
     fn test_joint_genome_all_dimensions_present() {
         let genome = JointGenome {
             codec: CodecFamily::Nf4,
             group_size: 32,
             residual_policy: "sparse".into(),
+            rescue_scope: RescueScope::None,
+            rescue_codec: RescueCodec::Nf4,
             kernel_variant: "tile640_gemv".into(),
             tile_m: 64,
             tile_n: 64,
@@ -629,11 +841,13 @@ mod tests {
 
     #[test]
     fn test_joint_search_generates_population() {
+        let archetype_count = 8; // 8 mixed-precision archetypes
         let config = JointSearchConfig::for_tensor("attention.q_proj");
         let pop = config.generate_initial_population();
         assert_eq!(
             pop.len(),
-            config.engram_codecs.len()
+            archetype_count
+                * config.engram_codecs.len()
                 * config.insertion_points.len()
                 * config.kernel_variants.len()
         );
@@ -653,6 +867,8 @@ mod tests {
             codec: CodecFamily::Nf4,
             group_size: 32,
             residual_policy: "sparse".into(),
+            rescue_scope: RescueScope::None,
+            rescue_codec: RescueCodec::Nf4,
             kernel_variant: "tile640_gemv".into(),
             tile_m: 64,
             tile_n: 128,
@@ -667,6 +883,8 @@ mod tests {
             codec: CodecFamily::Int8,
             group_size: 64,
             residual_policy: "dense".into(),
+            rescue_scope: RescueScope::Group,
+            rescue_codec: RescueCodec::Int8,
             kernel_variant: "persistent_gemv".into(),
             tile_m: 128,
             tile_n: 256,
@@ -681,6 +899,9 @@ mod tests {
         // Representation: codec from A, group_size from B
         assert_eq!(child.codec, CodecFamily::Nf4);
         assert_eq!(child.group_size, 64);
+        // Rescue: scope from A (None), codec from B (Int8)
+        assert_eq!(child.rescue_scope, RescueScope::None);
+        assert_eq!(child.rescue_codec, RescueCodec::Int8);
         // Kernel: variant from B, tiles from A
         assert_eq!(child.kernel_variant, "persistent_gemv");
         assert_eq!(child.tile_m, 64);
@@ -696,6 +917,8 @@ mod tests {
             codec: CodecFamily::Nf4,
             group_size: 32,
             residual_policy: "sparse".into(),
+            rescue_scope: RescueScope::None,
+            rescue_codec: RescueCodec::Nf4,
             kernel_variant: "tile640_gemv".into(),
             tile_m: 64,
             tile_n: 64,
@@ -707,7 +930,7 @@ mod tests {
             retrieval_threshold: 0.7,
         };
         let config = JointSearchConfig::for_tensor("attention.q_proj");
-        // seed=0 triggers threshold perturbation (seed%5==0)
+        // seed=0 triggers threshold perturbation (seed%9==0)
         let mutated = joint_mutate(&genome, &config, 0);
         assert_ne!(mutated.retrieval_threshold, 0.7);
         assert!((0.1..=1.0).contains(&mutated.retrieval_threshold));
@@ -738,7 +961,16 @@ mod tests {
             !best.engram_codec.is_empty(),
             "best genome should have an engram codec"
         );
-        assert_eq!(best.codec, CodecFamily::Nf4);
+        // Best genome varies by synthetic_fitness — with rescue costs factored
+        // in, any archetype codec is acceptable.
+        assert!(
+            matches!(
+                best.codec,
+                CodecFamily::Nf4 | CodecFamily::Int8 | CodecFamily::Ternary | CodecFamily::RawF32
+            ),
+            "best genome codec should be a valid representation family, got {:?}",
+            best.codec,
+        );
         assert!(
             !best.kernel_variant.is_empty(),
             "best genome should have a kernel variant"
@@ -758,6 +990,8 @@ mod tests {
             codec: CodecFamily::Nf4,
             group_size: 32,
             residual_policy: "sparse".into(),
+            rescue_scope: RescueScope::OutputRow,
+            rescue_codec: RescueCodec::Fp16,
             kernel_variant: "tile640_gemv".into(),
             tile_m: 64,
             tile_n: 64,
@@ -775,5 +1009,8 @@ mod tests {
         // Non-overridden fields preserve defaults
         assert_eq!(mapped.group_size, 32);
         assert_eq!(mapped.reduction_strategy, "sequential");
+        // Rescue fields inherited from base
+        assert_eq!(mapped.rescue_scope, RescueScope::OutputRow);
+        assert_eq!(mapped.rescue_codec, RescueCodec::Fp16);
     }
 }

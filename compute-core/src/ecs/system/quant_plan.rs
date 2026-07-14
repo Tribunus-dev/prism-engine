@@ -155,6 +155,11 @@ impl CompilerSystem for PrecisionPlanSystem {
             overrides,
             selection_basis: PrecisionSelectionBasis::StaticPolicy,
             evidence_level: crate::training_target::RequiredEvidenceLevel::WeightSpace,
+            override_table: None,
+            sidecar: None,
+            byte_cost: 0,
+            expected_error_reduction: None,
+            compatibility_version: 1,
         };
 
         for model in &models {

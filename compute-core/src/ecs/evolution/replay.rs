@@ -144,11 +144,12 @@ pub fn replay_from_manifest(manifest: &ReplayManifest) -> Result<ManifestReplayO
     }
 
     // ── Phase 2: Verify artifact provenance consistency ───────────────────
-    for (_sem_id, provenance) in &manifest.artifacts {
-        if !manifest
+    for (sem_id, provenance) in &manifest.artifacts {
+        let has_cached = manifest.compiled_artifacts.contains_key(sem_id);
+        let has_payload = manifest
             .payloads
-            .contains_key(&PhysicalSegmentId(provenance.compiled_byte_digest.clone()))
-        {
+            .contains_key(&PhysicalSegmentId(provenance.compiled_byte_digest.clone()));
+        if !has_cached && !has_payload {
             return Err(format!(
                 "artifact for {:?} references missing compiled bytes",
                 provenance.semantic_id
@@ -169,6 +170,18 @@ pub fn replay_from_manifest(manifest: &ReplayManifest) -> Result<ManifestReplayO
     let mut compiled_artifacts: Vec<CompiledKernelArtifact> = Vec::new();
 
     for (_sem_id, provenance) in &manifest.artifacts {
+        // First check if the compiled artifact bytes were cached in the manifest.
+        if let Some(cached_bytes) = manifest.compiled_artifacts.get(&provenance.semantic_id) {
+            compiled_artifacts.push(CompiledKernelArtifact {
+                implementation_id: provenance.implementation_id.clone(),
+                semantic_id: provenance.semantic_id.clone(),
+                compiled_bytes: cached_bytes.clone(),
+                sha256: provenance.compiled_byte_digest.clone(),
+                entry_point: "kernel".into(),
+                abi: manifest.abi.clone(),
+            });
+            continue;
+        }
         let source = catalogue_source_for(&provenance.semantic_id).ok_or_else(|| {
             format!(
                 "no catalogue source for {:?} — cannot replay artifact",
@@ -405,6 +418,7 @@ mod tests {
                 energy_uj: None,
                 compile_cost_ms: 10,
             }),
+            ternary_recipe: None,
             status: CandidateStatus::Measured,
         }
     }

@@ -1,9 +1,10 @@
+use crate::ecs::compute_image::kv_plan::KvCodec;
 use crate::ecs::state_store::epochs::StateEpoch;
 use crate::ecs::state_store::kv::KvCacheManager;
 use crate::ecs::state_store::pages::PageTable;
 use crate::ecs::state_store::receipts::{KvAppendReceipt, KvReadReceipt};
 use crate::ecs::state_store::schema::{
-    AccessKind, KvCacheLayout, KvCacheStoreDecl, KvPrecisionPolicy, KvResidencyPolicy,
+    AccessKind, KvCacheLayout, KvCacheStoreDecl, KvCodecPolicy, KvResidencyPolicy,
     StateAccessPolicy, StateStoreDecl, StateStoreSchema,
 };
 use crate::ecs::state_store::validate::validate_schema;
@@ -25,9 +26,8 @@ fn make_kv_config(store_id: &str) -> KvCacheStoreDecl {
             page_tokens: 64,
             alignment_bytes: 256,
         },
-        precision_policy: KvPrecisionPolicy {
-            key_dtype: "fp16".to_string(),
-            value_dtype: "fp16".to_string(),
+        codec_policy: KvCodecPolicy {
+            codec: KvCodec::Fp16,
         },
         residency_policy: KvResidencyPolicy {
             max_active_spans: 8,
@@ -262,9 +262,8 @@ fn serde_roundtrip_kv_cache_store_decl() {
             page_tokens: 64,
             alignment_bytes: 256,
         },
-        precision_policy: KvPrecisionPolicy {
-            key_dtype: "fp16".to_string(),
-            value_dtype: "fp16".to_string(),
+        codec_policy: KvCodecPolicy {
+            codec: KvCodec::Fp16,
         },
         residency_policy: KvResidencyPolicy {
             max_active_spans: 8,

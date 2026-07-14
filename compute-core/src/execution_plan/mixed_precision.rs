@@ -2,7 +2,7 @@
 //!
 //! The planner takes a base codec candidate and sweep receipts, attributes
 //! error per tensor group, and promotes the highest-error groups to a rescue
-//! codec (INT8/FP16). The result is a `PrecisionPlan` that can be integrated
+//! codec (INT8/FP16). The result is a `PrecisionPlanningResult` that can be integrated
 //! into a `ModelExecutionPlan`.
 //!
 //! ## Algorithm
@@ -11,7 +11,7 @@
 //! 2. Sort units by error contribution descending.
 //! 3. Promote top-N units to a rescue codec.
 //! 4. Recompute effective byte cost.
-//! 5. Return a `PrecisionPlan` or a rejection if the plan regresses.
+//! 5. Return a `PrecisionPlanningResult` or a rejection if the plan regresses.
 
 use serde::{Deserialize, Serialize};
 
@@ -78,11 +78,11 @@ pub struct PrecisionSidecar {
     pub quality_retention: f64,
 }
 
-// ── PrecisionPlan ──────────────────────────────────────────────────────────
+// ── PrecisionPlanningResult ────────────────────────────────────────────────
 
 /// Result of a mixed-precision planning pass.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PrecisionPlan {
+pub enum PrecisionPlanningResult {
     /// The plan is feasible and includes explicit overrides.
     ///
     /// Contains the override table and sidecar for downstream integration
@@ -181,8 +181,8 @@ pub struct SweepReceiptError {
 /// 2. Sort units by `error_contribution` descending.
 /// 3. Promote the top N units to a rescue codec (INT8 or FP16).
 /// 4. Compute effective byte cost after promotion.
-/// 5. Return `PrecisionPlan::Accepted` with the override table, or
-///    `PrecisionPlan::Rejected` if no promotion is beneficial.
+/// 5. Return `PrecisionPlanningResult::Accepted` with the override table, or
+///    `PrecisionPlanningResult::Rejected` if no promotion is beneficial.
 pub struct MixedPrecisionPlanner;
 
 impl MixedPrecisionPlanner {
@@ -200,7 +200,7 @@ impl MixedPrecisionPlanner {
     ///
     /// # Returns
     ///
-    /// A `PrecisionPlan` describing either an accepted override table or a
+    /// A `PrecisionPlanningResult` describing either an accepted override table or a
     /// rejection with the reason.
     pub fn plan(
         base_codec: CodecFamily,
@@ -208,9 +208,9 @@ impl MixedPrecisionPlanner {
         errors: &[SweepReceiptError],
         promotion_budget: f64,
         _pass_id: &str,
-    ) -> PrecisionPlan {
+    ) -> PrecisionPlanningResult {
         if errors.is_empty() {
-            return PrecisionPlan::Rejected {
+            return PrecisionPlanningResult::Rejected {
                 reason: "No sweep receipt errors provided".into(),
             };
         }
@@ -266,13 +266,13 @@ impl MixedPrecisionPlanner {
         //    Reject if post-cost >= full rescue cost (no byte savings) and
         //    pre_error was already negligible.
         if total_post_cost >= full_rescue_byte_cost && aggregate_pre_error < 1e-9 {
-            return PrecisionPlan::Rejected {
+            return PrecisionPlanningResult::Rejected {
                 reason: "Mixed precision plan has no benefit over full rescue".into(),
             };
         }
         let promoted_fraction = promote_count as f64 / sorted.len() as f64;
 
-        PrecisionPlan::Accepted {
+        PrecisionPlanningResult::Accepted {
             overrides: PrecisionOverrideTable {
                 entries: overrides,
                 total_effective_bytes: total_post_cost,
@@ -331,7 +331,7 @@ mod tests {
         );
 
         match &result {
-            PrecisionPlan::Accepted { overrides, sidecar } => {
+            PrecisionPlanningResult::Accepted { overrides, sidecar } => {
                 // 20% of 10 → 2 units promoted
                 assert_eq!(sidecar.promoted_count, 2);
                 assert!((sidecar.promoted_fraction - 0.2).abs() < 1e-9);
@@ -369,7 +369,7 @@ mod tests {
             "empty-test",
         );
         match result {
-            PrecisionPlan::Rejected { reason } => {
+            PrecisionPlanningResult::Rejected { reason } => {
                 assert!(reason.contains("No sweep receipt errors"));
             }
             other => panic!("Expected Rejected, got {:?}", other),
@@ -391,7 +391,7 @@ mod tests {
             "regressive-test",
         );
         match result {
-            PrecisionPlan::Rejected { reason } => {
+            PrecisionPlanningResult::Rejected { reason } => {
                 assert!(reason.contains("no benefit"));
             }
             other => panic!("Expected Rejected, got {:?}", other),

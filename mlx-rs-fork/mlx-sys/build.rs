@@ -1,3 +1,5 @@
+#[cfg(not(feature = "stub"))]
+use std::process::Command;
 use std::{env, path::PathBuf};
 
 #[cfg(not(feature = "stub"))]

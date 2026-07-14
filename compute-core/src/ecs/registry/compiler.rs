@@ -61,7 +61,7 @@ impl DeploymentCompiler {
             policy.allowed_backends.clone();
         let backend_plan =
             BackendPlan::select(&manifest.allowed_backends, &policy_backends, hardware)?;
-        let precision_policy = PrecisionPolicy::compile(
+        let admission_precision = AdmissionPrecision::compile(
             &manifest.required_precision_classes,
             &policy.allowed_precision_modes,
         )?;
@@ -76,8 +76,8 @@ impl DeploymentCompiler {
                 &serde_json::to_vec(&backend_plan).unwrap_or_default(),
             ),
             resource_budget_digest: resource_budget.digest(),
-            precision_policy_digest: Digest256::compute(
-                &serde_json::to_vec(&precision_policy).unwrap_or_default(),
+            admission_precision_digest: Digest256::compute(
+                &serde_json::to_vec(&admission_precision).unwrap_or_default(),
             ),
             tool_authority_digest: Digest256::compute(&[if policy.allow_tool_execution {
                 1u8
@@ -109,7 +109,7 @@ impl DeploymentCompiler {
             effective_capabilities,
             resource_budget,
             backend_plan,
-            precision_policy,
+            admission_precision,
             tool_authority: ToolAuthority::new(policy.allow_tool_execution),
             optimization_authority: OptimizationAuthority::new(
                 policy.allow_background_optimization,

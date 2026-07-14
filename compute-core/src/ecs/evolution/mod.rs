@@ -5,5 +5,6 @@ pub mod foundation;
 pub mod frontier;
 pub mod joint;
 pub mod replay;
+pub mod sensitivity;
 pub mod systems;
 pub use foundation::*;

@@ -15,8 +15,6 @@ pub use crate::kv_cache_types::{
 };
 use std::sync::Arc;
 
-use std::time::Duration;
-
 use mlx_rs::error::Result as MlxResult;
 use mlx_rs::ops::indexing::IndexMutOp;
 use mlx_rs::ops::indexing::IndexOp;
@@ -24,122 +22,131 @@ use mlx_rs::{ops, Array};
 use parking_lot::Mutex;
 
 use crate::ecs::cache::evolkv::{CalibrationSet, EvolKV};
+use crate::ecs::compute_image::kv_plan::KvCachePlan;
 use crate::ecs::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
+use crate::ecs::state_store::{
+    KvAppendReceipt, KvCacheLayout, KvCacheManager, KvCacheStoreDecl, KvCodecPolicy, KvReadReceipt,
+    KvResidencyPolicy,
+};
 use crate::memory::allocator::BlockHandle;
 use crate::quantization::turboquant_kv::{AsymmetricQuantMode, KvQuantMode, TurboQuantKvCache};
 
 /// Resource ID for KVCacheCoordinator.
 pub const KV_CACHE_COORDINATOR_RESOURCE: ResourceId = 19;
 
-/// ECS resource that owns all KV cache state across layers.
+/// ECS resource — sole state-store façade for all KV page memory.
 ///
-/// Systems interact with the KV cache exclusively through this resource,
-/// never constructing KvCache, CompressedKvCache, or PageMigrationService
-/// directly.
+/// Systems interact with the KV cache exclusively through this resource.
+/// The state store owns all pages; `live_caches` hold tagged wrappers
+/// for format-aware attention dispatch.
 pub struct KVCacheCoordinator {
-    /// Per-layer uncompressed caches.
-    pub per_layer: Vec<KvCache>,
-    /// Optional compressed cache infrastructure.
-    pub compressed: Option<CompressedKvCache>,
-    /// Page migration service for tiered cache.
-    pub migration: Option<PageMigrationService>,
-    /// Tagged union wrappers for systems that need format-aware dispatch.
+    /// State store — sole owner of all KV page memory.
+    pub store: KvCacheManager,
+    /// Plan describing codec, geometry, and policies.
+    pub plan: KvCachePlan,
+    /// Tagged wrappers for attention dispatch.
     pub live_caches: Vec<LiveKvCache>,
 }
 
 impl KVCacheCoordinator {
-    /// Create a new KVCacheCoordinator with the given per-layer configuration.
+    /// Create a new KVCacheCoordinator from a [`KvCachePlan`] and per-layer configs.
     ///
     /// Each element in `layer_configs` is `(capacity, n_kv_heads, head_dim, is_sliding)`.
-    pub fn allocate(layer_configs: &[(u32, u32, u32, bool)]) -> Self {
-        let per_layer: Vec<KvCache> = layer_configs
+    ///
+    /// 1. Builds a [`KvCacheStoreDecl`] from the plan and layer geometry.
+    /// 2. Creates the [`KvCacheManager`] and allocates store pages.
+    /// 3. Maps the codec to [`LiveKvCache`] variants for each layer.
+    pub fn allocate_from_plan(plan: KvCachePlan, layer_configs: &[(u32, u32, u32, bool)]) -> Self {
+        let store_id = "kv_coord_store_0";
+        let layer_count = layer_configs.len() as u32;
+        let (n_kv_heads, head_dim) = layer_configs.first().map(|c| (c.1, c.2)).unwrap_or((0, 0));
+        let max_seq_len = layer_configs.iter().map(|c| c.0).max().unwrap_or(0);
+
+        let config = KvCacheStoreDecl {
+            store_id: store_id.to_string(),
+            model_partition_id: "default".to_string(),
+            layer_count,
+            head_count: n_kv_heads,
+            kv_head_count: n_kv_heads,
+            head_dim,
+            max_sequence_len: max_seq_len,
+            cache_layout: KvCacheLayout::PagedLayerHead {
+                page_tokens: plan.block_tokens,
+                alignment_bytes: 64,
+            },
+            codec_policy: KvCodecPolicy {
+                codec: plan.codec.clone(),
+            },
+            residency_policy: KvResidencyPolicy {
+                max_active_spans: layer_count * 4,
+                span_pin_supported: false,
+            },
+        };
+
+        let mut store = KvCacheManager::new(store_id, config, "coordinator");
+        let _ = store.allocate_store();
+
+        let live_caches: Vec<LiveKvCache> = layer_configs
             .iter()
             .map(|&(capacity, n_kv_heads, head_dim, is_sliding)| {
-                KvCache::new(capacity, n_kv_heads, head_dim, is_sliding)
+                LiveKvCache::Fp16(KvCache::new(capacity, n_kv_heads, head_dim, is_sliding))
             })
             .collect();
-        let live_caches: Vec<LiveKvCache> = per_layer
-            .iter()
-            .map(|c| LiveKvCache::Fp16(c.clone()))
-            .collect();
+
         Self {
-            per_layer,
-            compressed: None,
-            migration: None,
+            store,
+            plan,
             live_caches,
         }
     }
 
-    /// Read KV data for a specific layer.
-    pub fn read(&self, layer_idx: u32) -> Option<(mlx_rs::Array, mlx_rs::Array)> {
-        self.per_layer
-            .get(layer_idx as usize)
-            .and_then(|c| c.read_window())
+    /// Read a window of KV pages from the state store.
+    pub fn read(
+        &self,
+        token_start: u32,
+        token_count: u32,
+        epoch_id: u64,
+        caller_region: &str,
+    ) -> Result<KvReadReceipt, String> {
+        self.store
+            .read_window(token_start, token_count, epoch_id, caller_region)
     }
 
-    /// Write (append) KV data to a specific layer.
+    /// Append a span of tokens to the state store.
     pub fn write(
         &mut self,
-        layer_idx: u32,
-        keys: mlx_rs::Array,
-        values: mlx_rs::Array,
-    ) -> Result<(), mlx_rs::error::Exception> {
-        if let Some(cache) = self.per_layer.get_mut(layer_idx as usize) {
-            cache.append(keys, values)?;
-        }
-        Ok(())
-    }
-
-    /// Evict cold pages from the page migration service.
-    /// Returns the number of pages evicted.
-    pub fn evict(&mut self) -> Result<usize, String> {
-        match &mut self.migration {
-            Some(m) => m.check_and_evict(Duration::from_secs(30)),
-            None => Ok(0),
-        }
-    }
-
-    /// Run one migration tick on the page migration service.
-    pub fn migrate(&mut self) -> Result<(), String> {
-        match &mut self.migration {
-            Some(m) => m.tick(),
-            None => Ok(()),
-        }
-    }
-
-    /// Set the compressed cache for the coordinator.
-    pub fn set_compressed(&mut self, compressed: CompressedKvCache) {
-        self.compressed = Some(compressed);
-    }
-
-    /// Set the page migration service.
-    pub fn set_migration(&mut self, migration: PageMigrationService) {
-        self.migration = Some(migration);
+        token_start: u32,
+        token_count: u32,
+        span_id: &str,
+        epoch_id: u64,
+        caller_region: &str,
+    ) -> Result<KvAppendReceipt, String> {
+        self.store
+            .append_tokens(token_start, token_count, span_id, epoch_id, caller_region)
     }
 
     /// Number of layers.
     pub fn layer_count(&self) -> u32 {
-        self.per_layer.len() as u32
+        self.live_caches.len() as u32
     }
 
     /// Clear all layer caches.
     pub fn clear(&mut self) {
-        for cache in &mut self.per_layer {
+        for cache in &mut self.live_caches {
             cache.clear();
         }
-        self.live_caches.clear();
     }
 
     /// Commit all uncommitted appends.
     pub fn commit_all(&mut self) {
-        for cache in &mut self.per_layer {
+        for cache in &mut self.live_caches {
             cache.commit_step();
         }
     }
 
     /// Rollback all uncommitted appends.
     pub fn rollback_all(&mut self) {
-        for cache in &mut self.per_layer {
+        for cache in &mut self.live_caches {
             cache.rollback();
         }
     }
@@ -148,9 +155,9 @@ impl KVCacheCoordinator {
 impl std::fmt::Debug for KVCacheCoordinator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KVCacheCoordinator")
-            .field("layer_count", &self.per_layer.len())
-            .field("has_compressed", &self.compressed.is_some())
-            .field("has_migration", &self.migration.is_some())
+            .field("layer_count", &self.live_caches.len())
+            .field("store_id", &self.store.store_id)
+            .field("plan_codec", &self.plan.codec)
             .finish()
     }
 }
@@ -345,6 +352,14 @@ impl CompressedKvCache {
         // beyond committed_len are stale. We rely on the fact that a subsequent
         // quantize() will overwrite them.
         self.seq_len = self.committed_len;
+    }
+
+    /// Reset all stored slots and pages.
+    pub fn clear(&mut self) {
+        self.slots.clear();
+        self.pages.clear();
+        self.committed_len = 0;
+        self.seq_len = 0;
     }
 
     /// Total allocated bytes (compressed data + metadata).
@@ -1280,6 +1295,17 @@ pub enum LiveKvCache {
 }
 
 impl LiveKvCache {
+    /// Clear all stored data.
+    pub fn clear(&mut self) {
+        match self {
+            Self::Fp16(c) => c.clear(),
+            Self::Compressed(c) => c.clear(),
+            Self::TurboQuant(_) => {
+                // TurboQuantKvCache is stateless per-slot; no clear needed.
+            }
+        }
+    }
+
     /// Number of committed tokens in this cache.
     pub fn committed_len(&self) -> u32 {
         match self {

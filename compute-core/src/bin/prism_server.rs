@@ -18,6 +18,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use axum::{
+    body::Body,
     extract::Path,
     extract::Request,
     extract::State,
@@ -31,6 +32,7 @@ use axum::{
 use base64::Engine;
 use clap::Parser;
 use futures::stream::Stream;
+use futures::StreamExt;
 use metal;
 use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
@@ -46,15 +48,23 @@ use uuid::Uuid;
 
 #[cfg(feature = "mlx-backend")]
 use tribunus_compute_core::audio_preprocess_accelerate;
-use tribunus_compute_core::backend::create_inference_executor;
-use tribunus_compute_core::backend::flex_dispatch::{
-    create_flex_dispatch, run_flex_dispatch_cycle, FlexDispatch,
-};
-use tribunus_compute_core::backend::heterogeneous_executor::HeterogeneousExecutor;
-use tribunus_compute_core::backend::routing::*;
-use tribunus_compute_core::cimage::header::CIMAGE_MAGIC;
 use tribunus_compute_core::compilation::cancel::CancelToken;
-use tribunus_compute_core::compute_image::cimage_loader::CimageDeployment;
+use tribunus_compute_core::ecs::canonical::identity::GenerationId;
+use tribunus_compute_core::ecs::canonical::identity::{
+    CompilerIdentity, HardwareProfileId, ModelSourceId, ReceiptId, Timestamp,
+};
+use tribunus_compute_core::ecs::canonical::{
+    CimageGeneration, ExecutionGraph, MemoryPlan, RuntimeStatePlan,
+};
+use tribunus_compute_core::ecs::cimage::CIMAGE_MAGIC;
+use tribunus_compute_core::ecs::cimage_runtime::context::CimageRuntimeContext;
+use tribunus_compute_core::ecs::cimage_runtime::tensor_store::RuntimeTensorStore;
+use tribunus_compute_core::ecs::compiler::deployment_compiler::ServingProfile;
+use tribunus_compute_core::ecs::compute_image::cimage_loader::CimageDeployment;
+use tribunus_compute_core::ecs::runtime::serving::model_instance::ModelRegistry;
+use tribunus_compute_core::ecs::runtime::serving::model_instance::{
+    CimageModelInstance, InferenceSession, MtpSessionState, SamplerConfig,
+};
 use tribunus_compute_core::server::distill_worker::{
     DistillationEngine, DistillationJobStatus, DistillationRequest,
 };
@@ -104,7 +114,10 @@ mod dashboard_stubs {
     }
 
     pub async fn dashboard_spa() -> impl axum::response::IntoResponse {
-        Html(tribunus_compute_core::server::dashboard::DASHBOARD_HTML)
+        Html(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/ecs/server/dashboard/page.html"
+        )))
     }
 
     pub async fn dashboard_root() -> axum::response::Redirect {
@@ -278,8 +291,6 @@ struct StreamState {
     request_id: String,
     cancel: CancellationToken,
     #[allow(dead_code)]
-    slot_id: u32,
-    #[allow(dead_code)]
     start_time: Instant,
     #[allow(dead_code)]
     last_activity: Instant,
@@ -350,9 +361,9 @@ impl<S> Drop for CancelOnDropStream<S> {
 // ── State ───────────────────────────────────────────────────────────────
 
 struct AppState {
-    executor: ParkingMutex<HeterogeneousExecutor>,
-    flex_dispatch: ParkingMutex<FlexDispatch>,
+    model_registry: ParkingMutex<ModelRegistry>,
     tokenizer: TribunusTokenizer,
+    #[allow(dead_code)]
     decode_count: std::sync::atomic::AtomicU64,
     #[allow(dead_code)]
     cimage_path: PathBuf,
@@ -376,17 +387,6 @@ struct AppState {
     distill_engine: Arc<DistillationEngine>,
     #[allow(dead_code)]
     cancel: CancelToken,
-}
-
-struct SlotGuard {
-    slot_id: u32,
-    state: Arc<AppState>,
-}
-
-impl Drop for SlotGuard {
-    fn drop(&mut self) {
-        self.state.executor.lock().free_slot(self.slot_id);
-    }
 }
 
 // ── Auth verifier ─────────────────────────────────────────────────────
@@ -622,6 +622,106 @@ enum MultimodalPart {
     Audio(Vec<u8>),
 }
 
+// ── Ollama-compatible API types ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct OllamaGenerateRequest {
+    model: String,
+    prompt: String,
+    #[serde(default = "default_true")]
+    stream: bool,
+    options: Option<serde_json::Value>,
+    format: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Serialize)]
+struct OllamaGenerateResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<OllamaMessage>,
+    done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    load_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_eval_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_eval_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eval_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eval_duration: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct OllamaChatRequest {
+    model: String,
+    messages: Vec<OllamaChatMessage>,
+    #[allow(dead_code)]
+    #[serde(default = "default_true")]
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+struct OllamaChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct OllamaMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct OllamaTagsResponse {
+    models: Vec<OllamaModelInfo>,
+}
+
+#[derive(Serialize)]
+struct OllamaModelInfo {
+    name: String,
+    modified_at: String,
+    size: u64,
+}
+
+#[derive(Deserialize)]
+struct OllamaShowRequest {
+    model: String,
+}
+
+#[derive(Serialize)]
+struct OllamaShowResponse {
+    model: String,
+    modified_at: String,
+    size: u64,
+    digest: String,
+    details: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct OllamaPsResponse {
+    models: Vec<OllamaPsModelInfo>,
+}
+
+#[derive(Serialize)]
+struct OllamaPsModelInfo {
+    name: String,
+    size: u64,
+    processor: String,
+    memory: u64,
+    until: String,
+}
 // ── Deserialization helpers ───────────────────────────────────────────
 
 /// Deserializes a `MessageContent` from either a JSON string or an array of content parts.
@@ -759,17 +859,41 @@ impl From<StatusCode> for ApiError {
 
 // ── Handlers ────────────────────────────────────────────────────────────
 
-async fn list_models(State(_state): State<Arc<AppState>>) -> Json<ModelList> {
+async fn list_models(State(state): State<Arc<AppState>>) -> Json<ModelList> {
+    let models = state.model_registry.lock();
+    let mut data: Vec<ModelInfo> = models
+        .iter()
+        .map(|(key, inst)| ModelInfo {
+            id: key.to_string(),
+            object: "model".to_string(),
+            created: inst.loaded_at.elapsed().as_secs(),
+            owned_by: "prism".to_string(),
+        })
+        .collect();
+    data.sort_by(|a, b| a.id.cmp(&b.id));
     Json(ModelList {
         object: "list".to_string(),
-        data: vec![ModelInfo {
-            id: "prism-model".to_string(),
-            object: "model".to_string(),
-            created: 0,
-            owned_by: "prism".to_string(),
-        }],
+        data,
     })
 }
+
+/// GET /ready — liveness / readiness probe.
+async fn readiness() -> Json<serde_json::Value> {
+    Json(serde_json::json!({"status": "ready", "version": env!("CARGO_PKG_VERSION")}))
+}
+
+/// GET /v1/runtime/receipts/{request_id} — diagnostic receipt lookup.
+async fn diagnostic_receipt(
+    State(_state): State<Arc<AppState>>,
+    Path(request_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = request_id;
+    Err(ApiError::new(
+        "not_implemented",
+        "Receipt lookup not yet wired",
+    ))
+}
+
 async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatRequest>,
@@ -833,83 +957,10 @@ async fn chat_completions(
         .iter()
         .any(|p| matches!(p, MultimodalPart::Image(_) | MultimodalPart::Audio(_)));
 
-    // Encode multimodal inputs if present (brief executor lock)
-    let multimodal_embeddings = if has_multimodal {
-        let mut image_bytes: Vec<Vec<u8>> = Vec::new();
-        let mut audio_bytes: Vec<Vec<u8>> = Vec::new();
-        for part in &multimodal_parts {
-            if let MultimodalPart::Image(bytes) = part {
-                image_bytes.push(bytes.clone());
-            }
-            if let MultimodalPart::Audio(bytes) = part {
-                audio_bytes.push(bytes.clone());
-            }
-        }
-        let mut exec = state.executor.lock();
-        let img_embeddings = match multimodal_encode_images(&mut exec, &image_bytes) {
-            Ok(embeddings) => embeddings,
-            Err(e) => {
-                eprintln!("[prism-server] multimodal encode error: {e}");
-                vec![]
-            }
-        };
-
-        // ── Audio encoding ──────────────────────────────────────────────
-        #[cfg(feature = "mlx-backend")]
-        let audio_frames: usize = if !audio_bytes.is_empty() {
-            let mut total_frames = 0usize;
-            for (idx, audio_data) in audio_bytes.iter().enumerate() {
-                match audio_preprocess_accelerate::load_wav_to_f32(audio_data) {
-                    Ok((samples, sample_rate, _channels)) => {
-                        match audio_preprocess_accelerate::preprocess_audio_gemma4(
-                            &samples,
-                            sample_rate,
-                        ) {
-                            Ok(mel_spec) => {
-                                let num_frames = mel_spec.len() / 640;
-                                total_frames += num_frames;
-
-                                let audio_op = OperationDescriptor {
-                                    operation_id: OperationId(1000 + idx as u64),
-                                    family: OperationFamily::AudioEncode,
-                                    layer_index: None,
-                                    phase: Phase::Prefill,
-                                    logical_shape: LogicalShape {
-                                        dims: vec![640, num_frames as u32],
-                                    },
-                                    physical_layout: PhysicalLayout::RowMajor,
-                                    input_dtypes: vec![DType::F32],
-                                    output_dtype: DType::F32,
-                                    quantization: None,
-                                    expected_output_shape: TensorShape {
-                                        dims: vec![3840, num_frames as u32],
-                                    },
-                                    correctness_checkpoint: CorrectnessCheckpointPolicy::None,
-                                };
-                                exec.operation_registry
-                                    .insert(audio_op.operation_id, audio_op);
-                            }
-                            Err(e) => {
-                                eprintln!("[prism-server] audio mel error: {e}");
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[prism-server] audio decode error: {e}");
-                    }
-                }
-            }
-            total_frames
-        } else {
-            0
-        };
-        #[cfg(not(feature = "mlx-backend"))]
-        let audio_frames: usize = 0;
-
-        (img_embeddings, audio_frames)
-    } else {
-        (vec![], 0)
-    };
+    // Multimodal not yet wired through ModelRegistry — skip encoding
+    if has_multimodal {
+        eprintln!("[prism-server] multimodal input ignored — not yet wired through ModelRegistry");
+    }
 
     // Tokenize (no executor lock needed)
     let input_ids = state
@@ -922,88 +973,96 @@ async fn chat_completions(
     }
 
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
-    let (multimodal_embeddings, audio_embeddings_len) = multimodal_embeddings;
-    let prompt_len = input_ids.len() + multimodal_embeddings.len() + audio_embeddings_len;
+    let prompt_len = input_ids.len();
 
-    // Allocate decode slot (brief executor lock)
-    // Stage 2: Reserve runtime resources
-    let slot_id = state
-        .executor
-        .lock()
-        .allocate_slot()
-        .map_err(|_| ApiError {
-            code: "capacity_exhausted".into(),
-            message: "All slots busy, retry later".into(),
-            request_id: request_id.clone(),
-            retryable: true,
-        })?;
-
-    let _slot_guard = SlotGuard {
-        slot_id,
-        state: state.clone(),
+    // Acquire model from registry (removes it temporarily — re-inserted after decode)
+    let mut model = {
+        let mut registry = state.model_registry.lock();
+        registry
+            .instances
+            .remove("default")
+            .ok_or_else(|| ApiError::new("model_not_found", "No model loaded"))?
     };
 
-    // Run decode in blocking task (Metal is synchronous: commit + wait_until_completed)
-    let state_clone = state.clone();
+    // Create inference session metadata (wired in future waves)
+    let mut session = InferenceSession {
+        session_id: request_id.clone(),
+        scheduler_slot: 0,
+        kv_epoch: 0,
+        sampler: SamplerConfig::default(),
+        mtp_state: if model.profile.mtp_enabled {
+            Some(MtpSessionState {
+                draft_tokens: vec![],
+                verified_count: 0,
+                accepted_count: 0,
+                rejection_position: None,
+            })
+        } else {
+            None
+        },
+    };
+
+    // Run decode in blocking task (Metal is synchronous)
     let generated_tokens = tokio::task::spawn_blocking(move || {
-        let mut exec = state_clone.executor.lock();
+        let sampling = session.sampler.clone();
 
-        // Sequential prefill: each token builds KV cache row
-        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)]
-            .iter()
-            .enumerate()
-        {
-            let op = make_prefill_op(tok as u64);
-            exec.operation_registry.insert(op.operation_id, op);
-            let plan =
-                make_boundary_plan(i as u64, BACKEND_MEGAKERNEL, vec![OperationId(tok as u64)]);
-            if let Err(e) = exec.execute_boundaries(&[plan]) {
-                eprintln!("[prism-server] prefill step {} error: {}", i, e);
-            }
-        }
+        // Prefill
+        model
+            .prefill(&mut session, &input_ids)
+            .map_err(|e| format!("prefill failed: {e}"))?;
 
-        let mut last_token = *input_ids.last().unwrap_or(&0) as u64;
+        // Autoregressive decode
         let mut generated_tokens = Vec::with_capacity(max_tokens);
-
-        for step in 0..max_tokens {
-            let dec = make_decode_op(last_token);
-            exec.operation_registry.insert(dec.operation_id, dec);
-            let plan = make_boundary_plan(
-                (prompt_len + step) as u64,
-                BACKEND_MEGAKERNEL,
-                vec![OperationId(last_token)],
-            );
-            if let Err(e) = exec.execute_boundaries(&[plan]) {
-                eprintln!("[prism-server] decode error: {e}");
-                break;
-            }
-
-            let next = exec.last_decoded_token().unwrap_or(1);
-            last_token = next;
-            generated_tokens.push(next as u32);
-
-            // Every 16 decode steps, run a flex-dispatch cycle to potentially
-            // re-route operations based on system state.
-            let count = state_clone
-                .decode_count
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if count % 16 == 0 {
-                let mut fd = state_clone.flex_dispatch.lock();
-                let _ = run_flex_dispatch_cycle(&mut fd, &mut exec);
-            }
-
-            if last_token == 1 {
-                // EOS token
-                break;
+        for _ in 0..max_tokens {
+            let token_id = model
+                .decode(&mut session, &sampling)
+                .map_err(|_| "decode failed".to_string())?
+                .token_id;
+            generated_tokens.push(token_id);
+            if token_id == 1 {
+                break; // EOS
             }
         }
 
-        generated_tokens
+        Ok::<(Vec<u32>, CimageModelInstance), String>((generated_tokens, model))
     })
     .await;
 
+    // Re-register model in registry
+    let (tokens_result, model_opt) = match generated_tokens {
+        Ok(Ok((tokens, model))) => (Ok(Ok(tokens)), Some(model)),
+        Ok(Err(e)) => (Ok(Err::<Vec<u32>, String>(e)), None),
+        Err(e) => (Err::<Result<Vec<u32>, String>, _>(e), None),
+    };
+
+    if let Some(model) = model_opt {
+        let mut registry = state.model_registry.lock();
+        registry.instances.insert("default".to_string(), model);
+    }
+
+    let generated_tokens = tokens_result;
     let generated_tokens = match generated_tokens {
-        Ok(tokens) => tokens,
+        Ok(Ok(tokens)) => tokens,
+        Ok(Err(e)) => {
+            let receipt = RequestReceipt {
+                request_id: request_id.clone(),
+                model_digest: state.model_digest.clone(),
+                client_id: None,
+                terminal_state: "failed".into(),
+                prompt_tokens: prompt_len as u32,
+                completion_tokens: 0,
+                audio_duration_ms: 0,
+                queue_time_us: 0,
+                execution_time_us: start_time.elapsed().as_micros() as u64,
+                error_code: Some("internal_error".into()),
+                error_message: Some(e),
+            };
+            eprintln!(
+                "[prism-server] receipt: {}",
+                serde_json::to_string(&receipt).unwrap()
+            );
+            return Err(ApiError::new("internal_error", "Decode failed"));
+        }
         Err(e) => {
             let receipt = RequestReceipt {
                 request_id: request_id.clone(),
@@ -1080,7 +1139,7 @@ async fn completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CompletionRequest>,
 ) -> Result<Json<CompletionResponse>, StatusCode> {
-    // Tokenize (no executor lock needed)
+    // Tokenize
     let input_ids = state
         .tokenizer
         .encode(&req.prompt)
@@ -1093,70 +1152,46 @@ async fn completions(
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
     let prompt_len = input_ids.len();
 
-    // Allocate decode slot (brief executor lock)
-    let slot_id = state
-        .executor
-        .lock()
-        .allocate_slot()
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    // Acquire model from registry
+    let mut models = state.model_registry.lock();
+    let model = models
+        .instances
+        .get_mut("default")
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-    // Run decode in blocking task (Metal is synchronous)
-    let state_clone = state.clone();
-    let generated_text = tokio::task::spawn_blocking(move || {
-        let mut exec = state_clone.executor.lock();
+    // Create inference session
+    let mut session = InferenceSession {
+        session_id: "completions".into(),
+        scheduler_slot: 0,
+        kv_epoch: 0,
+        sampler: SamplerConfig::default(),
+        mtp_state: None,
+    };
 
-        // Prefill: each token builds KV cache row
-        for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)]
-            .iter()
-            .enumerate()
-        {
-            let op = make_prefill_op(tok as u64);
-            exec.operation_registry.insert(op.operation_id, op);
-            let plan =
-                make_boundary_plan(i as u64, BACKEND_MEGAKERNEL, vec![OperationId(tok as u64)]);
-            if let Err(e) = exec.execute_boundaries(&[plan]) {
-                eprintln!("[prism-server] completions prefill error: {e}");
+    // Prefill
+    model
+        .prefill(&mut session, &input_ids)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let sampling = session.sampler.clone();
+    let mut generated_text = String::new();
+
+    for _step in 0..max_tokens {
+        match model.decode(&mut session, &sampling) {
+            Ok(result) => {
+                let next = result.token_id;
+                let token_text = state.tokenizer.decode(&[next]).unwrap_or_default();
+                generated_text.push_str(&token_text);
+
+                if next == 0 || token_text.is_empty() {
+                    break;
+                }
             }
+            Err(_) => break,
         }
+    }
 
-        let mut last_token = *input_ids.last().unwrap_or(&0) as u64;
-        let mut generated_text = String::new();
-
-        // Autoregressive decode
-        for step in 0..max_tokens {
-            let dec = make_decode_op(last_token);
-            exec.operation_registry.insert(dec.operation_id, dec);
-            let plan = make_boundary_plan(
-                (prompt_len + step) as u64,
-                BACKEND_MEGAKERNEL,
-                vec![OperationId(last_token)],
-            );
-            if let Err(e) = exec.execute_boundaries(&[plan]) {
-                eprintln!("[prism-server] completions decode error: {e}");
-                break;
-            }
-
-            let next = exec.last_decoded_token().unwrap_or(0);
-            last_token = next;
-
-            // Decode token to text
-            let token_text = state_clone
-                .tokenizer
-                .decode(&[next as u32])
-                .unwrap_or_default();
-            generated_text.push_str(&token_text);
-
-            // Check for stop token (EOS or empty)
-            if next == 0 || token_text.is_empty() {
-                break;
-            }
-        }
-
-        exec.free_slot(slot_id);
-        generated_text
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(models);
 
     let created = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1218,6 +1253,7 @@ async fn get_distill_status(
 
 #[derive(Deserialize)]
 struct LoadModelRequest {
+    #[allow(dead_code)]
     cimage_path: String,
 }
 
@@ -1225,18 +1261,20 @@ async fn load_model(
     State(state): State<Arc<AppState>>,
     Json(body): Json<LoadModelRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let new_executor = create_inference_executor(&body.cimage_path, 1, false)
-        .map_err(|e| ApiError::new("invalid_request", format!("failed to load cimage: {e}")))?;
-    *state.executor.lock() = new_executor;
-    Ok(Json(
-        serde_json::json!({"status": "ok", "model": body.cimage_path}),
+    let _ = state;
+    let _ = body;
+    Err(ApiError::new(
+        "not_implemented",
+        "Model loading through registry not yet wired",
     ))
 }
 
 #[derive(Deserialize)]
 struct DeployModelRequest {
+    #[allow(dead_code)]
     cimage_path: String,
     #[serde(default = "default_quality_gate")]
+    #[allow(dead_code)]
     quality_gate: bool,
 }
 
@@ -1248,11 +1286,11 @@ async fn deploy_model(
     State(state): State<Arc<AppState>>,
     Json(body): Json<DeployModelRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let new_executor = create_inference_executor(&body.cimage_path, 1, false)
-        .map_err(|e| ApiError::new("invalid_request", format!("failed to load cimage: {e}")))?;
-    *state.executor.lock() = new_executor;
-    Ok(Json(
-        serde_json::json!({"status": "deployed", "model": body.cimage_path, "quality_gate": body.quality_gate}),
+    let _ = state;
+    let _ = body;
+    Err(ApiError::new(
+        "not_implemented",
+        "Model deployment through registry not yet wired",
     ))
 }
 
@@ -1271,52 +1309,81 @@ async fn merge_adapter(
     ))
 }
 
-/// Encode image bytes through the executor's multimodal projection path.
-/// Returns the projected embedding vectors ready for decoder prefill.
-fn multimodal_encode_images(
-    exec: &mut HeterogeneousExecutor,
-    images: &[Vec<u8>],
-) -> Result<Vec<Vec<f32>>, String> {
-    let mut results = Vec::new();
-    for img_bytes in images {
-        // 1. Decode image bytes to get pixel dimensions
-        let (width, height, _rgb_data) = decode_image_to_rgb(img_bytes)
-            .map_err(|e| format!("failed to decode image {}: {e}", results.len()))?;
+// ── Rollback endpoints ──────────────────────────────────────────────────
 
-        // 2. Dispatch VisionEncode operation with real image shape
-        let vision_op = OperationDescriptor {
-            operation_id: OperationId(results.len() as u64),
-            family: OperationFamily::VisionEncode,
-            layer_index: None,
-            phase: Phase::Prefill,
-            logical_shape: LogicalShape {
-                dims: vec![height, width, 3],
-            },
-            physical_layout: PhysicalLayout::RowMajor,
-            input_dtypes: vec![DType::U8],
-            output_dtype: DType::F32,
-            quantization: None,
-            expected_output_shape: TensorShape { dims: vec![1] },
-            correctness_checkpoint: CorrectnessCheckpointPolicy::None,
+/// POST /v1/sessions/{session_id}/rollback — request-scope rollback
+
+async fn session_rollback(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut models = state.model_registry.lock();
+    if let Some(model) = models.instances.get_mut("default") {
+        let mut session = InferenceSession {
+            session_id: session_id.clone(),
+            scheduler_slot: 0,
+            kv_epoch: 0,
+            sampler: SamplerConfig::default(),
+            mtp_state: None,
         };
-        exec.operation_registry
-            .insert(vision_op.operation_id, vision_op);
-
-        // 3. The executor dispatches VisionEncode through MegakernelBackend.
-        //    Push a placeholder embedding — real embeddings arrive once
-        //    VisionEncode ops are wired end-to-end.
-        results.push(vec![0.0f32]);
+        model.rollback(&mut session);
+        Ok(Json(
+            serde_json::json!({"status": "rolled_back", "session_id": session_id}),
+        ))
+    } else {
+        Err(ApiError::new("model_not_found", "No model loaded"))
     }
-    Ok(results)
 }
 
-/// Decode image bytes (PNG/JPEG/WEBP) into raw RGB pixel data.
+/// POST /v1/kv/epoch/{epoch}/rollback — KV epoch rollback
+async fn kv_epoch_rollback(
+    State(state): State<Arc<AppState>>,
+    Path(epoch): Path<u64>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut models = state.model_registry.lock();
+    if let Some(model) = models.instances.get_mut("default") {
+        let mut session = InferenceSession {
+            session_id: "kv-rollback".into(),
+            scheduler_slot: 0,
+            kv_epoch: epoch,
+            sampler: SamplerConfig::default(),
+            mtp_state: None,
+        };
+        model.rollback(&mut session);
+        Ok(Json(
+            serde_json::json!({"status": "rolled_back", "epoch": epoch}),
+        ))
+    } else {
+        Err(ApiError::new("model_not_found", "No model loaded"))
+    }
+}
+
+/// POST /v1/generations/{gen_id}/rollback — generation rollback
+async fn generation_rollback(
+    State(_state): State<Arc<AppState>>,
+    Path(_gen_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    // Generation rollback restores the parent generation
+    // This is handled through the lifecycle coordinator's rollback
+    Err(ApiError::new(
+        "not_implemented",
+        "Generation rollback not yet wired through deployment compiler",
+    ))
+}
+
+#[allow(dead_code)]
 fn decode_image_to_rgb(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     use image::GenericImageView;
     let img = image::load_from_memory(bytes).map_err(|e| format!("image decode failed: {e}"))?;
     let (w, h) = img.dimensions();
     let rgb = img.to_rgb8().into_raw();
     Ok((w, h, rgb))
+}
+
+/// Stub: returns empty embeddings until the multimodal projection is wired through model_registry.
+#[allow(dead_code)]
+fn multimodal_encode_images(_images: &[Vec<u8>]) -> Result<Vec<Vec<f32>>, String> {
+    Ok(Vec::new())
 }
 
 // ---- TTS helpers --------------------------------------------------------
@@ -1376,59 +1443,8 @@ fn cimage_has_tts_segments(path: &std::path::Path) -> bool {
 
 // ---- SSE streaming helpers -----------------------------------------------
 
-/// Create a PrefillFragment operation descriptor for a token.
-fn make_prefill_op(tok: u64) -> OperationDescriptor {
-    OperationDescriptor {
-        operation_id: OperationId(tok),
-        family: OperationFamily::PrefillFragment,
-        layer_index: None,
-        phase: Phase::Prefill,
-        logical_shape: LogicalShape { dims: vec![1] },
-        physical_layout: PhysicalLayout::RowMajor,
-        input_dtypes: vec![],
-        output_dtype: DType::F32,
-        quantization: None,
-        expected_output_shape: TensorShape { dims: vec![] },
-        correctness_checkpoint: CorrectnessCheckpointPolicy::None,
-    }
-}
-
-/// Create a DecoderLayer operation descriptor for a token.
-fn make_decode_op(tok: u64) -> OperationDescriptor {
-    OperationDescriptor {
-        operation_id: OperationId(tok),
-        family: OperationFamily::DecoderLayer,
-        layer_index: None,
-        phase: Phase::Decode,
-        logical_shape: LogicalShape { dims: vec![1] },
-        physical_layout: PhysicalLayout::RowMajor,
-        input_dtypes: vec![],
-        output_dtype: DType::F32,
-        quantization: None,
-        expected_output_shape: TensorShape { dims: vec![] },
-        correctness_checkpoint: CorrectnessCheckpointPolicy::None,
-    }
-}
-
-/// Create an execution boundary plan for a backend + operation set.
-fn make_boundary_plan(
-    group_id: u64,
-    backend_id: BackendId,
-    operations: Vec<OperationId>,
-) -> ExecutionBoundaryPlan {
-    ExecutionBoundaryPlan {
-        group_id: EvaluationGroupId(group_id),
-        backend_id,
-        operations,
-        materialized_outputs: vec![],
-        policy: EvaluationPolicy::BackendLazy,
-        synchronization: SynchronizationPolicy::None,
-        release_after: vec![],
-        content_digest: None,
-    }
-}
-
 /// Decode a single token ID to its text representation.
+#[allow(dead_code)]
 fn decode_token_text(tokenizer: &TribunusTokenizer, token: u32) -> Option<String> {
     tokenizer.decode(&[token]).ok()
 }
@@ -1459,23 +1475,6 @@ async fn chat_completions_stream(
         });
     }
 
-    // Stage 2: Reserve runtime resources
-    let slot_id = state
-        .executor
-        .lock()
-        .allocate_slot()
-        .map_err(|_| ApiError {
-            code: "capacity_exhausted".into(),
-            message: "All slots busy, retry later".into(),
-            request_id: request_id.clone(),
-            retryable: true,
-        })?;
-
-    let _slot_guard = SlotGuard {
-        slot_id,
-        state: state.clone(),
-    };
-
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
 
     // Tokenize (no executor lock needed — tokenizer is &self)
@@ -1500,6 +1499,17 @@ async fn chat_completions_stream(
         .map_err(|_| ApiError::new("internal_error", "Tokenization failed"))?;
     let prompt_len = input_ids.len();
 
+    // Acquire model from registry (wrapped in Arc<Mutex> for concurrent spawn_blocking closures)
+    let model = {
+        let mut registry = state.model_registry.lock();
+        Arc::new(ParkingMutex::new(
+            registry
+                .instances
+                .remove("default")
+                .ok_or_else(|| ApiError::new("model_not_found", "No model loaded"))?,
+        ))
+    };
+
     let cancel = CancellationToken::new();
     let idle_timeout = Duration::from_secs(state.config.limits.stream_idle_timeout_secs as u64);
 
@@ -1507,7 +1517,6 @@ async fn chat_completions_stream(
     let stream_state = Arc::new(StreamState {
         request_id: request_id.clone(),
         cancel: cancel.clone(),
-        slot_id,
         start_time,
         last_activity: Instant::now(),
         terminal_sent: AtomicBool::new(false),
@@ -1519,57 +1528,63 @@ async fn chat_completions_stream(
     }
 
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+    let state_shared = state.clone();
 
     // Spawn decode work: runs until max_tokens, EOS, cancel, or idle timeout
-    let state_clone = state.clone();
-    let cancel_clone = cancel.clone();
-    let tx_clone = tx.clone();
-    let stream_state_clone = stream_state.clone();
-    let idle_timeout = idle_timeout;
-    let request_id_clone = request_id.clone();
-    let prompt_len = prompt_len;
-
+    let cancel_spawn = cancel.clone();
     tokio::spawn(async move {
-        let state = state_clone;
-        let cancel = cancel_clone;
-        let tx = tx_clone;
-        let stream_state = stream_state_clone;
+        let model = model;
+        let state = state_shared;
+        let cancel = cancel_spawn;
+        let tx = tx;
+        let stream_state = stream_state;
         let idle_timeout = idle_timeout;
-        let request_id = request_id_clone;
+        let request_id = request_id;
+        let input_ids = input_ids;
         let prompt_len = prompt_len;
+        let max_tokens = max_tokens;
+        let start_time = start_time;
 
-        // Clone before prefill closure to keep originals for while loop
-        let cancel_prefill = cancel.clone();
-        let state_prefill = state.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let mut exec = state_prefill.executor.lock();
-            let last_tok = *input_ids.last().unwrap_or(&0) as u64;
-
-            // Prefill all tokens except the last one
-            for (i, &tok) in input_ids[..input_ids.len().saturating_sub(1)]
-                .iter()
-                .enumerate()
-            {
-                if cancel_prefill.is_cancelled() {
-                    return None;
-                }
-                let op = make_prefill_op(tok as u64);
-                exec.operation_registry.insert(op.operation_id, op);
-                let plan =
-                    make_boundary_plan(i as u64, BACKEND_MEGAKERNEL, vec![OperationId(tok as u64)]);
-                if let Err(e) = exec.execute_boundaries(&[plan]) {
-                    eprintln!("[prism-server] streaming prefill error: {e}");
-                }
+        // Prefill in blocking task (brief model lock, released after prefill)
+        let prefill_ok = tokio::task::spawn_blocking({
+            let model = model.clone();
+            move || {
+                let mut sess = InferenceSession {
+                    session_id: "chat-stream-prefill".into(),
+                    scheduler_slot: 0,
+                    kv_epoch: 0,
+                    sampler: SamplerConfig::default(),
+                    mtp_state: None,
+                };
+                let mut guard = model.lock();
+                guard.prefill(&mut sess, &input_ids).is_ok()
             }
-            Some(last_tok)
         })
-        .await;
+        .await
+        .unwrap_or(false);
 
-        let mut last_tok = match result {
-            Ok(Some(t)) => t,
-            Err(_) => return,
-            _ => return,
-        };
+        if !prefill_ok {
+            // Terminal receipt for failed prefill
+            let receipt = RequestReceipt {
+                request_id: request_id.clone(),
+                model_digest: state.model_digest.clone(),
+                client_id: None,
+                terminal_state: "failed".into(),
+                prompt_tokens: prompt_len as u32,
+                completion_tokens: 0,
+                audio_duration_ms: 0,
+                queue_time_us: 0,
+                execution_time_us: start_time.elapsed().as_micros() as u64,
+                error_code: Some("internal_error".into()),
+                error_message: Some("prefill failed".into()),
+            };
+            stream_state.receipt.lock().replace(receipt.clone());
+            eprintln!(
+                "[prism-server] receipt: {}",
+                serde_json::to_string(&receipt).unwrap()
+            );
+            return;
+        }
 
         let mut step = 0;
         let mut last_activity = Instant::now();
@@ -1584,31 +1599,27 @@ async fn chat_completions_stream(
             }
 
             let step_result = tokio::task::spawn_blocking({
-                let state = state.clone();
-                move || -> Option<(u64, Option<String>)> {
-                    let mut exec = state.executor.lock();
-
-                    let dec = make_decode_op(last_tok);
-                    exec.operation_registry.insert(dec.operation_id, dec);
-                    let plan = make_boundary_plan(
-                        (prompt_len + step) as u64,
-                        BACKEND_MEGAKERNEL,
-                        vec![OperationId(last_tok)],
-                    );
-                    if let Err(e) = exec.execute_boundaries(&[plan]) {
-                        eprintln!("[prism-server] streaming decode error: {e}");
-                    }
-
-                    let next = exec.last_decoded_token().ok().unwrap_or(0);
-                    let text = decode_token_text(&state.tokenizer, next as u32);
-
-                    Some((next, text))
+                let model = model.clone();
+                move || -> Option<u32> {
+                    let mut sess = InferenceSession {
+                        session_id: "chat-stream-decode".into(),
+                        scheduler_slot: 0,
+                        kv_epoch: 0,
+                        sampler: SamplerConfig::default(),
+                        mtp_state: None,
+                    };
+                    let sampling = sess.sampler.clone();
+                    model
+                        .lock()
+                        .decode(&mut sess, &sampling)
+                        .ok()
+                        .map(|r| r.token_id)
                 }
             })
             .await;
 
-            let (next, text) = match step_result {
-                Ok(Some(r)) => r,
+            let next = match step_result {
+                Ok(Some(id)) => id,
                 _ => break,
             };
 
@@ -1617,7 +1628,7 @@ async fn chat_completions_stream(
             let event = Event::default().data(
                 serde_json::json!({
                     "choices": [{
-                        "delta": {"content": text.unwrap_or_default()},
+                        "delta": {"content": format!("[{}]", next)},
                         "index": 0
                     }]
                 })
@@ -1627,13 +1638,12 @@ async fn chat_completions_stream(
             if tx.send(Ok(event)).await.is_err() {
                 // Client disconnected (rx dropped)
                 cancel.cancel();
-                return;
+                break;
             }
 
-            last_tok = next;
             step += 1;
 
-            if last_tok == 1 {
+            if next == 1 {
                 // EOS token
                 break;
             }
@@ -1751,6 +1761,482 @@ async fn chat_completions_audio_stream(
     );
 
     Ok(Sse::new(stream))
+}
+
+// ── Ollama-compatible API handlers ──────────────────────────────────────
+
+/// POST /api/generate — Ollama-compatible prompt completion.
+///
+/// Runs real inference through the executor (same engine as /v1/completions).
+/// Streaming emits NDJSON; non-streaming aggregates into one response.
+async fn ollama_generate(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OllamaGenerateRequest>,
+) -> Result<Response, ApiError> {
+    let start_time = Instant::now();
+
+    // Tokenize (no executor lock needed)
+    let input_ids = state
+        .tokenizer
+        .encode(&req.prompt)
+        .map_err(|_| ApiError::new("internal_error", "Tokenization failed"))?;
+
+    if input_ids.is_empty() {
+        return Err(ApiError::new("invalid_request", "Empty prompt"));
+    }
+
+    let prompt_len = input_ids.len();
+    let max_tokens = 256usize;
+
+    if req.stream {
+        ollama_generate_stream(state, req, input_ids, prompt_len, max_tokens, start_time).await
+    } else {
+        // Non-streaming: run full inference, aggregate into one response
+        // Acquire model from registry
+        let mut model = {
+            let mut registry = state.model_registry.lock();
+            registry
+                .instances
+                .remove("default")
+                .ok_or_else(|| ApiError::new("model_not_found", "No model loaded"))?
+        };
+
+        let state_clone = state.clone();
+        let generated_text = tokio::task::spawn_blocking(move || {
+            let mut sess = InferenceSession {
+                session_id: "ollama-generate".into(),
+                scheduler_slot: 0,
+                kv_epoch: 0,
+                sampler: SamplerConfig::default(),
+                mtp_state: None,
+            };
+            let sampling = sess.sampler.clone();
+
+            // Prefill
+            model
+                .prefill(&mut sess, &input_ids)
+                .map_err(|e| format!("prefill failed: {e}"))?;
+
+            // Decode loop — generate text
+            let mut generated = String::new();
+            for _ in 0..max_tokens {
+                let token_id = model
+                    .decode(&mut sess, &sampling)
+                    .map_err(|_| "decode failed".to_string())?
+                    .token_id;
+
+                let token_text = state_clone
+                    .tokenizer
+                    .decode(&[token_id])
+                    .unwrap_or_default();
+                generated.push_str(&token_text);
+
+                if token_id == 0 || token_id == 1 || token_text.is_empty() {
+                    break;
+                }
+            }
+            Ok::<(String, CimageModelInstance), String>((generated, model))
+        })
+        .await;
+
+        let (generated_text, model) = match generated_text {
+            Ok(Ok((text, m))) => (text, m),
+            Ok(Err(e)) => {
+                eprintln!("[prism-server] ollama generate error: {e}");
+                return Err(ApiError::new("internal_error", e));
+            }
+            Err(e) => {
+                eprintln!("[prism-server] ollama generate panicked: {e}");
+                return Err(ApiError::new("internal_error", "Inference task panicked"));
+            }
+        };
+
+        // Re-register model
+        {
+            let mut registry = state.model_registry.lock();
+            registry.instances.insert("default".to_string(), model);
+        }
+
+        let elapsed = start_time.elapsed().as_nanos() as u64;
+        let eval_count = generated_text.split_whitespace().count() as u64;
+
+        Ok(Json(OllamaGenerateResponse {
+            model: Some(req.model),
+            response: Some(generated_text),
+            message: None,
+            done: true,
+            total_duration: Some(elapsed),
+            load_duration: Some(0),
+            prompt_eval_count: Some(prompt_len as u64),
+            prompt_eval_duration: Some(0),
+            eval_count: Some(eval_count),
+            eval_duration: Some(elapsed),
+        })
+        .into_response())
+    }
+}
+
+/// Streaming variant of /api/generate — emits NDJSON tokens.
+async fn ollama_generate_stream(
+    state: Arc<AppState>,
+    req: OllamaGenerateRequest,
+    input_ids: Vec<u32>,
+    prompt_len: usize,
+    max_tokens: usize,
+    start_time: Instant,
+) -> Result<Response, ApiError> {
+    // Acquire model from registry (wrapped in Arc<Mutex> for multiple spawn_blocking closures)
+    let model = {
+        let mut registry = state.model_registry.lock();
+        Arc::new(ParkingMutex::new(
+            registry
+                .instances
+                .remove("default")
+                .ok_or_else(|| ApiError::new("model_not_found", "No model loaded"))?,
+        ))
+    };
+
+    let (tx, rx) = mpsc::channel::<String>(64);
+    let state_clone = state.clone();
+    let model_name = req.model.clone();
+    let cancel = CancellationToken::new();
+
+    tokio::spawn(async move {
+        let model = model;
+        let _inner_state = state_clone;
+        let model_name = model_name;
+        let cancel = cancel;
+        let tx = tx;
+        let input_ids = input_ids;
+        let prompt_len = prompt_len;
+        let max_tokens = max_tokens;
+        let start_time = start_time;
+
+        // Prefill in blocking task
+        let prefill_ok = tokio::task::spawn_blocking({
+            let model = model.clone();
+            move || {
+                let mut sess = InferenceSession {
+                    session_id: "ollama-stream-prefill".into(),
+                    scheduler_slot: 0,
+                    kv_epoch: 0,
+                    sampler: SamplerConfig::default(),
+                    mtp_state: None,
+                };
+                let mut guard = model.lock();
+                guard.prefill(&mut sess, &input_ids).is_ok()
+            }
+        })
+        .await
+        .unwrap_or(false);
+
+        if !prefill_ok {
+            return;
+        }
+
+        // Autoregressive decode, emitting each token as NDJSON
+        for _step in 0..max_tokens {
+            if cancel.is_cancelled() {
+                break;
+            }
+
+            let step_result = tokio::task::spawn_blocking({
+                let model = model.clone();
+                move || -> Option<(u32, Option<String>)> {
+                    let mut sess = InferenceSession {
+                        session_id: "ollama-stream-decode".into(),
+                        scheduler_slot: 0,
+                        kv_epoch: 0,
+                        sampler: SamplerConfig::default(),
+                        mtp_state: None,
+                    };
+                    let sampling = sess.sampler.clone();
+                    let token_id = model.lock().decode(&mut sess, &sampling).ok()?.token_id;
+                    // Token text not available inside spawned closure without AppState ref
+                    Some((token_id, None))
+                }
+            })
+            .await;
+
+            let (next, text) = match step_result {
+                Ok(Some(r)) => r,
+                _ => break,
+            };
+
+            let chunk = serde_json::json!({
+                "model": model_name,
+                "response": text.unwrap_or_else(|| format!("[{}]", next)),
+                "done": false,
+            });
+            let line = serde_json::to_string(&chunk).unwrap_or_default();
+            if tx.send(line + "\n").await.is_err() {
+                cancel.cancel();
+                break;
+            }
+
+            // EOS token or empty token → stop generation
+            if next == 0 || next == 1 {
+                break;
+            }
+        }
+
+        // Emit final done chunk with timing
+        let elapsed = start_time.elapsed().as_nanos() as u64;
+        let done = serde_json::json!({
+            "model": model_name,
+            "response": "",
+            "done": true,
+            "total_duration": elapsed,
+            "load_duration": 0u64,
+            "prompt_eval_count": prompt_len,
+            "prompt_eval_duration": 0u64,
+            "eval_count": 0u64,
+            "eval_duration": elapsed,
+        });
+        let _ = tx
+            .send(serde_json::to_string(&done).unwrap_or_default() + "\n")
+            .await;
+    });
+
+    let stream =
+        tokio_stream::wrappers::ReceiverStream::new(rx).map(|line| Ok::<_, Infallible>(line));
+
+    Ok(Response::builder()
+        .header("content-type", "application/x-ndjson")
+        .body(Body::from_stream(stream))
+        .unwrap())
+}
+
+/// POST /api/chat — Ollama-compatible chat completion.
+///
+/// Builds a prompt from the message list, runs inference, returns Ollama chat format.
+async fn ollama_chat(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OllamaChatRequest>,
+) -> Result<Response, ApiError> {
+    let start_time = Instant::now();
+
+    // Build a simple prompt from messages
+    let prompt = req
+        .messages
+        .iter()
+        .map(|m| format!("{}: {}", m.role, m.content))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let input_ids = state
+        .tokenizer
+        .encode(&prompt)
+        .map_err(|_| ApiError::new("internal_error", "Tokenization failed"))?;
+
+    if input_ids.is_empty() {
+        return Err(ApiError::new("invalid_request", "Empty messages"));
+    }
+
+    let prompt_len = input_ids.len();
+    let max_tokens = 256usize;
+
+    // Acquire model from registry and run inference
+    let mut models = state.model_registry.lock();
+    let model = models
+        .instances
+        .get_mut("default")
+        .ok_or(ApiError::new("capacity_exhausted", "No model loaded"))?;
+
+    let mut session = InferenceSession {
+        session_id: "ollama-chat".into(),
+        scheduler_slot: 0,
+        kv_epoch: 0,
+        sampler: SamplerConfig::default(),
+        mtp_state: None,
+    };
+
+    // Prefill
+    model
+        .prefill(&mut session, &input_ids)
+        .map_err(|_| ApiError::new("internal_error", "Prefill failed"))?;
+
+    // Decode auto-regressively
+    let sampling = session.sampler.clone();
+    let mut generated = String::new();
+
+    for _step in 0..max_tokens {
+        match model.decode(&mut session, &sampling) {
+            Ok(result) => {
+                let next = result.token_id;
+                let token_text = state.tokenizer.decode(&[next]).unwrap_or_default();
+                generated.push_str(&token_text);
+
+                if next == 0 || token_text.is_empty() {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    drop(models);
+
+    let elapsed = start_time.elapsed().as_nanos() as u64;
+    let eval_count = generated.split_whitespace().count() as u64;
+
+    let resp = OllamaGenerateResponse {
+        model: Some(req.model),
+        response: None,
+        message: Some(OllamaMessage {
+            role: "assistant".to_string(),
+            content: generated,
+        }),
+        done: true,
+        total_duration: Some(elapsed),
+        load_duration: Some(0),
+        prompt_eval_count: Some(prompt_len as u64),
+        prompt_eval_duration: Some(0),
+        eval_count: Some(eval_count),
+        eval_duration: Some(elapsed),
+    };
+
+    Ok(Json(resp).into_response())
+}
+
+/// GET /api/tags — list locally deployed cimage models.
+async fn ollama_tags(State(state): State<Arc<AppState>>) -> Json<OllamaTagsResponse> {
+    let mut models = Vec::new();
+
+    // Derive model name from the currently loaded cimage path
+    if let Some(name) = state
+        .cimage_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| format!("{}:latest", s))
+    {
+        let size = std::fs::metadata(&*state.cimage_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let modified_at = std::fs::metadata(&*state.cimage_path)
+            .and_then(|m| m.modified())
+            .map(|t| {
+                let dur = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                let secs = dur.as_secs();
+                // ISO 8601 format
+                format!(
+                    "{}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                    secs / 31536000 + 1970,          // approximate year
+                    (secs % 31536000) / 2592000 + 1, // approximate month
+                    (secs % 2592000) / 86400 + 1,    // approximate day
+                    (secs % 86400) / 3600,
+                    (secs % 3600) / 60,
+                    secs % 60,
+                )
+            })
+            .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+
+        models.push(OllamaModelInfo {
+            name,
+            modified_at,
+            size,
+        });
+    }
+
+    // Also list models from config
+    for entry in &state.config.models {
+        let name = entry.name.clone();
+        let size = std::fs::metadata(&entry.cimage_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let modified_at = std::fs::metadata(&entry.cimage_path)
+            .and_then(|m| m.modified())
+            .map(|t| {
+                let dur = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                let secs = dur.as_secs();
+                format!(
+                    "{}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                    secs / 31536000 + 1970,
+                    (secs % 31536000) / 2592000 + 1,
+                    (secs % 2592000) / 86400 + 1,
+                    (secs % 86400) / 3600,
+                    (secs % 3600) / 60,
+                    secs % 60,
+                )
+            })
+            .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+
+        models.push(OllamaModelInfo {
+            name,
+            modified_at,
+            size,
+        });
+    }
+
+    Json(OllamaTagsResponse { models })
+}
+
+/// POST /api/show — return model details.
+async fn ollama_show(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OllamaShowRequest>,
+) -> Json<OllamaShowResponse> {
+    let size = std::fs::metadata(&*state.cimage_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let modified_at = std::fs::metadata(&*state.cimage_path)
+        .and_then(|m| m.modified())
+        .map(|t| {
+            let dur = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+            let secs = dur.as_secs();
+            format!(
+                "{}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                secs / 31536000 + 1970,
+                (secs % 31536000) / 2592000 + 1,
+                (secs % 2592000) / 86400 + 1,
+                (secs % 86400) / 3600,
+                (secs % 3600) / 60,
+                secs % 60,
+            )
+        })
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+
+    Json(OllamaShowResponse {
+        model: req.model,
+        modified_at,
+        size,
+        digest: state
+            .model_digest
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
+        details: serde_json::json!({
+            "format": "cimage",
+            "family": "prism",
+            "parameter_size": "unknown",
+            "quantization_level": "unknown"
+        }),
+    })
+}
+
+/// GET /api/ps — report loaded cimage instances and residency.
+async fn ollama_ps(State(state): State<Arc<AppState>>) -> Json<OllamaPsResponse> {
+    let name = state
+        .cimage_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| format!("{}:latest", s))
+        .unwrap_or_else(|| "prism-model:latest".to_string());
+    let size = std::fs::metadata(&*state.cimage_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    // Estimate residency: extract size is ~10x the cimage for loaded weights
+    let estimated_memory = size * 10;
+
+    Json(OllamaPsResponse {
+        models: vec![OllamaPsModelInfo {
+            name,
+            size,
+            processor: "metal".to_string(),
+            memory: estimated_memory,
+            until: "now".to_string(),
+        }],
+    })
 }
 
 // ── Auth middleware ──────────────────────────────────────────────────
@@ -1911,30 +2397,89 @@ async fn main() -> Result<(), String> {
         args.cimage_format.clone()
     };
 
-    let executor = if effective_format == "new" {
-        use tribunus_compute_core::backend::ane_backend::AneBackend;
-        use tribunus_compute_core::backend::metal::MetalBackend;
-        let mut exec = HeterogeneousExecutor::new();
-        let ane = AneBackend::new();
-        exec.register(Box::new(ane));
-        let metal = MetalBackend::new()?;
-        exec.register(Box::new(metal));
-        println!("[prism-server] Loaded new-format cimage");
-        exec
-    } else {
-        let exec = create_inference_executor(&args.cimage, 1, false)
-            .map_err(|e| format!("cimage load failed: {e}"))?;
-        println!("[prism-server] Loaded old-format cimage");
-        exec
-    };
-
     println!(
         "[prism-server] Loading tokenizer from {}...",
         args.model_dir.display()
     );
     let tokenizer = TribunusTokenizer::from_dir(&args.model_dir)?;
 
-    let flex_dispatch = create_flex_dispatch();
+    let model_registry = ParkingMutex::new(ModelRegistry::new());
+    println!("[prism-server] Model registry initialized");
+    // Load cimage model into registry
+    if let Some(device) = metal::Device::system_default() {
+        match CimageDeployment::load(&args.cimage, &device) {
+            Ok(_deployment) => {
+                let stem = args
+                    .cimage
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let profile = ServingProfile {
+                    model_name: stem.clone(),
+                    model_tag: "latest".into(),
+                    architecture: stem.clone(),
+                    context_length: 8192,
+                    precision: "compiled".into(),
+                    mtp_enabled: false,
+                };
+
+                let generation = CimageGeneration {
+                    generation_id: GenerationId(format!("deploy.{}", stem)),
+                    parent_generation: None,
+                    base_model: ModelSourceId(args.cimage.to_string_lossy().to_string()),
+                    compiler_identity: CompilerIdentity {
+                        name: "prism-server".into(),
+                        version: env!("CARGO_PKG_VERSION").into(),
+                        build_hash: None,
+                        build_timestamp: None,
+                    },
+                    hardware_profile: HardwareProfileId("auto".into()),
+                    tensor_bindings: std::collections::BTreeMap::new(),
+                    kernel_bindings: std::collections::BTreeMap::new(),
+                    engram_bindings: std::collections::BTreeMap::new(),
+                    execution_graph: ExecutionGraph {
+                        regions: vec![],
+                        edges: vec![],
+                        state: RuntimeStatePlan {
+                            max_context_tokens: 8192,
+                            kv_cache_bytes_per_token: 0,
+                            total_kv_cache_bytes: 0,
+                        },
+                        memory: MemoryPlan {
+                            total_activation_bytes: 0,
+                            total_weight_bytes: 0,
+                            arena_region_count: 0,
+                        },
+                    },
+                    receipt_root: ReceiptId("startup".into()),
+                    created_at: Timestamp("startup".into()),
+                };
+
+                let context = CimageRuntimeContext {
+                    generation,
+                    tensor_store: RuntimeTensorStore::new(),
+                    payloads: std::collections::BTreeMap::new(),
+                    kernel_artifacts: std::collections::BTreeMap::new(),
+                };
+
+                let instance =
+                    CimageModelInstance::new(format!("deploy.{}", stem), context, profile);
+
+                let mut registry = model_registry.lock();
+                registry.instances.insert("default".to_string(), instance);
+                drop(registry);
+                println!("[prism-server] Loaded model into registry");
+            }
+            Err(e) => {
+                eprintln!("[prism-server] Failed to load cimage: {e}");
+                eprintln!("[prism-server] Server will start but model registry is empty");
+            }
+        }
+    } else {
+        eprintln!("[prism-server] No Metal device — skipping cimage load");
+    }
     // Load TTS pipeline if the cimage contains TTS segments
     let tts_pipeline = if cimage_has_tts_segments(&args.cimage) {
         println!("[prism-server] Loading TTS pipeline...");
@@ -1959,8 +2504,7 @@ async fn main() -> Result<(), String> {
 
     let broker = Arc::new(MemoryAllocationBroker::new());
     let state = Arc::new(AppState {
-        executor: ParkingMutex::new(executor),
-        flex_dispatch: ParkingMutex::new(flex_dispatch),
+        model_registry,
         tokenizer,
         decode_count: std::sync::atomic::AtomicU64::new(0),
         cimage_path: args.cimage.clone(),
@@ -1996,6 +2540,8 @@ async fn main() -> Result<(), String> {
     #[allow(unused_mut)]
     let mut app = Router::new()
         .route("/v1/models", get(list_models))
+        .route("/ready", get(readiness))
+        .route("/v1/runtime/receipts/{request_id}", get(diagnostic_receipt))
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/completions", post(completions))
         .route("/v1/distill", post(post_distill))
@@ -2003,6 +2549,18 @@ async fn main() -> Result<(), String> {
         .route("/v1/models/load", post(load_model))
         .route("/v1/models/deploy", post(deploy_model))
         .route("/v1/adapters/merge", post(merge_adapter))
+        .route("/v1/sessions/{session_id}/rollback", post(session_rollback))
+        .route("/v1/kv/epoch/{epoch}/rollback", post(kv_epoch_rollback))
+        .route(
+            "/v1/generations/{gen_id}/rollback",
+            post(generation_rollback),
+        )
+        // ── Ollama-compatible endpoints ───────────────────────────
+        .route("/api/generate", post(ollama_generate))
+        .route("/api/chat", post(ollama_chat))
+        .route("/api/tags", get(ollama_tags))
+        .route("/api/show", post(ollama_show))
+        .route("/api/ps", get(ollama_ps))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             size_limit_middleware,

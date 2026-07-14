@@ -28,7 +28,7 @@ use mlx_rs::Array;
 // The phase engine calls them when constructing an ExecutionBindings-aware
 // dispatch path.
 
-use crate::ecs::canonical::identity::{LogicalTensorId, PhysicalSegmentId};
+use crate::ecs::canonical::identity::LogicalTensorId;
 use crate::ecs::canonical::provenance::ExecutionBindings;
 use crate::ecs::cimage::generation_store::ContentStore;
 
@@ -314,7 +314,7 @@ impl PhaseRunner for AccelMatMulRunner {
     fn kind(&self) -> PhaseKind {
         PhaseKind::AccelMatMul
     }
-    fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
+    fn run(&self, _phase: &EmittedPhase, _ctx: &mut ExecutionContext) -> Result<(), String> {
         // AccelMatMul requires weight data from ExecutionBindings.
         // Use execute_with_bindings which supplies real weight bytes via
         // resolve_weights/resolve_scales. Unavailable through the legacy
@@ -332,7 +332,7 @@ impl PhaseRunner for AccelElementWiseRunner {
     fn kind(&self) -> PhaseKind {
         PhaseKind::AccelElementWise
     }
-    fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
+    fn run(&self, _phase: &EmittedPhase, _ctx: &mut ExecutionContext) -> Result<(), String> {
         // AccelElementWise requires weight data from ExecutionBindings.
         // The mul/rms_norm/add operations need real weight tensors that
         // are not available in the legacy ExecutionContext path.
@@ -428,7 +428,7 @@ impl PhaseRunner for ResidualRmsNormRunner {
     fn kind(&self) -> PhaseKind {
         PhaseKind::ResidualRmsNorm
     }
-    fn run(&self, phase: &EmittedPhase, ctx: &mut ExecutionContext) -> Result<(), String> {
+    fn run(&self, _phase: &EmittedPhase, _ctx: &mut ExecutionContext) -> Result<(), String> {
         // ResidualRmsNorm requires a real RMS norm weight from the
         // ExecutionBindings path. The weight is not available through
         // the legacy ExecutionContext.

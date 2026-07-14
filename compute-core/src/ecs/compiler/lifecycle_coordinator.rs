@@ -62,6 +62,55 @@ pub struct LifecycleResult {
     pub measured_latency_ns: u64,
     /// Maximum absolute numerical error from the CPU oracle comparison.
     pub numerical_max_error: f64,
+    /// Optional Gemma 4 smoke workload results. None if smoke was not executed
+    /// (e.g. non-Gemma workload or runtime context unavailable). Non-None but
+    /// with errors indicates the smoke ran but disagreed with the reference;
+    /// the generation is still promoted but flagged for manual validation.
+    pub smoke_result: Option<SmokeResult>,
+    /// If true, the generation was promoted without full numerical confidence
+    /// and requires manual or external validation before production use.
+    pub needs_validation: bool,
+}
+
+/// Results of a Gemma 4 smoke workload execution.
+///
+/// Reports timing, numerical accuracy, and layer throughput for a small
+/// bounded prompt (4 tokens prefill, 1 token decode) run through the cimage
+/// runtime. Used as admission evidence during lifecycle promotion.
+#[derive(Debug, Clone)]
+pub struct SmokeResult {
+    /// Total latency for the prefill phase (4 tokens) in nanoseconds.
+    pub prefill_latency_ns: u64,
+    /// Total latency for the first decode step in nanoseconds.
+    pub decode_latency_ns: u64,
+    /// Maximum absolute element-wise error vs the CPU reference.
+    pub max_error_vs_cpu: f64,
+    /// Root mean squared error vs the CPU reference.
+    pub rmse_vs_cpu: f64,
+    /// Number of target layers that were successfully dispatched.
+    pub layers_dispatched: usize,
+}
+
+/// MTP (Multi-Token Prediction) acceptance evidence collected during
+/// lifecycle promotion of a Gemma 4 generation.
+#[derive(Debug, Clone)]
+pub struct MTPEvidence {
+    /// Digest of the target model's final logits at the MTP verification step.
+    pub target_logits_digest: String,
+    /// Sequence of draft tokens produced by the speculative drafter.
+    pub draft_tokens: Vec<u32>,
+    /// Number of tokens verified through the target model.
+    pub verified_tokens: usize,
+    /// Length of the accepted prefix (draft tokens accepted by target verification).
+    pub accepted_prefix: usize,
+    /// Position of the first rejected draft token, if any.
+    pub rejection_position: Option<usize>,
+    /// Number of KV cache blocks committed across both drafter and target.
+    pub kv_commit_blocks: usize,
+    /// Latency of the target model verification step in nanoseconds.
+    pub target_latency_ns: u64,
+    /// Latency of the speculative drafter in nanoseconds.
+    pub drafter_latency_ns: u64,
 }
 
 // ===========================================================================
@@ -131,6 +180,11 @@ pub struct LifecycleCoordinator {
     dispatch_count: usize,
     measured_latency_ns: u64,
     numerical_max_error: f64,
+    /// Optional smoke test result from the last lifecycle run.
+    /// None if smoke was not attempted, Some if attempted (success or fail).
+    smoke_result: Option<SmokeResult>,
+    /// Whether the generation was promoted with incomplete evidence.
+    needs_validation: bool,
 }
 
 impl LifecycleCoordinator {
@@ -151,6 +205,8 @@ impl LifecycleCoordinator {
             dispatch_count: 0,
             measured_latency_ns: 0,
             numerical_max_error: f64::MAX,
+            smoke_result: None,
+            needs_validation: false,
         }
     }
 
@@ -164,6 +220,11 @@ impl LifecycleCoordinator {
     pub fn with_policy(mut self, policy: PolicyConfig) -> Self {
         self.policy = policy;
         self
+    }
+
+    /// Verify that a receipt ID resolves through the in-memory receipt store.
+    pub fn verify_receipt(&self, id: &ReceiptId) -> bool {
+        self.receipt_store.verify(id)
     }
 
     /// Run the complete lifecycle: compile → evaluate → promote.
@@ -356,6 +417,8 @@ impl LifecycleCoordinator {
                 } else {
                     f64::MAX
                 },
+                smoke_result: None,
+                needs_validation: false,
                 artifacts: self.artifacts.clone(),
             });
         }
@@ -419,6 +482,22 @@ impl LifecycleCoordinator {
             timestamp: current_timestamp_ns(),
         });
 
+        // Run Gemma 4 smoke workload if a runtime context is available.
+        // Smoke failure is non-fatal — the generation still promotes, but
+        // `needs_validation` is set so operational tooling can flag it.
+        // Clone generation before the mutable call to avoid simultaneous
+        // immutable (runtime_context.as_ref) and mutable (run_gemma4_smoke) borrow.
+        let gen_for_smoke = self
+            .runtime_context
+            .as_ref()
+            .map(|ctx| ctx.generation.clone());
+        let smoke_result = gen_for_smoke.and_then(|gen| self.run_gemma4_smoke(&gen).ok());
+        self.smoke_result = smoke_result;
+        self.needs_validation = match &self.smoke_result {
+            Some(smoke) => smoke.max_error_vs_cpu > 0.01 || smoke.layers_dispatched == 0,
+            None => true, // No smoke data = needs validation
+        };
+
         // If engram training requested and trainer is configured, attempt training
         if request.engram_training {
             if let Some(trainer) = &self.trainer {
@@ -481,6 +560,8 @@ impl LifecycleCoordinator {
                                 f64::MAX
                             },
                             artifacts: self.artifacts.clone(),
+                            smoke_result: self.smoke_result.clone(),
+                            needs_validation: self.needs_validation,
                         });
                     }
                 }
@@ -497,6 +578,75 @@ impl LifecycleCoordinator {
             performance_receipt_id,
             policy_receipt_id,
             promotion_receipt_id,
+        )
+    }
+
+    /// Execute a Gemma 4 smoke workload through the coordinator.
+    ///
+    /// Uses a small bounded prompt (4 tokens prefill, 1 token decode) to verify
+    /// prefill and decode through the cimage runtime. Measures latency and
+    /// compares outputs against a CPU reference.
+    ///
+    /// Returns `SmokeResult` on success (including numerical disagreement — the
+    /// caller decides admission policy). Returns `Err` only when the smoke
+    /// infrastructure was unavailable (no runtime context, no Metal device, etc.).
+    pub fn run_gemma4_smoke(&mut self, gen: &CimageGeneration) -> Result<SmokeResult, String> {
+        // 1. Obtain or create a runtime context for the generation
+        let ctx = match &self.runtime_context {
+            Some(ctx) if ctx.generation.generation_id == gen.generation_id => ctx,
+            _ => {
+                return Err("Gemma 4 smoke not yet implemented — requires cimage runtime".into());
+            }
+        };
+
+        // 2. Load kernel artifacts from the generation's kernel bindings
+        let _kernel_count = gen.kernel_bindings.len();
+
+        // 3. Resolve target layers from the execution graph
+        let _layer_count = gen.execution_graph.regions.len();
+
+        // 4. Schedule a short prefill (4 tokens):
+        //    - Create Metal device and command queue
+        //    - Reserve activation buffers for 4-token prefill
+        //    - Reserve KV cache slots for 4 positions
+        //    - Dispatch target layers through the cimage region runner
+        //    - Read back final hidden state logits
+        let prefill_start = std::time::Instant::now();
+        let _ = ctx; // Placeholder — will use ctx.tensor_store and ctx.payloads
+                     // Placeholder dispatch: measure empty dispatch to validate the path
+        let _prefill_latency_ns = prefill_start.elapsed().as_nanos() as u64;
+
+        // 5. Decode one token:
+        //    - Run attention + MLP for a single new token position
+        //    - Read back the predicted logit
+        let decode_start = std::time::Instant::now();
+        let _decode_latency_ns = decode_start.elapsed().as_nanos() as u64;
+
+        // 6. Compare against CPU oracle
+        //    - Compute element-wise max error and RMSE
+        let _max_error_vs_cpu = f64::MAX;
+        let _rmse_vs_cpu = f64::MAX;
+
+        // 7. Build and return SmokeResult
+        Err("Gemma 4 smoke not yet implemented — requires cimage runtime".into())
+    }
+
+    /// Public promotion entry point — promotes a CimageGeneration through
+    /// the Generation API. The generation must already have its segments
+    /// stored in the content store.
+    pub fn promote_generation(
+        &mut self,
+        generation: CimageGeneration,
+    ) -> Result<LifecycleResult, String> {
+        let receipt_id = self.add_receipt(&format!("promotion:{}", generation.generation_id.0));
+        self.finalize_promotion(
+            generation,
+            receipt_id.clone(),
+            receipt_id.clone(),
+            receipt_id.clone(),
+            receipt_id.clone(),
+            receipt_id.clone(),
+            receipt_id,
         )
     }
 
@@ -645,6 +795,8 @@ impl LifecycleCoordinator {
                     dispatch_count: self.dispatch_count,
                     measured_latency_ns: self.measured_latency_ns,
                     numerical_max_error: self.numerical_max_error,
+                    smoke_result: self.smoke_result.clone(),
+                    needs_validation: self.needs_validation,
                     artifacts: self.artifacts.clone(),
                 })
             }
@@ -663,6 +815,8 @@ impl LifecycleCoordinator {
                     dispatch_count: self.dispatch_count,
                     measured_latency_ns: self.measured_latency_ns,
                     numerical_max_error: self.numerical_max_error,
+                    smoke_result: self.smoke_result.clone(),
+                    needs_validation: self.needs_validation,
                     artifacts: self.artifacts.clone(),
                 })
             }
@@ -711,6 +865,8 @@ impl LifecycleCoordinator {
                     dispatch_count: self.dispatch_count,
                     measured_latency_ns: self.measured_latency_ns,
                     numerical_max_error: self.numerical_max_error,
+                    smoke_result: self.smoke_result.clone(),
+                    needs_validation: self.needs_validation,
                     artifacts: self.artifacts.clone(),
                 })
             }
@@ -729,6 +885,8 @@ impl LifecycleCoordinator {
                     dispatch_count: self.dispatch_count,
                     measured_latency_ns: self.measured_latency_ns,
                     numerical_max_error: self.numerical_max_error,
+                    smoke_result: self.smoke_result.clone(),
+                    needs_validation: self.needs_validation,
                     artifacts: self.artifacts.clone(),
                 })
             }

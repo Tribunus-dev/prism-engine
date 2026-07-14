@@ -20,19 +20,17 @@ use tribunus_compute_core::ecs::canonical::identity::{
     PhysicalSegmentId, ReceiptId, RepresentationId, Timestamp,
 };
 use tribunus_compute_core::ecs::canonical::kernel_abi::{
-    ArtifactProvenance, DispatchGeometryPolicy, KernelAbi, KernelSemanticId,
+    ArtifactProvenance, DispatchGeometryPolicy, KernelAbi,
 };
 use tribunus_compute_core::ecs::canonical::provenance::ReplayManifest;
 use tribunus_compute_core::ecs::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
 use tribunus_compute_core::ecs::cimage::generation_api::GenerationApi;
 use tribunus_compute_core::ecs::compiler::event_emitter::CompilerEvent;
 use tribunus_compute_core::ecs::compiler::lifecycle_coordinator::{
-    CompilerRequest, LifecycleCoordinator, LifecycleResult,
+    CompilerRequest, LifecycleCoordinator,
 };
 use tribunus_compute_core::ecs::evolution::foundation::NumericalReceipt;
-use tribunus_compute_core::ecs::evolution::replay::{
-    replay_from_manifest, DriftClassification, ManifestReplayOutcome,
-};
+use tribunus_compute_core::ecs::evolution::replay::replay_from_manifest;
 use tribunus_compute_core::ecs::execution_profile::PhysicalTileLayout;
 use tribunus_compute_core::ecs::plan::CodecFamily;
 
@@ -118,7 +116,7 @@ fn probe_metal_device() -> bool {
 }
 
 /// Verify that a lifecycle event chain follows the expected stage order:
-/// ParseStarted -> CompileComplete -> BindComplete -> ScheduleReady ->
+/// ParseStarted -> CompileComplete -> BindComplete -> ScheduleComplete ->
 /// EvaluationComplete -> AdmissionPassed -> PromotionComplete.
 fn verify_lifecycle_event_chain(events: &[CompilerEvent]) -> Result<(), String> {
     if events.is_empty() {
@@ -131,7 +129,7 @@ fn verify_lifecycle_event_chain(events: &[CompilerEvent]) -> Result<(), String> 
         "ParseStarted",
         "CompileComplete",
         "BindComplete",
-        "ScheduleReady",
+        "ScheduleComplete",
         "EvaluationComplete",
         "AdmissionPassed",
         "PromotionComplete",
@@ -325,6 +323,21 @@ fn test_full_lifecycle_gate() {
         //    result and verify replay_from_manifest produces a clean outcome
         //    (or reports Metal unavailability gracefully).
         if let Some(bundle) = &result.receipt_bundle {
+            // Use the real promoted generation and its payloads from the content store.
+            let promoted_gen = coord
+                .generation_api
+                .current_generation()
+                .cloned()
+                .unwrap_or_else(|| {
+                    make_base_generation(gen_id.0.as_str(), None, PhysicalSegmentId("none".into()))
+                });
+            let mut real_payloads = BTreeMap::new();
+            for (_, binding) in &promoted_gen.tensor_bindings {
+                let seg = &binding.primary_segment;
+                if let Some(data) = coord.content_store.get(seg) {
+                    real_payloads.insert(seg.clone(), data.to_vec());
+                }
+            }
             let replay_artifacts: BTreeMap<_, _> = result
                 .artifacts
                 .iter()
@@ -347,14 +360,16 @@ fn test_full_lifecycle_gate() {
                     (sem_id.clone(), provenance)
                 })
                 .collect();
+            let compiled_artifacts: BTreeMap<_, _> = result
+                .artifacts
+                .iter()
+                .map(|(sem_id, artifact)| (sem_id.clone(), artifact.compiled_bytes.clone()))
+                .collect();
             let manifest = ReplayManifest {
-                generation: make_base_generation(
-                    gen_id.0.as_str(),
-                    None,
-                    PhysicalSegmentId("replay-payload".into()),
-                ),
-                payloads: BTreeMap::new(),
+                generation: promoted_gen,
+                payloads: real_payloads,
                 artifacts: replay_artifacts,
+                compiled_artifacts,
                 abi: KernelAbi {
                     version: 1,
                     buffers: vec![],

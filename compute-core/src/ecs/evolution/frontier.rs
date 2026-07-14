@@ -117,6 +117,7 @@ mod tests {
                 energy_uj: None,
                 compile_cost_ms: 10,
             }),
+            ternary_recipe: None,
             status: CandidateStatus::Measured,
         }
     }

@@ -42,6 +42,8 @@ pub mod cimage;
 pub mod embed_cluster;
 pub mod oq;
 pub mod palette;
+/// Per-class precision policy and M1 memory budget admission.
+pub mod precision_policy;
 pub mod turboquant_kv;
 
 pub use admission::quantize_tensor;

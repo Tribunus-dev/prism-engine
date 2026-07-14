@@ -15,6 +15,7 @@ use crate::ecs::canonical::provenance::MeasuredCandidateRecord;
 use crate::ecs::cimage::PhysicalTileLayout;
 use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::plan::CodecFamily;
+use crate::ecs::quantization::contract::TernaryCandidateRecipe;
 use crate::ecs::CompEntity;
 
 // ── Search infrastructure ───────────────────────────────────────────────
@@ -227,6 +228,7 @@ pub struct EvolutionCandidate {
     pub correctness_receipt: Option<StaticValidationReceipt>,
     pub quality_receipt: Option<NumericalReceipt>,
     pub performance_receipt: Option<PerformanceReceipt>,
+    pub ternary_recipe: Option<TernaryCandidateRecipe>,
     pub fitness: Option<FitnessVector>,
     pub status: CandidateStatus,
 }

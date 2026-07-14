@@ -523,7 +523,29 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
         }
         #[cfg(feature = "metal-dispatch")]
         {
-            let fixture = nf4_fixture()?;
+            let fixture = match candidate.genome.representation {
+                CodecFamily::Nf4 => nf4_fixture()?,
+                CodecFamily::Ternary | CodecFamily::Ternary1_58 => {
+                    // Phase 2 acceptance gate: ternary candidates produce a distinct
+                    // receipt rather than silently substituting NF4 evidence.
+                    let receipt = NumericalReceipt {
+                        candidate_id: compiled.candidate_id.clone(),
+                        passed: false,
+                        max_absolute_error: f64::NAN,
+                        max_relative_error: f64::NAN,
+                        threshold: 0.05,
+                        provenance: compiled.provenance.clone(),
+                    };
+                    candidate.quality_receipt = Some(receipt.clone());
+                    return Ok(receipt);
+                }
+                other => {
+                    return Err(format!(
+                        "numerical validation not implemented for {:?}",
+                        other
+                    ));
+                }
+            };
             let output = self.dispatch_fixture(&compiled.compiled_bytes, &fixture, 1)?;
             let mut max_abs: f64 = 0.0;
             let mut max_rel: f64 = 0.0;
@@ -559,7 +581,32 @@ impl CandidateEvaluator for MetalCandidateEvaluator {
         }
         #[cfg(feature = "metal-dispatch")]
         {
-            let fixture = nf4_fixture()?;
+            let fixture = match candidate.genome.representation {
+                CodecFamily::Nf4 => nf4_fixture()?,
+                CodecFamily::Ternary | CodecFamily::Ternary1_58 => {
+                    // Phase 2 acceptance gate: return distinct sentinel receipt
+                    // instead of silently substituting NF4 measurement data.
+                    let receipt = PerformanceReceipt {
+                        candidate_id: compiled.candidate_id.clone(),
+                        latency_p50_ns: u64::MAX,
+                        latency_p95_ns: u64::MAX,
+                        encode_time_ns: 0,
+                        sync_time_ns: 0,
+                        memory_traffic_bytes: 0,
+                        energy_uj: None,
+                        repetitions: 0,
+                        provenance: compiled.provenance.clone(),
+                    };
+                    candidate.performance_receipt = Some(receipt.clone());
+                    return Ok(receipt);
+                }
+                other => {
+                    return Err(format!(
+                        "performance measurement not implemented for {:?}",
+                        other
+                    ));
+                }
+            };
             let cfg = &self.repeatability;
             let warm_up = cfg.warm_up_repetitions.max(1);
             let min_reps = workload.repetitions.max(cfg.min_repetitions);
@@ -784,6 +831,7 @@ mod tests {
             correctness_receipt: None,
             quality_receipt: None,
             performance_receipt: None,
+            ternary_recipe: None,
             fitness: None,
             status: CandidateStatus::Created,
         }

@@ -121,6 +121,10 @@ pub struct ReplayManifest {
     pub payloads: BTreeMap<PhysicalSegmentId, Vec<u8>>,
     /// Compiled kernel artifacts keyed by semantic id.
     pub artifacts: BTreeMap<KernelSemanticId, ArtifactProvenance>,
+    /// Compiled kernel artifact bytes keyed by semantic ID.
+    /// Present when the replay has access to the original compiled artifacts.
+    /// When absent, the replay must recompile from the catalogue source.
+    pub compiled_artifacts: BTreeMap<KernelSemanticId, Vec<u8>>,
     /// ABI contracts for replay dispatch.
     pub abi: KernelAbi,
     /// The receipt bundle that was accepted at promotion time.

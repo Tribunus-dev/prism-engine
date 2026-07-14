@@ -249,6 +249,133 @@ pub enum ReconstructionContract {
     },
 }
 
+// ── Ternary tile640 contract ──────────────────────────────────────────────
+// RuntimeRepresentationClass::TernaryTile640Base is the canonical production
+// representation. CodecFamily remains the search-level family; the compiled
+// TernaryCandidateRecipe records the complete physical format.
+
+/// Complete physical contract for one ternary candidate.
+///
+/// Every field must affect either packing, reconstruction, or kernel selection.
+/// Dense residual retention is rejected at construction for production candidates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TernaryCandidateRecipe {
+    pub codec: TernaryCodec,
+    pub scale_policy: TernaryScalePolicy,
+    pub threshold_policy: TernaryThresholdPolicy,
+    pub group_size: u32,
+    pub residual_policy: TernaryResidualPolicy,
+    pub kernel_abi: TernaryKernelAbi,
+    pub representation_version: u16,
+    pub sparse_residual_capacity: Option<u32>,
+}
+
+impl TernaryCandidateRecipe {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.group_size == 0 || self.group_size > 640 || 640 % self.group_size != 0 {
+            return Err(format!("group_size {} must divide 640", self.group_size));
+        }
+        if matches!(self.residual_policy, TernaryResidualPolicy::Dense { .. }) {
+            return Err("dense residual invalidates compression fitness".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TernaryCodec {
+    Tile640,
+    BitNet158,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TernaryScalePolicy {
+    SymmetricPerGroup,
+    AsymmetricPerGroup,
+    Learned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum TernaryThresholdPolicy {
+    Fixed(f32),
+    Percentile(f32),
+    Learned,
+    ActivationAware,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TernaryResidualPolicy {
+    None,
+    Sparse {
+        fraction: f32,
+        fallback: ResidualFallbackPrecision,
+    },
+    LowRank {
+        rank: u32,
+    },
+    Dense {
+        fallback: ResidualFallbackPrecision,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResidualFallbackPrecision {
+    Fp16,
+    Int8,
+    Nf4,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TernaryKernelAbi {
+    pub threadgroup_size: u32,
+    pub simdgroup_width: u32,
+    pub unroll_factor: u32,
+}
+
+impl Default for TernaryKernelAbi {
+    fn default() -> Self {
+        Self {
+            threadgroup_size: 32,
+            simdgroup_width: 32,
+            unroll_factor: 4,
+        }
+    }
+}
+
+impl Default for TernaryCandidateRecipe {
+    fn default() -> Self {
+        Self {
+            codec: TernaryCodec::Tile640,
+            scale_policy: TernaryScalePolicy::SymmetricPerGroup,
+            threshold_policy: TernaryThresholdPolicy::Percentile(50.0),
+            group_size: 32,
+            residual_policy: TernaryResidualPolicy::None,
+            kernel_abi: TernaryKernelAbi::default(),
+            representation_version: REPRESENTATION_REGISTRY_VERSION,
+            sparse_residual_capacity: None,
+        }
+    }
+}
+
+pub fn ternary_candidate_digest(
+    tensor_digest: &str,
+    recipe: &TernaryCandidateRecipe,
+    policy_digest: &str,
+) -> Result<String, String> {
+    let bytes = bincode::serialize(recipe).map_err(|e| format!("serialize: {e}"))?;
+    let mut hasher = Sha256::new();
+    hasher.update(tensor_digest.as_bytes());
+    hasher.update(b":recipe:");
+    hasher.update(&bytes);
+    hasher.update(b":policy:");
+    hasher.update(policy_digest.as_bytes());
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect())
+}
+
 /// Validation gate thresholds per tensor class.
 ///
 /// Each tensor class has a promotion profile (for candidate selection) and
@@ -541,6 +668,15 @@ pub struct RepresentationCapability {
     pub runtime_kernel_ready: bool,
     pub nonzero_offset_test_passed: bool,
     pub tail_mask_test_passed: bool,
+    /// Tensor-mixing within a layer: different tensors in same operation use different codecs (MLP level)
+    pub tensor_mixing_passed: bool,
+    /// Layer-mixing: different layers in same decoder use different codecs
+    pub layer_mixing_passed: bool,
+    /// Decoder integration: full prefill+decode with mixed codecs
+    pub decoder_integration_passed: bool,
+    /// Serving integration: session lifecycle with mixed codecs
+    pub serving_integration_passed: bool,
+    /// Keep existing booleans for backward compat
     pub mixed_format_test_passed: bool,
     pub end_to_end_profile_test_passed: bool,
     pub production_ready: bool,
@@ -649,3 +785,5 @@ pub enum QuantizationAdmissionFailure {
         bank_selections: Vec<ActivationBankSelectionReceipt>,
     },
 }
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};

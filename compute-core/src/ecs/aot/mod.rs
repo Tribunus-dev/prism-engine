@@ -6,6 +6,7 @@
 
 // PrismCompiler — the single public compilation API.
 // Gated behind prism-backend for the full compile path.
+pub mod gemma4_frontend;
 pub mod gguf_frontend;
 #[cfg(feature = "prism-backend")]
 pub mod prism_compiler;

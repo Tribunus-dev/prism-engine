@@ -1,3 +1,4 @@
+use crate::ecs::compute_image::kv_plan::KvCodec;
 use serde::{Deserialize, Serialize};
 
 /// Top-level state store schema — a collection of store declarations plus
@@ -63,7 +64,7 @@ pub struct KvCacheStoreDecl {
     pub head_dim: u32,
     pub max_sequence_len: u32,
     pub cache_layout: KvCacheLayout,
-    pub precision_policy: KvPrecisionPolicy,
+    pub codec_policy: KvCodecPolicy,
     pub residency_policy: KvResidencyPolicy,
 }
 
@@ -78,11 +79,11 @@ pub enum KvCacheLayout {
     },
 }
 
-/// Precision policy — dtypes for key and value tensors.
+/// KV codec — replaces string-typed precision policies.
+/// The codec drives page sizing, runtime construction, and attention dispatch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KvPrecisionPolicy {
-    pub key_dtype: String,
-    pub value_dtype: String,
+pub struct KvCodecPolicy {
+    pub codec: KvCodec,
 }
 
 /// Residency policy — max active spans and pin support.

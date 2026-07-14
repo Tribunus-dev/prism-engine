@@ -10,6 +10,80 @@ use crate::ecs::canonical::kernel_abi::{
 use crate::ecs::canonical::model_ir::ArchitectureId;
 use crate::ecs::canonical::representation::TensorRepresentation;
 use std::sync::LazyLock;
+// ── Gemma 4 kernel semantic IDs ─────────────────────────────────────────────
+/// Kernel semantic IDs and expected source paths for all Gemma 4 decomposed
+/// Metal kernels, matching the decomposed-per-op execution strategy.
+pub const GEMMA4_KERNEL_SEMANTICS: &[(&str, &str)] = &[
+    (
+        "prism.gemma4.rms_norm",
+        "src/ecs/compute_image/gemma4/rms_norm.metal",
+    ),
+    (
+        "prism.gemma4.rope",
+        "src/ecs/compute_image/gemma4/rope.metal",
+    ),
+    (
+        "prism.gemma4.proj_qkv",
+        "src/ecs/compute_image/gemma4/qkv_proj.metal",
+    ),
+    (
+        "prism.gemma4.attention",
+        "src/ecs/compute_image/gemma4/attention.metal",
+    ),
+    (
+        "prism.gemma4.proj_o",
+        "src/ecs/compute_image/gemma4/o_proj.metal",
+    ),
+    (
+        "prism.gemma4.gate_up_proj",
+        "src/ecs/compute_image/gemma4/gate_up_proj.metal",
+    ),
+    (
+        "prism.gemma4.silu",
+        "src/ecs/compute_image/gemma4/silu.metal",
+    ),
+    (
+        "prism.gemma4.down_proj",
+        "src/ecs/compute_image/gemma4/down_proj.metal",
+    ),
+    (
+        "prism.gemma4.residual_add",
+        "src/ecs/compute_image/gemma4/residual_add.metal",
+    ),
+    (
+        "prism.gemma4.output_proj",
+        "src/ecs/compute_image/gemma4/output_proj.metal",
+    ),
+    (
+        "prism.gemma4.mtp_proj",
+        "src/ecs/compute_image/gemma4/mtp_proj.metal",
+    ),
+    (
+        "prism.gemma4.mtp_attention",
+        "src/ecs/compute_image/gemma4/mtp_attention.metal",
+    ),
+    (
+        "prism.gemma4.mtp_output",
+        "src/ecs/compute_image/gemma4/mtp_output.metal",
+    ),
+];
+
+/// Gemma 4 kernel entry point names, one per semantic ID (same order).
+pub const GEMMA4_KERNEL_ENTRY_POINTS: &[&str] = &[
+    "gemma4_rms_norm",
+    "gemma4_rope",
+    "gemma4_qkv_proj",
+    "gemma4_attention",
+    "gemma4_o_proj",
+    "gemma4_gate_up_proj",
+    "gemma4_silu",
+    "gemma4_down_proj",
+    "gemma4_residual_add",
+    "gemma4_output_proj",
+    "gemma4_mtp_proj",
+    "gemma4_mtp_attention",
+    "gemma4_mtp_output",
+];
 
 /// Catalogue of all Metal kernel implementations.
 #[derive(Debug, Clone)]
@@ -621,6 +695,8 @@ impl MetalImplementationCatalogue {
     }
 
     /// Register KV mixed primitive kernel.
+    ///
+    /// This kernel consumes page descriptors with representation metadata.
     pub fn register_kv_mixed(&mut self) {
         self.register(MetalImplementationRegistration {
             semantic_id: KernelSemanticId("prism.kv.mixed.v1".into()),
@@ -628,7 +704,7 @@ impl MetalImplementationCatalogue {
             supported_architectures: vec![],
             supported_representations: vec![],
             source_path: Some("src/ecs/compute_image/templates/kv_mixed.metal".into()),
-            source_entry_point: Some("kv_mixed".into()),
+            source_entry_point: Some("kv_mixed_attn".into()),
             abi: KernelAbi {
                 version: 1,
                 buffers: vec![],
@@ -1010,6 +1086,35 @@ impl MetalImplementationCatalogue {
             },
         });
     }
+    /// Register all Gemma 4 decomposed kernels as discrete Metal implementations.
+    ///
+    /// Each kernel corresponds to a single transformer sub-operation (RMSNorm, RoPE,
+    /// QKV projection, attention, SiLU gate, down projection, MTP stages, etc.)
+    /// and is independently dispatchable via `catalogue_source_for`.
+    pub fn register_gemma4_decomposed(&mut self) {
+        for (i, (sem_id, source_path)) in GEMMA4_KERNEL_SEMANTICS.iter().enumerate() {
+            let entry_point = GEMMA4_KERNEL_ENTRY_POINTS[i];
+            self.register(MetalImplementationRegistration {
+                semantic_id: KernelSemanticId(sem_id.to_string()),
+                implementation_id: KernelImplementationId(format!(
+                    "metal.gemma4.decomposed.{}.v1",
+                    entry_point
+                )),
+                supported_architectures: vec![ArchitectureId("gemma4".into())],
+                supported_representations: vec![TensorRepresentation::Fp32],
+                source_path: Some(source_path.to_string()),
+                source_entry_point: Some(entry_point.to_string()),
+                abi: KernelAbi {
+                    version: 1,
+                    buffers: vec![],
+                    constants: vec![],
+                    threadgroup_memory: vec![],
+                    dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+                    threads_per_threadgroup: (64, 1, 1),
+                },
+            });
+        }
+    }
 }
 
 impl Default for MetalImplementationCatalogue {
@@ -1043,6 +1148,11 @@ impl Default for MetalImplementationCatalogue {
         cat.register_kv_append();
         cat.register_ternary_cimage_gemv();
         cat.register_f32_to_half();
+        // Gemma 4 decomposed-op kernels — registered here.
+        // Phase-to-semantic-ID lookup via MTPExecutionGraph::semantic_id_for_phase()
+        // resolves pipeline phases (embedding, prefill, mtp_draft, verify, etc.)
+        // to kernel IDs registered above (prism.gemma4.embedding, prism.gemma4.prefill, ...).
+        cat.register_gemma4_decomposed();
         cat
     }
 }
@@ -1072,8 +1182,8 @@ mod tests {
     fn test_catalogue_default_has_all_registrations() {
         let catalogue = MetalImplementationCatalogue::default();
         assert!(
-            catalogue.len() >= 32,
-            "expected >=32 registrations, got {}",
+            catalogue.len() >= 40,
+            "expected >=40 registrations, got {}",
             catalogue.len()
         );
 
@@ -1100,6 +1210,20 @@ mod tests {
                 .len()
                 >= 1,
             "rmsnorm should be registered"
+        );
+        assert!(
+            catalogue
+                .for_semantic(&KernelSemanticId("prism.gemma4.rms_norm".into()))
+                .len()
+                >= 1,
+            "gemma4.rms_norm should be registered"
+        );
+        assert!(
+            catalogue
+                .for_semantic(&KernelSemanticId("prism.gemma4.mtp_output".into()))
+                .len()
+                >= 1,
+            "gemma4.mtp_output should be registered"
         );
     }
 

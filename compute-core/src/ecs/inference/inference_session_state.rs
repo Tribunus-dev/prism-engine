@@ -1,11 +1,14 @@
 #![cfg(feature = "mlx-backend")]
 
+use crate::ecs::compute_image::kv_plan::{KvCachePlan, KvCodec};
 use crate::ecs::inference::inference_step_state::StepReceiptLedger;
 use crate::ecs::kv_cache::KvCache;
 use crate::ecs::kv_cache::LiveKvCache;
+use crate::ecs::runtime::resources::kv_cache_coordinator::CompressedKvCache;
 use crate::ecs::scheduling::receipts::PhaseReceipt;
 use crate::executor::SinkState;
 use crate::profiled_executor::WorkingSetManager;
+use crate::quantization::turboquant_kv::KvQuantMode as TqKvQuantMode;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -38,8 +41,31 @@ pub struct CoreAiModelRegistryStub;
 pub struct LaneRegistryStub;
 
 impl InferenceSessionState {
-    pub fn new(session_id: String, kv_caches: Vec<KvCache>, sink_states: Vec<SinkState>) -> Self {
-        let live_caches = kv_caches.into_iter().map(LiveKvCache::Fp16).collect();
+    pub fn new(
+        session_id: String,
+        plan: &KvCachePlan,
+        kv_caches: Vec<KvCache>,
+        sink_states: Vec<SinkState>,
+    ) -> Self {
+        let live_caches = kv_caches
+            .into_iter()
+            .map(|c| match &plan.codec {
+                KvCodec::Fp16 => LiveKvCache::Fp16(c),
+                KvCodec::TurboQuant {
+                    key_mode,
+                    value_mode: _,
+                    group_size,
+                } => {
+                    let tq_mode = kv_plan_mode_to_tq(key_mode);
+                    LiveKvCache::Compressed(CompressedKvCache::new(
+                        tq_mode,
+                        *group_size as usize,
+                        plan.max_blocks as usize,
+                    ))
+                }
+                KvCodec::Fp32 => LiveKvCache::Fp16(c),
+            })
+            .collect();
         Self {
             session_id: InferenceSessionId(session_id),
             kv_caches: live_caches,
@@ -71,5 +97,26 @@ impl InferenceSessionState {
     /// Record a phase receipt in the session receipt ledger.
     pub fn push_receipt(&mut self, receipt: PhaseReceipt) {
         self.receipt_ledger.push(receipt);
+    }
+}
+/// Convert a kv_plan KvQuantMode (serialization-friendly) to a
+/// turboquant_kv KvQuantMode (implementation type) with conservative
+/// defaults for fields absent in the plan representation.
+fn kv_plan_mode_to_tq(mode: &crate::ecs::compute_image::kv_plan::KvQuantMode) -> TqKvQuantMode {
+    use crate::ecs::compute_image::kv_plan::KvQuantMode as PlanMode;
+    match mode {
+        PlanMode::Polar(b) => TqKvQuantMode::Polar(*b),
+        PlanMode::Prod(b) => TqKvQuantMode::Prod(*b),
+        PlanMode::Split(b) => TqKvQuantMode::Split(*b),
+        PlanMode::Mse(b) => TqKvQuantMode::Mse {
+            bits: *b,
+            state_bits: 4,
+        },
+        PlanMode::PolarProd(b) => TqKvQuantMode::PolarProd(*b),
+        PlanMode::PolarHadamard(b) => TqKvQuantMode::PolarHadamard(*b),
+        PlanMode::TurboQuant3 => TqKvQuantMode::TurboQuant3 {
+            bits: 3,
+            qjl_bits: 2,
+        },
     }
 }

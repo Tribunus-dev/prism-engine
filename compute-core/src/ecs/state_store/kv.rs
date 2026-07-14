@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use crate::ecs::compute_image::KvCachePlan;
 use crate::ecs::state_store::pages::PageDescriptor;
 use crate::ecs::state_store::receipts::{KvAppendReceipt, KvReadReceipt};
 use crate::ecs::state_store::schema::{
@@ -53,14 +54,7 @@ pub struct KvCacheManager {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn bytes_per_element(dtype: &str) -> u64 {
-    match dtype {
-        "fp32" | "float32" => 4,
-        _ => 2,
-    }
-}
-
+/// Round a value up to the next multiple of alignment.
 fn align_up(val: u64, align: u32) -> u64 {
     let a = align as u64;
     (val + a - 1) & !(a - 1)
@@ -108,12 +102,13 @@ impl KvCacheManager {
         let page_tokens = layout.0;
         let alignment_bytes = layout.1;
 
-        // Compute per-page byte sizes.
-        let key_size = bytes_per_element(&self.config.precision_policy.key_dtype);
-        let value_size = bytes_per_element(&self.config.precision_policy.value_dtype);
-        let bytes_per_token_per_head = self.config.head_dim as u64 * (key_size + value_size);
-        // Each page stores tokens for ONE head in ONE layer.
-        let page_raw = page_tokens as u64 * bytes_per_token_per_head;
+        // Resolve typed codec from the schema's codec_policy and compute page size.
+        let plan = KvCachePlan {
+            codec: self.config.codec_policy.codec.clone(),
+            block_tokens: page_tokens,
+            ..Default::default()
+        };
+        let page_raw = plan.page_bytes(self.config.head_dim);
         let page_aligned = align_up(page_raw, alignment_bytes);
 
         let pages_per_layer_head = (self.config.max_sequence_len + page_tokens - 1) / page_tokens;

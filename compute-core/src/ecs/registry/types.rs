@@ -240,13 +240,13 @@ impl BackendPlan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PrecisionPolicy {
+pub struct AdmissionPrecision {
     pub base: PrecisionClass,
     pub allowed_escalations: Vec<PrecisionClass>,
     pub allow_dynamic: bool,
 }
 
-impl PrecisionPolicy {
+impl AdmissionPrecision {
     pub fn compile(
         required: &[PrecisionClass],
         allowed: &std::collections::HashSet<PrecisionClass>,
@@ -510,7 +510,7 @@ pub struct RuntimeContract {
     pub effective_capabilities: CapabilitySet,
     pub resource_budget: ResourceBudget,
     pub backend_plan: BackendPlan,
-    pub precision_policy: PrecisionPolicy,
+    pub admission_precision: AdmissionPrecision,
     pub tool_authority: ToolAuthority,
     pub optimization_authority: OptimizationAuthority,
     pub issued_at: LogicalTimestamp,
@@ -805,7 +805,7 @@ pub struct DeploymentDigestInput {
     pub hardware_digest: Digest256,
     pub backend_plan_digest: Digest256,
     pub resource_budget_digest: Digest256,
-    pub precision_policy_digest: Digest256,
+    pub admission_precision_digest: Digest256,
     pub tool_authority_digest: Digest256,
     pub optimization_authority_digest: Digest256,
 }
@@ -819,7 +819,7 @@ pub fn hash_deployment_contract(input: &DeploymentDigestInput) -> Digest256 {
     h.update(input.hardware_digest.as_bytes());
     h.update(input.backend_plan_digest.as_bytes());
     h.update(input.resource_budget_digest.as_bytes());
-    h.update(input.precision_policy_digest.as_bytes());
+    h.update(input.admission_precision_digest.as_bytes());
     h.update(input.tool_authority_digest.as_bytes());
     h.update(input.optimization_authority_digest.as_bytes());
     Digest256(h.finalize().into())

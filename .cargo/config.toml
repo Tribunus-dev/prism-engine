@@ -18,3 +18,7 @@ rustflags = [
 
 [future-incompat-report]
 frequency = "never"
+
+# Homebrew LLVM — build scripts (tblgen, mlir-sys) need llvm-config in PATH.
+[env]
+LLVM_CONFIG_PATH = { value = "/opt/homebrew/opt/llvm/bin/llvm-config" }

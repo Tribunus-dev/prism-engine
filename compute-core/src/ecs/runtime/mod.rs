@@ -17,6 +17,8 @@ pub mod interceptors;
 pub mod npu_pump;
 pub mod pump_pool;
 pub mod resources;
+#[cfg(feature = "prism-backend")]
+pub mod serving;
 pub mod signal_bus;
 pub mod stage_graph;
 pub mod systems;

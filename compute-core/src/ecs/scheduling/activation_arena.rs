@@ -5,6 +5,7 @@ use crate::ecs::scheduling::activation_binding::ArenaBinding;
 ///
 /// The arena avoids repeated allocation/deallocation by recycling
 /// slots according to the compiler's EmittedArenaPlan.
+#[derive(Debug)]
 pub struct ActivationArena {
     total_bytes: u64,
     allocated_bytes: u64,

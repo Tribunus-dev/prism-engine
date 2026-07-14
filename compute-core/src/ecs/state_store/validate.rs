@@ -131,6 +131,7 @@ pub fn validate_schema(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::compute_image::kv_plan::KvCodec;
     use crate::ecs::state_store::schema::*;
 
     fn valid_decl(id: &str) -> StateStoreDecl {
@@ -157,9 +158,8 @@ mod tests {
                 page_tokens: 64,
                 alignment_bytes: 256,
             },
-            precision_policy: KvPrecisionPolicy {
-                key_dtype: "fp16".to_string(),
-                value_dtype: "fp16".to_string(),
+            codec_policy: KvCodecPolicy {
+                codec: KvCodec::Fp16,
             },
             residency_policy: KvResidencyPolicy {
                 max_active_spans: 8,

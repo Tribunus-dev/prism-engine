@@ -1,5 +1,12 @@
 //! Phased BitNet cimage emission — linear, MLP block, and decoder layer.
 //!
+//! ## Codec contract
+//!
+//! The `CodecFamily::Ternary1_58` variant (BitNet's b1.58 format) maps to the
+//! production `RuntimeRepresentationClass::TernaryTile640Base` representation.
+//! The canonical physical contract is recorded in
+//! [`TernaryCandidateRecipe`]
+//! with codec [`TernaryCodec::BitNet158`](crate::ecs::quantization::contract::TernaryCodec).
 //! Each phase uses the existing cimage shard builder infrastructure to
 //! emit a `PendingCImageShard` from BitNet-native ternary weights.
 
@@ -7,6 +14,8 @@ use crate::ecs::bitnet::checkpoint::BitNetCheckpoint;
 use crate::ecs::bitnet::importer::BitNetImporter;
 use crate::ecs::cimage::streaming_writer::StreamingCImageWriter;
 use crate::ecs::cimage::*;
+#[allow(unused_imports)]
+use crate::ecs::quantization::contract::TernaryCandidateRecipe;
 use crate::execution_plan::{CodecFamily, DType, HardwareProfileId};
 use crate::ternary::codec::TernaryPackedTensor;
 use crate::ternary::pack::unpack_ternary_codes;
@@ -17,6 +26,12 @@ use std::path::Path;
 fn sha256_of_bytes(data: &[u8]) -> String {
     format!("{:x}", Sha256::digest(data))
 }
+
+/// String label used in `PendingPayload.codec` for the BitNet b1.58 ternary format.
+/// Corresponds to `CodecFamily::Ternary1_58` and maps to
+/// `TernaryCodec::BitNet158` in
+/// [`TernaryCandidateRecipe`].
+const BITNET_TERNARY_CODEC_LABEL: &str = "Ternary1_58";
 
 /// Build a `PhysicalTileLayout` for a ternary-grouped tensor.
 fn ternary_layout(tensor: &TernaryPackedTensor) -> PhysicalTileLayout {
@@ -42,7 +57,7 @@ pub fn emit_single_bitnet_linear(
     let codes_payload = PendingPayload {
         payload_id: format!("p_{}_codes", tensor_key),
         payload_kind: CImagePayloadKind::TernaryPackedCodes,
-        codec: Some("Ternary1_58".into()),
+        codec: Some(BITNET_TERNARY_CODEC_LABEL.into()),
         alignment_bytes: 64,
         bytes: tensor.codes.clone(),
     };
@@ -51,7 +66,7 @@ pub fn emit_single_bitnet_linear(
     let scales_payload = PendingPayload {
         payload_id: format!("p_{}_scales", tensor_key),
         payload_kind: CImagePayloadKind::TernaryScales,
-        codec: Some("Ternary1_58".into()),
+        codec: Some(BITNET_TERNARY_CODEC_LABEL.into()),
         alignment_bytes: 64,
         bytes: scale_bytes,
     };
@@ -124,7 +139,7 @@ pub fn emit_bitnet_mlp_block(
         let codes_payload = PendingPayload {
             payload_id: format!("p_{}_codes", key),
             payload_kind: CImagePayloadKind::TernaryPackedCodes,
-            codec: Some("Ternary1_58".into()),
+            codec: Some(BITNET_TERNARY_CODEC_LABEL.into()),
             alignment_bytes: 64,
             bytes: tensor.codes.clone(),
         };
@@ -132,7 +147,7 @@ pub fn emit_bitnet_mlp_block(
         let scales_payload = PendingPayload {
             payload_id: format!("p_{}_scales", key),
             payload_kind: CImagePayloadKind::TernaryScales,
-            codec: Some("Ternary1_58".into()),
+            codec: Some(BITNET_TERNARY_CODEC_LABEL.into()),
             alignment_bytes: 64,
             bytes: scale_bytes,
         };
@@ -242,7 +257,7 @@ fn emit_ternary_decoder_tensor(
     let codes_payload = PendingPayload {
         payload_id: format!("p_{}_codes", tensor_key),
         payload_kind: CImagePayloadKind::TernaryPackedCodes,
-        codec: Some("Ternary1_58".into()),
+        codec: Some(BITNET_TERNARY_CODEC_LABEL.into()),
         alignment_bytes: 64,
         bytes: tensor.codes.clone(),
     };
@@ -250,7 +265,7 @@ fn emit_ternary_decoder_tensor(
     let scales_payload = PendingPayload {
         payload_id: format!("p_{}_scales", tensor_key),
         payload_kind: CImagePayloadKind::TernaryScales,
-        codec: Some("Ternary1_58".into()),
+        codec: Some(BITNET_TERNARY_CODEC_LABEL.into()),
         alignment_bytes: 64,
         bytes: scale_bytes,
     };
@@ -1042,7 +1057,7 @@ fn emit_checkpoint_ternary_tensor(
     let codes_payload = PendingPayload {
         payload_id: format!("p_{tensor_key}_codes"),
         payload_kind: CImagePayloadKind::TernaryPackedCodes,
-        codec: Some("Ternary1_58".into()),
+        codec: Some(BITNET_TERNARY_CODEC_LABEL.into()),
         alignment_bytes: 64,
         bytes: tensor.codes.clone(),
     };
@@ -1051,7 +1066,7 @@ fn emit_checkpoint_ternary_tensor(
     let scales_payload = PendingPayload {
         payload_id: format!("p_{tensor_key}_scales"),
         payload_kind: CImagePayloadKind::TernaryScales,
-        codec: Some("Ternary1_58".into()),
+        codec: Some(BITNET_TERNARY_CODEC_LABEL.into()),
         alignment_bytes: 64,
         bytes: scale_bytes,
     };
@@ -1139,7 +1154,7 @@ fn stream_checkpoint_ternary_tensor(
     writer.append_payload(
         codes_payload_id.clone(),
         CImagePayloadKind::TernaryPackedCodes,
-        Some("Ternary1_58".into()),
+        Some(BITNET_TERNARY_CODEC_LABEL.into()),
         64,
         &tensor.codes,
     )?;
@@ -1150,7 +1165,7 @@ fn stream_checkpoint_ternary_tensor(
     writer.append_payload(
         scales_payload_id.clone(),
         CImagePayloadKind::TernaryScales,
-        Some("Ternary1_58".into()),
+        Some(BITNET_TERNARY_CODEC_LABEL.into()),
         64,
         &scale_bytes,
     )?;

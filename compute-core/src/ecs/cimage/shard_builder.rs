@@ -31,6 +31,7 @@
 use sha2::{Digest, Sha256};
 
 use crate::ecs::cimage::*;
+use crate::ecs::quantization::contract::TernaryCandidateRecipe;
 use crate::execution_plan::{CodecFamily, DType, HardwareProfileId};
 use crate::nf4tile640::{
     pack_int8_weights, pack_nf4_weights, GROUPS_PER_TILE, GROUP_SIZE, PACKED_BYTES_PER_TILE,
@@ -220,9 +221,10 @@ fn rawf32_tile_layout(tensor_len: usize) -> PhysicalTileLayout {
 fn ternary_grouped_layout(
     pack_rows: usize,
     pack_cols: usize,
-    group_size: usize,
+    recipe: &TernaryCandidateRecipe,
     dtype: DType,
 ) -> PhysicalTileLayout {
+    let group_size = recipe.group_size as usize;
     let groups_per_row = pack_cols.div_ceil(group_size);
     let bytes_per_group = (group_size * 2 + 7) / 8;
     let scale_bytes_per_group = match dtype {
@@ -467,8 +469,12 @@ impl MlpShardBuilder {
                     )
                 }
                 CodecFamily::Ternary1_58 => {
-                    let group_size: usize = 32;
-                    let groups_per_row = pack_cols.div_ceil(group_size);
+                    // Implements RuntimeRepresentationClass::TernaryTile640Base
+                    let recipe = TernaryCandidateRecipe {
+                        group_size: 32,
+                        ..Default::default()
+                    };
+                    let groups_per_row = pack_cols.div_ceil(recipe.group_size as usize);
 
                     // 1. Quantize weights to {-1, 0, +1}.
                     let quantized: Vec<i8> = stored
@@ -492,13 +498,13 @@ impl MlpShardBuilder {
                     let mut scales_f32 = Vec::with_capacity(pack_rows * groups_per_row);
                     for r in 0..pack_rows {
                         for g in 0..groups_per_row {
-                            let start = g * group_size;
-                            let end = (start + group_size).min(pack_cols);
+                            let start = g * recipe.group_size as usize;
+                            let end = (start + recipe.group_size as usize).min(pack_cols);
                             let mut sum_abs = 0.0f32;
                             for c in start..end {
                                 sum_abs += stored[r * pack_cols + c].abs();
                             }
-                            scales_f32.push(sum_abs / group_size as f32);
+                            scales_f32.push(sum_abs / recipe.group_size as f32);
                         }
                     }
                     let scale_bytes: Vec<u8> = scales_f32
@@ -537,8 +543,7 @@ impl MlpShardBuilder {
                     all_payloads.push(scales_payload);
                     all_payloads.push(raw_f32_payload);
 
-                    let layout =
-                        ternary_grouped_layout(pack_rows, pack_cols, group_size, DType::F16);
+                    let layout = ternary_grouped_layout(pack_rows, pack_cols, &recipe, DType::F16);
 
                     (
                         CImagePayloadRef::Single {
@@ -619,6 +624,11 @@ impl MlpShardBuilder {
         group_size: usize,
         seed: u64,
     ) -> CImageResult<PendingCImageShard> {
+        // Implements RuntimeRepresentationClass::TernaryTile640Base
+        let recipe = TernaryCandidateRecipe {
+            group_size: group_size as u32,
+            ..Default::default()
+        };
         let tensor_key = "linear_weight";
         let tensor_id = "t0";
 
@@ -628,7 +638,7 @@ impl MlpShardBuilder {
 
         let pack_rows = rows;
         let pack_cols = cols;
-        let groups_per_row = pack_cols.div_ceil(group_size);
+        let groups_per_row = pack_cols.div_ceil(recipe.group_size as usize);
 
         // 1. Quantize weights to {-1, 0, +1}.
         let quantized: Vec<i8> = stored
@@ -652,13 +662,13 @@ impl MlpShardBuilder {
         let mut scales_f32 = Vec::with_capacity(pack_rows * groups_per_row);
         for r in 0..pack_rows {
             for g in 0..groups_per_row {
-                let start = g * group_size;
-                let end = (start + group_size).min(pack_cols);
+                let start = g * recipe.group_size as usize;
+                let end = (start + recipe.group_size as usize).min(pack_cols);
                 let mut sum_abs = 0.0f32;
                 for c in start..end {
                     sum_abs += stored[r * pack_cols + c].abs();
                 }
-                scales_f32.push(sum_abs / group_size as f32);
+                scales_f32.push(sum_abs / recipe.group_size as f32);
             }
         }
         let scale_bytes: Vec<u8> = scales_f32
@@ -697,7 +707,7 @@ impl MlpShardBuilder {
         all_payloads.push(raw_f32_payload);
 
         // 5. Build tensor entry.
-        let layout = ternary_grouped_layout(pack_rows, pack_cols, group_size, DType::F16);
+        let layout = ternary_grouped_layout(pack_rows, pack_cols, &recipe, DType::F16);
 
         let entry = CImageTensorEntry {
             tensor_id: tensor_id.to_string(),
@@ -1049,6 +1059,8 @@ impl DecoderLayerShardBuilder {
                 | CodecFamily::SymInt4
                 | CodecFamily::Ternary
                 | CodecFamily::Ternary1_58
+                // Ternary1_58 implements RuntimeRepresentationClass::TernaryTile640Base;
+                // not yet supported in the decoder layer builder.
                 | CodecFamily::Mixed
                 | CodecFamily::Q8_0
                 | CodecFamily::Q4_K

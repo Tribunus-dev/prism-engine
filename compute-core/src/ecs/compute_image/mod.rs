@@ -137,7 +137,7 @@ pub use manifest::{
     set_mlx_memory_limit, CompiledImageReader, ResolvedTensorBinding,
 };
 
-pub use kv_plan::{KVDtype, KvCachePlan, KvLayout, PrefixCompatibilityKey};
+pub use kv_plan::{KVDtype, KvCachePlan, KvCodec, KvLayout, KvQuantMode, PrefixCompatibilityKey};
 
 pub use compile::{download_hf_model, parse_hf_source};
 

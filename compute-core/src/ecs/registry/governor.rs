@@ -76,7 +76,7 @@ mod tests {
                 fallbacks: vec![],
                 validated_hardware: false,
             },
-            precision_policy: PrecisionPolicy {
+            admission_precision: AdmissionPrecision {
                 base: PrecisionClass::NF4Tile640,
                 allowed_escalations: vec![],
                 allow_dynamic: false,
