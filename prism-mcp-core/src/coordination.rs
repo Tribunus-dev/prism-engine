@@ -11,6 +11,8 @@ pub struct ClaimResult { pub claimed: bool, pub claim_id: Option<String>, pub co
 pub struct PathLock { pub lock_id: String, pub path: String, pub lock_kind: String, pub session_id: String, pub expires_at: String }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockResult { pub acquired: bool, pub locks: Vec<PathLock>, pub conflicts: Vec<PathLock> }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoordinationEvent { pub sequence: i64, pub event_type: String, pub session_id: String, pub payload: serde_json::Value }
 
 pub trait CoordinationStore: Send + Sync {
     fn start_session(&self, session_id: &str, agent_id: &str, purpose: Option<&str>) -> Result<CoordinationSession>;
@@ -23,4 +25,7 @@ pub trait CoordinationStore: Send + Sync {
     fn acquire_path(&self, session_id: &str, path: &str, kind: &str, ttl_seconds: i64) -> Result<LockResult>;
     fn release_path(&self, lock_id: &str, session_id: &str) -> Result<()>;
     fn recover_expired(&self) -> Result<serde_json::Value>;
+    fn handoff(&self, work_id: &str, from_session: &str, to_session: &str, context: &serde_json::Value) -> Result<()>;
+    fn append_event(&self, event_type: &str, session_id: &str, payload: &serde_json::Value) -> Result<CoordinationEvent>;
+    fn status(&self) -> Result<serde_json::Value>;
 }

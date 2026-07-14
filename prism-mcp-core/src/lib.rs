@@ -38,6 +38,6 @@ pub use storage::{
     KnowledgeDocument, KnowledgeListRow, KnowledgeSearchResult, KnowledgeStore, LeaseStore,
     ProjectionStore,
 };
-pub use coordination::{ClaimResult, CoordinationSession, CoordinationStore, LockResult, PathLock, WorkItem};
+pub use coordination::{ClaimResult, CoordinationEvent, CoordinationSession, CoordinationStore, LockResult, PathLock, WorkItem};
 pub use subprocess::{run_with_timeout, ProcessCache};
 pub use work_journal::{JournalEntry, JournalPhase, WorkJournal};

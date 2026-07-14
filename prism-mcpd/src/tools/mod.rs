@@ -27,6 +27,9 @@ pub fn register_basic() -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandl
         ("agent_path_lock", "acquire_path"),
         ("agent_path_unlock", "release_path"),
         ("agent_coordination_recover", "recover"),
+        ("agent_work_handoff", "handoff"),
+        ("agent_coordination_event", "event"),
+        ("agent_coordination_status", "status"),
     ] {
         map.insert(name, Arc::new(coordination_handler::CoordinationHandler { name, action }));
     }

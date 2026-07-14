@@ -211,6 +211,8 @@ CREATE TABLE IF NOT EXISTS prism_coord_claims (claim_id TEXT PRIMARY KEY, work_i
 CREATE UNIQUE INDEX IF NOT EXISTS prism_coord_active_claim ON prism_coord_claims(work_id) WHERE status='active';
 CREATE TABLE IF NOT EXISTS prism_coord_locks (lock_id TEXT PRIMARY KEY, path TEXT NOT NULL, lock_kind TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES prism_coord_sessions(session_id), status TEXT NOT NULL DEFAULT 'active', expires_at TIMESTAMPTZ NOT NULL, acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(), released_at TIMESTAMPTZ);
 CREATE INDEX IF NOT EXISTS prism_coord_lock_path ON prism_coord_locks(path) WHERE status='active';
+CREATE TABLE IF NOT EXISTS prism_coord_handoffs (handoff_id TEXT PRIMARY KEY, work_id TEXT NOT NULL REFERENCES prism_coord_work(work_id), from_session TEXT NOT NULL, to_session TEXT NOT NULL, context JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS prism_coord_events (sequence BIGSERIAL PRIMARY KEY, event_type TEXT NOT NULL, session_id TEXT NOT NULL, payload JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS prism_projection_events (
     id BIGSERIAL PRIMARY KEY,
     record_id TEXT NOT NULL,
