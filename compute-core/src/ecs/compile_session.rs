@@ -1,8 +1,16 @@
 use crate::ecs::compiler::event_emitter::{now_micros, CompilerEvent, CompilerEventStream};
-use crate::ecs::{CompWorld, EntityKind, SchedulePhase};
+use crate::ecs::Entity;
+use crate::ecs::{CompEntity, CompWorld, EntityKind, SchedulePhase};
 use std::path::{Path, PathBuf};
 
 /// A compile session — owns the ECS world and drives the compiler pipeline.
+///
+/// # Entity migration
+///
+/// New code SHOULD use the canonical [`Entity`] (u64, u32) type rather than
+/// the legacy [`CompEntity`](crate::ecs::CompEntity) wrapper.  The session
+/// provides [`canonical_entity`](Self::canonical_entity) to convert between
+/// the two when interacting with [`CompWorld`].
 pub struct CompileSession {
     pub world: CompWorld,
     /// Path to the input model (GGUF / safetensors / HF directory).
@@ -541,6 +549,28 @@ impl CompileSession {
     /// Run a single phase.
     pub fn run_phase(&mut self, phase: SchedulePhase) -> anyhow::Result<()> {
         self.world.run_phase(phase)
+    }
+
+    /// Borrow the underlying [`CompWorld`].
+    ///
+    /// This is the canonical accessor — callers SHOULD use this instead of
+    /// accessing `self.world` directly so that the rename to `World` (Phase 6)
+    /// becomes a no-op behind this accessor.
+    pub fn canonical_world(&self) -> &CompWorld {
+        &self.world
+    }
+
+    /// Convert a legacy [`CompEntity`] to the canonical [`Entity`] handle.
+    ///
+    /// During the ongoing migration the generation field is set to `0` because
+    /// the legacy [`CompWorld`] does not expose per-entity generation counters
+    /// through its public API.  Once `CompWorld` is replaced by the generational
+    /// `World` (Phase 6), this method will resolve the true generation.
+    ///
+    /// New code that creates entities through new APIs (e.g. `World::spawn`)
+    /// SHOULD receive [`Entity`] handles directly and skip this conversion.
+    pub fn canonical_entity(&self, legacy: CompEntity) -> Entity {
+        Entity(legacy.0, 0)
     }
 }
 

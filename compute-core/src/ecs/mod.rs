@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 pub mod canonical;
 
 pub mod adapter;
@@ -210,7 +211,7 @@ pub use component::tensor::*;
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::schema::SchemaCatalogue;
 use crate::ecs::constitutional::types::WorldEpoch;
-use crate::ecs::constitutional::world_txn::{
+pub use crate::ecs::constitutional::world_txn::{
     CommitReceipt, CommittedEpoch, ComponentChange, PreparedWorldTxn, WorldTxn, WorldTxnError,
 };
 pub use column::Column;
@@ -220,13 +221,17 @@ use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
+#[deprecated(note = "use Entity(u64, u32) for generation safety")]
 pub type EntityId = u64;
 
 /// Opaque entity handle.
 ///
 /// NOTE: This is the legacy ID-only handle. New code should use `Entity(id, gen)`.
+#[deprecated(note = "use Entity(u64, u32) for generation safety")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CompEntity(pub EntityId);
+/// Legacy world type — will be renamed to World after full migration.
+pub use CompWorld as LegacyCompWorld;
 
 /// Generational entity handle.
 ///
