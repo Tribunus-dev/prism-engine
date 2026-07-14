@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use parking_lot::Mutex;
-use prism_mcp_core::{ArtifactRepository, DaemonState, EvidenceStore, McpHandler, RequestContext, ToolRequest, ToolResult};
+use prism_mcp_core::{ArtifactRepository, DaemonState, EvidenceReceipt, EvidenceStatus, EvidenceStore, McpHandler, MetricSet, RequestContext, ToolInvocationId, ToolRequest, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -64,7 +64,7 @@ static SESSION: OnceLock<Arc<Mutex<BrowserSession>>> = OnceLock::new();
 fn session(_state: &DaemonState) -> Result<Arc<Mutex<BrowserSession>>> { Ok(SESSION.get_or_init(|| Arc::new(Mutex::new(BrowserSession::new(BrowserConfig::default())))).clone()) }
 fn lease(state: &DaemonState, owner: &str) -> Result<()> { if state.resource_leases.acquire("browser:safari", owner, 30)? { Ok(()) } else { bail!("browser session is leased by another agent") } }
 
-struct BrowserHandler { name: &'static str }
+struct BrowserHandler { name: &'static str, evidence: Arc<dyn EvidenceStore> }
 impl McpHandler for BrowserHandler {
     fn name(&self) -> &'static str { self.name }
     fn description(&self) -> &'static str { "MCPD-managed Safari WebDriver browser operation with safety limits and evidence." }
@@ -86,13 +86,15 @@ impl McpHandler for BrowserHandler {
             "browser_get_tabs" => json!([{"title":"current","url":browser.command("GET", "/url", None)?.as_str().unwrap_or_default(),"index":0}]),
             _ => bail!("unknown browser tool {}", self.name),
         };
+        let _ = state.resource_leases.release("browser:safari", owner);
+        let _ = self.evidence.record(&EvidenceReceipt { invocation_id: ToolInvocationId::new(), tool: "prism-mcp-browser".into(), operation: self.name.into(), inputs: vec![], outputs: vec![], environment: "mcpd".into(), target: Some("safari-webdriver".into()), source_revision: None, status: EvidenceStatus::Success, metrics: MetricSet::new(), diagnostics: vec![], started_at: chrono::Utc::now(), duration_ms: 0 });
         Ok(ToolResult::text(serde_json::to_string(&value)?))
     }
 }
 
 const STRUCTURED_EXTRACT: &str = r#"return {title:document.title,url:location.href,text:document.body?.innerText||'',links:[...document.querySelectorAll('a,button,input,textarea,select')].slice(0,500).map((e,i)=>({id:'dom-'+i,tag:e.tagName.toLowerCase(),text:(e.innerText||e.value||'').slice(0,1000),selector:e.id?'#'+e.id:e.tagName.toLowerCase(),x:e.getBoundingClientRect().x,y:e.getBoundingClientRect().y,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height})),forms:[]};"#;
 
-pub fn handlers(deps: &ToolDependencies) -> Vec<Arc<dyn McpHandler + Sync + Send>> { let _ = deps; ["browser_navigate","browser_page_source","browser_page_text","browser_current_url","browser_execute_js","browser_screenshot","browser_structured_extract","browser_interactive_regions","browser_structured_view","browser_click_region","browser_type_at","browser_find_element","browser_get_tabs","browser_session_close"].into_iter().map(|name| Arc::new(BrowserHandler{name}) as Arc<dyn McpHandler + Sync + Send>).collect() }
+pub fn handlers(deps: &ToolDependencies) -> Vec<Arc<dyn McpHandler + Sync + Send>> { ["browser_navigate","browser_page_source","browser_page_text","browser_current_url","browser_execute_js","browser_screenshot","browser_structured_extract","browser_interactive_regions","browser_structured_view","browser_click_region","browser_type_at","browser_find_element","browser_get_tabs","browser_session_close"].into_iter().map(|name| Arc::new(BrowserHandler{name, evidence:deps.evidence_ledger.clone()}) as Arc<dyn McpHandler + Sync + Send>).collect() }
 
 pub fn session_from_env() -> Arc<Mutex<BrowserSession>> { Arc::new(Mutex::new(BrowserSession::new(BrowserConfig::default()))) }
 
