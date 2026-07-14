@@ -9,6 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, OnceLock};
 
 struct ManagedJob {
+    job_id: String,
     child: Child,
     command: String,
     stdout_path: std::path::PathBuf,
@@ -92,6 +93,15 @@ impl JobHandler {
                 self.store.update_state(id, state)?;
                 managed.remove(&key);
             }
+        } else {
+            let record = self.store.get_job(id)?;
+            if matches!(&record.state, JobState::Running) {
+                let dir = std::env::temp_dir().join("prism-mcpd-jobs");
+                output = read_output(&dir.join(format!("{key}.stdout")), &dir.join(format!("{key}.stderr")));
+                self.store.update_state(id, JobState::Failed("daemon lost the child process; job reconciled as orphaned".into()))?;
+                self.store.push_event(id, "orphaned", "daemon reconciled a running job with no live child")?;
+                return Self::result(json!({"job_id":key,"status":"Failed","reconciled":true,"orphaned":true,"command":record.operation,"exit_code":null,"stdout":output.0,"stderr":output.1,"stdout_tail":tail(&output.0),"stderr_tail":tail(&output.1)}));
+            }
         }
         let record = self.store.get_job(id)?;
         Self::result(
@@ -144,7 +154,7 @@ impl McpHandler for JobHandler {
                         jobs().lock().values().find(|job| job.command == command)
                     {
                         return Self::result(
-                            json!({"status":"already_running","job_id":existing.child.id().to_string(),"command":command,"cache_key":key_value}),
+                            json!({"status":"already_running","job_id":existing.job_id,"command":command,"cache_key":key_value}),
                         );
                     }
                 }
@@ -173,6 +183,7 @@ impl McpHandler for JobHandler {
                 jobs().lock().insert(
                     id.to_string(),
                     ManagedJob {
+                        job_id: id.to_string(),
                         child,
                         command: command.to_string(),
                         stdout_path,
