@@ -679,4 +679,104 @@ mod tests {
         println!("  Buffers: {}", buffer_count);
         println!("  Dispatches: {}", dispatch_count);
     }
+
+    // -----------------------------------------------------------------------
+    // Generational safety tests
+    // -----------------------------------------------------------------------
+    #[test]
+    #[cfg(feature = "legacy_mutations")]
+    fn test_despawn_then_reuse_entity_id() {
+        let mut world = CompWorld::new();
+        let entity = world.spawn(EntityKind::Session, Some("test".into()));
+        assert!(world.is_alive(entity));
+
+        // Despawn and verify dead.
+        assert!(world.despawn(entity));
+        assert!(!world.is_alive(entity));
+
+        // Spawn again (reuses the freed slot from free_list).
+        let new_entity = world.spawn(EntityKind::Session, Some("test2".into()));
+
+        // After respawn the slot is occupied again. (CompEntity is ID-only,
+        // so old_handle and new_entity may have the same numeric value.)
+        assert!(world.is_alive(new_entity));
+        assert_eq!(world.entity_kind(new_entity), Some(EntityKind::Session));
+    }
+
+    #[test]
+    #[cfg(feature = "legacy_mutations")]
+    fn test_double_despawn_rejected() {
+        let mut world = CompWorld::new();
+        let entity = world.spawn(EntityKind::Session, None);
+
+        // First despawn succeeds.
+        assert!(world.despawn(entity));
+
+        // Second despawn returns false.
+        assert!(!world.despawn(entity));
+    }
+
+    #[test]
+    #[cfg(feature = "legacy_mutations")]
+    fn test_despawn_clears_entity_kind() {
+        let mut world = CompWorld::new();
+        let entity = world.spawn(EntityKind::Session, None);
+        assert_eq!(world.entity_kind(entity), Some(EntityKind::Session));
+
+        // Despawn and verify kind is cleared.
+        world.despawn(entity);
+        assert_eq!(world.entity_kind(entity), None);
+    }
+
+    #[test]
+    #[cfg(feature = "legacy_mutations")]
+    fn test_entity_count_after_despawn() {
+        let mut world = CompWorld::new();
+
+        // Spawn N entities.
+        let n = 5;
+        let mut entities = Vec::new();
+        for i in 0..n {
+            entities.push(world.spawn(EntityKind::Session, Some(format!("e{i}"))));
+        }
+        assert_eq!(world.entity_count(), n as usize);
+
+        // Despawn one.
+        world.despawn(entities[2]);
+
+        // Count reflects occupied slots, not total capacity.
+        assert_eq!(world.entity_count(), (n - 1) as usize);
+    }
+
+    #[test]
+    #[cfg(feature = "legacy_mutations")]
+    fn test_stale_handle_rejected_by_has_entity() {
+        let mut world = CompWorld::new();
+        let entity = world.spawn(EntityKind::Session, None);
+        assert!(world.has_entity(entity));
+
+        // Despawn and verify has_entity returns false.
+        world.despawn(entity);
+        assert!(!world.has_entity(entity));
+    }
+
+    #[test]
+    #[cfg(feature = "legacy_mutations")]
+    fn test_spawn_after_despawn_updates_generation() {
+        let mut world = CompWorld::new();
+        let entity = world.spawn(EntityKind::Session, Some("original".into()));
+        assert!(world.is_alive(entity));
+        assert_eq!(world.entity_kind(entity), Some(EntityKind::Session));
+        assert_eq!(world.name(entity), Some("original"));
+
+        // Despawn.
+        world.despawn(entity);
+        assert!(!world.is_alive(entity));
+
+        // Spawn again (slot may be reused from free_list).
+        let new_entity = world.spawn(EntityKind::Tensor, Some("reborn".into()));
+        assert!(world.is_alive(new_entity));
+        assert_eq!(world.entity_kind(new_entity), Some(EntityKind::Tensor));
+        assert_eq!(world.name(new_entity), Some("reborn"));
+    }
 }

@@ -2,6 +2,7 @@ pub mod canonical;
 
 pub mod adapter;
 pub mod aot;
+pub mod column;
 pub mod compile_session;
 pub mod component;
 pub mod config;
@@ -11,6 +12,7 @@ pub mod receipt_bus;
 pub mod system;
 #[cfg(test)]
 mod tests;
+pub mod world;
 
 pub mod agent;
 pub mod amd_rocm;
@@ -80,7 +82,6 @@ pub mod engine_receipts;
 pub mod errors;
 pub mod evidence;
 pub mod evolution;
-pub mod mlir;
 pub mod execution_profile;
 pub mod executor;
 pub mod executor_projection;
@@ -114,6 +115,7 @@ pub mod memory;
 pub mod metal_backend;
 pub mod metal_capture;
 pub mod metal_launcher;
+pub mod mlir;
 // Metal runtime — gated behind macOS + metal-dispatch
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub mod metal_runtime;
@@ -211,6 +213,7 @@ use crate::ecs::constitutional::types::WorldEpoch;
 use crate::ecs::constitutional::world_txn::{
     CommitReceipt, CommittedEpoch, ComponentChange, PreparedWorldTxn, WorldTxn, WorldTxnError,
 };
+pub use column::Column;
 #[cfg(feature = "mlx-backend")]
 pub use core::bridge;
 use serde::{Deserialize, Serialize};
@@ -220,11 +223,72 @@ use std::collections::HashMap;
 pub type EntityId = u64;
 
 /// Opaque entity handle.
+///
+/// NOTE: This is the legacy ID-only handle. New code should use `Entity(id, gen)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CompEntity(pub EntityId);
 
+/// Generational entity handle.
+///
+/// Each entity carries a generation counter that is incremented on despawn,
+/// catching stale references. The generation is opaque — callers construct
+/// entities through `World::spawn()` or `Commands::spawn()`, never by
+/// fabricating the tuple.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Entity(pub u64, pub u32);
+
+impl Entity {
+    pub fn id(&self) -> u64 {
+        self.0
+    }
+    pub fn generation(&self) -> u32 {
+        self.1
+    }
+}
+
+/// A reserved but not-yet-committed entity, returned by `Commands::spawn()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingEntity(pub u64);
+
+/// Either an existing entity or a pending token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityRef {
+    Existing(Entity),
+    Pending(PendingEntity),
+}
+
 /// Tag trait for data attached to entities.
 pub trait Component: std::fmt::Debug + Send + Sync + 'static {}
+
+// Basic type implementations for common Rust types used as components.
+impl Component for String {}
+impl Component for u64 {}
+impl Component for i64 {}
+impl Component for i32 {}
+impl Component for f32 {}
+impl Component for bool {}
+impl Component for usize {}
+
+/// Dense iterator over entities that have component type A.
+/// Backed by the Column<T> SparseSet storage — iterates the dense array
+/// directly without HashMap overhead.
+#[derive(Debug)]
+pub struct Query<'w, A: Component> {
+    col: Option<&'w Column<A>>,
+    cursor: usize,
+}
+impl<'w, A: Component> Iterator for Query<'w, A> {
+    type Item = (CompEntity, &'w A);
+    fn next(&mut self) -> Option<Self::Item> {
+        let col = self.col?;
+        if self.cursor >= col.len() {
+            return None;
+        }
+        let idx = self.cursor;
+        self.cursor += 1;
+        Some((CompEntity(col.entity_ids()[idx]), &col.dense()[idx]))
+    }
+}
 
 /// Phase in the compiler pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -253,8 +317,9 @@ pub struct CompWorld {
     component_store: ComponentStore,
     resource_store: ResourceStore,
     systems: Vec<Box<dyn CompilerSystem>>,
-    entity_meta: Vec<Option<EntityMeta>>,
+    entity_meta: Vec<Option<EntitySlot>>,
     next_id: u64,
+    free_list: Vec<u64>,
     staging: Vec<Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>>,
     epoch: WorldEpoch,
     journal: Vec<ComponentChange>,
@@ -271,7 +336,11 @@ impl std::fmt::Debug for CompWorld {
         f.debug_struct("CompWorld")
             .field(
                 "entity_count",
-                &self.entity_meta.iter().filter(|m| m.is_some()).count(),
+                &self
+                    .entity_meta
+                    .iter()
+                    .filter(|s| s.as_ref().and_then(|s| s.occupant.as_ref()).is_some())
+                    .count(),
             )
             .field("system_count", &self.systems.len())
             .field("staged_changes", &self.staging.len())
@@ -279,26 +348,32 @@ impl std::fmt::Debug for CompWorld {
     }
 }
 
-/// Manages the lifecycle of a single executable argument region.
+/// Per-entity slot — generation persists across despawn/reuse cycles.
 #[derive(Debug)]
-struct EntityMeta {
-    kind: EntityKind,
-    #[allow(dead_code)]
+struct EntitySlot {
     generation: u32,
+    occupant: Option<Occupant>,
+}
+
+#[derive(Debug)]
+struct Occupant {
+    kind: EntityKind,
     name: Option<String>,
 }
 
-impl Default for EntityMeta {
+impl Default for EntitySlot {
     fn default() -> Self {
         Self {
-            kind: EntityKind::Model,
-            #[allow(dead_code)]
             generation: 0,
-            name: None,
+            occupant: Some(Occupant {
+                kind: EntityKind::Model,
+                name: None,
+            }),
         }
     }
 }
 
+/// Entity kind classification — used for diagnostic and replay classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityKind {
     Node,
@@ -324,7 +399,7 @@ pub enum EntityKind {
 /// Type-erased storage for components, indexed by (TypeId, EntityId).
 #[derive(Debug)]
 pub struct ComponentStore {
-    data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    pub(crate) data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
 /// Type-erased storage for global resources (not per-entity).
@@ -359,8 +434,10 @@ impl CompWorld {
         let entity = self.spawn_entity(kind);
         if let Some(n) = name {
             let idx = (entity.0 - 1) as usize;
-            if let Some(Some(meta)) = self.entity_meta.get_mut(idx) {
-                meta.name = Some(n);
+            if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
+                if let Some(occupant) = &mut slot.occupant {
+                    occupant.name = Some(n);
+                }
             }
         }
         entity
@@ -374,8 +451,8 @@ impl CompWorld {
         let idx = (entity.0 - 1) as usize;
         self.entity_meta
             .get(idx)
-            .and_then(|m| m.as_ref())
-            .and_then(|m| m.name.as_deref())
+            .and_then(|m| m.as_ref()?.occupant.as_ref())
+            .and_then(|o| o.name.as_deref())
     }
 
     /// Find all entities of a given kind.
@@ -383,7 +460,11 @@ impl CompWorld {
         self.entity_meta
             .iter()
             .enumerate()
-            .filter(|(_, meta)| meta.as_ref().is_some_and(|m| m.kind == kind))
+            .filter(|(_, slot)| {
+                slot.as_ref()
+                    .and_then(|s| s.occupant.as_ref())
+                    .is_some_and(|o| o.kind == kind)
+            })
             .map(|(i, _)| CompEntity((i + 1) as u64))
             .collect()
     }
@@ -401,13 +482,7 @@ impl CompWorld {
             self.direct_mutation_allowed,
             "direct remove_component() called outside WorldTxn — use txn.remove_component()"
         );
-        let store = &mut self.component_store;
-        let type_id = TypeId::of::<T>();
-        store
-            .data
-            .get_mut(&type_id)?
-            .downcast_mut::<HashMap<EntityId, T>>()
-            .and_then(|map| map.remove(&entity.0))
+        self.component_store.remove::<T>(entity.0)
     }
 
     pub fn new() -> Self {
@@ -417,6 +492,7 @@ impl CompWorld {
             systems: Vec::new(),
             entity_meta: Vec::new(),
             next_id: 1,
+            free_list: Vec::new(),
             staging: Vec::new(),
             epoch: WorldEpoch(1),
             journal: Vec::new(),
@@ -449,7 +525,12 @@ impl CompWorld {
     /// both call it without double-pushing entity metadata.
     pub fn spawn_entity_with_id(&mut self, id: u64, kind: EntityKind) -> CompEntity {
         let idx = (id - 1) as usize;
-        if idx < self.entity_meta.len() && self.entity_meta[idx].is_some() {
+        if idx < self.entity_meta.len()
+            && self.entity_meta[idx]
+                .as_ref()
+                .and_then(|s| s.occupant.as_ref())
+                .is_some()
+        {
             // Already occupied — idempotent.
             return CompEntity(id);
         }
@@ -458,10 +539,9 @@ impl CompWorld {
             self.entity_meta.push(None);
         }
         // Mark the slot as occupied (not phantom)
-        self.entity_meta[idx] = Some(EntityMeta {
-            kind,
+        self.entity_meta[idx] = Some(EntitySlot {
             generation: 0,
-            name: None,
+            occupant: Some(Occupant { kind, name: None }),
         });
         if id >= self.next_id {
             self.next_id = id + 1;
@@ -474,13 +554,37 @@ impl CompWorld {
             self.direct_mutation_allowed,
             "direct spawn_entity() called outside WorldTxn — use WorldTxn::stage_spawn()"
         );
-        let id = self.next_id;
-        self.next_id += 1;
-        self.entity_meta.push(Some(EntityMeta {
-            kind,
-            generation: 0,
-            name: None,
-        }));
+        let (id, _generation) = if let Some(free) = self.free_list.pop() {
+            let idx = (free - 1) as usize;
+            if idx < self.entity_meta.len() {
+                if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
+                    let gen = slot.generation + 1;
+                    slot.occupant = Some(Occupant { kind, name: None });
+                    slot.generation = gen;
+                    (free, gen)
+                } else {
+                    self.entity_meta[idx] = Some(EntitySlot {
+                        generation: 0,
+                        occupant: Some(Occupant { kind, name: None }),
+                    });
+                    (free, 0)
+                }
+            } else {
+                self.entity_meta.push(Some(EntitySlot {
+                    generation: 0,
+                    occupant: Some(Occupant { kind, name: None }),
+                }));
+                (free, 0)
+            }
+        } else {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.entity_meta.push(Some(EntitySlot {
+                generation: 0,
+                occupant: Some(Occupant { kind, name: None }),
+            }));
+            (id, 0)
+        };
         CompEntity(id)
     }
 
@@ -491,7 +595,41 @@ impl CompWorld {
         let idx = (entity.0 - 1) as usize;
         self.entity_meta
             .get(idx)
-            .and_then(|m| m.as_ref().map(|meta| meta.kind))
+            .and_then(|slot| slot.as_ref()?.occupant.as_ref().map(|o| o.kind))
+    }
+
+    /// Check whether a CompEntity handle is still valid (not despawned).
+    pub fn is_alive(&self, entity: CompEntity) -> bool {
+        if entity.0 == 0 {
+            return false;
+        }
+        let idx = (entity.0 - 1) as usize;
+        self.entity_meta
+            .get(idx)
+            .and_then(|slot| slot.as_ref())
+            .and_then(|s| s.occupant.as_ref())
+            .is_some()
+    }
+
+    /// Despawn an entity: advance generation and release the slot for reuse.
+    /// Returns false if the entity was already dead.
+    pub fn despawn(&mut self, entity: CompEntity) -> bool {
+        if !self.is_alive(entity) {
+            return false;
+        }
+        let idx = (entity.0 - 1) as usize;
+        if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
+            slot.generation += 1;
+            slot.occupant = None;
+        }
+        self.free_list.push(entity.0);
+        true
+    }
+
+    /// Iterate over all entities that have component type A.
+    pub fn query<'w, A: Component>(&'w self) -> Query<'w, A> {
+        let col: Option<&Column<A>> = self.component_store.column::<A>();
+        Query { col, cursor: 0 }
     }
 
     pub fn add_component<T: Component>(&mut self, entity: CompEntity, component: T) {
@@ -499,28 +637,13 @@ impl CompWorld {
             self.direct_mutation_allowed,
             "direct add_component() called outside WorldTxn — use txn.add_component()"
         );
-        let store = &mut self.component_store;
-        let type_id = TypeId::of::<T>();
-        let map: &mut HashMap<EntityId, T> = store
-            .data
-            .entry(type_id)
-            .or_insert_with(|| Box::new(HashMap::<EntityId, T>::new()))
-            .downcast_mut::<HashMap<EntityId, T>>()
-            .expect("type mismatch in ComponentStore");
-        map.insert(entity.0, component);
+        self.component_store.insert::<T>(entity.0, component);
     }
 
     pub fn stage_component<T: Component>(&mut self, entity: CompEntity, component: T) {
         self.staging
             .push(Box::new(move |store: &mut ComponentStore| {
-                let type_id = TypeId::of::<T>();
-                let map: &mut HashMap<EntityId, T> = store
-                    .data
-                    .entry(type_id)
-                    .or_insert_with(|| Box::new(HashMap::<EntityId, T>::new()))
-                    .downcast_mut::<HashMap<EntityId, T>>()
-                    .expect("type mismatch in ComponentStore");
-                map.insert(entity.0, component);
+                store.insert::<T>(entity.0, component);
             }));
     }
 
@@ -532,24 +655,12 @@ impl CompWorld {
     }
 
     /// Discard deferred component insert operations added via [`stage_component`].
-    ///
-    /// **This is NOT a transactional world rollback.** It only clears the staging
-    /// queue. Systems that performed direct mutations via [`add_component`],
-    /// [`remove_component`], [`get_component_mut`], or [`spawn`] before returning
-    /// an error are NOT reverted. Use [`WorldTxn`] (when available) for atomic
-    /// state transitions.
     pub fn rollback_stage(&mut self) {
         self.staging.clear();
     }
 
     pub fn get_component<T: Component>(&self, entity: CompEntity) -> Option<&T> {
-        let store = &self.component_store;
-        let type_id = TypeId::of::<T>();
-        store
-            .data
-            .get(&type_id)?
-            .downcast_ref::<HashMap<EntityId, T>>()
-            .and_then(|map| map.get(&entity.0))
+        self.component_store.get::<T>(entity.0)
     }
 
     pub fn get_component_mut<T: Component>(&mut self, entity: CompEntity) -> Option<&mut T> {
@@ -557,13 +668,7 @@ impl CompWorld {
             self.direct_mutation_allowed,
             "direct get_component_mut() called outside WorldTxn — use txn for mutations"
         );
-        let store = &mut self.component_store;
-        let type_id = TypeId::of::<T>();
-        store
-            .data
-            .get_mut(&type_id)?
-            .downcast_mut::<HashMap<EntityId, T>>()
-            .and_then(|map| map.get_mut(&entity.0))
+        self.component_store.column_mut::<T>().get_mut(entity.0)
     }
 
     #[cfg_attr(
@@ -636,7 +741,10 @@ impl CompWorld {
     }
 
     pub fn entity_count(&self) -> usize {
-        self.entity_meta.len()
+        self.entity_meta
+            .iter()
+            .filter(|s| s.as_ref().and_then(|s| s.occupant.as_ref()).is_some())
+            .count()
     }
 
     pub fn system_count(&self) -> usize {
@@ -663,7 +771,11 @@ impl CompWorld {
             return false;
         }
         let idx = (entity.0 - 1) as usize;
-        self.entity_meta.get(idx).is_some_and(|m| m.is_some())
+        self.entity_meta
+            .get(idx)
+            .and_then(|s| s.as_ref())
+            .and_then(|s| s.occupant.as_ref())
+            .is_some()
     }
 
     /// Read the component version (write count) for a given entity.
@@ -774,19 +886,35 @@ impl ResourceStore {
 }
 
 impl ComponentStore {
-    pub fn contains<T: Component>(&self, entity: CompEntity) -> bool {
-        let type_id = TypeId::of::<T>();
+    /// Get or create a column for component type T.
+    pub fn column_mut<T: Component>(&mut self) -> &mut Column<T> {
+        let key = TypeId::of::<Column<T>>();
         self.data
-            .get(&type_id)
-            .and_then(|b| b.downcast_ref::<HashMap<EntityId, T>>())
-            .map_or(false, |map| map.contains_key(&entity.0))
+            .entry(key)
+            .or_insert_with(|| Box::new(Column::<T>::new()))
+            .downcast_mut::<Column<T>>()
+            .expect("Column<T> type mismatch in ComponentStore")
     }
 
-    pub fn remove<T: Component>(&mut self, entity: CompEntity) -> Option<T> {
-        let type_id = TypeId::of::<T>();
-        self.data
-            .get_mut(&type_id)
-            .and_then(|b| b.downcast_mut::<HashMap<EntityId, T>>())
-            .and_then(|map| map.remove(&entity.0))
+    /// Get a shared reference to a column.
+    pub fn column<T: Component>(&self) -> Option<&Column<T>> {
+        let key = TypeId::of::<Column<T>>();
+        self.data.get(&key)?.downcast_ref::<Column<T>>()
+    }
+
+    pub fn insert<T: Component>(&mut self, entity: u64, value: T) {
+        self.column_mut::<T>().insert(entity, value);
+    }
+
+    pub fn get<T: Component>(&self, entity: u64) -> Option<&T> {
+        self.column::<T>()?.get(entity)
+    }
+
+    pub fn remove<T: Component>(&mut self, entity: u64) -> Option<T> {
+        self.column_mut::<T>().remove(entity)
+    }
+
+    pub fn contains<T: Component>(&self, entity: CompEntity) -> bool {
+        self.column::<T>().map(|c| c.has(entity.0)).unwrap_or(false)
     }
 }
