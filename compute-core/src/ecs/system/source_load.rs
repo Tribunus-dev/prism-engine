@@ -17,7 +17,7 @@ use crate::ecs::compute_image::compile::load_source_tensor_table;
 use crate::ecs::compute_image::compile::source::load_source;
 use crate::ecs::Component;
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Source tensor metadata wrapped as an ECS component.
 #[derive(Debug, Clone)]

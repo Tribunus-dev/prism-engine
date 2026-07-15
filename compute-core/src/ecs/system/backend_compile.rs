@@ -16,9 +16,8 @@ pub enum CompileError {
     Io { details: String },
 }
 
-
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 use sha2::{Digest, Sha256};
 
 /// Compiles kernel source to backend-specific binaries inline.

@@ -1,5 +1,3 @@
-
-
 use serde::{Deserialize, Serialize};
 
 /// Deterministic search budget controlling Phase 4 calibration space.

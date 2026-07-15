@@ -25,8 +25,6 @@ use crate::ecs::runtime::scheduling::metadata::{
 use crate::ecs::runtime::systems::npu::submitter::NpuExecutionState;
 use crate::ecs::runtime::world::World;
 
-
-
 // ---------------------------------------------------------------------------
 // System
 // ---------------------------------------------------------------------------

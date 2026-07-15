@@ -1,91 +1,150 @@
-//! Column<T> — SparseSet component storage using u64 entity IDs.
+//! Column<T> — Generation-aware SparseSet component storage keyed by Entity(id, gen).
 //!
 //! This is the concrete storage backend for the existing `ComponentStore`,
-//! replacing `HashMap<EntityId, T>` with a dense+sparse column. It provides
-//! O(1) lookup and cache-friendly dense iteration, matching the runtime
-//! world's `ComponentVec` but with u64 entity IDs (no generation wrapper).
+//! replacing `HashMap<EntityId, T>` with a dense+sparse column. Every access
+//! checks the entity generation, preventing stale handles from observing or
+//! mutating components belonging to a newer entity occupying the same slot.
 
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-/// Dense SparseSet column keyed by u64 entity IDs.
+use crate::ecs::Entity;
+
+/// Generation-aware SparseSet column keyed by Entity(id, generation).
 ///
-/// Each column stores one component type. Entity IDs index into a sparse
-/// array that points to a dense storage slot. Swap-remove maintains O(1)
-/// amortized removal.
+/// Each column stores one component type. Entity id() values index into a
+/// sparse array that points to a dense storage slot. Every access validates
+/// that the stored entity generation matches the requested generation —
+/// stale handles (from despawned/respawned slots) are rejected.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Column<T> {
     /// Dense array — contiguous component values.
     dense: Vec<T>,
     /// Sparse index: entity_id -> Some(dense_idx) or None.
     sparse: Vec<Option<u32>>,
-    /// Entity id for each dense entry (for removal fixup and iteration).
-    entity_ids: Vec<u64>,
+    /// Entity (id, generation) for each dense entry (for removal fixup and iteration).
+    entities: Vec<Entity>,
 }
 
 impl<T> Column<T> {
+    /// Debug-only invariant check: sparse ↔ dense ↔ entities consistency.
+    fn debug_check_invariants(&self) {
+        debug_assert_eq!(
+            self.dense.len(),
+            self.entities.len(),
+            "dense/entities length mismatch"
+        );
+        for (i, slot) in self.sparse.iter().enumerate() {
+            if let Some(dense_idx) = slot {
+                let idx = *dense_idx as usize;
+                debug_assert!(
+                    idx < self.entities.len(),
+                    "sparse[{}] points past entities end ({})",
+                    i,
+                    self.entities.len()
+                );
+                debug_assert_eq!(
+                    self.entities[idx].id() as usize,
+                    i,
+                    "sparse[{}] points to entity[{}] with wrong id {}",
+                    i,
+                    idx,
+                    self.entities[idx].id()
+                );
+            }
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             dense: Vec::new(),
             sparse: Vec::new(),
-            entity_ids: Vec::new(),
+            entities: Vec::new(),
         }
     }
 
-    /// Insert or replace a component for an entity.
-    pub fn insert(&mut self, entity: u64, value: T) {
-        let id = entity as usize;
+    /// Insert or replace a component for an entity (generation-aware).
+    ///
+    /// If the slot is occupied by a stale generation (entity reused after
+    /// despawn), the stale entry is evicted first by swap-remove, then the
+    /// new value is inserted. Same-generation replaces in place.
+    pub fn insert(&mut self, entity: Entity, value: T) {
+        let id = entity.id() as usize;
         if id >= self.sparse.len() {
             self.sparse.resize(id + 1, None);
         }
         if let Some(dense_idx) = self.sparse[id] {
-            // Replace in-place
-            self.dense[dense_idx as usize] = value;
-            return;
+            let stored = &self.entities[dense_idx as usize];
+            if stored.generation() == entity.generation() {
+                // Same generation — replace in-place
+                self.dense[dense_idx as usize] = value;
+                return;
+            }
+            // Stale generation — evict old entry first
+            self.remove_dense_entry(dense_idx as usize);
         }
         let dense_idx = self.dense.len() as u32;
         self.sparse[id] = Some(dense_idx);
         self.dense.push(value);
-        self.entity_ids.push(entity);
+        self.entities.push(entity);
+        self.debug_check_invariants();
     }
 
-    /// Get a shared reference to an entity's component.
-    pub fn get(&self, entity: u64) -> Option<&T> {
-        let id = entity as usize;
+    /// Get a shared reference to an entity's component (generation-checked).
+    /// Returns None if the entity has no component or the handle is stale.
+    pub fn get(&self, entity: Entity) -> Option<&T> {
+        let id = entity.id() as usize;
         let dense_idx = self.sparse.get(id).and_then(|&opt| opt)?;
+        let stored = self.entities.get(dense_idx as usize)?;
+        if stored.generation() != entity.generation() {
+            return None;
+        }
         self.dense.get(dense_idx as usize)
     }
 
-    /// Get a mutable reference to an entity's component.
-    pub fn get_mut(&mut self, entity: u64) -> Option<&mut T> {
-        let id = entity as usize;
+    /// Get a mutable reference to an entity's component (generation-checked).
+    /// Returns None if the entity has no component or the handle is stale.
+    pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
+        let id = entity.id() as usize;
         let dense_idx = self.sparse.get_mut(id).and_then(|opt| *opt)?;
+        let stored = self.entities.get(dense_idx as usize)?;
+        if stored.generation() != entity.generation() {
+            return None;
+        }
         self.dense.get_mut(dense_idx as usize)
     }
 
-    /// Remove an entity's component, returning the old value.
+    /// Remove an entity's component (generation-checked), returning the old value.
     /// Uses swap-remove for O(1) amortized.
-    pub fn remove(&mut self, entity: u64) -> Option<T> {
-        let id = entity as usize;
-        let dense_idx = self.sparse.get_mut(id)?.take()? as usize;
-        let last = self.dense.len() - 1;
-        if dense_idx != last {
-            self.dense.swap(dense_idx, last);
-            let swapped = self.entity_ids[last];
-            self.sparse[swapped as usize] = Some(dense_idx as u32);
-            self.entity_ids.swap(dense_idx, last);
+    /// Returns None if the entity has no component or the handle is stale.
+    pub fn remove(&mut self, entity: Entity) -> Option<T> {
+        let id = entity.id() as usize;
+        let dense_idx = *self.sparse.get(id)?;
+        let dense_idx = dense_idx? as usize;
+        let stored = self.entities.get(dense_idx)?;
+        if stored.generation() != entity.generation() {
+            return None;
         }
-        let value = self.dense.pop();
-        self.entity_ids.pop();
-        value
+        self.sparse[id] = None;
+        let val = self.remove_dense_entry(dense_idx);
+        self.debug_check_invariants();
+        Some(val)
     }
 
-    /// Check if an entity has a component of this type.
-    pub fn has(&self, entity: u64) -> bool {
-        let id = entity as usize;
-        self.sparse.get(id).and_then(|&opt| opt).is_some()
+    /// Check if an entity has a component of this type (generation-checked).
+    /// Returns false for stale handles.
+    pub fn has(&self, entity: Entity) -> bool {
+        let id = entity.id() as usize;
+        match self.sparse.get(id).and_then(|&opt| opt) {
+            Some(dense_idx) => self
+                .entities
+                .get(dense_idx as usize)
+                .map(|e| e.generation() == entity.generation())
+                .unwrap_or(false),
+            None => false,
+        }
     }
 
     /// Number of components stored.
@@ -99,11 +158,12 @@ impl<T> Column<T> {
     /// Clear all components (does not reset sparse indices).
     pub fn clear(&mut self) {
         self.dense.clear();
-        self.entity_ids.clear();
+        self.entities.clear();
         // Reset sparse indices to prevent stale-index OOB panic on reinsert.
         for entry in &mut self.sparse {
             *entry = None;
         }
+        self.debug_check_invariants();
     }
 
     /// Access the dense array directly.
@@ -111,17 +171,37 @@ impl<T> Column<T> {
         &self.dense
     }
 
-    /// Access entity IDs in dense order.
-    pub fn entity_ids(&self) -> &[u64] {
-        &self.entity_ids
+    /// Access the stored entities in dense order (with generation).
+    pub fn entities(&self) -> &[Entity] {
+        &self.entities
     }
 
-    /// Iterate over (entity_id, &T) pairs.
-    pub fn iter(&self) -> impl Iterator<Item = (u64, &T)> + '_ {
+    /// Iterate over (Entity, &T) pairs (generation included).
+    pub fn iter(&self) -> impl Iterator<Item = (Entity, &T)> + '_ {
         self.dense
             .iter()
             .enumerate()
-            .map(|(i, v)| (self.entity_ids[i], v))
+            .map(|(i, v)| (self.entities[i], v))
+    }
+
+    /// Internal: swap-remove the entry at the given dense index.
+    /// The caller is responsible for clearing the sparse entry before calling
+    /// this when performing a generation-checked remove.
+    fn remove_dense_entry(&mut self, dense_idx: usize) -> T {
+        let last = self.dense.len() - 1;
+        if dense_idx != last {
+            self.dense.swap(dense_idx, last);
+            let swapped = self.entities[last];
+            self.sparse[swapped.id() as usize] = Some(dense_idx as u32);
+            self.entities.swap(dense_idx, last);
+        }
+        self.entities.pop();
+        let val = self
+            .dense
+            .pop()
+            .expect("remove_dense_entry on empty column");
+        self.debug_check_invariants();
+        val
     }
 }
 
@@ -134,11 +214,11 @@ impl<T> Column<T> {
 /// Enables operations like "remove this entity from every column" without
 /// knowing the concrete component type at the call site.
 pub trait ErasedColumn: Debug + Send + Sync {
-    /// Remove the entity from this column (swap-remove semantics).
-    fn remove_entity(&mut self, entity: u64) -> bool;
+    /// Remove the entity from this column (generation-checked).
+    fn remove_entity(&mut self, entity: Entity) -> bool;
 
-    /// Check if this column contains the entity.
-    fn has_entity(&self, entity: u64) -> bool;
+    /// Check if this column contains the entity (generation-checked).
+    fn has_entity(&self, entity: Entity) -> bool;
 
     /// Remove all entries from this column.
     fn clear(&mut self);
@@ -167,11 +247,11 @@ impl<T: 'static + Send + Sync + Debug> ErasedColumn for Column<T> {
         self
     }
 
-    fn remove_entity(&mut self, entity: u64) -> bool {
+    fn remove_entity(&mut self, entity: Entity) -> bool {
         self.remove(entity).is_some()
     }
 
-    fn has_entity(&self, entity: u64) -> bool {
+    fn has_entity(&self, entity: Entity) -> bool {
         self.has(entity)
     }
 
@@ -199,9 +279,8 @@ pub struct ColumnStore {
 }
 
 impl ColumnStore {
-    /// Remove an entity from every registered column.
-    /// Returns true if the entity was found in at least one column.
-    pub fn remove_entity_from_all(&mut self, entity: u64) -> bool {
+    /// Remove an entity from every registered column (generation-checked).
+    pub fn remove_entity_from_all(&mut self, entity: Entity) -> bool {
         let mut found = false;
         for (_, col) in self.data.iter_mut() {
             if col.remove_entity(entity) {
@@ -257,23 +336,26 @@ impl ColumnStore {
         )
     }
 
-    /// Insert a component for an entity.
-    pub fn insert<T: 'static + Send + Sync + std::fmt::Debug>(&mut self, entity: u64, value: T) {
+    /// Insert a component for an entity (generation-aware).
+    pub fn insert<T: 'static + Send + Sync + std::fmt::Debug>(&mut self, entity: Entity, value: T) {
         self.column_mut::<T>().insert(entity, value);
     }
 
-    /// Get a shared reference to an entity's component.
-    pub fn get<T: 'static + Send + Sync + std::fmt::Debug>(&self, entity: u64) -> Option<&T> {
+    /// Get a shared reference to an entity's component (generation-checked).
+    pub fn get<T: 'static + Send + Sync + std::fmt::Debug>(&self, entity: Entity) -> Option<&T> {
         self.column::<T>()?.get(entity)
     }
 
-    /// Remove an entity's component.
-    pub fn remove<T: 'static + Send + Sync + std::fmt::Debug>(&mut self, entity: u64) -> Option<T> {
+    /// Remove an entity's component (generation-checked).
+    pub fn remove<T: 'static + Send + Sync + std::fmt::Debug>(
+        &mut self,
+        entity: Entity,
+    ) -> Option<T> {
         self.column_mut_ref::<T>()?.remove(entity)
     }
 
-    /// Check if an entity has a component of this type.
-    pub fn has<T: 'static + Send + Sync + std::fmt::Debug>(&self, entity: u64) -> bool {
+    /// Check if an entity has a component of this type (generation-checked).
+    pub fn has<T: 'static + Send + Sync + std::fmt::Debug>(&self, entity: Entity) -> bool {
         self.column::<T>().map(|c| c.has(entity)).unwrap_or(false)
     }
 
@@ -287,20 +369,89 @@ impl ColumnStore {
 mod tests {
     use super::*;
 
+    fn e(id: u64, gen: u32) -> Entity {
+        Entity(id, gen)
+    }
+
     #[test]
     fn test_clear_does_not_cause_oob_on_reinsert() {
         let mut col: Column<i32> = Column::new();
-        col.insert(42, 100);
-        col.insert(84, 200);
+        col.insert(e(42, 0), 100);
+        col.insert(e(84, 0), 200);
         assert_eq!(col.len(), 2);
 
         col.clear();
         assert_eq!(col.len(), 0);
 
-        // Reinsert on a previously-stored entity — stale sparse index must
-        // be reset or this would try to write into the empty dense vector.
-        col.insert(42, 300);
+        col.insert(e(42, 0), 300);
         assert_eq!(col.len(), 1);
-        assert_eq!(col.get(42), Some(&300));
+        assert_eq!(col.get(e(42, 0)), Some(&300));
+    }
+
+    #[test]
+    fn test_stale_generation_get_returns_none() {
+        let mut col: Column<i32> = Column::new();
+        col.insert(e(42, 0), 100);
+        // Stale handle (wrong generation) should return None
+        assert_eq!(col.get(e(42, 1)), None);
+        // Correct generation still works
+        assert_eq!(col.get(e(42, 0)), Some(&100));
+    }
+
+    #[test]
+    fn test_stale_generation_has_returns_false() {
+        let mut col: Column<i32> = Column::new();
+        col.insert(e(42, 0), 100);
+        assert!(col.has(e(42, 0)));
+        assert!(!col.has(e(42, 1)));
+    }
+
+    #[test]
+    fn test_stale_generation_remove_returns_none() {
+        let mut col: Column<i32> = Column::new();
+        col.insert(e(42, 0), 100);
+        assert_eq!(col.remove(e(42, 1)), None);
+        // Original entry unchanged
+        assert_eq!(col.get(e(42, 0)), Some(&100));
+    }
+
+    #[test]
+    fn test_insert_evicts_stale_generation() {
+        let mut col: Column<i32> = Column::new();
+        col.insert(e(42, 0), 100);
+        // Insert with stale generation — should evict old entry
+        col.insert(e(42, 1), 200);
+        assert_eq!(col.len(), 1);
+        assert_eq!(col.get(e(42, 0)), None);
+        assert_eq!(col.get(e(42, 1)), Some(&200));
+    }
+
+    #[test]
+    fn test_iter_yields_full_entity() {
+        let mut col: Column<i32> = Column::new();
+        col.insert(e(42, 0), 100);
+        col.insert(e(84, 2), 200);
+        let entries: Vec<_> = col.iter().collect();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.contains(&(e(42, 0), &100)));
+        assert!(entries.contains(&(e(84, 2), &200)));
+    }
+
+    #[test]
+    fn test_same_generation_replaces_in_place() {
+        let mut col: Column<i32> = Column::new();
+        col.insert(e(42, 0), 100);
+        col.insert(e(42, 0), 200);
+        assert_eq!(col.len(), 1);
+        assert_eq!(col.get(e(42, 0)), Some(&200));
+    }
+
+    #[test]
+    fn test_entities_accessor_includes_generation() {
+        let mut col: Column<i32> = Column::new();
+        col.insert(e(42, 5), 100);
+        let ents = col.entities();
+        assert_eq!(ents.len(), 1);
+        assert_eq!(ents[0], e(42, 5));
     }
 }

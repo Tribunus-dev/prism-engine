@@ -1,6 +1,5 @@
-
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, Component, EntityKind, SchedulePhase, World};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------

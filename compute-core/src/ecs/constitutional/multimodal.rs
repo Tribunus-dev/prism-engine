@@ -4,7 +4,7 @@ use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn};
-use crate::ecs::{World, Entity, EntityKind};
+use crate::ecs::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -345,7 +345,7 @@ impl CreatePipelineCommand {
         txn.put_durable(
             pipeline_id,
             Pipeline {
-                pipeline_id,
+                pipeline_id: pipeline_id.id(),
                 session_entity: self.session_entity,
                 target_modality: modality_to_string(&self.target_modality),
                 created_at: Timestamp::now(),
@@ -360,11 +360,11 @@ impl CreatePipelineCommand {
 
         // 6. Attach stages as separate entities
         // Use sequential IDs starting after pipeline_id
-        let stage_entities: Vec<u64> = (0..self.stages.len())
+        let stage_entities: Vec<Entity> = (0..self.stages.len())
             .map(|i| {
-                let stage_id = pipeline_id + 1 + i as u64;
-                txn.stage_spawn(stage_id, EntityKind::Pipeline);
-                stage_id
+                let stage_id = pipeline_id.id() + 1 + i as u64;
+                txn.stage_spawn(Entity(stage_id, 0), EntityKind::Pipeline);
+                Entity(stage_id, 0)
             })
             .collect();
 
@@ -382,9 +382,9 @@ impl CreatePipelineCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "pipeline_created".to_string(),
-            entity_id: Some(EntityKindId(pipeline_id)),
+            entity_id: Some(EntityKindId(pipeline_id.id())),
             payload: serde_json::json!({
-                "pipeline_id": pipeline_id,
+                "pipeline_id": pipeline_id.id(),
                 "session_entity": self.session_entity,
                 "target_modality": modality_str,
             }),
@@ -405,7 +405,7 @@ impl CreatePipelineCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmitStageOutputCommand {
     pub id: MessageId,
-    pub pipeline_entity: u64,
+    pub pipeline_entity: Entity,
     pub stage_index: u32,
     pub output_artifact_id: Option<u64>,
 }
@@ -421,19 +421,21 @@ impl SubmitStageOutputCommand {
             .verify_type::<Pipeline>(ComponentSchemaId(SCHEMA_PIPELINE))
             .map_err(|e| MultimodalError::SchemaError(e))?;
 
-        let entity = crate::ecs::CompEntity(self.pipeline_entity);
+        let entity = self.pipeline_entity;
         if !world.has_entity(entity) {
-            return Err(MultimodalError::PipelineNotFound(self.pipeline_entity));
+            return Err(MultimodalError::PipelineNotFound(self.pipeline_entity.id()));
         }
         if let Some(lifecycle) = world.get_component::<PipelineLifecycle>(entity) {
             match lifecycle {
                 PipelineLifecycle::Executing | PipelineLifecycle::Assembled => {}
                 _ => {
-                    return Err(MultimodalError::PipelineNotExecuting(self.pipeline_entity));
+                    return Err(MultimodalError::PipelineNotExecuting(
+                        self.pipeline_entity.id(),
+                    ));
                 }
             }
         } else {
-            return Err(MultimodalError::PipelineNotFound(self.pipeline_entity));
+            return Err(MultimodalError::PipelineNotFound(self.pipeline_entity.id()));
         }
 
         Ok(())
@@ -462,9 +464,9 @@ impl SubmitStageOutputCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "stage_output_submitted".to_string(),
-            entity_id: Some(EntityKindId(self.pipeline_entity)),
+            entity_id: Some(EntityKindId(self.pipeline_entity.id())),
             payload: serde_json::json!({
-                "pipeline_entity": self.pipeline_entity,
+                "pipeline_entity": self.pipeline_entity.id(),
                 "stage_index": self.stage_index,
                 "output_artifact_id": self.output_artifact_id,
             }),
@@ -551,10 +553,10 @@ pub fn replay_pipeline_created(
         .unwrap_or(0);
     let mut txn = WorldTxn::new(world);
     if !world.has_entity(crate::ecs::CompEntity(pipeline_id)) {
-        txn.stage_spawn(pipeline_id, EntityKind::Pipeline);
+        txn.stage_spawn(Entity(pipeline_id, 0), EntityKind::Pipeline);
     }
     txn.add_component(
-        pipeline_id,
+        Entity(pipeline_id, 0),
         ComponentSchemaId(SCHEMA_PIPELINE),
         SchemaVersion(1),
         Pipeline {
@@ -565,7 +567,7 @@ pub fn replay_pipeline_created(
         },
     );
     txn.add_component(
-        pipeline_id,
+        Entity(pipeline_id, 0),
         ComponentSchemaId(SCHEMA_PIPELINE_LIFECYCLE),
         SchemaVersion(1),
         PipelineLifecycle::Created,
@@ -655,7 +657,7 @@ mod tests {
             SessionLifecycle::Active,
         );
         world.transit(txn).unwrap();
-        id
+        id.id()
     }
 
     // ── test_pipeline_lifecycle_transitions ───────────────────────────────
@@ -894,9 +896,9 @@ mod tests {
         // conflict with session_entity (entity 1 from make_session).
         // Entity 100: Model with Deployable lifecycle
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(100, EntityKind::Model);
+        txn.stage_spawn(Entity(100, 0), EntityKind::Model);
         txn.add_component(
-            100,
+            Entity(100, 0),
             ComponentSchemaId(7), // SCHEMA_MODEL_LIFECYCLE
             SchemaVersion(1),
             crate::ecs::constitutional::residency::ModelLifecycle::Deployable,
@@ -905,7 +907,7 @@ mod tests {
 
         // Entity 200: Artifact (no components)
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(200, EntityKind::Artifact);
+        txn.stage_spawn(Entity(200, 0), EntityKind::Artifact);
         world.transit(txn).unwrap();
 
         let cmd = CreatePipelineCommand {

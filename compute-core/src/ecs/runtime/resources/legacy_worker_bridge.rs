@@ -6,8 +6,6 @@
 
 use crate::ecs::runtime::world::World;
 
-
-
 /// Bridge helper that translates legacy-style request submissions into
 /// ECS entity creation with ingress queue population.
 pub struct LegacyWorkerBridge;

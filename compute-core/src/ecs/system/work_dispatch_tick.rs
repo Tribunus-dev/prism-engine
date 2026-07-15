@@ -3,7 +3,7 @@ use crate::ecs::component::scheduling::{
 };
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Ticks the work dispatch loop — scans entities with pending items
 /// in `ReadyQueueState` and advances `WorkRegistryComponent` states

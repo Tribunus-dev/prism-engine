@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::SessionState;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Cleans up session state — removes `SessionState` components
 /// from session entities.

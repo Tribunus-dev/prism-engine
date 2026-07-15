@@ -14,8 +14,7 @@ use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn,
 };
 
-
-use crate::ecs::{World, EntityKind};
+use crate::ecs::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -40,7 +39,7 @@ pub const SCHEMA_EXECUTION_OUTPUT: u64 = 29;
 /// removed). Not durable — reloaded from event history during replay.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionLease {
-    pub lease_id: u64,
+    pub lease_id: Entity,
     pub session_entity: u64,
     pub deployment_entity: u64,
     pub device_entity: u64,
@@ -329,7 +328,7 @@ impl AcquireExecutionLeaseCommand {
             lease_id,
             LeaseOwner {
                 session_id: self.session_entity,
-                work_item_id: lease_id,
+                work_item_id: lease_id.id(),
             },
         );
         txn.put_durable(
@@ -344,7 +343,7 @@ impl AcquireExecutionLeaseCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "lease_acquired".to_string(),
-            entity_id: Some(EntityKindId(lease_id)),
+            entity_id: Some(EntityKindId(lease_id.id())),
             payload: serde_json::json!({
                 "lease_id": lease_id,
                 "session_entity": self.session_entity,
@@ -369,7 +368,7 @@ impl AcquireExecutionLeaseCommand {
 pub struct CompleteExecutionLeaseCommand {
     pub id: MessageId,
     /// Lease entity to complete.
-    pub lease_id: u64,
+    pub lease_id: Entity,
     /// Generated token IDs.
     pub tokens: Vec<u32>,
     /// Reason for finishing (0 = normal, 1 = max_tokens, 2 = stop, 3 = cancelled).
@@ -379,12 +378,14 @@ pub struct CompleteExecutionLeaseCommand {
 impl CompleteExecutionLeaseCommand {
     /// Preflight: lease exists and is active (has an ExecutionLease component).
     pub fn preflight(&self, world: &World) -> Result<(), ExecutionError> {
-        let lease = crate::ecs::CompEntity(self.lease_id);
-        if !world.has_entity(lease) {
-            return Err(ExecutionError::LeaseNotFound(self.lease_id));
+        if !world.has_entity(self.lease_id) {
+            return Err(ExecutionError::LeaseNotFound(self.lease_id.id()));
         }
-        if world.get_component::<ExecutionLease>(lease).is_none() {
-            return Err(ExecutionError::LeaseNotFound(self.lease_id));
+        if world
+            .get_component::<ExecutionLease>(self.lease_id)
+            .is_none()
+        {
+            return Err(ExecutionError::LeaseNotFound(self.lease_id.id()));
         }
         Ok(())
     }
@@ -413,7 +414,7 @@ impl CompleteExecutionLeaseCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "lease_completed".to_string(),
-            entity_id: Some(EntityKindId(self.lease_id)),
+            entity_id: Some(EntityKindId(self.lease_id.id())),
             payload: serde_json::json!({
                 "lease_id": self.lease_id,
                 "token_count": self.tokens.len(),
@@ -482,17 +483,18 @@ pub fn replay_lease_acquired(
     let deadline_ts = event.payload["deadline"].as_u64().unwrap_or(0);
 
     let mut txn = WorldTxn::new(world);
+    let lease_entity = Entity(lease_id, 0);
 
     if !world.has_entity(crate::ecs::CompEntity(lease_id)) {
-        txn.stage_spawn(lease_id, EntityKind::Session);
+        txn.stage_spawn(lease_entity, EntityKind::Session);
     }
 
     txn.add_component(
-        lease_id,
+        lease_entity,
         ComponentSchemaId(SCHEMA_EXECUTION_LEASE),
         SchemaVersion(1),
         ExecutionLease {
-            lease_id,
+            lease_id: lease_entity,
             session_entity,
             deployment_entity,
             device_entity,
@@ -504,7 +506,7 @@ pub fn replay_lease_acquired(
         },
     );
     txn.add_component(
-        lease_id,
+        lease_entity,
         ComponentSchemaId(SCHEMA_LEASE_OWNER),
         SchemaVersion(1),
         LeaseOwner {
@@ -513,7 +515,7 @@ pub fn replay_lease_acquired(
         },
     );
     txn.add_component(
-        lease_id,
+        lease_entity,
         ComponentSchemaId(SCHEMA_LEASE_RANGE),
         SchemaVersion(1),
         LeaseTokenRange {
@@ -539,9 +541,10 @@ pub fn replay_lease_completed(
     let finish_reason = event.payload["finish_reason"].as_u64().unwrap_or(0) as u8;
 
     let mut txn = WorldTxn::new(world);
+    let lease_entity = Entity(lease_id, 0);
 
     txn.add_component(
-        lease_id,
+        lease_entity,
         ComponentSchemaId(SCHEMA_EXECUTION_OUTPUT),
         SchemaVersion(1),
         ExecutionOutput {
@@ -571,7 +574,7 @@ mod tests {
     fn test_execution_lease_types_serde() {
         // ExecutionLease
         let lease = ExecutionLease {
-            lease_id: 42,
+            lease_id: Entity(42, 0),
             session_entity: 1,
             deployment_entity: 3,
             device_entity: 2,
@@ -686,9 +689,9 @@ mod tests {
 
         // Spawn session entity (1) — must be Active
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Session);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Session);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             SessionLifecycle::Active,
@@ -697,9 +700,9 @@ mod tests {
 
         // Spawn device entity (2) — must be Ready
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Ready,
@@ -708,9 +711,9 @@ mod tests {
 
         // Spawn residency entity (3) — must be Resident
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(3, EntityKind::Residency);
+        txn.stage_spawn(Entity(3, 0), EntityKind::Residency);
         txn.add_component(
-            3,
+            Entity(3, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             ResidencyLifecycle::Resident,
@@ -736,7 +739,7 @@ mod tests {
         // Execute
         let (_epoch, event) = cmd.execute(&mut world, &reg).unwrap();
         assert_eq!(event.kind, "lease_acquired");
-        assert_eq!(event.payload["lease_id"], 4); // 4th entity
+        assert_eq!(event.payload["lease_id"], serde_json::json!([4, 0])); // 4th entity
     }
 
     // ── test_acquire_lease_preflight_invalid ─────────────────────────────
@@ -790,9 +793,9 @@ mod tests {
 
         // Spawn entities but with wrong lifecycle states
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Session);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Session);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             SessionLifecycle::Created,
@@ -800,9 +803,9 @@ mod tests {
         world.transit(txn).unwrap();
 
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Discovered,
@@ -810,9 +813,9 @@ mod tests {
         world.transit(txn).unwrap();
 
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(3, EntityKind::Residency);
+        txn.stage_spawn(Entity(3, 0), EntityKind::Residency);
         txn.add_component(
-            3,
+            Entity(3, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             ResidencyLifecycle::Binding,

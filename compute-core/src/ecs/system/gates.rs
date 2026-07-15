@@ -12,7 +12,7 @@ use crate::ecs::compilation::phase_ir::{ANEArtifactKey, CompilePhaseDescriptor, 
 use crate::ecs::compilation::tri_lane::{AneAdmission, AneRejectionReason};
 use crate::ecs::component::compilation::{AdmissionGate, EvidenceId, QualificationGate};
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
 
 // ---------------------------------------------------------------------------
 // AdmissionGateSystem

@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::{PhaseDagState, ReadyQueueState};
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Cleans up phase DAG state — removes `PhaseDagState` and
 /// `ReadyQueueState` components from the engine entity.

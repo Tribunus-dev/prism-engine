@@ -8,7 +8,7 @@
 use crate::ecs::component::aot::{SelectedVariant, ValidationReceipt};
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Runs held-out shape validation for each selected variant.
 pub struct CatalogValidationSystem;

@@ -12,8 +12,7 @@ use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
 
-
-use crate::ecs::{CompEntity, World, EntityKind};
+use crate::ecs::{CompEntity, Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs (39-46) ──────────────────────────────────────────
@@ -239,7 +238,7 @@ impl CreateAgentRunCommand {
         txn.put_durable(
             agent_id,
             AgentRun {
-                run_id: agent_id,
+                run_id: agent_id.id(),
                 session_entity: self.session_entity,
                 name: "agent_run".to_string(),
                 created_at: Timestamp::now(),
@@ -254,9 +253,9 @@ impl CreateAgentRunCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "agent_run_created".to_string(),
-            entity_id: Some(EntityKindId(agent_id)),
+            entity_id: Some(EntityKindId(agent_id.id())),
             payload: serde_json::json!({
-                "agent_id": agent_id,
+                "agent_id": agent_id.id(),
                 "session_entity": self.session_entity,
                 "task": self.task.task_description,
             }),
@@ -275,7 +274,7 @@ impl CreateAgentRunCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmitToolOutcomeCommand {
     pub id: MessageId,
-    pub agent_entity: u64,
+    pub agent_entity: Entity,
     pub invocation_id: u64,
     pub outcome: ToolOutcome,
 }
@@ -287,12 +286,12 @@ impl SubmitToolOutcomeCommand {
         world: &World,
         _schema_registry: &SchemaRegistry,
     ) -> Result<(), AgentExecError> {
-        let agent = CompEntity(self.agent_entity);
+        let agent = CompEntity(self.agent_entity.id());
         if !world.has_entity(agent) {
-            return Err(AgentExecError::AgentNotFound(self.agent_entity));
+            return Err(AgentExecError::AgentNotFound(self.agent_entity.id()));
         }
         if world.entity_kind(agent) != Some(EntityKind::Agent) {
-            return Err(AgentExecError::AgentNotFound(self.agent_entity));
+            return Err(AgentExecError::AgentNotFound(self.agent_entity.id()));
         }
 
         // Must be in ToolCall phase to accept a tool outcome.
@@ -327,7 +326,7 @@ impl SubmitToolOutcomeCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "tool_outcome_submitted".to_string(),
-            entity_id: Some(EntityKindId(self.agent_entity)),
+            entity_id: Some(EntityKindId(self.agent_entity.id())),
             payload: serde_json::json!({
                 "agent_entity": self.agent_entity,
                 "invocation_id": self.invocation_id,
@@ -513,10 +512,10 @@ pub fn replay_agent_run_created(
 
     let mut txn = WorldTxn::new(world);
     if !world.has_entity(crate::ecs::CompEntity(agent_id)) {
-        txn.stage_spawn(agent_id, EntityKind::Agent);
+        txn.stage_spawn(Entity(agent_id, 0), EntityKind::Agent);
     }
     txn.add_component(
-        agent_id,
+        Entity(agent_id, 0),
         ComponentSchemaId(SCHEMA_AGENT_RUN),
         SchemaVersion(1),
         AgentRun {
@@ -527,7 +526,7 @@ pub fn replay_agent_run_created(
         },
     );
     txn.add_component(
-        agent_id,
+        Entity(agent_id, 0),
         ComponentSchemaId(SCHEMA_AGENT_CONFIG),
         SchemaVersion(1),
         AgentConfig {
@@ -539,7 +538,7 @@ pub fn replay_agent_run_created(
         },
     );
     txn.add_component(
-        agent_id,
+        Entity(agent_id, 0),
         ComponentSchemaId(SCHEMA_AGENT_LIFECYCLE),
         SchemaVersion(1),
         AgentLifecycle::Active,
@@ -547,7 +546,6 @@ pub fn replay_agent_run_created(
     let epoch = world.transit(txn).map_err(AgentExecError::CommitFailed)?;
     Ok(epoch)
 }
-
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

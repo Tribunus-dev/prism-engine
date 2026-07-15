@@ -6,8 +6,7 @@ use crate::ecs::component::tensor::{
 use crate::ecs::config::TextArchitecture;
 use crate::ecs::plan::CodecFamily;
 
-
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 use std::collections::{HashMap, HashSet};
 
 /// Evaluates MoE expert budget against the configured codec and topology.

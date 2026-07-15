@@ -14,7 +14,6 @@ use crate::ecs::runtime::scheduling::component_id::{ComponentMask, ResourceMask}
 use crate::ecs::runtime::scheduling::error::ScheduleError;
 use crate::ecs::runtime::world::World;
 
-
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------

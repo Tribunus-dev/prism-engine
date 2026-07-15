@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::{BackendComponent, MetalDeviceState};
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Initializes the Metal device — creates a Backend entity with
 /// `MetalDeviceState` and `BackendComponent` on the ECS world.

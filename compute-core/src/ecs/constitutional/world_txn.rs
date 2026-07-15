@@ -2,10 +2,10 @@ pub use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::schema::SchemaCatalogue;
 use crate::ecs::constitutional::system_desc::ReadDependency;
 pub use crate::ecs::constitutional::types::*;
-use crate::ecs::World;
 use crate::ecs::Entity;
 use crate::ecs::EntityKind;
 use crate::ecs::PendingEntity;
+use crate::ecs::World;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -27,7 +27,7 @@ pub struct AccessDeclaration {
 /// A component change recorded in the mutation journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ComponentChange {
-    pub entity: u64,
+    pub entity: Entity,
     pub schema_key: SchemaKey,
     pub change_type: ChangeType,
     pub before_hash: Option<[u8; 32]>,
@@ -57,29 +57,29 @@ pub enum WorldTxnError {
         current: WorldEpoch,
     },
     #[error(
-        "stale read: entity {entity} schema {schema_id:?} version {observed} != current {current}"
+        "stale read: entity {entity:?} schema {schema_id:?} version {observed} != current {current}"
     )]
     StaleRead {
-        entity: u64,
+        entity: Entity,
         schema_id: ComponentSchemaId,
         observed: u64,
         current: u64,
     },
-    #[error("invalid entity handle: {0}")]
-    InvalidEntity(u64),
+    #[error("invalid entity handle: {0:?}")]
+    InvalidEntity(Entity),
     #[error("schema mismatch for {schema_id:?}: expected {expected}")]
     SchemaMismatch {
         schema_id: ComponentSchemaId,
         expected: String,
     },
-    #[error("component not found: entity {entity} schema {schema_id:?}")]
+    #[error("component not found: entity {entity:?} schema {schema_id:?}")]
     ComponentNotFound {
-        entity: u64,
+        entity: Entity,
         schema_id: ComponentSchemaId,
     },
-    #[error("conflicting operations for entity {entity} schema {schema_id:?}")]
+    #[error("conflicting operations for entity {entity:?} schema {schema_id:?}")]
     Conflict {
-        entity: u64,
+        entity: Entity,
         schema_id: ComponentSchemaId,
     },
 }
@@ -157,7 +157,7 @@ pub struct WorldTxn {
 /// A staged entity spawn.
 #[allow(dead_code)]
 pub(crate) struct StagedSpawn {
-    pub entity: u64,
+    pub entity: Entity,
     pub kind: EntityKind,
     /// If true, `prepare_inner()` will assign a fresh ID from the world allocator.
     pub is_pending: bool,
@@ -167,7 +167,7 @@ pub(crate) struct StagedSpawn {
 
 /// A staged component insert.
 pub(crate) struct StagedInsert {
-    pub entity: u64,
+    pub entity: Entity,
     pub schema_id: ComponentSchemaId,
     #[allow(dead_code)]
     pub schema_version: SchemaVersion,
@@ -187,7 +187,7 @@ pub(crate) struct StagedInsert {
 
 /// A staged component removal.
 pub(crate) struct StagedRemove {
-    pub entity: u64,
+    pub entity: Entity,
     pub schema_id: ComponentSchemaId,
     #[allow(dead_code)]
     pub schema_version: SchemaVersion,
@@ -238,24 +238,24 @@ impl WorldTxn {
     }
 
     /// Peek the next available entity ID from the world.
-    pub fn next_entity_id(world: &World) -> u64 {
-        world.next_entity_id()
+    pub fn next_entity_id(world: &World) -> Entity {
+        Entity(world.next_entity_id(), 0)
     }
 
     /// Stage an entity spawn with a reserved entity ID.
-    pub fn stage_spawn(&mut self, entity: u64, kind: EntityKind) {
+    pub fn stage_spawn(&mut self, entity: Entity, kind: EntityKind) {
         self.spawns.push(StagedSpawn {
             entity,
             kind,
             is_pending: false,
             preflight: Box::new(move |world: &World| {
-                if world.has_entity(crate::ecs::CompEntity(entity)) {
+                if world.has_entity(entity) {
                     return Err(WorldTxnError::InvalidEntity(entity));
                 }
                 Ok(())
             }),
             apply: Box::new(move |world: &mut World| {
-                world.spawn_entity_with_id(entity, kind);
+                world.spawn_entity_with_id(entity.id(), kind);
             }),
         });
     }
@@ -273,7 +273,7 @@ impl WorldTxn {
     pub fn spawn_pending(&mut self, kind: EntityKind) -> PendingEntity {
         let token = self.spawns.len() + 1; // 1-indexed token
         self.spawns.push(StagedSpawn {
-            entity: 0, // placeholder, resolved during prepare_inner()
+            entity: Entity(0, 0), // placeholder, resolved during prepare_inner()
             kind,
             is_pending: true,
             preflight: Box::new(|_| Ok(())), // pending IDs are always fresh
@@ -300,17 +300,16 @@ impl WorldTxn {
         };
 
         let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
-            let entity = entity_h.id();
             let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
             StagedInsert {
-                entity,
+                entity: entity_h,
                 schema_id,
                 schema_version,
                 schema_key,
                 type_id,
                 is_durable: true,
                 apply: Box::new(move |store: &mut ComponentStore| {
-                    store.insert::<T>(entity, component);
+                    store.insert::<T>(entity_h, component);
                 }),
                 preflight: Box::new(move |store: &ComponentStore| {
                     if let Some(b) = store.data.get(&col_type_id) {
@@ -349,17 +348,16 @@ impl WorldTxn {
         let type_id = std::any::TypeId::of::<T>();
 
         let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
-            let entity = entity_h.id();
             let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
             StagedInsert {
-                entity,
+                entity: entity_h,
                 schema_id: ComponentSchemaId(key.id as u64),
                 schema_version: SchemaVersion(key.version),
                 schema_key: key,
                 type_id,
                 is_durable: true,
                 apply: Box::new(move |store: &mut ComponentStore| {
-                    store.insert::<T>(entity, component);
+                    store.insert::<T>(entity_h, component);
                 }),
                 preflight: Box::new(move |store: &ComponentStore| {
                     if let Some(b) = store.data.get(&col_type_id) {
@@ -397,10 +395,9 @@ impl WorldTxn {
         let type_id = std::any::TypeId::of::<T>();
 
         let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
-            let entity = entity_h.id();
             let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
             StagedInsert {
-                entity,
+                entity: entity_h,
                 schema_id: ComponentSchemaId(0),
                 schema_version: SchemaVersion(0),
                 schema_key: SchemaKey {
@@ -411,7 +408,7 @@ impl WorldTxn {
                 type_id,
                 is_durable: false,
                 apply: Box::new(move |store: &mut ComponentStore| {
-                    store.insert::<T>(entity, component);
+                    store.insert::<T>(entity_h, component);
                 }),
                 preflight: Box::new(move |store: &ComponentStore| {
                     if let Some(b) = store.data.get(&col_type_id) {
@@ -443,7 +440,7 @@ impl WorldTxn {
     /// Prefer put_durable() or put_transient() for new code.
     pub(crate) fn add_component<T: crate::ecs::Component>(
         &mut self,
-        entity: u64,
+        entity: Entity,
         schema_id: ComponentSchemaId,
         schema_version: SchemaVersion,
         component: T,
@@ -472,7 +469,7 @@ impl WorldTxn {
         component: T,
     ) {
         self.push_insert(
-            entity.id(),
+            entity,
             schema_id,
             schema_version,
             SchemaKey {
@@ -489,7 +486,7 @@ impl WorldTxn {
     #[allow(dead_code)]
     pub(crate) fn remove_component<T: crate::ecs::Component>(
         &mut self,
-        entity: u64,
+        entity: Entity,
         schema_id: ComponentSchemaId,
     ) {
         self.push_remove::<T>(
@@ -506,7 +503,7 @@ impl WorldTxn {
     }
 
     /// Insert a durable (journaled, replayed) component.
-    pub fn put_durable<T: DurableComponent>(&mut self, entity: u64, component: T) {
+    pub fn put_durable<T: DurableComponent>(&mut self, entity: Entity, component: T) {
         let key = T::SCHEMA_KEY;
         self.push_insert(
             entity,
@@ -519,7 +516,7 @@ impl WorldTxn {
     }
 
     /// Insert a transient (process-local, non-replayed) component.
-    pub fn put_transient<T: TransientComponent>(&mut self, entity: u64, component: T) {
+    pub fn put_transient<T: TransientComponent>(&mut self, entity: Entity, component: T) {
         self.push_insert(
             entity,
             ComponentSchemaId(0), // placeholder — no schema binding for transient
@@ -535,7 +532,7 @@ impl WorldTxn {
     }
 
     /// Remove a durable component.
-    pub fn remove_durable<T: DurableComponent>(&mut self, entity: u64) {
+    pub fn remove_durable<T: DurableComponent>(&mut self, entity: Entity) {
         let key = T::SCHEMA_KEY;
         self.push_remove::<T>(
             entity,
@@ -547,7 +544,7 @@ impl WorldTxn {
     }
 
     /// Remove a transient component.
-    pub fn remove_transient<T: TransientComponent>(&mut self, entity: u64) {
+    pub fn remove_transient<T: TransientComponent>(&mut self, entity: Entity) {
         self.push_remove::<T>(
             entity,
             ComponentSchemaId(0),
@@ -565,7 +562,7 @@ impl WorldTxn {
 
     fn push_insert<T: crate::ecs::Component>(
         &mut self,
-        entity: u64,
+        entity: Entity,
         schema_id: ComponentSchemaId,
         schema_version: SchemaVersion,
         schema_key: SchemaKey,
@@ -600,7 +597,7 @@ impl WorldTxn {
 
     fn push_remove<T: crate::ecs::Component>(
         &mut self,
-        entity: u64,
+        entity: Entity,
         schema_id: ComponentSchemaId,
         schema_version: SchemaVersion,
         schema_key: SchemaKey,
@@ -668,7 +665,7 @@ pub struct CommitReceipt {
 
 /// A prepared durable operation with schema-bound journal entry.
 pub(crate) struct PreparedDurableOp {
-    pub entity: u64,
+    pub entity: Entity,
     #[allow(dead_code)]
     pub schema_key: SchemaKey,
     pub apply: Box<dyn FnOnce(&mut crate::ecs::ComponentStore) + Send>,
@@ -682,7 +679,7 @@ pub(crate) struct PreparedDurableOp {
 
 /// A prepared transient operation (no journal entry).
 pub(crate) struct PreparedTransientOp {
-    pub entity: u64,
+    pub entity: Entity,
     pub apply: Box<dyn FnOnce(&mut crate::ecs::ComponentStore) + Send>,
 }
 
@@ -727,7 +724,6 @@ impl WorldTxn {
         world: &World,
         catalogue: Option<&SchemaCatalogue>,
     ) -> Result<PreparedWorldTxn, WorldTxnError> {
-        use crate::ecs::CompEntity;
         use std::collections::HashSet;
 
         // 1a. Validate epoch
@@ -747,10 +743,10 @@ impl WorldTxn {
                 if spawn.is_pending {
                     let resolved_id = allocator_base + i as u64;
                     let kind = spawn.kind;
-                    spawn.entity = resolved_id;
+                    spawn.entity = Entity(resolved_id, 0);
                     spawn.preflight = Box::new(move |world: &World| {
-                        if world.has_entity(CompEntity(resolved_id)) {
-                            return Err(WorldTxnError::InvalidEntity(resolved_id));
+                        if world.has_entity(Entity(resolved_id, 0)) {
+                            return Err(WorldTxnError::InvalidEntity(Entity(resolved_id, 0)));
                         }
                         Ok(())
                     });
@@ -799,12 +795,12 @@ impl WorldTxn {
         }
 
         // 1e. Validate entity existence for every staged operation
-        let pending_spawn_ids: HashSet<u64> = self.spawns.iter().map(|s| s.entity).collect();
+        let pending_spawn_ids: HashSet<Entity> = self.spawns.iter().map(|s| s.entity).collect();
         for insert in &self.inserts {
             if pending_spawn_ids.contains(&insert.entity) {
                 continue;
             }
-            if !world.has_entity(CompEntity(insert.entity)) {
+            if !world.has_entity(insert.entity) {
                 return Err(WorldTxnError::InvalidEntity(insert.entity));
             }
         }
@@ -812,7 +808,7 @@ impl WorldTxn {
             if pending_spawn_ids.contains(&remove.entity) {
                 continue;
             }
-            if !world.has_entity(CompEntity(remove.entity)) {
+            if !world.has_entity(remove.entity) {
                 return Err(WorldTxnError::InvalidEntity(remove.entity));
             }
         }

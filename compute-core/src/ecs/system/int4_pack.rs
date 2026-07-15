@@ -12,7 +12,7 @@ use crate::ecs::compute_image::compile::int4_pack::{
 use crate::ecs::Component;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Raw f32 weight data for a tensor — populated by source loading or
 /// draft loading systems for downstream consumption.

@@ -111,7 +111,7 @@ use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::component::quality::AOTProfileMatch;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Match an AMD device by compute-unit proximity with a 20% threshold.
 /// Datacenter-class GPUs (Instinct) are preferred when matches are close.

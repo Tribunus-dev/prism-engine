@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ecs::component::model_source::{AneArchiveComp, AneArchiveResultComp};
 
-
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Tar-archive a .mlmodelc directory into a single `.ane.tar` file.
 pub fn archive_ane_modelc(src: &Path, dst: &Path) -> std::io::Result<()> {

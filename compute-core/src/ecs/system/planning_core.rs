@@ -14,7 +14,7 @@ use crate::ecs::compilation::region_catalogue::{RegionAdmission, RegionCatalogue
 use crate::ecs::component::compilation::{BackendTarget, OpId, ProfitabilityScore, RegionPlan};
 use crate::ecs::config::ModelExecutionPlan;
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
 
 // ---------------------------------------------------------------------------
 // AneEligibilitySystem

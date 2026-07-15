@@ -8,7 +8,7 @@
 
 use crate::ecs::component::model_source::PortfolioArtifactsComp;
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
 use std::path::PathBuf;
 
 /// Compile a portfolio of Core ML packets.

@@ -10,8 +10,6 @@ use crate::ecs::runtime::scheduling::command::CommandWriter;
 use crate::ecs::runtime::scheduling::metadata::*;
 use crate::ecs::runtime::world::World;
 
-
-
 // ---------------------------------------------------------------------------
 // LegacyBridgeSystem
 // ---------------------------------------------------------------------------

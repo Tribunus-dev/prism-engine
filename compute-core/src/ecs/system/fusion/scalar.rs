@@ -2,7 +2,7 @@ use crate::ecs::component::fusion::{TileSize, WorkgroupCount};
 use crate::ecs::component::tensor::Shape;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 pub struct ScalarDispatchSystem;
 impl CompilerSystem for ScalarDispatchSystem {

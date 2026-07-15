@@ -22,7 +22,7 @@ use crate::ecs::plan::fusion_scheduler_types::{
 use crate::ecs::plan::CodecFamily;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

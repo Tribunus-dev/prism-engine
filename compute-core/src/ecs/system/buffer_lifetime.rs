@@ -3,7 +3,7 @@ use crate::ecs::component::memory::{BufferLifetime, MemoryPool, PoolPolicy, Scra
 use crate::ecs::plan::fusion::DataflowGraph;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 use std::collections::{HashMap, VecDeque};
 

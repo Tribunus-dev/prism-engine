@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::SessionState;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Initializes an inference session — spawns a session entity with
 /// `SessionState` components.

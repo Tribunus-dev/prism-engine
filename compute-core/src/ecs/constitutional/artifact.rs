@@ -5,8 +5,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::World;
-
+use crate::ecs::{Entity, World};
 
 use serde::{Deserialize, Serialize};
 
@@ -222,7 +221,9 @@ impl LoadArtifactCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "artifact_loaded".to_string(),
-            entity_id: Some(crate::ecs::constitutional::types::EntityKindId(entity_id)),
+            entity_id: Some(crate::ecs::constitutional::types::EntityKindId(
+                entity_id.id(),
+            )),
             payload: serde_json::json!({
                 "artifact_path": self.artifact_path,
                 "expected_digest": hex_str(&self.expected_digest.unwrap_or([0u8; 32])),
@@ -261,7 +262,7 @@ pub fn replay_artifact_loaded(
         .unwrap_or("");
     let mut txn = WorldTxn::new(world);
     if !world.has_entity(crate::ecs::CompEntity(entity_id)) {
-        txn.stage_spawn(entity_id, crate::ecs::EntityKind::Artifact);
+        txn.stage_spawn(Entity(entity_id, 0), crate::ecs::EntityKind::Artifact);
     }
     let file_length = event
         .payload
@@ -269,19 +270,19 @@ pub fn replay_artifact_loaded(
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     txn.add_component(
-        entity_id,
+        Entity(entity_id, 0),
         ComponentSchemaId(2),
         SchemaVersion(1),
         crate::ecs::constitutional::artifact::ArtifactPath(path.to_string()),
     );
     txn.add_component(
-        entity_id,
+        Entity(entity_id, 0),
         ComponentSchemaId(1),
         SchemaVersion(1),
         crate::ecs::constitutional::artifact::ArtifactLifecycle::Loaded,
     );
     txn.add_component(
-        entity_id,
+        Entity(entity_id, 0),
         ComponentSchemaId(4),
         SchemaVersion(1),
         crate::ecs::constitutional::artifact::ArtifactMetadata {
@@ -713,8 +714,10 @@ mod tests {
                 let mut txn = WorldTxn::new(&replay_world);
                 txn.stage_spawn(entity_id, EntityKind::Artifact);
                 replay_world.transit(txn).unwrap();
-                let entity = crate::ecs::CompEntity(entity_id);
-                assert_eq!(replay_world.entity_kind(entity), Some(EntityKind::Artifact));
+                assert_eq!(
+                    replay_world.entity_kind(entity_id),
+                    Some(EntityKind::Artifact)
+                );
             }
         }
 

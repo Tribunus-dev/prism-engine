@@ -10,7 +10,7 @@ use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::plan::KernelTemplateId;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

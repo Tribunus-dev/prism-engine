@@ -6,7 +6,6 @@ use crate::ecs::constitutional::world_txn::{ClassifiedComponent, DurableClass, D
 use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
 use crate::ecs::World;
 
-
 use serde::{Deserialize, Serialize};
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -300,24 +299,24 @@ impl CreateCompilationJobCommand {
         Ok(())
     }
 
-    /// Execute: spawn job entity, attach components, emit event, commit.
+    // Execute: spawn job entity, attach components, emit event, commit.
     pub fn execute(
         self,
         world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), CompilationError> {
         self.preflight(world, schema_registry)?;
-
-        let entity_id = WorldTxn::next_entity_id(world);
+        // Execute: spawn job entity, attach components, emit event, commit.
+        let job_entity = WorldTxn::next_entity_id(world);
         let now = Timestamp::now();
 
         let mut txn = WorldTxn::new(world);
 
-        txn.stage_spawn(entity_id, crate::ecs::EntityKind::Executable);
+        txn.stage_spawn(job_entity, crate::ecs::EntityKind::Executable);
 
         // Job metadata
         txn.put_durable(
-            entity_id,
+            job_entity,
             CompilationJob {
                 job_id: self.job_id,
                 target_artifact: self.model_artifact,
@@ -328,7 +327,7 @@ impl CreateCompilationJobCommand {
 
         // Input
         txn.put_durable(
-            entity_id,
+            job_entity,
             JobInput {
                 model_artifact: self.model_artifact,
                 source_format: "".to_string(),
@@ -337,15 +336,15 @@ impl CreateCompilationJobCommand {
         );
 
         // Config
-        txn.put_durable(entity_id, self.config.clone());
+        txn.put_durable(job_entity, self.config.clone());
 
         // Lifecycle — starts Pending
-        txn.put_durable(entity_id, JobLifecycle::Pending);
+        txn.put_durable(job_entity, JobLifecycle::Pending);
 
         let event = DomainEvent {
             id: self.id,
             kind: "compilation_job_created".to_string(),
-            entity_id: Some(EntityKindId(entity_id)),
+            entity_id: Some(EntityKindId(job_entity.id())),
             payload: serde_json::json!({
                 "job_id": self.job_id,
                 "model_artifact": self.model_artifact,
@@ -409,7 +408,7 @@ impl SubmitValidationReceiptCommand {
     ) -> Result<(CommittedEpoch, DomainEvent), CompilationError> {
         self.preflight(world, schema_registry)?;
 
-        let entity = self.job_entity;
+        let entity = crate::ecs::Entity(self.job_entity, 0);
         let mut txn = WorldTxn::new(world);
 
         txn.put_durable(entity, self.receipt.clone());
@@ -440,7 +439,7 @@ pub struct PromoteCimageCommand {
     pub id: MessageId,
     /// Entity ID of the CImage to promote. See [`Entity`] for the canonical
     /// generational entity handle.
-    pub cimage_entity: u64,
+    pub cimage_entity: crate::ecs::Entity,
     /// Entity IDs of the validation receipts that must pass before promotion.
     /// See [`Entity`] for the canonical generational entity handle.
     pub receipt_ids: Vec<u64>,
@@ -456,18 +455,18 @@ impl PromoteCimageCommand {
         validate_compilation_schemas(schema_registry)
             .map_err(|e| CompilationError::SchemaError(e))?;
 
-        let cimage = crate::ecs::CompEntity(self.cimage_entity);
+        let cimage = crate::ecs::CompEntity(self.cimage_entity.id());
         if !world.has_entity(cimage) {
-            return Err(CompilationError::JobNotFound(self.cimage_entity));
+            return Err(CompilationError::JobNotFound(self.cimage_entity.id()));
         }
 
         // Check lifecycle: must be Sealed to transition to Promoted
         let lifecycle = world
             .get_component::<JobLifecycle>(cimage)
-            .ok_or(CompilationError::JobNotFound(self.cimage_entity))?;
+            .ok_or(CompilationError::JobNotFound(self.cimage_entity.id()))?;
         if *lifecycle != JobLifecycle::Sealed {
             return Err(CompilationError::InvalidState {
-                job_id: self.cimage_entity,
+                job_id: self.cimage_entity.id(),
                 expected: JobLifecycle::Sealed,
                 actual: *lifecycle,
             });
@@ -480,7 +479,7 @@ impl PromoteCimageCommand {
                 .get_component::<ValidationReceipt>(receipt_entity)
                 .is_none()
             {
-                return Err(CompilationError::MissingReceipt(self.cimage_entity));
+                return Err(CompilationError::MissingReceipt(self.cimage_entity.id()));
             }
         }
 
@@ -496,13 +495,14 @@ impl PromoteCimageCommand {
         self.preflight(world, schema_registry)?;
 
         let now = Timestamp::now();
+        let cimage = self.cimage_entity;
         let mut txn = WorldTxn::new(world);
 
         // Attach promotion record
         txn.put_durable(
-            self.cimage_entity,
+            cimage,
             CimagePromotion {
-                cimage_entity: self.cimage_entity,
+                cimage_entity: cimage.id(),
                 promotion_generation: 1,
                 validation_receipt_ids: self.receipt_ids.clone(),
                 promoted_at: now,
@@ -510,12 +510,12 @@ impl PromoteCimageCommand {
         );
 
         // Transition lifecycle to Promoted (add replaces the old value)
-        txn.put_durable(self.cimage_entity, JobLifecycle::Promoted);
+        txn.put_durable(cimage, JobLifecycle::Promoted);
 
         let event = DomainEvent {
             id: self.id,
             kind: "cimage_promoted".to_string(),
-            entity_id: Some(EntityKindId(self.cimage_entity)),
+            entity_id: Some(EntityKindId(self.cimage_entity.id())),
             payload: serde_json::json!({
                 "cimage_entity": self.cimage_entity,
                 "receipt_count": self.receipt_ids.len(),
@@ -598,14 +598,15 @@ pub fn replay_compilation_job_created(
         .to_string();
 
     let now = Timestamp::now();
+    let entity = crate::ecs::Entity(job_id, 0);
     let mut txn = WorldTxn::new(world);
 
     if !world.has_entity(crate::ecs::CompEntity(job_id)) {
-        txn.stage_spawn(job_id, crate::ecs::EntityKind::Executable);
+        txn.stage_spawn(entity, crate::ecs::EntityKind::Executable);
     }
 
     txn.add_component(
-        job_id,
+        entity,
         ComponentSchemaId(SCHEMA_COMPILATION_JOB),
         SchemaVersion(1),
         CompilationJob {
@@ -617,7 +618,7 @@ pub fn replay_compilation_job_created(
     );
 
     txn.add_component(
-        job_id,
+        entity,
         ComponentSchemaId(SCHEMA_JOB_INPUT),
         SchemaVersion(1),
         JobInput {
@@ -628,7 +629,7 @@ pub fn replay_compilation_job_created(
     );
 
     txn.add_component(
-        job_id,
+        entity,
         ComponentSchemaId(SCHEMA_JOB_CONFIG),
         SchemaVersion(1),
         JobConfig {
@@ -639,7 +640,7 @@ pub fn replay_compilation_job_created(
     );
 
     txn.add_component(
-        job_id,
+        entity,
         ComponentSchemaId(SCHEMA_JOB_LIFECYCLE),
         SchemaVersion(1),
         JobLifecycle::Pending,
@@ -861,7 +862,10 @@ mod tests {
         // ensuring cmd.execute() gets a fresh id for the job entity.
         let artifact_id = 2u64;
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(artifact_id, crate::ecs::EntityKind::Artifact);
+        txn.stage_spawn(
+            crate::ecs::Entity(artifact_id, 0),
+            crate::ecs::EntityKind::Artifact,
+        );
         world.transit(txn).unwrap();
 
         let config = JobConfig {
@@ -949,7 +953,7 @@ mod tests {
 
         let cmd = SubmitValidationReceiptCommand {
             id: MessageId::compute(b"receipt_1"),
-            job_entity: entity_id,
+            job_entity: entity_id.id(),
             receipt: ValidationReceipt {
                 job_id: 100,
                 validator_type: "accuracy_gate".to_string(),

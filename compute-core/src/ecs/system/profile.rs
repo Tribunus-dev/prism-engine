@@ -16,7 +16,7 @@ use crate::ecs::execution_profile::{
 use crate::ecs::plan::ModelExecutionPlan;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// ECS system that executes a profile plan on a backend and produces
 /// `ProfileRunResult` components.

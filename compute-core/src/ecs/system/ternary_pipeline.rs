@@ -10,7 +10,7 @@ use crate::ecs::compute_image::compile::ternary::{
 };
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 use sha2::{Digest, Sha256};
 
 /// Build a sealed cimage binary from the ECS world state.

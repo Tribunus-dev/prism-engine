@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::WorkRegistryComponent;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Dispatches Metal compute kernels — scans Tensor entities with pending
 /// work and advances them through the dispatch pipeline.

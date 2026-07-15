@@ -18,7 +18,6 @@ use crate::ecs::quantization::contract::{
     REPRESENTATION_REGISTRY_VERSION,
 };
 
-
 use crate::execution_plan::CodecFamily;
 
 /// Rescue scope for mixed-precision overrides.

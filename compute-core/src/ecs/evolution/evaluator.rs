@@ -16,8 +16,6 @@ use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 #[cfg(feature = "metal-dispatch")]
 use crate::ecs::nf4tile640::{dequant_matmul_reference, pack_nf4_weights};
 
-
-
 // ── Supporting types ─────────────────────────────────────────────────────────
 
 /// Performance workload description.

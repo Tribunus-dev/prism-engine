@@ -10,7 +10,7 @@ use crate::ecs::component::aot::{KernelVariantEntityData, SelectedVariant};
 use crate::ecs::component::backend::GPUArch;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;

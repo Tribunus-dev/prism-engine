@@ -8,7 +8,7 @@ use crate::ecs::plan::fusion::{
 use crate::ecs::plan::DType;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 use std::collections::HashMap;
 

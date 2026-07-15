@@ -2,7 +2,6 @@ use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::types::*;
 use crate::ecs::World;
 
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

@@ -4,7 +4,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{World, Entity, EntityKind};
+use crate::ecs::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs (63-68) ──────────────────────────────────────────
@@ -216,7 +216,7 @@ impl SubmitIngressRequestCommand {
         txn.put_durable(
             request_id,
             IngressRequest {
-                request_id,
+                request_id: request_id.0,
                 transport: self.transport.clone(),
                 method: self.method.clone(),
                 path: self.path.clone(),
@@ -236,7 +236,7 @@ impl SubmitIngressRequestCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "ingress_request_received".to_string(),
-            entity_id: Some(EntityKindId(request_id)),
+            entity_id: Some(EntityKindId(request_id.0)),
             payload: serde_json::json!({
                 "request_id": request_id,
                 "transport": self.transport,
@@ -313,7 +313,7 @@ impl ResolveIngressCommand {
         let mut txn = WorldTxn::new(world);
 
         // Update lifecycle
-        txn.put_durable(self.ingress_entity, IngressLifecycle::Resolved);
+        txn.put_durable(Entity(self.ingress_entity, 0), IngressLifecycle::Resolved);
 
         // Update the resolved_command field by replacing IngressRequest
         if let Some(ingress_req) =
@@ -323,7 +323,7 @@ impl ResolveIngressCommand {
                 resolved_command: Some(self.resolved_command_id.to_string()),
                 ..ingress_req.clone()
             };
-            txn.put_durable(self.ingress_entity, updated);
+            txn.put_durable(Entity(self.ingress_entity, 0), updated);
         }
 
         let event = DomainEvent {
@@ -400,7 +400,7 @@ impl IngressLifecycleTransitionCommand {
 
         let mut txn = WorldTxn::new(world);
 
-        txn.put_durable(self.ingress_entity, self.target);
+        txn.put_durable(Entity(self.ingress_entity, 0), self.target);
 
         let event = DomainEvent {
             id: self.id,
@@ -555,10 +555,10 @@ pub fn replay_ingress_request_submitted(
 
     let mut txn = WorldTxn::new(world);
     if !world.has_entity(crate::ecs::CompEntity(entity_id)) {
-        txn.stage_spawn(entity_id, EntityKind::Session);
+        txn.stage_spawn(Entity(entity_id, 0), EntityKind::Session);
     }
     txn.add_component(
-        entity_id,
+        Entity(entity_id, 0),
         ComponentSchemaId(SCHEMA_INGRESS_REQUEST),
         SchemaVersion(1),
         IngressRequest {
@@ -572,7 +572,7 @@ pub fn replay_ingress_request_submitted(
         },
     );
     txn.add_component(
-        entity_id,
+        Entity(entity_id, 0),
         ComponentSchemaId(SCHEMA_INGRESS_LIFECYCLE),
         SchemaVersion(1),
         IngressLifecycle::Received,

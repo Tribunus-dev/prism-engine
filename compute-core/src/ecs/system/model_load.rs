@@ -6,7 +6,7 @@ use crate::ecs::config::{
 };
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, Component, EntityKind, SchedulePhase, World};
 use serde_json::Value;
 use std::collections::BTreeSet;
 

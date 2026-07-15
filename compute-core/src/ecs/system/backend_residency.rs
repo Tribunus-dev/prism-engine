@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::{BackendComponent, TensorComponent};
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Manages tensor residency across backends — tracks which backends
 /// hold tensor data and initiates transfers when needed.

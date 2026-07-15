@@ -3,8 +3,7 @@ use crate::ecs::component::memory::{BufferLifetime, MemoryDomain, MemoryPool, Po
 use crate::ecs::component::tensor::{CanonicalRoleComp, CodecFamilyComp, Shape};
 use crate::ecs::plan::CodecFamily;
 
-
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

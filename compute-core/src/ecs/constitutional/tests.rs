@@ -8,7 +8,7 @@ mod tests {
     use crate::ecs::constitutional::*;
     use crate::ecs::receipt_bus::*;
     use crate::ecs::Entity;
-    use crate::ecs::{CompEntity, World, EntityKind};
+    use crate::ecs::{CompEntity, EntityKind, World};
     use std::collections::HashMap;
 
     fn make_test_envelope() -> Envelope<String> {
@@ -66,7 +66,7 @@ mod tests {
 
     /// Create a world with one entity carrying both a durable and a transient
     /// component.  Returns (world, entity_id).
-    fn make_world_both() -> (World, u64) {
+    fn make_world_both() -> (World, Entity) {
         let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
@@ -273,11 +273,11 @@ mod tests {
     #[test]
     fn test_read_dependency_construction() {
         let dep = ReadDependency {
-            entity: 7,
+            entity: Entity(7, 0),
             schema_id: ComponentSchemaId(1),
             observed_version: 3,
         };
-        assert_eq!(dep.entity, 7);
+        assert_eq!(dep.entity, Entity(7, 0));
         assert_eq!(dep.observed_version, 3);
     }
 
@@ -315,7 +315,7 @@ mod tests {
     fn make_world() -> World {
         let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
         world.transit(txn).unwrap();
         world
     }
@@ -323,7 +323,7 @@ mod tests {
     /// Create a transaction against a world, staging an insert on entity 1.
     fn make_txn_with_insert(world: &World) -> WorldTxn {
         let mut txn = WorldTxn::new(world);
-        txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn.add_component(Entity(1, 0), ComponentSchemaId(10), SchemaVersion(1), 42u64);
         txn
     }
 
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(journal.len(), 1, "journal should have one change entry");
 
         let change = &journal[0];
-        assert_eq!(change.entity, 1);
+        assert_eq!(change.entity, Entity(1, 0));
         assert_eq!(change.schema_key.id, 10);
         assert_eq!(change.schema_key.version, 1);
         assert_eq!(change.change_type, ChangeType::Insert);
@@ -415,7 +415,7 @@ mod tests {
         // Transaction with one insert
         let mut txn = WorldTxn::new(&world);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(42),
             SchemaVersion(2),
             "hello".to_string(),
@@ -427,7 +427,7 @@ mod tests {
         assert_eq!(journal.len(), 1, "expected exactly one journal entry");
 
         let entry = &journal[0];
-        assert_eq!(entry.entity, 1);
+        assert_eq!(entry.entity, Entity(1, 0));
         assert_eq!(entry.schema_key.id, 42);
         assert_eq!(entry.schema_key.version, 2);
         assert_eq!(entry.change_type, ChangeType::Insert);
@@ -510,7 +510,7 @@ mod tests {
         // in the intermediate gap slots.
         let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(100, EntityKind::Model);
+        txn.stage_spawn(Entity(100, 0), EntityKind::Model);
         world.transit(txn).unwrap();
 
         // Entity 100 exists
@@ -538,11 +538,11 @@ mod tests {
         let mut world = World::new();
 
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Device);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Device);
         world.transit(txn).unwrap();
 
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(200, EntityKind::Artifact);
+        txn.stage_spawn(Entity(200, 0), EntityKind::Artifact);
         world.transit(txn).unwrap();
 
         // Only two entities should exist
@@ -572,18 +572,23 @@ mod tests {
 
         // Spawn entity 1
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
         world.transit(txn).unwrap();
 
         // Create txn that spawns entity 2 and tries to insert on non-existent entity 99
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
-        txn.add_component(99, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
+        txn.add_component(
+            Entity(99, 0),
+            ComponentSchemaId(10),
+            SchemaVersion(1),
+            42u64,
+        );
         let result = world.transit(txn);
 
         // Must be rejected
         assert!(
-            matches!(result, Err(WorldTxnError::InvalidEntity(99))),
+            matches!(result, Err(WorldTxnError::InvalidEntity(Entity(99, 0)))),
             "expected InvalidEntity(99), got {:?}",
             result
         );
@@ -604,12 +609,12 @@ mod tests {
 
         // Same entity ID staged twice in one transaction
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
-        txn.stage_spawn(1, EntityKind::Device); // duplicate!
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Device); // duplicate!
         let result = world.transit(txn);
 
         assert!(
-            matches!(result, Err(WorldTxnError::InvalidEntity(1))),
+            matches!(result, Err(WorldTxnError::InvalidEntity(Entity(1, 0)))),
             "expected InvalidEntity(1), got {:?}",
             result
         );
@@ -624,16 +629,16 @@ mod tests {
 
         // Two spawns in one transaction
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(10),
             SchemaVersion(1),
             "model-one".to_string(),
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(10),
             SchemaVersion(1),
             "device-alpha".to_string(),
@@ -649,16 +654,16 @@ mod tests {
         // must produce the same result
         let mut world2 = World::new();
         let mut txn = WorldTxn::new(&world2);
-        txn.stage_spawn(1, EntityKind::Model);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(10),
             SchemaVersion(1),
             "model-one".to_string(),
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(10),
             SchemaVersion(1),
             "device-alpha".to_string(),
@@ -677,10 +682,10 @@ mod tests {
         let mut world = World::new();
 
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
-        txn.stage_spawn(2, EntityKind::Model);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Model);
         // Entity 2's component references entity 1's ID
-        txn.add_component(2, ComponentSchemaId(10), SchemaVersion(1), 1u64);
+        txn.add_component(Entity(2, 0), ComponentSchemaId(10), SchemaVersion(1), 1u64);
         world.transit(txn).unwrap();
 
         assert!(world.has_entity(CompEntity(1)));
@@ -691,15 +696,15 @@ mod tests {
     fn test_wrong_schema_type_rejected() {
         let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
         // Insert with one type
-        txn.add_component::<u64>(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn.add_component::<u64>(Entity(1, 0), ComponentSchemaId(10), SchemaVersion(1), 42u64);
         world.transit(txn).unwrap();
 
         // Now insert a DIFFERENT type under the same TypeId by using String
         let mut txn = WorldTxn::new(&world);
         txn.add_component::<String>(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(10),
             SchemaVersion(1),
             "not-a-u64".to_string(),
@@ -722,16 +727,16 @@ mod tests {
     fn test_failed_removal_leaves_components_unchanged() {
         let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
-        txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
+        txn.add_component(Entity(1, 0), ComponentSchemaId(10), SchemaVersion(1), 42u64);
         world.transit(txn).unwrap();
 
         // Attempt to remove from a non-existent entity
         let mut txn = WorldTxn::new(&world);
-        txn.remove_component::<u64>(99, ComponentSchemaId(10));
+        txn.remove_component::<u64>(Entity(99, 0), ComponentSchemaId(10));
         let result = world.transit(txn);
         assert!(
-            matches!(result, Err(WorldTxnError::InvalidEntity(99))),
+            matches!(result, Err(WorldTxnError::InvalidEntity(Entity(99, 0)))),
             "expected InvalidEntity(99), got {:?}",
             result
         );
@@ -764,8 +769,8 @@ mod tests {
     fn test_stale_read_rejected() {
         let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
-        txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
+        txn.add_component(Entity(1, 0), ComponentSchemaId(10), SchemaVersion(1), 42u64);
         world.transit(txn).unwrap();
 
         // Start a transaction with a stale epoch
@@ -837,17 +842,17 @@ mod tests {
         // Replaying the same events must produce the same entity state
         let mut world1 = World::new();
         let mut txn = WorldTxn::new(&world1);
-        txn.stage_spawn(5, EntityKind::Model);
-        txn.stage_spawn(10, EntityKind::Device);
-        txn.add_component(5, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn.stage_spawn(Entity(5, 0), EntityKind::Model);
+        txn.stage_spawn(Entity(10, 0), EntityKind::Device);
+        txn.add_component(Entity(5, 0), ComponentSchemaId(10), SchemaVersion(1), 42u64);
         world1.transit(txn).unwrap();
 
         // Clone world1's state by replaying the same commands
         let mut world2 = World::new();
         let mut txn = WorldTxn::new(&world2);
-        txn.stage_spawn(5, EntityKind::Model);
-        txn.stage_spawn(10, EntityKind::Device);
-        txn.add_component(5, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn.stage_spawn(Entity(5, 0), EntityKind::Model);
+        txn.stage_spawn(Entity(10, 0), EntityKind::Device);
+        txn.add_component(Entity(5, 0), ComponentSchemaId(10), SchemaVersion(1), 42u64);
         world2.transit(txn).unwrap();
 
         // Same entity occupancy
@@ -882,8 +887,8 @@ mod tests {
         let mut world = World::new();
         // Spawn entity 1
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
-        txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
+        txn.add_component(Entity(1, 0), ComponentSchemaId(10), SchemaVersion(1), 42u64);
         world.transit(txn).unwrap();
 
         let epoch_before = world.current_epoch();
@@ -891,9 +896,9 @@ mod tests {
 
         // Create txn with a stale read dep (entity 3 version doesn't match)
         let mut txn = WorldTxn::new(&world);
-        txn.add_component(1, ComponentSchemaId(10), SchemaVersion(2), 99u64);
+        txn.add_component(Entity(1, 0), ComponentSchemaId(10), SchemaVersion(2), 99u64);
         txn.record_read(crate::ecs::constitutional::system_desc::ReadDependency {
-            entity: 3,
+            entity: Entity(3, 0),
             schema_id: ComponentSchemaId(10),
             observed_version: 5, // entity 3 doesn't exist, version is 0
         });
@@ -928,7 +933,7 @@ mod tests {
 
         // Prepare a txn with a spawn at ID 200
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(200, EntityKind::Model);
+        txn.stage_spawn(Entity(200, 0), EntityKind::Model);
         let _prepared = world.prepare(txn, None).unwrap();
 
         assert_eq!(
@@ -1000,16 +1005,16 @@ mod tests {
         let mut world = World::new();
         // Three inserts in one transaction
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(10),
             SchemaVersion(1),
             "first".to_string(),
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(20),
             SchemaVersion(1),
             "second".to_string(),
@@ -1030,8 +1035,8 @@ mod tests {
 
         let applied_journal = world.last_journal();
         assert_eq!(applied_journal.len(), journal);
-        assert_eq!(applied_journal[0].entity, 1);
-        assert_eq!(applied_journal[1].entity, 2);
+        assert_eq!(applied_journal[0].entity, Entity(1, 0));
+        assert_eq!(applied_journal[1].entity, Entity(2, 0));
 
         let applied_events = world.last_committed_events();
         assert_eq!(applied_events.len(), events);
@@ -1747,7 +1752,7 @@ mod tests {
     fn test_work_item_with_prereqs() {
         let mut item = WorkItem::new(WorkKind::LoadModel, 7);
         item.prerequisites.push(Prerequisite {
-            entity: 1,
+            entity: Entity(1, 0),
             kind: PrereqKind::ComponentPresent,
             generation: 0,
         });
@@ -1854,11 +1859,11 @@ mod tests {
     #[test]
     fn test_prerequisite_construction() {
         let prereq = Prerequisite {
-            entity: 7,
+            entity: Entity(7, 0),
             kind: PrereqKind::EventReceived,
             generation: 3,
         };
-        assert_eq!(prereq.entity, 7);
+        assert_eq!(prereq.entity, Entity(7, 0));
         assert_eq!(prereq.kind, PrereqKind::EventReceived);
         assert_eq!(prereq.generation, 3);
 
@@ -2508,15 +2513,15 @@ mod tests {
         let mut world = World::new();
         // Artifact entity (1) with digest
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Artifact);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(3),
             SchemaVersion(1),
             crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
         );
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
@@ -2524,21 +2529,21 @@ mod tests {
         world.transit(txn).unwrap();
         // Device entity (2) with stable ID, Ready lifecycle, memory limits
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceStableId("pci-0000:01:00.0".into()),
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Ready,
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceMemoryLimits {
@@ -2702,9 +2707,9 @@ mod tests {
         let mut world = World::new();
         // Entity 1: Artifact
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Artifact);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
@@ -2712,21 +2717,21 @@ mod tests {
         world.transit(txn).unwrap();
         // Entity 2: Device
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceStableId("pci-x".into()),
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Ready,
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceMemoryLimits {
@@ -2751,15 +2756,15 @@ mod tests {
         let mut world = World::new();
         // Entity 1: Device
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Device);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Device);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Ready,
         );
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceMemoryLimits {
@@ -2787,15 +2792,15 @@ mod tests {
         let mut world = World::new();
         // Entity 1: Artifact
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Artifact);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
         );
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
@@ -2803,9 +2808,9 @@ mod tests {
         world.transit(txn).unwrap();
         // Entity 2: Device
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Discovered,
@@ -2827,15 +2832,15 @@ mod tests {
         let mut world = World::new();
         // Entity 1: Artifact
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Artifact);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             crate::ecs::constitutional::artifact::ArtifactDigest([0xab; 32]),
         );
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             crate::ecs::constitutional::lifecycle::ArtifactLifecycle::Loaded,
@@ -2843,21 +2848,21 @@ mod tests {
         world.transit(txn).unwrap();
         // Entity 2: Device
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceStableId("pci-0000:01:00.0".into()),
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Ready,
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceMemoryLimits {
@@ -3288,9 +3293,9 @@ mod tests {
         let mut world = World::new();
         // Entity 1: Artifact
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Artifact);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(3),
             SchemaVersion(1),
             ArtifactDigest([0xab; 32]),
@@ -3298,21 +3303,21 @@ mod tests {
         world.transit(txn).unwrap();
         // Entity 2: Device with stable ID, Ready, memory
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceStableId("pci-0000:01:00.0".into()),
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Ready,
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceMemoryLimits {
@@ -3323,15 +3328,15 @@ mod tests {
         world.transit(txn).unwrap();
         // Entity 3: Model with ID, artifact ref, lifecycle
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(3, EntityKind::Model);
+        txn.stage_spawn(Entity(3, 0), EntityKind::Model);
         txn.add_component(
-            3,
+            Entity(3, 0),
             ComponentSchemaId(5),
             SchemaVersion(1),
             ModelId(DomainId(uuid::Uuid::nil())),
         );
         txn.add_component(
-            3,
+            Entity(3, 0),
             ComponentSchemaId(6),
             SchemaVersion(1),
             ModelArtifactRef {
@@ -3340,7 +3345,7 @@ mod tests {
             },
         );
         txn.add_component(
-            3,
+            Entity(3, 0),
             ComponentSchemaId(7),
             SchemaVersion(1),
             ModelLifecycle::Deployable,
@@ -3348,9 +3353,9 @@ mod tests {
         world.transit(txn).unwrap();
         // Entity 4: Residency with device ref, memory claim, format, lifecycle, model ref
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(4, EntityKind::Residency);
+        txn.stage_spawn(Entity(4, 0), EntityKind::Residency);
         txn.add_component(
-            4,
+            Entity(4, 0),
             ComponentSchemaId(8),
             SchemaVersion(1),
             ResidencyDeviceRef {
@@ -3359,7 +3364,7 @@ mod tests {
             },
         );
         txn.add_component(
-            4,
+            Entity(4, 0),
             ComponentSchemaId(9),
             SchemaVersion(1),
             ResidencyMemoryClaim {
@@ -3368,19 +3373,19 @@ mod tests {
             },
         );
         txn.add_component(
-            4,
+            Entity(4, 0),
             ComponentSchemaId(10),
             SchemaVersion(1),
             ResidencyFormat::Native,
         );
         txn.add_component(
-            4,
+            Entity(4, 0),
             ComponentSchemaId(11),
             SchemaVersion(1),
             ResidencyLifecycle::Resident,
         );
         txn.add_component(
-            4,
+            Entity(4, 0),
             ComponentSchemaId(17),
             SchemaVersion(1),
             ResidencyModelRef {
@@ -3501,15 +3506,15 @@ mod tests {
         let mut world = World::new();
         // Entity 1: Model
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Model);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Model);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             ModelId(DomainId(uuid::Uuid::nil())),
         );
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             ModelLifecycle::Deployable,
@@ -3517,9 +3522,9 @@ mod tests {
         world.transit(txn).unwrap();
         // Entity 2: Device
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Device);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Discovered,
@@ -3548,9 +3553,9 @@ mod tests {
         let mut world = World::new();
         // Entity 1: Device
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Device);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Device);
         txn.add_component(
-            1,
+            Entity(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Ready,
@@ -3558,15 +3563,15 @@ mod tests {
         world.transit(txn).unwrap();
         // Entity 2: Model
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(2, EntityKind::Model);
+        txn.stage_spawn(Entity(2, 0), EntityKind::Model);
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             ModelId(DomainId(uuid::Uuid::nil())),
         );
         txn.add_component(
-            2,
+            Entity(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             ModelLifecycle::Deployable,
@@ -3638,7 +3643,7 @@ mod tests {
 
         let txn_cmd = TransitionSessionCommand {
             id: MessageId::compute(b"transition-created-admitted"),
-            session_entity: session_id,
+            session_entity: Entity(session_id, 0),
             target: SessionLifecycle::Admitted,
         };
         let (epoch, event2) = txn_cmd
@@ -3654,7 +3659,7 @@ mod tests {
 
         let invalid_cmd = TransitionSessionCommand {
             id: MessageId::compute(b"transition-admitted-released"),
-            session_entity: session_id,
+            session_entity: Entity(session_id, 0),
             target: SessionLifecycle::Released,
         };
         let err = invalid_cmd.execute(&mut world, &reg).unwrap_err();
@@ -4061,13 +4066,13 @@ mod tests {
     #[test]
     fn test_world_txn_bypasses_guard() {
         use crate::ecs::constitutional::world_txn::WorldTxn;
-        use crate::ecs::{World, EntityKind};
+        use crate::ecs::{EntityKind, World};
 
         let mut world = World::new();
         world.set_direct_mutation_allowed(false);
 
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(1, EntityKind::Artifact);
+        txn.stage_spawn(Entity(1, 0), EntityKind::Artifact);
         let epoch = world.transit(txn).expect("WorldTxn should bypass guard");
         assert!(epoch.0 .0 > 0);
         assert!(world.has_entity(crate::ecs::CompEntity(1)));
@@ -4166,7 +4171,7 @@ mod tests {
         txn.put_durable(eid, TestDurable(42));
         world.transit(txn).unwrap();
         let val = world
-            .get_component::<TestDurable>(CompEntity(eid))
+            .get_component::<TestDurable>(eid)
             .expect("durable component should be present");
         assert_eq!(val.0, 42);
     }
@@ -4180,7 +4185,7 @@ mod tests {
         txn.put_transient(eid, TestTransient("hello".into()));
         world.transit(txn).unwrap();
         let val = world
-            .get_component::<TestTransient>(CompEntity(eid))
+            .get_component::<TestTransient>(eid)
             .expect("transient component should be present");
         assert_eq!(val.0, "hello");
     }
@@ -4265,7 +4270,7 @@ mod tests {
     // which derive the schema key from the type itself.
     // fn test_add_component_is_pub_crate() {
     //     let mut txn = WorldTxn::new(&World::new());
-    //     txn.add_component::<TestDurable>(1, ComponentSchemaId(999), SchemaVersion(1), TestDurable(0));
+    //     txn.add_component::<TestDurable>(Entity(1, 0), ComponentSchemaId(999), SchemaVersion(1), TestDurable(0));
     //     // ^^^ pub(crate) — compiles from within the crate but not outside.
     // }
 
@@ -4554,7 +4559,7 @@ mod tests {
         txn.stage_spawn(eid, EntityKind::Node);
         txn.put_durable(eid, TestDurable(42));
         replayed.transit(txn).unwrap();
-        let val = replayed.get_component::<TestDurable>(CompEntity(eid));
+        let val = replayed.get_component::<TestDurable>(eid);
         assert!(val.is_some(), "durable component reconstructed by replay");
         assert_eq!(val.unwrap().0, 42);
     }
@@ -4568,7 +4573,7 @@ mod tests {
         txn.stage_spawn(eid, EntityKind::Node);
         txn.put_durable(eid, TestDurable(42));
         replayed.transit(txn).unwrap();
-        let transient = replayed.get_component::<TestTransient>(CompEntity(eid));
+        let transient = replayed.get_component::<TestTransient>(eid);
         assert!(
             transient.is_none(),
             "transient component absent after replay"
@@ -4604,15 +4609,11 @@ mod tests {
         txn.put_transient(eid, TestTransient("memory".into()));
         world.transit(txn).unwrap();
         assert!(
-            world
-                .get_component::<TestDurable>(CompEntity(eid))
-                .is_some(),
+            world.get_component::<TestDurable>(eid).is_some(),
             "durable present"
         );
         assert!(
-            world
-                .get_component::<TestTransient>(CompEntity(eid))
-                .is_some(),
+            world.get_component::<TestTransient>(eid).is_some(),
             "transient present"
         );
     }
@@ -4627,12 +4628,8 @@ mod tests {
         txn.put_transient(eid, TestTransient("lost".into()));
         world.transit(txn).unwrap();
         // Both present in live world
-        assert!(world
-            .get_component::<TestDurable>(CompEntity(eid))
-            .is_some());
-        assert!(world
-            .get_component::<TestTransient>(CompEntity(eid))
-            .is_some());
+        assert!(world.get_component::<TestDurable>(eid).is_some());
+        assert!(world.get_component::<TestTransient>(eid).is_some());
 
         // Replay: only durable portion
         let mut replayed = World::new();
@@ -4641,15 +4638,11 @@ mod tests {
         txn2.put_durable(eid, TestDurable(42));
         replayed.transit(txn2).unwrap();
         assert!(
-            replayed
-                .get_component::<TestDurable>(CompEntity(eid))
-                .is_some(),
+            replayed.get_component::<TestDurable>(eid).is_some(),
             "durable survives replay"
         );
         assert!(
-            replayed
-                .get_component::<TestTransient>(CompEntity(eid))
-                .is_none(),
+            replayed.get_component::<TestTransient>(eid).is_none(),
             "transient does not survive replay"
         );
     }
@@ -4683,10 +4676,7 @@ mod tests {
         assert!(result.is_err(), "stale-epoch txn should fail prepare");
         // World must be unchanged: epoch stayed at 2, entity 2 never spawned
         assert_eq!(world.current_epoch(), WorldEpoch(2), "epoch unchanged");
-        assert!(
-            !world.has_entity(CompEntity(next_eid)),
-            "entity not created"
-        );
+        assert!(!world.has_entity(next_eid), "entity not created");
     }
 
     #[test]
@@ -4706,10 +4696,7 @@ mod tests {
 
         let result = world.prepare(txn, None);
         assert!(result.is_err(), "stale-epoch txn should fail prepare");
-        assert!(
-            !world.has_entity(CompEntity(next_eid)),
-            "entity not created"
-        );
+        assert!(!world.has_entity(next_eid), "entity not created");
     }
 
     #[test]
@@ -4733,7 +4720,7 @@ mod tests {
         assert!(result.is_err(), "stale-epoch txn should fail");
         // The new entity must NOT exist because the transaction never applied
         assert!(
-            !world.has_entity(CompEntity(next_eid)),
+            !world.has_entity(next_eid),
             "entity not created after failed prepare"
         );
         assert_eq!(world.entity_count(), 1, "only original entity exists");

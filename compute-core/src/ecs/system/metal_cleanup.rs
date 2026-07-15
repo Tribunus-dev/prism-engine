@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::MetalDeviceState;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Cleans up Metal resources — removes `MetalDeviceState` components
 /// and their owning entities.

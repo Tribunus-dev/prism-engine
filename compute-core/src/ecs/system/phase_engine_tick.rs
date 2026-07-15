@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::PhaseDagState;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Ticks the phase engine state machine — advances `PhaseDagState.current_phase`
 /// along the configured phase DAG edges.

@@ -9,7 +9,7 @@ use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, TransientClass,
     TransientComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{World, Entity, EntityKind};
+use crate::ecs::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -291,6 +291,7 @@ impl DeployModelCommand {
         if let Some(existing_model) = Self::find_model_by_artifact(world, self.artifact_entity) {
             // Model exists — update the associated residency rather than creating new
             let residency = Self::find_residency_for_model(world, existing_model)
+                .map(|id| Entity(id, 0))
                 .unwrap_or_else(|| WorldTxn::next_entity_id(world));
 
             let artifact_digest = world
@@ -302,12 +303,12 @@ impl DeployModelCommand {
             let mut txn = WorldTxn::new(world);
 
             // If no existing residency, spawn one
-            if !world.has_entity(crate::ecs::CompEntity(residency)) {
+            if !world.has_entity(residency) {
                 txn.stage_spawn(residency, EntityKind::Residency);
             }
 
             txn.put_durable(
-                existing_model,
+                Entity(existing_model, 0),
                 ModelArtifactRef {
                     artifact_id: self.artifact_entity,
                     digest: *artifact_digest,
@@ -340,7 +341,7 @@ impl DeployModelCommand {
                 entity_id: Some(EntityKindId(existing_model)),
                 payload: serde_json::json!({
                     "model_id": existing_model,
-                    "residency_id": residency,
+                    "residency_id": residency.id(),
                     "device": self.device_entity,
                     "idempotent": true,
                 }),
@@ -353,7 +354,7 @@ impl DeployModelCommand {
 
         // 4. Fresh deployment: reserve entity IDs for model + residency
         let model_id = WorldTxn::next_entity_id(world);
-        let residency_id = model_id + 1; // next_entity_id doesn't advance, so offset by 1
+        let residency_id = Entity(model_id.id() + 1, 0); // next_entity_id doesn't advance, so offset by 1
 
         let artifact_digest = world
             .get_component::<crate::ecs::constitutional::artifact::ArtifactDigest>(
@@ -404,10 +405,10 @@ impl DeployModelCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "model_deployed".to_string(),
-            entity_id: Some(EntityKindId(model_id)),
+            entity_id: Some(EntityKindId(model_id.id())),
             payload: serde_json::json!({
-                "model_id": model_id,
-                "residency_id": residency_id,
+                "model_id": model_id.id(),
+                "residency_id": residency_id.id(),
                 "device": self.device_entity,
                 "artifact": self.artifact_entity,
                 "format": format_str,
@@ -525,22 +526,22 @@ pub fn replay_model_deployed(
 
     // Only spawn if not already present (idempotent replay)
     if !world.has_entity(crate::ecs::CompEntity(model_id)) {
-        txn.stage_spawn(model_id, EntityKind::Model);
+        txn.stage_spawn(Entity(model_id, 0), EntityKind::Model);
     }
     if !world.has_entity(crate::ecs::CompEntity(residency_id)) {
-        txn.stage_spawn(residency_id, EntityKind::Residency);
+        txn.stage_spawn(Entity(residency_id, 0), EntityKind::Residency);
     }
 
     // Attach durable components (omit AllocationToken — ephemeral)
     txn.add_component(
-        model_id,
+        Entity(model_id, 0),
         ComponentSchemaId(SCHEMA_MODEL_LIFECYCLE),
         SchemaVersion(1),
         ModelLifecycle::Created,
     );
     if let Some(artifact) = artifact_id {
         txn.add_component(
-            model_id,
+            Entity(model_id, 0),
             ComponentSchemaId(SCHEMA_MODEL_ARTIFACT_REF),
             SchemaVersion(1),
             ModelArtifactRef {
@@ -569,7 +570,7 @@ pub fn replay_model_deployed(
         .unwrap_or(0);
 
     txn.add_component(
-        residency_id,
+        Entity(residency_id, 0),
         ComponentSchemaId(SCHEMA_RESIDENCY_DEVICE_REF),
         SchemaVersion(1),
         ResidencyDeviceRef {
@@ -578,7 +579,7 @@ pub fn replay_model_deployed(
         },
     );
     txn.add_component(
-        residency_id,
+        Entity(residency_id, 0),
         ComponentSchemaId(SCHEMA_RESIDENCY_MEMORY_CLAIM),
         SchemaVersion(1),
         ResidencyMemoryClaim {
@@ -587,7 +588,7 @@ pub fn replay_model_deployed(
         },
     );
     txn.add_component(
-        residency_id,
+        Entity(residency_id, 0),
         ComponentSchemaId(SCHEMA_RESIDENCY_FORMAT),
         SchemaVersion(1),
         format,
@@ -595,7 +596,7 @@ pub fn replay_model_deployed(
     // Replay starts residency at Binding — NOT Resident — because the
     // allocation token was ephemeral and did not survive restart.
     txn.add_component(
-        residency_id,
+        Entity(residency_id, 0),
         ComponentSchemaId(SCHEMA_RESIDENCY_LIFECYCLE),
         SchemaVersion(1),
         ResidencyLifecycle::Binding,

@@ -12,7 +12,7 @@ use crate::ecs::core::model_store::ModelStore;
 use crate::ecs::streaming::GenerationEvent;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, Component, EntityKind, SchedulePhase, World};
 
 // ---------------------------------------------------------------------------
 // Constants

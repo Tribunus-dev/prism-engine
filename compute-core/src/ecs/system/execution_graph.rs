@@ -10,7 +10,7 @@ use crate::ecs::compute_image::compile::execution_graph::{
 };
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Build the execution graph from the ECS world's layer/tensor state.
 ///

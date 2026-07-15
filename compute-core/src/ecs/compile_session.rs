@@ -1,5 +1,4 @@
 use crate::ecs::compiler::event_emitter::{now_micros, CompilerEvent, CompilerEventStream};
-use crate::ecs::Entity;
 use crate::ecs::{EntityKind, SchedulePhase, World};
 use std::path::{Path, PathBuf};
 

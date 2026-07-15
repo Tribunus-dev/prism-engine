@@ -8,8 +8,6 @@ use crate::ecs::runtime::scheduling::error::MaskError;
 use crate::ecs::runtime::scheduling::error::RegistryError;
 use crate::ecs::runtime::world::Component;
 
-
-
 // ---------------------------------------------------------------------------
 // ID types
 // ---------------------------------------------------------------------------

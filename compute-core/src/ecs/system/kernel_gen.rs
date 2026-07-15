@@ -6,7 +6,7 @@ use crate::ecs::component::tensor::{CodecFamilyComp, Shape};
 use crate::ecs::plan::{CodecFamily, KernelTemplateId};
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 use std::collections::{HashMap, HashSet};
 
 /// Selects a kernel template for each dispatch based on its root op and codec.

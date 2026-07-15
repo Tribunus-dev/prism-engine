@@ -8,7 +8,7 @@ use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
 use crate::ecs::Component;
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Singleton entity id for the capability registry resource.
 const CAPABILITY_ENTITY_NAME: &str = "capability_registry";

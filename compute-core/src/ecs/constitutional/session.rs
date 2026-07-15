@@ -8,7 +8,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{World, Entity, EntityKind};
+use crate::ecs::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -248,7 +248,7 @@ impl CreateSessionCommand {
         {
             // Update components on existing session
             let mut txn = WorldTxn::new(world);
-            txn.put_durable(existing, self.config.clone());
+            txn.put_durable(Entity(existing, 0), self.config.clone());
 
             let event = DomainEvent {
                 id: self.id,
@@ -282,9 +282,9 @@ impl CreateSessionCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "session_admitted".to_string(),
-            entity_id: Some(EntityKindId(session_id)),
+            entity_id: Some(EntityKindId(session_id.id())),
             payload: serde_json::json!({
-                "session_id": session_id,
+                "session_id": session_id.id(),
                 "models": self.model_entities,
                 "devices": self.device_entities,
             }),
@@ -305,7 +305,7 @@ impl CreateSessionCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransitionSessionCommand {
     pub id: MessageId,
-    pub session_entity: u64,
+    pub session_entity: Entity,
     pub target: SessionLifecycle,
 }
 
@@ -317,18 +317,17 @@ impl TransitionSessionCommand {
     ) -> Result<(CommittedEpoch, DomainEvent), SessionError> {
         Self::validate_schemas(schema_registry).map_err(|e| SessionError::SchemaError(e))?;
 
-        let entity = crate::ecs::CompEntity(self.session_entity);
-        if !world.has_entity(entity) {
-            return Err(SessionError::SessionNotFound(self.session_entity));
+        if !world.has_entity(self.session_entity) {
+            return Err(SessionError::SessionNotFound(self.session_entity.id()));
         }
-        if world.entity_kind(entity) != Some(EntityKind::Session) {
-            return Err(SessionError::SessionNotFound(self.session_entity));
+        if world.entity_kind(self.session_entity) != Some(EntityKind::Session) {
+            return Err(SessionError::SessionNotFound(self.session_entity.id()));
         }
 
         // Read current lifecycle
         let current = world
-            .get_component::<SessionLifecycle>(entity)
-            .ok_or(SessionError::SessionNotFound(self.session_entity))?;
+            .get_component::<SessionLifecycle>(self.session_entity)
+            .ok_or(SessionError::SessionNotFound(self.session_entity.id()))?;
 
         // Validate transition
         current
@@ -341,9 +340,9 @@ impl TransitionSessionCommand {
         let event = DomainEvent {
             id: self.id,
             kind: format!("session_{}", self.target.name()),
-            entity_id: Some(EntityKindId(self.session_entity)),
+            entity_id: Some(EntityKindId(self.session_entity.id())),
             payload: serde_json::json!({
-                "session_id": self.session_entity,
+                "session_id": self.session_entity.id(),
                 "from": format!("{:?}", current),
                 "to": format!("{:?}", self.target),
             }),
@@ -416,6 +415,8 @@ pub fn replay_session_admitted(
         .or_else(|| event.payload.get("session_id").and_then(|v| v.as_u64()))
         .ok_or_else(|| SessionError::SchemaError("missing session_id in event".into()))?;
 
+    let entity = Entity(session_id, 0);
+
     let models: Vec<u64> = event
         .payload
         .get("models")
@@ -432,12 +433,12 @@ pub fn replay_session_admitted(
 
     let mut txn = WorldTxn::new(world);
 
-    if !world.has_entity(crate::ecs::CompEntity(session_id)) {
-        txn.stage_spawn(session_id, EntityKind::Session);
+    if !world.has_entity(entity) {
+        txn.stage_spawn(entity, EntityKind::Session);
     }
 
     txn.add_component(
-        session_id,
+        entity,
         ComponentSchemaId(SCHEMA_SESSION_CONFIG),
         SchemaVersion(1),
         SessionConfig {
@@ -450,19 +451,19 @@ pub fn replay_session_admitted(
         },
     );
     txn.add_component(
-        session_id,
+        entity,
         ComponentSchemaId(SCHEMA_SESSION_MODELS),
         SchemaVersion(1),
         SessionModels(models),
     );
     txn.add_component(
-        session_id,
+        entity,
         ComponentSchemaId(SCHEMA_SESSION_DEVICES),
         SchemaVersion(1),
         SessionDevices(devices),
     );
     txn.add_component(
-        session_id,
+        entity,
         ComponentSchemaId(SCHEMA_SESSION_LIFECYCLE),
         SchemaVersion(1),
         SessionLifecycle::Created,

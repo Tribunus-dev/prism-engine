@@ -17,7 +17,7 @@ use crate::ecs::{
         quality::{AOTProfileMatch, AdmissionReceipt, QualityGateResult},
         tensor::{CanonicalRoleComp, CodecFamilyComp, DataType, LayerIndex, Shape},
     },
-    World, CompilerSystem, EntityKind, SchedulePhase,
+    CompilerSystem, EntityKind, SchedulePhase, World,
 };
 
 // ---------------------------------------------------------------------------

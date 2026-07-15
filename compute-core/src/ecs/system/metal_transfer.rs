@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::{BackendComponent, MetalDeviceState, TensorComponent};
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Manages buffer transfers between backends — scans Tensor entities
 /// and initiates transfers when a tensor's residency doesn't match

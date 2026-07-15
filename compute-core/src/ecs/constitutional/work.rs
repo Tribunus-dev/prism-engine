@@ -10,8 +10,7 @@ use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
 
-
-use crate::ecs::{World, Component, EntityKind};
+use crate::ecs::{Component, Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Schema IDs ───────────────────────────────────────────────────────────────
@@ -55,7 +54,7 @@ pub enum PrereqKind {
 /// A single prerequisite for a work item to become ready.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Prerequisite {
-    pub entity: u64,
+    pub entity: Entity,
     pub kind: PrereqKind,
     pub generation: u64,
 }
@@ -68,7 +67,7 @@ pub struct Prerequisite {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkItemComponent {
     pub kind: WorkKind,
-    pub target_entity: u64,
+    pub target_entity: Entity,
     pub retry_count: u32,
     pub max_retries: u32,
 }
@@ -134,7 +133,7 @@ impl DurableComponent for WorkState {
 /// Active lease metadata attached to the leasing system / executor entity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkLeaseComponent {
-    pub work_entity: u64,
+    pub work_entity: Entity,
     pub lease_generation: u32,
     pub attempt: u32,
     pub cancellation_epoch: WorldEpoch,
@@ -256,7 +255,7 @@ const EVENT_WORK_RETRIED: &str = "work_retried";
 pub struct CreateWorkCommand {
     pub id: MessageId,
     pub kind: WorkKind,
-    pub target_entity: u64,
+    pub target_entity: Entity,
     pub prerequisites: Vec<Prerequisite>,
     pub resource_claim: ResourceClaimComponent,
 }
@@ -264,8 +263,8 @@ pub struct CreateWorkCommand {
 impl CreateWorkCommand {
     /// Validate that the target entity exists in the world.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        if !world.has_entity(crate::ecs::CompEntity(self.target_entity)) {
-            return Err(WorkError::EntityNotFound(self.target_entity));
+        if !world.has_entity(self.target_entity) {
+            return Err(WorkError::EntityNotFound(self.target_entity.id()));
         }
         Ok(())
     }
@@ -279,7 +278,9 @@ impl CreateWorkCommand {
         let domain_event = DomainEvent {
             id: self.id,
             kind: EVENT_WORK_CREATED.to_string(),
-            entity_id: Some(crate::ecs::constitutional::types::EntityKindId(work_entity)),
+            entity_id: Some(crate::ecs::constitutional::types::EntityKindId(
+                work_entity.id(),
+            )),
             payload: serde_json::json!({
                 "work_entity": work_entity,
                 "kind": format!("{:?}", self.kind),
@@ -318,7 +319,7 @@ impl CreateWorkCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeaseWorkCommand {
     pub id: MessageId,
-    pub work_entity: u64,
+    pub work_entity: Entity,
     pub lease_generation: u32,
     pub attempt: u32,
     pub cancellation_epoch: WorldEpoch,
@@ -328,19 +329,19 @@ pub struct LeaseWorkCommand {
 impl LeaseWorkCommand {
     /// Validate preconditions: entity exists, state is Ready, no conflicting lease.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        let entity = crate::ecs::CompEntity(self.work_entity);
+        let entity = crate::ecs::CompEntity(self.work_entity.id());
         if !world.has_entity(entity) {
-            return Err(WorkError::EntityNotFound(self.work_entity));
+            return Err(WorkError::EntityNotFound(self.work_entity.id()));
         }
         let state = world
             .get_component::<WorkState>(entity)
             .ok_or(WorkError::MissingComponent(
-                self.work_entity,
+                self.work_entity.id(),
                 "WorkState".into(),
             ))?;
         if *state != WorkState::Ready {
             return Err(WorkError::InvalidTransition {
-                entity: self.work_entity,
+                entity: self.work_entity.id(),
                 from: *state,
                 to: "Leased".into(),
             });
@@ -350,7 +351,7 @@ impl LeaseWorkCommand {
 
     /// Execute the lease: set state to Leased, add WorkLeaseComponent, emit event.
     pub fn execute(self, _world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
-        let _entity = crate::ecs::CompEntity(self.work_entity);
+        let _entity = crate::ecs::CompEntity(self.work_entity.id());
 
         // Update state to Leased
         txn.put_durable::<WorkState>(self.work_entity, WorkState::Leased(self.lease_generation));
@@ -371,7 +372,7 @@ impl LeaseWorkCommand {
             id: self.id,
             kind: EVENT_WORK_LEASED.to_string(),
             entity_id: Some(crate::ecs::constitutional::types::EntityKindId(
-                self.work_entity,
+                self.work_entity.id(),
             )),
             payload: serde_json::json!({
                 "work_entity": self.work_entity,
@@ -391,7 +392,7 @@ impl LeaseWorkCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompleteWorkCommand {
     pub id: MessageId,
-    pub work_entity: u64,
+    pub work_entity: Entity,
     pub output: Vec<u8>,
     pub lease_generation: u32,
 }
@@ -399,28 +400,28 @@ pub struct CompleteWorkCommand {
 impl CompleteWorkCommand {
     /// Validate: entity exists, state is Leased with matching generation.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        let entity = crate::ecs::CompEntity(self.work_entity);
+        let entity = crate::ecs::CompEntity(self.work_entity.id());
         if !world.has_entity(entity) {
-            return Err(WorkError::EntityNotFound(self.work_entity));
+            return Err(WorkError::EntityNotFound(self.work_entity.id()));
         }
         let state = world
             .get_component::<WorkState>(entity)
             .ok_or(WorkError::MissingComponent(
-                self.work_entity,
+                self.work_entity.id(),
                 "WorkState".into(),
             ))?;
         match state {
             WorkState::Leased(gen) if *gen == self.lease_generation => {}
             WorkState::Leased(gen) => {
                 return Err(WorkError::LeaseGenerationMismatch {
-                    entity: self.work_entity,
+                    entity: self.work_entity.id(),
                     expected: self.lease_generation,
                     actual: *gen,
                 });
             }
             _ => {
                 return Err(WorkError::InvalidTransition {
-                    entity: self.work_entity,
+                    entity: self.work_entity.id(),
                     from: *state,
                     to: "Completed".into(),
                 });
@@ -444,7 +445,7 @@ impl CompleteWorkCommand {
             id: self.id,
             kind: EVENT_WORK_COMPLETED.to_string(),
             entity_id: Some(crate::ecs::constitutional::types::EntityKindId(
-                self.work_entity,
+                self.work_entity.id(),
             )),
             payload: serde_json::json!({
                 "work_entity": self.work_entity,
@@ -466,7 +467,7 @@ impl CompleteWorkCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailWorkCommand {
     pub id: MessageId,
-    pub work_entity: u64,
+    pub work_entity: Entity,
     pub error: String,
     pub lease_generation: u32,
 }
@@ -474,28 +475,28 @@ pub struct FailWorkCommand {
 impl FailWorkCommand {
     /// Validate: entity exists, state is Leased with matching generation.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        let entity = crate::ecs::CompEntity(self.work_entity);
+        let entity = crate::ecs::CompEntity(self.work_entity.id());
         if !world.has_entity(entity) {
-            return Err(WorkError::EntityNotFound(self.work_entity));
+            return Err(WorkError::EntityNotFound(self.work_entity.id()));
         }
         let state = world
             .get_component::<WorkState>(entity)
             .ok_or(WorkError::MissingComponent(
-                self.work_entity,
+                self.work_entity.id(),
                 "WorkState".into(),
             ))?;
         match state {
             WorkState::Leased(gen) if *gen == self.lease_generation => {}
             WorkState::Leased(gen) => {
                 return Err(WorkError::LeaseGenerationMismatch {
-                    entity: self.work_entity,
+                    entity: self.work_entity.id(),
                     expected: self.lease_generation,
                     actual: *gen,
                 });
             }
             _ => {
                 return Err(WorkError::InvalidTransition {
-                    entity: self.work_entity,
+                    entity: self.work_entity.id(),
                     from: *state,
                     to: "Failed/Retry".into(),
                 });
@@ -506,7 +507,7 @@ impl FailWorkCommand {
 
     /// Execute: check retry eligibility, transition to Failed or Ready, emit event.
     pub fn execute(self, world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
-        let entity = crate::ecs::CompEntity(self.work_entity);
+        let entity = crate::ecs::CompEntity(self.work_entity.id());
 
         // Read current work item to check retry eligibility
         let should_retry = world
@@ -530,7 +531,7 @@ impl FailWorkCommand {
                 id: self.id,
                 kind: EVENT_WORK_RETRIED.to_string(),
                 entity_id: Some(crate::ecs::constitutional::types::EntityKindId(
-                    self.work_entity,
+                    self.work_entity.id(),
                 )),
                 payload: serde_json::json!({
                     "work_entity": self.work_entity,
@@ -548,7 +549,7 @@ impl FailWorkCommand {
                 id: self.id,
                 kind: EVENT_WORK_FAILED.to_string(),
                 entity_id: Some(crate::ecs::constitutional::types::EntityKindId(
-                    self.work_entity,
+                    self.work_entity.id(),
                 )),
                 payload: serde_json::json!({
                     "work_entity": self.work_entity,
@@ -568,25 +569,25 @@ impl FailWorkCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CancelWorkCommand {
     pub id: MessageId,
-    pub work_entity: u64,
+    pub work_entity: Entity,
 }
 
 impl CancelWorkCommand {
     /// Validate: entity exists, state is not terminal.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        let entity = crate::ecs::CompEntity(self.work_entity);
+        let entity = crate::ecs::CompEntity(self.work_entity.id());
         if !world.has_entity(entity) {
-            return Err(WorkError::EntityNotFound(self.work_entity));
+            return Err(WorkError::EntityNotFound(self.work_entity.id()));
         }
         let state = world
             .get_component::<WorkState>(entity)
             .ok_or(WorkError::MissingComponent(
-                self.work_entity,
+                self.work_entity.id(),
                 "WorkState".into(),
             ))?;
         if state.is_terminal() {
             return Err(WorkError::InvalidTransition {
-                entity: self.work_entity,
+                entity: self.work_entity.id(),
                 from: *state,
                 to: "Cancelled".into(),
             });
@@ -596,7 +597,7 @@ impl CancelWorkCommand {
 
     /// Execute: set state to Cancelled, remove lease if present, emit event.
     pub fn execute(self, world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
-        let entity = crate::ecs::CompEntity(self.work_entity);
+        let entity = crate::ecs::CompEntity(self.work_entity.id());
 
         // Remove lease if present
         if world.get_component::<WorkLeaseComponent>(entity).is_some() {
@@ -610,7 +611,7 @@ impl CancelWorkCommand {
             id: self.id,
             kind: EVENT_WORK_CANCELLED.to_string(),
             entity_id: Some(crate::ecs::constitutional::types::EntityKindId(
-                self.work_entity,
+                self.work_entity.id(),
             )),
             payload: serde_json::json!({
                 "work_entity": self.work_entity,
@@ -667,7 +668,7 @@ pub fn replay_work_created(world: &mut World, event: &DomainEvent) -> Result<(),
         ce,
         WorkItemComponent {
             kind,
-            target_entity,
+            target_entity: Entity(target_entity, 0),
             retry_count: 0,
             max_retries: 0,
         },
@@ -746,7 +747,7 @@ mod tests {
     #[test]
     fn test_create_work_item() {
         let mut world = setup_world();
-        let target = 1; // the model entity we spawned
+        let target = Entity(1, 0); // the model entity we spawned
         let cmd = CreateWorkCommand {
             id: make_id(b"create-test"),
             kind: WorkKind::CompileGraph,
@@ -795,7 +796,7 @@ mod tests {
     #[test]
     fn test_work_state_transitions() {
         let mut world = setup_world();
-        let target = 1;
+        let target = Entity(1, 0);
 
         // Create work item
         let create_cmd = CreateWorkCommand {
@@ -818,7 +819,7 @@ mod tests {
             .unwrap();
 
         let mut txn = WorldTxn::new(&world);
-        txn.put_durable::<WorkState>(work_entity.0, WorkState::Ready);
+        txn.put_durable::<WorkState>(work_entity, WorkState::Ready);
         world.transit(txn).unwrap();
 
         let state = world.get_component::<WorkState>(work_entity).unwrap();
@@ -827,7 +828,7 @@ mod tests {
         // Lease the work item (Ready → Leased)
         let lease_cmd = LeaseWorkCommand {
             id: make_id(b"transitions-lease"),
-            work_entity: work_entity.0,
+            work_entity: work_entity,
             lease_generation: 1,
             attempt: 1,
             cancellation_epoch: WorldEpoch(0),
@@ -851,7 +852,7 @@ mod tests {
         // Complete the work (Leased → Completed) via command
         let complete_cmd = CompleteWorkCommand {
             id: make_id(b"transitions-complete"),
-            work_entity: work_entity.0,
+            work_entity: work_entity,
             output: b"done".to_vec(),
             lease_generation: 1,
         };
@@ -877,7 +878,7 @@ mod tests {
     #[test]
     fn test_lease_then_complete() {
         let mut world = setup_world();
-        let target = 1;
+        let target = Entity(1, 0);
 
         // Create item in Pending, transition to Ready manually
         {
@@ -902,14 +903,14 @@ mod tests {
         // Ready
         {
             let mut txn = WorldTxn::new(&world);
-            txn.put_durable::<WorkState>(work_entity.0, WorkState::Ready);
+            txn.put_durable::<WorkState>(work_entity, WorkState::Ready);
             world.transit(txn).unwrap();
         }
 
         // Lease
         let lease_cmd = LeaseWorkCommand {
             id: make_id(b"lifecycle-lease"),
-            work_entity: work_entity.0,
+            work_entity: work_entity,
             lease_generation: 1,
             attempt: 1,
             cancellation_epoch: WorldEpoch(0),
@@ -924,7 +925,7 @@ mod tests {
         // Complete
         let complete_cmd = CompleteWorkCommand {
             id: make_id(b"lifecycle-complete"),
-            work_entity: work_entity.0,
+            work_entity: work_entity,
             output: vec![0u8; 16],
             lease_generation: 1,
         };
@@ -944,7 +945,7 @@ mod tests {
     #[test]
     fn test_fail_retry() {
         let mut world = setup_world();
-        let target = 1;
+        let target = Entity(1, 0);
 
         // Create work item with retry configured
         {
@@ -981,7 +982,7 @@ mod tests {
             let mut txn = WorldTxn::new(&world);
             let lease_cmd = LeaseWorkCommand {
                 id: make_id(b"retry-lease-1"),
-                work_entity: work_entity.0,
+                work_entity: work_entity,
                 lease_generation: 1,
                 attempt: 1,
                 cancellation_epoch: WorldEpoch(0),
@@ -994,7 +995,7 @@ mod tests {
         // Fail command — should retry (back to Ready) because retry_count < max_retries
         let fail_cmd = FailWorkCommand {
             id: make_id(b"retry-fail-1"),
-            work_entity: work_entity.0,
+            work_entity: work_entity,
             error: "transient error".into(),
             lease_generation: 1,
         };
@@ -1029,7 +1030,7 @@ mod tests {
         let cmd = CreateWorkCommand {
             id: make_id(b"preflight-fail"),
             kind: WorkKind::Validate,
-            target_entity: 999,
+            target_entity: Entity(999, 0),
             prerequisites: vec![],
             resource_claim: make_resource_claim(),
         };
@@ -1044,7 +1045,7 @@ mod tests {
     #[test]
     fn test_lease_preflight_fails_when_not_ready() {
         let mut world = setup_world();
-        let target = 1;
+        let target = Entity(1, 0);
 
         // Create work item (stays Pending)
         let create_cmd = CreateWorkCommand {
@@ -1067,7 +1068,7 @@ mod tests {
         // Trying to lease from Pending should fail
         let lease_cmd = LeaseWorkCommand {
             id: make_id(b"lease-bad-state"),
-            work_entity: work_entity.0,
+            work_entity: work_entity,
             lease_generation: 1,
             attempt: 1,
             cancellation_epoch: WorldEpoch(0),

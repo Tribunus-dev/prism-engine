@@ -19,7 +19,7 @@ use crate::ecs::component::compilation::{
 };
 use crate::ecs::config::{LayerPlan, ModelExecutionPlan};
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
 
 // ---------------------------------------------------------------------------
 // DistillCoreSystem

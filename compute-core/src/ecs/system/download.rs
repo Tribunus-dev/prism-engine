@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ecs::component::model_source::{DownloadedSourceComp, HfDownloadComp};
 
-
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Parse a HuggingFace source string ("hf:org/model" or "hf:org/model@revision")
 /// and return (hub_id, revision).

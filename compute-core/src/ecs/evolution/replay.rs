@@ -5,7 +5,6 @@ use crate::ecs::evolution::foundation::EvolutionCandidate;
 use crate::ecs::metal_backend::catalogue_source_for;
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 
-
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::time::Instant;

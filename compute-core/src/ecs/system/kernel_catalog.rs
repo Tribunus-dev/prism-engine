@@ -8,7 +8,7 @@ use crate::ecs::component::aot::CatalogEntry;
 use crate::ecs::component::backend::{BinaryFormat, CompiledBinary};
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Validates each kernel binary against the catalog schema.
 ///
@@ -71,7 +71,7 @@ mod tests {
     use crate::ecs::component::backend::{BinaryFormat, CompiledBinary};
 
     use crate::ecs::Entity;
-    use crate::ecs::{World, EntityKind};
+    use crate::ecs::{EntityKind, World};
 
     #[cfg(feature = "legacy_mutations")]
     #[test]

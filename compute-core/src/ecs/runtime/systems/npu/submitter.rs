@@ -29,8 +29,6 @@ use crate::ecs::runtime::scheduling::metadata::{
 };
 use crate::ecs::runtime::world::World;
 
-
-
 // ---------------------------------------------------------------------------
 // Component — NpuExecutionState
 // ---------------------------------------------------------------------------

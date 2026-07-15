@@ -4,7 +4,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{CompEntity, World, EntityKind};
+use crate::ecs::{CompEntity, Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -260,12 +260,12 @@ pub fn replay_peer_registered(
 
     let mut txn = WorldTxn::new(world);
 
-    if !world.has_entity(crate::ecs::CompEntity(node_id)) {
-        txn.stage_spawn(node_id, EntityKind::Node);
+    if !world.has_entity(Entity(node_id, 0)) {
+        txn.stage_spawn(Entity(node_id, 0), EntityKind::Node);
     }
 
-    txn.add_component(
-        node_id,
+    txn.add_component_entity(
+        Entity(node_id, 0),
         ComponentSchemaId(SCHEMA_PEER_IDENTITY),
         SchemaVersion(1),
         PeerIdentity {
@@ -274,8 +274,8 @@ pub fn replay_peer_registered(
             discovered_at: Timestamp::now(),
         },
     );
-    txn.add_component(
-        node_id,
+    txn.add_component_entity(
+        Entity(node_id, 0),
         ComponentSchemaId(SCHEMA_NODE_MEMBERSHIP),
         SchemaVersion(1),
         NodeMembership {
@@ -285,8 +285,8 @@ pub fn replay_peer_registered(
             last_seen: Timestamp::now(),
         },
     );
-    txn.add_component(
-        node_id,
+    txn.add_component_entity(
+        Entity(node_id, 0),
         ComponentSchemaId(SCHEMA_TRUST_STATE),
         SchemaVersion(1),
         TrustState::Observed,
@@ -377,9 +377,9 @@ impl RegisterPeerCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "peer_registered".to_string(),
-            entity_id: Some(EntityKindId(node_id)),
+            entity_id: Some(EntityKindId(node_id.id())),
             payload: serde_json::json!({
-                "node_id": node_id,
+                "node_id": node_id.id(),
                 "peer_id": self.peer_identity.peer_id,
                 "cluster": self.node_membership.cluster_name,
             }),
@@ -454,7 +454,7 @@ impl ObserveWorkerCapabilityCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "worker_capability_observed".to_string(),
-            entity_id: Some(EntityKindId(observation_id)),
+            entity_id: Some(EntityKindId(observation_id.id())),
             payload: serde_json::json!({
                 "worker_entity": self.worker_entity,
                 "capability": self.capability,

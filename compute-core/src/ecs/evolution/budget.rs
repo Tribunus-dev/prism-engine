@@ -1,6 +1,3 @@
-
-
-
 /// Search budget — time, memory, energy, candidate-count, and kill-bit limits.
 /// Plan Section 2: "Bounded execution: Search and training missions carry
 /// time, memory, energy, candidate-count, and kill-bit limits."

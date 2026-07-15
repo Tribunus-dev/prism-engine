@@ -6,8 +6,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::World;
-
+use crate::ecs::{Entity, World};
 
 use serde::{Deserialize, Serialize};
 
@@ -211,7 +210,7 @@ impl DiscoverDevicesCommand {
 ///
 /// Returns the entity ID of the matching device, if any. See [`Entity`] for the
 /// canonical generational entity handle.
-pub fn find_device_by_stable_id(_world: &World, _stable_id: &DeviceStableId) -> Option<u64> {
+pub fn find_device_by_stable_id(_world: &World, _stable_id: &DeviceStableId) -> Option<Entity> {
     // TODO: maintain StableId → EntityId reverse index
     None
 }
@@ -249,7 +248,7 @@ impl InitializeDeviceCommand {
 pub fn replay_device_discovered(
     world: &mut World,
     event: &DomainEvent,
-) -> Result<(CommittedEpoch, u64), DeviceError> {
+) -> Result<(CommittedEpoch, Entity), DeviceError> {
     let stable_id_str = event
         .payload
         .get("stable_id")

@@ -296,7 +296,6 @@ impl Component for usize {}
 pub struct Query<'w, A: Component> {
     col: Option<&'w Column<A>>,
     cursor: usize,
-    entity_meta: &'w [Option<EntitySlot>],
 }
 impl<'w, A: Component> Iterator for Query<'w, A> {
     type Item = (Entity, &'w A);
@@ -307,14 +306,8 @@ impl<'w, A: Component> Iterator for Query<'w, A> {
         }
         let idx = self.cursor;
         self.cursor += 1;
-        let eid = col.entity_ids()[idx];
-        let gen = self
-            .entity_meta
-            .get((eid - 1) as usize)
-            .and_then(|s| s.as_ref())
-            .map(|s| s.generation)
-            .unwrap_or(0);
-        Some((Entity(eid, gen), &col.dense()[idx]))
+        let e = col.entities()[idx];
+        Some((e, &col.dense()[idx]))
     }
 }
 
@@ -531,7 +524,7 @@ impl World {
             "direct remove_component() called outside WorldTxn — use txn.remove_component()"
         );
         self.validate_generation(entity)?;
-        self.component_store.remove::<T>(entity.0)
+        self.component_store.remove::<T>(entity)
     }
 
     pub fn new() -> Self {
@@ -678,11 +671,7 @@ impl World {
     /// Iterate over all entities that have component type A.
     pub fn query<'w, A: Component>(&'w self) -> Query<'w, A> {
         let col: Option<&Column<A>> = self.component_store.column::<A>();
-        Query {
-            col,
-            cursor: 0,
-            entity_meta: &self.entity_meta,
-        }
+        Query { col, cursor: 0 }
     }
 
     pub fn add_component<T: Component>(&mut self, entity: impl Into<Entity>, component: T) {
@@ -694,7 +683,7 @@ impl World {
         self.validate_generation(entity).expect(
             "add_component called with stale entity handle — entity has been despawned and reused",
         );
-        self.component_store.insert::<T>(entity.0, component);
+        self.component_store.insert::<T>(entity, component);
     }
 
     pub fn stage_component<T: Component>(&mut self, entity: impl Into<Entity>, component: T) {
@@ -703,7 +692,7 @@ impl World {
             .expect("stage_component called with stale entity handle");
         self.staging
             .push(Box::new(move |store: &mut ComponentStore| {
-                store.insert::<T>(entity.0, component);
+                store.insert::<T>(entity, component);
             }));
     }
 
@@ -722,17 +711,13 @@ impl World {
     pub fn get_component<T: Component>(&self, entity: impl Into<Entity>) -> Option<&T> {
         let entity: Entity = entity.into();
         self.validate_generation(entity)?;
-        self.component_store.get::<T>(entity.0)
+        self.component_store.get::<T>(entity)
     }
 
     pub fn get_component_mut<T: Component>(&mut self, entity: impl Into<Entity>) -> Option<&mut T> {
-        let entity: Entity = entity.into();
-        assert!(
-            self.direct_mutation_allowed,
-            "direct get_component_mut() called outside WorldTxn — use txn for mutations"
-        );
-        self.validate_generation(entity)?;
-        self.component_store.column_mut::<T>().get_mut(entity.0)
+        let e: Entity = entity.into();
+        self.validate_generation(e)?;
+        self.component_store.column_mut::<T>().get_mut(e)
     }
 
     #[cfg_attr(
@@ -837,9 +822,9 @@ impl World {
 
     /// Read the component version (write count) for a given entity.
     /// Returns 0 if no writes have occurred for this entity.
-    pub fn component_version(&self, entity_id: u64) -> u64 {
+    pub fn component_version(&self, entity: Entity) -> u64 {
         self.component_versions
-            .get(&entity_id)
+            .get(&entity.id())
             .copied()
             .unwrap_or(0)
     }
@@ -886,18 +871,18 @@ impl World {
         // -- PHASE 3: Apply all mutations ----------------------------------
         // Reserve spawn entity slots
         for spawn in &prepared.spawns {
-            self.spawn_entity_with_id(spawn.entity, spawn.kind);
+            self.spawn_entity_with_id(spawn.entity.id(), spawn.kind);
         }
 
         // Apply durable ops (journaled — component versions still bumped)
         for op in prepared.durable_ops {
             (op.apply)(&mut self.component_store);
-            *self.component_versions.entry(op.entity).or_insert(0) += 1;
+            *self.component_versions.entry(op.entity.id()).or_insert(0) += 1;
         }
         // Apply transient ops (not journaled — component versions bumped)
         for op in prepared.transient_ops {
             (op.apply)(&mut self.component_store);
-            *self.component_versions.entry(op.entity).or_insert(0) += 1;
+            *self.component_versions.entry(op.entity.id()).or_insert(0) += 1;
         }
 
         // 3c. Apply staged spawns
@@ -959,20 +944,20 @@ impl ComponentStore {
         self.data.get(&key)?.downcast_ref::<Column<T>>()
     }
 
-    pub fn insert<T: Component>(&mut self, entity: u64, value: T) {
+    pub fn insert<T: Component>(&mut self, entity: Entity, value: T) {
         self.column_mut::<T>().insert(entity, value);
     }
 
-    pub fn get<T: Component>(&self, entity: u64) -> Option<&T> {
+    pub fn get<T: Component>(&self, entity: Entity) -> Option<&T> {
         self.column::<T>()?.get(entity)
     }
 
-    pub fn remove<T: Component>(&mut self, entity: u64) -> Option<T> {
+    pub fn remove<T: Component>(&mut self, entity: Entity) -> Option<T> {
         self.column_mut::<T>().remove(entity)
     }
 
-    pub fn contains<T: Component>(&self, entity: CompEntity) -> bool {
-        self.column::<T>().map(|c| c.has(entity.0)).unwrap_or(false)
+    pub fn contains<T: Component>(&self, entity: Entity) -> bool {
+        self.column::<T>().map(|c| c.has(entity)).unwrap_or(false)
     }
 }
 

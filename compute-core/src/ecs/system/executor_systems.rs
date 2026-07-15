@@ -13,7 +13,7 @@ use crate::ecs::component::executor::{
 };
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// The single ECS system that drives the sequential decoder loop for all
 /// active sessions. Each tick advances every Session entity by one state

@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::{BackpressureComponent, BackpressureLevel};
 
 use crate::ecs::Entity;
-use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Ticks the backpressure state machine — decay active backpressure
 /// levels over time as resources drain.

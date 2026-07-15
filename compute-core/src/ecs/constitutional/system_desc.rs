@@ -1,4 +1,5 @@
 use crate::ecs::constitutional::types::*;
+use crate::ecs::Entity;
 use serde::{Deserialize, Serialize};
 
 /// Component version for optimistic concurrency control.
@@ -8,7 +9,7 @@ pub type ComponentVersion = u64;
 /// and the version that was observed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ReadDependency {
-    pub entity: u64, // process-local entity id
+    pub entity: Entity,
     pub schema_id: ComponentSchemaId,
     pub observed_version: ComponentVersion,
 }
