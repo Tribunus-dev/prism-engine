@@ -2,7 +2,7 @@ use crate::ecs::component::fusion::{TileSize, WorkgroupCount};
 use crate::ecs::component::tensor::Shape;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 pub struct ScalarDispatchSystem;
 impl CompilerSystem for ScalarDispatchSystem {
@@ -34,7 +34,7 @@ impl CompilerSystem for ScalarDispatchSystem {
 /// Prefers the product of `Shape` dimensions when present. Falls back to
 /// `WorkgroupCount` x `TileSize` (defaulting tile to 1x1x1 when absent).
 /// Returns `None` when neither signal is available or the product overflows.
-fn dispatch_total_elements(world: &CompWorld, entity: CompEntity) -> Option<u32> {
+fn dispatch_total_elements(world: &CompWorld, entity: Entity) -> Option<u32> {
     // Primary signal: the dispatch's output tensor shape.
     if let Some(shape) = world.get_component::<Shape>(entity) {
         return shape

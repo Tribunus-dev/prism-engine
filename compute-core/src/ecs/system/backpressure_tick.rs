@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::{BackpressureComponent, BackpressureLevel};
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Ticks the backpressure state machine — decay active backpressure
 /// levels over time as resources drain.
@@ -17,7 +17,7 @@ impl CompilerSystem for BackpressureTickSystem {
         SchedulePhase::Execution
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for entity in &entities {
             let Some(bp) = world.get_component_mut::<BackpressureComponent>(*entity) else {

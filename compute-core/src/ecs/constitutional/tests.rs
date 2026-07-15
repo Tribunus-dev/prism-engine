@@ -7,6 +7,7 @@ mod tests {
     use crate::ecs::constitutional::schema::SchemaCatalogue;
     use crate::ecs::constitutional::*;
     use crate::ecs::receipt_bus::*;
+    use crate::ecs::Entity;
     use crate::ecs::{CompEntity, CompWorld, EntityKind};
     use std::collections::HashMap;
 
@@ -528,7 +529,7 @@ mod tests {
         // entities_of_kind must not include phantom entities
         let models = world.entities_of_kind(EntityKind::Model);
         assert_eq!(models.len(), 1, "only one model entity should exist");
-        assert_eq!(models[0], CompEntity(100));
+        assert_eq!(models[0], Entity(100, 0));
     }
 
     #[test]

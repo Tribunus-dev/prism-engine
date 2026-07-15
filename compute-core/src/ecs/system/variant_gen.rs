@@ -10,7 +10,7 @@ use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::plan::KernelTemplateId;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -139,7 +139,7 @@ impl CompilerSystem for VariantGenerationSystem {
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         // Identify dispatches that have FusionGroup info.
-        let dispatch_entities: Vec<CompEntity> = world
+        let dispatch_entities: Vec<Entity> = world
             .entities_of_kind(EntityKind::Dispatch)
             .into_iter()
             .filter(|e| world.get_component::<FusionGroup>(*e).is_some())
@@ -150,7 +150,7 @@ impl CompilerSystem for VariantGenerationSystem {
         }
 
         // Collect existing kernel entities to use as parents.
-        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
         // Fallback: if no kernel entities exist yet, create one.
         let fallback_kernel = if kernel_entities.is_empty() {

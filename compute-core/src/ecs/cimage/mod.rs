@@ -20,6 +20,7 @@ pub mod receipts;
 // Implementation modules — written after type definitions.
 pub mod durability;
 pub mod loader;
+pub mod sealed_v1;
 pub mod shard_builder;
 pub mod streaming_writer;
 pub mod validate;
@@ -47,6 +48,11 @@ pub use receipts::{
     CImageLoadReceipt, CImageProofKind, CImageReceiptDirectoryV0, CImageReceiptEntry,
     CImageShardValidationReceipt, CImageValidationStatus, CImageWriteReceipt, EvidenceReceiptV0,
     ReceiptEvidenceKind,
+};
+pub use sealed_v1::{
+    AbiIdentity, CanonicalManifest, KernelArtifactIdentity, SealedCimageBuilder,
+    SealedCimageHeader, SealedCimageV1, SectionEntry, SectionKind, SegmentIdentity,
+    TokenizerIdentity, ValidatedSealedCimage, SEALED_CIMAGE_MAGIC, SEALED_CIMAGE_VERSION,
 };
 pub use shard_builder::{
     DecoderLayerShardBuilder, MlpShardBuilder, PendingCImageShard, SyntheticDecoderLayerConfig,

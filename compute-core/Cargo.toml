@@ -114,6 +114,8 @@ flux-klein-mlx = []
 backend-metal = ["dep:mpsgraph"]
 mlir-runtime = ["dep:melior"]
 generation-features-moved-to-separate-crates = []
+external-checkpoint = ["prism-backend"]
+unfinished-gates = []
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("generation-image", "generation-diffusion", "generation-video", "generation-audio-core", "generation-asr", "generation-tts", "generation-audio"))'] }

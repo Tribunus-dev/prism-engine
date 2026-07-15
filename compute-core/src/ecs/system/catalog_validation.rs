@@ -8,7 +8,7 @@
 use crate::ecs::component::aot::{SelectedVariant, ValidationReceipt};
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Runs held-out shape validation for each selected variant.
 pub struct CatalogValidationSystem;
@@ -23,7 +23,7 @@ impl CompilerSystem for CatalogValidationSystem {
     }
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
         for &kernel in &kernel_entities {
             // Only validate kernels that have a selected variant.

@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::SessionState;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Cleans up session state — removes `SessionState` components
 /// from session entities.
@@ -16,7 +16,7 @@ impl CompilerSystem for SessionCleanupSystem {
         SchedulePhase::Packaging
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::CommandBuffer);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::CommandBuffer);
 
         for entity in &entities {
             if world.get_component::<SessionState>(*entity).is_some() {

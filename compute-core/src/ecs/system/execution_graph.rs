@@ -10,7 +10,7 @@ use crate::ecs::compute_image::compile::execution_graph::{
 };
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Build the execution graph from the ECS world's layer/tensor state.
 ///
@@ -27,7 +27,7 @@ impl CompilerSystem for ExecutionGraphSystem {
         SchedulePhase::FusionDispatch
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let tensor_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let tensor_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         // Collect per-layer information from tensor components.
         let mut layer_map: std::collections::BTreeMap<u32, usize> =

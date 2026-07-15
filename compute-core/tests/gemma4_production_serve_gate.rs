@@ -420,15 +420,11 @@ mod contract_gate {
 // ====================================================================
 
 #[cfg(test)]
-#[cfg(feature = "backend-metal")]
+#[cfg(feature = "unfinished-gates")]
 mod metal_integration_gate {
     /// Assert 8: Dispatch count is positive after a decode invocation.
     #[test]
     fn test_kernel_dispatch_count() {
-        // Requires a real Metal device, compiled cimage with kernel artifacts,
-        // and a wired decode path through CimageModelInstance::decode().
-        // Once Metal dispatch is wired, this test should measure dispatch
-        // counter > 0 after calling `decode()`.
         panic!(
             "not yet implemented — requires wired Metal dispatch in CimageModelInstance::decode()"
         );
@@ -438,18 +434,12 @@ mod metal_integration_gate {
     /// than re-deriving from source weights.
     #[test]
     fn test_codec_fidelity() {
-        // Requires the Metal backend to compile a cimage with NF4 codec,
-        // then verify that the runtime tensor projections match the sealed
-        // codec family exactly (no fallback to unquantized source).
         panic!("not yet implemented — requires metal-dispatch codec projection trace");
     }
 
     /// Assert 10: MTP draft/verify/acceptance is measured at each step.
     #[test]
     fn test_mtp_measurement() {
-        // Requires MTP-enabled Gemma 4 model on Metal: calls decode_mtp()
-        // and verifies that draft_tokens, verified_count, and accepted_count
-        // are non-zero and logged in the MtpResult.
         panic!(
             "not yet implemented — requires wired CimageModelInstance::decode_mtp() with MTP graph"
         );
@@ -458,19 +448,12 @@ mod metal_integration_gate {
     /// Assert 11: Prefill and decode mutate the KV page store.
     #[test]
     fn test_kv_state_mutation() {
-        // Requires a loaded model instance with KV cache coordinator:
-        // call prefill([tokens]) then decode(), and verify that the KV
-        // cache page count increases and page entries contain the expected
-        // activations.
         panic!("not yet implemented — requires wired prefill + decode + layered KV cache");
     }
 
     /// Assert 12: Device disconnect rolls back the in-flight generation.
     #[test]
     fn test_rollback_on_disconnect() {
-        // Simulates a Metal device disconnect or GPU timeout during decode,
-        // then verifies the lifecycle coordinator rolls back the generation
-        // and the model registry serves the previous generation.
         panic!("not yet implemented — requires Metal device lifecycle monitoring");
     }
 }
@@ -480,21 +463,20 @@ mod metal_integration_gate {
 // ====================================================================
 
 #[cfg(test)]
+#[cfg(feature = "external-checkpoint")]
 mod gemma4_production_gate {
     /// Assert 4–7: Full compile-to-serve pipeline for a real Gemma 4
-    /// checkpoint.  Skips silently unless `PRISM_GEMMA4_MODEL` is set.
+    /// checkpoint.  Fails hard if `PRISM_GEMMA4_MODEL` is not set —
+    /// the external-checkpoint feature is an opt-in to checkpoint-requiring
+    /// tests.
     #[test]
     fn test_gemma4_full_compile_and_serve() {
-        let model_path = match std::env::var("PRISM_GEMMA4_MODEL") {
-            Ok(p) => p,
-            Err(_) => {
-                eprintln!(
-                    "[gemma4-prod] SKIP: PRISM_GEMMA4_MODEL not set — \
-                     requires a real Gemma 4 checkpoint path"
-                );
-                return;
-            }
-        };
+        let model_path = std::env::var("PRISM_GEMMA4_MODEL").unwrap_or_else(|_| {
+            panic!(
+                "requires PRISM_GEMMA4_MODEL env var pointing to a real Gemma 4 checkpoint \
+                 — set it before running with --features external-checkpoint"
+            )
+        });
         use std::path::PathBuf;
         use tribunus_compute_core::ecs::compiler::deployment_compiler::{
             CimageDeploymentCompiler, DeploymentRequest,

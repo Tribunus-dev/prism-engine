@@ -13,7 +13,7 @@ use crate::ecs::component::executor::{
 };
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// The single ECS system that drives the sequential decoder loop for all
 /// active sessions. Each tick advances every Session entity by one state
@@ -31,7 +31,7 @@ impl CompilerSystem for ExecutorSystem {
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         // Gather session entities that carry an ExecutorState component.
-        let session_entities: Vec<CompEntity> = world
+        let session_entities: Vec<Entity> = world
             .entities_of_kind(EntityKind::Session)
             .into_iter()
             .filter(|e| world.get_component::<ExecutorState>(*e).is_some())

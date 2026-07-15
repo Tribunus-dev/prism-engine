@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::MetalDeviceState;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Cleans up Metal resources — removes `MetalDeviceState` components
 /// and their owning entities.
@@ -16,7 +16,7 @@ impl CompilerSystem for MetalCleanupSystem {
         SchedulePhase::Packaging
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
         for entity in &entities {
             if world.get_component::<MetalDeviceState>(*entity).is_some() {

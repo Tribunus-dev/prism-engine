@@ -12,13 +12,13 @@ use crate::ecs::plan::{CodecFamily, DType as PlanDType, HardwareProfileId};
 #[allow(unused_imports)]
 use crate::ecs::Entity;
 use crate::ecs::{
-        component::{
-            backend::CompiledBinary,
-            quality::{AOTProfileMatch, AdmissionReceipt, QualityGateResult},
-            tensor::{CanonicalRoleComp, CodecFamilyComp, DataType, LayerIndex, Shape},
-        },
-        CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase,
-    };
+    component::{
+        backend::CompiledBinary,
+        quality::{AOTProfileMatch, AdmissionReceipt, QualityGateResult},
+        tensor::{CanonicalRoleComp, CodecFamilyComp, DataType, LayerIndex, Shape},
+    },
+    CompWorld, CompilerSystem, EntityKind, SchedulePhase,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -150,7 +150,7 @@ impl CompilerSystem for CImageAssemblySystem {
         let entity_count = world.entity_count();
 
         for id in 1..=entity_count {
-            let entity = CompEntity(id as u64);
+            let entity = Entity(id as u64, 0);
 
             if let Some(qg) = world.get_component::<QualityGateResult>(entity) {
                 let rid = format!("quality_gate_{}", id);
@@ -262,7 +262,7 @@ impl CompilerSystem for ReceiptSigningSystem {
         let mut evidence_receipts: Vec<EvidenceReceiptV0> = Vec::new();
 
         for id in 1..=entity_count {
-            let entity = CompEntity(id as u64);
+            let entity = Entity(id as u64, 0);
             let qg = world.get_component::<QualityGateResult>(entity);
             let aot = world.get_component::<AOTProfileMatch>(entity);
             let adm = world.get_component::<AdmissionReceipt>(entity);

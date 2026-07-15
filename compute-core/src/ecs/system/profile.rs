@@ -16,7 +16,7 @@ use crate::ecs::execution_profile::{
 use crate::ecs::plan::ModelExecutionPlan;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// ECS system that executes a profile plan on a backend and produces
 /// `ProfileRunResult` components.
@@ -36,7 +36,7 @@ impl CompilerSystem for ProfileExecutionSystem {
     }
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in model_entities {
             // Skip if already profiled.

@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::SessionState;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Initializes an inference session — spawns a session entity with
 /// `SessionState` components.
@@ -17,7 +17,7 @@ impl CompilerSystem for SessionInitSystem {
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         // Check if a session already exists.
-        let existing: Vec<CompEntity> = world.entities_of_kind(EntityKind::CommandBuffer);
+        let existing: Vec<Entity> = world.entities_of_kind(EntityKind::CommandBuffer);
         for entity in &existing {
             if world.get_component::<SessionState>(*entity).is_some() {
                 return Ok(());

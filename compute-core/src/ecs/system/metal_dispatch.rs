@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::WorkRegistryComponent;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Dispatches Metal compute kernels — scans Tensor entities with pending
 /// work and advances them through the dispatch pipeline.
@@ -16,7 +16,7 @@ impl CompilerSystem for MetalDispatchSystem {
         SchedulePhase::Execution
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for entity in &entities {
             // Check for a work registry entry to dispatch.

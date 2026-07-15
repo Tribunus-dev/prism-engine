@@ -8,7 +8,7 @@ use crate::ecs::plan::fusion::{
 use crate::ecs::plan::DType;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 use std::collections::HashMap;
 
@@ -21,8 +21,8 @@ impl CompilerSystem for FusionAnalysisSystem {
         SchedulePhase::FusionDispatch
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let layers: Vec<CompEntity> = world.entities_of_kind(EntityKind::Layer);
-        let all_tensors: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let layers: Vec<Entity> = world.entities_of_kind(EntityKind::Layer);
+        let all_tensors: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for layer in &layers {
             let layer_idx = match world.get_component::<LayerIndex>(*layer) {
@@ -31,7 +31,7 @@ impl CompilerSystem for FusionAnalysisSystem {
             };
 
             // Collect tensors whose CanonicalRole carries this layer index.
-            let layer_tensors: Vec<CompEntity> = all_tensors
+            let layer_tensors: Vec<Entity> = all_tensors
                 .iter()
                 .filter(|t| {
                     world
@@ -189,7 +189,7 @@ fn has_mlp_triplet(roles: &[CanonicalRole]) -> bool {
 /// For standalone MatMul roles, a single MatMul node is emitted.
 fn build_graph_for_layer(
     _world: &CompWorld,
-    _tensors: &[CompEntity],
+    _tensors: &[Entity],
     roles: &[CanonicalRole],
     layer_idx: u32,
 ) -> DataflowGraph {

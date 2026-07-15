@@ -10,7 +10,7 @@ use crate::ecs::component::aot::{KernelVariantEntityData, SelectedVariant};
 use crate::ecs::component::backend::GPUArch;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -181,21 +181,20 @@ impl CompilerSystem for VariantSelectionSystem {
     }
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let variant_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::KernelVariant);
+        let variant_entities: Vec<Entity> = world.entities_of_kind(EntityKind::KernelVariant);
 
         if variant_entities.is_empty() {
             return Ok(());
         }
 
         // Group variants by parent kernel.
-        let mut groups: HashMap<CompEntity, Vec<(CompEntity, KernelVariantEntityData)>> =
-            HashMap::new();
+        let mut groups: HashMap<Entity, Vec<(Entity, KernelVariantEntityData)>> = HashMap::new();
         for &entity in &variant_entities {
             if let Some(data) = world
                 .get_component::<KernelVariantEntityData>(entity)
                 .cloned()
             {
-                let parent = CompEntity(data.parent_kernel.0);
+                let parent = Entity(data.parent_kernel.0, 0);
                 groups.entry(parent).or_default().push((entity, data));
             }
         }

@@ -2,7 +2,7 @@ use crate::ecs::component::fusion::{BindingCapacity, FusionGroup, WorkgroupCount
 use crate::ecs::component::tensor::Shape;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 pub struct DispatchFormationSystem;
 impl CompilerSystem for DispatchFormationSystem {
@@ -34,7 +34,7 @@ impl CompilerSystem for DispatchFormationSystem {
 impl DispatchFormationSystem {
     /// Compute the workgroup X dimension from the shape of the dispatch output
     /// tensor. Uses the hidden (last) dimension with 256 threads per workgroup.
-    fn workgroup_dim(world: &CompWorld, entity: CompEntity) -> u32 {
+    fn workgroup_dim(world: &CompWorld, entity: Entity) -> u32 {
         let dim = world
             .get_component::<Shape>(entity)
             .and_then(|s| s.0.last().copied())
@@ -45,7 +45,7 @@ impl DispatchFormationSystem {
 
     /// Accept a fused dispatch group: attach WorkgroupCount and BindingCapacity
     /// to the entity so a single fused kernel is launched.
-    fn attach_fused_dispatch(world: &mut CompWorld, entity: CompEntity, fusion: &FusionGroup) {
+    fn attach_fused_dispatch(world: &mut CompWorld, entity: Entity, fusion: &FusionGroup) {
         let wg_x = Self::workgroup_dim(world, entity);
         world.add_component(entity, WorkgroupCount(wg_x, 1, 1));
         world.add_component(
@@ -60,7 +60,7 @@ impl DispatchFormationSystem {
     /// Rejected fusion group: spawn one Dispatch entity per operation (root
     /// + each fused op), each carrying its own WorkgroupCount, BindingCapacity,
     /// and Shape copied from the parent.
-    fn spawn_per_op_dispatches(world: &mut CompWorld, parent: CompEntity, fusion: &FusionGroup) {
+    fn spawn_per_op_dispatches(world: &mut CompWorld, parent: Entity, fusion: &FusionGroup) {
         // Op labels: root first, then each fused op.
         let op_kinds: Vec<String> = std::iter::once(&fusion.root_op_kind)
             .chain(fusion.fused_op_kinds.iter())

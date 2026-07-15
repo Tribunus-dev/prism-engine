@@ -6,7 +6,7 @@ use crate::ecs::config::{
 };
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -312,7 +312,7 @@ impl CompilerSystem for ModelAdapterSystem {
                             }
                         };
 
-                        let tensor_entity: CompEntity =
+                        let tensor_entity: Entity =
                             world.spawn(EntityKind::Tensor, Some(format!("tensor_{}", role)));
 
                         world.add_component(tensor_entity, Shape(shape.clone()));
@@ -336,7 +336,7 @@ impl CompilerSystem for ModelAdapterSystem {
 
             // ── 3. Create one Layer entity per unique layer index ──────
             for layer_idx in &seen_layers {
-                let layer_entity: CompEntity =
+                let layer_entity: Entity =
                     world.spawn(EntityKind::Layer, Some(format!("layer_{}", layer_idx)));
                 world.add_component(layer_entity, LayerIndex(*layer_idx));
             }

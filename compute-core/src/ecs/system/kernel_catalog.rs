@@ -8,7 +8,7 @@ use crate::ecs::component::aot::CatalogEntry;
 use crate::ecs::component::backend::{BinaryFormat, CompiledBinary};
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Validates each kernel binary against the catalog schema.
 ///
@@ -28,7 +28,7 @@ impl CompilerSystem for KernelCatalogSystem {
     }
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let kernels: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernels: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
         for &kernel in &kernels {
             let mut errors: Vec<String> = Vec::new();

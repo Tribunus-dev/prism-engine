@@ -12,7 +12,7 @@ use crate::ecs::compute_image::compile::int4_pack::{
 use crate::ecs::Component;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Raw f32 weight data for a tensor — populated by source loading or
 /// draft loading systems for downstream consumption.
@@ -33,7 +33,7 @@ impl CompilerSystem for Int4PackSystem {
         SchedulePhase::Quantization
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let tensor_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let tensor_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
         if tensor_entities.is_empty() {
             return Ok(());
         }

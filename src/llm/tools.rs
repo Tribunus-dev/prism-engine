@@ -221,7 +221,6 @@ impl ToolEngine {
                 Ok(ToolCallOutcome::Unrepairable(msg))
             }
         }
-
     }
 
     /// Execute a parsed tool call through a caller-provided dispatcher or

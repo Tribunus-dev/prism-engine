@@ -4232,6 +4232,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "chrono",
+ "deno_core",
  "parking_lot",
  "prism-mcp-core",
  "serde",
@@ -4353,6 +4355,7 @@ dependencies = [
  "prism-mcp-trace",
  "redis",
  "rusqlite",
+ "serde",
  "serde_json",
  "signal-hook",
  "tempfile",

@@ -5,7 +5,7 @@ use crate::ecs::component::backend::{
 use crate::ecs::component::quality::QualityGateResult;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Packages compiled kernel binaries into Executable entities for the CImage.
 pub struct ExecutablePackagingSystem;
@@ -17,7 +17,7 @@ impl CompilerSystem for ExecutablePackagingSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         for &kernel in &kernel_entities {
             let name = world.name(kernel).unwrap_or("kernel").to_string();
             if let Some(binary) = world.get_component::<CompiledBinary>(kernel).cloned() {
@@ -56,8 +56,8 @@ impl CompilerSystem for AdmissionValidationSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
-        let executable_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
+        let executable_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
         let any_failure = false;
 
         for &k in &kernel_entities {
@@ -76,7 +76,7 @@ impl CompilerSystem for AdmissionValidationSystem {
         }
 
         // Find the ModelEntity and attach a default-passed gate if none exist
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for &m in &model_entities {
             if world.get_component::<QualityGateResult>(m).is_none() {
                 world.add_component(

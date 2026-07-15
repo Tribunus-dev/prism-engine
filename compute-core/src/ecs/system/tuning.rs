@@ -111,7 +111,7 @@ use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::component::quality::AOTProfileMatch;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Match an AMD device by compute-unit proximity with a 20% threshold.
 /// Datacenter-class GPUs (Instinct) are preferred when matches are close.
@@ -167,8 +167,8 @@ impl CompilerSystem for AutoTuningSystem {
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         // Collect dispatch entities that have both a FusionGroup and GPUArch.
-        let dispatch_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Dispatch);
-        let candidates: Vec<CompEntity> = dispatch_entities
+        let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
+        let candidates: Vec<Entity> = dispatch_entities
             .into_iter()
             .filter(|e| {
                 world.get_component::<FusionGroup>(*e).is_some()
@@ -182,11 +182,11 @@ impl CompilerSystem for AutoTuningSystem {
 
         // Sample a subset (first 3 or 10%) to keep tuning overhead bounded.
         let sample_size = std::cmp::max(3, candidates.len() / 10).min(20);
-        let sample: Vec<CompEntity> = candidates.into_iter().take(sample_size).collect();
+        let sample: Vec<Entity> = candidates.into_iter().take(sample_size).collect();
 
         // Collect per-sample info under immutable borrow.
         struct SampleEntry {
-            kernel: Option<CompEntity>,
+            kernel: Option<Entity>,
             arch: GPUArch,
         }
         let entries: Vec<SampleEntry> = sample
@@ -295,11 +295,11 @@ impl CompilerSystem for AOTProfileMatchSystem {
         SchedulePhase::KernelGeneration
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
         // Collect AMD kernels with their GPU arch info.
         struct AmdMatch {
-            kernel: CompEntity,
+            kernel: Entity,
             arch: GPUArch,
         }
         let amd_kernels: Vec<AmdMatch> = kernel_entities

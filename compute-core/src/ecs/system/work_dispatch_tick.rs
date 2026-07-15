@@ -3,7 +3,7 @@ use crate::ecs::component::scheduling::{
 };
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Ticks the work dispatch loop — scans entities with pending items
 /// in `ReadyQueueState` and advances `WorkRegistryComponent` states
@@ -19,8 +19,8 @@ impl CompilerSystem for WorkDispatchTickSystem {
         SchedulePhase::Execution
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
-        let engine_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
+        let engine_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
         // Check backpressure on engine entities.
         let has_backpressure = engine_entities.iter().any(|e| {

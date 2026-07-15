@@ -87,7 +87,8 @@ mod tests {
         assert_eq!(policy.embeddings, TensorPrecision::Nf4);
         assert_eq!(policy.norms, TensorPrecision::Fp16);
         assert_eq!(policy.biases, TensorPrecision::Fp16);
-        assert_eq!(policy.kv_cache, TensorPrecision::Fp16);
+        // nf4_default uses 131K context, which exceeds the 32K FP16 threshold
+        assert_eq!(policy.kv_cache, TensorPrecision::Nf4);
         assert_eq!(policy.mtp_projections, TensorPrecision::Nf4);
     }
 

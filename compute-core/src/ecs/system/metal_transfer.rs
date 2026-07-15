@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::{BackendComponent, MetalDeviceState, TensorComponent};
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Manages buffer transfers between backends — scans Tensor entities
 /// and initiates transfers when a tensor's residency doesn't match
@@ -17,8 +17,8 @@ impl CompilerSystem for MetalTransferSystem {
         SchedulePhase::Execution
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let tensor_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
-        let backend_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let tensor_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
+        let backend_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
         // Collect available backend ids.
         let backend_ids: Vec<String> = backend_entities

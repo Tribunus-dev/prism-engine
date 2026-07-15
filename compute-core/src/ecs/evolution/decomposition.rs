@@ -22,7 +22,7 @@ use crate::ecs::evolution::EvolutionState;
 use crate::ecs::plan::CodecFamily;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, EntityKind};
+use crate::ecs::{CompWorld, EntityKind};
 
 /// Configuration for a metal decomposition search.
 ///
@@ -143,7 +143,7 @@ impl MetalDecompositionSearch {
             final_generation = gen as u64 + 1;
 
             // ── Snapshot the current population entity list ────────────────
-            let pop_entities: Vec<CompEntity> = {
+            let pop_entities: Vec<Entity> = {
                 let state = world
                     .get_component::<EvolutionState>(state_entity)
                     .expect("state component present");
@@ -216,7 +216,7 @@ impl MetalDecompositionSearch {
                 }
 
                 // ── Breed offspring from elites to fill remaining slots ──
-                let mut new_entities: Vec<CompEntity> = Vec::new();
+                let mut new_entities: Vec<Entity> = Vec::new();
                 let mut i = 0;
                 while elite_count + new_entities.len() < pop_size {
                     let parent_a = &elites[i % elites.len()];

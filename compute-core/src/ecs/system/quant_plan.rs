@@ -7,7 +7,7 @@ use crate::ecs::plan::precision_plan::{
 use crate::ecs::plan::CodecFamily;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 
 // ── Component wrapper ─────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ impl CompilerSystem for CodecSelectionSystem {
         SchedulePhase::Quantization
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let tensors: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let tensors: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for tensor in tensors {
             // Only process tensors with both Shape and CanonicalRoleComp.
@@ -121,8 +121,8 @@ impl CompilerSystem for PrecisionPlanSystem {
         SchedulePhase::Quantization
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let models: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
-        let tensors: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let models: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
+        let tensors: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         let mut overrides: Vec<PrecisionOverride> = Vec::new();
         let mut default_codec = CodecFamily::RawF32;

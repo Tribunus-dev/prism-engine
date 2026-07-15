@@ -141,12 +141,8 @@ fn main() {
 
     // ── Step 3: Build CimageAssembly ────────────────────────────────
     eprintln!("[prism] step 3/5: assembling deployable cimage...");
-    let assembly = compiler.build_deployable_cimage(
-        &compile_outcome,
-        &request,
-        &inspection,
-        &resolved_output,
-    );
+    let assembly =
+        compiler.build_deployable_cimage(&compile_outcome, &request, &inspection, &resolved_output);
     eprintln!(
         "[prism]   assembly complete: {} segments, {} kernel artifacts, mtp={}",
         assembly.segments.len(),
@@ -166,7 +162,11 @@ fn main() {
             process::exit(1);
         }
     };
-    eprintln!("[prism]   sealed: validated={}, digest={}", promotable.validated, &promotable.digest[..16]);
+    eprintln!(
+        "[prism]   sealed: validated={}, digest={}",
+        promotable.validated,
+        &promotable.digest[..16]
+    );
 
     // ── Step 5: Promote through lifecycle ───────────────────────────
     eprintln!("[prism] step 5/5: promoting through lifecycle...");

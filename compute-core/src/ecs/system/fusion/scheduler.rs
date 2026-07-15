@@ -22,7 +22,7 @@ use crate::ecs::plan::fusion_scheduler_types::{
 use crate::ecs::plan::CodecFamily;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -255,7 +255,7 @@ impl CompilerSystem for SchedulerEvaluationSystem {
     }
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let dispatch_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Dispatch);
+        let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
 
         for entity in dispatch_entities {
             let group = match world.get_component::<FusionGroup>(entity) {
@@ -394,10 +394,10 @@ impl CompilerSystem for GroupGrowthSystem {
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         // Collect dispatch entities with FusionGroup components.
-        let dispatch_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Dispatch);
+        let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
 
         // Group by DataflowGraphHandle for layer-aware growth.
-        let mut by_handle: Vec<(String, Vec<CompEntity>)> = Vec::new();
+        let mut by_handle: Vec<(String, Vec<Entity>)> = Vec::new();
         let mut seen_handles: Vec<String> = Vec::new();
 
         for &entity in &dispatch_entities {
@@ -535,7 +535,7 @@ impl CompilerSystem for CostEvaluationSystem {
     }
 
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let dispatch_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Dispatch);
+        let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
 
         for entity in dispatch_entities {
             // Skip if already has a cost.

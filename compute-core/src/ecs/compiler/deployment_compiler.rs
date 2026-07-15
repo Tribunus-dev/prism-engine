@@ -1,6 +1,7 @@
 //! CimageDeploymentCompiler — the production entry point for building
 //! a deployable cimage from a model directory and promoting through lifecycle.
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -18,17 +19,15 @@ use crate::ecs::canonical::compile_plan::CompileRequest;
 #[cfg(feature = "prism-backend")]
 use crate::ecs::canonical::identity::ModelSourceId;
 #[cfg(feature = "prism-backend")]
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
-#[cfg(feature = "prism-backend")]
-use crate::ecs::compiler::lifecycle_coordinator::{
-    CompilerRequest as LifecycleCompileRequest, LifecycleCoordinator, PolicyConfig,
-};
+use crate::ecs::compiler::lifecycle_coordinator::{LifecycleCoordinator, PolicyConfig};
 #[cfg(feature = "prism-backend")]
 use crate::ecs::compute_image::model_family::gemma4_inspect::inspect_gemma4_checkpoint;
 #[cfg(feature = "prism-backend")]
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 #[cfg(feature = "prism-backend")]
-use crate::ecs::plan::CodecFamily;
+use memmap2::Mmap;
+#[cfg(feature = "prism-backend")]
+use sha2::{Digest, Sha256};
 
 /// A request to compile a model into a deployable cimage.
 #[derive(Debug, Clone)]
@@ -68,6 +67,7 @@ pub struct DeploymentResult {
 ///
 /// Carried in the `CimageAssembly` and used by runtime loaders to
 /// configure the serving environment without re-inspecting the model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServingProfile {
     pub model_name: String,
     pub model_tag: String,
@@ -274,34 +274,133 @@ impl CimageDeploymentCompiler {
             inspection.config.mtp_depth.is_some()
         );
 
-        // 2. Read safetensors data and build tensor payloads
-        let st_file = request.model_path.join("model.safetensors");
-        let st_bytes = std::fs::read(&st_file)
-            .map_err(|e| format!("cannot read {}: {e}", st_file.display()))?;
-        let header_len = u64::from_le_bytes(st_bytes[0..8].try_into().unwrap()) as usize;
-        let header: serde_json::Value = serde_json::from_slice(&st_bytes[8..8 + header_len])
-            .map_err(|e| format!("invalid safetensors header: {e}"))?;
-        let header_obj = header.as_object().ok_or("header is not an object")?;
-        let data_start = 8 + header_len;
+        // 2. Call PrismCompiler::plan() to get real CompilePlan with ModelIr
+        let source_path = request.model_path.to_string_lossy().to_string();
+        let compile_request = CompileRequest {
+            source_path: source_path.clone(),
+            source_type: Some("safetensors".into()),
+            output_path: request
+                .output_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string()),
+            target_hardware: Some(request.target.clone()),
+            quant_mode: Some(request.precision.clone()),
+            ..Default::default()
+        };
 
-        let mut tensor_payloads = Vec::new();
-        for (name, meta) in header_obj {
-            if meta.get("dtype").is_none() {
-                continue;
-            } // skip __metadata__
-            let offsets = meta["data_offsets"]
-                .as_array()
-                .ok_or(format!("missing data_offsets for {name}"))?;
-            let start: usize = offsets[0].as_u64().ok_or("bad offset")? as usize;
-            let end: usize = offsets[1].as_u64().ok_or("bad offset")? as usize;
-            let data = st_bytes[data_start + start..data_start + end].to_vec();
-            tensor_payloads.push(crate::ecs::canonical::compile_plan::TensorPayload {
-                name: name.clone(),
-                data,
-                byte_size: (end - start) as u64,
-            });
+        let compile_plan = self
+            .prism_compiler
+            .plan(compile_request.clone())
+            .map_err(|e| format!("compiler plan failed: {e}"))?;
+
+        eprintln!(
+            "[deploy] plan: {} tensors in model IR, framework={}",
+            compile_plan.model_ir.tensors.by_id.len(),
+            compile_plan.model_ir.architecture.0,
+        );
+
+        // 2b. Call PrismCompiler::compile() to get real CompileOutcome with
+        // compiled_kernels, receipts, event_stream, and model_ir_digest
+        let compiled_outcome = self
+            .prism_compiler
+            .compile(compile_request.clone())
+            .map_err(|e| format!("compiler compile failed: {e}"))?;
+
+        // 3. Discover safetensors files in the model directory (handles sharding)
+        let mut safetensors_files: Vec<PathBuf> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&request.model_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |ext| ext == "safetensors") {
+                    safetensors_files.push(path);
+                }
+            }
+        }
+        safetensors_files.sort();
+
+        if safetensors_files.is_empty() {
+            return Err("no .safetensors files found in model directory".into());
         }
 
+        // 4. Build tensor payloads from safetensors files using bounded mmap
+        let mut tensor_payloads: Vec<crate::ecs::canonical::TensorPayload> = Vec::new();
+
+        for sf_path in &safetensors_files {
+            let file = std::fs::File::open(sf_path)
+                .map_err(|e| format!("cannot open {}: {e}", sf_path.display()))?;
+            let mmap = unsafe { Mmap::map(&file) }
+                .map_err(|e| format!("cannot mmap {}: {e}", sf_path.display()))?;
+
+            let header_len = u64::from_le_bytes(mmap[0..8].try_into().unwrap()) as usize;
+            let header: serde_json::Value = serde_json::from_slice(&mmap[8..8 + header_len])
+                .map_err(|e| format!("invalid safetensors header in {}: {e}", sf_path.display()))?;
+            let header_obj = header.as_object().ok_or("header is not an object")?;
+            let data_start = 8 + header_len;
+
+            for (name, meta) in header_obj {
+                if meta.get("dtype").is_none() {
+                    continue; // skip __metadata__
+                }
+                let offsets = meta["data_offsets"].as_array().ok_or(format!(
+                    "missing data_offsets for {name} in {}",
+                    sf_path.display()
+                ))?;
+                let start: usize = offsets[0].as_u64().ok_or("bad offset")? as usize;
+                let end: usize = offsets[1].as_u64().ok_or("bad offset")? as usize;
+                let slice = &mmap[data_start + start..data_start + end];
+                tensor_payloads.push(crate::ecs::canonical::TensorPayload {
+                    name: name.clone(),
+                    data: slice.to_vec(),
+                    byte_size: (end - start) as u64,
+                });
+            }
+            // mmap is dropped here, releasing the mapping
+        }
+
+        // 5. Compute real model_ir_digest from the plan's model IR
+        let mut hasher = Sha256::new();
+        hasher.update(compile_plan.model_ir.identity.name.as_bytes());
+        hasher.update(compile_plan.model_ir.architecture.0.as_bytes());
+        hasher.update(
+            &compile_plan
+                .model_ir
+                .configuration
+                .hidden_size
+                .to_le_bytes(),
+        );
+        hasher.update(
+            &compile_plan
+                .model_ir
+                .configuration
+                .num_hidden_layers
+                .to_le_bytes(),
+        );
+        hasher.update(
+            &compile_plan
+                .model_ir
+                .configuration
+                .num_attention_heads
+                .to_le_bytes(),
+        );
+        hasher.update(
+            &compile_plan
+                .model_ir
+                .configuration
+                .num_kv_heads
+                .to_le_bytes(),
+        );
+        hasher.update(&compile_plan.model_ir.configuration.head_dim.to_le_bytes());
+        hasher.update(&compile_plan.model_ir.configuration.vocab_size.to_le_bytes());
+        for desc in &compile_plan.model_ir.tensors.by_id {
+            hasher.update(desc.name.as_bytes());
+            hasher.update(&desc.byte_size.to_le_bytes());
+            for dim in &desc.shape {
+                hasher.update(&dim.to_le_bytes());
+            }
+        }
+        let model_ir_digest: [u8; 32] = hasher.finalize().into();
+
+        // 6. Build the output path
         let output_path = request.output_path.clone().unwrap_or_else(|| {
             let stem = request
                 .model_path
@@ -312,38 +411,54 @@ impl CimageDeploymentCompiler {
             PathBuf::from(format!("{}.cimage", stem))
         });
 
-        // 3. Build the CompileOutcome from the safetensors data
-        use crate::ecs::canonical::compile_plan::CompileOutcome;
-        let compile_outcome = CompileOutcome {
-            plan: todo!(), // placeholder — will be populated from the prism plan
-            compiled_kernels: vec![],
-            build_input: crate::ecs::canonical::compile_plan::CimageBuildInput {
-                model_ir_digest: [0u8; 32],
-                representation_plan: todo!(),
-                execution_graph: todo!(),
-                compiled_kernels: vec![],
+        // 7. Build the proper CompileOutcome combining plan data + real safetensors
+        //    + real compile output (compiled_kernels, receipts, event_stream)
+        let build_kernel_artifacts: Vec<crate::ecs::canonical::CompiledKernelArtifact> =
+            compiled_outcome
+                .compiled_kernels
+                .iter()
+                .map(|entry| entry.artifact.clone())
+                .collect();
+
+        let compile_outcome = crate::ecs::canonical::CompileOutcome {
+            plan: compile_plan.clone(),
+            compiled_kernels: compiled_outcome.compiled_kernels,
+            build_input: crate::ecs::canonical::CimageBuildInput {
+                model_ir_digest,
+                representation_plan: compile_plan.representation_plan.clone(),
+                execution_graph: compile_plan.execution_graph.clone(),
+                compiled_kernels: build_kernel_artifacts,
                 tensor_payloads,
-                receipts: todo!(),
+                receipts: compiled_outcome.receipts.clone(),
             },
-            receipts: todo!(),
+            receipts: compiled_outcome.receipts.clone(),
             output_path: Some(output_path.to_string_lossy().to_string()),
-            event_stream: todo!(),
+            event_stream: compiled_outcome.event_stream.clone(),
         };
 
-        // 4. Build cimage assembly
+        // 8. Build cimage assembly
         let cimage_assembly =
             self.build_deployable_cimage(&compile_outcome, &request, &inspection, &output_path);
 
-        // 5. Seal, validate, promote
+        // Free tensor payload memory — no longer needed after assembly
+        // TODO Phase 4: stream tensor data from mmap directly into cimage
+        // segments without intermediate Vec
+        drop(compile_outcome);
+
+        // 9. Seal, validate, promote
         let promotable = self.seal_and_validate(cimage_assembly)?;
-        let result = self.promote_cimage(promotable)?;
+        let mut result = self.promote_cimage(promotable)?;
+
+        // Set the cimage_path in the result
+        result.cimage_path = output_path.clone();
 
         let elapsed = started.elapsed();
         eprintln!(
-            "[deploy] done: gen_id={} output={} ({:.2}s)",
+            "[deploy] done: gen_id={} output={} ({:.2}s) tensors={}",
             result.generation_id.0,
             output_path.display(),
-            elapsed.as_secs_f64()
+            elapsed.as_secs_f64(),
+            compile_plan.model_ir.tensors.by_id.len(),
         );
 
         Ok(result)

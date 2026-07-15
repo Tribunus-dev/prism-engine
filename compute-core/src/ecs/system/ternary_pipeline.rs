@@ -10,7 +10,7 @@ use crate::ecs::compute_image::compile::ternary::{
 };
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use sha2::{Digest, Sha256};
 
 /// Build a sealed cimage binary from the ECS world state.
@@ -62,7 +62,7 @@ impl CompilerSystem for TertiaryPipelineSystem {
         }; CIMAGE_SEGMENT_CAPACITY];
         let mut seg_count = 0u32;
 
-        let tensor_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let tensor_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
         for &_entity in &tensor_entities {
             if seg_count >= CIMAGE_SEGMENT_CAPACITY as u32 {
                 break;

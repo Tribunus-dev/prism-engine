@@ -3,7 +3,7 @@ use crate::ecs::component::scheduling::{
 };
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Dispatches work from the registry to lane queues.
 ///
@@ -19,9 +19,9 @@ impl CompilerSystem for WorkDispatchSystem {
         SchedulePhase::Execution
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
-        let lane_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::CommandBuffer);
+        let lane_entities: Vec<Entity> = world.entities_of_kind(EntityKind::CommandBuffer);
 
         for entity in &entities {
             // Check backpressure first (immutable borrow)

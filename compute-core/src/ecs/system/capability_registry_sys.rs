@@ -8,7 +8,7 @@ use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
 use crate::ecs::Component;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Singleton entity id for the capability registry resource.
 const CAPABILITY_ENTITY_NAME: &str = "capability_registry";
@@ -42,7 +42,7 @@ impl CompilerSystem for CapabilityRegistrySystem {
     }
 }
 
-fn find_or_create_registry_entity(world: &mut CompWorld) -> CompEntity {
+fn find_or_create_registry_entity(world: &mut CompWorld) -> Entity {
     // Look for existing registry by name.
     for entity in world.entities_of_kind(EntityKind::Model) {
         if let Some(name) = world.name(entity) {

@@ -3,6 +3,7 @@ use crate::ecs::constitutional::schema::SchemaCatalogue;
 use crate::ecs::constitutional::system_desc::ReadDependency;
 pub use crate::ecs::constitutional::types::*;
 use crate::ecs::CompWorld;
+use crate::ecs::Entity;
 use crate::ecs::EntityKind;
 use crate::ecs::PendingEntity;
 use serde::{Deserialize, Serialize};
@@ -217,7 +218,7 @@ pub(crate) struct PendingOp {
     is_durable: bool,
     /// Consumed during `prepare_inner()`: given a resolved entity ID, returns
     /// the fully-formed `StagedInsert`.
-    resolve: Box<dyn FnOnce(u64) -> StagedInsert + Send>,
+    resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send>,
 }
 
 use crate::ecs::ComponentStore;
@@ -298,7 +299,8 @@ impl WorldTxn {
             version: schema_version.0,
         };
 
-        let resolve: Box<dyn FnOnce(u64) -> StagedInsert + Send> = Box::new(move |entity| {
+        let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
+            let entity = entity_h.id();
             let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
             StagedInsert {
                 entity,
@@ -346,7 +348,8 @@ impl WorldTxn {
         let token = pending.0;
         let type_id = std::any::TypeId::of::<T>();
 
-        let resolve: Box<dyn FnOnce(u64) -> StagedInsert + Send> = Box::new(move |entity| {
+        let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
+            let entity = entity_h.id();
             let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
             StagedInsert {
                 entity,
@@ -393,7 +396,8 @@ impl WorldTxn {
         let token = pending.0;
         let type_id = std::any::TypeId::of::<T>();
 
-        let resolve: Box<dyn FnOnce(u64) -> StagedInsert + Send> = Box::new(move |entity| {
+        let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
+            let entity = entity_h.id();
             let col_type_id = std::any::TypeId::of::<crate::ecs::Column<T>>();
             StagedInsert {
                 entity,
@@ -446,6 +450,29 @@ impl WorldTxn {
     ) {
         self.push_insert(
             entity,
+            schema_id,
+            schema_version,
+            SchemaKey {
+                namespace: "",
+                id: schema_id.0 as u32,
+                version: schema_version.0,
+            },
+            component,
+            true,
+        )
+    }
+
+    #[allow(dead_code)]
+    /// New internal version that takes Entity(id, gen) for generation safety.
+    pub(crate) fn add_component_entity<T: crate::ecs::Component>(
+        &mut self,
+        entity: Entity,
+        schema_id: ComponentSchemaId,
+        schema_version: SchemaVersion,
+        component: T,
+    ) {
+        self.push_insert(
+            entity.id(),
             schema_id,
             schema_version,
             SchemaKey {
@@ -737,7 +764,7 @@ impl WorldTxn {
             for (token, ops) in std::mem::take(&mut self.pending_resolutions) {
                 let resolved_id = allocator_base + (token - 1);
                 for op in ops {
-                    let insert = (op.resolve)(resolved_id);
+                    let insert = (op.resolve)(Entity(resolved_id, 0));
                     self.inserts.push(insert);
                 }
             }

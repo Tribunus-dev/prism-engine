@@ -19,7 +19,7 @@ use crate::ecs::component::compilation::{GraphNode, GraphNodeKind, NodeId};
 use crate::ecs::config::ModelExecutionPlan;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------
 // CompileScheduleSystem
@@ -36,7 +36,7 @@ impl CompilerSystem for CompileScheduleSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
             let Some(plan) = world.get_component::<ModelExecutionPlan>(*entity) else {
@@ -85,7 +85,7 @@ impl CompilerSystem for BackendAssessmentSystem {
         ];
         let pass = BackendAssessmentPass::new(backends);
 
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &model_entities {
             let Some(plan) = world.get_component::<ModelExecutionPlan>(*entity) else {
                 continue;
@@ -128,7 +128,7 @@ impl CompilerSystem for GraphOptimizerSystem {
         SchedulePhase::FusionDispatch
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
             let Some(plan) = world.get_component::<ModelExecutionPlan>(*entity) else {
@@ -237,7 +237,7 @@ impl CompilerSystem for GraphEqualizationSystem {
         SchedulePhase::FusionDispatch
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let tensor_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let tensor_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
         let phase_types = [
             "rms_norm",
             "q_projection",

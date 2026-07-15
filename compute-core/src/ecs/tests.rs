@@ -779,4 +779,46 @@ mod tests {
         assert_eq!(world.entity_kind(new_entity), Some(EntityKind::Tensor));
         assert_eq!(world.name(new_entity), Some("reborn"));
     }
+
+    // -----------------------------------------------------------------------
+    // test_stale_handle_rejected — verify manually-fabricated Entity(id, old_gen)
+    // with stale generation is rejected by all CompWorld accessors
+    // -----------------------------------------------------------------------
+    #[test]
+    #[cfg(feature = "legacy_mutations")]
+    fn test_stale_handle_rejected() {
+        let mut world = CompWorld::new();
+        world.set_direct_mutation_allowed(true);
+
+        // Spawn and capture the generation.
+        let e = world.spawn(EntityKind::Tensor, None);
+        let id = e.id();
+        let gen = e.generation();
+        assert!(world.is_alive(e));
+        world.add_component(e, 42u64);
+        assert_eq!(world.get_component::<u64>(e), Some(&42));
+
+        // Despawn — generation advances.
+        world.despawn(e);
+        assert!(!world.is_alive(e)); // same value, but generation no longer matches slot
+
+        // Manually fabricate a stale handle with the OLD generation.
+        let stale = Entity(id, gen);
+        assert!(!world.is_alive(stale));
+        assert_eq!(world.entity_kind(stale), None);
+        assert!(world.get_component::<u64>(stale).is_none());
+        assert!(world.get_component_mut::<u64>(stale).is_none());
+
+        // Spawn again at the same slot — new handle works.
+        let e2 = world.spawn(EntityKind::Tensor, None);
+        assert_eq!(e2.id(), id); // same slot
+        assert!(e2.generation() > gen); // advanced generation
+        assert!(world.is_alive(e2));
+        world.add_component(e2, 99u64);
+        assert_eq!(world.get_component::<u64>(e2), Some(&99));
+
+        // Stale handle still rejected even after slot is reused.
+        assert!(!world.is_alive(stale));
+        assert!(world.get_component::<u64>(stale).is_none());
+    }
 }

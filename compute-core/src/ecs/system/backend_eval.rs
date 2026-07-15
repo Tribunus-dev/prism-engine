@@ -1,6 +1,6 @@
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ impl CompilerSystem for BackendEvalSystem {
         SchedulePhase::Validation
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let eval_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let eval_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for entity in &eval_entities {
             let Some(group) = world.get_component_mut::<EvalGroupComponent>(*entity) else {

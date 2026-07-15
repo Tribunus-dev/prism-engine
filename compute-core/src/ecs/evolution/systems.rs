@@ -11,7 +11,7 @@ use crate::ecs::evolution::foundation::{
 use crate::ecs::plan::CodecFamily;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, Component, EntityKind};
+use crate::ecs::{CompWorld, Component, EntityKind};
 
 // ── Deterministic PRNG (SplitMix64) ─────────────────────────────────────────
 // Same algorithm used by EvolKvRng in evolkv.rs — no external dependency needed.
@@ -91,7 +91,7 @@ pub fn evolve_seed(
     target_backend: &BackendTarget,
     seed: EvolveProgram,
     config: SearchConfig,
-) -> Result<CompEntity, String> {
+) -> Result<Entity, String> {
     let state_entity = world.spawn(EntityKind::Node, Some("evolution_state".into()));
 
     world.add_component(
@@ -129,7 +129,7 @@ pub fn evolve_seed(
     let seed_content = format!("{:?}", &seed);
     let base_seed = hash_seed(&seed_content);
 
-    let mut population_entities: Vec<CompEntity> = Vec::with_capacity(config.population_size);
+    let mut population_entities: Vec<Entity> = Vec::with_capacity(config.population_size);
 
     for i in 0..config.population_size.saturating_sub(1) {
         let child = mutate_program(&seed, &config, base_seed.wrapping_add(i as u64));

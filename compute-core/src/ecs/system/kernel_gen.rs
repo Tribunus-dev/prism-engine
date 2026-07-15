@@ -6,7 +6,7 @@ use crate::ecs::component::tensor::{CodecFamilyComp, Shape};
 use crate::ecs::plan::{CodecFamily, KernelTemplateId};
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use std::collections::{HashMap, HashSet};
 
 /// Selects a kernel template for each dispatch based on its root op and codec.
@@ -24,8 +24,8 @@ impl CompilerSystem for TemplateSelectionSystem {
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         // Collect Dispatch entities with FusionGroup data up front.
-        let dispatch_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Dispatch);
-        let payload: Vec<CompEntity> = dispatch_entities
+        let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
+        let payload: Vec<Entity> = dispatch_entities
             .into_iter()
             .filter(|e| world.get_component::<FusionGroup>(*e).is_some())
             .collect();
@@ -36,7 +36,7 @@ impl CompilerSystem for TemplateSelectionSystem {
 
         // Collect per-entity data while world is immutably borrowed.
         struct DispatchInfo {
-            entity: CompEntity,
+            entity: Entity,
             root_op: String,
             codec: CodecFamily,
         }
@@ -98,14 +98,14 @@ impl CompilerSystem for ParameterResolutionSystem {
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         use crate::ecs::aot::parameters::KernelParameters;
 
-        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         if kernel_entities.is_empty() {
             return Ok(());
         }
 
         // Collect dispatch-level data for each kernel (via the kernel source entry point).
         struct KernelResolve {
-            entity: CompEntity,
+            entity: Entity,
             shape: Option<crate::ecs::component::tensor::Shape>,
             source_name: String,
         }
@@ -275,14 +275,14 @@ impl CompilerSystem for TemplateExpansionSystem {
         SchedulePhase::KernelGeneration
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         if kernel_entities.is_empty() {
             return Ok(());
         }
 
         // Collect data per kernel (immutable borrow).
         struct ExpandWork {
-            entity: CompEntity,
+            entity: Entity,
             source: KernelSource,
             params: KernelParameters,
         }

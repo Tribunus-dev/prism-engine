@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::{BackendComponent, MetalDeviceState};
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Initializes the Metal device — creates a Backend entity with
 /// `MetalDeviceState` and `BackendComponent` on the ECS world.
@@ -17,7 +17,7 @@ impl CompilerSystem for MetalInitSystem {
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
         // Check if a Metal backend entity already exists.
-        let existing: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let existing: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
         for entity in &existing {
             if world.get_component::<MetalDeviceState>(*entity).is_some() {
                 return Ok(());

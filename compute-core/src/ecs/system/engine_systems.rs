@@ -12,7 +12,7 @@ use crate::ecs::core::model_store::ModelStore;
 use crate::ecs::streaming::GenerationEvent;
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -144,7 +144,7 @@ impl CompilerSystem for GenerationRequestSystem {
         SchedulePhase::Execution
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
             // Skip the engine singleton.
             if world.name(*entity) == Some(ENGINE_ENTITY_NAME) {
@@ -211,7 +211,7 @@ impl CompilerSystem for ModelInstallSystem {
         let store = store_comp.0.clone();
         let _ = store_comp;
 
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
             if world.name(*entity) == Some(ENGINE_ENTITY_NAME) {
                 continue;
@@ -299,7 +299,7 @@ impl CompilerSystem for ModelLoadSystem {
         let store = store_comp.0.clone();
         let _ = store_comp;
 
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
             if world.name(*entity) == Some(ENGINE_ENTITY_NAME) {
                 continue;
@@ -371,7 +371,7 @@ impl CompilerSystem for CimageLoadSystem {
             return Ok(());
         };
 
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
             if world.name(*entity) == Some(ENGINE_ENTITY_NAME) {
                 continue;
@@ -576,7 +576,7 @@ impl CompilerSystem for CimageGenerateSystem {
             return Ok(()); // Not a cimage model — nothing to do.
         };
 
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
             if world.name(*entity) == Some(ENGINE_ENTITY_NAME) {
                 continue;
@@ -798,7 +798,7 @@ impl CompilerSystem for CancelSystem {
         SchedulePhase::Execution
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
             if world.name(*entity) == Some(ENGINE_ENTITY_NAME) {
                 continue;
@@ -1037,7 +1037,7 @@ impl CompilerSystem for EngineShutdownSystem {
 // ---------------------------------------------------------------------------
 
 /// Find the singleton engine entity by name.
-fn find_engine_entity(world: &CompWorld) -> Option<CompEntity> {
+fn find_engine_entity(world: &CompWorld) -> Option<Entity> {
     for entity in world.entities_of_kind(EntityKind::Model) {
         if world.name(entity) == Some(ENGINE_ENTITY_NAME) {
             return Some(entity);

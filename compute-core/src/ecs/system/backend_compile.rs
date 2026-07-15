@@ -18,7 +18,7 @@ pub enum CompileError {
 
 #[allow(unused_imports)]
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
 use sha2::{Digest, Sha256};
 
 /// Compiles kernel source to backend-specific binaries inline.
@@ -45,7 +45,7 @@ impl CompilerSystem for BackendCompilationSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let kernels: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernels: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         for entity in kernels {
             let Some(source) = world.get_component::<KernelSource>(entity).cloned() else {
                 continue;
@@ -197,7 +197,7 @@ impl CompilerSystem for ExecutableCachingSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
-        let kernels: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernels: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         for entity in kernels {
             let Some(binary) = world.get_component::<CompiledBinary>(entity) else {
                 continue;

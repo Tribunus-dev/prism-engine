@@ -250,6 +250,12 @@ impl Entity {
     }
 }
 
+impl From<CompEntity> for Entity {
+    fn from(ce: CompEntity) -> Self {
+        Entity(ce.0, 0)
+    }
+}
+
 /// A reserved but not-yet-committed entity, returned by `Commands::spawn()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PendingEntity(pub u64);
@@ -280,9 +286,10 @@ impl Component for usize {}
 pub struct Query<'w, A: Component> {
     col: Option<&'w Column<A>>,
     cursor: usize,
+    entity_meta: &'w [Option<EntitySlot>],
 }
 impl<'w, A: Component> Iterator for Query<'w, A> {
-    type Item = (CompEntity, &'w A);
+    type Item = (Entity, &'w A);
     fn next(&mut self) -> Option<Self::Item> {
         let col = self.col?;
         if self.cursor >= col.len() {
@@ -290,7 +297,14 @@ impl<'w, A: Component> Iterator for Query<'w, A> {
         }
         let idx = self.cursor;
         self.cursor += 1;
-        Some((CompEntity(col.entity_ids()[idx]), &col.dense()[idx]))
+        let eid = col.entity_ids()[idx];
+        let gen = self
+            .entity_meta
+            .get((eid - 1) as usize)
+            .and_then(|s| s.as_ref())
+            .map(|s| s.generation)
+            .unwrap_or(0);
+        Some((Entity(eid, gen), &col.dense()[idx]))
     }
 }
 
@@ -430,7 +444,25 @@ impl Default for ComponentStore {
 
 impl CompWorld {
     /// Spawn entity with kind and optional name.
-    pub fn spawn(&mut self, kind: EntityKind, name: Option<String>) -> CompEntity {
+    /// Validate that an entity handle is still valid (the slot is occupied and
+    /// the generation matches). Returns None if the handle is stale or the
+    /// entity has been despawned.
+    fn validate_generation(&self, entity: Entity) -> Option<()> {
+        if entity.0 == 0 {
+            return None;
+        }
+        let idx = (entity.0 - 1) as usize;
+        self.entity_meta.get(idx).and_then(|slot| {
+            let slot = slot.as_ref()?;
+            if slot.occupant.is_some() && slot.generation == entity.1 {
+                Some(())
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn spawn(&mut self, kind: EntityKind, name: Option<String>) -> Entity {
         assert!(
             self.direct_mutation_allowed,
             "direct spawn() called outside WorldTxn — use WorldTxn::stage_spawn()"
@@ -448,10 +480,9 @@ impl CompWorld {
     }
 
     /// Get the name of an entity.
-    pub fn name(&self, entity: CompEntity) -> Option<&str> {
-        if entity.0 == 0 {
-            return None;
-        }
+    pub fn name(&self, entity: impl Into<Entity>) -> Option<&str> {
+        let entity: Entity = entity.into();
+        self.validate_generation(entity)?;
         let idx = (entity.0 - 1) as usize;
         self.entity_meta
             .get(idx)
@@ -460,7 +491,7 @@ impl CompWorld {
     }
 
     /// Find all entities of a given kind.
-    pub fn entities_of_kind(&self, kind: EntityKind) -> Vec<CompEntity> {
+    pub fn entities_of_kind(&self, kind: EntityKind) -> Vec<Entity> {
         self.entity_meta
             .iter()
             .enumerate()
@@ -469,23 +500,27 @@ impl CompWorld {
                     .and_then(|s| s.occupant.as_ref())
                     .is_some_and(|o| o.kind == kind)
             })
-            .map(|(i, _)| CompEntity((i + 1) as u64))
+            .map(|(i, slot)| {
+                let gen = slot.as_ref().map(|s| s.generation).unwrap_or(0);
+                Entity((i + 1) as u64, gen)
+            })
             .collect()
     }
 
     /// Get the kind of an entity (alias for entity_kind).
-    pub fn kind(&self, entity: CompEntity) -> Option<EntityKind> {
-        if entity.0 == 0 {
-            return None;
-        }
+    pub fn kind(&self, entity: impl Into<Entity>) -> Option<EntityKind> {
+        let entity: Entity = entity.into();
+        self.validate_generation(entity)?;
         self.entity_kind(entity)
     }
 
-    pub fn remove_component<T: Component>(&mut self, entity: CompEntity) -> Option<T> {
+    pub fn remove_component<T: Component>(&mut self, entity: impl Into<Entity>) -> Option<T> {
+        let entity: Entity = entity.into();
         assert!(
             self.direct_mutation_allowed,
             "direct remove_component() called outside WorldTxn — use txn.remove_component()"
         );
+        self.validate_generation(entity)?;
         self.component_store.remove::<T>(entity.0)
     }
 
@@ -527,7 +562,7 @@ impl CompWorld {
     /// Idempotent: if the entity slot already exists at this ID, the call is
     /// a no-op. This allows phase 1aa (reservation) and phase 3c (apply) to
     /// both call it without double-pushing entity metadata.
-    pub fn spawn_entity_with_id(&mut self, id: u64, kind: EntityKind) -> CompEntity {
+    pub fn spawn_entity_with_id(&mut self, id: u64, kind: EntityKind) -> Entity {
         let idx = (id - 1) as usize;
         if idx < self.entity_meta.len()
             && self.entity_meta[idx]
@@ -536,7 +571,11 @@ impl CompWorld {
                 .is_some()
         {
             // Already occupied — idempotent.
-            return CompEntity(id);
+            let gen = self.entity_meta[idx]
+                .as_ref()
+                .map(|s| s.generation)
+                .unwrap_or(0);
+            return Entity(id, gen);
         }
         // Fill gap if needed (spawns may be out of order from reservation)
         while self.entity_meta.len() <= idx {
@@ -550,15 +589,15 @@ impl CompWorld {
         if id >= self.next_id {
             self.next_id = id + 1;
         }
-        CompEntity(id)
+        Entity(id, 0)
     }
 
-    pub fn spawn_entity(&mut self, kind: EntityKind) -> CompEntity {
+    pub fn spawn_entity(&mut self, kind: EntityKind) -> Entity {
         assert!(
             self.direct_mutation_allowed,
             "direct spawn_entity() called outside WorldTxn — use WorldTxn::stage_spawn()"
         );
-        let (id, _generation) = if let Some(free) = self.free_list.pop() {
+        let (id, generation) = if let Some(free) = self.free_list.pop() {
             let idx = (free - 1) as usize;
             if idx < self.entity_meta.len() {
                 if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
@@ -589,38 +628,34 @@ impl CompWorld {
             }));
             (id, 0)
         };
-        CompEntity(id)
+        Entity(id, generation)
     }
 
-    pub fn entity_kind(&self, entity: CompEntity) -> Option<EntityKind> {
-        if entity.0 == 0 {
-            return None;
-        }
+    pub fn entity_kind(&self, entity: impl Into<Entity>) -> Option<EntityKind> {
+        let entity: Entity = entity.into();
+        self.validate_generation(entity)?;
         let idx = (entity.0 - 1) as usize;
         self.entity_meta
             .get(idx)
             .and_then(|slot| slot.as_ref()?.occupant.as_ref().map(|o| o.kind))
     }
 
-    /// Check whether a CompEntity handle is still valid (not despawned).
-    pub fn is_alive(&self, entity: CompEntity) -> bool {
-        if entity.0 == 0 {
-            return false;
-        }
-        let idx = (entity.0 - 1) as usize;
-        self.entity_meta
-            .get(idx)
-            .and_then(|slot| slot.as_ref())
-            .and_then(|s| s.occupant.as_ref())
-            .is_some()
+    /// Check whether an entity handle is still valid (slot occupied and generation matches).
+    pub fn is_alive(&self, entity: impl Into<Entity>) -> bool {
+        let entity: Entity = entity.into();
+        self.validate_generation(entity).is_some()
     }
 
     /// Despawn an entity: advance generation and release the slot for reuse.
     /// Returns false if the entity was already dead.
-    pub fn despawn(&mut self, entity: CompEntity) -> bool {
+    pub fn despawn(&mut self, entity: impl Into<Entity>) -> bool {
+        let entity: Entity = entity.into();
         if !self.is_alive(entity) {
             return false;
         }
+        // Generation mismatch = caller has a stale handle — panic to catch bugs
+        self.validate_generation(entity)
+            .expect("despawn called with stale entity handle");
         let idx = (entity.0 - 1) as usize;
         if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
             slot.generation += 1;
@@ -633,18 +668,29 @@ impl CompWorld {
     /// Iterate over all entities that have component type A.
     pub fn query<'w, A: Component>(&'w self) -> Query<'w, A> {
         let col: Option<&Column<A>> = self.component_store.column::<A>();
-        Query { col, cursor: 0 }
+        Query {
+            col,
+            cursor: 0,
+            entity_meta: &self.entity_meta,
+        }
     }
 
-    pub fn add_component<T: Component>(&mut self, entity: CompEntity, component: T) {
+    pub fn add_component<T: Component>(&mut self, entity: impl Into<Entity>, component: T) {
+        let entity: Entity = entity.into();
         assert!(
             self.direct_mutation_allowed,
             "direct add_component() called outside WorldTxn — use txn.add_component()"
         );
+        self.validate_generation(entity).expect(
+            "add_component called with stale entity handle — entity has been despawned and reused",
+        );
         self.component_store.insert::<T>(entity.0, component);
     }
 
-    pub fn stage_component<T: Component>(&mut self, entity: CompEntity, component: T) {
+    pub fn stage_component<T: Component>(&mut self, entity: impl Into<Entity>, component: T) {
+        let entity: Entity = entity.into();
+        self.validate_generation(entity)
+            .expect("stage_component called with stale entity handle");
         self.staging
             .push(Box::new(move |store: &mut ComponentStore| {
                 store.insert::<T>(entity.0, component);
@@ -663,15 +709,19 @@ impl CompWorld {
         self.staging.clear();
     }
 
-    pub fn get_component<T: Component>(&self, entity: CompEntity) -> Option<&T> {
+    pub fn get_component<T: Component>(&self, entity: impl Into<Entity>) -> Option<&T> {
+        let entity: Entity = entity.into();
+        self.validate_generation(entity)?;
         self.component_store.get::<T>(entity.0)
     }
 
-    pub fn get_component_mut<T: Component>(&mut self, entity: CompEntity) -> Option<&mut T> {
+    pub fn get_component_mut<T: Component>(&mut self, entity: impl Into<Entity>) -> Option<&mut T> {
+        let entity: Entity = entity.into();
         assert!(
             self.direct_mutation_allowed,
             "direct get_component_mut() called outside WorldTxn — use txn for mutations"
         );
+        self.validate_generation(entity)?;
         self.component_store.column_mut::<T>().get_mut(entity.0)
     }
 
@@ -770,16 +820,9 @@ impl CompWorld {
     }
 
     /// Check whether an entity exists in the world.
-    pub fn has_entity(&self, entity: CompEntity) -> bool {
-        if entity.0 == 0 {
-            return false;
-        }
-        let idx = (entity.0 - 1) as usize;
-        self.entity_meta
-            .get(idx)
-            .and_then(|s| s.as_ref())
-            .and_then(|s| s.occupant.as_ref())
-            .is_some()
+    pub fn has_entity(&self, entity: impl Into<Entity>) -> bool {
+        let entity: Entity = entity.into();
+        self.is_alive(entity)
     }
 
     /// Read the component version (write count) for a given entity.
