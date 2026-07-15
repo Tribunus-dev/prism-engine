@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::{BackendComponent, TensorComponent};
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Dispatches tensor operations to the appropriate backend.
 ///
@@ -16,7 +16,7 @@ impl CompilerSystem for BackendDispatchSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Validation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensor_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
         let backend_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
         let backends: Vec<(&Entity, BackendComponent)> = backend_entities

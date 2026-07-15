@@ -2,16 +2,16 @@
 //!
 //! These functions seed, evaluate, select, mutate, and notify on the
 //! evolutionary search lifecycle.  They operate on the foundation types
-//! from [`super::foundation`] and the crate's custom `CompWorld` ECS.
+//! from [`super::foundation`] and the crate's custom `World` ECS.
 
 use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::evolution::foundation::{
     CostMetrics, EvolutionState, EvolveCandidate, EvolveProgram, SearchConfig,
 };
 use crate::ecs::plan::CodecFamily;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, Component, EntityKind};
+use crate::ecs::{Component, EntityKind, World};
 
 // ── Deterministic PRNG (SplitMix64) ─────────────────────────────────────────
 // Same algorithm used by EvolKvRng in evolkv.rs — no external dependency needed.
@@ -86,7 +86,7 @@ impl Component for EvolveCandidate {}
 /// Returns the entity id of the `EvolutionState` entity (which also carries an
 /// `EvolveCandidate` component for the seed candidate).
 pub fn evolve_seed(
-    world: &mut CompWorld,
+    world: &mut World,
     tensor_id: &str,
     target_backend: &BackendTarget,
     seed: EvolveProgram,
@@ -732,7 +732,7 @@ mod tests {
 
     #[test]
     fn test_evolve_seed_creates_population() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         world.set_direct_mutation_allowed(true);
 
         let config = SearchConfig {

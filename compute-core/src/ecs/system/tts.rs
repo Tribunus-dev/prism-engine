@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use crate::ecs::component::model_source::TtsWeightsComp;
 use crate::ecs::compute_image::compile::tts_compile::pack_tts_weights;
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Pack TTS weights into nf4tile640 cimage segment files.
 ///
@@ -33,7 +33,7 @@ impl CompilerSystem for TTSSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // pack_tts_weights writes files to output_dir and returns TensorEntries
         let _entries = pack_tts_weights(&self.safetensors_path, &self.output_dir)
             .map_err(|e| anyhow::anyhow!("TTS weight packing failed: {e}"))?;

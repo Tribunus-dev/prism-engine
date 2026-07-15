@@ -5,9 +5,9 @@ use crate::ecs::component::tensor::{
 };
 use crate::ecs::config::TextArchitecture;
 use crate::ecs::plan::CodecFamily;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+
+
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 use std::collections::{HashMap, HashSet};
 
 /// Evaluates MoE expert budget against the configured codec and topology.
@@ -19,7 +19,7 @@ impl CompilerSystem for MoERoutingSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Quantization
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let all_tensors = world.entities_of_kind(EntityKind::Tensor);
 
         // (layer -> set of expert indices)
@@ -119,7 +119,7 @@ impl CompilerSystem for MemoryBudgetSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Quantization
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensor_entities = world.entities_of_kind(EntityKind::Tensor);
 
         let mut weight_bytes: f64 = 0.0;

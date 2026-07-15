@@ -10,9 +10,9 @@ use crate::ecs::component::engine::{
 };
 use crate::ecs::core::model_store::ModelStore;
 use crate::ecs::streaming::GenerationEvent;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, Component, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -70,7 +70,7 @@ impl CompilerSystem for EngineInitSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Skip if the engine entity already exists.
         if find_engine_entity(world).is_some() {
             return Ok(());
@@ -143,7 +143,7 @@ impl CompilerSystem for GenerationRequestSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
             // Skip the engine singleton.
@@ -199,7 +199,7 @@ impl CompilerSystem for ModelInstallSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -288,7 +288,7 @@ impl CompilerSystem for ModelLoadSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -366,7 +366,7 @@ impl CompilerSystem for CimageLoadSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -464,7 +464,7 @@ impl CompilerSystem for HostInferenceInitSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -544,7 +544,7 @@ impl CompilerSystem for HostInferenceInitSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, _world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, _world: &mut World) -> anyhow::Result<()> {
         // Host inference requires mlx-backend; no-op on other targets.
         Ok(())
     }
@@ -565,7 +565,7 @@ impl CompilerSystem for CimageGenerateSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -614,7 +614,7 @@ impl CompilerSystem for InferenceCycleSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -663,7 +663,7 @@ impl CompilerSystem for InferenceCycleSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, _world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, _world: &mut World) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -686,7 +686,7 @@ impl CompilerSystem for TokenBudgetInferenceSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -749,7 +749,7 @@ impl CompilerSystem for TokenBudgetInferenceSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, _world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, _world: &mut World) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -768,7 +768,7 @@ impl CompilerSystem for ModelUnloadSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Packaging
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -797,7 +797,7 @@ impl CompilerSystem for CancelSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &entities {
             if world.name(*entity) == Some(ENGINE_ENTITY_NAME) {
@@ -858,7 +858,7 @@ impl CompilerSystem for MemoryPressureSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -947,7 +947,7 @@ impl CompilerSystem for MemoryPressureSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Ensure MemoryPressure is set to None on the engine singleton
         // even without mlx-backend, so downstream code can read it.
         let Some(engine_entity) = find_engine_entity(world) else {
@@ -978,7 +978,7 @@ impl CompilerSystem for EngineMetricsSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Packaging
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -1011,7 +1011,7 @@ impl CompilerSystem for EngineShutdownSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Packaging
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let Some(engine_entity) = find_engine_entity(world) else {
             return Ok(());
         };
@@ -1037,7 +1037,7 @@ impl CompilerSystem for EngineShutdownSystem {
 // ---------------------------------------------------------------------------
 
 /// Find the singleton engine entity by name.
-fn find_engine_entity(world: &CompWorld) -> Option<Entity> {
+fn find_engine_entity(world: &World) -> Option<Entity> {
     for entity in world.entities_of_kind(EntityKind::Model) {
         if world.name(entity) == Some(ENGINE_ENTITY_NAME) {
             return Some(entity);

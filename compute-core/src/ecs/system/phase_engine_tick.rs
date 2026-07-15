@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::PhaseDagState;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Ticks the phase engine state machine — advances `PhaseDagState.current_phase`
 /// along the configured phase DAG edges.
@@ -15,7 +15,7 @@ impl CompilerSystem for PhaseEngineTickSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Execution
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
         for entity in &entities {

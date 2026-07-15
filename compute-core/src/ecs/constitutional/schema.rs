@@ -1,6 +1,6 @@
 use crate::ecs::constitutional::types::*;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -108,7 +108,7 @@ pub struct DurableSchemaRegistration {
     pub type_name: &'static str,
     pub encode: fn(&dyn std::any::Any) -> Vec<u8>,
     pub decode: fn(&[u8]) -> Box<dyn std::any::Any>,
-    pub replay_apply: fn(&mut crate::ecs::CompWorld, crate::ecs::CompEntity, &[u8]),
+    pub replay_apply: fn(&mut crate::ecs::World, crate::ecs::CompEntity, &[u8]),
 }
 
 impl std::fmt::Debug for DurableSchemaRegistration {
@@ -213,7 +213,7 @@ impl SchemaCatalogue {
     pub fn replay_applier(
         &self,
         key: &SchemaKey,
-    ) -> Option<fn(&mut crate::ecs::CompWorld, crate::ecs::CompEntity, &[u8])> {
+    ) -> Option<fn(&mut crate::ecs::World, crate::ecs::CompEntity, &[u8])> {
         self.schemas.get(key).map(|reg| reg.replay_apply)
     }
 

@@ -15,8 +15,8 @@ use crate::ecs::evolution::foundation::{
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 #[cfg(feature = "metal-dispatch")]
 use crate::ecs::nf4tile640::{dequant_matmul_reference, pack_nf4_weights};
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+
+
 
 // ── Supporting types ─────────────────────────────────────────────────────────
 

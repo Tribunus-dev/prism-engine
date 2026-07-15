@@ -3,9 +3,9 @@ use crate::ecs::component::backend::{
     BinaryFormat, CompiledBinary, ExecutableFormat, KernelSource,
 };
 use crate::ecs::component::quality::QualityGateResult;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Packages compiled kernel binaries into Executable entities for the CImage.
 pub struct ExecutablePackagingSystem;
@@ -16,7 +16,7 @@ impl CompilerSystem for ExecutablePackagingSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         for &kernel in &kernel_entities {
             let name = world.name(kernel).unwrap_or("kernel").to_string();
@@ -55,7 +55,7 @@ impl CompilerSystem for AdmissionValidationSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         let executable_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
         let any_failure = false;

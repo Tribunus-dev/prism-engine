@@ -5,9 +5,9 @@ use crate::ecs::plan::precision_plan::{
     PrecisionSelectionBasis, PrecisionSelector,
 };
 use crate::ecs::plan::CodecFamily;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 
 // ── Component wrapper ─────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ impl CompilerSystem for CodecSelectionSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Quantization
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensors: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for tensor in tensors {
@@ -120,7 +120,7 @@ impl CompilerSystem for PrecisionPlanSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Quantization
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let models: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         let tensors: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 

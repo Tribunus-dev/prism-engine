@@ -14,7 +14,7 @@ use crate::ecs::compilation::region_catalogue::{RegionAdmission, RegionCatalogue
 use crate::ecs::component::compilation::{BackendTarget, OpId, ProfitabilityScore, RegionPlan};
 use crate::ecs::config::ModelExecutionPlan;
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompEntity, World, CompilerSystem, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------
 // AneEligibilitySystem
@@ -32,7 +32,7 @@ impl CompilerSystem for AneEligibilitySystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Quantization
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let catalogue = RegionCatalogue::fp16_alpha();
         let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
 
@@ -81,7 +81,7 @@ impl CompilerSystem for MemoryBudgetSystemV2 {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::MemoryPlanning
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let budget = MemoryBudget::m1_16gb_default();
         let exec_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
 
@@ -132,7 +132,7 @@ impl CompilerSystem for RegionCatalogueSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::FusionDispatch
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let catalogue = RegionCatalogue::fp16_alpha();
         let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
 
@@ -173,7 +173,7 @@ impl CompilerSystem for RegionPlannerSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::MemoryPlanning
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let catalogue = RegionCatalogue::fp16_alpha();
         let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
 
@@ -214,7 +214,7 @@ impl CompilerSystem for ReceiptSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Packaging
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let exec_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
 
         for entity in &exec_entities {

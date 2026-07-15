@@ -4,9 +4,9 @@ use crate::ecs::plan::backend_capability::{
 };
 use crate::ecs::plan::fusion::DataflowOpKind;
 use crate::ecs::plan::fusion_scheduler_types::FusionPolicy;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, SchedulePhase};
+
+
+use crate::ecs::{CompEntity, World, CompilerSystem, SchedulePhase};
 
 // ── Op kind string parser ──────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ impl CompilerSystem for FusionHeuristicSystem {
         SchedulePhase::FusionDispatch
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Collect entity ids that carry a FusionGroup component.
         let group_entities: Vec<CompEntity> = (1..=world.entity_count() as u64)
             .map(CompEntity)

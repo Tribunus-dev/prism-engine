@@ -19,7 +19,7 @@ use tribunus_compute_core::ecs::system::engine_systems::{
     CimageGenerateSystem, CimageLoadRequest, CimageLoadSystem, EngineInitSystem,
 };
 use tribunus_compute_core::ecs::system::metal_init::MetalInitSystem;
-use tribunus_compute_core::ecs::{CompWorld, EntityKind, SchedulePhase};
+use tribunus_compute_core::ecs::{EntityKind, SchedulePhase, World};
 
 #[derive(Parser)]
 struct Args {
@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Tokens: {}", args.tokens);
 
     // ── 1. Build the ECS world with the systems we need ────────────────
-    let mut world = CompWorld::new();
+    let mut world = World::new();
 
     // Phase A: Model loading — engine singleton + CImage loading
     world.add_system(Box::new(EngineInitSystem));

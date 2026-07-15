@@ -4,9 +4,9 @@ use crate::ecs::config::{
     AttentionKind, ConfidenceType, DiffusionConfig, MoEConfig as ArchMoEConfig, NoiseScheduleType,
     RopeSpec, TextArchitecture,
 };
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, Component, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, Component, EntityKind, SchedulePhase};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -272,7 +272,7 @@ impl CompilerSystem for ModelAdapterSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         for model_entity in world.entities_of_kind(EntityKind::Model) {
             // Read the raw source from the model entity
             let source = world

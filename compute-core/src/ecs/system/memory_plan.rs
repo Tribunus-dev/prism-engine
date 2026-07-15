@@ -2,9 +2,9 @@ use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::component::memory::{BufferLifetime, MemoryDomain, MemoryPool, PoolPolicy};
 use crate::ecs::component::tensor::{CanonicalRoleComp, CodecFamilyComp, Shape};
 use crate::ecs::plan::CodecFamily;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+
+
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -91,7 +91,7 @@ impl CompilerSystem for MemoryDomainAssignmentSystem {
         SchedulePhase::MemoryPlanning
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensors = world.entities_of_kind(EntityKind::Tensor);
         for tensor in tensors {
             let target = world
@@ -140,7 +140,7 @@ impl CompilerSystem for BufferAllocationSystem {
         SchedulePhase::MemoryPlanning
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensors = world.entities_of_kind(EntityKind::Tensor);
         let mut next_dedicated_pool: u32 = 1; // 0 is reserved for arena
 

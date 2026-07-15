@@ -8,9 +8,9 @@ use crate::ecs::component::model_source::CimageBinaryComp;
 use crate::ecs::compute_image::compile::ternary::{
     write_cimage_header_le, CimageHeader, SegmentEntry, SegmentKind, CIMAGE_SEGMENT_CAPACITY,
 };
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 use sha2::{Digest, Sha256};
 
 /// Build a sealed cimage binary from the ECS world state.
@@ -46,7 +46,7 @@ impl CompilerSystem for TertiaryPipelineSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Packaging
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities = world.entities_of_kind(EntityKind::Model);
         let model_entity = *model_entities
             .first()

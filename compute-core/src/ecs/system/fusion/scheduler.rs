@@ -20,9 +20,9 @@ use crate::ecs::plan::fusion_scheduler_types::{
     LoweringCost as SchedLoweringCost,
 };
 use crate::ecs::plan::CodecFamily;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -254,7 +254,7 @@ impl CompilerSystem for SchedulerEvaluationSystem {
         SchedulePhase::FusionDispatch
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
 
         for entity in dispatch_entities {
@@ -392,7 +392,7 @@ impl CompilerSystem for GroupGrowthSystem {
         SchedulePhase::FusionDispatch
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Collect dispatch entities with FusionGroup components.
         let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
 
@@ -534,7 +534,7 @@ impl CompilerSystem for CostEvaluationSystem {
         SchedulePhase::FusionDispatch
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
 
         for entity in dispatch_entities {

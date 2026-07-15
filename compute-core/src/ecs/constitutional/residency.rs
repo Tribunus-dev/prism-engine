@@ -9,7 +9,7 @@ use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, TransientClass,
     TransientComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{CompWorld, Entity, EntityKind};
+use crate::ecs::{World, Entity, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -166,7 +166,7 @@ impl DeployModelCommand {
     /// Returns an error on the first violation.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), DeploymentError> {
         // 1. Schema enforcement — every component must be registered
@@ -229,7 +229,7 @@ impl DeployModelCommand {
 
     /// Find an existing model entity by artifact ID.
     /// Linear scan — in production, maintain a reverse index.
-    pub fn find_model_by_artifact(world: &CompWorld, artifact_id: u64) -> Option<u64> {
+    pub fn find_model_by_artifact(world: &World, artifact_id: u64) -> Option<u64> {
         for entity in world.entities_of_kind(EntityKind::Model) {
             if let Some(model_ref) = world.get_component::<ModelArtifactRef>(entity) {
                 if model_ref.artifact_id == artifact_id {
@@ -248,7 +248,7 @@ impl DeployModelCommand {
     /// a duplicate).
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
         outcome: EffectOutcome,
     ) -> Result<(CommittedEpoch, DomainEvent), DeploymentError> {
@@ -423,7 +423,7 @@ impl DeployModelCommand {
 
     /// Find the residency entity associated with a model.
     /// Linear scan over residency entities.
-    fn find_residency_for_model(world: &CompWorld, model_entity: u64) -> Option<u64> {
+    fn find_residency_for_model(world: &World, model_entity: u64) -> Option<u64> {
         // Residency entity IDs are allocated sequentially after model IDs.
         // Look for any residency referencing this model's device.
         for entity in world.entities_of_kind(EntityKind::Residency) {
@@ -501,7 +501,7 @@ pub enum DeploymentError {
 /// lifecycle is set to `Binding` requiring a fresh allocation before it
 /// becomes schedulable as `Resident`.
 pub fn replay_model_deployed(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<(CommittedEpoch, u64), DeploymentError> {
     let model_id = event
@@ -626,7 +626,7 @@ impl crate::ecs::Component for AllocationToken {}
 /// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
 ///
 /// Uses generation `0` for backward compatibility with the legacy
-/// `CompWorld`/`CompEntity` storage. Callers migrating to the new
+/// `World`/`CompEntity` storage. Callers migrating to the new
 /// `World`+`Entity(u64, u32)` API should replace this with proper
 /// generation-aware entity construction.
 #[allow(dead_code)]

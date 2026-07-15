@@ -8,9 +8,9 @@
 use crate::ecs::component::aot::{CompEntityRef, KernelVariantEntityData};
 use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::plan::KernelTemplateId;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -137,7 +137,7 @@ impl CompilerSystem for VariantGenerationSystem {
         SchedulePhase::KernelGeneration
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Identify dispatches that have FusionGroup info.
         let dispatch_entities: Vec<Entity> = world
             .entities_of_kind(EntityKind::Dispatch)
@@ -200,7 +200,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_generates_variants_for_dispatches() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let dispatch = world.spawn(EntityKind::Dispatch, None);
         world.add_component(
             dispatch,
@@ -230,7 +230,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_no_dispatches_no_variants() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         let system = VariantGenerationSystem;
         system.run(&mut world).unwrap();

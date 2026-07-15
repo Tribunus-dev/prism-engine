@@ -14,6 +14,7 @@ struct ManagedJob {
     command: String,
     stdout_path: std::path::PathBuf,
     stderr_path: std::path::PathBuf,
+    cwd: std::path::PathBuf,
 }
 
 static JOBS: OnceLock<Mutex<HashMap<String, ManagedJob>>> = OnceLock::new();
@@ -75,7 +76,7 @@ impl JobHandler {
         if let Some(job) = managed.get_mut(&key) {
             output = read_output(&job.stdout_path, &job.stderr_path);
             if let Some(status) = job.child.try_wait()? {
-                if let Some(cache_key_value) = cache_key(&job.command, &std::env::current_dir()?) {
+                if let Some(cache_key_value) = cache_key(&job.command, &job.cwd) {
                     cache().lock().insert(
                         cache_key_value,
                         (
@@ -118,8 +119,12 @@ impl JobHandler {
             }
         }
         let record = self.store.get_job(id)?;
+        let cwd = managed
+            .get(&key)
+            .map(|job| job.cwd.display().to_string())
+            .unwrap_or_default();
         Self::result(
-            json!({"job_id":key,"status":record.state.as_str(),"command":record.operation,"exit_code":null,"stdout":output.0,"stderr":output.1,"stdout_tail":tail(&output.0),"stderr_tail":tail(&output.1)}),
+            json!({"job_id":key,"status":record.state.as_str(),"phase":if record.state == JobState::Running { "running" } else { "terminal" },"command":record.operation,"cwd":cwd,"exit_code":null,"stdout":output.0,"stderr":output.1,"stdout_bytes":output.0.len(),"stderr_bytes":output.1.len(),"stdout_tail":tail(&output.0),"stderr_tail":tail(&output.1),"updated_at":record.updated_at}),
         )
     }
 }
@@ -132,7 +137,7 @@ impl McpHandler for JobHandler {
         "Start, inspect, or cancel a daemon-supervised shell job."
     }
     fn input_schema(&self) -> Value {
-        json!({"type":"object","properties":{"action":{"type":"string","enum":["start","status","cancel"]},"command":{"type":"string"},"job_id":{"type":"string"}},"required":["action"]})
+        json!({"type":"object","properties":{"action":{"type":"string","enum":["start","status","cancel"]},"command":{"type":"string"},"job_id":{"type":"string"},"cwd":{"type":"string","description":"Workspace directory in which the command must run."}},"required":["action"]})
     }
 
     fn call(
@@ -154,7 +159,16 @@ impl McpHandler for JobHandler {
                     .and_then(Value::as_str)
                     .filter(|v| !v.trim().is_empty())
                     .ok_or_else(|| anyhow::anyhow!("command is required"))?;
-                let cwd = std::env::current_dir()?;
+                let cwd = request
+                    .args
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or(std::env::current_dir()?);
+                if !cwd.is_dir() {
+                    anyhow::bail!("cwd does not exist or is not a directory: {}", cwd.display());
+                }
+                let cwd_display = cwd.display().to_string();
                 let key = cache_key(command, &cwd);
                 if let Some(key_value) = &key {
                     if let Some((exit_code, stdout, stderr)) =
@@ -165,7 +179,7 @@ impl McpHandler for JobHandler {
                         );
                     }
                     if let Some(existing) =
-                        jobs().lock().values().find(|job| job.command == command)
+                        jobs().lock().values().find(|job| job.command == command && job.cwd == cwd)
                     {
                         return Self::result(
                             json!({"status":"already_running","job_id":existing.job_id,"command":command,"cache_key":key_value}),
@@ -189,7 +203,7 @@ impl McpHandler for JobHandler {
                     .open(&stderr_path)?;
                 let child = Command::new("/bin/zsh")
                     .args(["-lc", command])
-                    .current_dir(cwd)
+                    .current_dir(&cwd)
                     .stdout(Stdio::from(stdout))
                     .stderr(Stdio::from(stderr))
                     .spawn()?;
@@ -202,9 +216,10 @@ impl McpHandler for JobHandler {
                         command: command.to_string(),
                         stdout_path,
                         stderr_path,
+                        cwd,
                     },
                 );
-                Self::result(json!({"status":"started","job_id":id.to_string(),"command":command}))
+                Self::result(json!({"status":"started","phase":"running","job_id":id.to_string(),"command":command,"cwd":cwd_display,"cache_key":key}))
             }
             "status" => {
                 let raw = request
@@ -244,5 +259,6 @@ fn read_output(stdout: &std::path::Path, stderr: &std::path::Path) -> (String, S
     )
 }
 fn tail(value: &str) -> Vec<&str> {
-    value.lines().rev().take(50).collect()
+    let lines: Vec<&str> = value.lines().collect();
+    lines.into_iter().rev().take(50).rev().collect()
 }

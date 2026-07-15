@@ -2,7 +2,7 @@ pub use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::schema::SchemaCatalogue;
 use crate::ecs::constitutional::system_desc::ReadDependency;
 pub use crate::ecs::constitutional::types::*;
-use crate::ecs::CompWorld;
+use crate::ecs::World;
 use crate::ecs::Entity;
 use crate::ecs::EntityKind;
 use crate::ecs::PendingEntity;
@@ -134,7 +134,7 @@ pub trait TransientComponent: ClassifiedComponent<Class = TransientClass> {}
 /// A pending world transaction.
 ///
 /// Systems build a WorldTxn by reading from the world and staging changes.
-/// On commit via CompWorld::transit(), all changes are applied atomically
+/// On commit via World::transit(), all changes are applied atomically
 /// with optimistic concurrency control.
 pub struct WorldTxn {
     /// Staged component inserts, keyed by (entity_id, schema_id)
@@ -161,8 +161,8 @@ pub(crate) struct StagedSpawn {
     pub kind: EntityKind,
     /// If true, `prepare_inner()` will assign a fresh ID from the world allocator.
     pub is_pending: bool,
-    pub preflight: Box<dyn Fn(&CompWorld) -> Result<(), WorldTxnError> + Send + Sync>,
-    pub apply: Box<dyn FnOnce(&mut CompWorld) + Send>,
+    pub preflight: Box<dyn Fn(&World) -> Result<(), WorldTxnError> + Send + Sync>,
+    pub apply: Box<dyn FnOnce(&mut World) + Send>,
 }
 
 /// A staged component insert.
@@ -225,7 +225,7 @@ use crate::ecs::ComponentStore;
 
 impl WorldTxn {
     /// Begin a new transaction against the given world at its current epoch.
-    pub fn new(world: &CompWorld) -> Self {
+    pub fn new(world: &World) -> Self {
         Self {
             inserts: Vec::new(),
             removes: Vec::new(),
@@ -238,7 +238,7 @@ impl WorldTxn {
     }
 
     /// Peek the next available entity ID from the world.
-    pub fn next_entity_id(world: &CompWorld) -> u64 {
+    pub fn next_entity_id(world: &World) -> u64 {
         world.next_entity_id()
     }
 
@@ -248,13 +248,13 @@ impl WorldTxn {
             entity,
             kind,
             is_pending: false,
-            preflight: Box::new(move |world: &CompWorld| {
+            preflight: Box::new(move |world: &World| {
                 if world.has_entity(crate::ecs::CompEntity(entity)) {
                     return Err(WorldTxnError::InvalidEntity(entity));
                 }
                 Ok(())
             }),
-            apply: Box::new(move |world: &mut CompWorld| {
+            apply: Box::new(move |world: &mut World| {
                 world.spawn_entity_with_id(entity, kind);
             }),
         });
@@ -688,7 +688,7 @@ pub(crate) struct PreparedTransientOp {
 
 /// A fully validated, ready-to-apply transaction.
 ///
-/// Produced by `CompWorld::prepare()` via `WorldTxn::prepare_inner()`.
+/// Produced by `World::prepare()` via `WorldTxn::prepare_inner()`.
 /// Contains all resolved operations and journals. The type is deliberately
 /// sealed — external code cannot construct one directly.
 #[must_use = "a prepared transaction must be applied or explicitly dropped"]
@@ -719,12 +719,12 @@ impl PreparedWorldTxn {
 }
 
 impl WorldTxn {
-    /// Internal preparation — validation logic extracted for CompWorld::prepare().
+    /// Internal preparation — validation logic extracted for World::prepare().
     /// Validates all invariants against the world WITHOUT mutating it.
     /// On success, returns a PreparedWorldTxn containing the resolved closures.
     pub(crate) fn prepare_inner(
         mut self,
-        world: &CompWorld,
+        world: &World,
         catalogue: Option<&SchemaCatalogue>,
     ) -> Result<PreparedWorldTxn, WorldTxnError> {
         use crate::ecs::CompEntity;
@@ -748,13 +748,13 @@ impl WorldTxn {
                     let resolved_id = allocator_base + i as u64;
                     let kind = spawn.kind;
                     spawn.entity = resolved_id;
-                    spawn.preflight = Box::new(move |world: &CompWorld| {
+                    spawn.preflight = Box::new(move |world: &World| {
                         if world.has_entity(CompEntity(resolved_id)) {
                             return Err(WorldTxnError::InvalidEntity(resolved_id));
                         }
                         Ok(())
                     });
-                    spawn.apply = Box::new(move |world: &mut CompWorld| {
+                    spawn.apply = Box::new(move |world: &mut World| {
                         world.spawn_entity_with_id(resolved_id, kind);
                     });
                 }

@@ -4,7 +4,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{CompEntity, CompWorld, EntityKind};
+use crate::ecs::{CompEntity, World, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -239,7 +239,7 @@ impl DurableComponent for RemoteCapabilityObservation {
 /// Restores: PeerIdentity, NodeMembership, TrustState::Observed.
 /// Spawns the node entity if not already present (idempotent).
 pub fn replay_peer_registered(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<CommittedEpoch, DistributedError> {
     let node_id = event
@@ -336,7 +336,7 @@ impl RegisterPeerCommand {
     /// Preflight: peer_id must not already be registered.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), DistributedError> {
         Self::validate_schemas(schema_registry)?;
@@ -358,7 +358,7 @@ impl RegisterPeerCommand {
     /// Execute registration: spawn a Node entity with all distributed components.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), DistributedError> {
         self.preflight(world, schema_registry)?;
@@ -410,7 +410,7 @@ impl ObserveWorkerCapabilityCommand {
     /// Preflight: worker_entity must exist and be a Node.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), DistributedError> {
         Self::validate_schemas(schema_registry)?;
@@ -429,7 +429,7 @@ impl ObserveWorkerCapabilityCommand {
     /// Execute: attach a new RemoteCapabilityObservation component to the worker entity.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), DistributedError> {
         self.preflight(world, schema_registry)?;
@@ -498,7 +498,7 @@ pub enum DistributedError {
 mod tests {
     use super::*;
     use crate::ecs::constitutional::schema::{ComponentDurability, SchemaRegistry};
-    use crate::ecs::CompWorld;
+    use crate::ecs::World;
 
     fn make_registry() -> SchemaRegistry {
         let mut reg = SchemaRegistry::new();
@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn test_register_peer_preflight_duplicate() {
         let reg = make_registry();
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         let cmd = RegisterPeerCommand {
             id: MessageId::compute(b"reg-1"),
@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn test_observe_capability_preflight_missing_worker() {
         let reg = make_registry();
-        let world = CompWorld::new();
+        let world = World::new();
 
         let cmd = ObserveWorkerCapabilityCommand {
             id: MessageId::compute(b"obs-1"),

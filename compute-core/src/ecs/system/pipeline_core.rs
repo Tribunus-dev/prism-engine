@@ -19,7 +19,7 @@ use crate::ecs::component::compilation::{
 };
 use crate::ecs::config::{LayerPlan, ModelExecutionPlan};
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompEntity, World, CompilerSystem, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------
 // DistillCoreSystem
@@ -35,7 +35,7 @@ impl CompilerSystem for DistillCoreSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
@@ -70,7 +70,7 @@ impl CompilerSystem for EpochSchedulerSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let exec_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
 
         for entity in &exec_entities {
@@ -117,7 +117,7 @@ impl CompilerSystem for FrontierSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
@@ -171,7 +171,7 @@ impl CompilerSystem for PhaseIRSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
 
         for entity in &phase_entities {
@@ -211,7 +211,7 @@ impl CompilerSystem for ProfitabilitySystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
@@ -271,7 +271,7 @@ impl CompilerSystem for StagingSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let _staging_ring: StagingRing<Vec<u8>> = StagingRing::new();
 
         // Verify the staging ring is operational: try a push-pop cycle
@@ -305,7 +305,7 @@ impl CompilerSystem for TriLaneSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Compilation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
         for entity in &model_entities {
             world.add_component(

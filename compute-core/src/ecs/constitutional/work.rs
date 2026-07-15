@@ -1,6 +1,6 @@
 //! Work item subsystem — work items, leases, prerequisites, and output.
 //!
-//! Uses `CompWorld`/`CompEntity` from the legacy ECS store internally.
+//! Uses `World`/`CompEntity` from the legacy ECS store internally.
 //! The canonical [`Entity`](crate::ecs::Entity) type is available for new
 //! consumer code that prefers generation-safe handles over the legacy
 //! `CompEntity(u64)`.
@@ -9,9 +9,9 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompWorld, Component, EntityKind};
+
+
+use crate::ecs::{World, Component, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Schema IDs ───────────────────────────────────────────────────────────────
@@ -263,7 +263,7 @@ pub struct CreateWorkCommand {
 
 impl CreateWorkCommand {
     /// Validate that the target entity exists in the world.
-    pub fn preflight(&self, world: &CompWorld) -> Result<(), WorkError> {
+    pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
         if !world.has_entity(crate::ecs::CompEntity(self.target_entity)) {
             return Err(WorkError::EntityNotFound(self.target_entity));
         }
@@ -271,7 +271,7 @@ impl CreateWorkCommand {
     }
 
     /// Execute the command, staging spawn + components into a WorldTxn.
-    pub fn execute(self, world: &CompWorld, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
+    pub fn execute(self, world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
         // Allocate entity ID for the work item
         let work_entity = WorldTxn::next_entity_id(world);
         txn.stage_spawn(work_entity, EntityKind::Executable);
@@ -327,7 +327,7 @@ pub struct LeaseWorkCommand {
 
 impl LeaseWorkCommand {
     /// Validate preconditions: entity exists, state is Ready, no conflicting lease.
-    pub fn preflight(&self, world: &CompWorld) -> Result<(), WorkError> {
+    pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
         let entity = crate::ecs::CompEntity(self.work_entity);
         if !world.has_entity(entity) {
             return Err(WorkError::EntityNotFound(self.work_entity));
@@ -349,7 +349,7 @@ impl LeaseWorkCommand {
     }
 
     /// Execute the lease: set state to Leased, add WorkLeaseComponent, emit event.
-    pub fn execute(self, _world: &CompWorld, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
+    pub fn execute(self, _world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
         let _entity = crate::ecs::CompEntity(self.work_entity);
 
         // Update state to Leased
@@ -398,7 +398,7 @@ pub struct CompleteWorkCommand {
 
 impl CompleteWorkCommand {
     /// Validate: entity exists, state is Leased with matching generation.
-    pub fn preflight(&self, world: &CompWorld) -> Result<(), WorkError> {
+    pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
         let entity = crate::ecs::CompEntity(self.work_entity);
         if !world.has_entity(entity) {
             return Err(WorkError::EntityNotFound(self.work_entity));
@@ -430,7 +430,7 @@ impl CompleteWorkCommand {
     }
 
     /// Execute: set state to Completed, attach output, remove lease, emit event.
-    pub fn execute(self, _world: &CompWorld, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
+    pub fn execute(self, _world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
         // Update state to Completed
         txn.put_durable::<WorkState>(self.work_entity, WorkState::Completed);
 
@@ -473,7 +473,7 @@ pub struct FailWorkCommand {
 
 impl FailWorkCommand {
     /// Validate: entity exists, state is Leased with matching generation.
-    pub fn preflight(&self, world: &CompWorld) -> Result<(), WorkError> {
+    pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
         let entity = crate::ecs::CompEntity(self.work_entity);
         if !world.has_entity(entity) {
             return Err(WorkError::EntityNotFound(self.work_entity));
@@ -505,7 +505,7 @@ impl FailWorkCommand {
     }
 
     /// Execute: check retry eligibility, transition to Failed or Ready, emit event.
-    pub fn execute(self, world: &CompWorld, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
+    pub fn execute(self, world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
         let entity = crate::ecs::CompEntity(self.work_entity);
 
         // Read current work item to check retry eligibility
@@ -573,7 +573,7 @@ pub struct CancelWorkCommand {
 
 impl CancelWorkCommand {
     /// Validate: entity exists, state is not terminal.
-    pub fn preflight(&self, world: &CompWorld) -> Result<(), WorkError> {
+    pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
         let entity = crate::ecs::CompEntity(self.work_entity);
         if !world.has_entity(entity) {
             return Err(WorkError::EntityNotFound(self.work_entity));
@@ -595,7 +595,7 @@ impl CancelWorkCommand {
     }
 
     /// Execute: set state to Cancelled, remove lease if present, emit event.
-    pub fn execute(self, world: &CompWorld, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
+    pub fn execute(self, world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
         let entity = crate::ecs::CompEntity(self.work_entity);
 
         // Remove lease if present
@@ -629,7 +629,7 @@ impl CancelWorkCommand {
 /// Restores the full work entity with all durable components.
 /// Ephemeral components (WorkOutput, WorkLeaseComponent) are skipped
 /// and should be reconciled by the projection/query side.
-pub fn replay_work_created(world: &mut CompWorld, event: &DomainEvent) -> Result<(), String> {
+pub fn replay_work_created(world: &mut World, event: &DomainEvent) -> Result<(), String> {
     let work_entity: u64 = event
         .payload
         .get("work_entity")
@@ -725,9 +725,9 @@ mod tests {
         MessageId::compute(seed)
     }
 
-    /// Helper: create a minimal CompWorld with a target entity.
-    fn setup_world() -> CompWorld {
-        let mut world = CompWorld::new();
+    /// Helper: create a minimal World with a target entity.
+    fn setup_world() -> World {
+        let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
         let eid = WorldTxn::next_entity_id(&world);
         txn.stage_spawn(eid, EntityKind::Model);
@@ -1025,7 +1025,7 @@ mod tests {
 
     #[test]
     fn test_create_work_preflight_fails_on_missing_target() {
-        let world = CompWorld::new(); // no entities
+        let world = World::new(); // no entities
         let cmd = CreateWorkCommand {
             id: make_id(b"preflight-fail"),
             kind: WorkKind::Validate,

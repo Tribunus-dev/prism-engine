@@ -17,7 +17,7 @@ use crate::ecs::compute_image::compile::load_source_tensor_table;
 use crate::ecs::compute_image::compile::source::load_source;
 use crate::ecs::Component;
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Source tensor metadata wrapped as an ECS component.
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ impl CompilerSystem for SourceLoadingSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let loaded = load_source(&self.source_dir, self.skip_validation)
             .map_err(|e| anyhow::anyhow!("source load failed: {e}"))?;
 
@@ -78,7 +78,7 @@ impl CompilerSystem for TensorTableLoadingSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let table = load_source_tensor_table(&self.source_dir)
             .map_err(|e| anyhow::anyhow!("tensor table load failed: {e}"))?;
 
@@ -109,7 +109,7 @@ impl CompilerSystem for DiffSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, _world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, _world: &mut World) -> anyhow::Result<()> {
         // Load manifest from the source dir — requires a saved manifest path.
         // Stub: the real call is `diff_tensors(source_dir, &prev_manifest)`.
         // We store the result on a model entity for use by downstream systems.

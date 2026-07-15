@@ -12,7 +12,7 @@ use crate::ecs::compilation::phase_ir::{ANEArtifactKey, CompilePhaseDescriptor, 
 use crate::ecs::compilation::tri_lane::{AneAdmission, AneRejectionReason};
 use crate::ecs::component::compilation::{AdmissionGate, EvidenceId, QualificationGate};
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompEntity, World, CompilerSystem, EntityKind, SchedulePhase};
 
 // ---------------------------------------------------------------------------
 // AdmissionGateSystem
@@ -27,7 +27,7 @@ impl CompilerSystem for AdmissionGateSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Validation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
         let device = DeviceSignature {
             device_id: "apple-m1".into(),
@@ -88,7 +88,7 @@ impl CompilerSystem for AneAdmissionGateSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Validation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
         let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
 
@@ -177,7 +177,7 @@ impl CompilerSystem for EvidenceProbeSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Validation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let exe_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
 
         for entity in &exe_entities {
@@ -224,7 +224,7 @@ impl CompilerSystem for QualificationGateSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Validation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let config = AneQualificationConfig::default();
         let gate = AneQualificationGate::new(config);
         let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);

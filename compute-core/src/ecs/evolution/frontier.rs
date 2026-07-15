@@ -1,6 +1,6 @@
 use crate::ecs::evolution::foundation::{EvolutionCandidate, FitnessVector};
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+
+
 
 /// Pareto frontier — multi-objective ranking.
 /// Plan Section 10: "Fitness is a vector rather than one arbitrary scalar.

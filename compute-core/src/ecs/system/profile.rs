@@ -14,9 +14,9 @@ use crate::ecs::execution_profile::{
     RuntimeHealthReceipt, StabilityStatus,
 };
 use crate::ecs::plan::ModelExecutionPlan;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// ECS system that executes a profile plan on a backend and produces
 /// `ProfileRunResult` components.
@@ -35,7 +35,7 @@ impl CompilerSystem for ProfileExecutionSystem {
         SchedulePhase::Validation
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in model_entities {

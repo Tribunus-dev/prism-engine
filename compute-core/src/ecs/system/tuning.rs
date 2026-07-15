@@ -109,9 +109,9 @@ const AMD_PROFILES: &[GpuProfile] = &[
 ];
 use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::component::quality::AOTProfileMatch;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Match an AMD device by compute-unit proximity with a 20% threshold.
 /// Datacenter-class GPUs (Instinct) are preferred when matches are close.
@@ -165,7 +165,7 @@ impl CompilerSystem for AutoTuningSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::KernelGeneration
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Collect dispatch entities that have both a FusionGroup and GPUArch.
         let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
         let candidates: Vec<Entity> = dispatch_entities
@@ -294,7 +294,7 @@ impl CompilerSystem for AOTProfileMatchSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::KernelGeneration
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
         // Collect AMD kernels with their GPU arch info.

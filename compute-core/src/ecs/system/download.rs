@@ -6,9 +6,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::ecs::component::model_source::{DownloadedSourceComp, HfDownloadComp};
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+
+
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Parse a HuggingFace source string ("hf:org/model" or "hf:org/model@revision")
 /// and return (hub_id, revision).
@@ -159,7 +159,7 @@ impl CompilerSystem for DownloadSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities = world.entities_of_kind(EntityKind::Model);
         for entity in &model_entities {
             let Some(info) = world.get_component::<HfDownloadComp>(*entity) else {
@@ -190,7 +190,7 @@ impl CompilerSystem for HfSourceParsingSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities = world.entities_of_kind(EntityKind::Model);
         for entity in &model_entities {
             // Skip if already has HfDownloadComp.

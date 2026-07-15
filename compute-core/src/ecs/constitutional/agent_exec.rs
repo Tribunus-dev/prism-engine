@@ -1,6 +1,6 @@
 //! Agent execution subsystem — agent runs, tasks, phases, and tool invocations.
 //!
-//! Uses `CompWorld`/`CompEntity` from the legacy ECS store internally.
+//! Uses `World`/`CompEntity` from the legacy ECS store internally.
 //! The canonical [`Entity`](crate::ecs::Entity) type is available for new
 //! consumer code that prefers generation-safe handles over the legacy
 //! `CompEntity(u64)`.
@@ -11,9 +11,9 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, EntityKind};
+
+
+use crate::ecs::{CompEntity, World, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs (39-46) ──────────────────────────────────────────
@@ -194,7 +194,7 @@ impl CreateAgentRunCommand {
     /// Preflight: session exists, session lifecycle is Active or Admitted.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), AgentExecError> {
         Self::validate_schemas(schema_registry).map_err(AgentExecError::SchemaError)?;
@@ -225,7 +225,7 @@ impl CreateAgentRunCommand {
     /// Execute: spawn agent entity with all components, emit domain event.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), AgentExecError> {
         self.preflight(world, schema_registry)?;
@@ -284,7 +284,7 @@ impl SubmitToolOutcomeCommand {
     /// Preflight: agent exists, is in ToolCall phase.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         _schema_registry: &SchemaRegistry,
     ) -> Result<(), AgentExecError> {
         let agent = CompEntity(self.agent_entity);
@@ -311,7 +311,7 @@ impl SubmitToolOutcomeCommand {
     /// update the invocation status, transition phase to Observing.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), AgentExecError> {
         self.preflight(world, schema_registry)?;
@@ -495,7 +495,7 @@ impl DurableComponent for AgentLifecycle {
 /// Spawns an agent entity and populates `AgentRun`, `AgentConfig`, and
 /// `AgentLifecycle::Active` components from the event payload.
 pub fn replay_agent_run_created(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<CommittedEpoch, AgentExecError> {
     let agent_id = event.entity_id.ok_or(AgentExecError::AgentNotFound(0))?.0;
@@ -728,7 +728,7 @@ mod tests {
 
     #[test]
     fn test_create_agent_run_preflight_session_missing() {
-        let world = CompWorld::new();
+        let world = World::new();
         let reg = SchemaRegistry::new();
 
         let cmd = CreateAgentRunCommand {

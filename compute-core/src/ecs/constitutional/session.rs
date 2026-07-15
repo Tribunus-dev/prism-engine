@@ -8,7 +8,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{CompWorld, Entity, EntityKind};
+use crate::ecs::{World, Entity, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -100,7 +100,7 @@ impl CreateSessionCommand {
     /// and every model has at least one admissible residency on a requested device.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), SessionError> {
         Self::validate_schemas(schema_registry).map_err(|e| SessionError::SchemaError(e))?;
@@ -168,7 +168,7 @@ impl CreateSessionCommand {
     }
 
     /// Find a residency entity for a given model on a given device.
-    fn find_residency(world: &CompWorld, model: u64, device: u64) -> Option<u64> {
+    fn find_residency(world: &World, model: u64, device: u64) -> Option<u64> {
         for entity in world.entities_of_kind(EntityKind::Residency) {
             // Check this residency targets the right device
             if let Some(dev_ref) = world.get_component::<ResidencyDeviceRef>(entity) {
@@ -201,7 +201,7 @@ impl CreateSessionCommand {
 
     /// Find an existing session with the same model+device combination.
     /// Linear scan — in production, maintain index.
-    fn find_existing_session(world: &CompWorld, models: &[u64], devices: &[u64]) -> Option<u64> {
+    fn find_existing_session(world: &World, models: &[u64], devices: &[u64]) -> Option<u64> {
         for entity in world.entities_of_kind(EntityKind::Session) {
             if let Some(session_models) =
                 world.get_component::<SessionModels>(crate::ecs::CompEntity(entity.0))
@@ -236,7 +236,7 @@ impl CreateSessionCommand {
     /// components, commit atomically.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), SessionError> {
         // 0. Preflight
@@ -312,7 +312,7 @@ pub struct TransitionSessionCommand {
 impl TransitionSessionCommand {
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), SessionError> {
         Self::validate_schemas(schema_registry).map_err(|e| SessionError::SchemaError(e))?;
@@ -407,7 +407,7 @@ pub enum SessionError {
 /// Reconstruct a session entity from a `session_admitted` event.
 /// Restores config, model refs, device refs, lifecycle. Idempotent.
 pub fn replay_session_admitted(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<CommittedEpoch, SessionError> {
     let session_id = event
@@ -485,7 +485,7 @@ impl crate::ecs::Component for ResidencyModelRef {}
 /// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
 ///
 /// Uses generation `0` for backward compatibility with the legacy
-/// `CompWorld`/`CompEntity` storage. Callers migrating to the new
+/// `World`/`CompEntity` storage. Callers migrating to the new
 /// `World`+`Entity(u64, u32)` API should replace this with proper
 /// generation-aware entity construction.
 #[allow(dead_code)]

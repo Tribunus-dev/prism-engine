@@ -8,9 +8,9 @@ use crate::ecs::component::tensor::LayerIndex;
 use crate::ecs::compute_image::compile::execution_graph::{
     ExecutionGraphDescriptor, LayerExecutionNode,
 };
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Build the execution graph from the ECS world's layer/tensor state.
 ///
@@ -26,7 +26,7 @@ impl CompilerSystem for ExecutionGraphSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::FusionDispatch
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensor_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         // Collect per-layer information from tensor components.

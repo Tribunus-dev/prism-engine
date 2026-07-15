@@ -1,9 +1,9 @@
 use crate::ecs::component::fusion::DataflowGraphHandle;
 use crate::ecs::component::memory::{BufferLifetime, MemoryPool, PoolPolicy, ScratchConfig};
 use crate::ecs::plan::fusion::DataflowGraph;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 use std::collections::{HashMap, VecDeque};
 
@@ -50,7 +50,7 @@ impl LifetimeAnalysisSystem {
 
     /// Collect graph lifetimes from all registered graphs that are referenced
     /// by `DataflowGraphHandle` components in the world.
-    fn collect_registered_lifetimes(&self, world: &CompWorld) -> Vec<HashMap<String, (u64, u64)>> {
+    fn collect_registered_lifetimes(&self, world: &World) -> Vec<HashMap<String, (u64, u64)>> {
         let tensors = world.entities_of_kind(EntityKind::Tensor);
         let layers = world.entities_of_kind(EntityKind::Layer);
         let all_holders: Vec<Entity> = tensors.into_iter().chain(layers).collect();
@@ -90,7 +90,7 @@ impl CompilerSystem for LifetimeAnalysisSystem {
         SchedulePhase::MemoryPlanning
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let mut all_lifetimes = self.collect_registered_lifetimes(world);
 
         if all_lifetimes.is_empty() {
@@ -191,7 +191,7 @@ impl CompilerSystem for ScratchPlanningSystem {
         SchedulePhase::MemoryPlanning
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let dispatches: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
 
         if dispatches.is_empty() {

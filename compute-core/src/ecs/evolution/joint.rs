@@ -17,8 +17,8 @@ use crate::ecs::quantization::contract::{
     TernaryResidualPolicy, TernaryScalePolicy, TernaryThresholdPolicy,
     REPRESENTATION_REGISTRY_VERSION,
 };
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+
+
 use crate::execution_plan::CodecFamily;
 
 /// Rescue scope for mixed-precision overrides.

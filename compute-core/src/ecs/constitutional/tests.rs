@@ -8,7 +8,7 @@ mod tests {
     use crate::ecs::constitutional::*;
     use crate::ecs::receipt_bus::*;
     use crate::ecs::Entity;
-    use crate::ecs::{CompEntity, CompWorld, EntityKind};
+    use crate::ecs::{CompEntity, World, EntityKind};
     use std::collections::HashMap;
 
     fn make_test_envelope() -> Envelope<String> {
@@ -66,8 +66,8 @@ mod tests {
 
     /// Create a world with one entity carrying both a durable and a transient
     /// component.  Returns (world, entity_id).
-    fn make_world_both() -> (CompWorld, u64) {
-        let mut world = CompWorld::new();
+    fn make_world_both() -> (World, u64) {
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -312,8 +312,8 @@ mod tests {
     // ══════════════════════════════════════════════════════════════════════
 
     /// Create a minimal world with one spawned entity for txn tests.
-    fn make_world() -> CompWorld {
-        let mut world = CompWorld::new();
+    fn make_world() -> World {
+        let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
         world.transit(txn).unwrap();
@@ -321,7 +321,7 @@ mod tests {
     }
 
     /// Create a transaction against a world, staging an insert on entity 1.
-    fn make_txn_with_insert(world: &CompWorld) -> WorldTxn {
+    fn make_txn_with_insert(world: &World) -> WorldTxn {
         let mut txn = WorldTxn::new(world);
         txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
         txn
@@ -508,7 +508,7 @@ mod tests {
     fn test_sparse_spawn_no_phantom_entities() {
         // Spawning at a high ID must not create apparent occupied entities
         // in the intermediate gap slots.
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(100, EntityKind::Model);
         world.transit(txn).unwrap();
@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn test_sparse_replay_id_no_phantom_entities() {
         // Replaying exact IDs (e.g., 1 and 200) must create only two entities
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Device);
@@ -568,7 +568,7 @@ mod tests {
     fn test_failed_insert_after_staged_spawn_leaves_no_entity() {
         // A transaction that stages a spawn and an insert on a different
         // entity should not leave any entity behind if the insert fails.
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         // Spawn entity 1
         let mut txn = WorldTxn::new(&world);
@@ -600,7 +600,7 @@ mod tests {
 
     #[test]
     fn test_duplicate_pending_spawns_rejected() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         // Same entity ID staged twice in one transaction
         let mut txn = WorldTxn::new(&world);
@@ -620,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_two_pending_entities_resolve_deterministically() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         // Two spawns in one transaction
         let mut txn = WorldTxn::new(&world);
@@ -647,7 +647,7 @@ mod tests {
 
         // Deterministic: running the same sequence again (in a fresh world)
         // must produce the same result
-        let mut world2 = CompWorld::new();
+        let mut world2 = World::new();
         let mut txn = WorldTxn::new(&world2);
         txn.stage_spawn(1, EntityKind::Model);
         txn.stage_spawn(2, EntityKind::Device);
@@ -674,7 +674,7 @@ mod tests {
     #[test]
     fn test_components_reference_same_txn_spawn() {
         // Components may reference another entity spawned in the same txn
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
@@ -689,7 +689,7 @@ mod tests {
 
     #[test]
     fn test_wrong_schema_type_rejected() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
         // Insert with one type
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn test_failed_removal_leaves_components_unchanged() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
         txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
@@ -762,7 +762,7 @@ mod tests {
 
     #[test]
     fn test_stale_read_rejected() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
         txn.add_component(1, ComponentSchemaId(10), SchemaVersion(1), 42u64);
@@ -788,7 +788,7 @@ mod tests {
     fn test_events_unchanged_across_deterministic_retries() {
         // The same command applied to the same initial world state
         // should produce the same events.
-        fn apply_sequence(world: &mut CompWorld) -> Vec<DomainEvent> {
+        fn apply_sequence(world: &mut World) -> Vec<DomainEvent> {
             let txn = WorldTxn::new(world);
             world.transit(txn).unwrap();
             world.last_committed_events().to_vec()
@@ -835,7 +835,7 @@ mod tests {
     #[test]
     fn test_replay_produces_identical_entity_occupancy() {
         // Replaying the same events must produce the same entity state
-        let mut world1 = CompWorld::new();
+        let mut world1 = World::new();
         let mut txn = WorldTxn::new(&world1);
         txn.stage_spawn(5, EntityKind::Model);
         txn.stage_spawn(10, EntityKind::Device);
@@ -843,7 +843,7 @@ mod tests {
         world1.transit(txn).unwrap();
 
         // Clone world1's state by replaying the same commands
-        let mut world2 = CompWorld::new();
+        let mut world2 = World::new();
         let mut txn = WorldTxn::new(&world2);
         txn.stage_spawn(5, EntityKind::Model);
         txn.stage_spawn(10, EntityKind::Device);
@@ -879,7 +879,7 @@ mod tests {
 
     #[test]
     fn test_prepare_failed_read_dep_leaves_state_unchanged() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // Spawn entity 1
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
@@ -986,7 +986,7 @@ mod tests {
     #[test]
     fn test_prepare_no_mutation_guarantee() {
         // Verify prepare takes &self (shared ref), not &mut self
-        let world = CompWorld::new();
+        let world = World::new();
         let txn = WorldTxn::new(&world);
         // This compiles only if prepare() borrows immutably:
         let _prepared = world.prepare(txn, None).unwrap();
@@ -997,7 +997,7 @@ mod tests {
 
     #[test]
     fn test_journal_and_event_ordering_deterministic() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // Three inserts in one transaction
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
@@ -1062,7 +1062,7 @@ mod tests {
     //  Lifecycle Tests  (Stage 3 — entity lifecycle types)
     // ══════════════════════════════════════════════════════════════════════
     //
-    //  Pure type-level tests: no runtime behavior, no CompWorld dependency.
+    //  Pure type-level tests: no runtime behavior, no World dependency.
     //  Tests exercise transition guards, terminal/status predicates,
     //  typed relationship construction, and serde roundtrips.
 
@@ -2325,7 +2325,7 @@ mod tests {
 
     #[test]
     fn test_discover_devices_success() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let schema_registry = SchemaRegistry::new();
         let cmd_id = MessageId::compute(b"discover-gpu");
         let effect_id = MessageId::compute(b"effect-1");
@@ -2365,7 +2365,7 @@ mod tests {
 
     #[test]
     fn test_discover_devices_failure() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let schema_registry = SchemaRegistry::new();
         let cmd_id = MessageId::compute(b"discover-fail");
 
@@ -2395,7 +2395,7 @@ mod tests {
 
     #[test]
     fn test_discover_devices_request_mismatch() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let schema_registry = SchemaRegistry::new();
         let cmd_id = MessageId::compute(b"discover-request");
 
@@ -2502,10 +2502,10 @@ mod tests {
         reg
     }
 
-    /// Helper: create a CompWorld with one Artifact (entity 1) and one device
+    /// Helper: create a World with one Artifact (entity 1) and one device
     /// at DeviceLifecycle::Ready (entity 2), with DeviceStableId and DeviceMemoryLimits.
-    fn make_deployment_world() -> CompWorld {
-        let mut world = CompWorld::new();
+    fn make_deployment_world() -> World {
+        let mut world = World::new();
         // Artifact entity (1) with digest
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Artifact);
@@ -2699,7 +2699,7 @@ mod tests {
 
     #[test]
     fn test_schema_enforcement_rejects_unregistered() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // Entity 1: Artifact
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Artifact);
@@ -2748,7 +2748,7 @@ mod tests {
 
     #[test]
     fn test_preflight_artifact_not_found() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // Entity 1: Device
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Device);
@@ -2784,7 +2784,7 @@ mod tests {
 
     #[test]
     fn test_preflight_device_not_ready() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // Entity 1: Artifact
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Artifact);
@@ -2824,7 +2824,7 @@ mod tests {
 
     #[test]
     fn test_insufficient_memory_rejected() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // Entity 1: Artifact
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Artifact);
@@ -3014,7 +3014,7 @@ mod tests {
 
     #[test]
     fn test_replay_model_deployed() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         let event = DomainEvent {
             id: MessageId::compute(b"ev-replay"),
@@ -3067,7 +3067,7 @@ mod tests {
 
     #[test]
     fn test_replay_idempotent() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         let event = DomainEvent {
             id: MessageId::compute(b"ev-replay-idem"),
@@ -3284,8 +3284,8 @@ mod tests {
 
     /// Create a world with a model deployed to a Ready device.
     /// Returns (world, model_entity_id, device_entity_id).
-    fn make_session_world() -> (CompWorld, u64, u64) {
-        let mut world = CompWorld::new();
+    fn make_session_world() -> (World, u64, u64) {
+        let mut world = World::new();
         // Entity 1: Artifact
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Artifact);
@@ -3498,7 +3498,7 @@ mod tests {
     #[test]
     fn test_admit_session_device_not_ready() {
         let reg = make_session_schema_registry();
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // Entity 1: Model
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Model);
@@ -3545,7 +3545,7 @@ mod tests {
     #[test]
     fn test_admit_session_model_not_admissible() {
         let reg = make_session_schema_registry();
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // Entity 1: Device
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(1, EntityKind::Device);
@@ -3679,7 +3679,7 @@ mod tests {
     #[test]
     fn test_replay_session_admitted() {
         let _reg = make_session_schema_registry();
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let event = DomainEvent {
             id: MessageId::compute(b"replay-event"),
             kind: "session_admitted".to_string(),
@@ -3719,7 +3719,7 @@ mod tests {
         // successful effect outcomes.
 
         let mut event_store = InMemoryEventStore::new();
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         // --- 1a. Discover a device (auto-assigned to entity 1) ---
         let device_event = DomainEvent {
@@ -3869,7 +3869,7 @@ mod tests {
             .is_some());
 
         // ── Phase 4: Replay into fresh world using ReplayRegistry ────────
-        let mut replay_world = CompWorld::new();
+        let mut replay_world = World::new();
         let registry = ReplayRegistry::register_all();
 
         let start_epoch = replay_world.current_epoch();
@@ -4036,8 +4036,8 @@ mod tests {
         struct DummyComponent(u64);
         impl crate::ecs::Component for DummyComponent {}
 
-        use crate::ecs::CompWorld;
-        let mut world = CompWorld::new();
+        use crate::ecs::World;
+        let mut world = World::new();
         world.set_direct_mutation_allowed(false);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -4061,9 +4061,9 @@ mod tests {
     #[test]
     fn test_world_txn_bypasses_guard() {
         use crate::ecs::constitutional::world_txn::WorldTxn;
-        use crate::ecs::{CompWorld, EntityKind};
+        use crate::ecs::{World, EntityKind};
 
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         world.set_direct_mutation_allowed(false);
 
         let mut txn = WorldTxn::new(&world);
@@ -4083,7 +4083,7 @@ mod tests {
         // Phase 1: Build a world with events stored in FsEventStore
         let registry = ReplayRegistry::register_all();
         let mut store = FsEventStore::open(&log_path, &snap_path).expect("open store");
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         // Build events as if they came from real commands
         let device_event = DomainEvent {
@@ -4124,7 +4124,7 @@ mod tests {
         let entity_count_original = world.entity_count();
 
         // Phase 2: "Restart" — create fresh world, replay from store
-        let mut fresh_world = CompWorld::new();
+        let mut fresh_world = World::new();
         let result = ReplayEngine::replay_into(&mut fresh_world, &store, WorldEpoch(1), &registry)
             .expect("replay should succeed");
 
@@ -4159,7 +4159,7 @@ mod tests {
 
     #[test]
     fn test_durable_acceptance() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4173,7 +4173,7 @@ mod tests {
 
     #[test]
     fn test_transient_acceptance() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4190,7 +4190,7 @@ mod tests {
     // Uncommenting triggers:
     //   error[E0277]: the trait bound `TestTransient: DurableComponent` is not satisfied
     // fn test_transient_not_durable() {
-    //     let mut world = CompWorld::new();
+    //     let mut world = World::new();
     //     let eid = WorldTxn::next_entity_id(&world);
     //     let mut txn = WorldTxn::new(&world);
     //     txn.stage_spawn(eid, EntityKind::Node);
@@ -4206,7 +4206,7 @@ mod tests {
     //
     // The commented block below shows the conceptual prohibition:
     // fn test_durable_not_transient() {
-    //     let mut world = CompWorld::new();
+    //     let mut world = World::new();
     //     let eid = WorldTxn::next_entity_id(&world);
     //     let mut txn = WorldTxn::new(&world);
     //     txn.stage_spawn(eid, EntityKind::Node);
@@ -4240,7 +4240,7 @@ mod tests {
 
     #[test]
     fn test_durable_schema_derivation_journal() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4264,7 +4264,7 @@ mod tests {
     // can call it.  External callers must use put_durable / put_transient
     // which derive the schema key from the type itself.
     // fn test_add_component_is_pub_crate() {
-    //     let mut txn = WorldTxn::new(&CompWorld::new());
+    //     let mut txn = WorldTxn::new(&World::new());
     //     txn.add_component::<TestDurable>(1, ComponentSchemaId(999), SchemaVersion(1), TestDurable(0));
     //     // ^^^ pub(crate) — compiles from within the crate but not outside.
     // }
@@ -4437,7 +4437,7 @@ mod tests {
     #[test]
     fn test_equivalent_transactions_equivalent_journals() {
         let journal_a = {
-            let mut world = CompWorld::new();
+            let mut world = World::new();
             let eid = WorldTxn::next_entity_id(&world);
             let mut txn = WorldTxn::new(&world);
             txn.stage_spawn(eid, EntityKind::Node);
@@ -4446,7 +4446,7 @@ mod tests {
             world.last_journal().to_vec()
         };
         let journal_b = {
-            let mut world = CompWorld::new();
+            let mut world = World::new();
             let eid = WorldTxn::next_entity_id(&world);
             let mut txn = WorldTxn::new(&world);
             txn.stage_spawn(eid, EntityKind::Node);
@@ -4462,7 +4462,7 @@ mod tests {
 
     #[test]
     fn test_journal_ordering_deterministic() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4490,7 +4490,7 @@ mod tests {
 
     #[test]
     fn test_durable_insertion_produces_journal() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4504,7 +4504,7 @@ mod tests {
 
     #[test]
     fn test_transient_insertion_no_journal() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4518,7 +4518,7 @@ mod tests {
 
     #[test]
     fn test_durable_removal_produces_journal() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4532,7 +4532,7 @@ mod tests {
 
     #[test]
     fn test_transient_removal_no_journal() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4549,7 +4549,7 @@ mod tests {
     fn test_replay_reconstructs_durable() {
         let (_world1, eid) = make_world_both();
         // Simulate replay: fresh world, apply only durable ops
-        let mut replayed = CompWorld::new();
+        let mut replayed = World::new();
         let mut txn = WorldTxn::new(&replayed);
         txn.stage_spawn(eid, EntityKind::Node);
         txn.put_durable(eid, TestDurable(42));
@@ -4563,7 +4563,7 @@ mod tests {
     fn test_replay_no_transient() {
         let (_world1, eid) = make_world_both();
         // Simulate replay: only durable ops are replayed; transient is skipped
-        let mut replayed = CompWorld::new();
+        let mut replayed = World::new();
         let mut txn = WorldTxn::new(&replayed);
         txn.stage_spawn(eid, EntityKind::Node);
         txn.put_durable(eid, TestDurable(42));
@@ -4578,7 +4578,7 @@ mod tests {
     #[test]
     fn test_snapshot_durable_only() {
         // Snapshot output contains durable components (journal entries) only
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4596,7 +4596,7 @@ mod tests {
 
     #[test]
     fn test_mixed_transaction_applies_both() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4619,7 +4619,7 @@ mod tests {
 
     #[test]
     fn test_replay_mixed_only_durable() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4635,7 +4635,7 @@ mod tests {
             .is_some());
 
         // Replay: only durable portion
-        let mut replayed = CompWorld::new();
+        let mut replayed = World::new();
         let mut txn2 = WorldTxn::new(&replayed);
         txn2.stage_spawn(eid, EntityKind::Node);
         txn2.put_durable(eid, TestDurable(42));
@@ -4664,7 +4664,7 @@ mod tests {
 
     #[test]
     fn test_failed_preparation_durable_leaves_world_unchanged() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let _epoch_before = world.current_epoch();
 
@@ -4691,7 +4691,7 @@ mod tests {
 
     #[test]
     fn test_failed_preparation_transient_leaves_world_unchanged() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
 
         // Advance world epoch
@@ -4714,7 +4714,7 @@ mod tests {
 
     #[test]
     fn test_schema_failure_after_pending_entity_creation_leaves_no_entity() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
 
         // Advance world epoch
@@ -4741,7 +4741,7 @@ mod tests {
 
     #[test]
     fn test_prepared_transaction_advances_epoch_once() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         assert_eq!(world.current_epoch(), WorldEpoch(1), "initial epoch");
 
         let eid = WorldTxn::next_entity_id(&world);
@@ -4757,7 +4757,7 @@ mod tests {
 
     #[test]
     fn test_dropped_prepared_transaction_changes_nothing() {
-        let world = CompWorld::new();
+        let world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let epoch_before = world.current_epoch();
         let count_before = world.entity_count();
@@ -4797,7 +4797,7 @@ mod tests {
     // Uncommenting triggers:
     //   error[E0277]: the trait bound `TestDurable: TransientComponent` is not satisfied
     // fn test_durable_not_transient() {
-    //     let mut world = CompWorld::new();
+    //     let mut world = World::new();
     //     let eid = WorldTxn::next_entity_id(&world);
     //     let mut txn = WorldTxn::new(&world);
     //     txn.stage_spawn(eid, EntityKind::Node);
@@ -4808,7 +4808,7 @@ mod tests {
     fn test_remove_never_created_component_does_not_panic() {
         // Removing a component type that was never inserted on the entity
         // must silently succeed (no-op) rather than panic.
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4828,7 +4828,7 @@ mod tests {
 
     #[test]
     fn test_conflicting_inserts_rejected() {
-        let world = CompWorld::new();
+        let world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4849,7 +4849,7 @@ mod tests {
         let cat = SchemaCatalogue::build(vec![]).unwrap();
         assert_eq!(cat.len(), 0, "catalogue should be empty");
 
-        let world = CompWorld::new();
+        let world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);
@@ -4866,7 +4866,7 @@ mod tests {
     fn test_namespace_preserved_in_journal() {
         // Insert a durable component with a known namespace and verify
         // the journal entry's schema_key.namespace matches.
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let eid = WorldTxn::next_entity_id(&world);
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(eid, EntityKind::Node);

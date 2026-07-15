@@ -6,9 +6,9 @@ use crate::ecs::plan::fusion::{
     MatMulContract, ValueResidency,
 };
 use crate::ecs::plan::DType;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 use std::collections::HashMap;
 
@@ -20,7 +20,7 @@ impl CompilerSystem for FusionAnalysisSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::FusionDispatch
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let layers: Vec<Entity> = world.entities_of_kind(EntityKind::Layer);
         let all_tensors: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
@@ -188,7 +188,7 @@ fn has_mlp_triplet(roles: &[CanonicalRole]) -> bool {
 /// MatMul node (the attention fusion is handled downstream).
 /// For standalone MatMul roles, a single MatMul node is emitted.
 fn build_graph_for_layer(
-    _world: &CompWorld,
+    _world: &World,
     _tensors: &[Entity],
     roles: &[CanonicalRole],
     layer_idx: u32,

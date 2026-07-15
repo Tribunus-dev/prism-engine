@@ -1,7 +1,7 @@
 use crate::ecs::component::scheduling::{PhaseDagState, ReadyQueueState};
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Initializes the phase DAG — spawns a backend entity with
 /// `PhaseDagState` and `ReadyQueueState` components.
@@ -15,7 +15,7 @@ impl CompilerSystem for PhaseEngineInitSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Check if phase DAG already exists.
         let existing: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
         for entity in &existing {

@@ -8,7 +8,7 @@
 use crate::ecs::component::model_source::{ValidationReportComp, ValidationResultSummary};
 use crate::ecs::compute_image::compile::validation_matrix::{ValidationMatrix, ValidationResult};
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{CompEntity, World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Run validation tests on every Kernel entity in the world.
 ///
@@ -23,7 +23,7 @@ impl CompilerSystem for ValidationMatrixSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Validation
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
         if kernel_entities.is_empty() {
             return Ok(());

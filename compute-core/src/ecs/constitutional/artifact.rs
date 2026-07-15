@@ -5,9 +5,9 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::CompWorld;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+use crate::ecs::World;
+
+
 use serde::{Deserialize, Serialize};
 
 // ── Component Types ───────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ impl LoadArtifactCommand {
     /// Returns the committed epoch and the emitted domain event.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
         outcome: EffectOutcome,
     ) -> Result<(CommittedEpoch, DomainEvent), ArtifactError> {
@@ -250,7 +250,7 @@ impl LoadArtifactCommand {
 /// The canonical entity type [`Entity`](crate::ecs::Entity) `(u64, u32)`
 /// is preferred for new code outside this module.
 pub fn replay_artifact_loaded(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<(CommittedEpoch, u64), ArtifactError> {
     let entity_id = event.entity_id.ok_or(ArtifactError::MissingDigest)?.0;
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn test_artifact_slice_success() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut schema_registry = SchemaRegistry::new();
         schema_registry.register_for_type::<ArtifactLifecycle>(
             ComponentSchemaId(1),
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn test_artifact_slice_effect_failure() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut schema_registry = SchemaRegistry::new();
         schema_registry.register_for_type::<ArtifactLifecycle>(
             ComponentSchemaId(1),
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn test_artifact_slice_digest_mismatch() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut schema_registry = SchemaRegistry::new();
         schema_registry.register_for_type::<ArtifactLifecycle>(
             ComponentSchemaId(1),
@@ -564,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_artifact_slice_request_mismatch() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut schema_registry = SchemaRegistry::new();
         schema_registry.register_for_type::<ArtifactLifecycle>(
             ComponentSchemaId(1),
@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn test_artifact_slice_replay_no_file() {
         // --- Phase 1: Execute and persist ---
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut schema_registry = SchemaRegistry::new();
         schema_registry.register_for_type::<ArtifactLifecycle>(
             ComponentSchemaId(1),
@@ -703,7 +703,7 @@ mod tests {
         assert_eq!(replay_result.last_epoch, epoch.0);
 
         // --- Phase 3: Create new world and reconstruct entity from event ---
-        let mut replay_world = CompWorld::new();
+        let mut replay_world = World::new();
         let stored_events = store.get_events_from(replay_world.current_epoch());
 
         for entry in &stored_events {

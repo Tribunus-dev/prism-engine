@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 use crate::ecs::component::model_source::DraftWeightsComp;
 use crate::ecs::compute_image::compile::draft_loader::load_draft_weights;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+
+
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Load draft model weights and attach as `DraftWeightsComp` on the model entity.
 pub struct DraftModelSystem {
@@ -23,7 +23,7 @@ impl CompilerSystem for DraftModelSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let fused = load_draft_weights(&self.ckpt_dir)
             .map_err(|e| anyhow::anyhow!("draft weight load failed: {e}"))?;
 

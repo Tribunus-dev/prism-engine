@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::{BackendComponent, MetalDeviceState};
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Initializes the Metal device — creates a Backend entity with
 /// `MetalDeviceState` and `BackendComponent` on the ECS world.
@@ -15,7 +15,7 @@ impl CompilerSystem for MetalInitSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Check if a Metal backend entity already exists.
         let existing: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
         for entity in &existing {

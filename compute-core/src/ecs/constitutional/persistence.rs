@@ -1,8 +1,8 @@
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::types::*;
-use crate::ecs::CompWorld;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+use crate::ecs::World;
+
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -54,7 +54,7 @@ pub struct ReplayEngine;
 impl ReplayEngine {
     /// Replay events from the store into an existing world using a registry of appliers.
     pub fn replay_into(
-        world: &mut CompWorld,
+        world: &mut World,
         store: &dyn EventStore,
         from_epoch: WorldEpoch,
         registry: &ReplayRegistry,
@@ -86,10 +86,10 @@ impl ReplayEngine {
 
 /// Function signature for replaying a single event.
 ///
-/// Internally processes entity data via `CompWorld`. The canonical entity type
+/// Internally processes entity data via `World`. The canonical entity type
 /// [`Entity`](crate::ecs::Entity) `(u64, u32)` is preferred for new replay
 /// code outside the constitutional domain.
-pub type ReplayApplier = fn(&mut CompWorld, &DomainEvent) -> Result<(), String>;
+pub type ReplayApplier = fn(&mut World, &DomainEvent) -> Result<(), String>;
 
 /// Registry mapping event kind strings to replay applier functions.
 ///
@@ -111,7 +111,7 @@ impl ReplayRegistry {
         self.appliers.insert(event_kind.to_string(), applier);
     }
 
-    pub fn apply(&self, world: &mut CompWorld, event: &DomainEvent) -> Result<(), String> {
+    pub fn apply(&self, world: &mut World, event: &DomainEvent) -> Result<(), String> {
         let applier = self.appliers.get(&event.kind).ok_or_else(|| {
             format!(
                 "no replay applier registered for event kind: {}",

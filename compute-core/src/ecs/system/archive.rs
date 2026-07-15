@@ -5,9 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::ecs::component::model_source::{AneArchiveComp, AneArchiveResultComp};
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+
+
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Tar-archive a .mlmodelc directory into a single `.ane.tar` file.
 pub fn archive_ane_modelc(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -66,7 +66,7 @@ impl CompilerSystem for ArchiveSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities = world.entities_of_kind(EntityKind::Model);
         for entity in &model_entities {
             let Some(archive) = world.get_component::<AneArchiveComp>(*entity) else {
@@ -101,7 +101,7 @@ impl CompilerSystem for PrecompiledAneSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::ModelLoading
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         copy_precompiled_ane_models(&self.src_dir, &self.output_dir)
             .map_err(|e| anyhow::anyhow!("precompiled ane copy failed: {e}"))?;
 

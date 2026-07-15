@@ -4,7 +4,7 @@ use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn};
-use crate::ecs::{CompWorld, Entity, EntityKind};
+use crate::ecs::{World, Entity, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -87,7 +87,7 @@ pub enum PipelineModality {
 /// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
 ///
 /// Uses generation `0` for backward compatibility with the legacy
-/// `CompWorld`/`CompEntity` storage. Callers migrating to the new
+/// `World`/`CompEntity` storage. Callers migrating to the new
 /// `World`+`Entity(u64, u32)` API should replace this with proper
 /// generation-aware entity construction.
 #[allow(dead_code)]
@@ -284,7 +284,7 @@ impl CreatePipelineCommand {
     /// Preflight: session exists and is Active.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), MultimodalError> {
         Self::validate_schemas(schema_registry).map_err(|e| MultimodalError::SchemaError(e))?;
@@ -324,7 +324,7 @@ impl CreatePipelineCommand {
     /// components, commit atomically.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), MultimodalError> {
         // 0. Preflight
@@ -414,7 +414,7 @@ impl SubmitStageOutputCommand {
     /// Preflight: pipeline exists, is Executing or Assembled.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), MultimodalError> {
         schema_registry
@@ -442,7 +442,7 @@ impl SubmitStageOutputCommand {
     /// Execute: attach output artifact, potentially transition lifecycle.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), MultimodalError> {
         self.preflight(world, schema_registry)?;
@@ -537,7 +537,7 @@ pub enum MultimodalError {
 ///
 /// Restores: Pipeline, PipelineLifecycle::Created. Idempotent.
 pub fn replay_pipeline_created(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<CommittedEpoch, MultimodalError> {
     let pipeline_id = event
@@ -644,7 +644,7 @@ mod tests {
         reg
     }
 
-    fn make_session(world: &mut CompWorld) -> u64 {
+    fn make_session(world: &mut World) -> u64 {
         let id = WorldTxn::next_entity_id(world);
         let mut txn = WorldTxn::new(world);
         txn.stage_spawn(id, EntityKind::Session);
@@ -834,7 +834,7 @@ mod tests {
 
     #[test]
     fn test_create_pipeline_preflight() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let reg = make_registry();
 
         // No session — should fail
@@ -887,7 +887,7 @@ mod tests {
 
     #[test]
     fn test_create_pipeline_execute() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let reg = make_registry();
         let session_id = make_session(&mut world);
         // Model at entity 100, artifact at entity 200 — explicit IDs to avoid

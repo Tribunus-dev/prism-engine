@@ -15,8 +15,8 @@ use crate::ecs::runtime::scheduling::metadata::{
     SystemResult, SystemSpec,
 };
 use crate::ecs::runtime::world::World;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+
+
 
 // ---------------------------------------------------------------------------
 // System

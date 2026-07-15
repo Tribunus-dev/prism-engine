@@ -4,7 +4,7 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::{CompWorld, Entity, EntityKind};
+use crate::ecs::{World, Entity, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs (63-68) ──────────────────────────────────────────
@@ -171,7 +171,7 @@ impl SubmitIngressRequestCommand {
     /// Preflight: validate api_key hash is valid (if provided), rate limit not exceeded.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), IngressError> {
         Self::validate_schemas(schema_registry).map_err(|e| IngressError::SchemaError(e))?;
@@ -200,7 +200,7 @@ impl SubmitIngressRequestCommand {
     /// attach IngressRequest component, emit event, and request resolution.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), IngressError> {
         self.preflight(world, schema_registry)?;
@@ -276,7 +276,7 @@ impl ResolveIngressCommand {
     /// Preflight: ingress entity exists and is in a resolvable lifecycle state.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), IngressError> {
         Self::validate_schemas(schema_registry).map_err(|e| IngressError::SchemaError(e))?;
@@ -305,7 +305,7 @@ impl ResolveIngressCommand {
     /// update the resolved_command on IngressRequest, emit event.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), IngressError> {
         self.preflight(world, schema_registry)?;
@@ -366,7 +366,7 @@ impl IngressLifecycleTransitionCommand {
     /// Preflight: entity exists, transition is valid.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), IngressError> {
         Self::validate_schemas(schema_registry).map_err(|e| IngressError::SchemaError(e))?;
@@ -393,7 +393,7 @@ impl IngressLifecycleTransitionCommand {
     /// Execute: update lifecycle to target, emit event.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), IngressError> {
         self.preflight(world, schema_registry)?;
@@ -451,7 +451,7 @@ impl crate::ecs::Component for IngressLifecycle {}
 /// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
 ///
 /// Uses generation `0` for backward compatibility with the legacy
-/// `CompWorld`/`CompEntity` storage. Callers migrating to the new
+/// `World`/`CompEntity` storage. Callers migrating to the new
 /// `World`+`Entity(u64, u32)` API should replace this with proper
 /// generation-aware entity construction.
 #[allow(dead_code)]
@@ -530,7 +530,7 @@ impl DurableComponent for IngressLifecycle {
 /// Replay an ingress request submitted event, restoring the ingress entity
 /// and its request/lifecycle components.
 pub fn replay_ingress_request_submitted(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<CommittedEpoch, IngressError> {
     let entity_id = event.entity_id.ok_or(IngressError::EntityNotFound(0))?.0;
@@ -767,7 +767,7 @@ mod tests {
     #[test]
     fn test_submit_ingress_command_execution() {
         let reg = make_registry();
-        let mut world = CompWorld::new();
+        let mut world = World::new();
 
         let cmd = SubmitIngressRequestCommand {
             id: MessageId::compute(b"test-ingress-1"),

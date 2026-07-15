@@ -9,7 +9,7 @@ use crate::ecs::cimage::{
     PhysicalTileLayout,
 };
 use crate::ecs::plan::{CodecFamily, DType as PlanDType, HardwareProfileId};
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
 use crate::ecs::{
     component::{
@@ -17,7 +17,7 @@ use crate::ecs::{
         quality::{AOTProfileMatch, AdmissionReceipt, QualityGateResult},
         tensor::{CanonicalRoleComp, CodecFamilyComp, DataType, LayerIndex, Shape},
     },
-    CompWorld, CompilerSystem, EntityKind, SchedulePhase,
+    World, CompilerSystem, EntityKind, SchedulePhase,
 };
 
 // ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ impl CompilerSystem for CImageAssemblySystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Packaging
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // ── Model info ────────────────────────────────────────────────────
         let model_entities = world.entities_of_kind(EntityKind::Model);
         let model_family = model_entities
@@ -257,7 +257,7 @@ impl CompilerSystem for ReceiptSigningSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::Packaging
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let entity_count = world.entity_count();
         let mut evidence_receipts: Vec<EvidenceReceiptV0> = Vec::new();
 

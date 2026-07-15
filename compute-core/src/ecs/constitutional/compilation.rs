@@ -4,9 +4,9 @@ use crate::ecs::constitutional::schema::SchemaRegistry;
 use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::ecs::constitutional::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
-use crate::ecs::CompWorld;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+use crate::ecs::World;
+
+
 use serde::{Deserialize, Serialize};
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -282,7 +282,7 @@ impl CreateCompilationJobCommand {
     /// Preflight: validate schemas and model entity existence.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), CompilationError> {
         validate_compilation_schemas(schema_registry)
@@ -303,7 +303,7 @@ impl CreateCompilationJobCommand {
     /// Execute: spawn job entity, attach components, emit event, commit.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), CompilationError> {
         self.preflight(world, schema_registry)?;
@@ -375,7 +375,7 @@ impl SubmitValidationReceiptCommand {
     /// Preflight: validate schemas and that the job entity exists with a compatible lifecycle.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), CompilationError> {
         validate_compilation_schemas(schema_registry)
@@ -404,7 +404,7 @@ impl SubmitValidationReceiptCommand {
     /// Execute: attach validation receipt to the job entity.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), CompilationError> {
         self.preflight(world, schema_registry)?;
@@ -450,7 +450,7 @@ impl PromoteCimageCommand {
     /// Preflight: validate schemas, entity existence, and gate conditions.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), CompilationError> {
         validate_compilation_schemas(schema_registry)
@@ -490,7 +490,7 @@ impl PromoteCimageCommand {
     /// Execute: attach promotion record and update lifecycle to Promoted.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), CompilationError> {
         self.preflight(world, schema_registry)?;
@@ -580,7 +580,7 @@ pub enum CompilationError {
 /// Returns the committed epoch and the entity ID (u64) of the reconstructed
 /// job entity. See [`Entity`] for the canonical generational entity handle.
 pub fn replay_compilation_job_created(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<(CommittedEpoch, u64), CompilationError> {
     let job_id = event
@@ -657,7 +657,7 @@ pub fn replay_compilation_job_created(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::CompWorld;
+    use crate::ecs::World;
 
     /// Build a schema registry with all compilation types registered.
     fn make_compilation_schema_registry() -> SchemaRegistry {
@@ -853,7 +853,7 @@ mod tests {
 
     #[test]
     fn test_create_compilation_job_execute() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let reg = make_compilation_schema_registry();
 
         // Set up an artifact entity for the model
@@ -905,7 +905,7 @@ mod tests {
 
     #[test]
     fn test_create_compilation_job_preflight_rejects_missing_artifact() {
-        let world = CompWorld::new();
+        let world = World::new();
         let reg = make_compilation_schema_registry();
 
         let cmd = CreateCompilationJobCommand {
@@ -932,7 +932,7 @@ mod tests {
 
     #[test]
     fn test_submit_validation_receipt_rejects_non_validating_state() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let reg = make_compilation_schema_registry();
 
         // Spawn an entity as a job (must be in some lifecycle state)

@@ -20,9 +20,9 @@ use crate::ecs::evolution::foundation::{
 use crate::ecs::evolution::systems::{evolve_evaluate, evolve_seed, evolve_select, mutate_program};
 use crate::ecs::evolution::EvolutionState;
 use crate::ecs::plan::CodecFamily;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, EntityKind};
+use crate::ecs::{EntityKind, World};
 
 /// Configuration for a metal decomposition search.
 ///
@@ -114,7 +114,7 @@ impl MetalDecompositionSearch {
     /// Pass [`SyntheticEvaluator`] for testing or a real Metal-measuring
     /// evaluator in production.
     pub fn run(&self, evaluator: &dyn Evaluator) -> DecompositionResult {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         // The run() method uses direct mutation (outside WorldTxn).
         world.set_direct_mutation_allowed(true);
 

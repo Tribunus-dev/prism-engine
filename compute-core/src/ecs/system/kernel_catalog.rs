@@ -6,9 +6,9 @@
 
 use crate::ecs::component::aot::CatalogEntry;
 use crate::ecs::component::backend::{BinaryFormat, CompiledBinary};
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Validates each kernel binary against the catalog schema.
 ///
@@ -27,7 +27,7 @@ impl CompilerSystem for KernelCatalogSystem {
         SchedulePhase::KernelGeneration
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernels: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
         for &kernel in &kernels {
@@ -69,14 +69,14 @@ impl CompilerSystem for KernelCatalogSystem {
 mod tests {
     use super::*;
     use crate::ecs::component::backend::{BinaryFormat, CompiledBinary};
-    #[allow(unused_imports)]
+
     use crate::ecs::Entity;
-    use crate::ecs::{CompWorld, EntityKind};
+    use crate::ecs::{World, EntityKind};
 
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_valid_binary_passes_catalog_check() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
         world.add_component(
             kernel,
@@ -98,7 +98,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_empty_binary_fails() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
         world.add_component(
             kernel,
@@ -120,7 +120,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_no_binary_is_ok() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         world.spawn(EntityKind::Kernel, None);
 
         let system = KernelCatalogSystem;
@@ -132,7 +132,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_missing_fingerprint_fails() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
         world.add_component(
             kernel,

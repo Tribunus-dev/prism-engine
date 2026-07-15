@@ -66,9 +66,9 @@ pub mod session_decode_tick;
 pub mod session_init;
 pub mod work_dispatch_tick;
 
-use crate::ecs::{CompWorld, SchedulePhase};
+use crate::ecs::{World, SchedulePhase};
 
 /// Run all systems in the given phase.
-pub fn run_phase(world: &mut CompWorld, phase: SchedulePhase) -> anyhow::Result<()> {
+pub fn run_phase(world: &mut World, phase: SchedulePhase) -> anyhow::Result<()> {
     world.run_phase(phase)
 }

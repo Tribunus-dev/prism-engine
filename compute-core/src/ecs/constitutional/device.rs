@@ -6,9 +6,9 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use crate::ecs::CompWorld;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+use crate::ecs::World;
+
+
 use serde::{Deserialize, Serialize};
 
 /// Stable hardware identity — backend-specific but deterministic.
@@ -141,7 +141,7 @@ impl DiscoverDevicesCommand {
     /// Validate outcome, create or update device entity, commit.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         _schema_registry: &SchemaRegistry,
         outcome: EffectOutcome,
     ) -> Result<(CommittedEpoch, Vec<DomainEvent>), DeviceError> {
@@ -211,7 +211,7 @@ impl DiscoverDevicesCommand {
 ///
 /// Returns the entity ID of the matching device, if any. See [`Entity`] for the
 /// canonical generational entity handle.
-pub fn find_device_by_stable_id(_world: &CompWorld, _stable_id: &DeviceStableId) -> Option<u64> {
+pub fn find_device_by_stable_id(_world: &World, _stable_id: &DeviceStableId) -> Option<u64> {
     // TODO: maintain StableId → EntityId reverse index
     None
 }
@@ -247,7 +247,7 @@ impl InitializeDeviceCommand {
 /// Returns the committed epoch and the entity ID (u64) of the reconstructed
 /// device entity. See [`Entity`] for the canonical generational handle.
 pub fn replay_device_discovered(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<(CommittedEpoch, u64), DeviceError> {
     let stable_id_str = event

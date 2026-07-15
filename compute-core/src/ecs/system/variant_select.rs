@@ -8,9 +8,9 @@
 
 use crate::ecs::component::aot::{KernelVariantEntityData, SelectedVariant};
 use crate::ecs::component::backend::GPUArch;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -128,7 +128,7 @@ fn profile_from_str(s: &str) -> Option<AppleSiliconProfileId> {
 }
 
 /// Determine the target device profile from GPU arch info on kernel entities.
-fn target_device_profile(world: &CompWorld) -> Option<AppleSiliconProfileId> {
+fn target_device_profile(world: &World) -> Option<AppleSiliconProfileId> {
     let kernels = world.entities_of_kind(EntityKind::Kernel);
     for &k in &kernels {
         if let Some(arch) = world.get_component::<GPUArch>(k) {
@@ -180,7 +180,7 @@ impl CompilerSystem for VariantSelectionSystem {
         SchedulePhase::KernelGeneration
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let variant_entities: Vec<Entity> = world.entities_of_kind(EntityKind::KernelVariant);
 
         if variant_entities.is_empty() {
@@ -243,7 +243,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_selects_variant_by_group() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let parent = world.spawn(EntityKind::Kernel, None);
         let v1 = world.spawn(EntityKind::KernelVariant, None);
         world.add_component(
@@ -277,7 +277,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_empty_variants_noop() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let system = VariantSelectionSystem;
         system.run(&mut world).unwrap();
         // no panic

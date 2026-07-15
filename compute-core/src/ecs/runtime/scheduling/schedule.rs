@@ -31,8 +31,8 @@ use crate::ecs::runtime::scheduling::metadata::{
     SystemResult,
 };
 use crate::ecs::runtime::world::World;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+
+
 
 // ---------------------------------------------------------------------------
 // PriorityKey — deterministic ready-queue ordering

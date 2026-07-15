@@ -4,9 +4,9 @@ use crate::ecs::component::backend::{BackendTarget, GPUArch, KernelSource};
 use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::component::tensor::{CodecFamilyComp, Shape};
 use crate::ecs::plan::{CodecFamily, KernelTemplateId};
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 use std::collections::{HashMap, HashSet};
 
 /// Selects a kernel template for each dispatch based on its root op and codec.
@@ -22,7 +22,7 @@ impl CompilerSystem for TemplateSelectionSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::KernelGeneration
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Collect Dispatch entities with FusionGroup data up front.
         let dispatch_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Dispatch);
         let payload: Vec<Entity> = dispatch_entities
@@ -95,7 +95,7 @@ impl CompilerSystem for ParameterResolutionSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::KernelGeneration
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         use crate::ecs::aot::parameters::KernelParameters;
 
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
@@ -274,7 +274,7 @@ impl CompilerSystem for TemplateExpansionSystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::KernelGeneration
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         if kernel_entities.is_empty() {
             return Ok(());

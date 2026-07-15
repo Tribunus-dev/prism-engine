@@ -1,6 +1,6 @@
 //! Execution subsystem — execution leases, KV cache slots, and tokens.
 //!
-//! Uses `CompWorld` from the legacy ECS store internally.
+//! Uses `World` from the legacy ECS store internally.
 //! The canonical [`Entity`](crate::ecs::Entity) type is available for new
 //! consumer code that prefers generation-safe handles over the legacy
 //! `CompEntity(u64)`.
@@ -13,9 +13,9 @@ use crate::ecs::constitutional::types::*;
 use crate::ecs::constitutional::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn,
 };
-#[allow(unused_imports)]
-use crate::ecs::Entity;
-use crate::ecs::{CompWorld, EntityKind};
+
+
+use crate::ecs::{World, EntityKind};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
@@ -226,7 +226,7 @@ impl AcquireExecutionLeaseCommand {
     /// Resident, device exists and is Ready.
     pub fn preflight(
         &self,
-        world: &CompWorld,
+        world: &World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(), ExecutionError> {
         validate_execution_schemas(schema_registry)?;
@@ -294,7 +294,7 @@ impl AcquireExecutionLeaseCommand {
     /// and emits a lease_acquired domain event.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
         schema_registry: &SchemaRegistry,
     ) -> Result<(CommittedEpoch, DomainEvent), ExecutionError> {
         // 0. Preflight
@@ -378,7 +378,7 @@ pub struct CompleteExecutionLeaseCommand {
 
 impl CompleteExecutionLeaseCommand {
     /// Preflight: lease exists and is active (has an ExecutionLease component).
-    pub fn preflight(&self, world: &CompWorld) -> Result<(), ExecutionError> {
+    pub fn preflight(&self, world: &World) -> Result<(), ExecutionError> {
         let lease = crate::ecs::CompEntity(self.lease_id);
         if !world.has_entity(lease) {
             return Err(ExecutionError::LeaseNotFound(self.lease_id));
@@ -392,7 +392,7 @@ impl CompleteExecutionLeaseCommand {
     /// Execute lease completion: validate, emit lease_completed event.
     pub fn execute(
         self,
-        world: &mut CompWorld,
+        world: &mut World,
     ) -> Result<(CommittedEpoch, DomainEvent), ExecutionError> {
         // 0. Preflight
         self.preflight(world)?;
@@ -462,7 +462,7 @@ impl From<String> for ExecutionError {
 /// Reconstruct a lease entity from a `lease_acquired` event.
 /// Restores ExecutionLease, LeaseOwner, LeaseTokenRange. Idempotent.
 pub fn replay_lease_acquired(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<CommittedEpoch, ExecutionError> {
     let lease_id = event.payload["lease_id"]
@@ -529,7 +529,7 @@ pub fn replay_lease_acquired(
 /// Reconstruct lease completion from a `lease_completed` event.
 /// Restores ExecutionOutput. Idempotent.
 pub fn replay_lease_completed(
-    world: &mut CompWorld,
+    world: &mut World,
     event: &DomainEvent,
 ) -> Result<CommittedEpoch, ExecutionError> {
     let lease_id = event.payload["lease_id"]
@@ -563,7 +563,7 @@ mod tests {
     use crate::ecs::constitutional::lifecycle::{
         DeviceLifecycle, ResidencyLifecycle, SessionLifecycle,
     };
-    use crate::ecs::CompWorld;
+    use crate::ecs::World;
 
     // ── test_execution_lease_types_serde ────────────────────────────────
 
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_acquire_lease_preflight() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut reg = crate::ecs::constitutional::schema::SchemaRegistry::new();
 
         // Register schemas
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn test_acquire_lease_preflight_invalid() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let mut reg = crate::ecs::constitutional::schema::SchemaRegistry::new();
         reg.register_for_type::<ExecutionLease>(
             ComponentSchemaId(SCHEMA_EXECUTION_LEASE),

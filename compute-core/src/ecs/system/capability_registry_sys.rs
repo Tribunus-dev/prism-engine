@@ -6,9 +6,9 @@
 use crate::ecs::component::model_source::CapabilityKeyComp;
 use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
 use crate::ecs::Component;
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Singleton entity id for the capability registry resource.
 const CAPABILITY_ENTITY_NAME: &str = "capability_registry";
@@ -28,7 +28,7 @@ impl CompilerSystem for CapabilityRegistrySystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::FusionDispatch
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         // Find or create the capability registry entity.
         let entity = find_or_create_registry_entity(world);
         let registry = CapabilityRegistry::default_metal_v1();
@@ -42,7 +42,7 @@ impl CompilerSystem for CapabilityRegistrySystem {
     }
 }
 
-fn find_or_create_registry_entity(world: &mut CompWorld) -> Entity {
+fn find_or_create_registry_entity(world: &mut World) -> Entity {
     // Look for existing registry by name.
     for entity in world.entities_of_kind(EntityKind::Model) {
         if let Some(name) = world.name(entity) {

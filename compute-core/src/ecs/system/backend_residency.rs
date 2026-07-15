@@ -1,7 +1,7 @@
 use crate::ecs::component::backend::{BackendComponent, TensorComponent};
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Manages tensor residency across backends — tracks which backends
 /// hold tensor data and initiates transfers when needed.
@@ -17,7 +17,7 @@ impl CompilerSystem for BackendResidencySystem {
     fn phase(&self) -> SchedulePhase {
         SchedulePhase::MemoryPlanning
     }
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensor_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
         let backend_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 

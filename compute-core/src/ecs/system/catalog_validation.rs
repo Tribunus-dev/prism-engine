@@ -6,9 +6,9 @@
 //! (`Compilation`).
 
 use crate::ecs::component::aot::{SelectedVariant, ValidationReceipt};
-#[allow(unused_imports)]
+
 use crate::ecs::Entity;
-use crate::ecs::{CompWorld, CompilerSystem, EntityKind, SchedulePhase};
+use crate::ecs::{World, CompilerSystem, EntityKind, SchedulePhase};
 
 /// Runs held-out shape validation for each selected variant.
 pub struct CatalogValidationSystem;
@@ -22,7 +22,7 @@ impl CompilerSystem for CatalogValidationSystem {
         SchedulePhase::Compilation
     }
 
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()> {
+    fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
         for &kernel in &kernel_entities {
@@ -55,7 +55,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_validates_selected_kernels() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
         world.add_component(
             kernel,
@@ -76,7 +76,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_skips_kernels_without_selection() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         world.spawn(EntityKind::Kernel, None);
 
         let system = CatalogValidationSystem;
@@ -87,7 +87,7 @@ mod tests {
     #[cfg(feature = "legacy_mutations")]
     #[test]
     fn test_empty_world() {
-        let mut world = CompWorld::new();
+        let mut world = World::new();
         let system = CatalogValidationSystem;
         system.run(&mut world).unwrap();
         // no panic

@@ -7,8 +7,8 @@
 use crate::ecs::runtime::scheduling::error::MaskError;
 use crate::ecs::runtime::scheduling::error::RegistryError;
 use crate::ecs::runtime::world::Component;
-#[allow(unused_imports)]
-use crate::ecs::Entity;
+
+
 
 // ---------------------------------------------------------------------------
 // ID types

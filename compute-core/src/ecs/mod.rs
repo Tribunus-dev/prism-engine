@@ -229,8 +229,9 @@ pub type EntityId = u64;
 #[deprecated(note = "use Entity(u64, u32) for generation safety")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CompEntity(pub EntityId);
-/// Legacy world type — will be renamed to World after full migration.
-pub use CompWorld as LegacyCompWorld;
+/// Legacy alias for compatibility during migration.
+#[deprecated(note = "use World instead")]
+pub type CompWorld = World;
 
 /// Generational entity handle.
 ///
@@ -238,8 +239,17 @@ pub use CompWorld as LegacyCompWorld;
 /// catching stale references. The generation is opaque — callers construct
 /// entities through `World::spawn()` or `Commands::spawn()`, never by
 /// fabricating the tuple.
+///
+/// # Invalid-handle contract
+///
+/// - `Entity(0, _)` (zero ID) is always invalid — handle it as a null
+///   sentinel. Every API returns `None`/`false`, never panics.
+/// - A handle whose generation does not match the current generation in the
+///   world slot is stale — `is_alive()` returns `false`, queries skip it.
+/// - Fabricated handles (created outside `World::spawn()`) are treated as
+///   stale unless the slot exists AND generation matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Entity(pub u64, pub u32);
+pub struct Entity(pub(crate) u64, pub(crate) u32);
 
 impl Entity {
     pub fn id(&self) -> u64 {
@@ -327,11 +337,11 @@ pub enum SchedulePhase {
 pub trait CompilerSystem: Send + Sync {
     fn name(&self) -> &str;
     fn phase(&self) -> SchedulePhase;
-    fn run(&self, world: &mut CompWorld) -> anyhow::Result<()>;
+    fn run(&self, world: &mut World) -> anyhow::Result<()>;
 }
 
 /// The ECS world — all entities, components, and systems.
-pub struct CompWorld {
+pub struct World {
     component_store: ComponentStore,
     resource_store: ResourceStore,
     systems: Vec<Box<dyn CompilerSystem>>,
@@ -349,9 +359,9 @@ pub struct CompWorld {
     direct_mutation_allowed: bool,
 }
 
-impl std::fmt::Debug for CompWorld {
+impl std::fmt::Debug for World {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CompWorld")
+        f.debug_struct("World")
             .field(
                 "entity_count",
                 &self
@@ -442,7 +452,7 @@ impl Default for ComponentStore {
     }
 }
 
-impl CompWorld {
+impl World {
     /// Spawn entity with kind and optional name.
     /// Validate that an entity handle is still valid (the slot is occupied and
     /// the generation matches). Returns None if the handle is stale or the
@@ -806,7 +816,7 @@ impl CompWorld {
     }
 }
 
-impl CompWorld {
+impl World {
     pub fn current_epoch(&self) -> WorldEpoch {
         self.epoch
     }
@@ -963,5 +973,71 @@ impl ComponentStore {
 
     pub fn contains<T: Component>(&self, entity: CompEntity) -> bool {
         self.column::<T>().map(|c| c.has(entity.0)).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod entity_tests {
+    use super::*;
+
+    #[test]
+    fn zero_entity_is_invalid() {
+        let zero = Entity(0, 0);
+        assert_eq!(zero.id(), 0);
+        assert_eq!(zero.generation(), 0);
+    }
+
+    #[test]
+    fn entity_id_and_generation_accessors() {
+        let e = Entity(42, 3);
+        assert_eq!(e.id(), 42);
+        assert_eq!(e.generation(), 3);
+    }
+
+    #[test]
+    fn entity_serialization_round_trip() {
+        let e = Entity(100, 5);
+        let json = serde_json::to_string(&e).unwrap();
+        let deserialized: Entity = serde_json::from_str(&json).unwrap();
+        assert_eq!(e, deserialized);
+        assert_eq!(deserialized.id(), 100);
+        assert_eq!(deserialized.generation(), 5);
+    }
+
+    #[test]
+    fn entity_partial_eq_by_id_and_generation() {
+        let a = Entity(1, 0);
+        let b = Entity(1, 1);
+        let c = Entity(2, 0);
+        assert_ne!(a, b, "different generations must not be equal");
+        assert_ne!(a, c, "different IDs must not be equal");
+        assert_eq!(a, Entity(1, 0));
+    }
+
+    #[test]
+    fn entity_hash_consistency() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(Entity(10, 0));
+        set.insert(Entity(10, 1));
+        set.insert(Entity(20, 0));
+        assert_eq!(set.len(), 3);
+        assert!(set.contains(&Entity(10, 0)));
+        assert!(set.contains(&Entity(10, 1)));
+    }
+
+    #[test]
+    fn entity_copy_trait() {
+        let a = Entity(5, 2);
+        let b = a;
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn entity_from_comp_entity_sets_generation_zero() {
+        let ce = CompEntity(42);
+        let e = Entity::from(ce);
+        assert_eq!(e.id(), 42);
+        assert_eq!(e.generation(), 0);
     }
 }
