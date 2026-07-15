@@ -385,7 +385,7 @@ impl McpHandler for TestScopeHandler {
                 },
                 "scope": {
                     "type": "string",
-                    "description": "Scope: \"auto\" runs cargo test on the component; \"all\" lists workspace crates",
+                    "description": "Scope: \"auto\" runs the component library tests without compiling CLI binaries; \"all\" lists workspace crates",
                     "default": "auto"
                 },
                 "timeout_secs": {
@@ -452,6 +452,10 @@ impl McpHandler for TestScopeHandler {
                 if let Some(comp) = &component {
                     owned_args.push("-p".into());
                     owned_args.push(comp.clone());
+                    // Component-scoped tests default to the library target. A
+                    // Cargo test-name filter does not constrain target
+                    // compilation, so omitting this would compile every CLI.
+                    owned_args.push("--lib".into());
                 }
 
                 let all_strs: Vec<&str> = owned_args.iter().map(|s| s.as_str()).collect();
@@ -472,6 +476,7 @@ impl McpHandler for TestScopeHandler {
                 let result = json!({
                     "component": component,
                     "scope": "auto",
+                    "target_kind": if component.is_some() { "lib" } else { "workspace-default" },
                     "output": output,
                     "exit_code": 0
                 });

@@ -106,7 +106,8 @@ impl CompilerSystem for PrecompiledAneSystem {
 
         // Record a result on a dedicated entity so downstream systems know
         // the precompiled models are available.
-        let entity = world.spawn(EntityKind::Model, Some("precompiled_ane".into()));
+        let entity = world.spawn(EntityKind::Model, Some("precompiled_ane".into()))?;
+         let entity = world.spawn(EntityKind::Model, Some("precompiled_ane".into()))?;
         world.add_component(entity, AneArchiveResultComp { paths: vec![] });
         Ok(())
     }

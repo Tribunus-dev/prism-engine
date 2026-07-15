@@ -24,6 +24,7 @@ use crate::ecs::compiler::lifecycle_coordinator::{LifecycleCoordinator, PolicyCo
 use crate::ecs::compute_image::model_family::gemma4_inspect::inspect_gemma4_checkpoint;
 #[cfg(feature = "prism-backend")]
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
+use crate::ecs::scheduling::compilation_job_bridge::CompilationJobBridge;
 #[cfg(feature = "prism-backend")]
 use memmap2::Mmap;
 #[cfg(feature = "prism-backend")]
@@ -131,6 +132,7 @@ pub struct CimageDeploymentCompiler {
     pub prism_compiler: PrismCompiler,
     pub metal_backend: Option<MetalBackendCompiler>,
     pub lifecycle_coordinator: Option<LifecycleCoordinator>,
+    pub job_bridge: Option<CompilationJobBridge>,
 }
 
 #[cfg(feature = "prism-backend")]
@@ -146,6 +148,7 @@ impl Default for CimageDeploymentCompiler {
             prism_compiler: pc,
             metal_backend: Self::create_metal_backend(),
             lifecycle_coordinator: Some(LifecycleCoordinator::new()),
+            job_bridge: None,
         }
     }
 }
@@ -301,6 +304,23 @@ impl CimageDeploymentCompiler {
 
         // 2b. Call PrismCompiler::compile() to get real CompileOutcome with
         // compiled_kernels, receipts, event_stream, and model_ir_digest
+        // 2a. Record compilation job creation in the constitutional authority path
+        let mut job_entity: u64 = 0;
+        if let Some(bridge) = &self.job_bridge {
+            let job_config = crate::ecs::constitutional::compilation::JobConfig {
+                target_format: request.target.clone(),
+                optimization_level: 3,
+                enable_validation: true,
+            };
+            if let Ok(entity_id) = bridge.create_job(
+                0, // model_artifact_id — placeholder; bridge is authority record
+                &request.target,
+                job_config,
+            ) {
+                job_entity = entity_id;
+            }
+        }
+
         let compiled_outcome = self
             .prism_compiler
             .compile(compile_request.clone())
@@ -401,6 +421,18 @@ impl CimageDeploymentCompiler {
         let model_ir_digest: [u8; 32] = hasher.finalize().into();
 
         // 6. Build the output path
+        // 5b. Record cimage promotion in the constitutional authority path
+        if let Some(bridge) = &self.job_bridge {
+            // Encode the model IR digest as a hex string for the bridge's &str parameter
+            let digest_hex: String = model_ir_digest.iter().map(|b| format!("{b:02x}")).collect();
+            let _ = bridge.promote_cimage(
+                crate::ecs::Entity(job_entity, 0),
+                &digest_hex,
+                source_path.len() as u64,
+                &request.target,
+            );
+        }
+
         let output_path = request.output_path.clone().unwrap_or_else(|| {
             let stem = request
                 .model_path

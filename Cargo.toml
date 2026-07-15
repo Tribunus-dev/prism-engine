@@ -23,9 +23,16 @@ members = [
     "prism-mcp-browser",
     "prism-mcp-core",
     "prism-mcpd",
+    "crates/prism-ecs-core",
+    "crates/prism-ecs-constitutional",
+    "crates/prism-ecs-backend",
+    "crates/prism-ecs-quantization",
+    "crates/prism-kv-cache",
+    "crates/prism-metal-runtime",
+    "crates/prism-ecs-ir",
 ]
-
 [workspace.package]
+
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-only"
@@ -89,11 +96,13 @@ path = "src/lib.rs"
 [[bin]]
 name = "prism"
 path = "src/bin/prism.rs"
+test = false
 
 [[bin]]
 name = "prism-server"
 path = "compute-core/src/bin/prism_server.rs"
 required-features = ["prism-backend"]
+test = false
 
 [dependencies]
 metal = { version = "0.32", optional = true }
@@ -141,6 +150,10 @@ ane = ["dep:coreml-proto"]
 metal-dispatch = ["dep:metal", "dep:objc"]
 full = ["server", "ane"]
 prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "dep:image", "server", "metal-dispatch"]
+prism-backend-full = ["prism-backend", "tribunus-compute-core/prism-backend-full"]
+test-core = ["dep:tribunus-compute-core", "tribunus-compute-core/test-core"]
+test-hardware = ["prism-backend", "tribunus-compute-core/test-hardware"]
+test-compiler = ["prism-backend-full", "tribunus-compute-core/test-compiler"]
 gguf-compile = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend"]
 full-apple = ["prism-backend", "ane", "server"]
 mlx-backend = ["dep:mlx-rs"]
@@ -171,8 +184,8 @@ debug = false
 
 [profile.test]
 lto = false
-codegen-units = 8
-opt-level = 3
+codegen-units = 16
+opt-level = 1
 incremental = true
 debug = "line-tables-only"
 debug-assertions = false

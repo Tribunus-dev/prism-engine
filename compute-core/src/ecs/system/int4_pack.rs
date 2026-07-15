@@ -74,13 +74,11 @@ impl CompilerSystem for Int4PackSystem {
             let packed = pack_f32_to_ternary_blocks(weights);
             let block_count = packed.len() as u32 / 9;
 
-            world.add_component(
-                entity,
-                TernaryPackResult {
-                    packed_blocks: packed,
-                    block_count,
-                },
-            );
+            let _ = world.add_component(entity,
+            TernaryPackResult {
+                packed_blocks: packed,
+                block_count,
+            },);;
         }
 
         Ok(())

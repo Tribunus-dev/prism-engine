@@ -12,8 +12,7 @@ use super::representation::TensorRepresentation;
 use serde::{Deserialize, Serialize};
 
 /// Semantic identifier for a kernel purpose (e.g. "prism.linear.nf4.v1").
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
-pub struct KernelSemanticId(pub String);
+pub use prism_ecs_core::canonical::kernel_abi::KernelSemanticId;
 
 /// Implementation identifier for a specific kernel variant.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]

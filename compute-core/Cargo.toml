@@ -8,11 +8,16 @@ description = "Tribunus transactional compute kernel, compiler, and hardware run
 
 [lib]
 name = "tribunus_compute_core"
-crate-type = ["rlib", "staticlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 metal = { version = "0.32", optional = true }
 objc = { version = "0.2", optional = true }
+prism-ecs-core = { path = "../crates/prism-ecs-core" }
+prism-ecs-constitutional = { path = "../crates/prism-ecs-constitutional" }
+prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
+prism-kv-cache = { path = "../crates/prism-kv-cache" }
+prism-ecs-backend = { path = "../crates/prism-ecs-backend" }
 block = { version = "0.1", optional = true }
 mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"
@@ -84,8 +89,15 @@ prism-backend = [
     "metal-dispatch",
     "backend-metal",
     "dep:image",
-    "mlir-runtime",
 ]
+# Explicit production/compiler bundle. Keep LLVM/MLIR out of ordinary backend
+# tests unless the caller is qualifying the compiler path itself.
+prism-backend-full = ["prism-backend", "mlir-runtime"]
+# Named test lanes make the intended dependency surface visible to developers,
+# CI, and prism-mcpd. `test-core` intentionally enables no native backend.
+test-core = []
+test-hardware = ["prism-backend"]
+test-compiler = ["prism-backend-full"]
 prism-backend-ios = ["prism-backend", "metal-dispatch", "backend-metal", "dep:image"]
 mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
 research = ["prism-backend", "mlx-backend"]
@@ -123,31 +135,37 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("generatio
 [[bin]]
 name = "prism"
 path = "src/bin/prism.rs"
+test = false
 
 [[bin]]
 name = "prism-server"
 path = "src/bin/prism_server.rs"
 required-features = ["prism-backend", "server-dashboard"]
+test = false
 
 [[bin]]
 name = "prism-alpha"
 path = "src/bin/prism_alpha.rs"
 required-features = ["legacy_mutations"]
+test = false
 
 [[bin]]
 name = "check-gguf-meta"
 path = "src/bin/check_gguf_meta.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bin]]
 name = "prism-bench-ab"
 path = "src/bin/prism_bench_ab.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bin]]
 name = "prism-compile"
 path = "src/bin/prism_compile.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bench]]
 name = "benchmark_placement"
@@ -158,44 +176,60 @@ required-features = ["mlx-backend"]
 cc = "1.2"
 tar = "0.4"
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
 [[bin]]
 name = "verify-ternary"
 path = "src/bin/verify_ternary.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bin]]
 name = "q8-scale-dump"
 path = "src/bin/q8_scale_dump.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bin]]
 name = "tribunus-pack-nf4tile640"
 path = "src/bin/tribunus_pack_nf4tile640.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bin]]
 name = "gemma4-inspect"
 path = "src/bin/gemma4_inspect.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bin]]
 name = "diagnose-nf4-roundtrip"
 path = "src/bin/diagnose_nf4_roundtrip.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bin]]
 name = "qwen25-omni-ingest"
 path = "src/bin/qwen25_omni_ingest.rs"
 required-features = ["prism-backend"]
+test = false
 
 [[bin]]
 name = "tribunus-compute-image"
 path = "src/bin/tribunus-compute-image.rs"
 required-features = ["research"]
+test = false
 [[bin]]
 name = "tribunus-ecs-compile"
 path = "src/bin/tribunus_ecs_compile.rs"
+test = false
 [[bin]]
 name = "bitnet-ecs-test"
 path = "src/bin/bitnet_ecs_test.rs"
 required-features = ["prism-backend"]
+test = false
+
+[[bench]]
+ name = "ir_representation"
+ harness = false

@@ -14,17 +14,7 @@ use crate::ecs::compilation::region_catalogue::{RegionAdmission, RegionCatalogue
 use crate::ecs::component::compilation::{BackendTarget, OpId, ProfitabilityScore, RegionPlan};
 use crate::ecs::config::ModelExecutionPlan;
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
-
-// ---------------------------------------------------------------------------
-// AneEligibilitySystem
-// ---------------------------------------------------------------------------
-
-/// Determines whether compile phases are eligible for ANE execution.
-///
-/// For each phase entity with a CompilePhaseDescriptor, consults the region
-/// catalogue and writes eligibility results as components.
-pub struct AneEligibilitySystem;
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};pub struct AneEligibilitySystem;
 impl CompilerSystem for AneEligibilitySystem {
     fn name(&self) -> &str {
         "AneEligibilitySystem"
@@ -34,7 +24,7 @@ impl CompilerSystem for AneEligibilitySystem {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let catalogue = RegionCatalogue::fp16_alpha();
-        let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let phase_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for entity in &phase_entities {
             let Some(phase) = world.get_component::<CompilePhaseDescriptor>(*entity) else {
@@ -47,20 +37,18 @@ impl CompilerSystem for AneEligibilitySystem {
                 crate::ecs::compilation::ane_eligibility::AneEligibilityStatus::Eligible
             );
 
-            world.add_component(
-                *entity,
-                crate::ecs::component::compilation::AdmissionGate {
-                    name: format!("ane_eligibility_{}", phase.phase_id.0),
-                    passed,
-                    evidence: if passed {
-                        Some(format!("shape_class={:?}", eligibility.shape_class))
-                    } else {
-                        eligibility
-                            .rejection_reason
-                            .map(|r| format!("rejected: {r:?}"))
-                    },
+            let _ = world.add_component(*entity,
+            crate::ecs::component::compilation::AdmissionGate {
+                name: format!("ane_eligibility_{}", phase.phase_id.0),
+                passed,
+                evidence: if passed {
+                    Some(format!("shape_class={:?}", eligibility.shape_class))
+                } else {
+                    eligibility
+                        .rejection_reason
+                        .map(|r| format!("rejected: {r:?}"))
                 },
-            );
+            },);;
         }
         Ok(())
     }
@@ -83,7 +71,7 @@ impl CompilerSystem for MemoryBudgetSystemV2 {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let budget = MemoryBudget::m1_16gb_default();
-        let exec_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let exec_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
         let mut plans = Vec::new();
         for _entity in &exec_entities {
@@ -101,17 +89,15 @@ impl CompilerSystem for MemoryBudgetSystemV2 {
         let check = budget.check_plans(&plans, 0);
 
         for entity in &exec_entities {
-            world.add_component(
-                *entity,
-                ProfitabilityScore {
-                    score: if check.fits { 1.0 } else { 0.0 },
-                    confidence: 0.9,
-                    reason: format!(
-                        "mem_budget: peak={}, headroom={}, actions={:?}",
-                        check.predicted_peak, check.headroom_bytes, check.suggested_actions,
-                    ),
-                },
-            );
+            let _ = world.add_component(*entity,
+            ProfitabilityScore {
+                score: if check.fits { 1.0 } else { 0.0 },
+                confidence: 0.9,
+                reason: format!(
+                    "mem_budget: peak={}, headroom={}, actions={:?}",
+                    check.predicted_peak, check.headroom_bytes, check.suggested_actions,
+                ),
+            },);;
         }
         Ok(())
     }
@@ -134,7 +120,7 @@ impl CompilerSystem for RegionCatalogueSystem {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let catalogue = RegionCatalogue::fp16_alpha();
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
             let Some(plan) = world.get_component::<ModelExecutionPlan>(*entity) else {
@@ -143,17 +129,15 @@ impl CompilerSystem for RegionCatalogueSystem {
             let region_count = plan.layers.len();
             let ane_count = catalogue.coreai_production_ops().len();
 
-            world.add_component(
-                *entity,
-                ProfitabilityScore {
-                    score: ane_count as f64 / region_count.max(1) as f64,
-                    confidence: 0.95,
-                    reason: format!(
-                        "catalogue: {} regions, {} ANE-eligible ops",
-                        region_count, ane_count,
-                    ),
-                },
-            );
+            let _ = world.add_component(*entity,
+            ProfitabilityScore {
+                score: ane_count as f64 / region_count.max(1) as f64,
+                confidence: 0.95,
+                reason: format!(
+                    "catalogue: {} regions, {} ANE-eligible ops",
+                    region_count, ane_count,
+                ),
+            },);;
         }
         Ok(())
     }
@@ -175,7 +159,7 @@ impl CompilerSystem for RegionPlannerSystem {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let catalogue = RegionCatalogue::fp16_alpha();
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
             for entry in &catalogue.entries {
@@ -186,14 +170,12 @@ impl CompilerSystem for RegionPlannerSystem {
                     _ => "fallback",
                 };
 
-                world.add_component(
-                    *entity,
-                    RegionPlan {
-                        region_id: format!("region_{}", entry.operator_family),
-                        backend: BackendTarget::from(backend),
-                        schedule: vec![OpId::from(format!("op_{}", entry.operator_family))],
-                    },
-                );
+                let _ = world.add_component(*entity,
+                RegionPlan {
+                    region_id: format!("region_{}", entry.operator_family),
+                    backend: BackendTarget::from(backend),
+                    schedule: vec![OpId::from(format!("op_{}", entry.operator_family))],
+                },);;
             }
         }
         Ok(())
@@ -215,7 +197,7 @@ impl CompilerSystem for ReceiptSystem {
         SchedulePhase::Packaging
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let exec_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let exec_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
         for entity in &exec_entities {
             let record = PhaseExecutionRecord {
@@ -230,17 +212,15 @@ impl CompilerSystem for ReceiptSystem {
                 transition_count: 3,
             };
 
-            world.add_component(
-                *entity,
-                ProfitabilityScore {
-                    score: 1.0,
-                    confidence: 1.0,
-                    reason: format!(
-                        "receipt: phase={}, peak={}B, transitions={}",
-                        record.phase_type, record.peak_bytes, record.transition_count,
-                    ),
-                },
-            );
+            let _ = world.add_component(*entity,
+            ProfitabilityScore {
+                score: 1.0,
+                confidence: 1.0,
+                reason: format!(
+                    "receipt: phase={}, peak={}B, transitions={}",
+                    record.phase_type, record.peak_bytes, record.transition_count,
+                ),
+            },);;
         }
         Ok(())
     }

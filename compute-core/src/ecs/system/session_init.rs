@@ -25,15 +25,13 @@ impl CompilerSystem for SessionInitSystem {
         }
 
         // Spawn a session entity.
-        let entity = world.spawn(EntityKind::CommandBuffer, Some("session".into()));
-        world.add_component(
-            entity,
-            SessionState {
-                decode_step: 0,
-                active_model: "".into(),
-                generation_params_json: "{}".into(),
-            },
-        );
+        let entity = world.spawn(EntityKind::Session, Some("session".into()))?;
+        let _ = world.add_component(entity,
+        SessionState {
+            decode_step: 0,
+            active_model: "".into(),
+            generation_params_json: "{}".into(),
+        },);;
 
         Ok(())
     }

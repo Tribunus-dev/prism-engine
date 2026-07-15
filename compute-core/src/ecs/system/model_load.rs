@@ -312,12 +312,13 @@ impl CompilerSystem for ModelAdapterSystem {
                             }
                         };
 
-                        let tensor_entity: Entity =
-                            world.spawn(EntityKind::Tensor, Some(format!("tensor_{}", role)));
+                        let tensor_entity =
+                            world.spawn(EntityKind::Tensor, Some(tensor_name.clone()))?;
 
-                        world.add_component(tensor_entity, Shape(shape.clone()));
-                        world.add_component(tensor_entity, DataType(parse_dtype(dtype_str)));
-                        world.add_component(tensor_entity, CanonicalRoleComp(role));
+                        let _ = world.add_component(tensor_entity, Shape(shape.clone()));
+                        let _ =
+                            world.add_component(tensor_entity, DataType(parse_dtype(dtype_str)));
+                        let _ = world.add_component(tensor_entity, CanonicalRoleComp(role));
 
                         // Track layer membership
                         seen_layers.insert(layer);
@@ -336,14 +337,14 @@ impl CompilerSystem for ModelAdapterSystem {
 
             // ── 3. Create one Layer entity per unique layer index ──────
             for layer_idx in &seen_layers {
-                let layer_entity: Entity =
-                    world.spawn(EntityKind::Layer, Some(format!("layer_{}", layer_idx)));
-                world.add_component(layer_entity, LayerIndex(*layer_idx));
+                let layer_entity =
+                    world.spawn(EntityKind::Layer, Some(format!("layer_{}", layer_idx)))?;
+                let _ = world.add_component(layer_entity, LayerIndex(*layer_idx));
             }
 
             // Store the architecture on the model entity (after all
             // tensor processing to avoid E0502 borrow conflicts).
-            world.add_component(model_entity, architecture);
+            let _ = world.add_component(model_entity, architecture);
         }
         Ok(())
     }

@@ -2,21 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Global world epoch — total commit order counter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct WorldEpoch(pub u64);
-
-impl PartialOrd for WorldEpoch {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.0.cmp(&other.0))
-    }
-}
-
-impl Ord for WorldEpoch {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.cmp(&other.0)
-    }
-}
+// Re-export WorldEpoch from prism-ecs-core.
+pub use prism_ecs_core::WorldEpoch;
 
 /// Per-entity aggregate sequence — ordered events within one entity's history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

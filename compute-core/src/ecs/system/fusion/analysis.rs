@@ -61,24 +61,20 @@ impl CompilerSystem for FusionAnalysisSystem {
 
             // Create one Dispatch entity per fusion group.
             for group in &fusion_groups {
-                let dispatch = world.spawn(EntityKind::Dispatch, None);
-                world.add_component(
-                    dispatch,
-                    FusionGroup {
-                        root_op_kind: group.root_op_kind.clone(),
-                        fused_op_kinds: group.fused_op_kinds.clone(),
-                        binding_slots: (1 + group.fused_op_kinds.len()) as u32,
-                        accepted: true,
-                        reject_reason: None,
-                    },
-                );
+                let dispatch = world.spawn(EntityKind::Dispatch, None)?;
+                let _ = world.add_component(dispatch,
+                FusionGroup {
+                    root_op_kind: group.root_op_kind.clone(),
+                    fused_op_kinds: group.fused_op_kinds.clone(),
+                    binding_slots: (1 + group.fused_op_kinds.len()) as u32,
+                    accepted: true,
+                    reject_reason: None,
+                },);;
             }
 
             // Attach a handle so downstream systems can reference the graph.
-            world.add_component(
-                *layer,
-                DataflowGraphHandle(format!("fusion_graph_layer_{}", layer_idx)),
-            );
+            let _ = world.add_component(*layer,
+            DataflowGraphHandle(format!("fusion_graph_layer_{}", layer_idx)),);;
         }
 
         Ok(())

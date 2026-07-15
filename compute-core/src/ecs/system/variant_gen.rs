@@ -154,7 +154,11 @@ impl CompilerSystem for VariantGenerationSystem {
 
         // Fallback: if no kernel entities exist yet, create one.
         let fallback_kernel = if kernel_entities.is_empty() {
-            Some(world.spawn(EntityKind::Kernel, Some("variant_parent".into())))
+            Some(
+                world
+                    .spawn(EntityKind::Kernel, Some("variant_parent".into()))?
+                    .entity,
+            )
         } else {
             None
         };
@@ -177,15 +181,13 @@ impl CompilerSystem for VariantGenerationSystem {
                     let variant = world.spawn(
                         EntityKind::KernelVariant,
                         Some(format!("variant_{template_id:?}_{profile_str}")),
-                    );
-                    world.add_component(
-                        variant,
-                        KernelVariantEntityData {
-                            profile_id: profile_str,
-                            template_id,
-                            parent_kernel: CompEntityRef(parent_kernel.0),
-                        },
-                    );
+                    )?;
+                    let _ = world.add_component(variant,
+                    KernelVariantEntityData {
+                        profile_id: profile_str,
+                        template_id,
+                        parent_kernel: CompEntityRef(parent_kernel.0),
+                    },);;
                 }
             }
         }
@@ -201,18 +203,16 @@ mod tests {
     #[test]
     fn test_generates_variants_for_dispatches() {
         let mut world = World::new();
-        let dispatch = world.spawn(EntityKind::Dispatch, None);
-        world.add_component(
-            dispatch,
-            FusionGroup {
-                root_op_kind: "matmul".into(),
-                fused_op_kinds: vec![],
-                binding_slots: 4,
-                accepted: true,
-                reject_reason: None,
-            },
-        );
-        let kernel = world.spawn(EntityKind::Kernel, None);
+        let dispatch = world.spawn(EntityKind::Dispatch, None)?;
+        let _ = world.add_component(dispatch,
+        FusionGroup {
+            root_op_kind: "matmul".into(),
+            fused_op_kinds: vec![],
+            binding_slots: 4,
+            accepted: true,
+            reject_reason: None,
+        },);;
+        let kernel = world.spawn(EntityKind::Kernel, None)?;
 
         let system = VariantGenerationSystem;
         system.run(&mut world).unwrap();

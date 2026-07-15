@@ -64,7 +64,7 @@ impl CompilerSystem for BackendCompilationSystem {
                 _ => continue,
             };
 
-            world.add_component(entity, compiled);
+            world.add_component(entity, compiled)?;
         }
 
         Ok(())
@@ -217,7 +217,7 @@ impl CompilerSystem for ExecutableCachingSystem {
                     "cache_miss".to_string()
                 }],
             };
-            world.add_component(entity, config);
+            world.add_component(entity, config)?;
         }
 
         Ok(())

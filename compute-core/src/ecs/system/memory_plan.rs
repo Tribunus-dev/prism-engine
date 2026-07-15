@@ -110,7 +110,7 @@ impl CompilerSystem for MemoryDomainAssignmentSystem {
                 BackendTarget::CPU => MemoryDomain::HostVisible,
             };
 
-            world.add_component(tensor, domain);
+            let _ = world.add_component(tensor, domain);;
         }
         Ok(())
     }
@@ -172,26 +172,22 @@ impl CompilerSystem for BufferAllocationSystem {
             };
 
             // ── Allocate buffer entity ──────────────────────────────────
-            let buffer = world.spawn(EntityKind::Buffer, None);
+            let buffer = world.spawn(EntityKind::Buffer, None)?;
 
-            world.add_component(
-                buffer,
-                MemoryPool {
-                    policy,
-                    pool_id,
-                    total_bytes: storage_bytes,
-                    used_bytes: 0,
-                },
-            );
+            let _ = world.add_component(buffer,
+            MemoryPool {
+                policy,
+                pool_id,
+                total_bytes: storage_bytes,
+                used_bytes: 0,
+            },);;
 
-            world.add_component(
-                buffer,
-                BufferLifetime {
-                    alloc_epoch: 0,       // allocated in planning phase
-                    free_epoch: u64::MAX, // unknown until liveness analysis
-                    causal_death_frontier: None,
-                },
-            );
+            let _ = world.add_component(buffer,
+            BufferLifetime {
+                alloc_epoch: 0,       // allocated in planning phase
+                free_epoch: u64::MAX, // unknown until liveness analysis
+                causal_death_frontier: None,
+            },);;
         }
 
         Ok(())

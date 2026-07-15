@@ -109,7 +109,7 @@ impl CompilerSystem for TertiaryPipelineSystem {
             .map_err(|e| anyhow::anyhow!("write final cimage header: {e}"))?;
 
         // Store on model entity.
-        world.add_component(model_entity, CimageBinaryComp(buf));
+        let _ = world.add_component(model_entity, CimageBinaryComp(buf));;
 
         Ok(())
     }

@@ -92,37 +92,36 @@ pub fn evolve_seed(
     seed: EvolveProgram,
     config: SearchConfig,
 ) -> Result<Entity, String> {
-    let state_entity = world.spawn(EntityKind::Node, Some("evolution_state".into()));
+    let spawn_result = world
+        .spawn(EntityKind::Node, None)
+        .map_err(|e| format!("{:?}", e))?;
+    let state_entity = spawn_result.entity;
 
-    world.add_component(
-        state_entity,
-        EvolutionState {
-            tensor_id: tensor_id.to_string(),
-            target_backend: *target_backend,
-            seed_program: seed.clone(),
-            population: Vec::new(),
-            records: Vec::new(),
-            generation: 0,
-            best_cost: None,
-            best_candidate: None,
-            converged: false,
-            search_config: config.clone(),
-            receipt_store: Vec::new(),
-        },
-    );
+    let _ = world.add_component(state_entity,
+    EvolutionState {
+        tensor_id: tensor_id.to_string(),
+        target_backend: *target_backend,
+        seed_program: seed.clone(),
+        population: Vec::new(),
+        records: Vec::new(),
+        generation: 0,
+        best_cost: None,
+        best_candidate: None,
+        converged: false,
+        search_config: config.clone(),
+        receipt_store: Vec::new(),
+    },);;
 
-    world.add_component(
-        state_entity,
-        EvolveCandidate {
-            tensor_id: tensor_id.to_string(),
-            target_backend: *target_backend,
-            format: CodecFamily::Ternary,
-            program: seed.clone(),
-            measured_cost: None,
-            generation: 0,
-            parents: Vec::new(),
-        },
-    );
+    let _ = world.add_component(state_entity,
+    EvolveCandidate {
+        tensor_id: tensor_id.to_string(),
+        target_backend: *target_backend,
+        format: CodecFamily::Ternary,
+        program: seed.clone(),
+        measured_cost: None,
+        generation: 0,
+        parents: Vec::new(),
+    },);;
 
     // Spawn population entities with perturbed programs.
     // Derive base seed from the seed program for determinism.
@@ -133,20 +132,20 @@ pub fn evolve_seed(
 
     for i in 0..config.population_size.saturating_sub(1) {
         let child = mutate_program(&seed, &config, base_seed.wrapping_add(i as u64));
-        let pop_entity = world.spawn(EntityKind::Node, None);
-        world.add_component(
-            pop_entity,
-            EvolveCandidate {
-                tensor_id: tensor_id.to_string(),
-                target_backend: *target_backend,
-                format: CodecFamily::Ternary,
-                program: child,
-                measured_cost: None,
-                generation: 0,
-                parents: vec![format!("seed-{}", tensor_id)],
-            },
-        );
-        population_entities.push(pop_entity);
+        let pop_entity = world
+            .spawn(EntityKind::Node, None)
+            .map_err(|e| format!("{:?}", e))?;
+        let _ = world.add_component(pop_entity,
+        EvolveCandidate {
+            tensor_id: tensor_id.to_string(),
+            target_backend: *target_backend,
+            format: CodecFamily::Ternary,
+            program: child,
+            measured_cost: None,
+            generation: 0,
+            parents: vec![format!("seed-{}", tensor_id)],
+        },);;
+        population_entities.push(pop_entity.entity);
     }
 
     // Link population into the state

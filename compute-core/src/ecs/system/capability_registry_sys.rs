@@ -33,10 +33,10 @@ impl CompilerSystem for CapabilityRegistrySystem {
         let entity = find_or_create_registry_entity(world);
         let registry = CapabilityRegistry::default_metal_v1();
 
-        world.add_component(entity, registry);
+        world.add_component(entity, registry)?;
 
         // Also tag the entity so other systems can find it by component type.
-        world.add_component(entity, CapabilityKeyComp("default_metal_v1".to_string()));
+        world.add_component(entity, CapabilityKeyComp("default_metal_v1".to_string()))?;
 
         Ok(())
     }
@@ -51,5 +51,8 @@ fn find_or_create_registry_entity(world: &mut World) -> Entity {
             }
         }
     }
-    world.spawn(EntityKind::Model, Some(CAPABILITY_ENTITY_NAME.to_string()))
+    world
+        .spawn(EntityKind::Model, Some(CAPABILITY_ENTITY_NAME.to_string()))
+        .unwrap()
+        .into()
 }

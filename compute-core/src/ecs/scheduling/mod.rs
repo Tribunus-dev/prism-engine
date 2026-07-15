@@ -11,12 +11,17 @@ pub mod activation_arena;
 pub mod activation_binding;
 #[cfg(feature = "mlx-backend")]
 pub mod activation_transaction;
+pub mod agent_bridge;
 pub mod ane_artifact_cache;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod batch;
 pub mod benchmark_harness;
+pub mod compilation_job_bridge;
+pub mod distributed_bridge;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod execution_context;
+pub mod execution_lease_bridge;
+pub mod ingress_bridge;
 pub mod kv_transaction;
 pub mod lane_executors;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
@@ -35,6 +40,7 @@ pub mod phase_readiness;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod phase_runner;
 pub mod phase_telemetry;
+pub mod pipeline_bridge;
 pub mod prefill_orchestrator;
 pub mod prism_session;
 pub mod ready_queue;
@@ -51,6 +57,7 @@ pub mod tri_lane_orchestrator;
 pub mod unified_scheduler;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod weight_residency;
+pub mod work_lifecycle_bridge;
 pub use token_budget::*;
 pub use unified_scheduler::*;
 

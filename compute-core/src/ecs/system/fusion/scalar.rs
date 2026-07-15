@@ -20,7 +20,7 @@ impl CompilerSystem for ScalarDispatchSystem {
         for entity in dispatches {
             if let Some(total) = dispatch_total_elements(world, entity) {
                 if total < SCALAR_THRESHOLD {
-                    world.add_component(entity, WorkgroupCount(1, 1, 1));
+                    let _ = world.add_component(entity, WorkgroupCount(1, 1, 1));;
                 }
             }
         }

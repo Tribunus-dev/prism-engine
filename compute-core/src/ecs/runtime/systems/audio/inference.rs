@@ -16,6 +16,8 @@
 
 use lazy_static::lazy_static;
 
+use crate::ecs::constitutional::multimodal::{PipelineModality, PipelineStage};
+use crate::ecs::constitutional::pipeline_bridge::PipelineBridge;
 use crate::ecs::runtime::components::{
     worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase},
     worker_request::RequestClass,
@@ -72,11 +74,18 @@ pub struct AudioFeatures {
 /// pipeline continues.
 pub struct AudioInferenceSystem {
     _private: (),
+    /// Optional bridge to the constitutional pipeline command layer.
+    /// When set, registers a pipeline entity before processing and
+    /// submits stage output after.
+    pub pipeline_bridge: Option<PipelineBridge>,
 }
 
 impl AudioInferenceSystem {
     pub fn new() -> Self {
-        Self { _private: () }
+        Self {
+            _private: (),
+            pipeline_bridge: None,
+        }
     }
 }
 
@@ -158,10 +167,41 @@ impl ErasedSystem for AudioInferenceSystem {
             .collect();
 
         if candidates.is_empty() {
+            // No work to do, but still record an empty pipeline so the
+            // authority record exists for the session.
+            if let Some(bridge) = &mut self.pipeline_bridge {
+                let _ = bridge.create_pipeline(
+                    world,
+                    PipelineModality::Audio,
+                    vec![PipelineStage {
+                        stage_index: 0,
+                        stage_type: "audio_encode".to_string(),
+                        model_entity: 0,
+                        input_transform: "audio".to_string(),
+                        output_transform: "features".to_string(),
+                    }],
+                );
+                let _ = bridge.submit_stage_output(world, 0, None);
+            }
             return SystemResult::Ok;
         }
 
         // Process each candidate entity.
+        // Register the constitutional pipeline authority before encoding.
+        if let Some(bridge) = &mut self.pipeline_bridge {
+            let _ = bridge.create_pipeline(
+                world,
+                PipelineModality::Audio,
+                vec![PipelineStage {
+                    stage_index: 0,
+                    stage_type: "audio_encode".to_string(),
+                    model_entity: 0,
+                    input_transform: "audio".to_string(),
+                    output_transform: "features".to_string(),
+                }],
+            );
+        }
+
         for entity in candidates {
             let result = Self::process_entity(world, entity, has_encoder, has_tts);
 
@@ -172,6 +212,11 @@ impl ErasedSystem for AudioInferenceSystem {
                 }
                 eprintln!("[audio_inference] entity {} failed: {msg}", entity.0);
             }
+        }
+
+        // Record stage output through the constitutional pipeline.
+        if let Some(bridge) = &self.pipeline_bridge {
+            let _ = bridge.submit_stage_output(world, 0, None);
         }
 
         SystemResult::Ok

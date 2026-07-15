@@ -1,12 +1,12 @@
 //! In-flight work tracking and state machine.
 //!
-//! Maintains a registry of all in-flight work items across all execution lanes,
-//! managing the work state machine and providing indexed access by lane, session,
-//! and phase.  The [`WorkRegistry`] is the single source of truth for the lifecycle
-//! of every submitted work item.
+//! Shared types from the legacy work registry.  The [`WorkRegistry`] write path
+//! has been replaced by the constitutional [`WorkLifecycleBridge`]; the remaining
+//! types ([`WorkKey`], [`WorkStatus`]) are kept for compat in downstream consumers
+//! such as [`completion_bridge`] and [`receipt`].
 
 pub mod registry;
 pub mod scheduling;
 
-pub use registry::*;
-pub use scheduling::*;
+pub use registry::WorkStatus;
+pub use scheduling::WorkKey;

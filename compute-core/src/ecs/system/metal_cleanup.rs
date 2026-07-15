@@ -20,7 +20,8 @@ impl CompilerSystem for MetalCleanupSystem {
 
         for entity in &entities {
             if world.get_component::<MetalDeviceState>(*entity).is_some() {
-                world.remove_component::<MetalDeviceState>(*entity);
+                let _ = world.remove_component::<MetalDeviceState>(*entity);
+                let _ = world.remove_component::<MetalDeviceState>(*entity);
             }
         }
 

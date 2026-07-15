@@ -31,7 +31,7 @@ impl CompilerSystem for DraftModelSystem {
             world.add_component(*entity, DraftWeightsComp(fused));
         } else {
             // No model entity yet — spawn one.
-            let entity = world.spawn(EntityKind::Model, Some("draft_model".into()));
+             let entity = world.spawn(EntityKind::Model, Some("draft_model".into()))?;
             world.add_component(entity, DraftWeightsComp(fused));
         }
         Ok(())

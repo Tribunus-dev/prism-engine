@@ -67,10 +67,10 @@ impl CompilerSystem for ExecutionGraphSystem {
         // Attach to the first model entity, or spawn one.
         let model_entities = world.entities_of_kind(EntityKind::Model);
         if let Some(entity) = model_entities.first() {
-            world.add_component(*entity, ExecutionGraphComp(serialized));
+            let _ = world.add_component(*entity, ExecutionGraphComp(serialized));;
         } else {
-            let entity = world.spawn(EntityKind::Model, Some("execution_graph".into()));
-            world.add_component(entity, ExecutionGraphComp(serialized));
+            let spawn_result = world.spawn(EntityKind::Model, Some("execution_graph".into()))?;
+            let _ = world.add_component(spawn_result, ExecutionGraphComp(serialized));;
         }
 
         Ok(())

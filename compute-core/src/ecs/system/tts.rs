@@ -13,7 +13,6 @@ use std::path::PathBuf;
 
 use crate::ecs::component::model_source::TtsWeightsComp;
 use crate::ecs::compute_image::compile::tts_compile::pack_tts_weights;
-use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Pack TTS weights into nf4tile640 cimage segment files.
@@ -44,24 +43,20 @@ impl CompilerSystem for TTSSystem {
 
         let model_entities = world.entities_of_kind(EntityKind::Model);
         if let Some(entity) = model_entities.first() {
-            world.add_component(
-                *entity,
-                TtsWeightsComp {
-                    weight_path,
-                    scale_path,
-                    bias_path,
-                },
-            );
+            let _ = world.add_component(*entity,
+            TtsWeightsComp {
+                weight_path,
+                scale_path,
+                bias_path,
+            },);;
         } else {
-            let entity = world.spawn(EntityKind::Model, Some("tts_model".into()));
-            world.add_component(
-                entity,
-                TtsWeightsComp {
-                    weight_path,
-                    scale_path,
-                    bias_path,
-                },
-            );
+            let entity = world.spawn(EntityKind::Model, Some("tts_weights".into()))?;
+            let _ = world.add_component(entity,
+            TtsWeightsComp {
+                weight_path,
+                scale_path,
+                bias_path,
+            },);;
         }
         Ok(())
     }

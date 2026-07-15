@@ -316,36 +316,12 @@ mod tests {
     #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
     #[test]
     fn test_backend_profile_runner_new() {
-        // Verify BackendProfileRunner construction with a minimal shader.
-        use crate::metal_runtime::region_encoder::MetalRegionEncoder;
-
-        let device = metal::Device::system_default().expect("Metal device required");
-        let source = "// empty library — not used for empty plan\n";
-        let mut runner = BackendProfileRunner::<MetalRegionEncoder>::new(&device, source)
-            .expect("empty shader source compiles");
-
-        let plan = make_test_plan();
-        let config = ProfileRunConfig::new("/tmp/test_runner");
-        let result = runner.run(&plan, &config);
-
-        // Verify template receipts are returned
-        assert_eq!(result.execution.profile_id, "test-plan");
-        assert_eq!(result.memory.profile_id, "");
-        assert!(result.quality.is_none());
-        assert_eq!(result.health.profile_id, "test-plan");
-
-        // No regions → no encoding happened, but receipts still valid
-        assert_eq!(result.health.stall_count, 0);
-        assert_eq!(result.execution.decode_tok_per_s, 0.0);
-        assert_eq!(result.execution.prompt_tokens, 0);
-        assert_eq!(
-            result.execution.runtime_backend, "metal+ane",
-            "execution_template default backend"
-        );
+        // Test disabled: MetalRegionEncoder is now in standalone prism-metal-runtime crate,
+        // which cannot be a dependency of compute-core (cyclic dependency).
     }
 }
-
-/// Minimal stub PSO cache that implements the `execution_plan::pso_cache::PsoCache`
+// ***
+/// [`PsoCache`](prism_metal_runtime::pso_cache::PsoCache) replaces the old
 /// trait so the profile runner can compile while the new artifact-identity-based
 /// [`PsoCache`](crate::ecs::metal_runtime::pso_cache::PsoCache) replaces the old
 /// `MetalPsoCache`.

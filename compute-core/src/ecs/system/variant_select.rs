@@ -223,13 +223,11 @@ impl CompilerSystem for VariantSelectionSystem {
             if let Some(idx) = best_idx {
                 let best_data = &variants[idx].1;
                 let score = scored[idx];
-                world.add_component(
-                    *parent_kernel,
-                    SelectedVariant {
-                        profile_id: best_data.profile_id.clone(),
-                        score,
-                    },
-                );
+                let _ = world.add_component(*parent_kernel,
+                SelectedVariant {
+                    profile_id: best_data.profile_id.clone(),
+                    score,
+                },);;
             }
         }
 
@@ -246,23 +244,19 @@ mod tests {
         let mut world = World::new();
         let parent = world.spawn(EntityKind::Kernel, None);
         let v1 = world.spawn(EntityKind::KernelVariant, None);
-        world.add_component(
-            v1,
-            KernelVariantEntityData {
-                profile_id: "apple_m1".into(),
-                template_id: KernelTemplateId::Nf4Tile640Gemv,
-                parent_kernel: CompEntityRef(parent.0),
-            },
-        );
+        let _ = world.add_component(v1,
+        KernelVariantEntityData {
+            profile_id: "apple_m1".into(),
+            template_id: KernelTemplateId::Nf4Tile640Gemv,
+            parent_kernel: CompEntityRef(parent.0),
+        },);;
         let v2 = world.spawn(EntityKind::KernelVariant, None);
-        world.add_component(
-            v2,
-            KernelVariantEntityData {
-                profile_id: "apple_m4_max".into(),
-                template_id: KernelTemplateId::Fp16Matmul,
-                parent_kernel: CompEntityRef(parent.0),
-            },
-        );
+        let _ = world.add_component(v2,
+        KernelVariantEntityData {
+            profile_id: "apple_m4_max".into(),
+            template_id: KernelTemplateId::Fp16Matmul,
+            parent_kernel: CompEntityRef(parent.0),
+        },);;
 
         let system = VariantSelectionSystem;
         system.run(&mut world).unwrap();

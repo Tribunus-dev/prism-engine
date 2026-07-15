@@ -97,7 +97,7 @@ pub trait BackendInstance: TensorBackend + Send + Sync {
     /// Evaluate output tensors and materialize them directly into a
     /// pre-allocated IOSurface arena, avoiding any copy between backends.
     ///
-    /// The default implementation delegates to [`TensorBackend::evaluate_into`].
+    /// The default implementation delegates to [`TensorBackend::evaluate`].
     /// Backends that support zero-copy IOSurface materialization should
     /// override that trait method instead.
     fn evaluate_into_arena(
@@ -106,7 +106,7 @@ pub trait BackendInstance: TensorBackend + Send + Sync {
         _outputs: &[TensorHandle],
         _arena: &Arena,
     ) -> Result<crate::ecs::backend::EvaluationReceipt, String> {
-        self.evaluate_into(_group_id, _outputs, _arena)
+        self.evaluate(_group_id, _outputs)
     }
 
     /// If this backend supports compiled region execution, return the

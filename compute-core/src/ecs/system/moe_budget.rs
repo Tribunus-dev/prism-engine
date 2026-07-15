@@ -61,30 +61,26 @@ impl CompilerSystem for MoERoutingSystem {
         // Create an expert entity for each (layer, expert) pair.
         for experts in layer_experts.values() {
             for expert_idx in experts {
-                let expert_entity = world.spawn(EntityKind::Expert, None);
-                world.add_component(
-                    expert_entity,
-                    ExpertIndex {
-                        index: *expert_idx,
-                        total,
-                        top_k,
-                    },
-                );
+                let expert_entity = world.spawn(EntityKind::Expert, None)?;
+                let _ = world.add_component(expert_entity,
+                ExpertIndex {
+                    index: *expert_idx,
+                    total,
+                    top_k,
+                },);;
             }
         }
 
         // Add MoEConfig to the model entity (first one).
         if total > 0 {
             for model in world.entities_of_kind(EntityKind::Model) {
-                world.add_component(
-                    model,
-                    MoEConfig {
-                        shared_expert: has_shared_expert,
-                        num_experts: total,
-                        top_k,
-                        intermediate_size: None,
-                    },
-                );
+                let _ = world.add_component(model,
+                MoEConfig {
+                    shared_expert: has_shared_expert,
+                    num_experts: total,
+                    top_k,
+                    intermediate_size: None,
+                },);;
                 break;
             }
         }
@@ -161,15 +157,13 @@ impl CompilerSystem for MemoryBudgetSystem {
 
         // Add MemoryBudget to the first model entity.
         for model in model_entities {
-            world.add_component(
-                model,
-                MemoryBudget {
-                    total_bytes,
-                    weight_bytes,
-                    scratch_bytes,
-                    kv_cache_bytes,
-                },
-            );
+            let _ = world.add_component(model,
+            MemoryBudget {
+                total_bytes,
+                weight_bytes,
+                scratch_bytes,
+                kv_cache_bytes,
+            },);;
             break;
         }
 

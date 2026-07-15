@@ -334,8 +334,6 @@ pub use crate::ecs::lut;
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub use crate::ecs::memory;
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-pub use crate::ecs::metal_runtime;
 // model_adapter removed — legacy, was behind legacy_mutations feature
 #[cfg(any(
     feature = "mlx-backend",

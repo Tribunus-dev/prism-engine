@@ -76,7 +76,8 @@ impl CompilerSystem for EngineInitSystem {
             return Ok(());
         }
 
-        let entity = world.spawn(EntityKind::Model, Some(ENGINE_ENTITY_NAME.to_string()));
+        // Spawn the singleton engine entity.
+        let entity = world.spawn(EntityKind::Model, Some(ENGINE_ENTITY_NAME.into()))?;
 
         // Open the default model store.
         let store = ModelStore::open_default()
@@ -85,39 +86,31 @@ impl CompilerSystem for EngineInitSystem {
         // List already-installed models.
         let installed = store.list().unwrap_or_default();
 
-        world.add_component(entity, ModelStoreComponent(store));
-        world.add_component(
-            entity,
-            EngineState {
-                serial_number: 1,
-                engine_error: None,
-                shutdown: false,
-                resource_summary: "initialised".into(),
-            },
-        );
-        world.add_component(
-            entity,
-            EngineMetrics {
-                request_count: 0,
-                avg_tokens_per_second: 0.0,
-                peak_memory_bytes: 0,
-            },
-        );
-        world.add_component(
-            entity,
-            ModelInstallState {
-                installed_models: installed,
-            },
-        );
-        world.add_component(
-            entity,
-            MemoryPressure {
-                level: PressureLevel::None,
-                active_bytes: 0,
-                limit_bytes: 0,
-            },
-        );
-        world.add_component(entity, LoadedModelResource(None));
+        let _ = world.add_component(entity, ModelStoreComponent(store));;
+        let _ = world.add_component(entity,
+        EngineState {
+            serial_number: 1,
+            engine_error: None,
+            shutdown: false,
+            resource_summary: "initialised".into(),
+        },);;
+        let _ = world.add_component(entity,
+        EngineMetrics {
+            request_count: 0,
+            avg_tokens_per_second: 0.0,
+            peak_memory_bytes: 0,
+        },);;
+        let _ = world.add_component(entity,
+        ModelInstallState {
+            installed_models: installed,
+        },);;
+        let _ = world.add_component(entity,
+        MemoryPressure {
+            level: PressureLevel::None,
+            active_bytes: 0,
+            limit_bytes: 0,
+        },);;
+        let _ = world.add_component(entity, LoadedModelResource(None));;
 
         Ok(())
     }
@@ -164,14 +157,12 @@ impl CompilerSystem for GenerationRequestSystem {
             }
 
             // Attach the InFlightDecode tracker for downstream systems.
-            world.add_component(
-                *entity,
-                InFlightDecode {
-                    token_count: 0,
-                    kv_block_index: 0,
-                    eos: false,
-                },
-            );
+            let _ = world.add_component(*entity,
+            InFlightDecode {
+                token_count: 0,
+                kv_block_index: 0,
+                eos: false,
+            },);;
 
             // Update the engine singleton's request count.
             if let Some(engine_entity) = find_engine_entity(world) {
@@ -254,7 +245,7 @@ impl CompilerSystem for ModelInstallSystem {
             }
 
             // Remove the request component so it only fires once.
-            world.remove_component::<ModelInstallRequest>(*entity);
+            let _ = world.remove_component::<ModelInstallRequest>(*entity);;
         }
         Ok(())
     }
@@ -337,7 +328,7 @@ impl CompilerSystem for ModelLoadSystem {
                 }
             }
 
-            world.remove_component::<ModelLoadRequest>(*entity);
+            let _ = world.remove_component::<ModelLoadRequest>(*entity);;
         }
         Ok(())
     }
@@ -392,7 +383,7 @@ impl CompilerSystem for CimageLoadSystem {
                 if let Some(tx) = &result_tx {
                     let _ = tx.send(Err(msg));
                 }
-                world.remove_component::<CimageLoadRequest>(*entity);
+                let _ = world.remove_component::<CimageLoadRequest>(*entity);;
                 continue;
             }
 
@@ -407,7 +398,7 @@ impl CompilerSystem for CimageLoadSystem {
                 if let Some(tx) = &result_tx {
                     let _ = tx.send(Err(msg));
                 }
-                world.remove_component::<CimageLoadRequest>(*entity);
+                let _ = world.remove_component::<CimageLoadRequest>(*entity);;
                 continue;
             }
 
@@ -423,7 +414,7 @@ impl CompilerSystem for CimageLoadSystem {
                 let _ = tx.send(Ok(()));
             }
 
-            world.remove_component::<CimageLoadRequest>(*entity);
+            let _ = world.remove_component::<CimageLoadRequest>(*entity);;
         }
         Ok(())
     }
@@ -482,15 +473,13 @@ impl CompilerSystem for HostInferenceInitSystem {
         // Create the token-budget scheduler.
         let tbs = TokenBudgetScheduler::new(TokenBudgetConfig::default());
 
-        world.add_component(engine_entity, SchedulerComponent(scheduler));
-        world.add_component(engine_entity, HybridExecutorComponent(executor));
-        world.add_component(engine_entity, TokenBudgetSchedulerComponent(tbs));
-        world.add_component(
-            engine_entity,
-            HostInferenceHandle {
-                handle_id: "host-inference-1".into(),
-            },
-        );
+        let _ = world.add_component(engine_entity, SchedulerComponent(scheduler));;
+        let _ = world.add_component(engine_entity, HybridExecutorComponent(executor));;
+        let _ = world.add_component(engine_entity, TokenBudgetSchedulerComponent(tbs));;
+        let _ = world.add_component(engine_entity,
+        HostInferenceHandle {
+            handle_id: "host-inference-1".into(),
+        },);;
 
         Ok(())
     }
@@ -826,7 +815,7 @@ impl CompilerSystem for CancelSystem {
                 let _ = tx.send(Ok(()));
             }
 
-            world.remove_component::<CancelRequest>(*entity);
+            let _ = world.remove_component::<CancelRequest>(*entity);;
         }
         Ok(())
     }

@@ -139,7 +139,7 @@ impl CompilerSystem for LifetimeAnalysisSystem {
                     free_epoch,
                     causal_death_frontier: frontier,
                 },
-            );
+            )?;
         }
 
         Ok(())
@@ -229,7 +229,7 @@ impl CompilerSystem for ScratchPlanningSystem {
             let scratch_buf = world.spawn(
                 EntityKind::Buffer,
                 Some(format!("scratch_dispatch_{}", dispatch.0)),
-            );
+            )?;
             world.add_component(
                 scratch_buf,
                 MemoryPool {
@@ -238,7 +238,7 @@ impl CompilerSystem for ScratchPlanningSystem {
                     total_bytes: scratch_bytes,
                     used_bytes: 0,
                 },
-            );
+            )?;
 
             // Record the scratch config on the dispatch entity.
             world.add_component(
@@ -248,7 +248,7 @@ impl CompilerSystem for ScratchPlanningSystem {
                     persistent_scratch: 0,
                     arena_policy: PoolPolicy::Arena,
                 },
-            );
+            )?;
         }
 
         Ok(())

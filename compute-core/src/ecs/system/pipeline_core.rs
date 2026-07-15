@@ -19,15 +19,7 @@ use crate::ecs::component::compilation::{
 };
 use crate::ecs::config::{LayerPlan, ModelExecutionPlan};
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
-
-// ---------------------------------------------------------------------------
-// DistillCoreSystem
-// ---------------------------------------------------------------------------
-
-/// Computes knowledge-distillation metrics (KL divergence, top-1 agreement)
-/// for teacher/student logit pairs found on the world.
-pub struct DistillCoreSystem;
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};pub struct DistillCoreSystem;
 impl CompilerSystem for DistillCoreSystem {
     fn name(&self) -> &str {
         "DistillCoreSystem"
@@ -36,7 +28,7 @@ impl CompilerSystem for DistillCoreSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
             let metrics = kd_divergence(
@@ -44,14 +36,12 @@ impl CompilerSystem for DistillCoreSystem {
                 &[1.1_f32, 1.9, 3.2, 3.8], // placeholder student logits
                 1.0,                       // temperature
             );
-            world.add_component(
-                *entity,
-                ProfitabilityScore {
-                    score: metrics as f64,
-                    confidence: 0.95,
-                    reason: format!("kd_divergence={metrics:.6}"),
-                },
-            );
+            let _ = world.add_component(*entity,
+            ProfitabilityScore {
+                score: metrics as f64,
+                confidence: 0.95,
+                reason: format!("kd_divergence={metrics:.6}"),
+            },);;
         }
         Ok(())
     }
@@ -71,33 +61,29 @@ impl CompilerSystem for EpochSchedulerSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let exec_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let exec_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
         for entity in &exec_entities {
-            world.add_component(
-                *entity,
-                EpochSchedule {
-                    current: 0,
-                    max: 10,
-                    policy: EpochPolicy::Adaptive,
-                },
-            );
+            let _ = world.add_component(*entity,
+            EpochSchedule {
+                current: 0,
+                max: 10,
+                policy: EpochPolicy::Adaptive,
+            },);;
         }
 
         // Also handle model-level entities
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &model_entities {
             if world.get_component::<EpochSchedule>(*entity).is_some() {
                 continue;
             }
-            world.add_component(
-                *entity,
-                EpochSchedule {
-                    current: 0,
-                    max: 1,
-                    policy: EpochPolicy::Fixed(1),
-                },
-            );
+            let _ = world.add_component(*entity,
+            EpochSchedule {
+                current: 0,
+                max: 1,
+                policy: EpochPolicy::Fixed(1),
+            },);;
         }
         Ok(())
     }
@@ -118,7 +104,7 @@ impl CompilerSystem for FrontierSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
             let mut frontier = CalibrationFrontier {
@@ -141,17 +127,15 @@ impl CompilerSystem for FrontierSystem {
             };
             let _ = frontier.append_stage(&[], metadata);
 
-            world.add_component(
-                *entity,
-                FrontierState {
-                    nodes: frontier
-                        .stages
-                        .iter()
-                        .map(|s| FrontierNodeId::from(format!("stage_{}", s.stage_index)))
-                        .collect(),
-                    active_path: PathId::from("teacher-frontier"),
-                },
-            );
+            let _ = world.add_component(*entity,
+            FrontierState {
+                nodes: frontier
+                    .stages
+                    .iter()
+                    .map(|s| FrontierNodeId::from(format!("stage_{}", s.stage_index)))
+                    .collect(),
+                active_path: PathId::from("teacher-frontier"),
+            },);;
         }
         Ok(())
     }
@@ -172,7 +156,7 @@ impl CompilerSystem for PhaseIRSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let phase_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for entity in &phase_entities {
             let Some(phase_desc) = world.get_component::<CompilePhaseDescriptor>(*entity) else {
@@ -185,13 +169,11 @@ impl CompilerSystem for PhaseIRSystem {
             };
 
             let ir_bytes = serde_json::to_vec(phase_desc).unwrap_or_default();
-            world.add_component(
-                *entity,
-                PhaseIR {
-                    phase: cphase,
-                    ir: ir_bytes,
-                },
-            );
+            let _ = world.add_component(*entity,
+            PhaseIR {
+                phase: cphase,
+                ir: ir_bytes,
+            },);;
         }
         Ok(())
     }
@@ -212,7 +194,7 @@ impl CompilerSystem for ProfitabilitySystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
         for entity in &model_entities {
             let plan = world
@@ -238,20 +220,18 @@ impl CompilerSystem for ProfitabilitySystem {
                 }
             };
 
-            world.add_component(
-                *entity,
-                ProfitabilityScore {
-                    score,
-                    confidence: 0.85,
-                    reason: format!(
-                        "{} ops, {} bubbles, {} ANE assignments, gpu_saved={}ns",
-                        report.op_costs.len(),
-                        report.bubbles.len(),
-                        report.assignments.len(),
-                        report.total_gpu_time_saved_ns,
-                    ),
-                },
-            );
+            let _ = world.add_component(*entity,
+            ProfitabilityScore {
+                score,
+                confidence: 0.85,
+                reason: format!(
+                    "{} ops, {} bubbles, {} ANE assignments, gpu_saved={}ns",
+                    report.op_costs.len(),
+                    report.bubbles.len(),
+                    report.assignments.len(),
+                    report.total_gpu_time_saved_ns,
+                ),
+            },);;
         }
         Ok(())
     }
@@ -276,16 +256,14 @@ impl CompilerSystem for StagingSystem {
 
         // Verify the staging ring is operational: try a push-pop cycle
         // using the ring's CAS-based state machine.
-        let exec_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let exec_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
         for entity in &exec_entities {
-            world.add_component(
-                *entity,
-                ProfitabilityScore {
-                    score: 1.0,
-                    confidence: 1.0,
-                    reason: "staging_ring_initialized".into(),
-                },
-            );
+            let _ = world.add_component(*entity,
+            ProfitabilityScore {
+                score: 1.0,
+                confidence: 1.0,
+                reason: "staging_ring_initialized".into(),
+            },);;
         }
         Ok(())
     }
@@ -306,16 +284,14 @@ impl CompilerSystem for TriLaneSystem {
         SchedulePhase::Compilation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for entity in &model_entities {
-            world.add_component(
-                *entity,
-                ProfitabilityScore {
-                    score: 1.0,
-                    confidence: 0.9,
-                    reason: "tri_lane_plan: lanes=3, epochs=10".into(),
-                },
-            );
+            let _ = world.add_component(*entity,
+            ProfitabilityScore {
+                score: 1.0,
+                confidence: 0.9,
+                reason: "tri_lane_plan: lanes=3, epochs=10".into(),
+            },);;
         }
         Ok(())
     }

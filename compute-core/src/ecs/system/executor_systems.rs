@@ -81,14 +81,12 @@ impl CompilerSystem for ExecutorSystem {
                     }
 
                     // Place a default step for the first decode iteration.
-                    world.add_component(
-                        *entity,
-                        ExecutorStep {
-                            token_id: 0,
-                            logits: None,
-                            kv_block_indices: Vec::new(),
-                        },
-                    );
+                    let _ = world.add_component(*entity,
+                    ExecutorStep {
+                        token_id: 0,
+                        logits: None,
+                        kv_block_indices: Vec::new(),
+                    },);;
                 }
 
                 ExecutorStage::Decode => {
@@ -115,7 +113,7 @@ impl CompilerSystem for ExecutorSystem {
                     };
 
                     if let Some(step) = next_step {
-                        world.add_component(*entity, step);
+                        let _ = world.add_component(*entity, step);;
                     }
                 }
 

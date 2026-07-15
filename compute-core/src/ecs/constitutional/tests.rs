@@ -4046,16 +4046,19 @@ mod tests {
         world.set_direct_mutation_allowed(false);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            world.spawn(crate::ecs::EntityKind::Model, None);
+            let _ = world.spawn(crate::ecs::EntityKind::Model, None);
         }));
         assert!(result.is_err(), "spawn should panic when guard is active");
 
         // add_component
         world.set_direct_mutation_allowed(true);
-        let e = world.spawn(crate::ecs::EntityKind::Model, None);
+        let e = world
+            .spawn(crate::ecs::EntityKind::Model, None)
+            .expect("spawn failed")
+            .entity;
         world.set_direct_mutation_allowed(false);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            world.add_component(e, DummyComponent(42));
+            let _ = world.add_component(e, DummyComponent(42));
         }));
         assert!(
             result.is_err(),

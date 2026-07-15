@@ -1,0 +1,13 @@
+[package]
+name = "prism-metal-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+tribunus-compute-core = { path = "../../compute-core" }
+metal = { version = "0.32" }
+objc = { version = "0.2" }
+serde = { version = "1", features = ["derive"] }
+bytemuck = { version = "1", features = ["derive"] }

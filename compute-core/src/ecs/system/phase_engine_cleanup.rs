@@ -20,10 +20,12 @@ impl CompilerSystem for PhaseEngineCleanupSystem {
 
         for entity in &entities {
             if world.get_component::<PhaseDagState>(*entity).is_some() {
-                world.remove_component::<PhaseDagState>(*entity);
+                let _ = world.remove_component::<PhaseDagState>(*entity);
+                let _ = world.remove_component::<PhaseDagState>(*entity);
             }
             if world.get_component::<ReadyQueueState>(*entity).is_some() {
-                world.remove_component::<ReadyQueueState>(*entity);
+                let _ = world.remove_component::<ReadyQueueState>(*entity);
+                let _ = world.remove_component::<ReadyQueueState>(*entity);
             }
         }
 

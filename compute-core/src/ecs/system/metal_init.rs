@@ -25,23 +25,19 @@ impl CompilerSystem for MetalInitSystem {
         }
 
         // Spawn a new backend entity with Metal device state.
-        let entity = world.spawn(EntityKind::Executable, Some("metal-backend".into()));
-        world.add_component(
-            entity,
-            MetalDeviceState {
-                device_handle: 0,
-                command_queue_handle: 0,
-                buffer_manager_handle: 0,
-            },
-        );
-        world.add_component(
-            entity,
-            BackendComponent {
-                backend_id: "metal".into(),
-                capabilities: vec!["f32".into(), "f16".into(), "bfloat16".into()],
-                instance_id: 1,
-            },
-        );
+        let entity = world.spawn(EntityKind::Executable, Some("metal_backend".into()))?;
+        let _ = world.add_component(entity,
+        MetalDeviceState {
+            device_handle: 0,
+            command_queue_handle: 0,
+            buffer_manager_handle: 0,
+        },);;
+        let _ = world.add_component(entity,
+        BackendComponent {
+            backend_id: "metal".into(),
+            capabilities: vec!["f32".into(), "f16".into(), "bfloat16".into()],
+            instance_id: 1,
+        },);;
 
         Ok(())
     }

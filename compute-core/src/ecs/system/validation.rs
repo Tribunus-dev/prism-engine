@@ -20,26 +20,21 @@ impl CompilerSystem for ExecutablePackagingSystem {
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         for &kernel in &kernel_entities {
             let name = world.name(kernel).unwrap_or("kernel").to_string();
+            let exe = world.spawn(EntityKind::Executable, Some(format!("exe_{}", name)))?;
             if let Some(binary) = world.get_component::<CompiledBinary>(kernel).cloned() {
-                let exe = world.spawn(EntityKind::Executable, Some(format!("exe_{}", name)));
-                world.add_component(
-                    exe,
-                    ExecutableFormat {
-                        binary_format: binary.format,
-                        variant_label: name.clone(),
-                    },
-                );
+                let _ = world.add_component(exe,
+                ExecutableFormat {
+                    binary_format: binary.format,
+                    variant_label: name.clone(),
+                },);;
             } else if world.get_component::<KernelSource>(kernel).is_some()
                 && world.get_component::<KernelParameters>(kernel).is_some()
             {
-                let exe = world.spawn(EntityKind::Executable, Some(format!("stub_{}", name)));
-                world.add_component(
-                    exe,
-                    ExecutableFormat {
-                        binary_format: BinaryFormat::LLVMBitcode,
-                        variant_label: format!("stub_{}", name),
-                    },
-                );
+                let _ = world.add_component(exe,
+                ExecutableFormat {
+                    binary_format: BinaryFormat::LLVMBitcode,
+                    variant_label: format!("stub_{}", name),
+                },);;
             }
         }
         Ok(())
@@ -79,14 +74,12 @@ impl CompilerSystem for AdmissionValidationSystem {
         let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         for &m in &model_entities {
             if world.get_component::<QualityGateResult>(m).is_none() {
-                world.add_component(
-                    m,
-                    QualityGateResult {
-                        passed: !any_failure,
-                        nrmse: 0.0,
-                        perplexity_delta: 0.0,
-                    },
-                );
+                let _ = world.add_component(m,
+                QualityGateResult {
+                    passed: !any_failure,
+                    nrmse: 0.0,
+                    perplexity_delta: 0.0,
+                },);;
             }
         }
         Ok(())

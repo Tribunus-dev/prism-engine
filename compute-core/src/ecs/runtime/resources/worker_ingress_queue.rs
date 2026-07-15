@@ -4,6 +4,7 @@
 //! here.  The worker ingress system drains them in batches and creates
 //! entities with the appropriate components.
 
+use crate::ecs::scheduling::ingress_bridge::IngressBridge;
 use std::collections::VecDeque;
 
 /// A single queued ingress entry carrying a request into the ECS world.
@@ -28,6 +29,9 @@ pub struct IngressEntry {
 #[derive(Debug)]
 pub struct WorkerIngressQueue {
     queue: VecDeque<IngressEntry>,
+    /// Optional constitutional bridge for submitting ingress requests
+    /// through the canonical ECS path.
+    ingress_bridge: Option<IngressBridge>,
 }
 
 impl WorkerIngressQueue {
@@ -35,7 +39,29 @@ impl WorkerIngressQueue {
     pub fn new() -> Self {
         Self {
             queue: VecDeque::new(),
+            ingress_bridge: None,
         }
+    }
+
+    /// Attach an [`IngressBridge`] for routing submissions through the
+    /// constitutional ingress path.
+    pub fn set_ingress_bridge(&mut self, bridge: IngressBridge) {
+        self.ingress_bridge = Some(bridge);
+    }
+
+    /// Submit an ingress request through the constitutional bridge, if one
+    /// is attached.  Returns the allocated entity id on success, or `None`
+    /// when no bridge is configured.
+    pub fn submit_ingress_request(
+        &self,
+        transport: &str,
+        method: &str,
+        path: &str,
+        body: Vec<u8>,
+    ) -> Option<Result<u64, String>> {
+        self.ingress_bridge
+            .as_ref()
+            .map(|b| b.submit_request(transport, method, path, body))
     }
 
     /// Push a new ingress entry onto the back of the queue.

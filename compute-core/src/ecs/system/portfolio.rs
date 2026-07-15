@@ -8,7 +8,7 @@
 
 use crate::ecs::component::model_source::PortfolioArtifactsComp;
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 use std::path::PathBuf;
 
 /// Compile a portfolio of Core ML packets.
@@ -23,14 +23,12 @@ impl CompilerSystem for PortfolioSystem {
         SchedulePhase::KernelGeneration
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let model_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Model);
+        let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
         if let Some(entity) = model_entities.first() {
-            world.add_component(
-                *entity,
-                PortfolioArtifactsComp {
-                    artifact_paths: vec![],
-                },
-            );
+            let _ = world.add_component(*entity,
+            PortfolioArtifactsComp {
+                artifact_paths: vec![],
+            },);;
         }
         Ok(())
     }

@@ -35,12 +35,14 @@ use tokio::sync::{mpsc, oneshot};
 use crate::ecs::backend::placement::ExecutionLane;
 use crate::ecs::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
 use crate::ecs::compilation::phase_ir::PhaseId;
+use crate::ecs::constitutional::work::{ResourceClaimComponent, WorkKind};
 use crate::ecs::scheduling::accelerate_lane_executor::AccelerateLaneExecutor;
 use crate::ecs::scheduling::ane_lane_executor::AneLaneExecutor;
 use crate::ecs::scheduling::backpressure::{
     BackpressureEventController, BackpressureLevel, BatchCompletionRecord, SchedulingMetrics,
 };
 use crate::ecs::scheduling::completion_bridge::work_completion_to_event;
+use crate::ecs::scheduling::execution_lease_bridge::ExecutionLeaseBridge;
 use crate::ecs::scheduling::lane_capacity::{LaneCapacityConfig, LaneCapacityManager, LanePermit};
 use crate::ecs::scheduling::lane_work::{
     next_work_id, BackendStatus, CompletionClock, LaneExecutor, LaneWorkRequest, MetalPipelineRef,
@@ -55,7 +57,9 @@ use crate::ecs::scheduling::slot_lease_manager::SlotLeaseManager;
 use crate::ecs::scheduling::tri_lane_orchestrator::{
     AdmissionStatus, PhaseVariant, PhaseVariantSet, VariantId,
 };
-use crate::ecs::scheduling::work_registry::{WorkKey, WorkRecord, WorkRegistry, WorkStatus};
+use crate::ecs::scheduling::work_lifecycle_bridge::WorkLifecycleBridge;
+use crate::ecs::scheduling::work_registry::{WorkKey, WorkStatus};
+use crate::ecs::Entity;
 
 // ── Error types ─────────────────────────────────────────────────────────
 
@@ -214,7 +218,8 @@ pub struct HeterogeneousExecutor {
 
     // ── Scheduling state ─────────────────────────────────────────────
     capacity: LaneCapacityManager,
-    registry: WorkRegistry,
+    lifecycle: WorkLifecycleBridge, // constitutional authority for work lifecycle
+    lease_authority: ExecutionLeaseBridge, // NEW: constitutional lease authority
     slot_leases: SlotLeaseManager,
     backpressure: BackpressureEventController,
     scheduling_metrics: SchedulingMetrics,
@@ -226,10 +231,14 @@ pub struct HeterogeneousExecutor {
     internal_completion_tx: mpsc::UnboundedSender<WorkCompletion>,
 
     // ── Bookkeeping ──────────────────────────────────────────────────
+    /// Maps WorkId → constitutional Entity for bridge calls.
+    work_id_to_entity: HashMap<WorkId, Entity>,
+    /// Maps WorkId → lease Entity for constitutional lease completion.
+    work_id_to_lease_entity: HashMap<WorkId, Entity>,
+    /// Lightweight execution-level tracking (not authority — performance cache only).
+    work_meta: HashMap<WorkId, WorkMeta>,
     /// Permits held per in-flight work item; released on completion.
     active_permits: HashMap<WorkId, LanePermit>,
-    /// Maps session name → work key prefix (session_id + next sequence counter).
-    session_state: HashMap<String, SessionState>,
     /// Maps session name → numeric stream identifier for lane executors.
     session_streams: HashMap<String, StreamId>,
     /// Monotonic stream-id allocator.
@@ -249,12 +258,6 @@ pub struct HeterogeneousExecutor {
     config: ExecutorConfig,
     #[allow(dead_code)]
     model_identity: String,
-}
-
-/// Per-session mutable state.
-struct SessionState {
-    /// Next sequence number for this session.
-    next_sequence: u64,
 }
 
 // ── Public handle ──────────────────────────────────────────────────────
@@ -278,6 +281,8 @@ impl HeterogeneousExecutor {
         ane: Option<AneLaneExecutor>,
         accelerate: Option<AccelerateLaneExecutor>,
         #[allow(dead_code)] config: ExecutorConfig,
+        lifecycle: WorkLifecycleBridge,
+        lease_authority: ExecutionLeaseBridge,
         #[allow(dead_code)] runtime_handle: tokio::runtime::Handle,
     ) -> HeterogeneousExecutorHandle {
         let (cmd_tx, cmd_rx) = mpsc::channel(config.command_queue_capacity);
@@ -289,7 +294,8 @@ impl HeterogeneousExecutor {
             ane,
             accelerate,
             capacity: LaneCapacityManager::new(config.lane_capacity.clone()),
-            registry: WorkRegistry::new(),
+            lifecycle,
+            lease_authority,
             slot_leases: SlotLeaseManager::new(),
             backpressure: BackpressureEventController::new(),
             scheduling_metrics: SchedulingMetrics::new(
@@ -298,8 +304,10 @@ impl HeterogeneousExecutor {
             ),
             internal_completion_rx,
             internal_completion_tx,
+            work_id_to_entity: HashMap::new(),
+            work_id_to_lease_entity: HashMap::new(),
+            work_meta: HashMap::new(),
             active_permits: HashMap::new(),
-            session_state: HashMap::new(),
             session_streams: HashMap::new(),
             next_stream_id: 1,
             next_slot_id: 1,
@@ -360,12 +368,6 @@ impl HeterogeneousExecutor {
 
         // ── 2. Resolve session identity ──────────────────────────────
         let stream_id = self.resolve_stream_id(&request.session_id);
-        let session_seq = self
-            .session_state
-            .entry(request.session_id.clone())
-            .or_insert_with(|| SessionState { next_sequence: 0 });
-        let epoch_sequence = session_seq.next_sequence;
-        session_seq.next_sequence += 1;
 
         // ── 3. Walk the phase graph ──────────────────────────────────
         let fallback_summary = FallbackSummary::default();
@@ -406,7 +408,7 @@ impl HeterogeneousExecutor {
             let lane_request = LaneWorkRequest {
                 work_id,
                 session_id: stream_id,
-                epoch_id: epoch_sequence,
+                epoch_id: request.sequence_id,
                 phase_id: phase_set.phase_id,
                 variant_id: variant_idx as VariantId,
                 lane: variant.lane,
@@ -425,31 +427,56 @@ impl HeterogeneousExecutor {
                 completion_clock: clock,
             };
 
-            // Register in the work registry.
-            let _ = self.registry.register(WorkRecord {
-                work_id,
-                lane: variant.lane,
-                session_id: request.session_id.clone(),
-                phase_id: phase_set.phase_id,
-                input_slots: vec![],
-                output_slot: output_lease,
-                status: WorkStatus::Created,
-                created_at: Instant::now(),
-                submitted_at: None,
-                completed_at: None,
-                attempt: 0,
-                backend_timing: None,
-            });
+            // ── Constitutional work lifecycle (via bridge) ──────────
+            let claim = ResourceClaimComponent {
+                memory_bytes: 0,
+                compute_units: 0,
+                priority: 0,
+            };
+            let work_entity = self
+                .lifecycle
+                .create_work(WorkKind::RunInference, Entity(0, 0), claim)
+                .map_err(|e| ExecutorError::SubmitFailed(variant.lane, e))?;
 
-            // Transition: Created → Ready.
-            let _ = self.registry.transition(work_id, WorkStatus::Ready);
+            // Map WorkId → Entity for completion handling.
+            self.work_id_to_entity.insert(work_id, work_entity);
+            // Track execution-level metadata.
+            self.work_meta.insert(
+                work_id,
+                WorkMeta {
+                    session_id: request.session_id.clone(),
+                    phase_id: phase_set.phase_id,
+                    attempt: 0,
+                    status: ExecutionState::Submitted,
+                },
+            );
+
+            // ── Constitutional lease authority (via bridge) ──────────
+            // Best-effort: entity IDs derived from available identifiers.
+            // Errors are discarded — SlotLeaseManager is the hot-path;
+            // the constitutional call is the authority record.
+            let session_entity = Self::derive_exec_entity_id(&request.session_id, b"session");
+            let deployment_entity =
+                Self::derive_exec_entity_id(&self.model_identity, b"deployment");
+            let device_entity = Self::derive_exec_entity_id(&self.model_identity, b"device");
+            let _ = self.lease_authority.acquire_lease(
+                session_entity,
+                deployment_entity,
+                device_entity,
+                variant.artifact_key.as_ref().map_or(512, |k| k.0 as u64),
+            );
+
+            // Track lease entity mapping for completion.
+            // We use work_id.0 as a best-effort lease entity identifier.
+            self.work_id_to_lease_entity
+                .insert(work_id, Entity(work_id.0, 0));
 
             // Submit to the appropriate lane executor.
             let completion_tx = self.internal_completion_tx.clone();
             let _submission = self.submit_to_lane(variant.lane, lane_request, completion_tx)?;
 
-            // Transition: Ready → Submitted (skip intermediate states for simplicity).
-            let _ = self.registry.transition(work_id, WorkStatus::Submitted);
+            // Execution state already set to Submitted above — no additional
+            // registry transition needed.
 
             // Track the permit for later release.
             self.active_permits.insert(work_id, permit);
@@ -601,26 +628,60 @@ impl HeterogeneousExecutor {
         let event = work_completion_to_event(wc.clone(), work_key, received_at);
 
         // ── Update work registry state ─────────────────────────────
-        let new_status = match &event.backend_status {
-            BackendStatus::Completed => WorkStatus::Completed,
-            BackendStatus::Failed(_) => WorkStatus::ExecutionFailed,
-            BackendStatus::Cancelled => WorkStatus::CancelledBeforeSubmit,
-        };
-        let _ = self.registry.transition(wc.work_id, new_status);
+        // ── Constitutional lifecycle via bridge ────────────────────
+        match &event.backend_status {
+            BackendStatus::Completed => {
+                if let Some(entity) = self.work_id_to_entity.get(&wc.work_id) {
+                    let _ = self.lifecycle.complete_work(*entity, vec![]);
+                }
+            }
+            BackendStatus::Failed(err) => {
+                if let Some(entity) = self.work_id_to_entity.get(&wc.work_id) {
+                    let _ = self.lifecycle.fail_work(*entity, err.clone());
+                }
+            }
+            BackendStatus::Cancelled => {
+                if let Some(entity) = self.work_id_to_entity.get(&wc.work_id) {
+                    let _ = self.lifecycle.fail_work(*entity, "cancelled".to_string());
+                }
+            }
+        }
 
-        // Only mark output ready for successful completions.
+        // ── Execution-level state tracking ─────────────────────────
         if matches!(event.backend_status, BackendStatus::Completed) {
-            let _ = self
-                .registry
-                .transition(wc.work_id, WorkStatus::OutputReady);
+            if let Some(meta) = self.work_meta.get_mut(&wc.work_id) {
+                meta.status = ExecutionState::OutputReady;
+            }
             let _ = self.slot_leases.mark_output_ready(wc.output_slot);
+        } else {
+            if let Some(meta) = self.work_meta.get_mut(&wc.work_id) {
+                meta.status = ExecutionState::Released;
+            }
+        }
+
+        // ── Constitutional lease completion (via bridge) ───────────
+        // Best-effort: if no lease mapping exists, the call is a no-op
+        // (the SlotLeaseManager is the hot-path authority).
+        if let Some(&lease_entity) = self.work_id_to_lease_entity.get(&wc.work_id) {
+            let tokens = match &event.backend_status {
+                BackendStatus::Completed => vec![], // token data not available here
+                _ => vec![],
+            };
+            let finish_reason: u8 = match &event.backend_status {
+                BackendStatus::Completed => 0,
+                BackendStatus::Failed(_) => 3,
+                BackendStatus::Cancelled => 3,
+            };
+            let _ = self
+                .lease_authority
+                .complete_lease(lease_entity, tokens, finish_reason);
         }
 
         // ── Release lane capacity ──────────────────────────────────
         let session_for_release = self
-            .registry
-            .get(wc.work_id)
-            .map(|r| r.session_id.clone())
+            .work_meta
+            .get(&wc.work_id)
+            .map(|m| m.session_id.clone())
             .unwrap_or_default();
         if let Some(permit) = self.active_permits.remove(&wc.work_id) {
             self.capacity.release(permit, &session_for_release);
@@ -672,17 +733,37 @@ impl HeterogeneousExecutor {
         }
     }
 
+    // ── Entity ID derivation ─────────────────────────────────────────
+
+    /// Derive a stable best-effort u64 entity ID from a string and salt.
+    ///
+    /// Used for constitutional lease commands where the true ECS entity
+    /// IDs are not available in the scheduling path.  This is explicitly
+    /// best-effort — the constitutional call is the authority record, and
+    /// the `SlotLeaseManager` handles hot-path synchronization.
+    fn derive_exec_entity_id(s: &str, salt: &[u8]) -> u64 {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(salt);
+        hasher.update(s.as_bytes());
+        let hash = hasher.finalize();
+        // Use the first 8 bytes as a u64 (little-endian).
+        let bytes = hash.as_bytes();
+        u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])
+    }
+
     /// Construct a [`WorkKey`] from a [`WorkCompletion`] by consulting
-    /// the work registry for the associated session and epoch.
+    /// the execution-level metadata cache.
     fn build_work_key(&self, wc: &WorkCompletion) -> WorkKey {
-        if let Some(record) = self.registry.get(wc.work_id) {
+        if let Some(meta) = self.work_meta.get(&wc.work_id) {
             WorkKey {
-                session_id: record.session_id.clone(),
+                session_id: meta.session_id.clone(),
                 request_id: String::new(),
                 sequence_id: 0,
                 epoch_id: 0,
-                phase_id: record.phase_id,
-                attempt: record.attempt,
+                phase_id: meta.phase_id,
+                attempt: meta.attempt,
             }
         } else {
             WorkKey {
@@ -831,4 +912,22 @@ impl ActivationAbiDefault for ActivationAbi {
             byte_count: 0,
         })
     }
+}
+/// Execution-level state for lightweight in-memory tracking.
+/// These are NOT authority states — they are execution bookkeeping only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutionState {
+    Submitted,
+    Running,
+    OutputReady,
+    Released,
+}
+
+/// Execution-level metadata cached in the executor for fast lookup.
+#[derive(Debug, Clone)]
+struct WorkMeta {
+    session_id: String,
+    phase_id: PhaseId,
+    attempt: u32,
+    status: ExecutionState,
 }

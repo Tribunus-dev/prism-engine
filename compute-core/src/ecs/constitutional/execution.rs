@@ -841,7 +841,7 @@ mod tests {
 
         // Fix session to Active, should now fail on DeploymentNotResident
         world.set_direct_mutation_allowed(true);
-        world.add_component(crate::ecs::CompEntity(1), SessionLifecycle::Active);
+        let _ = world.add_component(crate::ecs::CompEntity(1), SessionLifecycle::Active);;
         assert!(
             matches!(
                 cmd.preflight(&world, &reg),
@@ -851,7 +851,7 @@ mod tests {
         );
 
         // Fix deployment to Resident, should now fail on DeviceNotReady
-        world.add_component(crate::ecs::CompEntity(3), ResidencyLifecycle::Resident);
+        let _ = world.add_component(crate::ecs::CompEntity(3), ResidencyLifecycle::Resident);;
         assert!(
             matches!(
                 cmd.preflight(&world, &reg),

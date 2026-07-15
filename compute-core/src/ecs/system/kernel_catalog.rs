@@ -57,7 +57,7 @@ impl CompilerSystem for KernelCatalogSystem {
                 true
             };
 
-            world.add_component(kernel, CatalogEntry { valid, errors });
+            let _ = world.add_component(kernel, CatalogEntry { valid, errors });;
         }
 
         Ok(())
@@ -78,14 +78,12 @@ mod tests {
     fn test_valid_binary_passes_catalog_check() {
         let mut world = World::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
-        world.add_component(
-            kernel,
-            CompiledBinary {
-                format: BinaryFormat::Metallib,
-                data: vec![0xde, 0xad],
-                fingerprint: "abc123".into(),
-            },
-        );
+        let _ = world.add_component(kernel,
+        CompiledBinary {
+            format: BinaryFormat::Metallib,
+            data: vec![0xde, 0xad],
+            fingerprint: "abc123".into(),
+        },);;
 
         let system = KernelCatalogSystem;
         system.run(&mut world).unwrap();
@@ -100,14 +98,12 @@ mod tests {
     fn test_empty_binary_fails() {
         let mut world = World::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
-        world.add_component(
-            kernel,
-            CompiledBinary {
-                format: BinaryFormat::Metallib,
-                data: vec![],
-                fingerprint: "abc123".into(),
-            },
-        );
+        let _ = world.add_component(kernel,
+        CompiledBinary {
+            format: BinaryFormat::Metallib,
+            data: vec![],
+            fingerprint: "abc123".into(),
+        },);;
 
         let system = KernelCatalogSystem;
         system.run(&mut world).unwrap();
@@ -134,14 +130,12 @@ mod tests {
     fn test_missing_fingerprint_fails() {
         let mut world = World::new();
         let kernel = world.spawn(EntityKind::Kernel, None);
-        world.add_component(
-            kernel,
-            CompiledBinary {
-                format: BinaryFormat::HSACO,
-                data: vec![0x01, 0x02],
-                fingerprint: String::new(),
-            },
-        );
+        let _ = world.add_component(kernel,
+        CompiledBinary {
+            format: BinaryFormat::HSACO,
+            data: vec![0x01, 0x02],
+            fingerprint: String::new(),
+        },);;
 
         let system = KernelCatalogSystem;
         system.run(&mut world).unwrap();

@@ -25,40 +25,36 @@ impl CompilerSystem for PhaseEngineInitSystem {
         }
 
         // Spawn a new engine entity with phase DAG and ready queue state.
-        let entity = world.spawn(EntityKind::Executable, Some("phase-engine".into()));
-        world.add_component(
-            entity,
-            PhaseDagState {
-                phase_names: vec![
-                    "model_load".into(),
-                    "quantize".into(),
-                    "memory_plan".into(),
-                    "fusion_dispatch".into(),
-                    "kernel_gen".into(),
-                    "compile".into(),
-                    "package".into(),
-                    "validate".into(),
-                    "execute".into(),
-                ],
-                edges: vec![
-                    ("model_load".into(), "quantize".into()),
-                    ("quantize".into(), "memory_plan".into()),
-                    ("memory_plan".into(), "fusion_dispatch".into()),
-                    ("fusion_dispatch".into(), "kernel_gen".into()),
-                    ("kernel_gen".into(), "compile".into()),
-                    ("compile".into(), "package".into()),
-                    ("package".into(), "validate".into()),
-                    ("validate".into(), "execute".into()),
-                ],
-                current_phase: "model_load".into(),
-            },
-        );
-        world.add_component(
-            entity,
-            ReadyQueueState {
-                pending_items: Vec::new(),
-            },
-        );
+        let entity = world.spawn(EntityKind::Executable, Some("phase_engine".into()))?;
+        let _ = world.add_component(entity,
+        PhaseDagState {
+            phase_names: vec![
+                "model_load".into(),
+                "quantize".into(),
+                "memory_plan".into(),
+                "fusion_dispatch".into(),
+                "kernel_gen".into(),
+                "compile".into(),
+                "package".into(),
+                "validate".into(),
+                "execute".into(),
+            ],
+            edges: vec![
+                ("model_load".into(), "quantize".into()),
+                ("quantize".into(), "memory_plan".into()),
+                ("memory_plan".into(), "fusion_dispatch".into()),
+                ("fusion_dispatch".into(), "kernel_gen".into()),
+                ("kernel_gen".into(), "compile".into()),
+                ("compile".into(), "package".into()),
+                ("package".into(), "validate".into()),
+                ("validate".into(), "execute".into()),
+            ],
+            current_phase: "model_load".into(),
+        },);;
+        let _ = world.add_component(entity,
+        ReadyQueueState {
+            pending_items: Vec::new(),
+        },);;
 
         Ok(())
     }

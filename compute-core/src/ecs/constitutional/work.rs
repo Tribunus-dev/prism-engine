@@ -664,25 +664,28 @@ pub fn replay_work_created(world: &mut World, event: &DomainEvent) -> Result<(),
         _ => WorkKind::Custom(0),
     };
 
-    world.add_component(
-        ce,
-        WorkItemComponent {
-            kind,
-            target_entity: Entity(target_entity, 0),
-            retry_count: 0,
-            max_retries: 0,
-        },
-    );
-    world.add_component(ce, WorkState::Pending);
+    world
+        .add_component(
+            ce,
+            WorkItemComponent {
+                kind,
+                target_entity: Entity(target_entity, 0),
+                retry_count: 0,
+                max_retries: 0,
+            },
+        )
+        .map_err(|e| e.to_string())?;
     // ResourceClaim is durable; replicate as zero-claim if missing from event
-    world.add_component(
-        ce,
-        ResourceClaimComponent {
-            memory_bytes: 0,
-            compute_units: 0,
-            priority: 0,
-        },
-    );
+    world
+        .add_component(
+            ce,
+            ResourceClaimComponent {
+                memory_bytes: 0,
+                compute_units: 0,
+                priority: 0,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }

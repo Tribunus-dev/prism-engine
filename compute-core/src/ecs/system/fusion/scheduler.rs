@@ -332,25 +332,21 @@ impl CompilerSystem for SchedulerEvaluationSystem {
                 prod_select(&candidates)
             };
 
-            world.add_component(
-                entity,
-                FusionScheduleData {
-                    candidates: candidates.clone(),
-                    selected: selected.clone(),
-                },
-            );
+            let _ = world.add_component(entity,
+            FusionScheduleData {
+                candidates: candidates.clone(),
+                selected: selected.clone(),
+            },);;
 
-            world.add_component(
-                entity,
-                FusionEvaluationData {
-                    source_nodes,
-                    rejected,
-                },
-            );
+            let _ = world.add_component(entity,
+            FusionEvaluationData {
+                source_nodes,
+                rejected,
+            },);;
 
             // If a candidate was selected, also attach LoweringCost component.
             if let Some(ref best) = selected {
-                world.add_component(entity, LoweringCost(best.lowering_cost.clone()));
+                let _ = world.add_component(entity, LoweringCost(best.lowering_cost.clone()));;
             }
         }
 
@@ -550,7 +546,7 @@ impl CompilerSystem for CostEvaluationSystem {
 
             // If a selected candidate already exists, attach its cost.
             if let Some(ref selected) = schedule.selected {
-                world.add_component(entity, LoweringCost(selected.lowering_cost.clone()));
+                let _ = world.add_component(entity, LoweringCost(selected.lowering_cost.clone()));;
                 continue;
             }
 
@@ -563,7 +559,7 @@ impl CompilerSystem for CostEvaluationSystem {
             };
 
             if let Some(ref best) = selected {
-                world.add_component(entity, LoweringCost(best.lowering_cost.clone()));
+                let _ = world.add_component(entity, LoweringCost(best.lowering_cost.clone()));;
             }
         }
 

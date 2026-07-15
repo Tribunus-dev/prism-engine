@@ -22,7 +22,7 @@ impl CompilerSystem for DispatchFormationSystem {
                 if fusion.accepted {
                     Self::attach_fused_dispatch(world, entity, &fusion);
                 } else {
-                    Self::spawn_per_op_dispatches(world, entity, &fusion);
+                    Self::spawn_per_op_dispatches(world, entity, &fusion)?;
                 }
             }
         }
@@ -47,8 +47,8 @@ impl DispatchFormationSystem {
     /// to the entity so a single fused kernel is launched.
     fn attach_fused_dispatch(world: &mut World, entity: Entity, fusion: &FusionGroup) {
         let wg_x = Self::workgroup_dim(world, entity);
-        world.add_component(entity, WorkgroupCount(wg_x, 1, 1));
-        world.add_component(
+        let _ = world.add_component(entity, WorkgroupCount(wg_x, 1, 1));
+        let _ = world.add_component(
             entity,
             BindingCapacity {
                 max_slots: fusion.binding_slots.max(1),
@@ -60,7 +60,11 @@ impl DispatchFormationSystem {
     /// Rejected fusion group: spawn one Dispatch entity per operation (root
     /// + each fused op), each carrying its own WorkgroupCount, BindingCapacity,
     /// and Shape copied from the parent.
-    fn spawn_per_op_dispatches(world: &mut World, parent: Entity, fusion: &FusionGroup) {
+    fn spawn_per_op_dispatches(
+        world: &mut World,
+        parent: Entity,
+        fusion: &FusionGroup,
+    ) -> Result<(), crate::ecs::WorldError> {
         // Op labels: root first, then each fused op.
         let op_kinds: Vec<String> = std::iter::once(&fusion.root_op_kind)
             .chain(fusion.fused_op_kinds.iter())
@@ -70,11 +74,14 @@ impl DispatchFormationSystem {
         let parent_shape = world.get_component::<Shape>(parent).cloned();
 
         for op_kind in &op_kinds {
-            let op_entity = world.spawn(EntityKind::Dispatch, Some(format!("{op_kind}_per_op")));
+            let spawn_result =
+                world.spawn(EntityKind::Dispatch, Some(format!("dispatch_{op_kind}")))?;
+            let op_entity = spawn_result.entity;
 
             let wg_x = Self::workgroup_dim(world, parent);
-            world.add_component(op_entity, WorkgroupCount(wg_x, 1, 1));
-            world.add_component(
+            let _ = world.add_component(op_entity, WorkgroupCount(wg_x, 1, 1));
+            let _ = world.add_component(op_entity, WorkgroupCount(wg_x, 1, 1));
+            let _ = world.add_component(
                 op_entity,
                 BindingCapacity {
                     max_slots: 1,
@@ -85,8 +92,9 @@ impl DispatchFormationSystem {
             // Carry forward the parent shape so downstream systems (e.g.
             // ScalarDispatchSystem) can reason about element counts.
             if let Some(shape) = &parent_shape {
-                world.add_component(op_entity, shape.clone());
+                let _ = world.add_component(op_entity, shape.clone());
             }
         }
+        Ok(())
     }
 }

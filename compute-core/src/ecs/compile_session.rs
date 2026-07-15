@@ -1,5 +1,5 @@
 use crate::ecs::compiler::event_emitter::{now_micros, CompilerEvent, CompilerEventStream};
-use crate::ecs::{EntityKind, SchedulePhase, World};
+use crate::ecs::{EntityKind, SchedulePhase, World, WorldSystemsExt};
 use std::path::{Path, PathBuf};
 
 /// A compile session — owns the ECS world and drives the compiler pipeline.
@@ -387,7 +387,9 @@ impl CompileSession {
         self.input_path = Some(path.to_string());
 
         // Spawn a model entity carrying the path as its name.
-        self.world.spawn(EntityKind::Model, Some(path.to_string()));
+        let _ = self.world.spawn(EntityKind::Model, Some(path.to_string()));
+        self.world
+            .spawn(EntityKind::Model, Some(path.to_string()))?;
 
         // Register Phase A systems.
         self.world

@@ -19,6 +19,14 @@ rustflags = [
 [future-incompat-report]
 frequency = "never"
 
+[alias]
+# Fast default lane: library tests only, without Metal, MLIR, or CLI targets.
+test-core = "test -p tribunus-compute-core --lib --features test-core"
+# Explicit native-hardware lane. Supply a test-name filter after the alias.
+test-hardware = "test -p tribunus-compute-core --lib --features test-hardware"
+# Compiler qualification remains deliberately separate because it links MLIR.
+test-compiler = "test -p tribunus-compute-core --lib --features test-compiler"
+
 # Homebrew LLVM — build scripts (tblgen, mlir-sys) need llvm-config in PATH.
 [env]
 LLVM_CONFIG_PATH = { value = "/opt/homebrew/opt/llvm/bin/llvm-config" }

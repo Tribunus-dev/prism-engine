@@ -1,15 +1,10 @@
 #![allow(deprecated)]
 pub mod canonical;
 
-pub mod capacity;
-pub mod error;
 pub mod evaluator;
-pub mod mutation;
-pub mod resource;
 
 pub mod adapter;
 pub mod aot;
-pub mod column;
 pub mod compile_session;
 pub mod component;
 pub mod config;
@@ -122,9 +117,6 @@ pub mod metal_backend;
 pub mod metal_capture;
 pub mod metal_launcher;
 pub mod mlir;
-// Metal runtime — gated behind macOS + metal-dispatch
-#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
-pub mod metal_runtime;
 // Metal backend compiler — gated behind macOS + metal-dispatch
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
 pub mod metrics;
@@ -206,147 +198,36 @@ pub mod worker_crash_ledger;
 pub mod worker_dispatch;
 pub mod worker_memory;
 pub mod worker_protocol;
-pub use capacity::{ComponentStoreCapacity, WorldCapacity};
 pub use component::aot::*;
 pub use component::backend::*;
 pub use component::executor::*;
 pub use component::memory::*;
 pub use component::quality::*;
 pub use component::tensor::*;
-pub use error::WorldError;
 pub use evaluator::{
     AdmissionDecision, AdmissionPolicy, BackendArtifact, BackendEvaluator, BindingPlan,
     EvaluationConfig, EvaluationError, EvaluationFixture, EvaluationReceiptBundle, EvaluationRole,
     GeneratedExecutable, HeterogeneousEvaluatorSystem, TemperaturePolicy,
 };
-pub use mutation::MutationPolicy;
+pub use prism_ecs_core::*;
 
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::schema::SchemaCatalogue;
-use crate::ecs::constitutional::types::WorldEpoch;
 pub use crate::ecs::constitutional::world_txn::{
     CommitReceipt, CommittedEpoch, ComponentChange, PreparedWorldTxn, WorldTxn, WorldTxnError,
 };
-use crate::ecs::resource::{ResourceMut, ResourceRef};
-pub use column::Column;
 #[cfg(feature = "mlx-backend")]
 pub use core::bridge;
-use serde::{Deserialize, Serialize};
-use std::any::{Any, TypeId};
-use std::collections::HashMap;
 
 #[deprecated(note = "use Entity(u64, u32) for generation safety")]
 pub type EntityId = u64;
 
-/// Opaque entity handle.
-///
-/// NOTE: This is the legacy ID-only handle. New code should use `Entity(id, gen)`.
-#[deprecated(note = "use Entity(u64, u32) for generation safety")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct CompEntity(pub EntityId);
 /// Legacy alias for compatibility during migration.
 #[deprecated(note = "use World instead")]
 pub type CompWorld = World;
 
-/// Generational entity handle.
-///
-/// Each entity carries a generation counter that is incremented on despawn,
-/// catching stale references. The generation is opaque — callers construct
-/// entities through `World::spawn()` or `Commands::spawn()`, never by
-/// fabricating the tuple.
-///
-/// # Invalid-handle contract
-///
-/// - `Entity(0, _)` (zero ID) is always invalid — handle it as a null
-///   sentinel. Every API returns `None`/`false`, never panics.
-/// - A handle whose generation does not match the current generation in the
-///   world slot is stale — `is_alive()` returns `false`, queries skip it.
-/// - Fabricated handles (created outside `World::spawn()`) are treated as
-///   stale unless the slot exists AND generation matches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Entity(pub(crate) u64, pub(crate) u32);
-
-impl Entity {
-    pub fn id(&self) -> u64 {
-        self.0
-    }
-    pub fn generation(&self) -> u32 {
-        self.1
-    }
-}
-
-impl From<CompEntity> for Entity {
-    fn from(ce: CompEntity) -> Self {
-        Entity(ce.0, 0)
-    }
-}
-
-/// A reserved but not-yet-committed entity, returned by `Commands::spawn()`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PendingEntity(pub u64);
-
-/// Either an existing entity or a pending token.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityRef {
-    Existing(Entity),
-    Pending(PendingEntity),
-}
-
-/// Result of spawning an entity, with allocation detail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SpawnedEntity {
-    pub entity: Entity,
-    pub allocation: EntityAllocation,
-}
-
-/// Describes how an entity was allocated during spawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityAllocation {
-    /// Fresh entity slot — no previous occupant.
-    NewSlot,
-    /// Reused slot from a despawned entity.
-    ReusedSlot { previous_generation: u32 },
-}
-
-impl From<SpawnedEntity> for Entity {
-    fn from(s: SpawnedEntity) -> Self {
-        s.entity
-    }
-}
-
-/// Tag trait for data attached to entities.
-pub trait Component: std::fmt::Debug + Send + Sync + 'static {}
-
-// Basic type implementations for common Rust types used as components.
-impl Component for String {}
-impl Component for u64 {}
-impl Component for i64 {}
-impl Component for i32 {}
-impl Component for f32 {}
-impl Component for bool {}
-impl Component for usize {}
-
-/// Dense iterator over entities that have component type A.
-/// Backed by the Column<T> SparseSet storage — iterates the dense array
-/// directly without HashMap overhead.
-#[derive(Debug)]
-pub struct Query<'w, A: Component> {
-    col: Option<&'w Column<A>>,
-    cursor: usize,
-}
-impl<'w, A: Component> Iterator for Query<'w, A> {
-    type Item = (Entity, &'w A);
-    fn next(&mut self) -> Option<Self::Item> {
-        let col = self.col?;
-        if self.cursor >= col.len() {
-            return None;
-        }
-        let idx = self.cursor;
-        self.cursor += 1;
-        let e = col.entities()[idx];
-        Some((e, &col.dense()[idx]))
-    }
-}
+// EntityRef is now in prism-ecs-core (re-exported via prism_ecs_core::* above).
+// World is now in prism-ecs-core (re-exported via prism_ecs_core::* above).
 
 /// Phase in the compiler pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -370,537 +251,49 @@ pub trait CompilerSystem: Send + Sync {
     fn run(&self, world: &mut World) -> anyhow::Result<()>;
 }
 
-/// The ECS world — all entities, components, and systems.
-pub struct World {
-    component_store: ComponentStore,
-    resource_store: ResourceStore,
-    systems: Vec<Box<dyn CompilerSystem>>,
-    entity_meta: Vec<Option<EntitySlot>>,
-    next_id: u64,
-    free_list: Vec<u64>,
-    staging: Vec<Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>>,
-    epoch: WorldEpoch,
-    journal: Vec<ComponentChange>,
-    component_versions: std::collections::HashMap<u64, u64>,
-    committed_events: Vec<DomainEvent>,
-    /// When false, direct mutations (spawn, add_component, remove_component)
-    /// panic with a message pointing to WorldTxn. Defaults to true for
-    /// backward compatibility during migration.
-    direct_mutation_allowed: bool,
+// ═════════════════════════════════════════════════════════════════════════════
+// Extension traits — compute-core-specific World methods stored via
+// type-erased extensions on prism_ecs_core::World.
+// ═════════════════════════════════════════════════════════════════════════════
+
+use anyhow::Context;
+use prism_ecs_constitutional::WorldTransitExt;
+
+/// Extension trait providing system-management methods on [`World`].
+///
+/// Systems are stored as `Vec<Box<dyn CompilerSystem>>` via the type-erased
+/// extension mechanism (`World::set_extension` / `World::get_extension`).
+pub trait WorldSystemsExt {
+    fn add_system(&mut self, system: Box<dyn CompilerSystem>);
+    fn run_phase(&mut self, phase: SchedulePhase) -> anyhow::Result<()>;
+    fn system_count(&self) -> usize;
 }
 
-impl std::fmt::Debug for World {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("World")
-            .field(
-                "entity_count",
-                &self
-                    .entity_meta
-                    .iter()
-                    .filter(|s| s.as_ref().and_then(|s| s.occupant.as_ref()).is_some())
-                    .count(),
-            )
-            .field("system_count", &self.systems.len())
-            .field("staged_changes", &self.staging.len())
-            .finish()
-    }
-}
-
-/// Per-entity slot — generation persists across despawn/reuse cycles.
-#[derive(Debug)]
-struct EntitySlot {
-    generation: u32,
-    occupant: Option<Occupant>,
-}
-
-#[derive(Debug)]
-struct Occupant {
-    kind: EntityKind,
-    name: Option<String>,
-}
-
-impl Default for EntitySlot {
-    fn default() -> Self {
-        Self {
-            generation: 0,
-            occupant: Some(Occupant {
-                kind: EntityKind::Model,
-                name: None,
-            }),
-        }
-    }
-}
-
-/// Entity kind classification — used for diagnostic and replay classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityKind {
-    Node,
-    Pipeline,
-    Model,
-    Tensor,
-    Layer,
-    Expert,
-    Dispatch,
-    Kernel,
-    KernelVariant,
-    Buffer,
-    CommandBuffer,
-    Executable,
-    Fence,
-    Session,
-    Artifact,
-    Device,
-    Residency,
-    Agent,
-}
-
-/// Type-erased storage for components, indexed by (TypeId, EntityId).
-#[derive(Debug)]
-pub struct ComponentStore {
-    pub(crate) data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
-}
-
-/// Type-erased storage for global resources (not per-entity).
-#[derive(Debug)]
-pub struct ResourceStore {
-    data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
-}
-
-impl Default for ResourceStore {
-    fn default() -> Self {
-        Self {
-            data: HashMap::new(),
-        }
-    }
-}
-
-impl Default for ComponentStore {
-    fn default() -> Self {
-        Self {
-            data: HashMap::new(),
-        }
-    }
-}
-
-impl World {
-    /// Spawn entity with kind and optional name.
-    /// Validate that an entity handle is still valid (the slot is occupied and
-    /// the generation matches). Returns None if the handle is stale or the
-    /// entity has been despawned.
-    fn validate_generation(&self, entity: Entity) -> Option<()> {
-        if entity.0 == 0 {
-            return None;
-        }
-        let idx = (entity.0 - 1) as usize;
-        self.entity_meta.get(idx).and_then(|slot| {
-            let slot = slot.as_ref()?;
-            if slot.occupant.is_some() && slot.generation == entity.1 {
-                Some(())
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn spawn(&mut self, kind: EntityKind, name: Option<String>) -> Entity {
-        assert!(
-            self.direct_mutation_allowed,
-            "direct spawn() called outside WorldTxn — use WorldTxn::stage_spawn()"
-        );
-        let entity = self.spawn_entity(kind);
-        if let Some(n) = name {
-            let idx = (entity.0 - 1) as usize;
-            if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
-                if let Some(occupant) = &mut slot.occupant {
-                    occupant.name = Some(n);
-                }
-            }
-        }
-        entity
-    }
-
-    /// Get the name of an entity.
-    pub fn name(&self, entity: impl Into<Entity>) -> Option<&str> {
-        let entity: Entity = entity.into();
-        self.validate_generation(entity)?;
-        let idx = (entity.0 - 1) as usize;
-        self.entity_meta
-            .get(idx)
-            .and_then(|m| m.as_ref()?.occupant.as_ref())
-            .and_then(|o| o.name.as_deref())
-    }
-
-    /// Find all entities of a given kind.
-    pub fn entities_of_kind(&self, kind: EntityKind) -> Vec<Entity> {
-        self.entity_meta
-            .iter()
-            .enumerate()
-            .filter(|(_, slot)| {
-                slot.as_ref()
-                    .and_then(|s| s.occupant.as_ref())
-                    .is_some_and(|o| o.kind == kind)
-            })
-            .map(|(i, slot)| {
-                let gen = slot.as_ref().map(|s| s.generation).unwrap_or(0);
-                Entity((i + 1) as u64, gen)
-            })
-            .collect()
-    }
-
-    /// Get the kind of an entity (alias for entity_kind).
-    pub fn kind(&self, entity: impl Into<Entity>) -> Option<EntityKind> {
-        let entity: Entity = entity.into();
-        self.validate_generation(entity)?;
-        self.entity_kind(entity)
-    }
-
-    pub fn remove_component<T: Component>(&mut self, entity: impl Into<Entity>) -> Option<T> {
-        let entity: Entity = entity.into();
-        assert!(
-            self.direct_mutation_allowed,
-            "direct remove_component() called outside WorldTxn — use txn.remove_component()"
-        );
-        self.validate_generation(entity)?;
-        self.component_store.remove::<T>(entity)
-    }
-
-    pub fn new() -> Self {
-        Self {
-            component_store: ComponentStore::default(),
-            resource_store: ResourceStore::default(),
-            systems: Vec::new(),
-            entity_meta: Vec::new(),
-            next_id: 1,
-            free_list: Vec::new(),
-            staging: Vec::new(),
-            epoch: WorldEpoch(1),
-            journal: Vec::new(),
-            component_versions: std::collections::HashMap::new(),
-            committed_events: Vec::new(),
-            direct_mutation_allowed: cfg!(feature = "legacy_mutations"),
-        }
-    }
-
-    /// Returns the next entity ID that will be assigned, without consuming it.
-    pub fn next_entity_id(&self) -> u64 {
-        self.next_id
-    }
-
-    /// Enable or disable direct mutation mode.
-    /// When disabled, spawn/add_component/remove_component panic.
-    pub fn set_direct_mutation_allowed(&mut self, allowed: bool) {
-        self.direct_mutation_allowed = allowed;
-    }
-
-    /// Check if direct mutation is currently allowed.
-    pub fn is_direct_mutation_allowed(&self) -> bool {
-        self.direct_mutation_allowed
-    }
-
-    /// Spawn an entity at a specific reserved ID (used by WorldTxn during commit).
-    ///
-    /// Idempotent: if the entity slot already exists at this ID, the call is
-    /// a no-op. This allows phase 1aa (reservation) and phase 3c (apply) to
-    /// both call it without double-pushing entity metadata.
-    pub fn spawn_entity_with_id(&mut self, id: u64, kind: EntityKind) -> Entity {
-        let idx = (id - 1) as usize;
-        if idx < self.entity_meta.len()
-            && self.entity_meta[idx]
-                .as_ref()
-                .and_then(|s| s.occupant.as_ref())
-                .is_some()
+impl WorldSystemsExt for World {
+    fn add_system(&mut self, system: Box<dyn CompilerSystem>) {
+        if self
+            .get_extension::<Vec<Box<dyn CompilerSystem>>>()
+            .is_none()
         {
-            // Already occupied — idempotent.
-            let gen = self.entity_meta[idx]
-                .as_ref()
-                .map(|s| s.generation)
-                .unwrap_or(0);
-            return Entity(id, gen);
+            self.set_extension(Vec::<Box<dyn CompilerSystem>>::new());
         }
-        // Fill gap if needed (spawns may be out of order from reservation)
-        while self.entity_meta.len() <= idx {
-            self.entity_meta.push(None);
-        }
-        // Mark the slot as occupied (not phantom)
-        self.entity_meta[idx] = Some(EntitySlot {
-            generation: 0,
-            occupant: Some(Occupant { kind, name: None }),
-        });
-        if id >= self.next_id {
-            self.next_id = id + 1;
-        }
-        Entity(id, 0)
+        self.get_extension_mut::<Vec<Box<dyn CompilerSystem>>>()
+            .expect("systems extension just initialized")
+            .push(system);
     }
 
-    pub fn spawn_entity(&mut self, kind: EntityKind) -> Entity {
-        assert!(
-            self.direct_mutation_allowed,
-            "direct spawn_entity() called outside WorldTxn — use WorldTxn::stage_spawn()"
-        );
-        let (id, generation) = if let Some(free) = self.free_list.pop() {
-            let idx = (free - 1) as usize;
-            if idx < self.entity_meta.len() {
-                if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
-                    let gen = slot.generation + 1;
-                    slot.occupant = Some(Occupant { kind, name: None });
-                    slot.generation = gen;
-                    (free, gen)
-                } else {
-                    self.entity_meta[idx] = Some(EntitySlot {
-                        generation: 0,
-                        occupant: Some(Occupant { kind, name: None }),
-                    });
-                    (free, 0)
-                }
-            } else {
-                self.entity_meta.push(Some(EntitySlot {
-                    generation: 0,
-                    occupant: Some(Occupant { kind, name: None }),
-                }));
-                (free, 0)
-            }
-        } else {
-            let id = self.next_id;
-            self.next_id += 1;
-            self.entity_meta.push(Some(EntitySlot {
-                generation: 0,
-                occupant: Some(Occupant { kind, name: None }),
-            }));
-            (id, 0)
+    fn run_phase(&mut self, phase: SchedulePhase) -> anyhow::Result<()> {
+        // Take systems, partition, restore unmatched — then drop the borrow
+        let matched = {
+            let systems = self
+                .get_extension_mut::<Vec<Box<dyn CompilerSystem>>>()
+                .expect("run_phase requires systems extension — call add_system first");
+            let prev_systems = std::mem::take(systems);
+            let (matched, unmatched): (Vec<_>, Vec<_>) =
+                prev_systems.into_iter().partition(|s| s.phase() == phase);
+            *systems = unmatched;
+            matched
         };
-        Entity(id, generation)
-    }
-
-    pub fn entity_kind(&self, entity: impl Into<Entity>) -> Option<EntityKind> {
-        let entity: Entity = entity.into();
-        self.validate_generation(entity)?;
-        let idx = (entity.0 - 1) as usize;
-        self.entity_meta
-            .get(idx)
-            .and_then(|slot| slot.as_ref()?.occupant.as_ref().map(|o| o.kind))
-    }
-
-    /// Check whether an entity handle is still valid (slot occupied and generation matches).
-    pub fn is_alive(&self, entity: impl Into<Entity>) -> bool {
-        let entity: Entity = entity.into();
-        self.validate_generation(entity).is_some()
-    }
-
-    /// Despawn an entity: advance generation and release the slot for reuse.
-    /// Returns false if the entity was already dead.
-    pub fn despawn(&mut self, entity: impl Into<Entity>) -> bool {
-        let entity: Entity = entity.into();
-        if !self.is_alive(entity) {
-            return false;
-        }
-        // Generation mismatch = caller has a stale handle — panic to catch bugs
-        self.validate_generation(entity)
-            .expect("despawn called with stale entity handle");
-        let idx = (entity.0 - 1) as usize;
-        if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
-            slot.generation += 1;
-            slot.occupant = None;
-        }
-        self.free_list.push(entity.0);
-        true
-    }
-
-    /// Iterate over all entities that have component type A.
-    pub fn query<'w, A: Component>(&'w self) -> Query<'w, A> {
-        let col: Option<&Column<A>> = self.component_store.column::<A>();
-        Query { col, cursor: 0 }
-    }
-
-    pub fn add_component<T: Component>(&mut self, entity: impl Into<Entity>, component: T) {
-        let entity: Entity = entity.into();
-        assert!(
-            self.direct_mutation_allowed,
-            "direct add_component() called outside WorldTxn — use txn.add_component()"
-        );
-        self.validate_generation(entity).expect(
-            "add_component called with stale entity handle — entity has been despawned and reused",
-        );
-        self.component_store.insert::<T>(entity, component);
-    }
-
-    pub fn stage_component<T: Component>(&mut self, entity: impl Into<Entity>, component: T) {
-        let entity: Entity = entity.into();
-        self.validate_generation(entity)
-            .expect("stage_component called with stale entity handle");
-        self.staging
-            .push(Box::new(move |store: &mut ComponentStore| {
-                store.insert::<T>(entity, component);
-            }));
-    }
-
-    pub fn commit_stage(&mut self) {
-        let staging = std::mem::take(&mut self.staging);
-        for op in staging {
-            op(&mut self.component_store);
-        }
-    }
-
-    /// Discard deferred component insert operations added via [`stage_component`].
-    pub fn rollback_stage(&mut self) {
-        self.staging.clear();
-    }
-
-    pub fn get_component<T: Component>(&self, entity: impl Into<Entity>) -> Option<&T> {
-        let entity: Entity = entity.into();
-        self.validate_generation(entity)?;
-        self.component_store.get::<T>(entity)
-    }
-
-    pub fn get_component_mut<T: Component>(&mut self, entity: impl Into<Entity>) -> Option<&mut T> {
-        let e: Entity = entity.into();
-        self.validate_generation(e)?;
-        self.component_store.column_mut::<T>().get_mut(e)
-    }
-
-    /// Canonical: insert or replace a component on an entity.
-    /// Returns error if the entity is stale or dead.
-    pub fn insert_component<T: Component>(
-        &mut self,
-        entity: impl Into<Entity>,
-        component: T,
-    ) -> Result<(), WorldError> {
-        let entity: Entity = entity.into();
-        if !self.is_alive(entity) {
-            return Err(WorldError::StaleHandle { entity });
-        }
-        assert!(
-            self.direct_mutation_allowed,
-            "direct insert_component() called outside WorldTxn"
-        );
-        self.component_store.insert::<T>(entity, component);
-        Ok(())
-    }
-
-    /// Canonical: read a component from an entity.
-    pub fn component<T: Component>(&self, entity: impl Into<Entity>) -> Result<&T, WorldError> {
-        let entity: Entity = entity.into();
-        if !self.is_alive(entity) {
-            return Err(WorldError::StaleHandle { entity });
-        }
-        self.component_store
-            .get::<T>(entity)
-            .ok_or(WorldError::MissingComponent {
-                entity,
-                type_name: std::any::type_name::<T>(),
-            })
-    }
-
-    /// Canonical: mutable read of a component.
-    pub fn component_mut<T: Component>(
-        &mut self,
-        entity: impl Into<Entity>,
-    ) -> Result<&mut T, WorldError> {
-        let e: Entity = entity.into();
-        if !self.is_alive(e) {
-            return Err(WorldError::StaleHandle { entity: e });
-        }
-        self.component_store
-            .column_mut::<T>()
-            .get_mut(e)
-            .ok_or(WorldError::MissingComponent {
-                entity: e,
-                type_name: std::any::type_name::<T>(),
-            })
-    }
-
-    /// Canonical: check if an entity has a component.
-    pub fn has_component<T: Component>(&self, entity: impl Into<Entity>) -> bool {
-        let entity: Entity = entity.into();
-        self.is_alive(entity) && self.component_store.contains::<T>(entity)
-    }
-
-    #[cfg_attr(
-        not(feature = "legacy_mutations"),
-        deprecated(note = "resources should be committed via WorldTxn")
-    )]
-    pub fn add_resource<T: 'static + Send + Sync>(&mut self, resource: T) {
-        self.resource_store
-            .data
-            .insert(TypeId::of::<T>(), Box::new(resource));
-    }
-
-    pub fn get_resource<T: 'static + Send + Sync>(&self) -> Option<&T> {
-        self.resource_store
-            .data
-            .get(&TypeId::of::<T>())
-            .and_then(|b| b.downcast_ref::<T>())
-    }
-
-    #[cfg_attr(
-        not(feature = "legacy_mutations"),
-        deprecated(note = "resources should be committed via WorldTxn")
-    )]
-    pub fn get_resource_mut<T: 'static + Send + Sync>(&mut self) -> Option<&mut T> {
-        self.resource_store
-            .data
-            .get_mut(&TypeId::of::<T>())
-            .and_then(|b| b.downcast_mut::<T>())
-    }
-
-    /// Typed resource: insert a resource, returning error if already exists.
-    pub fn insert_resource<T: 'static + Send + Sync>(
-        &mut self,
-        resource: T,
-    ) -> Result<(), WorldError> {
-        if self.resource_store.contains::<T>() {
-            return Err(WorldError::DuplicateResource {
-                type_name: std::any::type_name::<T>(),
-            });
-        }
-        self.resource_store.insert::<T>(resource);
-        Ok(())
-    }
-
-    /// Typed resource: get a guarded shared reference.
-    pub fn resource<T: 'static + Send + Sync>(&self) -> Result<ResourceRef<'_, T>, WorldError> {
-        self.resource_store
-            .get::<T>()
-            .map(ResourceRef::new)
-            .ok_or(WorldError::MissingResource {
-                type_name: std::any::type_name::<T>(),
-            })
-    }
-
-    /// Typed resource: get a guarded mutable reference.
-    pub fn resource_mut<T: 'static + Send + Sync>(
-        &mut self,
-    ) -> Result<ResourceMut<'_, T>, WorldError> {
-        self.resource_store
-            .get_mut::<T>()
-            .map(ResourceMut::new)
-            .ok_or(WorldError::MissingResource {
-                type_name: std::any::type_name::<T>(),
-            })
-    }
-
-    /// Check if a resource type exists.
-    pub fn has_resource<T: 'static + Send + Sync>(&self) -> bool {
-        self.resource_store.contains::<T>()
-    }
-
-    /// Remove a resource, returning it.
-    pub fn remove_resource<T: 'static + Send + Sync>(&mut self) -> Result<T, WorldError> {
-        self.resource_store
-            .remove::<T>()
-            .ok_or(WorldError::MissingResource {
-                type_name: std::any::type_name::<T>(),
-            })
-    }
-
-    pub fn add_system(&mut self, system: Box<dyn CompilerSystem>) {
-        self.systems.push(system);
-    }
-
-    pub fn run_phase(&mut self, phase: SchedulePhase) -> anyhow::Result<()> {
-        let prev_systems = std::mem::take(&mut self.systems);
-        let (matched, unmatched): (Vec<_>, Vec<_>) =
-            prev_systems.into_iter().partition(|s| s.phase() == phase);
-        self.systems = unmatched;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             for system in &matched {
                 system.run(self)?;
@@ -908,8 +301,12 @@ impl World {
             self.commit_stage();
             Ok::<_, anyhow::Error>(())
         }));
+        // Re-borrow self to push matched systems back
+        let systems = self
+            .get_extension_mut::<Vec<Box<dyn CompilerSystem>>>()
+            .expect("systems extension just initialized");
         for sys in matched {
-            self.systems.push(sys);
+            systems.push(sys);
         }
         match result {
             Ok(Ok(())) => Ok(()),
@@ -933,68 +330,62 @@ impl World {
         }
     }
 
-    pub fn entity_count(&self) -> usize {
-        self.entity_meta
-            .iter()
-            .filter(|s| s.as_ref().and_then(|s| s.occupant.as_ref()).is_some())
-            .count()
-    }
-
-    pub fn system_count(&self) -> usize {
-        self.systems.len()
+    fn system_count(&self) -> usize {
+        self.get_extension::<Vec<Box<dyn CompilerSystem>>>()
+            .map(|s| s.len())
+            .unwrap_or(0)
     }
 }
 
-impl World {
-    pub fn current_epoch(&self) -> WorldEpoch {
-        self.epoch
+/// Extension trait providing transactional/constitutional methods on [`World`].
+///
+/// Epoch, journal, and committed-events state are stored via the type-erased
+/// extension mechanism so that [`prism_ecs_core::World`] has no direct
+/// dependency on constitutional types.
+pub trait WorldConstitutionalExt {
+    fn last_journal(&self) -> &[ComponentChange];
+    fn last_committed_events(&self) -> &[DomainEvent];
+    fn drain_committed_events(&mut self) -> Vec<DomainEvent>;
+    fn transit(&mut self, txn: WorldTxn) -> Result<CommittedEpoch, WorldTxnError>;
+    fn prepare(
+        &self,
+        txn: WorldTxn,
+        catalogue: Option<&SchemaCatalogue>,
+    ) -> Result<PreparedWorldTxn, WorldTxnError>;
+    fn apply_prepared(&mut self, prepared: PreparedWorldTxn) -> CommitReceipt;
+}
+
+impl WorldConstitutionalExt for World {
+    fn last_journal(&self) -> &[ComponentChange] {
+        self.get_extension::<Vec<ComponentChange>>()
+            .map(|v| v.as_slice())
+            .unwrap_or_default()
     }
 
-    pub fn last_journal(&self) -> &[ComponentChange] {
-        &self.journal
+    fn last_committed_events(&self) -> &[DomainEvent] {
+        self.get_extension::<Vec<DomainEvent>>()
+            .map(|v| v.as_slice())
+            .unwrap_or_default()
     }
 
-    pub fn last_committed_events(&self) -> &[DomainEvent] {
-        &self.committed_events
+    fn drain_committed_events(&mut self) -> Vec<DomainEvent> {
+        self.get_extension_mut::<Vec<DomainEvent>>()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
-    /// Check whether an entity exists in the world.
-    pub fn has_entity(&self, entity: impl Into<Entity>) -> bool {
-        let entity: Entity = entity.into();
-        self.is_alive(entity)
-    }
-
-    /// Read the component version (write count) for a given entity.
-    /// Returns 0 if no writes have occurred for this entity.
-    pub fn component_version(&self, entity: Entity) -> u64 {
-        self.component_versions
-            .get(&entity.id())
-            .copied()
-            .unwrap_or(0)
-    }
-
-    /// Expose component_store for preflight closure evaluation during prepare().
-    pub(crate) fn component_store_ref(&self) -> &ComponentStore {
-        &self.component_store
-    }
-
-    pub fn drain_committed_events(&mut self) -> Vec<DomainEvent> {
-        std::mem::take(&mut self.committed_events)
-    }
-    pub fn transit(&mut self, txn: WorldTxn) -> Result<CommittedEpoch, WorldTxnError> {
-        let prepared = self.prepare(txn, None)?;
-        let receipt = self.apply_prepared(prepared);
+    fn transit(&mut self, txn: WorldTxn) -> Result<CommittedEpoch, WorldTxnError> {
+        let prepared = WorldTransitExt::prepare(self, txn, None)?;
+        let receipt = WorldTransitExt::apply_prepared(self, prepared);
         Ok(CommittedEpoch(receipt.committed_epoch))
     }
 
-    /// Validate a transaction against the world WITHOUT mutating it.
-    /// On success returns a PreparedWorldTxn that can be atomically applied.
-    pub fn prepare(
+    fn prepare(
         &self,
         txn: WorldTxn,
         catalogue: Option<&SchemaCatalogue>,
     ) -> Result<PreparedWorldTxn, WorldTxnError> {
-        txn.prepare_inner(self, catalogue)
+        <World as WorldTransitExt>::prepare(self, txn, catalogue)
     }
 
     /// Atomically apply a validated, prepared transaction.
@@ -1004,143 +395,8 @@ impl World {
     ///
     /// After the first mutation, no recoverable errors remain — all invariants
     /// were validated during ::prepare().
-    pub fn apply_prepared(&mut self, prepared: PreparedWorldTxn) -> CommitReceipt {
-        // verify epoch before any mutation
-        assert_eq!(
-            self.epoch, prepared.expected_epoch,
-            "prepared transaction epoch mismatch: expected {:?}, world is at {:?}",
-            prepared.expected_epoch, self.epoch
-        );
-
-        // -- PHASE 3: Apply all mutations ----------------------------------
-        // Reserve spawn entity slots
-        for spawn in &prepared.spawns {
-            self.spawn_entity_with_id(spawn.entity.id(), spawn.kind);
-        }
-
-        // Apply durable ops (journaled — component versions still bumped)
-        for op in prepared.durable_ops {
-            (op.apply)(&mut self.component_store);
-            *self.component_versions.entry(op.entity.id()).or_insert(0) += 1;
-        }
-        // Apply transient ops (not journaled — component versions bumped)
-        for op in prepared.transient_ops {
-            (op.apply)(&mut self.component_store);
-            *self.component_versions.entry(op.entity.id()).or_insert(0) += 1;
-        }
-
-        // 3c. Apply staged spawns
-        for spawn in prepared.spawns {
-            (spawn.apply)(self);
-        }
-
-        // -- PHASE 4: Advance epoch AFTER all mutations succeed -----------
-        let next_epoch = WorldEpoch(self.epoch.0 + 1);
-        self.epoch = next_epoch;
-        self.journal = prepared.journal;
-        self.committed_events = prepared.events;
-
-        let receipt = CommitReceipt {
-            committed_epoch: next_epoch,
-            journal_length: self.journal.len(),
-            event_count: self.committed_events.len(),
-        };
-        receipt
-    }
-}
-
-impl ResourceStore {
-    pub fn insert<T: 'static + Send + Sync>(&mut self, resource: T) {
-        self.data.insert(TypeId::of::<T>(), Box::new(resource));
-    }
-
-    pub fn get<T: 'static + Send + Sync>(&self) -> Option<&T> {
-        self.data
-            .get(&TypeId::of::<T>())
-            .and_then(|b| b.downcast_ref::<T>())
-    }
-
-    pub fn contains<T: 'static + Send + Sync>(&self) -> bool {
-        self.data.contains_key(&TypeId::of::<T>())
-    }
-
-    pub fn remove<T: 'static + Send + Sync>(&mut self) -> Option<T> {
-        self.data
-            .remove(&TypeId::of::<T>())
-            .and_then(|b| b.downcast::<T>().ok().map(|b| *b))
-    }
-
-    pub fn get_mut<T: 'static + Send + Sync>(&mut self) -> Option<&mut T> {
-        self.data
-            .get_mut(&TypeId::of::<T>())
-            .and_then(|b| b.downcast_mut::<T>())
-    }
-}
-
-impl ComponentStore {
-    /// Get or create a column for component type T.
-    pub fn column_mut<T: Component>(&mut self) -> &mut Column<T> {
-        let key = TypeId::of::<Column<T>>();
-        self.data
-            .entry(key)
-            .or_insert_with(|| Box::new(Column::<T>::new()))
-            .downcast_mut::<Column<T>>()
-            .expect("Column<T> type mismatch in ComponentStore")
-    }
-
-    /// Get a shared reference to a column.
-    pub fn column<T: Component>(&self) -> Option<&Column<T>> {
-        let key = TypeId::of::<Column<T>>();
-        self.data.get(&key)?.downcast_ref::<Column<T>>()
-    }
-
-    /// Canonical: insert or replace a component.
-    pub fn insert_component<T: Component>(
-        &mut self,
-        entity: Entity,
-        value: T,
-    ) -> Result<(), WorldError> {
-        self.insert::<T>(entity, value);
-        Ok(())
-    }
-
-    /// Canonical: read a component.
-    pub fn component<T: Component>(&self, entity: Entity) -> Result<&T, WorldError> {
-        self.get::<T>(entity).ok_or(WorldError::MissingComponent {
-            entity,
-            type_name: std::any::type_name::<T>(),
-        })
-    }
-
-    /// Canonical: mutable read of a component.
-    pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Result<&mut T, WorldError> {
-        self.column_mut::<T>()
-            .get_mut(entity)
-            .ok_or(WorldError::MissingComponent {
-                entity,
-                type_name: std::any::type_name::<T>(),
-            })
-    }
-
-    /// Canonical: check if entity has a component.
-    pub fn has_component<T: Component>(&self, entity: Entity) -> bool {
-        self.contains::<T>(entity)
-    }
-
-    pub fn insert<T: Component>(&mut self, entity: Entity, value: T) {
-        self.column_mut::<T>().insert(entity, value);
-    }
-
-    pub fn get<T: Component>(&self, entity: Entity) -> Option<&T> {
-        self.column::<T>()?.get(entity)
-    }
-
-    pub fn remove<T: Component>(&mut self, entity: Entity) -> Option<T> {
-        self.column_mut::<T>().remove(entity)
-    }
-
-    pub fn contains<T: Component>(&self, entity: Entity) -> bool {
-        self.column::<T>().map(|c| c.has(entity)).unwrap_or(false)
+    fn apply_prepared(&mut self, prepared: PreparedWorldTxn) -> CommitReceipt {
+        <World as WorldTransitExt>::apply_prepared(self, prepared)
     }
 }
 

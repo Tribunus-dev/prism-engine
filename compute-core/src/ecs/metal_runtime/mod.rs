@@ -1,6 +1,5 @@
-//! Metal runtime — region encoding, PSO caching, and profile-runner integration.
+//! Metal runtime — re-exported from the standalone `prism-metal-runtime` crate.
 //! Gated behind `metal-dispatch` feature + macOS.
 
-pub mod fusion_lowering;
-pub mod pso_cache;
-pub mod region_encoder;
+#[cfg(feature = "metal-dispatch")]
+pub use prism_metal_runtime::*;

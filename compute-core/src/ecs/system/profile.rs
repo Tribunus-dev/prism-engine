@@ -56,7 +56,7 @@ impl CompilerSystem for ProfileExecutionSystem {
 
             let result = execute_profile(&plan, &config);
 
-            world.add_component(entity, ProfileRunResult(result));
+            let _ = world.add_component(entity, ProfileRunResult(result));;
         }
 
         Ok(())

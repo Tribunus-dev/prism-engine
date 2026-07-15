@@ -1,0 +1,16 @@
+[package]
+name = "prism-ecs-constitutional"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Prism ECS constitutional commands — session, work, execution, compilation, multimodal, agent, distributed, and ingress authority systems"
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+serde_json = "1"
+blake3 = "1"
+serde_json_canonicalizer = "0.3"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+strum = { workspace = true }

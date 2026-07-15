@@ -12,14 +12,7 @@ use crate::ecs::compilation::phase_ir::{ANEArtifactKey, CompilePhaseDescriptor, 
 use crate::ecs::compilation::tri_lane::{AneAdmission, AneRejectionReason};
 use crate::ecs::component::compilation::{AdmissionGate, EvidenceId, QualificationGate};
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
-
-// ---------------------------------------------------------------------------
-// AdmissionGateSystem
-// ---------------------------------------------------------------------------
-
-/// Applies the five ANE admission checks to every compile phase entity.
-pub struct AdmissionGateSystem;
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};pub struct AdmissionGateSystem;
 impl CompilerSystem for AdmissionGateSystem {
     fn name(&self) -> &str {
         "AdmissionGateSystem"
@@ -28,7 +21,7 @@ impl CompilerSystem for AdmissionGateSystem {
         SchedulePhase::Validation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let phase_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
         let device = DeviceSignature {
             device_id: "apple-m1".into(),
             chip: "Apple M1".into(),
@@ -57,18 +50,16 @@ impl CompilerSystem for AdmissionGateSystem {
                 AdmissionVerdict::Denied { reason, .. } => reason.clone(),
             };
 
-            world.add_component(
-                *entity,
-                AdmissionGate {
-                    name: format!("ane_admission_{}", phase.phase_id.0),
-                    passed,
-                    evidence: if passed {
-                        Some(EvidenceId::from(reason))
-                    } else {
-                        None
-                    },
+            let _ = world.add_component(*entity,
+            AdmissionGate {
+                name: format!("ane_admission_{}", phase.phase_id.0),
+                passed,
+                evidence: if passed {
+                    Some(EvidenceId::from(reason))
+                } else {
+                    None
                 },
-            );
+            },);;
         }
         Ok(())
     }
@@ -90,7 +81,7 @@ impl CompilerSystem for AneAdmissionGateSystem {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let mut gate = LaneAdmissionGate::new(RiskPolicy::ProductionOnly);
-        let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let phase_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for entity in &phase_entities {
             let Some(phase) = world.get_component::<CompilePhaseDescriptor>(*entity) else {
@@ -146,18 +137,16 @@ impl CompilerSystem for AneAdmissionGateSystem {
             gate.record(record);
 
             let admitted = gate.is_production_ready(&qual_key);
-            world.add_component(
-                *entity,
-                AdmissionGate {
-                    name: format!("lane_admission_{}", phase.phase_id.0),
-                    passed: admitted,
-                    evidence: if admitted {
-                        Some(EvidenceId::from("lane_admission_passed"))
-                    } else {
-                        Some(EvidenceId::from("lane_admission_failed"))
-                    },
+            let _ = world.add_component(*entity,
+            AdmissionGate {
+                name: format!("lane_admission_{}", phase.phase_id.0),
+                passed: admitted,
+                evidence: if admitted {
+                    Some(EvidenceId::from("lane_admission_passed"))
+                } else {
+                    Some(EvidenceId::from("lane_admission_failed"))
                 },
-            );
+            },);;
         }
         Ok(())
     }
@@ -178,32 +167,28 @@ impl CompilerSystem for EvidenceProbeSystem {
         SchedulePhase::Validation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let exe_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Executable);
+        let exe_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
         for entity in &exe_entities {
             match run_probe("/tmp/test_mlmodelc", 1, 4096) {
                 Ok(evidence) => {
-                    world.add_component(
-                        *entity,
-                        AdmissionGate {
-                            name: "evidence_probe".into(),
-                            passed: true,
-                            evidence: Some(EvidenceId::from(format!(
-                                "aliasing:{}",
-                                evidence.zero_copy_qualified
-                            ))),
-                        },
-                    );
+                    let _ = world.add_component(*entity,
+                    AdmissionGate {
+                        name: "evidence_probe".into(),
+                        passed: true,
+                        evidence: Some(EvidenceId::from(format!(
+                            "aliasing:{}",
+                            evidence.zero_copy_qualified
+                        ))),
+                    },);;
                 }
                 Err(e) => {
-                    world.add_component(
-                        *entity,
-                        AdmissionGate {
-                            name: "evidence_probe".into(),
-                            passed: false,
-                            evidence: Some(EvidenceId::from(format!("probe_failed: {e}"))),
-                        },
-                    );
+                    let _ = world.add_component(*entity,
+                    AdmissionGate {
+                        name: "evidence_probe".into(),
+                        passed: false,
+                        evidence: Some(EvidenceId::from(format!("probe_failed: {e}"))),
+                    },);;
                 }
             }
         }
@@ -227,7 +212,7 @@ impl CompilerSystem for QualificationGateSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let config = AneQualificationConfig::default();
         let gate = AneQualificationGate::new(config);
-        let phase_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Tensor);
+        let phase_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
         for entity in &phase_entities {
             let Some(phase) = world.get_component::<CompilePhaseDescriptor>(*entity) else {
@@ -248,15 +233,13 @@ impl CompilerSystem for QualificationGateSystem {
                 0.0
             };
 
-            world.add_component(
-                *entity,
-                QualificationGate {
-                    name: format!("qual_gate_{}", phase.phase_id.0),
-                    min_score: 0.10,
-                    actual: score - 1.0,
-                    passed,
-                },
-            );
+            let _ = world.add_component(*entity,
+            QualificationGate {
+                name: format!("qual_gate_{}", phase.phase_id.0),
+                min_score: 0.10,
+                actual: score - 1.0,
+                passed,
+            },);;
         }
         Ok(())
     }

@@ -20,6 +20,8 @@
 
 use lazy_static::lazy_static;
 
+use crate::ecs::constitutional::multimodal::{PipelineModality, PipelineStage};
+use crate::ecs::constitutional::pipeline_bridge::PipelineBridge;
 use crate::ecs::runtime::components::worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase};
 use crate::ecs::runtime::components::worker_request::WorkerRequest;
 use crate::ecs::runtime::components::worker_stream::WorkerStream;
@@ -45,12 +47,19 @@ use crate::ecs::runtime::world::{Entity, World};
 /// 4. Writes encoded feature metadata into the entity's `WorkerStream`.
 pub struct VisionInferenceSystem {
     _private: (),
+    /// Optional bridge to the constitutional pipeline command layer.
+    /// When set, registers a pipeline entity before encoding and
+    /// submits stage output after.
+    pub pipeline_bridge: Option<PipelineBridge>,
 }
 
 impl VisionInferenceSystem {
     /// Create a new vision inference system.
     pub fn new() -> Self {
-        Self { _private: () }
+        Self {
+            _private: (),
+            pipeline_bridge: None,
+        }
     }
 }
 
@@ -127,6 +136,23 @@ impl ErasedSystem for VisionInferenceSystem {
 
         // 3. For each entity with image input, encode and write features.
         //
+        //    Authority record: register the constitutional pipeline
+        //    before inference so the pipeline entity tracks this work.
+        if let Some(bridge) = &mut self.pipeline_bridge {
+            let _ = bridge.create_pipeline(
+                world,
+                PipelineModality::Vision,
+                vec![PipelineStage {
+                    stage_index: 0,
+                    stage_type: "vision_encode".to_string(),
+                    model_entity: 0,
+                    input_transform: "image".to_string(),
+                    output_transform: "features".to_string(),
+                }],
+            );
+        }
+
+        //
         //    TODO: In a full implementation, the WorkerRequest payload
         //    contains serialized image bytes that must be decoded into an
         //    MLX Array in NCHW format ([1, C, H, W]), then passed to
@@ -146,6 +172,12 @@ impl ErasedSystem for VisionInferenceSystem {
                 stream.record_output(None, 0);
             }
         }
+
+        // Record stage output through the constitutional pipeline.
+        if let Some(bridge) = &self.pipeline_bridge {
+            let _ = bridge.submit_stage_output(world, 0, None);
+        }
+
         SystemResult::ok()
     }
 }

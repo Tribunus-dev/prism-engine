@@ -243,7 +243,7 @@ impl CompilerSystem for AutoTuningSystem {
                 wave_limit: Some(std::cmp::max(1, compute_units * 4)),
             };
 
-            world.add_component(kernel, spec);
+            let _ = world.add_component(kernel, spec);;
         }
 
         Ok(())
@@ -334,7 +334,7 @@ impl CompilerSystem for AOTProfileMatchSystem {
                 profile_id: profile_id_str,
                 match_confidence,
             };
-            world.add_component(entry.kernel, match_component);
+            let _ = world.add_component(entry.kernel, match_component);;
 
             // Also add a TuningSpec with profile-informed parameters.
             let spec = TuningSpec {
@@ -350,7 +350,7 @@ impl CompilerSystem for AOTProfileMatchSystem {
                 lds_usage_bytes: entry.arch.max_lds_bytes.min(64 * 1024),
                 wave_limit: Some(std::cmp::max(1, cu * 4)),
             };
-            world.add_component(entry.kernel, spec);
+            let _ = world.add_component(entry.kernel, spec);;
         }
 
         Ok(())

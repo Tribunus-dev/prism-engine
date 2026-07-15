@@ -224,20 +224,18 @@ impl MetalDecompositionSearch {
                     let seed_val = (gen as u64).wrapping_mul(100).wrapping_add(i as u64);
                     let child = mutate_program(&parent_a.program, &self.config, seed_val);
 
-                    let entity = world.spawn(EntityKind::Node, None);
-                    world.add_component(
-                        entity,
-                        EvolveCandidate {
-                            tensor_id: self.tensor_id.clone(),
-                            target_backend: self.backend,
-                            format: self.format,
-                            program: child,
-                            measured_cost: None,
-                            generation: gen as u64 + 1,
-                            parents: vec![parent_a.tensor_id.clone(), parent_b.tensor_id.clone()],
-                        },
-                    );
-                    new_entities.push(entity);
+                    let entity = world.spawn(EntityKind::Node, None).expect("spawn failed");
+                    let _ = world.add_component(entity,
+                    EvolveCandidate {
+                        tensor_id: self.tensor_id.clone(),
+                        target_backend: self.backend,
+                        format: self.format,
+                        program: child,
+                        measured_cost: None,
+                        generation: gen as u64 + 1,
+                        parents: vec![parent_a.tensor_id.clone(), parent_b.tensor_id.clone()],
+                    },);;
+                    new_entities.push(entity.entity);
                     i += 1;
                 }
 

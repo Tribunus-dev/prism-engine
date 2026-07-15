@@ -59,25 +59,23 @@ impl CompilerSystem for TemplateSelectionSystem {
         // Spawn kernels and add components (mutable borrow).
         for info in &infos {
             let template_id = select_template(&info.root_op, info.codec);
-            let kernel = world.spawn(EntityKind::Kernel, Some(template_id.name().to_string()));
+            let kernel = world.spawn(EntityKind::Kernel, Some(template_id.name().into()))?;
             // Attach the template id via a string component for downstream lookups.
-            world.add_component(
-                kernel,
-                KernelSource {
-                    language: crate::ecs::component::backend::ShaderLanguage::MSL,
-                    source: template_id.name().to_string(),
-                    entry_point: template_id.default_entry_point().to_string(),
-                },
-            );
+            let _ = world.add_component(kernel,
+            KernelSource {
+                language: crate::ecs::component::backend::ShaderLanguage::MSL,
+                source: template_id.name().to_string(),
+                entry_point: template_id.default_entry_point().to_string(),
+            },);;
             // Propagate backend arch and GPU info from the dispatch.
             if let Some(arch) = world.get_component::<GPUArch>(info.entity) {
-                world.add_component(kernel, arch.clone());
+                let _ = world.add_component(kernel, arch.clone());;
             }
             if let Some(target) = world.get_component::<BackendTarget>(info.entity) {
-                world.add_component(kernel, *target);
+                let _ = world.add_component(kernel, *target);;
             }
             if let Some(shape) = world.get_component::<Shape>(info.entity) {
-                world.add_component(kernel, shape.clone());
+                let _ = world.add_component(kernel, shape.clone());;
             }
         }
 
@@ -146,7 +144,7 @@ impl CompilerSystem for ParameterResolutionSystem {
                 accumulation_dtype: crate::ecs::aot::parameters::DType::Fp32,
                 output_dtype: crate::ecs::aot::parameters::DType::Fp16,
             };
-            world.add_component(r.entity, params);
+            let _ = world.add_component(r.entity, params);;
         }
 
         Ok(())
@@ -310,14 +308,12 @@ impl CompilerSystem for TemplateExpansionSystem {
             let expanded = self.expander.expand(&template, &w.params)?;
 
             // Update the KernelSource with expanded source.
-            world.add_component(
-                w.entity,
-                KernelSource {
-                    language: w.source.language.clone(),
-                    source: expanded,
-                    entry_point: w.source.entry_point.clone(),
-                },
-            );
+            let _ = world.add_component(w.entity,
+            KernelSource {
+                language: w.source.language.clone(),
+                source: expanded,
+                entry_point: w.source.entry_point.clone(),
+            },);;
         }
 
         Ok(())

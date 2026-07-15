@@ -20,7 +20,8 @@ impl CompilerSystem for SessionCleanupSystem {
 
         for entity in &entities {
             if world.get_component::<SessionState>(*entity).is_some() {
-                world.remove_component::<SessionState>(*entity);
+                let _ = world.remove_component::<SessionState>(*entity);
+                let _ = world.remove_component::<SessionState>(*entity);
             }
         }
 

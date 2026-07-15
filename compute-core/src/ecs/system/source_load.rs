@@ -16,7 +16,6 @@ use crate::ecs::component::tensor::{DataType, Shape};
 use crate::ecs::compute_image::compile::load_source_tensor_table;
 use crate::ecs::compute_image::compile::source::load_source;
 use crate::ecs::Component;
-use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
 /// Source tensor metadata wrapped as an ECS component.
@@ -47,11 +46,11 @@ impl CompilerSystem for SourceLoadingSystem {
             .map_err(|e| anyhow::anyhow!("source load failed: {e}"))?;
 
         // Spawn a Tensor entity per source tensor with Shape and DataType.
-        for (_name, tensor) in &loaded.source_tensors {
-            let entity = world.spawn(EntityKind::Tensor, Some(tensor.name.clone()));
-            world.add_component(entity, Shape(tensor.shape.clone()));
+        for (name, tensor) in &loaded.source_tensors {
+            let entity = world.spawn(EntityKind::Tensor, Some(name.clone()))?;
+            world.add_component(entity, Shape(tensor.shape.clone()))?;
             let dt = map_dtype_str(&tensor.dtype);
-            world.add_component(entity, DataType(dt));
+            world.add_component(entity, DataType(dt))?;
             world.add_component(
                 entity,
                 SourceTensorMeta {
@@ -59,7 +58,7 @@ impl CompilerSystem for SourceLoadingSystem {
                     raw_dtype: tensor.dtype.clone(),
                     sha256: tensor.source_sha256.clone(),
                 },
-            );
+            )?;
         }
 
         Ok(())
@@ -84,8 +83,8 @@ impl CompilerSystem for TensorTableLoadingSystem {
 
         // Store table as a component on a synthetic entity so downstream
         // systems can reference it for differential compilation decisions.
-        let meta_entity = world.spawn(EntityKind::Model, Some("tensor_table".into()));
-        world.add_component(meta_entity, TensorTableComp(table));
+        let meta_entity = world.spawn(EntityKind::Artifact, Some("tensor_table".into()))?;
+        world.add_component(meta_entity, TensorTableComp(table))?;
         Ok(())
     }
 }

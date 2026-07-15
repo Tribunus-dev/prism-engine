@@ -8,13 +8,7 @@
 use crate::ecs::component::model_source::{ValidationReportComp, ValidationResultSummary};
 use crate::ecs::compute_image::compile::validation_matrix::{ValidationMatrix, ValidationResult};
 use crate::ecs::Entity;
-use crate::ecs::{CompEntity, CompilerSystem, EntityKind, SchedulePhase, World};
-
-/// Run validation tests on every Kernel entity in the world.
-///
-/// For each kernel with a `KernelSource` component, creates a
-/// `ValidationMatrix`, runs equivalence tests, and stores the report.
-pub struct ValidationMatrixSystem;
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};pub struct ValidationMatrixSystem;
 
 impl CompilerSystem for ValidationMatrixSystem {
     fn name(&self) -> &str {
@@ -24,7 +18,7 @@ impl CompilerSystem for ValidationMatrixSystem {
         SchedulePhase::Validation
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
-        let kernel_entities: Vec<CompEntity> = world.entities_of_kind(EntityKind::Kernel);
+        let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
         if kernel_entities.is_empty() {
             return Ok(());
         }
@@ -87,14 +81,12 @@ impl CompilerSystem for ValidationMatrixSystem {
                 })
                 .collect();
 
-            world.add_component(
-                entity,
-                ValidationReportComp {
-                    kernel_name: name,
-                    results,
-                    overall_pass: matrix.overall_pass,
-                },
-            );
+            let _ = world.add_component(entity,
+            ValidationReportComp {
+                kernel_name: name,
+                results,
+                overall_pass: matrix.overall_pass,
+            },);;
         }
 
         Ok(())

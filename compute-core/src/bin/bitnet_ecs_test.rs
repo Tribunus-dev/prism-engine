@@ -19,6 +19,7 @@ use tribunus_compute_core::ecs::system::engine_systems::{
     CimageGenerateSystem, CimageLoadRequest, CimageLoadSystem, EngineInitSystem,
 };
 use tribunus_compute_core::ecs::system::metal_init::MetalInitSystem;
+use tribunus_compute_core::ecs::WorldSystemsExt;
 use tribunus_compute_core::ecs::{EntityKind, SchedulePhase, World};
 
 #[derive(Parser)]
@@ -61,9 +62,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model_entity = world.spawn(
         EntityKind::Model,
         Some(args.cimage.to_string_lossy().to_string()),
-    );
+    )?;
     let (load_tx, load_rx) = mpsc::channel();
-    world.add_component(
+    let _ = world.add_component(
         model_entity,
         CimageLoadRequest {
             cimage_bytes,
@@ -93,7 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // ── 4. Add InFlightDecode to start inference tracking ──────────────
-    world.add_component(
+    let _ = world.add_component(
         model_entity,
         InFlightDecode {
             token_count: 0,

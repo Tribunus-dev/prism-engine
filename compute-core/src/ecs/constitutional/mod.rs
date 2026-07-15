@@ -1,51 +1,9 @@
-pub mod agent_exec;
-pub mod artifact;
-pub mod command;
-pub mod compilation;
-pub mod device;
-pub mod distributed;
-pub mod driver;
-pub mod envelope;
-pub mod event_store;
-pub mod execution;
-pub mod ingress;
-pub mod lifecycle;
-pub mod migration;
-pub mod multimodal;
-pub mod persistence;
-pub mod residency;
-pub mod scheduler;
-pub mod schema;
-pub mod session;
-pub mod sparse_set;
-pub mod system_desc;
-pub mod types;
-pub mod work;
-pub mod world_txn;
+//! Constitutional commands — re-exported from the prism-ecs-constitutional crate.
+//!
+//! This module exists as a compatibility shim during the extraction migration.
+//! New code should use `prism_ecs_constitutional` directly.
 
-pub use agent_exec::*;
-pub use artifact::*;
-pub use command::*;
-pub use compilation::*;
-pub use device::*;
-pub use distributed::*;
-pub use driver::*;
-pub use envelope::*;
-pub use event_store::*;
-pub use execution::*;
-pub use ingress::*;
-pub use lifecycle::*;
-pub use migration::*;
-pub use multimodal::*;
-pub use persistence::*;
-pub use residency::*;
-pub use scheduler::*;
-pub use schema::*;
-pub use session::*;
-pub use sparse_set::*;
-pub use system_desc::*;
-pub use work::*;
-pub use world_txn::*;
+pub use prism_ecs_constitutional::*;
 
 #[cfg(test)]
 mod tests;

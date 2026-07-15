@@ -9,6 +9,7 @@
 use crate::ecs::runtime::scheduling::command::CommandWriter;
 use crate::ecs::runtime::scheduling::metadata::*;
 use crate::ecs::runtime::world::World;
+use crate::ecs::scheduling::agent_bridge::AgentBridge;
 
 // ---------------------------------------------------------------------------
 // LegacyBridgeSystem
@@ -21,13 +22,21 @@ use crate::ecs::runtime::world::World;
 /// system) so it can populate the ingress queue before
 /// [`WorkerIngressSystem`] drains it.
 pub struct LegacyBridgeSystem {
-    _private: (),
+    /// Optional constitutional bridge for agent-run creation before
+    /// worker spawns.  Defaults to `None`; set via [`with_agent_bridge`].
+    pub agent_bridge: Option<AgentBridge>,
 }
 
 impl LegacyBridgeSystem {
     /// Create a new legacy bridge system.
     pub fn new() -> Self {
-        Self { _private: () }
+        Self { agent_bridge: None }
+    }
+
+    /// Attach an [`AgentBridge`] for constitutional agent-run creation.
+    pub fn with_agent_bridge(mut self, bridge: AgentBridge) -> Self {
+        self.agent_bridge = Some(bridge);
+        self
     }
 }
 
@@ -69,7 +78,17 @@ impl ErasedSystem for LegacyBridgeSystem {
     }
 
     fn run(&mut self, _world: &mut World, _commands: &mut CommandWriter) -> SystemResult {
-        // Placeholder — no-op until the legacy bridge path is wired.
+        // Wire create_agent_run before worker spawn: when the
+        // bridge is available, iterate queued entities and
+        // call bridge.create_agent_run(...) with the session/task/config
+        // extracted from the runtime world.
+        //
+        // TODO: extract session_entity, task, config from runtime components
+        // and call bridge.create_agent_run(...) for each candidate.
+        if self.agent_bridge.is_some() {
+            // Bridge is available — wiring is pending entity mapping.
+        }
+
         SystemResult::ok()
     }
 }

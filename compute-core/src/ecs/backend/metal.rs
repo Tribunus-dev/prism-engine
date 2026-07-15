@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::ecs::backend::completion::{ComellationToken, ComputationToken};
 use mpsgraph::{DataType, Device, Graph, ShapedType, TensorData};
+use prism_ecs_backend::completion::{ComellationToken, ComputationToken};
 
 use crate::ecs::backend::heterogeneous_executor::BackendInstance;
 use crate::ecs::backend::routing::{
@@ -1787,42 +1787,12 @@ impl TensorBackend for MetalBackend {
         outputs: &[TensorHandle],
     ) -> Result<ComputationToken, String> {
         self.evaluate(group_id, outputs)?;
-
-        // Create a Metal command buffer with an async completion handler.
-        let queue = self.mtl_device.new_command_queue();
-        let cmd_buf = queue.new_command_buffer();
-
-        // Create a completion token backed by the MTLCommandBuffer.
-        // The completion handler will fire when the GPU finishes.
-        let token = ComellationToken::from_command_buffer(cmd_buf);
-        cmd_buf.commit();
-
-        Ok(ComputationToken::Metal(token))
+        // Use synchronous completion — metal-dispatch not available in
+        // prism-ecs-backend (ComputationToken::Metal variant is gated behind it).
+        let (token, completer) = ComellationToken::new();
+        completer.complete();
+        Ok(ComputationToken::Generic(token))
     }
-
-    /// Evaluate outputs into a pre-allocated arena (IOSurface-backed).
-    /// Creates a Metal command buffer with a blit encoder for memory
-    /// synchronization, commits, and waits for completion.
-    #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-    fn evaluate_into(
-        &mut self,
-        group_id: u64,
-        outputs: &[TensorHandle],
-        _arena: &crate::arena::Arena,
-    ) -> Result<EvaluationReceipt, String> {
-        let receipt = self.evaluate(group_id, outputs)?;
-
-        // Create a command buffer with a blit encoder to synchronise memory.
-        let queue = self.mtl_device.new_command_queue();
-        let cmd_buf = queue.new_command_buffer();
-        let blit_enc = cmd_buf.new_blit_command_encoder();
-        blit_enc.end_encoding();
-        cmd_buf.commit();
-        cmd_buf.wait_until_completed();
-
-        Ok(receipt)
-    }
-
     fn read_f32(&mut self, handle: TensorHandle) -> Result<ReadbackReceipt, String> {
         let tensor = self.slot(handle)?;
         let buf = tensor

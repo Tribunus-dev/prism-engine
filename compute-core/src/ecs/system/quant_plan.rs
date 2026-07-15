@@ -51,7 +51,7 @@ impl CompilerSystem for CodecSelectionSystem {
             };
 
             let (codec, group_size) = select_codec_for_role(role);
-            world.add_component(tensor, CodecFamilyComp(codec, group_size));
+            let _ = world.add_component(tensor, CodecFamilyComp(codec, group_size));;
         }
 
         Ok(())
@@ -165,7 +165,7 @@ impl CompilerSystem for PrecisionPlanSystem {
         };
 
         for model in &models {
-            world.add_component(*model, PrecisionPlanComponent(plan.clone()));
+            let _ = world.add_component(*model, PrecisionPlanComponent(plan.clone()));;
         }
 
         Ok(())
