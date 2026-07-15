@@ -1,6 +1,12 @@
 #![allow(deprecated)]
 pub mod canonical;
 
+pub mod capacity;
+pub mod error;
+pub mod evaluator;
+pub mod mutation;
+pub mod resource;
+
 pub mod adapter;
 pub mod aot;
 pub mod column;
@@ -200,12 +206,20 @@ pub mod worker_crash_ledger;
 pub mod worker_dispatch;
 pub mod worker_memory;
 pub mod worker_protocol;
+pub use capacity::{ComponentStoreCapacity, WorldCapacity};
 pub use component::aot::*;
 pub use component::backend::*;
 pub use component::executor::*;
 pub use component::memory::*;
 pub use component::quality::*;
 pub use component::tensor::*;
+pub use error::WorldError;
+pub use evaluator::{
+    AdmissionDecision, AdmissionPolicy, BackendArtifact, BackendEvaluator, BindingPlan,
+    EvaluationConfig, EvaluationError, EvaluationFixture, EvaluationReceiptBundle, EvaluationRole,
+    GeneratedExecutable, HeterogeneousEvaluatorSystem, TemperaturePolicy,
+};
+pub use mutation::MutationPolicy;
 
 use crate::ecs::constitutional::command::DomainEvent;
 use crate::ecs::constitutional::schema::SchemaCatalogue;
@@ -213,6 +227,7 @@ use crate::ecs::constitutional::types::WorldEpoch;
 pub use crate::ecs::constitutional::world_txn::{
     CommitReceipt, CommittedEpoch, ComponentChange, PreparedWorldTxn, WorldTxn, WorldTxnError,
 };
+use crate::ecs::resource::{ResourceMut, ResourceRef};
 pub use column::Column;
 #[cfg(feature = "mlx-backend")]
 pub use core::bridge;
@@ -275,6 +290,28 @@ pub struct PendingEntity(pub u64);
 pub enum EntityRef {
     Existing(Entity),
     Pending(PendingEntity),
+}
+
+/// Result of spawning an entity, with allocation detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnedEntity {
+    pub entity: Entity,
+    pub allocation: EntityAllocation,
+}
+
+/// Describes how an entity was allocated during spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityAllocation {
+    /// Fresh entity slot — no previous occupant.
+    NewSlot,
+    /// Reused slot from a despawned entity.
+    ReusedSlot { previous_generation: u32 },
+}
+
+impl From<SpawnedEntity> for Entity {
+    fn from(s: SpawnedEntity) -> Self {
+        s.entity
+    }
 }
 
 /// Tag trait for data attached to entities.
@@ -720,6 +757,63 @@ impl World {
         self.component_store.column_mut::<T>().get_mut(e)
     }
 
+    /// Canonical: insert or replace a component on an entity.
+    /// Returns error if the entity is stale or dead.
+    pub fn insert_component<T: Component>(
+        &mut self,
+        entity: impl Into<Entity>,
+        component: T,
+    ) -> Result<(), WorldError> {
+        let entity: Entity = entity.into();
+        if !self.is_alive(entity) {
+            return Err(WorldError::StaleHandle { entity });
+        }
+        assert!(
+            self.direct_mutation_allowed,
+            "direct insert_component() called outside WorldTxn"
+        );
+        self.component_store.insert::<T>(entity, component);
+        Ok(())
+    }
+
+    /// Canonical: read a component from an entity.
+    pub fn component<T: Component>(&self, entity: impl Into<Entity>) -> Result<&T, WorldError> {
+        let entity: Entity = entity.into();
+        if !self.is_alive(entity) {
+            return Err(WorldError::StaleHandle { entity });
+        }
+        self.component_store
+            .get::<T>(entity)
+            .ok_or(WorldError::MissingComponent {
+                entity,
+                type_name: std::any::type_name::<T>(),
+            })
+    }
+
+    /// Canonical: mutable read of a component.
+    pub fn component_mut<T: Component>(
+        &mut self,
+        entity: impl Into<Entity>,
+    ) -> Result<&mut T, WorldError> {
+        let e: Entity = entity.into();
+        if !self.is_alive(e) {
+            return Err(WorldError::StaleHandle { entity: e });
+        }
+        self.component_store
+            .column_mut::<T>()
+            .get_mut(e)
+            .ok_or(WorldError::MissingComponent {
+                entity: e,
+                type_name: std::any::type_name::<T>(),
+            })
+    }
+
+    /// Canonical: check if an entity has a component.
+    pub fn has_component<T: Component>(&self, entity: impl Into<Entity>) -> bool {
+        let entity: Entity = entity.into();
+        self.is_alive(entity) && self.component_store.contains::<T>(entity)
+    }
+
     #[cfg_attr(
         not(feature = "legacy_mutations"),
         deprecated(note = "resources should be committed via WorldTxn")
@@ -746,6 +840,56 @@ impl World {
             .data
             .get_mut(&TypeId::of::<T>())
             .and_then(|b| b.downcast_mut::<T>())
+    }
+
+    /// Typed resource: insert a resource, returning error if already exists.
+    pub fn insert_resource<T: 'static + Send + Sync>(
+        &mut self,
+        resource: T,
+    ) -> Result<(), WorldError> {
+        if self.resource_store.contains::<T>() {
+            return Err(WorldError::DuplicateResource {
+                type_name: std::any::type_name::<T>(),
+            });
+        }
+        self.resource_store.insert::<T>(resource);
+        Ok(())
+    }
+
+    /// Typed resource: get a guarded shared reference.
+    pub fn resource<T: 'static + Send + Sync>(&self) -> Result<ResourceRef<'_, T>, WorldError> {
+        self.resource_store
+            .get::<T>()
+            .map(ResourceRef::new)
+            .ok_or(WorldError::MissingResource {
+                type_name: std::any::type_name::<T>(),
+            })
+    }
+
+    /// Typed resource: get a guarded mutable reference.
+    pub fn resource_mut<T: 'static + Send + Sync>(
+        &mut self,
+    ) -> Result<ResourceMut<'_, T>, WorldError> {
+        self.resource_store
+            .get_mut::<T>()
+            .map(ResourceMut::new)
+            .ok_or(WorldError::MissingResource {
+                type_name: std::any::type_name::<T>(),
+            })
+    }
+
+    /// Check if a resource type exists.
+    pub fn has_resource<T: 'static + Send + Sync>(&self) -> bool {
+        self.resource_store.contains::<T>()
+    }
+
+    /// Remove a resource, returning it.
+    pub fn remove_resource<T: 'static + Send + Sync>(&mut self) -> Result<T, WorldError> {
+        self.resource_store
+            .remove::<T>()
+            .ok_or(WorldError::MissingResource {
+                type_name: std::any::type_name::<T>(),
+            })
     }
 
     pub fn add_system(&mut self, system: Box<dyn CompilerSystem>) {
@@ -925,6 +1069,12 @@ impl ResourceStore {
             .remove(&TypeId::of::<T>())
             .and_then(|b| b.downcast::<T>().ok().map(|b| *b))
     }
+
+    pub fn get_mut<T: 'static + Send + Sync>(&mut self) -> Option<&mut T> {
+        self.data
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|b| b.downcast_mut::<T>())
+    }
 }
 
 impl ComponentStore {
@@ -942,6 +1092,39 @@ impl ComponentStore {
     pub fn column<T: Component>(&self) -> Option<&Column<T>> {
         let key = TypeId::of::<Column<T>>();
         self.data.get(&key)?.downcast_ref::<Column<T>>()
+    }
+
+    /// Canonical: insert or replace a component.
+    pub fn insert_component<T: Component>(
+        &mut self,
+        entity: Entity,
+        value: T,
+    ) -> Result<(), WorldError> {
+        self.insert::<T>(entity, value);
+        Ok(())
+    }
+
+    /// Canonical: read a component.
+    pub fn component<T: Component>(&self, entity: Entity) -> Result<&T, WorldError> {
+        self.get::<T>(entity).ok_or(WorldError::MissingComponent {
+            entity,
+            type_name: std::any::type_name::<T>(),
+        })
+    }
+
+    /// Canonical: mutable read of a component.
+    pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Result<&mut T, WorldError> {
+        self.column_mut::<T>()
+            .get_mut(entity)
+            .ok_or(WorldError::MissingComponent {
+                entity,
+                type_name: std::any::type_name::<T>(),
+            })
+    }
+
+    /// Canonical: check if entity has a component.
+    pub fn has_component<T: Component>(&self, entity: Entity) -> bool {
+        self.contains::<T>(entity)
     }
 
     pub fn insert<T: Component>(&mut self, entity: Entity, value: T) {

@@ -14,7 +14,13 @@
         <key>HOME</key>
         <string>__HOME__</string>
         <key>PATH</key>
-        <string>__HOME__/.cargo/bin:__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/opt/homebrew/opt/llvm/bin:__HOME__/.cargo/bin:__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>LLVM_CONFIG_PATH</key>
+        <string>/opt/homebrew/opt/llvm/bin/llvm-config</string>
+        <key>MLIR_SYS_220_PREFIX</key>
+        <string>/opt/homebrew/opt/llvm</string>
+        <key>TABLEGEN_220_PREFIX</key>
+        <string>/opt/homebrew/opt/llvm</string>
         <key>PRISM_MCPD_STATE_DIR</key>
         <string>__STATE_DIR__</string>
         <key>PRISM_MCPD_ARTIFACT_DIR</key>

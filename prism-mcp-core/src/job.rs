@@ -35,7 +35,9 @@ impl JobState {
 #[derive(Debug, Clone)]
 pub struct JobProgress {
     pub message: String,
-    pub percent: f64,
+    /// Present only when the underlying operation exposes a trustworthy
+    /// completion denominator. `None` means indeterminate, not zero percent.
+    pub percent: Option<f64>,
 }
 
 /// Full record for a tracked job.
@@ -157,10 +159,10 @@ impl JobManager {
                     tool: row.get(1)?,
                     operation: row.get(2)?,
                     state: parse_state(&row.get::<_, String>(3)?, &row.get::<_, Option<String>>(4)?),
-                    progress: match (row.get::<_, Option<String>>(4)?, row.get::<_, Option<f64>>(5)?) {
-                        (Some(msg), Some(pct)) => Some(JobProgress { message: msg, percent: pct }),
-                        _ => None,
-                    },
+                    progress: row.get::<_, Option<String>>(4)?.map(|message| JobProgress {
+                        message,
+                        percent: row.get::<_, Option<f64>>(5).unwrap_or(None),
+                    }),
                     receipt_id: row.get(6)?,
                     created_at: row.get::<_, String>(7)?.parse().unwrap_or_else(|_| Utc::now()),
                     updated_at: row.get::<_, String>(8)?.parse().unwrap_or_else(|_| Utc::now()),
@@ -186,10 +188,10 @@ impl JobManager {
                     tool: row.get(1)?,
                     operation: row.get(2)?,
                     state: parse_state(&row.get::<_, String>(3)?, &row.get::<_, Option<String>>(4)?),
-                    progress: match (row.get::<_, Option<String>>(4)?, row.get::<_, Option<f64>>(5)?) {
-                        (Some(msg), Some(pct)) => Some(JobProgress { message: msg, percent: pct }),
-                        _ => None,
-                    },
+                    progress: row.get::<_, Option<String>>(4)?.map(|message| JobProgress {
+                        message,
+                        percent: row.get::<_, Option<f64>>(5).unwrap_or(None),
+                    }),
                     receipt_id: row.get(6)?,
                     created_at: row.get::<_, String>(7)?.parse().unwrap_or_else(|_| Utc::now()),
                     updated_at: row.get::<_, String>(8)?.parse().unwrap_or_else(|_| Utc::now()),

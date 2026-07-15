@@ -526,13 +526,10 @@ impl PostgresJobStore {
             tool: row.get(1),
             operation: row.get(2),
             state: Self::state(&row.get::<_, String>(3), row.get(4)),
-            progress: match (
-                row.get::<_, Option<String>>(4),
-                row.get::<_, Option<f64>>(5),
-            ) {
-                (Some(message), Some(percent)) => Some(JobProgress { message, percent }),
-                _ => None,
-            },
+            progress: row.get::<_, Option<String>>(4).map(|message| JobProgress {
+                message,
+                percent: row.get::<_, Option<f64>>(5),
+            }),
             receipt_id: row.get(6),
             created_at: row
                 .get::<_, String>(7)

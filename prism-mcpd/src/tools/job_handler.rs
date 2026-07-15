@@ -158,6 +158,102 @@ fn output_bytes(job: &ManagedJob) -> u64 {
         .sum()
 }
 
+#[derive(Debug, Serialize)]
+struct ProcessActivity {
+    classification: &'static str,
+    phase: &'static str,
+    active_processes: usize,
+    compiler_processes: usize,
+    runnable_processes: usize,
+    cpu_percent: f64,
+    output_idle_secs: Option<u64>,
+    stalled: bool,
+}
+
+fn classify_activity(
+    active_processes: usize,
+    runnable_processes: usize,
+    cpu_percent: f64,
+    output_idle_secs: Option<u64>,
+) -> (&'static str, bool) {
+    let stalled = active_processes == 0
+        || (output_idle_secs.is_some_and(|seconds| seconds >= 120)
+            && cpu_percent < 0.1
+            && runnable_processes == 0);
+    let classification = if stalled {
+        "possibly_stalled"
+    } else if runnable_processes > 0 || cpu_percent >= 0.1 {
+        "active"
+    } else {
+        "waiting"
+    };
+    (classification, stalled)
+}
+
+fn process_group_activity(process_group: i32, paths: &[&Path]) -> ProcessActivity {
+    let output = Command::new("/bin/ps")
+        .args(["-axo", "pgid=,state=,%cpu=,command="])
+        .output()
+        .ok();
+    let mut active_processes = 0;
+    let mut compiler_processes = 0;
+    let mut runnable_processes = 0;
+    let mut cpu_percent = 0.0;
+    let mut has_test_process = false;
+    if let Some(output) = output {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let mut fields = line.split_whitespace();
+            let Some(pgid) = fields.next().and_then(|value| value.parse::<i32>().ok()) else {
+                continue;
+            };
+            if pgid != process_group {
+                continue;
+            }
+            let state = fields.next().unwrap_or("");
+            let cpu = fields
+                .next()
+                .and_then(|value| value.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let command = fields.collect::<Vec<_>>().join(" ");
+            active_processes += 1;
+            cpu_percent += cpu;
+            runnable_processes += usize::from(state.starts_with('R'));
+            compiler_processes += usize::from(command.contains("rustc"));
+            has_test_process |= command.contains("/deps/") && !command.contains("rustc");
+        }
+    }
+    let latest_output = paths
+        .iter()
+        .filter_map(|path| std::fs::metadata(path).ok()?.modified().ok())
+        .max();
+    let output_idle_secs = latest_output
+        .and_then(|time| time.elapsed().ok())
+        .map(|duration| duration.as_secs());
+    let (classification, stalled) = classify_activity(
+        active_processes,
+        runnable_processes,
+        cpu_percent,
+        output_idle_secs,
+    );
+    let phase = if compiler_processes > 0 {
+        "compiling"
+    } else if has_test_process {
+        "testing"
+    } else {
+        "running"
+    };
+    ProcessActivity {
+        classification,
+        phase,
+        active_processes,
+        compiler_processes,
+        runnable_processes,
+        cpu_percent,
+        output_idle_secs,
+        stalled,
+    }
+}
+
 fn output_summary(command: &str, stdout: &str, stderr: &str) -> Value {
     if !command.starts_with("cargo ") && !command.contains(" cargo ") {
         return json!({
@@ -488,7 +584,7 @@ fn supervise_once(store: &dyn JobStore) {
         let activity = if changed {
             "output advanced"
         } else {
-            "compiler active"
+            "job heartbeat"
         };
         let _ = store.update_progress(
             &JobId(uuid),
@@ -496,7 +592,7 @@ fn supervise_once(store: &dyn JobStore) {
                 message: format!(
                     "{activity}; pid={pid}; elapsed_secs={elapsed}; output_bytes={bytes}"
                 ),
-                percent: 0.0,
+                percent: None,
             },
         );
     }
@@ -720,8 +816,14 @@ impl JobHandler {
                 .num_milliseconds()
                 .max(0) as u64
         });
+        let activity = manifest.as_ref().map(|manifest| {
+            process_group_activity(
+                manifest.process_group,
+                &[stdout_path.as_path(), stderr_path.as_path()],
+            )
+        });
         Self::result(
-            json!({"job_id":key,"status":record.state.as_str(),"phase":if record.state == JobState::Running { "running" } else { "terminal" },"command":record.operation,"cwd":manifest.as_ref().map(|value| value.cwd.display().to_string()),"fingerprint":manifest.as_ref().map(|value| &value.fingerprint),"pid":manifest.as_ref().map(|value| value.pid),"process_group":manifest.as_ref().map(|value| value.process_group),"daemon_instance":manifest.as_ref().map(|value| &value.daemon_instance),"exit_code":exit_code,"duration_ms":duration_ms,"progress":record.progress.as_ref().map(|value| json!({"message":value.message,"percent":value.percent})),"stdout_bytes":output.0.len(),"stderr_bytes":output.1.len(),"summary":summary,"updated_at":record.updated_at}),
+            json!({"job_id":key,"status":record.state.as_str(),"phase":activity.as_ref().map(|value| value.phase).unwrap_or(if record.state == JobState::Running { "running" } else { "terminal" }),"command":record.operation,"cwd":manifest.as_ref().map(|value| value.cwd.display().to_string()),"fingerprint":manifest.as_ref().map(|value| &value.fingerprint),"pid":manifest.as_ref().map(|value| value.pid),"process_group":manifest.as_ref().map(|value| value.process_group),"daemon_instance":manifest.as_ref().map(|value| &value.daemon_instance),"exit_code":exit_code,"duration_ms":duration_ms,"progress":record.progress.as_ref().map(|value| json!({"message":value.message,"determinate":value.percent.is_some(),"percent":value.percent})),"activity":activity,"stdout_bytes":output.0.len(),"stderr_bytes":output.1.len(),"summary":summary,"updated_at":record.updated_at}),
         )
     }
 }
@@ -1027,5 +1129,19 @@ mod tests {
         assert_eq!(summary["diagnostic_count"], 1);
         assert_eq!(summary["diagnostics"][0]["level"], "warning");
         assert_eq!(summary["messages_tail"][0], "Finished dev profile");
+    }
+
+    #[test]
+    fn activity_classification_distinguishes_active_waiting_and_stalled() {
+        assert_eq!(classify_activity(4, 2, 35.0, Some(300)), ("active", false));
+        assert_eq!(classify_activity(2, 0, 0.0, Some(30)), ("waiting", false));
+        assert_eq!(
+            classify_activity(2, 0, 0.0, Some(121)),
+            ("possibly_stalled", true)
+        );
+        assert_eq!(
+            classify_activity(0, 0, 0.0, None),
+            ("possibly_stalled", true)
+        );
     }
 }
