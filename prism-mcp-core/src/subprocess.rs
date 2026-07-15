@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -16,24 +17,51 @@ pub fn run_with_timeout(
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = cmd.spawn()?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture {program} stdout"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture {program} stderr"))?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).map(|_| bytes)
+    });
     let start = Instant::now();
 
     loop {
         match child.try_wait()? {
             Some(status) => {
-                let output = child.wait_with_output()?;
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let stdout = String::from_utf8_lossy(
+                    &stdout_reader
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("{program} stdout reader panicked"))??,
+                )
+                .to_string();
+                let stderr = String::from_utf8_lossy(
+                    &stderr_reader
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("{program} stderr reader panicked"))??,
+                )
+                .to_string();
                 if status.success() {
                     return Ok(stdout);
                 } else {
                     return Err(anyhow::anyhow!(
-                        "{} exited with {}: stderr={}",
+                        "{} exited with {}\nstdout:\n{}\nstderr:\n{}",
                         program,
                         status,
-                        stderr
+                        output_tail(&stdout),
+                        output_tail(&stderr)
                     ));
                 }
             }
@@ -41,12 +69,19 @@ pub fn run_with_timeout(
                 if start.elapsed() > timeout {
                     let _ = child.kill();
                     child.wait()?;
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
                     return Err(anyhow::anyhow!("{} timed out after {:?}", program, timeout));
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
     }
+}
+
+fn output_tail(value: &str) -> String {
+    let lines: Vec<&str> = value.lines().collect();
+    lines[lines.len().saturating_sub(100)..].join("\n")
 }
 
 /// Cache for warm subprocess outputs.
@@ -110,5 +145,40 @@ impl ProcessCache {
         } else {
             Err(anyhow::anyhow!("{} exited with {}", program, exit_code))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timeout_runner_captures_nonzero_diagnostics() {
+        let error = run_with_timeout(
+            "/bin/sh",
+            &["-c", "echo stdout-marker; echo stderr-marker >&2; exit 7"],
+            None,
+            Duration::from_secs(2),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("stdout-marker"));
+        assert!(error.contains("stderr-marker"));
+        assert!(error.contains("status: 7"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn timeout_runner_drains_output_while_process_runs() {
+        let output = run_with_timeout(
+            "/bin/sh",
+            &[
+                "-c",
+                "i=0; while [ $i -lt 20000 ]; do echo line-$i; i=$((i+1)); done",
+            ],
+            None,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(output.contains("line-19999"));
     }
 }

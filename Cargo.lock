@@ -4252,6 +4252,7 @@ dependencies = [
  "chrono",
  "prism-mcp-core",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

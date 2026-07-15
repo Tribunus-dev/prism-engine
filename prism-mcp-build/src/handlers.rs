@@ -18,7 +18,16 @@ use tracing::info;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-fn json_input_schema(props: serde_json::Value, required: &[&str]) -> serde_json::Value {
+fn json_input_schema(mut props: serde_json::Value, required: &[&str]) -> serde_json::Value {
+    if let Some(properties) = props.as_object_mut() {
+        properties.insert(
+            "workspace_root".into(),
+            json!({
+                "type": "string",
+                "description": "Absolute workspace root. Never inferred from the persistent daemon process CWD."
+            }),
+        );
+    }
     json!({
         "type": "object",
         "properties": props,
@@ -77,20 +86,28 @@ fn line_diff(a: &str, b: &str) -> String {
     out
 }
 
-/// Resolve the prism-engine workspace root.
-///
-/// Strategy:
-///   1. `CARGO_MANIFEST_DIR` env var (set during `cargo build`) → pop parent.
-///   2. Fall back to current working directory.
-fn resolve_workspace_root() -> String {
-    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
-        let mut path = std::path::PathBuf::from(manifest_dir);
-        path.pop();
-        return path.to_string_lossy().to_string();
+/// Resolve a workspace independently of the persistent daemon's launchd CWD.
+fn resolve_workspace_root(args: &serde_json::Value) -> Result<String> {
+    let requested = args
+        .get("workspace_root")
+        .and_then(serde_json::Value::as_str)
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("PRISM_MCPD_WORKSPACE_ROOT").map(std::path::PathBuf::from))
+        .unwrap_or_else(|| {
+            let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            path.pop();
+            path
+        });
+    let root = requested
+        .canonicalize()
+        .with_context(|| format!("workspace does not exist: {}", requested.display()))?;
+    if !root.join("Cargo.toml").is_file() {
+        anyhow::bail!(
+            "workspace_root does not contain Cargo.toml: {}",
+            root.display()
+        );
     }
-    std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| ".".to_string())
+    Ok(root.to_string_lossy().into_owned())
 }
 
 // ── PlanBuildHandler ──────────────────────────────────────────────────────
@@ -217,7 +234,7 @@ impl McpHandler for BuildComponentHandler {
         let target = extract_optional_string(request.args, "target");
         let timeout_secs = extract_optional_u64(request.args, "timeout_secs").unwrap_or(300);
 
-        let workspace_root = resolve_workspace_root();
+        let workspace_root = resolve_workspace_root(request.args)?;
 
         let mut owned_args: Vec<String> = vec![
             "build".into(),
@@ -310,7 +327,7 @@ impl McpHandler for CheckComponentHandler {
         let features = extract_optional_string(request.args, "features");
         let timeout_secs = extract_optional_u64(request.args, "timeout_secs").unwrap_or(300);
 
-        let workspace_root = resolve_workspace_root();
+        let workspace_root = resolve_workspace_root(request.args)?;
 
         let mut owned_args: Vec<String> = vec!["check".into(), "-p".into(), component.clone()];
 
@@ -391,7 +408,7 @@ impl McpHandler for TestScopeHandler {
         let scope = extract_string_or_default(request.args, "scope", "auto");
         let timeout_secs = extract_optional_u64(request.args, "timeout_secs").unwrap_or(600);
 
-        let workspace_root = resolve_workspace_root();
+        let workspace_root = resolve_workspace_root(request.args)?;
 
         match scope.as_str() {
             "all" => {
@@ -556,7 +573,7 @@ impl McpHandler for ChangedBuildSurfaceHandler {
         let from_revision = extract_string_or_default(request.args, "from_revision", "HEAD~1");
         let to_revision = extract_string_or_default(request.args, "to_revision", "HEAD");
 
-        let workspace_root = resolve_workspace_root();
+        let workspace_root = resolve_workspace_root(request.args)?;
 
         let output = run_with_timeout(
             "git",
@@ -576,5 +593,28 @@ impl McpHandler for ChangedBuildSurfaceHandler {
         });
 
         Ok(ToolResult::text(serde_json::to_string_pretty(&result)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_resolution_uses_explicit_request_not_process_cwd() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(workspace.path().join("Cargo.toml"), "[workspace]\n")
+            .expect("workspace manifest");
+        let args = json!({"workspace_root": workspace.path()});
+        assert_eq!(
+            std::path::PathBuf::from(resolve_workspace_root(&args).unwrap()),
+            workspace.path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn build_tool_schema_exposes_workspace_root() {
+        let schema = CheckComponentHandler.input_schema();
+        assert_eq!(schema["properties"]["workspace_root"]["type"], "string");
     }
 }

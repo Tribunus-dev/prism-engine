@@ -245,10 +245,21 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     let coordination_store: Option<Arc<dyn prism_mcp_core::CoordinationStore>> =
         if backend_config.profile == "trifecta" {
             #[cfg(feature = "trifecta")]
-            { Some(crate::trifecta_store::PostgresCoordinationStore::connect(backend_config.postgres_url.as_deref().expect("validated PostgreSQL URL"))?) }
+            {
+                Some(crate::trifecta_store::PostgresCoordinationStore::connect(
+                    backend_config
+                        .postgres_url
+                        .as_deref()
+                        .expect("validated PostgreSQL URL"),
+                )?)
+            }
             #[cfg(not(feature = "trifecta"))]
-            { anyhow::bail!("trifecta coordination storage requires the `trifecta` feature") }
-        } else { None };
+            {
+                anyhow::bail!("trifecta coordination storage requires the `trifecta` feature")
+            }
+        } else {
+            None
+        };
     let projection_store: Arc<dyn prism_mcp_core::ProjectionStore> =
         if backend_config.profile == "trifecta" {
             #[cfg(feature = "trifecta")]

@@ -21,6 +21,11 @@ impl BackendConfig {
             duckdb_path: std::env::var("PRISM_MCPD_DUCKDB_PATH").ok(),
         }
     }
+
+    #[cfg(not(feature = "trifecta"))]
+    fn configured(&self) -> bool {
+        self.postgres_url.is_some() || self.valkey_url.is_some() || self.duckdb_path.is_some()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +37,7 @@ pub struct BackendHealth {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "trifecta"), allow(dead_code))]
 pub enum BackendStatus {
     Disabled,
     Healthy,

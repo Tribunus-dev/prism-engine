@@ -177,6 +177,12 @@ pub fn register_stateful(
         "run_job",
         Arc::new(job_handler::JobHandler::new(state.job_manager.clone())),
     );
+    map.insert(
+        "test_scope",
+        Arc::new(job_handler::TestScopeJobHandler::new(
+            state.job_manager.clone(),
+        )),
+    );
 
     Ok(map)
 }

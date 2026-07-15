@@ -255,7 +255,7 @@ impl Scheduler {
                 let resp = match result_rx.recv_timeout(limit.timeout) {
                     Ok(Ok(crate::ToolResult::Text(t))) => crate::McpResponse::success(id, &t),
                     Ok(Err(e)) => {
-                        crate::McpResponse::tool_error(id, "TOOL_FAILED", &e.to_string(), false)
+                        crate::McpResponse::tool_error(id, "TOOL_FAILED", &format!("{e:#}"), false)
                     }
                     Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                         crate::McpResponse::tool_error(

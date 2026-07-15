@@ -8,7 +8,9 @@ use prism_mcp_core::{
     EvidenceStore, JobEvent, JobId, JobProgress, JobRecord, JobState, JobStore, ToolInvocationId,
 };
 #[cfg(feature = "trifecta")]
-use prism_mcp_core::{ClaimResult, CoordinationSession, CoordinationStore, LockResult, PathLock, WorkItem};
+use prism_mcp_core::{
+    ClaimResult, CoordinationSession, CoordinationStore, LockResult, PathLock, WorkItem,
+};
 #[cfg(feature = "trifecta")]
 use prism_mcp_core::{KnowledgeDocument, KnowledgeListRow, KnowledgeSearchResult, KnowledgeStore};
 #[cfg(feature = "trifecta")]
@@ -32,7 +34,10 @@ pub struct PostgresJobStore {
     client: Mutex<tokio_postgres::Client>,
 }
 #[cfg(feature = "trifecta")]
-pub struct PostgresCoordinationStore { runtime: tokio::runtime::Runtime, client: Mutex<tokio_postgres::Client> }
+pub struct PostgresCoordinationStore {
+    runtime: tokio::runtime::Runtime,
+    client: Mutex<tokio_postgres::Client>,
+}
 
 #[cfg(feature = "trifecta")]
 pub struct PostgresExperimentStore {
@@ -115,50 +120,225 @@ fn connect_postgres(url: &str) -> Result<(tokio::runtime::Runtime, tokio_postgre
 
 #[cfg(feature = "trifecta")]
 impl PostgresCoordinationStore {
-    pub fn connect(url: &str) -> Result<Arc<Self>> { let (runtime, client) = connect_postgres(url)?; Ok(Arc::new(Self { runtime, client: Mutex::new(client) })) }
+    pub fn connect(url: &str) -> Result<Arc<Self>> {
+        let (runtime, client) = connect_postgres(url)?;
+        Ok(Arc::new(Self {
+            runtime,
+            client: Mutex::new(client),
+        }))
+    }
 }
 
 #[cfg(feature = "trifecta")]
 impl CoordinationStore for PostgresCoordinationStore {
-    fn start_session(&self, id: &str, agent: &str, purpose: Option<&str>) -> Result<CoordinationSession> {
-        let c = self.client.lock(); let now = chrono::Utc::now();
+    fn start_session(
+        &self,
+        id: &str,
+        agent: &str,
+        purpose: Option<&str>,
+    ) -> Result<CoordinationSession> {
+        let c = self.client.lock();
+        let now = chrono::Utc::now();
         let session_id = id.to_string();
         let agent_id = agent.to_string();
         let purpose_value = purpose.unwrap_or("").to_string();
         self.runtime.block_on(c.execute("INSERT INTO prism_coord_sessions(session_id,agent_id,purpose,last_heartbeat_at) VALUES($1,$2,$3,$4) ON CONFLICT(session_id) DO UPDATE SET status='active',last_heartbeat_at=EXCLUDED.last_heartbeat_at", &[&session_id,&agent_id,&purpose_value,&now]))?;
-        Ok(CoordinationSession { session_id:id.into(), agent_id:agent.into(), status:"active".into(), last_heartbeat_at:now.to_rfc3339() })
+        Ok(CoordinationSession {
+            session_id: id.into(),
+            agent_id: agent.into(),
+            status: "active".into(),
+            last_heartbeat_at: now.to_rfc3339(),
+        })
     }
-    fn heartbeat(&self, id: &str) -> Result<()> { let c=self.client.lock(); let now=chrono::Utc::now(); self.runtime.block_on(c.execute("UPDATE prism_coord_sessions SET last_heartbeat_at=$1,status='active' WHERE session_id=$2 AND status <> 'closed'", &[&now,&id]))?; Ok(()) }
-    fn close_session(&self, id: &str) -> Result<()> { let c=self.client.lock(); self.runtime.block_on(c.execute("UPDATE prism_coord_sessions SET status='closed',closed_at=now() WHERE session_id=$1", &[&id]))?; Ok(()) }
-    fn create_work(&self,id:&str,title:&str,priority:i32,session:Option<&str>)->Result<WorkItem>{let c=self.client.lock();let work_id=id.to_string();let work_title=title.to_string();let created_by=session.unwrap_or("").to_string();self.runtime.block_on(c.execute("INSERT INTO prism_coord_work(work_id,title,priority,created_by) VALUES($1,$2,$3,$4)", &[&work_id,&work_title,&priority,&created_by]))?;Ok(WorkItem{work_id:id.into(),title:title.into(),status:"queued".into(),priority})}
-    fn list_work(&self,status:Option<&str>)->Result<Vec<WorkItem>>{let c=self.client.lock();let rows=self.runtime.block_on(c.query("SELECT work_id,title,status,priority FROM prism_coord_work WHERE ($1::text IS NULL OR status=$1) ORDER BY priority DESC,created_at", &[&status]))?;Ok(rows.into_iter().map(|r|WorkItem{work_id:r.get(0),title:r.get(1),status:r.get(2),priority:r.get(3)}).collect())}
-    fn claim_work(&self, work:&str, session:&str, ttl:i64)->Result<ClaimResult> {
-        let mut c=self.client.lock();
-        let tx=self.runtime.block_on(c.transaction())?;
+    fn heartbeat(&self, id: &str) -> Result<()> {
+        let c = self.client.lock();
+        let now = chrono::Utc::now();
+        self.runtime.block_on(c.execute("UPDATE prism_coord_sessions SET last_heartbeat_at=$1,status='active' WHERE session_id=$2 AND status <> 'closed'", &[&now,&id]))?;
+        Ok(())
+    }
+    fn close_session(&self, id: &str) -> Result<()> {
+        let c = self.client.lock();
+        self.runtime.block_on(c.execute(
+            "UPDATE prism_coord_sessions SET status='closed',closed_at=now() WHERE session_id=$1",
+            &[&id],
+        ))?;
+        Ok(())
+    }
+    fn create_work(
+        &self,
+        id: &str,
+        title: &str,
+        priority: i32,
+        session: Option<&str>,
+    ) -> Result<WorkItem> {
+        let c = self.client.lock();
+        let work_id = id.to_string();
+        let work_title = title.to_string();
+        let created_by = session.unwrap_or("").to_string();
+        self.runtime.block_on(c.execute(
+            "INSERT INTO prism_coord_work(work_id,title,priority,created_by) VALUES($1,$2,$3,$4)",
+            &[&work_id, &work_title, &priority, &created_by],
+        ))?;
+        Ok(WorkItem {
+            work_id: id.into(),
+            title: title.into(),
+            status: "queued".into(),
+            priority,
+        })
+    }
+    fn list_work(&self, status: Option<&str>) -> Result<Vec<WorkItem>> {
+        let c = self.client.lock();
+        let rows=self.runtime.block_on(c.query("SELECT work_id,title,status,priority FROM prism_coord_work WHERE ($1::text IS NULL OR status=$1) ORDER BY priority DESC,created_at", &[&status]))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| WorkItem {
+                work_id: r.get(0),
+                title: r.get(1),
+                status: r.get(2),
+                priority: r.get(3),
+            })
+            .collect())
+    }
+    fn claim_work(&self, work: &str, session: &str, ttl: i64) -> Result<ClaimResult> {
+        let mut c = self.client.lock();
+        let tx = self.runtime.block_on(c.transaction())?;
         let valid=self.runtime.block_on(tx.query_opt("SELECT work_id FROM prism_coord_work WHERE work_id=$1 AND status IN ('queued','blocked') FOR UPDATE", &[&work]))?.is_some();
         if !valid {
             let owner=self.runtime.block_on(tx.query_opt("SELECT session_id FROM prism_coord_claims WHERE work_id=$1 AND status='active'", &[&work]))?.map(|row| row.get(0));
             self.runtime.block_on(tx.commit())?;
-            return Ok(ClaimResult{claimed:false,claim_id:None,conflict_session_id:owner});
+            return Ok(ClaimResult {
+                claimed: false,
+                claim_id: None,
+                conflict_session_id: owner,
+            });
         }
-        let id=uuid::Uuid::new_v4().to_string();
+        let id = uuid::Uuid::new_v4().to_string();
         let claim_work_id = work.to_string();
         let claim_session_id = session.to_string();
         let ttl = ttl.clamp(1, 86_400);
         let claim_sql = format!("INSERT INTO prism_coord_claims(claim_id,work_id,session_id,expires_at) VALUES($1,$2,$3,now()+{} * interval '1 second') ON CONFLICT (work_id) WHERE status='active' DO NOTHING", ttl);
-        let inserted=self.runtime.block_on(tx.execute(&claim_sql, &[&id,&claim_work_id,&claim_session_id]))?;
-        if inserted == 0 { let owner=self.runtime.block_on(tx.query_one("SELECT session_id FROM prism_coord_claims WHERE work_id=$1 AND status='active'", &[&work]))?; self.runtime.block_on(tx.commit())?; return Ok(ClaimResult{claimed:false,claim_id:None,conflict_session_id:Some(owner.get(0))}); }
-        self.runtime.block_on(tx.execute("UPDATE prism_coord_work SET status='claimed' WHERE work_id=$1", &[&work]))?;
+        let inserted = self
+            .runtime
+            .block_on(tx.execute(&claim_sql, &[&id, &claim_work_id, &claim_session_id]))?;
+        if inserted == 0 {
+            let owner = self.runtime.block_on(tx.query_one(
+                "SELECT session_id FROM prism_coord_claims WHERE work_id=$1 AND status='active'",
+                &[&work],
+            ))?;
+            self.runtime.block_on(tx.commit())?;
+            return Ok(ClaimResult {
+                claimed: false,
+                claim_id: None,
+                conflict_session_id: Some(owner.get(0)),
+            });
+        }
+        self.runtime.block_on(tx.execute(
+            "UPDATE prism_coord_work SET status='claimed' WHERE work_id=$1",
+            &[&work],
+        ))?;
         self.runtime.block_on(tx.commit())?;
-        Ok(ClaimResult{claimed:true,claim_id:Some(id),conflict_session_id:None})
+        Ok(ClaimResult {
+            claimed: true,
+            claim_id: Some(id),
+            conflict_session_id: None,
+        })
     }
-    fn release_claim(&self,id:&str,session:&str)->Result<()> {let c=self.client.lock();self.runtime.block_on(c.execute("UPDATE prism_coord_claims SET status='released',released_at=now() WHERE claim_id=$1 AND session_id=$2 AND status='active'", &[&id,&session]))?;Ok(())}
-    fn acquire_path(&self,session:&str,path:&str,kind:&str,ttl:i64)->Result<LockResult>{let c=self.client.lock();self.runtime.block_on(c.query_one("SELECT pg_advisory_xact_lock(hashtextextended($1, 1))", &[&path]))?;let conflict=self.runtime.block_on(c.query_opt("SELECT lock_id,session_id,lock_kind,expires_at::text FROM prism_coord_locks WHERE path=$1 AND status='active' AND expires_at>now() AND session_id<>$2 AND ($3='write' OR lock_kind='write')", &[&path.to_string(),&session.to_string(),&kind.to_string()]))?;if let Some(r)=conflict{return Ok(LockResult{acquired:false,locks:vec![],conflicts:vec![PathLock{lock_id:r.get(0),path:path.into(),lock_kind:r.get(2),session_id:r.get(1),expires_at:r.get(3)}]});}let id=uuid::Uuid::new_v4().to_string();let ttl=ttl.clamp(1,86_400);let lock_sql=format!("INSERT INTO prism_coord_locks(lock_id,path,lock_kind,session_id,expires_at) VALUES($1,$2,$3,$4,now()+{} * interval '1 second')",ttl);self.runtime.block_on(c.execute(&lock_sql,&[&id,&path.to_string(),&kind.to_string(),&session.to_string()]))?;Ok(LockResult{acquired:true,locks:vec![PathLock{lock_id:id,path:path.into(),lock_kind:kind.into(),session_id:session.into(),expires_at:(chrono::Utc::now()+chrono::Duration::seconds(ttl)).to_rfc3339()}],conflicts:vec![]})}
-    fn release_path(&self,id:&str,session:&str)->Result<()> {let c=self.client.lock();self.runtime.block_on(c.execute("UPDATE prism_coord_locks SET status='released',released_at=now() WHERE lock_id=$1 AND session_id=$2 AND status='active'", &[&id,&session]))?;Ok(())}
-    fn recover_expired(&self)->Result<serde_json::Value>{let c=self.client.lock();let claims=self.runtime.block_on(c.execute("UPDATE prism_coord_claims SET status='expired',released_at=now() WHERE status='active' AND expires_at<=now()", &[]))?;let locks=self.runtime.block_on(c.execute("UPDATE prism_coord_locks SET status='expired',released_at=now() WHERE status='active' AND expires_at<=now()", &[]))?;Ok(serde_json::json!({"expired_claims":claims,"expired_locks":locks}))}
-    fn handoff(&self, work:&str, from:&str, to:&str, context:&serde_json::Value)->Result<()> { let c=self.client.lock(); let id=uuid::Uuid::new_v4().to_string(); self.runtime.block_on(c.execute("INSERT INTO prism_coord_handoffs(handoff_id,work_id,from_session,to_session,context) VALUES($1,$2,$3,$4,$5)",&[&id,&work,&from,&to,context]))?; Ok(()) }
-    fn append_event(&self, kind:&str, session:&str, payload:&serde_json::Value)->Result<prism_mcp_core::CoordinationEvent> { let c=self.client.lock(); let row=self.runtime.block_on(c.query_one("INSERT INTO prism_coord_events(event_type,session_id,payload) VALUES($1,$2,$3) RETURNING sequence", &[&kind,&session,payload]))?; Ok(prism_mcp_core::CoordinationEvent{sequence:row.get(0),event_type:kind.into(),session_id:session.into(),payload:payload.clone()}) }
-    fn status(&self)->Result<serde_json::Value> { let c=self.client.lock(); let sessions=self.runtime.block_on(c.query_one("SELECT count(*) FROM prism_coord_sessions WHERE status='active'",&[]))?; let work=self.runtime.block_on(c.query_one("SELECT count(*) FROM prism_coord_work WHERE status IN ('queued','claimed','running','blocked')",&[]))?; let locks=self.runtime.block_on(c.query_one("SELECT count(*) FROM prism_coord_locks WHERE status='active' AND expires_at>now()",&[]))?; Ok(serde_json::json!({"active_sessions":sessions.get::<_,i64>(0),"open_work":work.get::<_,i64>(0),"active_locks":locks.get::<_,i64>(0)})) }
+    fn release_claim(&self, id: &str, session: &str) -> Result<()> {
+        let c = self.client.lock();
+        self.runtime.block_on(c.execute("UPDATE prism_coord_claims SET status='released',released_at=now() WHERE claim_id=$1 AND session_id=$2 AND status='active'", &[&id,&session]))?;
+        Ok(())
+    }
+    fn acquire_path(&self, session: &str, path: &str, kind: &str, ttl: i64) -> Result<LockResult> {
+        let c = self.client.lock();
+        self.runtime.block_on(c.query_one(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 1))",
+            &[&path],
+        ))?;
+        let conflict=self.runtime.block_on(c.query_opt("SELECT lock_id,session_id,lock_kind,expires_at::text FROM prism_coord_locks WHERE path=$1 AND status='active' AND expires_at>now() AND session_id<>$2 AND ($3='write' OR lock_kind='write')", &[&path.to_string(),&session.to_string(),&kind.to_string()]))?;
+        if let Some(r) = conflict {
+            return Ok(LockResult {
+                acquired: false,
+                locks: vec![],
+                conflicts: vec![PathLock {
+                    lock_id: r.get(0),
+                    path: path.into(),
+                    lock_kind: r.get(2),
+                    session_id: r.get(1),
+                    expires_at: r.get(3),
+                }],
+            });
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let ttl = ttl.clamp(1, 86_400);
+        let lock_sql=format!("INSERT INTO prism_coord_locks(lock_id,path,lock_kind,session_id,expires_at) VALUES($1,$2,$3,$4,now()+{} * interval '1 second')",ttl);
+        self.runtime.block_on(c.execute(
+            &lock_sql,
+            &[
+                &id,
+                &path.to_string(),
+                &kind.to_string(),
+                &session.to_string(),
+            ],
+        ))?;
+        Ok(LockResult {
+            acquired: true,
+            locks: vec![PathLock {
+                lock_id: id,
+                path: path.into(),
+                lock_kind: kind.into(),
+                session_id: session.into(),
+                expires_at: (chrono::Utc::now() + chrono::Duration::seconds(ttl)).to_rfc3339(),
+            }],
+            conflicts: vec![],
+        })
+    }
+    fn release_path(&self, id: &str, session: &str) -> Result<()> {
+        let c = self.client.lock();
+        self.runtime.block_on(c.execute("UPDATE prism_coord_locks SET status='released',released_at=now() WHERE lock_id=$1 AND session_id=$2 AND status='active'", &[&id,&session]))?;
+        Ok(())
+    }
+    fn recover_expired(&self) -> Result<serde_json::Value> {
+        let c = self.client.lock();
+        let claims=self.runtime.block_on(c.execute("UPDATE prism_coord_claims SET status='expired',released_at=now() WHERE status='active' AND expires_at<=now()", &[]))?;
+        let locks=self.runtime.block_on(c.execute("UPDATE prism_coord_locks SET status='expired',released_at=now() WHERE status='active' AND expires_at<=now()", &[]))?;
+        Ok(serde_json::json!({"expired_claims":claims,"expired_locks":locks}))
+    }
+    fn handoff(&self, work: &str, from: &str, to: &str, context: &serde_json::Value) -> Result<()> {
+        let c = self.client.lock();
+        let id = uuid::Uuid::new_v4().to_string();
+        self.runtime.block_on(c.execute("INSERT INTO prism_coord_handoffs(handoff_id,work_id,from_session,to_session,context) VALUES($1,$2,$3,$4,$5)",&[&id,&work,&from,&to,context]))?;
+        Ok(())
+    }
+    fn append_event(
+        &self,
+        kind: &str,
+        session: &str,
+        payload: &serde_json::Value,
+    ) -> Result<prism_mcp_core::CoordinationEvent> {
+        let c = self.client.lock();
+        let row=self.runtime.block_on(c.query_one("INSERT INTO prism_coord_events(event_type,session_id,payload) VALUES($1,$2,$3) RETURNING sequence", &[&kind,&session,payload]))?;
+        Ok(prism_mcp_core::CoordinationEvent {
+            sequence: row.get(0),
+            event_type: kind.into(),
+            session_id: session.into(),
+            payload: payload.clone(),
+        })
+    }
+    fn status(&self) -> Result<serde_json::Value> {
+        let c = self.client.lock();
+        let sessions = self.runtime.block_on(c.query_one(
+            "SELECT count(*) FROM prism_coord_sessions WHERE status='active'",
+            &[],
+        ))?;
+        let work=self.runtime.block_on(c.query_one("SELECT count(*) FROM prism_coord_work WHERE status IN ('queued','claimed','running','blocked')",&[]))?;
+        let locks = self.runtime.block_on(c.query_one(
+            "SELECT count(*) FROM prism_coord_locks WHERE status='active' AND expires_at>now()",
+            &[],
+        ))?;
+        Ok(
+            serde_json::json!({"active_sessions":sessions.get::<_,i64>(0),"open_work":work.get::<_,i64>(0),"active_locks":locks.get::<_,i64>(0)}),
+        )
+    }
 }
 
 #[cfg(feature = "trifecta")]

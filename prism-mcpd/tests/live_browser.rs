@@ -16,6 +16,7 @@ impl Drop for DaemonCleanup {
 
 fn call(state: &std::path::Path, artifacts: &std::path::Path, name: &str, args: Value) -> Value {
     let mut child = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_TEST_ISOLATION", "1")
         .env("PRISM_MCPD_STORAGE", "sqlite")
         .env("PRISM_MCPD_STATE_DIR", state)
         .env("PRISM_MCPD_ARTIFACT_DIR", artifacts)
@@ -59,6 +60,7 @@ fn call_sequence(
     calls: &[(&str, Value)],
 ) -> Vec<Value> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_TEST_ISOLATION", "1")
         .env("PRISM_MCPD_STORAGE", "sqlite")
         .env("PRISM_MCPD_STATE_DIR", state)
         .env("PRISM_MCPD_ARTIFACT_DIR", artifacts)

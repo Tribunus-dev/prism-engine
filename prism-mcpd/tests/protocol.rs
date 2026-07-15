@@ -14,12 +14,35 @@ fn wait_for_exit(child: &mut std::process::Child, timeout: Duration) -> bool {
     false
 }
 
+fn terminate_daemon(state: &std::path::Path) {
+    let Ok(raw) = std::fs::read_to_string(state.join("mcpd.pid")) else {
+        return;
+    };
+    let Ok(pid) = raw.trim().parse::<i32>() else {
+        return;
+    };
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    unsafe {
+        libc::kill(pid, libc::SIGKILL);
+    }
+}
+
 #[test]
 fn production_profile_requires_trifecta_configuration() {
     let state = tempfile::tempdir().expect("state directory");
     let artifacts = tempfile::tempdir().expect("artifact directory");
     let mut child = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
         .arg("--daemon")
+        .env("PRISM_MCPD_TEST_ISOLATION", "1")
         .env_remove("PRISM_MCPD_STORAGE")
         .env_remove("PRISM_MCPD_POSTGRES_URL")
         .env_remove("PRISM_MCPD_VALKEY_URL")
@@ -50,11 +73,188 @@ fn read_health(socket: &std::path::Path) -> serde_json::Value {
     serde_json::from_str(&line).expect("health response JSON")
 }
 
+fn wait_for_socket(socket: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if socket.exists() && UnixStream::connect(socket).is_ok() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("daemon socket did not become ready: {}", socket.display());
+}
+
+fn call_tool(
+    socket: &std::path::Path,
+    name: &str,
+    arguments: serde_json::Value,
+) -> serde_json::Value {
+    let mut stream = UnixStream::connect(socket).expect("connect tool client");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    writeln!(stream, r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-03-26","capabilities":{{}},"clientInfo":{{"name":"protocol-test","version":"1"}}}}}}"#).unwrap();
+    writeln!(
+        stream,
+        r#"{{"jsonrpc":"2.0","method":"notifications/initialized"}}"#
+    )
+    .unwrap();
+    writeln!(
+        stream,
+        "{}",
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments}
+        })
+    )
+    .unwrap();
+    let mut reader = BufReader::new(stream);
+    for _ in 0..3 {
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read tool response");
+        let response: serde_json::Value = serde_json::from_str(&line).expect("tool response JSON");
+        if response["id"] == 2 {
+            assert!(response.get("error").is_none(), "tool error: {response}");
+            return response["result"]["structuredContent"].clone();
+        }
+    }
+    panic!("tool response was not received");
+}
+
+fn spawn_test_daemon(state: &std::path::Path, artifacts: &std::path::Path) -> std::process::Child {
+    Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_TEST_ISOLATION", "1")
+        .env("PRISM_MCPD_STORAGE", "sqlite")
+        .arg("--daemon")
+        .env("PRISM_MCPD_STATE_DIR", state)
+        .env("PRISM_MCPD_ARTIFACT_DIR", artifacts)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start test daemon")
+}
+
+#[test]
+fn running_job_is_adopted_after_daemon_restart() {
+    let state = tempfile::tempdir().expect("state directory");
+    let artifacts = tempfile::tempdir().expect("artifact directory");
+    let workspace = tempfile::tempdir().expect("workspace directory");
+    let canonical_workspace = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+    let socket = state.path().join("mcpd.sock");
+    let mut first = spawn_test_daemon(state.path(), artifacts.path());
+    wait_for_socket(&socket);
+
+    let started = call_tool(
+        &socket,
+        "run_job",
+        serde_json::json!({
+            "action": "start",
+            "command": "pwd; sleep 2; printf 'adopted-ok\\n'",
+            "cwd": workspace.path()
+        }),
+    );
+    let job_id = started["job_id"].as_str().expect("job id").to_string();
+    unsafe {
+        libc::kill(first.id() as i32, libc::SIGTERM);
+    }
+    assert!(wait_for_exit(&mut first, Duration::from_secs(3)));
+
+    let mut second = spawn_test_daemon(state.path(), artifacts.path());
+    wait_for_socket(&socket);
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let status = call_tool(
+            &socket,
+            "run_job",
+            serde_json::json!({"action": "status", "job_id": job_id}),
+        );
+        if status["status"] == "Succeeded" {
+            assert_eq!(status["exit_code"], 0);
+            assert!(status["summary"]["stdout_tail"]
+                .as_array()
+                .is_some_and(|lines| lines.iter().any(|line| line == "adopted-ok")));
+            assert!(status["summary"]["stdout_tail"]
+                .as_array()
+                .is_some_and(|lines| lines
+                    .iter()
+                    .any(|line| line.as_str() == canonical_workspace.to_str())));
+            break;
+        }
+        assert_ne!(status["status"], "Failed", "adopted job failed: {status}");
+        assert!(Instant::now() < deadline, "adopted job timed out: {status}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    unsafe {
+        libc::kill(second.id() as i32, libc::SIGTERM);
+    }
+    assert!(wait_for_exit(&mut second, Duration::from_secs(3)));
+}
+
+#[test]
+fn test_scope_returns_supervised_job_instead_of_blocking_request() {
+    let state = tempfile::tempdir().expect("state directory");
+    let artifacts = tempfile::tempdir().expect("artifact directory");
+    let workspace = tempfile::tempdir().expect("workspace directory");
+    std::fs::create_dir(workspace.path().join("src")).unwrap();
+    std::fs::write(
+        workspace.path().join("Cargo.toml"),
+        "[package]\nname='scope-fixture'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.path().join("src/lib.rs"),
+        "#[test]\nfn scope_passes() { assert_eq!(2 + 2, 4); }\n",
+    )
+    .unwrap();
+    let socket = state.path().join("mcpd.sock");
+    let mut daemon = spawn_test_daemon(state.path(), artifacts.path());
+    wait_for_socket(&socket);
+
+    let started_at = Instant::now();
+    let started = call_tool(
+        &socket,
+        "test_scope",
+        serde_json::json!({
+            "component": "scope-fixture",
+            "timeout_secs": 30,
+            "workspace_root": workspace.path()
+        }),
+    );
+    assert!(started_at.elapsed() < Duration::from_secs(2));
+    assert_eq!(started["status"], "started");
+    let job_id = started["job_id"].as_str().expect("job id");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let status = call_tool(
+            &socket,
+            "run_job",
+            serde_json::json!({"action": "status", "job_id": job_id}),
+        );
+        if status["status"] == "Succeeded" {
+            assert_eq!(status["exit_code"], 0);
+            break;
+        }
+        assert_ne!(status["status"], "Failed", "test scope failed: {status}");
+        assert!(Instant::now() < deadline, "test scope timed out: {status}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    unsafe {
+        libc::kill(daemon.id() as i32, libc::SIGTERM);
+    }
+    assert!(wait_for_exit(&mut daemon, Duration::from_secs(3)));
+}
+
 #[test]
 fn initializes_lists_tools_and_exits_after_stdin_closes() {
     let state = tempfile::tempdir().expect("state directory");
     let artifacts = tempfile::tempdir().expect("artifact directory");
     let mut child = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_TEST_ISOLATION", "1")
         .env("PRISM_MCPD_STORAGE", "sqlite")
         .env("PRISM_MCPD_STATE_DIR", state.path())
         .env("PRISM_MCPD_ARTIFACT_DIR", artifacts.path())
@@ -163,11 +363,11 @@ fn initializes_lists_tools_and_exits_after_stdin_closes() {
     assert_eq!(lines[2]["result"]["isError"], false);
     assert!(lines[2]["result"]["structuredContent"].is_object());
 
-    if wait_for_exit(&mut child, Duration::from_secs(3)) {
-        return;
+    if !wait_for_exit(&mut child, Duration::from_secs(3)) {
+        let _ = child.kill();
+        panic!("proxy did not exit after stdin closed");
     }
-    let _ = child.kill();
-    panic!("proxy did not exit after stdin closed");
+    terminate_daemon(state.path());
 }
 
 #[test]
@@ -175,6 +375,7 @@ fn daemon_removes_runtime_files_after_sigterm() {
     let state = tempfile::tempdir().expect("state directory");
     let artifacts = tempfile::tempdir().expect("artifact directory");
     let mut daemon = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_TEST_ISOLATION", "1")
         .env("PRISM_MCPD_STORAGE", "sqlite")
         .arg("--daemon")
         .env("PRISM_MCPD_STATE_DIR", state.path())
@@ -224,6 +425,7 @@ fn same_state_directory_allows_only_one_daemon_owner() {
     let state = tempfile::tempdir().expect("state directory");
     let artifacts = tempfile::tempdir().expect("artifact directory");
     let mut first = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_TEST_ISOLATION", "1")
         .env("PRISM_MCPD_STORAGE", "sqlite")
         .arg("--daemon")
         .env("PRISM_MCPD_STATE_DIR", state.path())
@@ -240,6 +442,7 @@ fn same_state_directory_allows_only_one_daemon_owner() {
     assert!(socket.exists(), "first daemon did not create its socket");
 
     let mut second = Command::new(env!("CARGO_BIN_EXE_prism-mcpd"))
+        .env("PRISM_MCPD_TEST_ISOLATION", "1")
         .env("PRISM_MCPD_STORAGE", "sqlite")
         .arg("--daemon")
         .env("PRISM_MCPD_STATE_DIR", state.path())
@@ -272,6 +475,7 @@ fn concurrent_proxies_converge_on_one_daemon() {
             let artifact_path = artifact_path.clone();
             std::thread::spawn(move || {
                 let mut child = Command::new(binary)
+                    .env("PRISM_MCPD_TEST_ISOLATION", "1")
                     .env("PRISM_MCPD_STORAGE", "sqlite")
                     .env("PRISM_MCPD_STATE_DIR", state_path)
                     .env("PRISM_MCPD_ARTIFACT_DIR", artifact_path)
@@ -311,7 +515,5 @@ fn concurrent_proxies_converge_on_one_daemon() {
         read_health(&state.path().join("mcpd.sock"))["result"]["pid"],
         pid
     );
-    unsafe {
-        libc::kill(pid, libc::SIGTERM);
-    }
+    terminate_daemon(state.path());
 }

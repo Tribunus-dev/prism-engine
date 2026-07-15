@@ -255,13 +255,13 @@ pub struct RequestContext {
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::coordination::CoordinationStore;
 use crate::file_lock::FileLock;
 use crate::scheduler::SchedulerHandle;
 use crate::storage::{
     ArtifactRepository, BenchmarkStore, EvidenceStore, ExperimentStore, JobStore, KnowledgeStore,
     LeaseStore, ProjectionStore,
 };
-use crate::coordination::CoordinationStore;
 use crate::subprocess::ProcessCache;
 use crate::work_journal::WorkJournal;
 

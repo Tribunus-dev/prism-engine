@@ -18,11 +18,22 @@ fn default_state_dir() -> String {
     format!("{}/.local/state/prism-mcpd", home)
 }
 
+fn effective_state_dir() -> String {
+    if std::env::var("PRISM_MCPD_TEST_ISOLATION").as_deref() == Ok("1") {
+        return std::env::var("PRISM_MCPD_STATE_DIR").unwrap_or_else(|_| default_state_dir());
+    }
+    default_state_dir()
+}
+
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let is_daemon = args.iter().any(|a| a == "--daemon");
 
-    let state_dir = std::env::var("PRISM_MCPD_STATE_DIR").unwrap_or_else(|_| default_state_dir());
+    // Production MCPD is deliberately a single persistent per-user daemon.
+    // Arbitrary client state directories previously created one daemon per
+    // agent and defeated shared supervision and caching. Integration tests
+    // opt into isolated state explicitly.
+    let state_dir = effective_state_dir();
 
     let artifact_dir = std::env::var("PRISM_MCPD_ARTIFACT_DIR")
         .unwrap_or_else(|_| format!("{}/artifacts", state_dir));
@@ -73,10 +84,13 @@ fn ensure_daemon(state_dir: &str, artifact_dir: &str, socket_path: &str) -> anyh
 
 fn start_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     let current_exe = std::env::current_exe().ok();
-    let installed_exe = std::env::var_os("HOME")
-        .map(|home| Path::new(&home).join(".local/bin/prism-mcpd"));
+    let installed_exe =
+        std::env::var_os("HOME").map(|home| Path::new(&home).join(".local/bin/prism-mcpd"));
     let use_launchd = Path::new(state_dir).join("supervised").exists()
-        && current_exe.as_ref().zip(installed_exe.as_ref()).is_none_or(|(current, installed)| current == installed);
+        && current_exe
+            .as_ref()
+            .zip(installed_exe.as_ref())
+            .is_none_or(|(current, installed)| current == installed);
     if use_launchd {
         let domain = format!("gui/{}", unsafe { libc::getuid() });
         let service = format!("{domain}/com.prism.engine.mcpd");
@@ -112,12 +126,22 @@ fn daemon_is_healthy(socket_path: &str) -> bool {
     }
     serde_json::from_str::<serde_json::Value>(&response)
         .ok()
-        .is_some_and(|value| {
-            value["id"] == "health"
-                && value["result"]["protocol"] == 1
-                && value["result"]["status"] == "healthy"
-                && value["result"]["build_id"] == env!("PRISM_MCPD_BUILD_ID")
-        })
+        .is_some_and(|value| health_response_is_compatible(&value))
+}
+
+fn health_response_is_compatible(value: &serde_json::Value) -> bool {
+    let protocol_is_compatible = value["id"] == "health"
+        && value["result"]["protocol"] == 1
+        && value["result"]["status"] == "healthy";
+    if !protocol_is_compatible {
+        return false;
+    }
+
+    // A proxy and the persistent daemon may legitimately come from different
+    // build profiles or rolling deployments. Protocol compatibility is the
+    // default contract; strict build identity remains available for diagnostics.
+    std::env::var("PRISM_MCPD_REQUIRE_BUILD_ID").as_deref() != Ok("1")
+        || value["result"]["build_id"] == env!("PRISM_MCPD_BUILD_ID")
 }
 
 fn terminate_recorded_daemon(state_dir: &str) {
@@ -161,9 +185,15 @@ fn spawn_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     cmd.arg("--daemon");
     cmd.env("PRISM_MCPD_STATE_DIR", state_dir);
     cmd.env("PRISM_MCPD_ARTIFACT_DIR", artifact_dir);
+    if std::env::var("PRISM_MCPD_TEST_ISOLATION").as_deref() == Ok("1") {
+        cmd.env("PRISM_MCPD_TEST_ISOLATION", "1");
+    }
     std::fs::create_dir_all(state_dir)?;
     let log_path = Path::new(state_dir).join("daemon.log");
-    let log = std::fs::OpenOptions::new().create(true).append(true).open(log_path)?;
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)?;
     let log_err = log.try_clone()?;
     // Detach — don't wait, but retain durable diagnostics for startup/recovery.
     cmd.stdin(std::process::Stdio::null())
