@@ -72,7 +72,12 @@ fn ensure_daemon(state_dir: &str, artifact_dir: &str, socket_path: &str) -> anyh
 }
 
 fn start_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
-    if Path::new(state_dir).join("supervised").exists() {
+    let current_exe = std::env::current_exe().ok();
+    let installed_exe = std::env::var_os("HOME")
+        .map(|home| Path::new(&home).join(".local/bin/prism-mcpd"));
+    let use_launchd = Path::new(state_dir).join("supervised").exists()
+        && current_exe.as_ref().zip(installed_exe.as_ref()).is_none_or(|(current, installed)| current == installed);
+    if use_launchd {
         let domain = format!("gui/{}", unsafe { libc::getuid() });
         let service = format!("{domain}/com.prism.engine.mcpd");
         let status = std::process::Command::new("launchctl")
@@ -111,6 +116,7 @@ fn daemon_is_healthy(socket_path: &str) -> bool {
             value["id"] == "health"
                 && value["result"]["protocol"] == 1
                 && value["result"]["status"] == "healthy"
+                && value["result"]["build_id"] == env!("PRISM_MCPD_BUILD_ID")
         })
 }
 
