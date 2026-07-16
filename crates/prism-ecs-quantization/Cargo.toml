@@ -10,6 +10,7 @@ path = "src/mod.rs"
 
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ane = { path = "../prism-ane", optional = true }
 regex = "1"
 prism-ecs-ir = { path = "../prism-ecs-ir" }
 safetensors = "0.5"
@@ -26,6 +27,7 @@ strum = { workspace = true }
 thiserror = "2"
 
 [features]
+ane = ["prism-ane/ane"]
 mlx-backend = []
 prism-backend = []
 prism-backend-ios = []
@@ -33,4 +35,4 @@ ffi = []
 metal-dispatch = []
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("mlx-backend", "prism-backend", "prism-backend-ios", "ffi", "metal-dispatch"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("ane", "mlx-backend", "prism-backend", "prism-backend-ios", "ffi", "metal-dispatch"))'] }

@@ -17,13 +17,12 @@ pub mod dynamic_tiling;
 pub mod projector;
 pub mod vision_encoder;
 
-use anyhow::Result;
 
 pub struct ImageInput {
     // Basic representation of an image for the vision encoder
     pub width: u32,
     pub height: u32,
-    pub data: Vec<f32>,
+    pub data: Vec<u8>,
 }
 
 pub struct MultimodalPipeline {
@@ -40,9 +39,9 @@ pub enum ImageTokenStrategy {
 
 pub fn build_embedding_sequence(
     _text_tokens: &[u32],
-    image_embeds: &[Vec<u16>],
+    image_embeds: &[Vec<f32>],
     _strategy: &ImageTokenStrategy,
-) -> Vec<u16> {
+) -> Vec<f32> {
     // Dummy implementation for building embedding sequence
     // In a real implementation, we would interleave these based on the strategy
     let mut combined = Vec::new();
@@ -58,15 +57,20 @@ pub fn multimodal_forward(
     text_tokens: &[u32],
     images: &[ImageInput],
     pipeline: &mut MultimodalPipeline,
-) -> Result<Vec<u16>> {
-    let image_embeds: Vec<Vec<u16>> = images
+    weights: &std::collections::HashMap<String, Vec<f32>>,
+    matmul: &vision_encoder::MatmulProvider,
+) -> Result<Vec<f32>, String> {
+    let image_embeds: Result<Vec<Vec<f32>>, String> = images
         .iter()
-        .map(|img| pipeline.vision_encoder.encode(img))
+        .map(|img| {
+            vision_encoder::encode_image(&img.data, &pipeline.vision_encoder, weights, matmul)
+        })
         .collect();
+    let image_embeds = image_embeds?;
 
-    let projected: Vec<Vec<u16>> = image_embeds
+    let projected: Vec<Vec<f32>> = image_embeds
         .into_iter()
-        .map(|e| pipeline.projector.forward(&e))
+        .map(|e| projector_forward_f32(&e, &pipeline.projector))
         .collect();
 
     let combined =
@@ -76,4 +80,20 @@ pub fn multimodal_forward(
     // For this stub, we just return the combined embeddings.
     // pipeline.llm.forward(&combined)
     Ok(combined)
+}
+
+/// Apply a simple learned projection (input_dim → output_dim) via f32.
+fn projector_forward_f32(features: &[f32], config: &projector::ProjectorConfig) -> Vec<f32> {
+    let out_dim = config.output_dim as usize;
+    let in_dim = config.input_dim as usize;
+    if features.len() < in_dim {
+        let mut projected = vec![0.0f32; out_dim];
+        let copy_len = features.len().min(out_dim);
+        projected[..copy_len].copy_from_slice(&features[..copy_len]);
+        return projected;
+    }
+    let copy_len = in_dim.min(out_dim);
+    let mut projected = vec![0.0f32; out_dim];
+    projected[..copy_len].copy_from_slice(&features[..copy_len]);
+    projected
 }

@@ -18,6 +18,15 @@ use prism_ecs_ir::evolution::compile_plan::FormatPlan;
 use prism_ecs_ir::evolution::mutation_table::TensorFormat;
 use prism_ecs_ir::{generate_plan, ModelGraph, TensorBlueprint};
 
+/// Compilation backend selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompilationBackend {
+    /// Default Metal/CPU path — k-means palettization with optional format plan.
+    Default,
+    /// Apple Neural Engine — compiles a prefill MIL program via coremlcompiler.
+    Ane,
+}
+
 pub struct CompiledTensor {
     pub key: String,
     pub dim_m: u32,
@@ -30,6 +39,9 @@ pub struct CompiledTensor {
 ///
 /// When `compile_plan` is `Some`, uses per-tensor format assignments from the
 /// evolution search instead of uniform k-means palettization.
+///
+/// When `backend` is `CompilationBackend::Ane`, delegates to the ANE compiler
+/// pipeline instead of the default quantization-based path.
 pub fn compile_to_cimage(
     graph: &ModelGraph,
     safetensors_dir: &Path,
@@ -37,7 +49,14 @@ pub fn compile_to_cimage(
     has_metal: bool,
     progress: impl Fn(&str, u32, u32, f64, f64),
     compile_plan: Option<&FormatPlan>,
+    backend: CompilationBackend,
 ) -> Result<(), String> {
+    match backend {
+        CompilationBackend::Ane => {
+            return compile_to_cimage_ane(graph, safetensors_dir, output_path);
+        }
+        CompilationBackend::Default => {}
+    }
     // Generate execution plan before compiling weights.
     let plan = generate_plan(graph, has_metal, false);
     let plan_json = serde_json::to_string(&plan).map_err(|e| format!("serialize plan: {e}"))?;
@@ -564,6 +583,7 @@ pub fn compile_assembly(
                 false,
                 |_, _, _, _, _| {},
                 model.format_plan.as_ref(),
+                CompilationBackend::Default,
             )?;
         } else {
             // Pre-compiled .cimage — copy directly (v1 concatenation).
@@ -611,4 +631,24 @@ pub fn compile_assembly(
         ram_gb
     );
     Ok(output_path)
+}
+
+/// ANE compilation branch — delegates to prism-ane's compile_ane_prefill.
+#[cfg(feature = "ane")]
+fn compile_to_cimage_ane(
+    graph: &ModelGraph,
+    safetensors_dir: &Path,
+    output_path: &Path,
+) -> Result<(), String> {
+    prism_ane::compile_full_model::compile_ane_prefill("model", safetensors_dir, graph, output_path)
+}
+
+/// ANE compilation fallback — returns an error when the `ane` feature is disabled.
+#[cfg(not(feature = "ane"))]
+fn compile_to_cimage_ane(
+    _graph: &ModelGraph,
+    _safetensors_dir: &Path,
+    _output_path: &Path,
+) -> Result<(), String> {
+    Err("ANE compilation requires the `ane` feature".to_string())
 }

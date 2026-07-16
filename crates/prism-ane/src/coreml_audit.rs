@@ -23,9 +23,10 @@ impl AneModelAudit {
         // Basic checks (extend with MIL proto parsing when coreml-proto is available)
         #[cfg(feature = "ane")]
         {
+            let model = _model;
             // Parse the model's MIL spec to check op compatibility
             audit.check_mil_ops(model);
-            audit.check_mil_ops(_model);
+            audit.check_mil_ops(model);
         }
         audit.is_ane_compatible = audit.issues.is_empty();
         audit

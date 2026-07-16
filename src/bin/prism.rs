@@ -13,6 +13,7 @@
 //!   tokenizer_config.json
 
 use clap::{Parser, Subcommand};
+use prism_ecs_quantization::compiler::CompilationBackend;
 use std::path::{Path, PathBuf};
 
 /// Detect if Metal GPU is available.
@@ -413,6 +414,7 @@ fn pull(repo: &str) {
         has_metal(),
         |_, _, _, _, _| {},
         None,
+        CompilationBackend::Default,
     ) {
         eprintln!("Compilation failed: {e}");
         std::process::exit(1);
@@ -534,6 +536,7 @@ fn compile_model_dir(dir: &Path, label: &str) {
         has_metal(),
         |_, _, _, _, _| {},
         None,
+        CompilationBackend::Default,
     ) {
         Ok(()) => {
             let size = std::fs::metadata(&out)

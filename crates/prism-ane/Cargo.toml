@@ -14,7 +14,7 @@ bytemuck = "1"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-prism-engine = { path = "../.." }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
 
 [features]
 default = []

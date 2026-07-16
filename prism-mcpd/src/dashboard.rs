@@ -16,6 +16,7 @@ use prism_ecs_ir::evolution::{
     CandidateGenome, FormatPlan, JointEvolutionSystem, JointSearchConfig, ParetoFrontier,
     SyntheticEvaluator,
 };
+use prism_ecs_quantization::compiler::CompilationBackend;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
@@ -633,6 +634,7 @@ async fn handle_pull_socket(mut socket: WebSocket, state: Arc<DashboardState>) {
                     );
                 },
                 Some(&compile_plan),
+                CompilationBackend::Default,
             )
         }
     })

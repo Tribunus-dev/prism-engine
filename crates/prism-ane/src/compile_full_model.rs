@@ -10,7 +10,6 @@ use crate::mil_gen_full::{self, LayerMILWeights};
 use crate::mlpackage::{self, ModelMeta};
 use crate::pack_mlmodelc;
 use prism_ecs_ir::model_graph::{ComputeNode, ModelGraph};
-use prism_ecs_quantization::cimage::cimage_append_blob;
 use safetensors::SafeTensors;
 
 // ── Config extraction ───────────────────────────────────────────────────
@@ -460,6 +459,88 @@ pub fn compile_ane_prefill(
 
     let blob_bytes = pack_mlmodelc(&mlmodelc_dir)?;
     cimage_append_blob(cimage_path, "mlmodelc", &blob_bytes)?;
+
+    Ok(())
+}
+
+/// Append a blob payload to an already-finalized .cimage file.
+/// Reads the JSON header, appends payload at the next 16 KB boundary,
+/// and rewrites the header with the new tensor record.
+fn cimage_append_blob(path: &Path, name: &str, payload: &[u8]) -> Result<(), String> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    const PAGE_SIZE: u64 = 16384;
+    const MAGIC: &[u8; 8] = b"TRB_CIMG";
+    const HEADER_PAGES: u64 = 8;
+
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("open: {e}"))?;
+
+    let mut magic = [0u8; 8];
+    file.read_exact(&mut magic)
+        .map_err(|e| format!("read magic: {e}"))?;
+    if &magic != MAGIC {
+        return Err("invalid .cimage magic: expected TRB_CIMG".to_string());
+    }
+
+    let mut hdr_size_bytes = [0u8; 8];
+    file.read_exact(&mut hdr_size_bytes)
+        .map_err(|e| format!("read header size: {e}"))?;
+    let hdr_size = u64::from_le_bytes(hdr_size_bytes) as usize;
+
+    let mut hdr_buf = vec![0u8; hdr_size];
+    file.read_exact(&mut hdr_buf)
+        .map_err(|e| format!("read header: {e}"))?;
+    let mut header: serde_json::Value =
+        serde_json::from_slice(&hdr_buf).map_err(|e| format!("parse header: {e}"))?;
+
+    let end_offset = header["tensors"]
+        .as_object()
+        .and_then(|tensors| {
+            tensors
+                .values()
+                .filter_map(|v| {
+                    let offset = v["offset"].as_u64()?;
+                    let size = v["size"].as_u64()?;
+                    Some(offset + size)
+                })
+                .max()
+        })
+        .unwrap_or(HEADER_PAGES * PAGE_SIZE);
+
+    let aligned = (end_offset + PAGE_SIZE - 1) / PAGE_SIZE * PAGE_SIZE;
+
+    file.seek(SeekFrom::Start(aligned))
+        .map_err(|e| format!("seek: {e}"))?;
+    file.write_all(payload)
+        .map_err(|e| format!("write blob: {e}"))?;
+
+    let record = serde_json::json!({
+        "tensor_type": "Blob",
+        "offset": aligned,
+        "size": payload.len() as u64,
+        "dim_m": 0,
+        "dim_n": 0,
+    });
+
+    if let Some(tensors) = header["tensors"].as_object_mut() {
+        tensors.insert(name.to_string(), record);
+    }
+
+    let hdr_json = serde_json::to_string(&header).map_err(|e| format!("serialize header: {e}"))?;
+    let hdr_size = hdr_json.len() as u64;
+
+    file.seek(SeekFrom::Start(0))
+        .map_err(|e| format!("seek: {e}"))?;
+    file.write_all(MAGIC)
+        .map_err(|e| format!("write magic: {e}"))?;
+    file.write_all(&hdr_size.to_le_bytes())
+        .map_err(|e| format!("write header size: {e}"))?;
+    file.write_all(hdr_json.as_bytes())
+        .map_err(|e| format!("write header json: {e}"))?;
+    file.flush().map_err(|e| format!("flush: {e}"))?;
 
     Ok(())
 }
