@@ -11,7 +11,6 @@ serde_json = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["sync", "macros", "time"] }
 tempfile = { workspace = true }
-tokenizers = { workspace = true }
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-ir = { path = "../prism-ecs-ir" }
 prism-runtime = { path = "../prism-runtime" }

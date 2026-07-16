@@ -1,10 +1,13 @@
-//! Real tokenizer for encoding text to token IDs using HuggingFace tokenizers.
+//! Real tokenizer for encoding text to token IDs using pure Rust BPE.
+//!
+//! Delegates to prism_runtime::bpe_tokenizer::Tokenizer.
 
+use prism_runtime::bpe_tokenizer::Tokenizer;
 use std::path::Path;
 
 /// A HuggingFace-compatible tokenizer loaded from tokenizer.json.
 pub struct TribunusTokenizer {
-    inner: tokenizers::Tokenizer,
+    inner: Tokenizer,
 }
 
 impl TribunusTokenizer {
@@ -14,7 +17,7 @@ impl TribunusTokenizer {
         if !path.exists() {
             return Err(format!("tokenizer file not found: {}", path.display()));
         }
-        let inner = tokenizers::Tokenizer::from_file(&path)
+        let inner = Tokenizer::from_file(&path)
             .map_err(|e| format!("failed to load tokenizer from {}: {}", path.display(), e))?;
         Ok(Self { inner })
     }
@@ -25,7 +28,7 @@ impl TribunusTokenizer {
             .inner
             .encode(text, false)
             .map_err(|e| format!("tokenizer encode failed: {}", e))?;
-        Ok(encoding.get_ids().iter().map(|&id| id as u32).collect())
+        Ok(encoding.ids)
     }
 
     /// Decode token IDs back to text.

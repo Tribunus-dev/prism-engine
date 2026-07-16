@@ -6,6 +6,7 @@
 //! or CPU fallback using the quantization codec families from
 //! `prism-ecs-quantization`.
 
+pub mod bpe_tokenizer;
 pub mod cpu;
 pub mod engine;
 pub mod inference;
@@ -13,5 +14,6 @@ pub mod measured;
 pub mod metal;
 pub mod model;
 pub mod multimodal;
+pub mod safetensors;
 pub mod sampling;
 pub mod streaming;

@@ -270,12 +270,12 @@ impl PrismEngine {
             // Fallback: simple whitespace split for testing
             return Ok(text.split_whitespace().map(|_| 1u32).collect());
         }
-        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path)
+        let tokenizer = crate::bpe_tokenizer::Tokenizer::from_file(tokenizer_path)
             .map_err(|e| format!("load tokenizer: {e}"))?;
         let encoding = tokenizer
             .encode(text, true)
             .map_err(|e| format!("encode: {e}"))?;
-        Ok(encoding.get_ids().to_vec())
+        Ok(encoding.ids)
     }
 
     /// Detokenize token IDs back to text.
@@ -284,7 +284,7 @@ impl PrismEngine {
         if tokenizer_path.is_empty() {
             return Ok(format!("<token {}>", ids.first().copied().unwrap_or(0)));
         }
-        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path)
+        let tokenizer = crate::bpe_tokenizer::Tokenizer::from_file(tokenizer_path)
             .map_err(|e| format!("load tokenizer: {e}"))?;
         tokenizer
             .decode(ids, true)
