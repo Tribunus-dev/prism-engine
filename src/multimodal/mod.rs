@@ -17,8 +17,8 @@ pub mod dynamic_tiling;
 pub mod projector;
 pub mod vision_encoder;
 
-use crate::lut::engine::PrismEngine;
 use anyhow::Result;
+use prism_runtime::engine::PrismEngine;
 
 pub struct ImageInput {
     // Basic representation of an image for the vision encoder

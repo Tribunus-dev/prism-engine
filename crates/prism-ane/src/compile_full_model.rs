@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use crate::mil_gen_full::{self, LayerMILWeights};
 use crate::mlpackage::{self, ModelMeta};
 use crate::pack_mlmodelc;
-use prism_engine::lut::graph::{ComputeNode, ModelGraph};
-use prism_engine::quantization::cimage::cimage_append_blob;
+use prism_ecs_ir::model_graph::{ComputeNode, ModelGraph};
+use prism_ecs_quantization::cimage::cimage_append_blob;
 use safetensors::SafeTensors;
 
 // ── Config extraction ───────────────────────────────────────────────────

@@ -184,14 +184,14 @@ fn run_chat(model: Option<String>) {
                 })
         }
     };
-    let cfg = prism_engine::lut::graph::UnifiedConfig::from_file(&model_path.join("config.json"))
+    let cfg = prism_ecs_ir::model_graph::UnifiedConfig::from_file(&model_path.join("config.json"))
         .unwrap_or_else(|e| {
             eprintln!("config: {e}");
             std::process::exit(1);
         });
-    let graph = prism_engine::lut::graph::ModelGraph::build(&cfg);
+    let graph = prism_ecs_ir::model_graph::ModelGraph::build(&cfg);
     let mut engine =
-        prism_engine::lut::engine::PrismEngine::load(&model_path.join("model.cimage"), graph)
+        prism_runtime::engine::PrismEngine::load(&model_path.join("model.cimage"), graph)
             .unwrap_or_else(|e| {
                 eprintln!("load: {e}");
                 std::process::exit(1);
@@ -201,7 +201,7 @@ fn run_chat(model: Option<String>) {
         eprintln!("Metal: {e}");
     }
     let tok =
-        prism_engine::tokenizer::TribunusTokenizer::from_dir(&model_path).unwrap_or_else(|e| {
+        prism_ecs_server::tokenizer::TribunusTokenizer::from_dir(&model_path).unwrap_or_else(|e| {
             eprintln!("tokenizer: {e}");
             std::process::exit(1);
         });
@@ -316,12 +316,12 @@ fn pull(repo: &str) {
     std::fs::copy(&cfg_path, out_dir.join("config.json")).ok();
     eprintln!("ok");
 
-    let cfg = prism_engine::lut::graph::UnifiedConfig::from_file(&out_dir.join("config.json"))
+    let cfg = prism_ecs_ir::model_graph::UnifiedConfig::from_file(&out_dir.join("config.json"))
         .unwrap_or_else(|e| {
             eprintln!("config: {e}");
             std::process::exit(1);
         });
-    let graph = prism_engine::lut::graph::ModelGraph::build(&cfg);
+    let graph = prism_ecs_ir::model_graph::ModelGraph::build(&cfg);
     eprintln!(
         "  Graph: {} layers, {} nodes",
         graph.num_layers,
@@ -406,7 +406,7 @@ fn pull(repo: &str) {
     // 5. Compile to .cimage.
     eprintln!("  [4/4] compiling... ");
     let out_cimage = cimage_path(&name);
-    if let Err(e) = prism_engine::lut::compiler::compile_to_cimage(
+    if let Err(e) = prism_ecs_quantization::compiler::compile_to_cimage(
         &graph,
         &safetensors_dir,
         &out_cimage,
@@ -420,7 +420,7 @@ fn pull(repo: &str) {
     #[cfg(feature = "ane")]
     {
         eprint!("  [5/5] ANE prefill... ");
-        match prism_engine::ane::compile_full_model::compile_ane_prefill(
+        match prism_ane::compile_full_model::compile_ane_prefill(
             &name,
             &safetensors_dir,
             &graph,
@@ -515,17 +515,17 @@ fn compile_model_dir(dir: &Path, label: &str) {
         "[prism:compile] Building graph from {}... ",
         dir.join("config.json").display()
     );
-    let cfg = prism_engine::lut::graph::UnifiedConfig::from_file(&dir.join("config.json"))
+    let cfg = prism_ecs_ir::model_graph::UnifiedConfig::from_file(&dir.join("config.json"))
         .unwrap_or_else(|e| {
             eprintln!("config error: {e}");
             std::process::exit(1);
         });
-    let graph = prism_engine::lut::graph::ModelGraph::build(&cfg);
+    let graph = prism_ecs_ir::model_graph::ModelGraph::build(&cfg);
     eprintln!("{} layers, {} nodes", graph.num_layers, graph.nodes.len());
 
     let out = dir.join("model.cimage");
     eprintln!("[prism:compile] Compiling to {}...", out.display());
-    match prism_engine::lut::compiler::compile_to_cimage(
+    match prism_ecs_quantization::compiler::compile_to_cimage(
         &graph,
         &safetensors_dir,
         &out,

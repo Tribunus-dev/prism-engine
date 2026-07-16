@@ -27,6 +27,7 @@ pub mod ir_types;
 pub mod linalg;
 pub mod lowering;
 pub mod manifest;
+pub mod model_graph;
 pub mod op;
 pub mod pass_manager;
 pub mod pass_pipeline;
@@ -42,4 +43,9 @@ pub mod value;
 
 pub use block_analysis::{AnalysisResult, BlockAnalyzer, FusionSuggestion, PatternKind};
 pub use hash_dispatch::{DispatchHash, HashDispatchSystem, HashDispatchTable};
+pub use model_graph::{
+    generate_plan, ActivationFunction, ArchitectureFamily, AttentionBackend, BackendAssignment,
+    ComputeNode, ExecutionPlan, KVCacheConfig, ModelGraph, TensorBlueprint, TensorRole,
+    UnifiedConfig,
+};
 pub use symbol_table::{SymbolConflict, SymbolTable};

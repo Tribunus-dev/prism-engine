@@ -7,9 +7,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::lut::graph::{ModelGraph, TensorBlueprint};
-use crate::quantization::cimage::CImageWriter;
-use crate::quantization::palette::palettize_matrix;
+use crate::cimage::CImageWriter;
+use crate::palette::palettize_matrix;
+use prism_ecs_ir::{generate_plan, ModelGraph, TensorBlueprint};
 
 pub struct CompiledTensor {
     pub key: String,
@@ -27,11 +27,11 @@ pub fn compile_to_cimage(
     has_metal: bool,
 ) -> Result<(), String> {
     // Generate execution plan before compiling weights.
-    let plan = crate::lut::graph::generate_plan(graph, has_metal, false);
+    let plan = generate_plan(graph, has_metal, false);
     let plan_json = serde_json::to_string(&plan).map_err(|e| format!("serialize plan: {e}"))?;
 
     let mut cimage = CImageWriter::new(output_path)?;
-    cimage.set_execution_plan(&plan_json);
+    cimage.set_execution_plan(plan_json);
     let pal_tensors = graph.palettized_tensors();
 
     let shards = discover_safetensors(safetensors_dir)?;
@@ -68,7 +68,7 @@ pub fn compile_to_cimage(
 
     // Also compile the embedding tensor (not in palettized_tensors).
     for node in &graph.nodes {
-        if let crate::lut::graph::ComputeNode::TokenEmbedding {
+        if let prism_ecs_ir::ComputeNode::TokenEmbedding {
             key,
             vocab_size,
             hidden_dim,
@@ -153,7 +153,7 @@ pub fn compile_to_memory(
     Ok(results)
 }
 
-// ── Safetensors helpers ─────────────────────────────────────────────────
+// ── Safetensors helpers ───────────────────────────────────────────────
 
 fn discover_safetensors(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
     let mut shards = Vec::new();

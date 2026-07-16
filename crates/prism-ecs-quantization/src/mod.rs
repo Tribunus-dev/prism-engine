@@ -19,9 +19,9 @@
 
 pub mod admission;
 pub mod calibration;
+pub mod contract;
 /// Quantization algorithm codec families — AWQ, GPTQ, SmoothQuant.
 pub mod families;
-pub mod contract;
 /// Generalized substitution pipeline — tries ranked codec candidates against
 /// evidence gates and uses the most aggressive one that passes.
 pub mod substitution;
@@ -40,16 +40,17 @@ pub mod validation;
 pub mod substitution_pass;
 
 // Pre-existing quantization submodules (preserved from original mod.rs).
-/// NF4 tile640 weight format — local copy for crate-internal use.
-/// These types live in tribunus-compute-core and will be migrated to
-/// prism-ecs-core once the extraction dependency chain is resolved.
-pub mod nf4tile640;
+pub mod cimage;
+pub mod compiler;
+pub mod embed_cluster;
 /// Execution plan types — local copy for crate-internal use.
 /// CodecFamily and related types live in tribunus-compute-core and will be
 /// migrated to prism-ecs-core.
 pub mod execution_plan;
-pub mod cimage;
-pub mod embed_cluster;
+/// NF4 tile640 weight format — local copy for crate-internal use.
+/// These types live in tribunus-compute-core and will be migrated to
+/// prism-ecs-core once the extraction dependency chain is resolved.
+pub mod nf4tile640;
 pub mod oq;
 pub mod palette;
 /// Per-class precision policy and M1 memory budget admission.

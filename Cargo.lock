@@ -3021,6 +3021,7 @@ dependencies = [
  "half",
  "memmap2",
  "prism-ecs-core",
+ "prism-ecs-ir",
  "rayon",
  "regex",
  "safetensors 0.5.3",

@@ -7,6 +7,7 @@
 //! `prism-ecs-quantization`.
 
 pub mod cpu;
+pub mod engine;
 pub mod inference;
 pub mod metal;
 pub mod model;

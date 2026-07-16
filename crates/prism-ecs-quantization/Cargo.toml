@@ -11,6 +11,7 @@ path = "src/mod.rs"
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
 regex = "1"
+prism-ecs-ir = { path = "../prism-ecs-ir" }
 safetensors = "0.5"
 memmap2 = "0.9"
 uuid = { version = "1", features = ["v4"] }
