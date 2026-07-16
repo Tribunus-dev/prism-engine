@@ -6,6 +6,7 @@
 
 use crate::inference::{InferenceEngine, KvCache};
 use crate::model::Model;
+use crate::streaming::StreamingLayerLoader;
 use prism_ecs_ir::model_graph::ModelGraph;
 use std::path::Path;
 
@@ -93,6 +94,51 @@ impl PrismEngine {
 
             // Forward pass for the single new token
             logits = engine.forward(&[next_token], &mut kv_cache)?;
+        }
+
+        Ok(InferenceStats {
+            prompt_tokens: prompt_tokens.len(),
+            generated_tokens: generated,
+            total_time_ms: t0.elapsed().as_secs_f64() * 1000.0,
+        })
+    }
+
+    /// Generate tokens using streamed layer loading.
+    ///
+    /// Same as generate() but loads one layer at a time via
+    /// StreamingLayerLoader for models exceeding available RAM.
+    pub fn generate_streamed(
+        &mut self,
+        prompt_tokens: &[u32],
+        max_tokens: usize,
+        streamer: &StreamingLayerLoader,
+    ) -> Result<InferenceStats, String> {
+        if prompt_tokens.is_empty() {
+            return Err("generate_streamed: empty prompt".to_string());
+        }
+
+        let engine = InferenceEngine::new(self.model.clone());
+
+        let num_layers = self.graph.num_layers as usize;
+        let head_dim = Self::detect_head_dim(&engine);
+        let num_kv_heads = Self::detect_num_kv_heads(&engine);
+        let max_seq_len = prompt_tokens.len() + max_tokens;
+
+        let mut kv_cache = KvCache::new(num_layers, num_kv_heads, head_dim, max_seq_len);
+        let t0 = std::time::Instant::now();
+
+        // Prefill: process all prompt tokens
+        let mut logits = engine.forward_streamed(prompt_tokens, &mut kv_cache, streamer)?;
+
+        // Autoregressive generation
+        let mut generated: Vec<u32> = Vec::with_capacity(max_tokens);
+        for _ in 0..max_tokens {
+            let next_token = crate::sampling::sample(&logits, &Default::default());
+            generated.push(next_token);
+            if next_token == 0 {
+                break;
+            }
+            logits = engine.forward_streamed(&[next_token], &mut kv_cache, streamer)?;
         }
 
         Ok(InferenceStats {

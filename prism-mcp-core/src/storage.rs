@@ -82,6 +82,8 @@ pub trait ArtifactRepository: Send + Sync {
         kind: ArtifactKind,
         producer: &ToolInvocationId,
     ) -> Result<ArtifactId>;
+    /// Retrieve artifact data by id.
+    fn get(&self, id: &ArtifactId) -> Result<Option<Vec<u8>>>;
     fn list(&self, kind: Option<&ArtifactKind>) -> Result<Vec<ArtifactRecord>>;
 }
 

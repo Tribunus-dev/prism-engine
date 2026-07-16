@@ -9,6 +9,8 @@ name = "prism-mcpd"
 path = "src/main.rs"
 
 [dependencies]
+sysinfo = "0.33"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 prism-mcp-core = { path = "../prism-mcp-core" }
 prism-mcp-model = { path = "../prism-mcp-model" }
 prism-mcp-build = { path = "../prism-mcp-build" }
@@ -21,6 +23,8 @@ prism-mcp-lab = { path = "../prism-mcp-lab" }
 prism-mcp-browser = { path = "../prism-mcp-browser" }
 prism-ecs-server = { path = "../crates/prism-ecs-server", default-features = false }
 prism-ecs-ir = { path = "../crates/prism-ecs-ir" }
+prism-ecs-constitutional = { path = "../crates/prism-ecs-constitutional" }
+prism-ecs-core = { path = "../crates/prism-ecs-core" }
 prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
 prism-runtime = { path = "../crates/prism-runtime", optional = true }
 hf-hub = "0.4"

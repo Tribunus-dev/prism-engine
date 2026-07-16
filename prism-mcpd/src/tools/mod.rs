@@ -1,19 +1,26 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::tools::subagent_handler::EcsSubagentHandler;
 use parking_lot::Mutex;
+use prism_ecs_core::World;
 use prism_ecs_server::inference::ModelRegistry;
 use prism_mcp_core::{DaemonState, McpHandler};
 
 // ── Inline handler modules ────────────────────────────────────────
+mod agent_tick_handler;
 mod cimage_handler;
+mod conversation_handler;
 mod coordination_handler;
 mod doctor_handler;
+mod hf_handler;
+mod hw_handler;
 mod inference_handler;
 mod job_handler;
 mod kb_handler;
 mod repo_handler;
 mod resolve_path_handler;
+mod subagent_handler;
 
 /// Phase 1: register handlers that do NOT need DaemonState.
 /// Returns a `HashMap` for insertion into DaemonState before Phase 2.
@@ -74,7 +81,26 @@ pub fn register_basic(
     let inference = inference_handler::InferenceHandler::new(registry);
     map.insert(inference.name(), Arc::new(inference));
 
+    // ── Subagent ────────────────────────────────────────────────
+    // Subagent needs a World — registered in register_stateful (Phase 2)
+
+    // ── Agent Tick ─────────────────────────────────────────────
+    let agent_tick = agent_tick_handler::AgentTickHandler::new();
+    map.insert(agent_tick.name(), Arc::new(agent_tick));
+
+    // ── Conversation ───────────────────────────────────────────────
+    let conversation = conversation_handler::ConversationHandler;
+    map.insert("conversation", Arc::new(conversation));
+
     // ── Model (zero-arg handlers()) ────────────────────────────────
+    // ── Hardware Probe ─────────────────────────────────────────────
+    let hw_probe = hw_handler::HwProbeHandler::new();
+    map.insert(hw_probe.name(), Arc::new(hw_probe));
+
+    // ── HuggingFace ────────────────────────────────────────────────
+    let hf = hf_handler::HfHandler::new();
+    map.insert(hf.name(), Arc::new(hf));
+
     for h in prism_mcp_model::handlers() {
         map.insert(h.name(), h);
     }
@@ -169,6 +195,7 @@ pub fn register_stateful(
         }
     }
 
+    // ── Browser ────────────────────────────────────────────────────
     {
         let deps = prism_mcp_browser::ToolDependencies {
             artifact_store: state.artifact_store.clone(),
@@ -181,6 +208,7 @@ pub fn register_stateful(
         }
     }
 
+    // ── Coordination jobs ──────────────────────────────────────────
     map.insert(
         "run_job",
         Arc::new(job_handler::JobHandler::new(state.job_manager.clone())),
@@ -191,6 +219,10 @@ pub fn register_stateful(
             state.job_manager.clone(),
         )),
     );
+
+    // ── Subagent (ECS-backed) ────────────────────────────────────
+    let ecs_world = Arc::new(Mutex::new(World::new()));
+    map.insert("subagent", Arc::new(EcsSubagentHandler::new(ecs_world)));
 
     Ok(map)
 }

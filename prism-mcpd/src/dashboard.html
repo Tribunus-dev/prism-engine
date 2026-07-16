@@ -15,6 +15,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9
 .model-item{padding:8px 12px;margin:2px 0;border-radius:6px;cursor:pointer;font-size:.85rem;color:#c9d1d9;transition:background .1s}
 .model-item:hover{background:#21262d}
 .model-item.active{background:#1f6feb22;color:#58a6ff;border:1px solid #1f6feb44}
+.agent-list{overflow-y:auto}
 .pull-section{padding:12px 16px;border-top:1px solid #30363d}
 .pull-section input{width:100%;padding:6px 8px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:.8rem;margin-bottom:6px}
 .pull-section input:focus{outline:1px solid #58a6ff;border-color:#58a6ff}
@@ -83,6 +84,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9
     <div class="model-list" id="model-list">
       <div style="color:#484f58;font-size:.8rem;padding:8px 16px">No models loaded</div>
     </div>
+    <h2>Agents</h2>
+    <div class="agent-list" id="agent-list" style="flex:0 0 auto;max-height:200px;overflow-y:auto;padding:0 8px">
+      <div style="color:#484f58;font-size:.8rem;padding:8px 16px">No agents active</div>
+    </div>
     <div class="pull-section">
       <input type="text" id="hf-repo" placeholder="HF repo e.g. prism-ml/Bonsai-27B" spellcheck="false">
       <button class="btn btn-hf" id="pull-btn" onclick="pullModel()">&#x2B06; Pull &amp; Compile from HF</button>
@@ -145,6 +150,52 @@ function connectModelsWs() {
   ws.onclose = () => setTimeout(connectModelsWs, 2000);
 }
 connectModelsWs();
+
+// ── Agent polling ─────────────────────────────────────────────────
+let agentRefreshInterval = null;
+
+function startAgentPolling() {
+  if (agentRefreshInterval) return;
+  agentRefreshInterval = setInterval(fetchAgents, 2000);
+  fetchAgents();
+}
+
+function fetchAgents() {
+  fetch('/api/agents')
+    .then(r => r.json())
+    .then(agents => renderAgentList(agents))
+    .catch(() => {});
+}
+
+function renderAgentList(agents) {
+  const el = document.getElementById('agent-list');
+  if (!agents || agents.length === 0) {
+    el.innerHTML = '<div style="color:#484f58;font-size:.8rem;padding:8px 16px">No agents active</div>';
+    return;
+  }
+
+  // Separate parents from subagents
+  const parents = agents.filter(a => !a.parent_id);
+  const subagents = agents.filter(a => a.parent_id);
+
+  el.innerHTML = parents.map(p => {
+    const subs = subagents.filter(s => s.parent_id === p.entity_id);
+    const phaseColor = p.phase === 'Planning' ? '#d29922' : p.phase === 'ToolCall' || p.phase === 'Executing' ? '#3fb950' : p.phase === 'Finished' ? '#58a6ff' : p.phase === 'Failed' || p.phase === 'Error' ? '#f85149' : '#8b949e';
+    return `<div style="padding:6px 12px;margin:2px 0;border-radius:6px;background:#161b22;font-size:.75rem">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="width:8px;height:8px;border-radius:50%;background:${phaseColor};display:inline-block"></span>
+        <span style="color:#c9d1d9">#${p.entity_id}</span>
+        <span style="color:#8b949e;font-size:.7rem">${p.phase}</span>
+        ${subs.length > 0 ? `<span style="color:#484f58">(${subs.length} sub)</span>` : ''}
+      </div>
+      ${subs.slice(0,5).map(s => `<div style="padding:2px 0 2px 20px;font-size:.7rem;color:#8b949e">#${s.entity_id} ${s.phase}</div>`).join('')}
+      ${subs.length > 5 ? `<div style="padding:2px 0 2px 20px;font-size:.7rem;color:#484f58">+${subs.length - 5} more</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// Start polling when page loads
+startAgentPolling();
 
 function renderModelList(models) {
   const el = document.getElementById('model-list');

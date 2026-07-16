@@ -2,6 +2,9 @@
 //! multimodal, agent, distributed, and ingress authority systems.
 
 pub mod agent_exec;
+pub mod agent_plan;
+pub mod agent_reflection;
+pub mod agent_state;
 pub mod artifact;
 pub mod command;
 pub mod compilation;
@@ -28,6 +31,8 @@ pub mod work;
 pub mod world_txn;
 
 pub use agent_exec::*;
+pub use agent_plan::*;
+pub use agent_reflection::*;
 pub use artifact::*;
 pub use command::*;
 pub use compilation::*;

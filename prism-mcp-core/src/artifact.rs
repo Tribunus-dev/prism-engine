@@ -304,6 +304,9 @@ impl crate::storage::ArtifactRepository for ArtifactStore {
     ) -> Result<ArtifactId> {
         self.put(data, kind, producer)
     }
+    fn get(&self, id: &ArtifactId) -> Result<Option<Vec<u8>>> {
+        self.get(id)
+    }
     fn list(&self, kind: Option<&ArtifactKind>) -> Result<Vec<ArtifactRecord>> {
         self.list(kind)
     }

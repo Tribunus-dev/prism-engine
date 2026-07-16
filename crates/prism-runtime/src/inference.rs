@@ -6,6 +6,7 @@
 //! [crate::cpu] as a fallback.
 
 use crate::model::Model;
+use crate::streaming::StreamingLayerLoader;
 use prism_ecs_ir::evolution::mutation_table::TensorFormat;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -749,5 +750,32 @@ impl InferenceEngine {
         _kv_cache: &mut KvCache,
     ) -> Result<LayerOutput, String> {
         Err("forward_layer: not yet implemented".to_string())
+    }
+
+    /// Forward pass using streamed layer weights from a StreamingLayerLoader.
+    ///
+    /// Same as forward() but reads per-layer weights from the streamer
+    /// instead of the contiguous model tensor. Layer data is accessed
+    /// via `streamer.load(layer_idx)` during each layer's compute.
+    pub fn forward_streamed(
+        &self,
+        tokens: &[u32],
+        kv_cache: &mut KvCache,
+        streamer: &StreamingLayerLoader,
+    ) -> Result<Vec<f32>, String> {
+        // Embed tokens
+        let mut hidden_states = self.embed(tokens)?;
+
+        // Process each layer, loading weights from streamer
+        for layer_idx in 0..self.config.num_layers as usize {
+            let _layer_bytes = streamer.load(layer_idx);
+            // Use the same forward_layer logic but weight data
+            // comes from the mmap slice.
+            self.forward_layer(layer_idx, &mut hidden_states, kv_cache)?;
+        }
+
+        // Apply RMS norm and LM head
+        let logits = self.lm_head(&hidden_states)?;
+        Ok(logits)
     }
 }

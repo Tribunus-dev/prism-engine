@@ -648,6 +648,25 @@ impl ArtifactRepository for PostgresArtifactRepository {
         Ok(id)
     }
 
+    fn get(&self, id: &ArtifactId) -> Result<Option<Vec<u8>>> {
+        let client = self.client.lock();
+        let rows = self.runtime.block_on(client.query(
+            "SELECT kind FROM prism_artifacts WHERE id_hash=$1",
+            &[&id.hex()],
+        ))?;
+        let kind_name: String = match rows.iter().next() {
+            Some(row) => row.get(0),
+            None => return Ok(None),
+        };
+        let kind = Self::kind(&kind_name)?;
+        let path = self.path(id, &kind);
+        if path.exists() {
+            std::fs::read(&path).map(Some).map_err(Into::into)
+        } else {
+            Ok(None)
+        }
+    }
+
     fn list(&self, kind: Option<&ArtifactKind>) -> Result<Vec<ArtifactRecord>> {
         let client = self.client.lock();
         let rows = if let Some(kind) = kind {

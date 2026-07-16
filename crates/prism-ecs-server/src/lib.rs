@@ -22,6 +22,8 @@ pub mod inference;
 pub mod kv_cache;
 /// LLM inference server types (ported from src/llm/server.rs).
 pub mod llm_server;
+/// Tensor residency tracking for layer streaming.
+pub mod residency;
 /// LLM inference runtime subsystem — session lifecycle, weight residency,
 /// KV-cache management, lane dispatch, scheduling, cancellation,
 /// memory pressure monitoring, receipt storage, and HTTP serving.

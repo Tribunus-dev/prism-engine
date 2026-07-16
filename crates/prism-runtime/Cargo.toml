@@ -14,6 +14,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rand = { workspace = true }
 parking_lot = { workspace = true }
+memmap2 = "0.9"
 
 [features]
 duckdb-projections = ["dep:duckdb"]

@@ -9,11 +9,15 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
+use prism_ecs_constitutional::agent_exec::{AgentLifecycle, AgentPhase};
+use prism_ecs_constitutional::agent_plan::ParentAgentId;
+use prism_ecs_core::World;
 use prism_ecs_ir::evolution::{
     CandidateGenome, FormatPlan, JointEvolutionSystem, JointSearchConfig, ParetoFrontier,
     SyntheticEvaluator,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
@@ -23,17 +27,41 @@ pub struct DashboardState {
     pub registry: Arc<Mutex<prism_ecs_server::inference::ModelRegistry>>,
     /// Broadcast channel for model list change notifications.
     pub model_tx: broadcast::Sender<Vec<String>>,
+    /// ECS world for agent observability.
+    pub world: Arc<Mutex<World>>,
 }
 
 pub fn router(state: DashboardState) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/api/models", get(list_models))
+        .route("/api/agents", get(list_agents))
         .route("/api/models/ws", get(models_ws_handler))
         .route("/api/generate", post(generate))
         .route("/api/ws", get(ws_handler))
         .route("/api/pull", get(pull_model))
         .with_state(Arc::new(state))
+}
+
+async fn list_agents(State(state): State<Arc<DashboardState>>) -> Json<Vec<Value>> {
+    let world = state.world.lock();
+    let mut agents = Vec::new();
+
+    for entity in world.all_entities() {
+        if let Some(phase) = world.get_component::<AgentPhase>(entity) {
+            let lifecycle = world.get_component::<AgentLifecycle>(entity);
+            let parent = world.get_component::<ParentAgentId>(entity);
+
+            agents.push(serde_json::json!({
+                "entity_id": entity.id(),
+                "phase": format!("{:?}", phase),
+                "lifecycle": format!("{:?}", lifecycle.unwrap_or(&AgentLifecycle::Active)),
+                "parent_id": parent.map(|p| p.0.id()),
+            }));
+        }
+    }
+
+    Json(agents)
 }
 
 async fn index() -> Html<&'static str> {

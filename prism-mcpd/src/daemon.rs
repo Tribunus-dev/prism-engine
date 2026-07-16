@@ -422,7 +422,12 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
             let rt = tokio::runtime::Runtime::new().expect("dashboard tokio runtime");
             rt.block_on(async move {
                 let (model_tx, _) = broadcast::channel::<Vec<String>>(16);
-                let state = crate::dashboard::DashboardState { registry, model_tx };
+                let world = Arc::new(Mutex::new(prism_ecs_core::World::new()));
+                let state = crate::dashboard::DashboardState {
+                    registry,
+                    model_tx,
+                    world,
+                };
                 let app = crate::dashboard::router(state);
                 let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
                     .await

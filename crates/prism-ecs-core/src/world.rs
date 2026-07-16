@@ -80,7 +80,7 @@ pub struct World {
     /// Type-erased extension map — used by [`tribunus_compute_core`] to store
     /// `SystemStage`, `WorldEpoch`, `Vec<ComponentChange>`, `Vec<DomainEvent>`,
     /// and any other compute-core-specific state without coupling this crate.
-    pub(crate) extensions: HashMap<TypeId, Box<dyn Any>>,
+    pub(crate) extensions: HashMap<TypeId, Box<dyn Any + Send + 'static>>,
 }
 
 impl std::fmt::Debug for World {
@@ -157,7 +157,7 @@ impl World {
     // ── Extension accessors ───────────────────────────────────────────────────
 
     /// Store a type-erased extension value.
-    pub fn set_extension<T: 'static>(&mut self, ext: T) {
+    pub fn set_extension<T: 'static + Send>(&mut self, ext: T) {
         self.extensions.insert(TypeId::of::<T>(), Box::new(ext));
     }
 
@@ -718,6 +718,22 @@ impl World {
             .iter()
             .filter(|s| s.as_ref().and_then(|s| s.occupant.as_ref()).is_some())
             .count()
+    }
+
+    /// Return all alive entities in the world.
+    pub fn all_entities(&self) -> Vec<Entity> {
+        self.entity_meta
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slot)| {
+                let slot = slot.as_ref()?;
+                if slot.occupant.is_some() {
+                    Some(Entity::new((i + 1) as u64, slot.generation))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Check whether an entity exists in the world.
