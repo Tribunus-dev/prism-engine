@@ -25,7 +25,10 @@ test-core = "test -p tribunus-compute-core --lib --features test-core"
 # Explicit native-hardware lane. Supply a test-name filter after the alias.
 test-hardware = "test -p tribunus-compute-core --lib --features test-hardware"
 # Compiler qualification remains deliberately separate because it links MLIR.
-test-compiler = "test -p tribunus-compute-core --lib --features test-compiler"
+# Sweep incremental artifacts older than 14 days (keeps rebuilds fast,
+# prevents the 70GB+ accumulation we hit before).
+sweep = "sweep -t 14"
+clean-old = "sweep -t 14"
 
 # Homebrew LLVM — build scripts (tblgen, mlir-sys) need llvm-config in PATH.
 [env]
