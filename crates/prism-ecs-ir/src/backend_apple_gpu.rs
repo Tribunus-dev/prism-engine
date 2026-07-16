@@ -343,24 +343,41 @@ pub fn lower_matmul_to_metal(world: &World, matmul_op: Entity) -> Result<String,
     // 5. Emit kernel source
     // Check for FormatAssignment — if any operand has Ternary158 or Binary1
     // assigned, emit the corresponding kernel variant instead of standard FP16.
-    let assigned_a = get_assigned_format(world, matmul_op, a);
-    let assigned_b = get_assigned_format(world, matmul_op, b);
+    let assigned_a = get_assigned_format(world, a);
+    let assigned_b = get_assigned_format(world, b);
 
     // Prefer the weight operand (B) for format selection; fall back to A.
     let fmt = assigned_b.or(assigned_a).map(|(fmt, _op)| fmt);
 
-    let (tile_m, tile_n, tile_k) = resolve_matmul_tile(world, matmul_op, m, n, k_a);
+    let (tile_m, tile_n, tile_k) =
+        resolve_matmul_tile(world, matmul_op, m as u32, n as u32, k_a as u32);
     match fmt {
         Some(TensorFormat::Ternary158) => Ok(emit_ternary_matmul_kernel(
-            m, n, k_a, tile_m, tile_n, tile_k,
+            m as u64,
+            n as u64,
+            k_a as u64,
+            tile_m as u64,
+            tile_n as u64,
+            tile_k as u64,
         )),
-        Some(TensorFormat::Binary1) => {
-            Ok(emit_binary_matmul_kernel(m, n, k_a, tile_m, tile_n, tile_k))
-        }
+        Some(TensorFormat::Binary1) => Ok(emit_binary_matmul_kernel(
+            m as u64,
+            n as u64,
+            k_a as u64,
+            tile_m as u64,
+            tile_n as u64,
+            tile_k as u64,
+        )),
         _ => {
             let metal_type = element_type_to_metal(&a_tensor.element_type);
             Ok(emit_matmul_kernel(
-                m, n, k_a, tile_m, tile_n, tile_k, metal_type,
+                m as u64,
+                n as u64,
+                k_a as u64,
+                tile_m as u64,
+                tile_n as u64,
+                tile_k as u64,
+                metal_type,
             ))
         }
     }
@@ -444,10 +461,18 @@ pub fn lower_batch_matmul_to_metal(
     }
 
     // 5. Emit kernel source
-    let (tile_m, tile_n, tile_k) = resolve_matmul_tile(world, batch_op, m, n, k_a);
+    let (tile_m, tile_n, tile_k) =
+        resolve_matmul_tile(world, batch_op, m as u32, n as u32, k_a as u32);
     let metal_type = element_type_to_metal(&a_tensor.element_type);
     Ok(emit_batch_matmul_kernel(
-        m, n, k_a, batch, tile_m, tile_n, tile_k, metal_type,
+        m as u64,
+        n as u64,
+        k_a as u64,
+        batch as u64,
+        tile_m as u64,
+        tile_n as u64,
+        tile_k as u64,
+        metal_type,
     ))
 }
 
@@ -525,13 +550,26 @@ pub fn lower_ternary_matmul_to_metal(
     }
 
     // 4. Detect tensor encoding from element type and emit appropriate kernel
-    let (tile_m, tile_n, tile_k) = resolve_matmul_tile(world, matmul_op, m, n, k_a);
+    let (tile_m, tile_n, tile_k) =
+        resolve_matmul_tile(world, matmul_op, m as u32, n as u32, k_a as u32);
     let encoding = detect_tensor_encoding(&a_tensor.element_type);
     match encoding {
         TensorEncoding::Ternary158 => Ok(emit_ternary_matmul_kernel(
-            m, n, k_a, tile_m, tile_n, tile_k,
+            m as u64,
+            n as u64,
+            k_a as u64,
+            tile_m as u64,
+            tile_n as u64,
+            tile_k as u64,
         )),
-        TensorEncoding::Binary1 => Ok(emit_binary_matmul_kernel(m, n, k_a, tile_m, tile_n, tile_k)),
+        TensorEncoding::Binary1 => Ok(emit_binary_matmul_kernel(
+            m as u64,
+            n as u64,
+            k_a as u64,
+            tile_m as u64,
+            tile_n as u64,
+            tile_k as u64,
+        )),
         TensorEncoding::Float => Err(MetalLowerError::UnsupportedEncoding(
             "ternary_matmul requires Ternary158 or Binary1 element type, got float".into(),
         )),

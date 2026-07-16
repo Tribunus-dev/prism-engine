@@ -7,6 +7,7 @@ use prism_mcp_core::{DaemonState, McpHandler};
 mod cimage_handler;
 mod coordination_handler;
 mod doctor_handler;
+mod inference_handler;
 mod job_handler;
 mod kb_handler;
 mod repo_handler;
@@ -65,6 +66,10 @@ pub fn register_basic() -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandl
     // ── CImage ─────────────────────────────────────────────────────
     let cimage = cimage_handler::CImageHandler::new();
     map.insert(cimage.name(), Arc::new(cimage));
+
+    // ── Inference ─────────────────────────────────────────────────
+    let inference = inference_handler::InferenceHandler::new();
+    map.insert(inference.name(), Arc::new(inference));
 
     // ── Model (zero-arg handlers()) ────────────────────────────────
     for h in prism_mcp_model::handlers() {

@@ -1,0 +1,13 @@
+[package]
+name = "prism-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+bytemuck = { workspace = true }
+blake3 = "1"
+[features]
+default = []
+generation-audio = []

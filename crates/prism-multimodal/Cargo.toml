@@ -1,0 +1,23 @@
+[package]
+name = "prism-multimodal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Prism multimodal and embedding pipeline -- vision encoder, projector, dynamic tiling, and text embedding generation"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+thiserror = "2"
+bytemuck = "1"
+blake3 = "1"
+serde = { workspace = true }
+
+[features]
+# No-op feature stubs -- the prism-backend feature was removed along with the
+# optional `tribunus-compute-core` dependency. These stubs prevent
+# `unexpected_cfg` warnings in source code that still references these
+# feature names.
+prism-backend = []

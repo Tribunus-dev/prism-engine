@@ -2951,6 +2951,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "prism-ane"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "coreml-proto",
+ "prism-engine",
+ "prost",
+ "safetensors 0.6.2",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
+name = "prism-audio"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "thiserror",
+]
+
+[[package]]
 name = "prism-ecs-constitutional"
 version = "0.1.0"
 dependencies = [
@@ -2985,6 +3009,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -2998,7 +3023,7 @@ dependencies = [
  "prism-ecs-core",
  "rayon",
  "regex",
- "safetensors",
+ "safetensors 0.5.3",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3011,8 +3036,20 @@ dependencies = [
 name = "prism-ecs-server"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "futures",
+ "parking_lot",
  "prism-ecs-core",
+ "prism-ecs-ir",
+ "prism-runtime",
  "serde",
+ "serde_json",
+ "tempfile",
+ "tokenizers",
+ "tokio",
+ "tokio-stream",
+ "tower-http",
+ "uuid",
 ]
 
 [[package]]
@@ -3039,7 +3076,7 @@ dependencies = [
  "prost-types",
  "rand 0.8.6",
  "rayon",
- "safetensors",
+ "safetensors 0.5.3",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3057,6 +3094,18 @@ dependencies = [
 [[package]]
 name = "prism-ffi"
 version = "0.1.0"
+
+[[package]]
+name = "prism-image"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
 
 [[package]]
 name = "prism-kv-cache"
@@ -3212,6 +3261,7 @@ dependencies = [
  "libc",
  "nix",
  "parking_lot",
+ "prism-ecs-server",
  "prism-mcp-admission",
  "prism-mcp-bench",
  "prism-mcp-browser",
@@ -3233,6 +3283,37 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "prism-multimodal"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "bytemuck",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "prism-runtime"
+version = "0.1.0"
+dependencies = [
+ "half",
+ "prism-ecs-core",
+ "prism-ecs-ir",
+ "prism-ecs-quantization",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "prism-video"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]
@@ -3809,6 +3890,16 @@ name = "safetensors"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc0cdb7198d738a111f6df8fef42cb175412c311d0c4ac9126ff4e550ad1a0e8"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "safetensors"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "172dd94c5a87b5c79f945c863da53b2ebc7ccef4eca24ac63cca66a41aab2178"
 dependencies = [
  "serde",
  "serde_json",

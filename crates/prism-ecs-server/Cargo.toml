@@ -6,5 +6,26 @@ license.workspace = true
 description = "Prism ECS server — RPCS3-absorbed cell SPU mailbox, DMA, and workgroup patterns"
 
 [dependencies]
+uuid = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros", "time"] }
+tempfile = { workspace = true }
+tokenizers = { workspace = true }
 prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+prism-runtime = { path = "../prism-runtime" }
 serde = { workspace = true, features = ["derive"] }
+axum = { version = "0.8", optional = true }
+tokio-stream = { version = "0.1", optional = true }
+futures = "0.3"
+tower-http = { version = "0.6", optional = true, features = ["cors"] }
+
+[features]
+default = []
+server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]
+prism-backend = []
+generation-image = []
+generation-audio = []
+generation-video = []
+generation-diffusion = []

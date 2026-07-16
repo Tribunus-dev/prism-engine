@@ -5,8 +5,13 @@
 //! Every operation is an Entity in the ECS World.
 
 pub mod arith;
+pub mod backend_apple_gpu;
+pub mod backend_cpu;
+pub mod backend_dispatch;
+pub mod backend_intel_gpu;
 pub mod block;
 pub mod block_analysis;
+pub mod block_program;
 pub mod bonsai;
 pub mod builder;
 pub mod cimage_types;
@@ -21,6 +26,7 @@ pub mod ir_attrs;
 pub mod ir_types;
 pub mod linalg;
 pub mod lowering;
+pub mod manifest;
 pub mod op;
 pub mod pass_manager;
 pub mod pass_pipeline;

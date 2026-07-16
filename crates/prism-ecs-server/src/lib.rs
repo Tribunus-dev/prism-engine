@@ -18,4 +18,13 @@ pub mod workgroup;
 pub mod cimage_types;
 
 /// KV cache and scheduler types (ported from compute-core).
+pub mod inference;
 pub mod kv_cache;
+/// LLM inference server types (ported from src/llm/server.rs).
+pub mod llm_server;
+/// LLM inference runtime subsystem — session lifecycle, weight residency,
+/// KV-cache management, lane dispatch, scheduling, cancellation,
+/// memory pressure monitoring, receipt storage, and HTTP serving.
+pub mod runtime;
+/// HuggingFace tokenizer wrapper.
+pub mod tokenizer;

@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 smallvec = { workspace = true }
+uuid = { workspace = true }
 bitflags = { version = "2" }
 thiserror = { workspace = true }
 prism-ecs-core = { path = "../prism-ecs-core" }

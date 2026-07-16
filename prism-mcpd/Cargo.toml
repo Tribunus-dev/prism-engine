@@ -19,6 +19,7 @@ prism-mcp-replay = { path = "../prism-mcp-replay" }
 prism-mcp-trace = { path = "../prism-mcp-trace" }
 prism-mcp-lab = { path = "../prism-mcp-lab" }
 prism-mcp-browser = { path = "../prism-mcp-browser" }
+prism-ecs-server = { path = "../crates/prism-ecs-server", default-features = false }
 serde_json = "1"
 serde.workspace = true
 blake3 = "1"

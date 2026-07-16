@@ -22,6 +22,12 @@ members = [
     "crates/prism-kv-cache",
     "crates/prism-ecs-ir",
     "crates/prism-ecs-server",
+    "crates/prism-ane",
+    "crates/prism-audio",
+    "crates/prism-image",
+    "crates/prism-multimodal",
+    "crates/prism-runtime",
+    "crates/prism-video",
 ]
 [workspace.package]
 

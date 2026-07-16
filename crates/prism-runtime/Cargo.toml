@@ -1,0 +1,18 @@
+[package]
+name = "prism-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-quantization = { path = "../prism-ecs-quantization" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+half = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rand = { workspace = true }
+
+[features]
+default = []
+metal-dispatch = []
