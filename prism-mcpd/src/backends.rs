@@ -299,6 +299,15 @@ CREATE TABLE IF NOT EXISTS benchmark_baseline_projection (
     observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS artifact_projection (
+CREATE TABLE IF NOT EXISTS tensor_benchmarks (
+    dim_m INTEGER,
+    dim_n INTEGER,
+    format VARCHAR,
+    avg_tok_sec DOUBLE,
+    sample_count INTEGER DEFAULT 1,
+    observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (dim_m, dim_n, format)
+);
     id_hash VARCHAR PRIMARY KEY,
     kind VARCHAR NOT NULL,
     byte_len BIGINT NOT NULL,

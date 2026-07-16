@@ -35,6 +35,16 @@ pub enum TensorType {
     StandardFP16,
     Palettized4Bit,
     Blob,
+    /// Ternary (Ternary158) — 2-bit ternary encoding per value.
+    Ternary158,
+    /// Binary — 1-bit binary encoding per value.
+    Binary1,
+    /// NF4 — 4-bit NormalFloat with per-group scale/bias.
+    NF4,
+    /// Int4 — symmetric 4-bit quantization with per-group scale.
+    Int4,
+    /// FP8 — 8-bit floating point.
+    FP8,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -106,6 +116,21 @@ impl CImageWriter {
         dim_m: u32,
         dim_n: u32,
     ) -> Result<(), String> {
+        self.append(name, payload, dim_m, dim_n, TensorType::Palettized4Bit)
+    }
+
+    /// Write a tensor payload with the given tensor type.
+    ///
+    /// The payload format is specific to the tensor type and must be
+    /// understood by the runtime loader.
+    pub fn append(
+        &mut self,
+        name: &str,
+        payload: &[u8],
+        dim_m: u32,
+        dim_n: u32,
+        tensor_type: TensorType,
+    ) -> Result<(), String> {
         self.align_to_page()?;
         let offset = self.current_pos()?;
         self.file
@@ -114,7 +139,7 @@ impl CImageWriter {
         self.header.tensors.insert(
             name.to_string(),
             TensorRecord {
-                tensor_type: TensorType::Palettized4Bit,
+                tensor_type,
                 offset,
                 size: payload.len() as u64,
                 dim_m,

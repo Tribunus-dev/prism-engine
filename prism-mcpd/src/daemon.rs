@@ -196,6 +196,31 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     let work_journal = WorkJournal::new(Path::new(&paths.staging_dir));
     let process_cache = ProcessCache::new(32);
 
+    // ── MeasuredEvaluator (hardware-backed evolution evaluator) ─────
+    // Opens a separate DuckDB connection for benchmark projections.
+    // Gated behind the `measure` feature (requires `trifecta`).
+    #[cfg(feature = "measure")]
+    let measured_evaluator = {
+        if let Some(duckdb_path) = &backend_config.duckdb_path {
+            match duckdb::Connection::open(duckdb_path) {
+                Ok(conn) => {
+                    let eval =
+                        prism_runtime::measured::MeasuredEvaluator::new(0.1).with_duckdb(conn);
+                    Some(eval)
+                }
+                Err(e) => {
+                    eprintln!("prism-mcpd: failed to open DuckDB for MeasuredEvaluator: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
+    #[cfg(not(feature = "measure"))]
+    let measured_evaluator: Option<()> = None;
+    let _measured_evaluator = measured_evaluator;
+
     // Global work queue: reader threads push, scheduler pulls
     let (work_tx, work_rx) = bounded::<RequestEnvelope>(256);
     let work_tx_for_handler = work_tx.clone();

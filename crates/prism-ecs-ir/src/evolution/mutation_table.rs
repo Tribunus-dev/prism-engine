@@ -28,6 +28,11 @@ pub enum TensorFormat {
     Nf4,
     /// Normal float 8.
     Nf8,
+    /// Palettized 4-bit (k-means with 16 centroids per 16-element block).
+    /// Used as the default AOT compilation format when no evolution plan
+    /// is provided. Route: `compile_to_cimage` -> `quantize_and_append` ->
+    /// k-means palettization -> `CImageWriter::append_palettized`.
+    Palettized4Bit,
     /// Ternary 1.58-bit {-1, 0, +1} with FP16 scale per 128 elements.
     Ternary158,
     /// Binary 1-bit {0, +1} with FP16 scale.
@@ -44,6 +49,7 @@ impl TensorFormat {
             TensorFormat::Int4,
             TensorFormat::Nf4,
             TensorFormat::Nf8,
+            TensorFormat::Palettized4Bit,
             TensorFormat::Ternary158,
             TensorFormat::Binary1,
         ]
@@ -58,6 +64,7 @@ impl TensorFormat {
             TensorFormat::Int4 => 4,
             TensorFormat::Nf4 => 4,
             TensorFormat::Nf8 => 8,
+            TensorFormat::Palettized4Bit => 4,
             TensorFormat::Ternary158 => 2, // 1.58 rounded up
             TensorFormat::Binary1 => 1,
         }
@@ -67,7 +74,10 @@ impl TensorFormat {
     pub fn requires_group_dequant(&self) -> bool {
         matches!(
             self,
-            TensorFormat::Int4 | TensorFormat::Nf4 | TensorFormat::Ternary158
+            TensorFormat::Int4
+                | TensorFormat::Nf4
+                | TensorFormat::Palettized4Bit
+                | TensorFormat::Ternary158
         )
     }
 }

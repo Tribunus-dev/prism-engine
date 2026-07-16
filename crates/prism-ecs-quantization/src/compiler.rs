@@ -3,12 +3,17 @@
 //! Takes a `ModelGraph`, iterates every `PalettizedMatmul` node, loads
 //! weights in any format (F32/BF16/F16/U32 block-quantized), runs k-means
 //! per row, builds split-block payloads, and writes a `.cimage` file.
+//!
+//! When a `FormatPlan` is provided, uses the per-tensor format assignment
+//! from evolution search instead of uniform k-means palettization.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::cimage::CImageWriter;
+use crate::cimage::{CImageWriter, TensorType};
 use crate::palette::palettize_matrix;
+use prism_ecs_ir::evolution::compile_plan::FormatPlan;
+use prism_ecs_ir::evolution::mutation_table::TensorFormat;
 use prism_ecs_ir::{generate_plan, ModelGraph, TensorBlueprint};
 
 pub struct CompiledTensor {
@@ -20,12 +25,16 @@ pub struct CompiledTensor {
 }
 
 /// Compile an entire model into a `.cimage` file.
+///
+/// When `compile_plan` is `Some`, uses per-tensor format assignments from the
+/// evolution search instead of uniform k-means palettization.
 pub fn compile_to_cimage(
     graph: &ModelGraph,
     safetensors_dir: &Path,
     output_path: &Path,
     has_metal: bool,
     progress: impl Fn(&str, u32, u32, f64, f64),
+    compile_plan: Option<&FormatPlan>,
 ) -> Result<(), String> {
     // Generate execution plan before compiling weights.
     let plan = generate_plan(graph, has_metal, false);
@@ -33,11 +42,14 @@ pub fn compile_to_cimage(
 
     let mut cimage = CImageWriter::new(output_path)?;
     cimage.set_execution_plan(plan_json);
-    let pal_tensors = graph.palettized_tensors();
 
     let shards = discover_safetensors(safetensors_dir)?;
 
-    for tb in &pal_tensors {
+    // Helper: compile a single tensor with optional plan-based dispatch
+    let compile_tensor = |cimage: &mut CImageWriter,
+                          tb: &TensorBlueprint,
+                          format: Option<TensorFormat>|
+     -> Result<(), String> {
         let t0 = std::time::Instant::now();
         let f32_vals = load_weight_f32(&shards, tb)?;
         let out_dim = tb.dim_m as usize;
@@ -45,27 +57,56 @@ pub fn compile_to_cimage(
 
         eprint!("  [prism] {} ({}×{})... ", tb.key, out_dim, in_dim);
 
-        let pal = palettize_matrix(&f32_vals, out_dim, in_dim, 16, 50);
-        let bpp = pal.effective_bpp();
+        match format {
+            // With a plan-specified format, dispatch to the appropriate codec
+            Some(fmt) => {
+                let result = quantize_by_format(cimage, &tb.key, &f32_vals, out_dim, in_dim, fmt)?;
+                let elapsed = t0.elapsed();
+                eprintln!(
+                    "bpp={:.3} format={:?} {:.2}s",
+                    result.bpp,
+                    fmt,
+                    elapsed.as_secs_f64()
+                );
+                progress(
+                    &tb.key,
+                    tb.dim_m,
+                    tb.dim_n,
+                    result.bpp as f64,
+                    elapsed.as_secs_f64(),
+                );
+            }
+            // Without a plan: use uniform k-means palettization (legacy path)
+            None => {
+                let pal = palettize_matrix(&f32_vals, out_dim, in_dim, 16, 50);
+                let bpp = pal.effective_bpp();
 
-        let cb_bytes = pal.rows.len() * 16 * 2;
-        let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
-        let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
-        for row in &pal.rows {
-            for &cb_f32 in &row.codebook {
-                let cb_f16 = half::f16::from_f32(cb_f32);
-                payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
+                let cb_bytes = pal.rows.len() * 16 * 2;
+                let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
+                let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
+                for row in &pal.rows {
+                    for &cb_f32 in &row.codebook {
+                        let cb_f16 = half::f16::from_f32(cb_f32);
+                        payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
+                    }
+                }
+                for row in &pal.rows {
+                    payload.extend_from_slice(&row.indices);
+                }
+
+                cimage.append_palettized(&tb.key, &payload, tb.dim_m, tb.dim_n)?;
+                let elapsed = t0.elapsed();
+                eprintln!("bpp={bpp:.3} {:.2}s", elapsed.as_secs_f64());
+                progress(&tb.key, tb.dim_m, tb.dim_n, bpp, elapsed.as_secs_f64());
             }
         }
-        for row in &pal.rows {
-            payload.extend_from_slice(&row.indices);
-        }
+        Ok(())
+    };
 
-        cimage.append_palettized(&tb.key, &payload, tb.dim_m, tb.dim_n)?;
-
-        let elapsed = t0.elapsed();
-        eprintln!("bpp={bpp:.3} {:.2}s", elapsed.as_secs_f64());
-        progress(&tb.key, tb.dim_m, tb.dim_n, bpp, elapsed.as_secs_f64());
+    // Compile palettized tensors (matmuls, projections, heads)
+    for tb in graph.palettized_tensors() {
+        let fmt = compile_plan.and_then(|p| p.get(&tb.key));
+        compile_tensor(&mut cimage, tb, fmt)?;
     }
 
     // Also compile the embedding tensor (not in palettized_tensors).
@@ -81,36 +122,8 @@ pub fn compile_to_cimage(
                 dim_m: *vocab_size,
                 dim_n: *hidden_dim,
             };
-            let t0 = std::time::Instant::now();
-            let f32_vals = load_weight_f32(&shards, &tb)?;
-            let out_dim = *vocab_size as usize;
-            let in_dim = *hidden_dim as usize;
-            eprint!("  [prism] {} ({}×{})... ", key, out_dim, in_dim);
-            let pal = palettize_matrix(&f32_vals, out_dim, in_dim, 16, 50);
-            let mut payload =
-                Vec::with_capacity(pal.rows.len() * 16 * 2 + out_dim * in_dim / 8 * 4);
-            for row in &pal.rows {
-                for &cb_f32 in &row.codebook {
-                    payload.extend_from_slice(&half::f16::from_f32(cb_f32).to_bits().to_le_bytes());
-                }
-            }
-            for row in &pal.rows {
-                payload.extend_from_slice(&row.indices);
-            }
-            cimage.append_palettized(key, &payload, *vocab_size, *hidden_dim)?;
-            let elapsed = t0.elapsed();
-            eprintln!(
-                "bpp={:.3} {:.2}s",
-                pal.effective_bpp(),
-                elapsed.as_secs_f64()
-            );
-            progress(
-                key,
-                *vocab_size,
-                *hidden_dim,
-                pal.effective_bpp(),
-                elapsed.as_secs_f64(),
-            );
+            let fmt = compile_plan.and_then(|p| p.get(key));
+            compile_tensor(&mut cimage, &tb, fmt)?;
             break;
         }
     }
@@ -118,6 +131,171 @@ pub fn compile_to_cimage(
     cimage.finalize()?;
     eprintln!("[prism:compile] Done -> {}", output_path.display());
     Ok(())
+}
+
+/// Result of a single tensor quantization operation.
+struct QuantResult {
+    bpp: f32,
+}
+
+/// Quantize a tensor by the given format and append to cimage.
+fn quantize_by_format(
+    cimage: &mut CImageWriter,
+    key: &str,
+    f32_vals: &[f32],
+    out_dim: usize,
+    in_dim: usize,
+    format: TensorFormat,
+) -> Result<QuantResult, String> {
+    match format {
+        TensorFormat::Nf4 | TensorFormat::Int4 => {
+            let (codes, scales, biases, _packed_rows, _packed_cols) =
+                crate::nf4tile640::pack_nf4_weights(f32_vals, out_dim, in_dim);
+            // Payload layout: [packed codes] [f32 scales] [f32 biases]
+            let mut payload = codes;
+            for &s in &scales {
+                payload.extend_from_slice(&s.to_le_bytes());
+            }
+            for &b in &biases {
+                payload.extend_from_slice(&b.to_le_bytes());
+            }
+            // 4-bit → 0.5 bytes per value → 4 bpp
+            let tensor_type = match format {
+                TensorFormat::Nf4 => TensorType::NF4,
+                _ => TensorType::Int4,
+            };
+            cimage.append(key, &payload, out_dim as u32, in_dim as u32, tensor_type)?;
+            Ok(QuantResult { bpp: 4.0 })
+        }
+
+        TensorFormat::Fp16 => {
+            // Raw f32→f16 conversion, no quantization
+            let mut payload = Vec::with_capacity(f32_vals.len() * 2);
+            for &v in f32_vals {
+                payload.extend_from_slice(&half::f16::from_f32(v).to_bits().to_le_bytes());
+            }
+            cimage.append_fp16(key, &payload, out_dim as u32, in_dim as u32)?;
+            Ok(QuantResult { bpp: 16.0 })
+        }
+
+        TensorFormat::Ternary158 => {
+            // Ternary: quantize each value to {-1, 0, +1} with group scales
+            let group_size = 128usize;
+            let num_groups = (f32_vals.len() + group_size - 1) / group_size;
+            let mut weights = Vec::with_capacity(f32_vals.len());
+            let mut scales = Vec::with_capacity(num_groups);
+
+            for g in 0..num_groups {
+                let start = g * group_size;
+                let end = (start + group_size).min(f32_vals.len());
+                let group = &f32_vals[start..end];
+
+                let abs_max = group.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+                let scale = if abs_max > 1e-10 { abs_max } else { 1.0 };
+                scales.push(scale);
+
+                for &v in group {
+                    let q = (v / scale).clamp(-1.0, 1.0);
+                    let t = if q < -0.5 {
+                        -1i8
+                    } else if q > 0.5 {
+                        1i8
+                    } else {
+                        0i8
+                    };
+                    weights.push(t);
+                }
+            }
+
+            let package = crate::ternarization::packaging::pack_ternary(&weights, &scales)?;
+
+            // Payload layout: [packed ternary bytes] [f32 scales]
+            let packed_len = package.packed_bytes.len();
+            let scales_len = package.scales.len();
+            let mut payload = package.packed_bytes;
+            for &s in &package.scales {
+                payload.extend_from_slice(&s.to_le_bytes());
+            }
+
+            // Ternary158: ~1.58 bits per value + scales
+            let bpp = (packed_len as f32 * 8.0 + scales_len as f32 * 32.0) / f32_vals.len() as f32;
+            cimage.append(
+                key,
+                &payload,
+                out_dim as u32,
+                in_dim as u32,
+                TensorType::Ternary158,
+            )?;
+            Ok(QuantResult { bpp })
+        }
+
+        TensorFormat::Binary1 => {
+            // Binary: quantize to {+1, -1} (1 bit per value)
+            let group_size = 128usize;
+            let num_groups = (f32_vals.len() + group_size - 1) / group_size;
+            let mut binary_bits: Vec<u8> = Vec::new();
+            let mut scales = Vec::with_capacity(num_groups);
+
+            for g in 0..num_groups {
+                let start = g * group_size;
+                let end = (start + group_size).min(f32_vals.len());
+                let group = &f32_vals[start..end];
+
+                let mean_abs = group.iter().map(|v| v.abs()).sum::<f32>() / group.len() as f32;
+                let scale = if mean_abs > 1e-10 { mean_abs } else { 1.0 };
+                scales.push(scale);
+
+                let byte_count = (group.len() + 7) / 8;
+                let mut bits = vec![0u8; byte_count];
+                for (i, &v) in group.iter().enumerate() {
+                    if v > 0.0 {
+                        bits[i / 8] |= 1 << (i % 8);
+                    }
+                }
+                binary_bits.extend_from_slice(&bits);
+            }
+
+            let mut payload = binary_bits;
+            for &s in &scales {
+                payload.extend_from_slice(&s.to_le_bytes());
+            }
+
+            let bpp = (payload.len() as f32 * 8.0) / f32_vals.len() as f32;
+            cimage.append(
+                key,
+                &payload,
+                out_dim as u32,
+                in_dim as u32,
+                TensorType::Binary1,
+            )?;
+            Ok(QuantResult { bpp })
+        }
+
+        // Fallback for formats not yet wired: use k-means palettization
+        TensorFormat::Palettized4Bit
+        | TensorFormat::Bf16
+        | TensorFormat::Int8
+        | TensorFormat::Nf8 => {
+            let pal = palettize_matrix(f32_vals, out_dim, in_dim, 16, 50);
+            let bpp = pal.effective_bpp() as f32;
+
+            let cb_bytes = pal.rows.len() * 16 * 2;
+            let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
+            let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
+            for row in &pal.rows {
+                for &cb_f32 in &row.codebook {
+                    let cb_f16 = half::f16::from_f32(cb_f32);
+                    payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
+                }
+            }
+            for row in &pal.rows {
+                payload.extend_from_slice(&row.indices);
+            }
+
+            cimage.append_palettized(key, &payload, out_dim as u32, in_dim as u32)?;
+            Ok(QuantResult { bpp })
+        }
+    }
 }
 
 /// Compile to memory (no .cimage I/O).
@@ -133,7 +311,7 @@ pub fn compile_to_memory(
         let out_dim = tb.dim_m as usize;
         let in_dim = tb.dim_n as usize;
         let pal = palettize_matrix(&f32_vals, out_dim, in_dim, 16, 50);
-        let bpp = pal.effective_bpp();
+        let bpp = pal.effective_bpp() as f32;
 
         let cb_bytes = pal.rows.len() * 16 * 2;
         let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
@@ -155,7 +333,7 @@ pub fn compile_to_memory(
                 dim_m: tb.dim_m,
                 dim_n: tb.dim_n,
                 payload,
-                effective_bpp: bpp as f32,
+                effective_bpp: bpp,
             },
         );
     }
@@ -280,7 +458,7 @@ fn dequantize_mlx_block(
 
     let logical_n: usize = view.shape().iter().product();
     let group_size = logical_n / scales.len().max(1);
-    let elements_per_word = if packed.len() > 0 {
+    let elements_per_word = if !packed.is_empty() {
         logical_n / packed.len()
     } else {
         8

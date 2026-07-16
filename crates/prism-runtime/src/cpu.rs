@@ -43,6 +43,10 @@ pub fn matmul(
         TensorFormat::Nf8 => matmul_nf8(input, weight_data, dim_m, dim_n),
         TensorFormat::Ternary158 => matmul_ternary(input, weight_data, dim_m, dim_n),
         TensorFormat::Binary1 => matmul_binary(input, weight_data, dim_m, dim_n),
+        TensorFormat::Palettized4Bit => Err(
+            "Palettized4Bit CPU matmul: not yet implemented — pending palettized codec integration"
+                .to_string(),
+        ),
     }
 }
 
@@ -211,6 +215,59 @@ fn matmul_binary(
     _dim_n: u32,
 ) -> Result<Vec<f32>, String> {
     Err("Binary1 CPU matmul: not yet implemented".to_string())
+}
+
+// ── Utility operations ──────────────────────────────────────────────────────
+
+/// Root Mean Square normalization: `y = x / sqrt(mean(x²) + eps) * weight`.
+///
+/// Both `x` and `weight` must have length `dim`. Returns normalized vector.
+pub fn rms_norm(x: &[f32], weight: &[f32]) -> Result<Vec<f32>, String> {
+    if x.len() != weight.len() {
+        return Err(format!(
+            "rms_norm: x len {} != weight len {}",
+            x.len(),
+            weight.len()
+        ));
+    }
+    if x.is_empty() {
+        return Ok(Vec::new());
+    }
+    let dim = x.len() as f32;
+    let mut sum_sq = 0.0f32;
+    for &v in x {
+        sum_sq += v * v;
+    }
+    let rms = (sum_sq / dim + 1e-5).sqrt();
+    let inv_rms = 1.0 / rms;
+    let mut out = Vec::with_capacity(x.len());
+    for (i, &v) in x.iter().enumerate() {
+        out.push(v * inv_rms * weight[i]);
+    }
+    Ok(out)
+}
+
+/// Element-wise vector addition: `c = a + b`.
+///
+/// Both slices must have the same length.
+pub fn vec_add(a: &[f32], b: &[f32]) -> Result<Vec<f32>, String> {
+    if a.len() != b.len() {
+        return Err(format!(
+            "vec_add: left len {} != right len {}",
+            a.len(),
+            b.len()
+        ));
+    }
+    let mut out = Vec::with_capacity(a.len());
+    for (x, y) in a.iter().zip(b.iter()) {
+        out.push(x + y);
+    }
+    Ok(out)
+}
+
+/// SiLU (Sigmoid Linear Unit) activation: `x * sigmoid(x)`.
+pub fn silu(x: &[f32]) -> Vec<f32> {
+    x.iter().map(|&v| v / (1.0 + (-v).exp())).collect()
 }
 
 #[cfg(test)]

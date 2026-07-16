@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+duckdb = { version = "1.1", optional = true, features = ["bundled"] }
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-quantization = { path = "../prism-ecs-quantization" }
 prism-ecs-ir = { path = "../prism-ecs-ir" }
@@ -12,7 +13,9 @@ half = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rand = { workspace = true }
+parking_lot = { workspace = true }
 
 [features]
+duckdb-projections = ["dep:duckdb"]
 default = []
 metal-dispatch = []

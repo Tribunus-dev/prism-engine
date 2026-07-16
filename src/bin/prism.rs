@@ -412,6 +412,7 @@ fn pull(repo: &str) {
         &out_cimage,
         has_metal(),
         |_, _, _, _, _| {},
+        None,
     ) {
         eprintln!("Compilation failed: {e}");
         std::process::exit(1);
@@ -532,6 +533,7 @@ fn compile_model_dir(dir: &Path, label: &str) {
         &out,
         has_metal(),
         |_, _, _, _, _| {},
+        None,
     ) {
         Ok(()) => {
             let size = std::fs::metadata(&out)

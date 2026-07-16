@@ -9,6 +9,10 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
+use prism_ecs_ir::evolution::{
+    CandidateGenome, FormatPlan, JointEvolutionSystem, JointSearchConfig, ParetoFrontier,
+    SyntheticEvaluator,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -513,6 +517,54 @@ async fn handle_pull_socket(mut socket: WebSocket, state: Arc<DashboardState>) {
         }
     };
 
+    // Phase 2.5: Run evolution search to find optimal per-tensor formats
+    send_progress(
+        &mut socket,
+        "Running evolution search for quantization formats...",
+    )
+    .await;
+
+    let tensor_keys: Vec<String> = graph
+        .palettized_tensors()
+        .iter()
+        .map(|tb| tb.key.clone())
+        .collect();
+
+    // Build format plan from evolution search (runs in blocking task)
+    let format_plan = tokio::task::spawn_blocking({
+        let tensor_keys = tensor_keys.clone();
+        move || -> FormatPlan {
+            let config = JointSearchConfig::default();
+            let max_generations = config.max_generations;
+            let evo = JointEvolutionSystem::new(config);
+            let mut population: Vec<CandidateGenome> =
+                (0..50).map(|_| CandidateGenome::new()).collect();
+            let mut frontier = ParetoFrontier::new(1);
+            let synthetic = SyntheticEvaluator::default();
+            let measured = SyntheticEvaluator::default();
+
+            // Run evolution for the configured number of generations
+            for _gen in 0..max_generations {
+                evo.run_generation_with_measured(
+                    &mut population,
+                    &synthetic,
+                    &measured,
+                    &mut frontier,
+                );
+            }
+
+            // Use the best genome from the frontier
+            let best_genome = frontier
+                .best_by_dimension(0)
+                .map(|_| population[0].clone())
+                .unwrap_or_else(CandidateGenome::new);
+
+            FormatPlan::from_best_genome(&best_genome, &tensor_keys)
+        }
+    })
+    .await
+    .unwrap_or_else(|_| FormatPlan::new());
+
     // Phase 3: Compile to cimage with per-tensor progress streaming
     send_progress(&mut socket, "Compiling model (palettizing tensors)...").await;
 
@@ -522,6 +574,7 @@ async fn handle_pull_socket(mut socket: WebSocket, state: Arc<DashboardState>) {
     let compile_result = tokio::task::spawn_blocking({
         let output_path = output_path.clone();
         let safetensors_dir = safetensors_dir.clone();
+        let compile_plan = format_plan.clone();
         move || {
             prism_ecs_quantization::compiler::compile_to_cimage(
                 &graph,
@@ -541,6 +594,7 @@ async fn handle_pull_socket(mut socket: WebSocket, state: Arc<DashboardState>) {
                         .to_string(),
                     );
                 },
+                Some(&compile_plan),
             )
         }
     })

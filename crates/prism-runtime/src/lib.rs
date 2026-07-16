@@ -9,6 +9,7 @@
 pub mod cpu;
 pub mod engine;
 pub mod inference;
+pub mod measured;
 pub mod metal;
 pub mod model;
 pub mod sampling;

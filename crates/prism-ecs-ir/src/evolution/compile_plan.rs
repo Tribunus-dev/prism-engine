@@ -4,8 +4,10 @@
 //! tile geometry by the evolutionary search. These types provide the ECS
 //! components and query functions that backends use to read assignments.
 
+use crate::evolution::foundation::CandidateGenome;
 use crate::evolution::mutation_table::TensorFormat;
 use prism_ecs_core::{Component, Entity, World};
+use std::collections::HashMap;
 
 // ── Components ──────────────────────────────────────────────────────────────
 
@@ -65,12 +67,17 @@ impl Component for FormatAssignment {}
 pub fn get_assigned_format(
     world: &World,
     tensor: Entity,
-) -> Option<(TensorFormat, crate::evolution::mutation_table::TensorOperation)> {
+) -> Option<(
+    TensorFormat,
+    crate::evolution::mutation_table::TensorOperation,
+)> {
     let fmt = world.get_component::<FormatAssignment>(tensor)?.0;
     // Derive the default operation from the format
     let op = match fmt {
         TensorFormat::Ternary158 => crate::evolution::mutation_table::TensorOperation::TernaryGemm,
-        TensorFormat::Binary1 => crate::evolution::mutation_table::TensorOperation::BinaryPopcountGemm,
+        TensorFormat::Binary1 => {
+            crate::evolution::mutation_table::TensorOperation::BinaryPopcountGemm
+        }
         TensorFormat::Int4 => crate::evolution::mutation_table::TensorOperation::Int4DequantMatmul,
         _ => crate::evolution::mutation_table::TensorOperation::Matmul,
     };
@@ -96,6 +103,69 @@ pub fn resolve_matmul_tile(
     }
     // Default tile sizes: 64×64×32
     (64, 64, 32)
+}
+
+// ── FormatPlan ───────────────────────────────────────────────────────────────
+
+/// Thread-safe format assignment extracted from evolution search.
+///
+/// Maps tensor keys to their assigned quantization formats. This is the
+/// non-ECS representation passed across thread boundaries to the compiler.
+#[derive(Debug, Clone)]
+pub struct FormatPlan {
+    /// Per-tensor format assignment, keyed by tensor key
+    /// (e.g. "model.layers.0.self_attn.q_proj.weight").
+    pub per_tensor: HashMap<String, TensorFormat>,
+}
+
+impl FormatPlan {
+    /// Create an empty format plan.
+    pub fn new() -> Self {
+        Self {
+            per_tensor: HashMap::new(),
+        }
+    }
+
+    /// Build a format plan from the best genome in an evolution search.
+    ///
+    /// Maps the genome's representation axis to a per-tensor format
+    /// assignment for all tensors in `tensor_keys`.
+    pub fn from_best_genome(genome: &CandidateGenome, tensor_keys: &[String]) -> Self {
+        let format = Self::representation_to_format(&genome.representation);
+        let mut per_tensor = HashMap::new();
+        for key in tensor_keys {
+            per_tensor.insert(key.clone(), format);
+        }
+        Self { per_tensor }
+    }
+
+    /// Convert a `RepresentationAxis` to the corresponding `TensorFormat`.
+    fn representation_to_format(
+        repr: &crate::evolution::foundation::RepresentationAxis,
+    ) -> TensorFormat {
+        use crate::evolution::foundation::RepresentationAxis;
+        match repr {
+            RepresentationAxis::Fp16 => TensorFormat::Fp16,
+            RepresentationAxis::Bf16 => TensorFormat::Bf16,
+            RepresentationAxis::Int8 => TensorFormat::Int8,
+            RepresentationAxis::Int4 => TensorFormat::Int4,
+            RepresentationAxis::Nf4 => TensorFormat::Nf4,
+            RepresentationAxis::Nf8 => TensorFormat::Nf8,
+            RepresentationAxis::Ternary158 => TensorFormat::Ternary158,
+            RepresentationAxis::Binary1 => TensorFormat::Binary1,
+        }
+    }
+
+    /// Get the assigned format for a tensor key, if present.
+    pub fn get(&self, key: &str) -> Option<TensorFormat> {
+        self.per_tensor.get(key).copied()
+    }
+}
+
+impl Default for FormatPlan {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -141,10 +211,26 @@ mod tests {
     #[test]
     fn default_tiles_when_no_plan() {
         let world = World::new();
-        let fake = Entity(999, 0);
+        let fake = Entity::new(999, 0);
         let (tm, tn, tk) = resolve_matmul_tile(&world, fake, 1024, 1024, 1024);
         assert_eq!(tm, 64);
         assert_eq!(tn, 64);
         assert_eq!(tk, 32);
+    }
+
+    #[test]
+    fn format_plan_from_genome() {
+        let genome = CandidateGenome::new();
+        let keys = vec!["w1".to_string(), "w2".to_string()];
+        let plan = FormatPlan::from_best_genome(&genome, &keys);
+        assert_eq!(plan.per_tensor.len(), 2);
+        assert_eq!(plan.get("w1"), Some(TensorFormat::Fp16));
+    }
+
+    #[test]
+    fn format_plan_empty() {
+        let plan = FormatPlan::new();
+        assert!(plan.per_tensor.is_empty());
+        assert_eq!(plan.get("anything"), None);
     }
 }

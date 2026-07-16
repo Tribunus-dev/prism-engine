@@ -1,10 +1,14 @@
 //! Metal dispatch — format-aware GPU kernel invocations.
 //!
-//! Gated behind `cfg(feature = "metal-dispatch")`. When disabled, imports
-//! produce an empty module (the inference engine falls through to the CPU
-//! path).
+//! Gated behind `cfg(feature = "metal-dispatch")`. When disabled, the
+//! dispatch falls through to the CPU path in [`crate::cpu`].
+//!
+//! When the feature is enabled but the kernel for a specific tensor
+//! format is not yet implemented, the function returns an error with
+//! the name of the unimplemented kernel.
 
-/// Dispatch a matmul for a tensor with the given format, using Metal.
+/// Dispatch a matmul for a tensor with the given format, using Metal
+/// when available, or falling back to CPU.
 ///
 /// # Arguments
 /// - `tensor_name`: name of the weight tensor being multiplied.
@@ -18,25 +22,41 @@
 /// Output vector of length `dim_m`.
 #[cfg(feature = "metal-dispatch")]
 pub fn dispatch_matmul(
-    _tensor_name: &str,
-    _input: &[f32],
-    _weight_data: &[u8],
-    _dim_m: u32,
-    _dim_n: u32,
-    _format: &prism_ecs_ir::evolution::mutation_table::TensorFormat,
+    tensor_name: &str,
+    input: &[f32],
+    weight_data: &[u8],
+    dim_m: u32,
+    dim_n: u32,
+    format: &prism_ecs_ir::evolution::mutation_table::TensorFormat,
 ) -> Result<Vec<f32>, String> {
-    Err("Metal GEMV dispatch not yet implemented — format-aware kernels (palettized GEMV, ternary, binary, NF4) are pending".to_string())
+    match format {
+        prism_ecs_ir::evolution::mutation_table::TensorFormat::Fp16
+        | prism_ecs_ir::evolution::mutation_table::TensorFormat::Bf16
+        | prism_ecs_ir::evolution::mutation_table::TensorFormat::Int8
+        | prism_ecs_ir::evolution::mutation_table::TensorFormat::Int4
+        | prism_ecs_ir::evolution::mutation_table::TensorFormat::Nf4
+        | prism_ecs_ir::evolution::mutation_table::TensorFormat::Nf8
+        | prism_ecs_ir::evolution::mutation_table::TensorFormat::Palettized4Bit
+        | prism_ecs_ir::evolution::mutation_table::TensorFormat::Ternary158
+        | prism_ecs_ir::evolution::mutation_table::TensorFormat::Binary1 => Err(format!(
+            "Metal kernel for {format:?} not implemented — tensor {tensor_name} [{dim_m}×{dim_n}]"
+        )),
+    }
 }
 
-/// Stub: Metal dispatch when feature is off.
+/// Dispatch matmul — Metal feature not enabled, delegate to CPU.
+///
+/// This path is used when `metal-dispatch` is not compiled in. It directly
+/// calls the CPU matmul implementation (Accelerate / per-format dequant +
+/// GEMV).
 #[cfg(not(feature = "metal-dispatch"))]
 pub fn dispatch_matmul(
     _tensor_name: &str,
-    _input: &[f32],
-    _weight_data: &[u8],
-    _dim_m: u32,
-    _dim_n: u32,
-    _format: &prism_ecs_ir::evolution::mutation_table::TensorFormat,
+    input: &[f32],
+    weight_data: &[u8],
+    dim_m: u32,
+    dim_n: u32,
+    format: &prism_ecs_ir::evolution::mutation_table::TensorFormat,
 ) -> Result<Vec<f32>, String> {
-    Err("Metal dispatch not enabled (compile with --features metal-dispatch)".to_string())
+    crate::cpu::matmul(input, weight_data, dim_m, dim_n, format)
 }

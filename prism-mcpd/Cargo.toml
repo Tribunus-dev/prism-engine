@@ -22,6 +22,7 @@ prism-mcp-browser = { path = "../prism-mcp-browser" }
 prism-ecs-server = { path = "../crates/prism-ecs-server", default-features = false }
 prism-ecs-ir = { path = "../crates/prism-ecs-ir" }
 prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
+prism-runtime = { path = "../crates/prism-runtime", optional = true }
 hf-hub = "0.4"
 serde_json = "1"
 serde.workspace = true
@@ -51,6 +52,7 @@ duckdb = { version = "1.1", optional = true, features = ["bundled"] }
 default = ["trifecta"]
 trifecta = ["dep:tokio-postgres", "dep:redis", "dep:duckdb"]
 live-trifecta = ["trifecta"]
+measure = ["prism-runtime", "trifecta"]
 live-browser = []
 
 [dev-dependencies]
