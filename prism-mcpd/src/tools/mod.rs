@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use parking_lot::Mutex;
+use prism_ecs_server::inference::ModelRegistry;
 use prism_mcp_core::{DaemonState, McpHandler};
 
 // ── Inline handler modules ────────────────────────────────────────
@@ -15,8 +17,9 @@ mod resolve_path_handler;
 
 /// Phase 1: register handlers that do NOT need DaemonState.
 /// Returns a `HashMap` for insertion into DaemonState before Phase 2.
-pub fn register_basic() -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>>
-{
+pub fn register_basic(
+    registry: Arc<Mutex<ModelRegistry>>,
+) -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>> {
     let mut map: HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>> = HashMap::new();
     for (name, action) in [
         ("agent_session_start", "start_session"),
@@ -68,7 +71,7 @@ pub fn register_basic() -> anyhow::Result<HashMap<&'static str, Arc<dyn McpHandl
     map.insert(cimage.name(), Arc::new(cimage));
 
     // ── Inference ─────────────────────────────────────────────────
-    let inference = inference_handler::InferenceHandler::new();
+    let inference = inference_handler::InferenceHandler::new(registry);
     map.insert(inference.name(), Arc::new(inference));
 
     // ── Model (zero-arg handlers()) ────────────────────────────────

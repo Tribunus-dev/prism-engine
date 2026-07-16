@@ -1,12 +1,16 @@
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+use prism_ecs_server::inference::ModelRegistry;
 use prism_mcp_core::{DaemonState, McpHandler, RequestContext, ToolRequest, ToolResult};
 
 pub struct InferenceHandler {
-    // registry: Arc<prism_ecs_server::inference::ModelRegistry>,
+    registry: Arc<Mutex<ModelRegistry>>,
 }
 
 impl InferenceHandler {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(registry: Arc<Mutex<ModelRegistry>>) -> Self {
+        Self { registry }
     }
 }
 
@@ -61,14 +65,20 @@ impl McpHandler for InferenceHandler {
                 if path.is_empty() {
                     return Err(anyhow::anyhow!("model_path is required"));
                 }
-                // TODO: delegate to prism_ecs_server::inference::ModelRegistry
-                Ok(ToolResult::text(format!(
-                    "Model loading from {path} — not yet wired to runtime"
-                )))
+                let model = self
+                    .registry
+                    .lock()
+                    .load_model(std::path::Path::new(path))
+                    .map_err(|e| anyhow::anyhow!("failed to load model: {e}"))?;
+                Ok(ToolResult::text(format!("Loaded model: {}", model.name)))
             }
             "list_models" => {
-                // TODO: read from ModelRegistry
-                Ok(ToolResult::text("No models loaded."))
+                let models = self.registry.lock().list_models();
+                Ok(ToolResult::text(if models.is_empty() {
+                    "No models loaded.".to_string()
+                } else {
+                    models.join("\n")
+                }))
             }
             "generate" => {
                 let model_name = request.args["model_name"].as_str().unwrap_or("");
@@ -77,8 +87,17 @@ impl McpHandler for InferenceHandler {
                 if model_name.is_empty() || prompt.is_empty() {
                     return Err(anyhow::anyhow!("model_name and prompt are required"));
                 }
+
+                let reg = self.registry.lock();
+                let _model = reg.get_model(model_name).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Model '{model_name}' not found. Load it first with load_model."
+                    )
+                })?;
+                // Runtime generate is not yet implemented — return status
                 Ok(ToolResult::text(format!(
-                    "Generate from {model_name}: {prompt} (max_tokens={max_tokens}) — engine not yet wired"
+                    "[prism-runtime:generate] model={model_name} prompt='{prompt}' max_tokens={max_tokens}\n\
+                     Inference engine not yet implemented — staged for wire-up."
                 )))
             }
             _ => Err(anyhow::anyhow!(

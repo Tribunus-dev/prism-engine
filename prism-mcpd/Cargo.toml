@@ -20,6 +20,9 @@ prism-mcp-trace = { path = "../prism-mcp-trace" }
 prism-mcp-lab = { path = "../prism-mcp-lab" }
 prism-mcp-browser = { path = "../prism-mcp-browser" }
 prism-ecs-server = { path = "../crates/prism-ecs-server", default-features = false }
+prism-ecs-ir = { path = "../crates/prism-ecs-ir" }
+prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
+hf-hub = "0.4"
 serde_json = "1"
 serde.workspace = true
 blake3 = "1"
@@ -36,6 +39,10 @@ parking_lot = "0.12"
 rusqlite = { version = "0.31", features = ["bundled"] }
 signal-hook = "0.3"
 tokio = { workspace = true }
+axum = { version = "0.8", features = ["ws"] }
+futures-util = "0.3"
+dirs = "6"
+tower-http = { version = "0.6", features = ["cors"] }
 tokio-postgres = { version = "0.7", optional = true, features = ["with-serde_json-1", "with-chrono-0_4"] }
 redis = { version = "0.27", optional = true }
 duckdb = { version = "1.1", optional = true, features = ["bundled"] }

@@ -25,6 +25,7 @@ pub fn compile_to_cimage(
     safetensors_dir: &Path,
     output_path: &Path,
     has_metal: bool,
+    progress: impl Fn(&str, u32, u32, f64, f64),
 ) -> Result<(), String> {
     // Generate execution plan before compiling weights.
     let plan = generate_plan(graph, has_metal, false);
@@ -64,6 +65,7 @@ pub fn compile_to_cimage(
 
         let elapsed = t0.elapsed();
         eprintln!("bpp={bpp:.3} {:.2}s", elapsed.as_secs_f64());
+        progress(&tb.key, tb.dim_m, tb.dim_n, bpp, elapsed.as_secs_f64());
     }
 
     // Also compile the embedding tensor (not in palettized_tensors).
@@ -96,10 +98,18 @@ pub fn compile_to_cimage(
                 payload.extend_from_slice(&row.indices);
             }
             cimage.append_palettized(key, &payload, *vocab_size, *hidden_dim)?;
+            let elapsed = t0.elapsed();
             eprintln!(
                 "bpp={:.3} {:.2}s",
                 pal.effective_bpp(),
-                t0.elapsed().as_secs_f64()
+                elapsed.as_secs_f64()
+            );
+            progress(
+                key,
+                *vocab_size,
+                *hidden_dim,
+                pal.effective_bpp(),
+                elapsed.as_secs_f64(),
             );
             break;
         }

@@ -9,11 +9,14 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::{bounded, Receiver, Sender};
+use parking_lot::Mutex;
+use prism_ecs_server::inference::ModelRegistry;
 use prism_mcp_core::{
     ArtifactStore, ConnectionId, DaemonState, DbManager, EvidenceLedger, FileLock, JobManager,
     ProcessCache, RequestEnvelope, ResourceLeaseManager, ResponseFrame, Scheduler, SchedulerHandle,
     WorkJournal,
 };
+use tokio::sync::broadcast;
 
 use crate::backends::{self, BackendHealth};
 use crate::tools;
@@ -197,8 +200,11 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     let (work_tx, work_rx) = bounded::<RequestEnvelope>(256);
     let work_tx_for_handler = work_tx.clone();
 
+    // Create shared model registry
+    let model_registry = Arc::new(Mutex::new(ModelRegistry::new()));
+
     // Register tools
-    let mut tools_map = tools::register_basic()?;
+    let mut tools_map = tools::register_basic(model_registry)?;
 
     // Shared state
     let conn_count = Arc::new(AtomicU64::new(0));
@@ -377,6 +383,31 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     std::thread::spawn(move || {
         sched.run();
     });
+
+    // ── Model registry (shared between MCP handlers and dashboard) ──────
+    let model_registry: Arc<parking_lot::Mutex<prism_ecs_server::inference::ModelRegistry>> =
+        Arc::new(parking_lot::Mutex::new(
+            prism_ecs_server::inference::ModelRegistry::new(),
+        ));
+
+    // ── Dashboard HTTP server ───────────────────────────────────────────
+    {
+        let registry = model_registry.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("dashboard tokio runtime");
+            rt.block_on(async move {
+                let (model_tx, _) = broadcast::channel::<Vec<String>>(16);
+                let state = crate::dashboard::DashboardState { registry, model_tx };
+                let app = crate::dashboard::router(state);
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
+                    .await
+                    .expect("dashboard bind 127.0.0.1:8080");
+                tracing::info!("Dashboard listening on http://127.0.0.1:8080");
+                eprintln!("prism-mcpd: dashboard at http://127.0.0.1:8080");
+                axum::serve(listener, app).await.expect("dashboard serve");
+            });
+        });
+    }
 
     // Write PID
     let _ = std::fs::write(&paths.pid_path, format!("{}", std::process::id()));

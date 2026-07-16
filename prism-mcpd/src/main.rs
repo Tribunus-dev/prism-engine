@@ -1,5 +1,6 @@
 mod backends;
 mod daemon;
+mod dashboard;
 mod proxy;
 mod tools;
 mod trifecta_store;

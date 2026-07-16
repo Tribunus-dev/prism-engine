@@ -411,6 +411,7 @@ fn pull(repo: &str) {
         &safetensors_dir,
         &out_cimage,
         has_metal(),
+        |_, _, _, _, _| {},
     ) {
         eprintln!("Compilation failed: {e}");
         std::process::exit(1);
@@ -530,6 +531,7 @@ fn compile_model_dir(dir: &Path, label: &str) {
         &safetensors_dir,
         &out,
         has_metal(),
+        |_, _, _, _, _| {},
     ) {
         Ok(()) => {
             let size = std::fs::metadata(&out)
