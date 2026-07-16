@@ -7,6 +7,7 @@
 use crate::evolution::foundation::CandidateGenome;
 use crate::evolution::mutation_table::TensorFormat;
 use prism_ecs_core::{Component, Entity, World};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ── Components ──────────────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ pub fn resolve_matmul_tile(
 ///
 /// Maps tensor keys to their assigned quantization formats. This is the
 /// non-ECS representation passed across thread boundaries to the compiler.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormatPlan {
     /// Per-tensor format assignment, keyed by tensor key
     /// (e.g. "model.layers.0.self_attn.q_proj.weight").

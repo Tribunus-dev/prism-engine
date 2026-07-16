@@ -15,23 +15,24 @@
 //! - `evaluate`: pluggable evaluation system trait + synthetic evaluator
 //! - `compile_plan`: ECS components for compilation plan + format/tile assignment
 
-pub mod mutation_table;
-pub mod foundation;
+pub mod assembly;
 pub mod budget;
-pub mod sensitivity;
-pub mod frontier;
-pub mod decompose;
-pub mod joint;
-pub mod evaluate;
 pub mod compile_plan;
+pub mod decompose;
+pub mod evaluate;
+pub mod foundation;
+pub mod frontier;
+pub mod joint;
+pub mod mutation_table;
+pub mod sensitivity;
 
 // Re-export everything from the sub-modules for backward compatibility.
-pub use mutation_table::*;
-pub use foundation::*;
 pub use budget::*;
-pub use sensitivity::*;
-pub use frontier::*;
-pub use decompose::*;
-pub use joint::*;
-pub use evaluate::*;
 pub use compile_plan::*;
+pub use decompose::*;
+pub use evaluate::*;
+pub use foundation::*;
+pub use frontier::*;
+pub use joint::*;
+pub use mutation_table::*;
+pub use sensitivity::*;

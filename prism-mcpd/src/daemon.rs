@@ -427,6 +427,11 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
                     registry,
                     model_tx,
                     world,
+                    authorized: std::path::Path::new(&format!(
+                        "{}/.prism/auth",
+                        std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
+                    ))
+                    .exists(),
                 };
                 let app = crate::dashboard::router(state);
                 let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")

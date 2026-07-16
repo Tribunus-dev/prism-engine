@@ -12,5 +12,6 @@ pub mod inference;
 pub mod measured;
 pub mod metal;
 pub mod model;
+pub mod multimodal;
 pub mod sampling;
 pub mod streaming;

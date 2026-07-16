@@ -17,6 +17,7 @@ use prism_ecs_ir::evolution::{
     SyntheticEvaluator,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use serde_json::Value;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -24,6 +25,8 @@ use std::time::Instant;
 use tokio::sync::broadcast;
 
 pub struct DashboardState {
+    /// Whether this user is authorized for full compilation pipeline.
+    pub authorized: bool,
     pub registry: Arc<Mutex<prism_ecs_server::inference::ModelRegistry>>,
     /// Broadcast channel for model list change notifications.
     pub model_tx: broadcast::Sender<Vec<String>>,
@@ -40,6 +43,7 @@ pub fn router(state: DashboardState) -> Router {
         .route("/api/generate", post(generate))
         .route("/api/ws", get(ws_handler))
         .route("/api/pull", get(pull_model))
+        .route("/api/assemble", post(assemble))
         .with_state(Arc::new(state))
 }
 
@@ -423,6 +427,12 @@ async fn pull_model(
 }
 
 async fn handle_pull_socket(mut socket: WebSocket, state: Arc<DashboardState>) {
+    if !state.authorized {
+        let _ = socket.send(Message::Text(
+            serde_json::json!({"error": "Full compilation pipeline requires authorization. Use Model Store for pre-compiled models."}).to_string().into()
+        )).await;
+        return;
+    }
     // Wait for the pull request message
     let repo = loop {
         let Some(Ok(msg)) = socket.recv().await else {
@@ -691,4 +701,34 @@ async fn handle_pull_socket(mut socket: WebSocket, state: Arc<DashboardState>) {
 pub fn notify_models_changed(state: &DashboardState) {
     let models = state.registry.lock().list_models();
     let _ = state.model_tx.send(models);
+}
+// ── POST /api/assemble ───────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct AssembleRequest {
+    models: Vec<AssembleModelRequest>,
+}
+
+#[derive(Deserialize)]
+struct AssembleModelRequest {
+    name: String,
+    repo: String,
+    #[allow(dead_code)]
+    size_gb: f64,
+}
+
+async fn assemble(
+    State(state): State<Arc<DashboardState>>,
+    Json(req): Json<AssembleRequest>,
+) -> Json<Value> {
+    if !state.authorized {
+        return Json(json!({
+            "error": "Assembly pipeline requires authorization. Use Model Store for pre-compiled models."
+        }));
+    }
+    Json(json!({
+        "status": "not_implemented",
+        "models": req.models.iter().map(|m| json!({"name": m.name, "repo": m.repo})).collect::<Vec<_>>(),
+        "note": "Full assembly compilation not yet wired — needs compile_assembly() integration",
+    }))
 }

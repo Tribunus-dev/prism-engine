@@ -6,6 +6,7 @@
 
 use crate::inference::{InferenceEngine, KvCache};
 use crate::model::Model;
+use crate::multimodal::{MultimodalCallback, MultimodalInput, StreamEvent, TokenMetrics};
 use crate::streaming::StreamingLayerLoader;
 use prism_ecs_ir::model_graph::ModelGraph;
 use std::path::Path;
@@ -174,5 +175,82 @@ impl PrismEngine {
             }
         }
         896
+    }
+
+    /// Tokenize text using the model's tokenizer.
+    /// Falls back to simple whitespace splitting if no tokenizer path in metadata.
+    pub fn tokenize(&self, text: &str) -> Result<Vec<u32>, String> {
+        let tokenizer_path = self.model.metadata["tokenizer_path"].as_str().unwrap_or("");
+        if tokenizer_path.is_empty() {
+            // Fallback: simple whitespace split for testing
+            return Ok(text.split_whitespace().map(|_| 1u32).collect());
+        }
+        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path)
+            .map_err(|e| format!("load tokenizer: {e}"))?;
+        let encoding = tokenizer
+            .encode(text, true)
+            .map_err(|e| format!("encode: {e}"))?;
+        Ok(encoding.get_ids().to_vec())
+    }
+
+    /// Detokenize token IDs back to text.
+    pub fn detokenize(&self, ids: &[u32]) -> Result<String, String> {
+        let tokenizer_path = self.model.metadata["tokenizer_path"].as_str().unwrap_or("");
+        if tokenizer_path.is_empty() {
+            return Ok(format!("<token {}>", ids.first().copied().unwrap_or(0)));
+        }
+        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path)
+            .map_err(|e| format!("load tokenizer: {e}"))?;
+        tokenizer
+            .decode(ids, true)
+            .map_err(|e| format!("decode: {e}"))
+    }
+
+    /// Multimodal generation with streaming callback.
+    ///
+    /// Accepts text + optional images/audio, runs inference, and streams
+    /// results via the callback trait.
+    pub fn generate_multimodal(
+        &mut self,
+        input: MultimodalInput,
+        max_tokens: usize,
+        callback: &mut dyn MultimodalCallback,
+    ) -> Result<(), String> {
+        // Image handling stub
+        if !input.images.is_empty() {
+            eprintln!(
+                "[prism] multimodal: image input ({} image(s)) received but vision encoder not yet implemented",
+                input.images.len()
+            );
+        }
+        if input.audio.is_some() {
+            eprintln!(
+                "[prism] multimodal: audio input received but audio encoder not yet implemented"
+            );
+        }
+
+        // Tokenize text
+        let prompt_tokens = self.tokenize(&input.text)?;
+        let stats = self.generate(&prompt_tokens, max_tokens)?;
+
+        let total_time_s = (stats.total_time_ms / 1000.0).max(0.001);
+        let tps = stats.prompt_tokens as f64 / total_time_s;
+
+        // Stream tokens via callback
+        for (i, token_id) in stats.generated_tokens.iter().enumerate() {
+            let token_str = self.detokenize(&[*token_id])?;
+            callback.on_event(StreamEvent::Text {
+                token: token_str,
+                index: i as u64,
+                metrics: TokenMetrics {
+                    tokens_per_sec: tps,
+                    time_ms: stats.total_time_ms,
+                    layer: 0,
+                },
+            });
+        }
+
+        callback.on_done();
+        Ok(())
     }
 }

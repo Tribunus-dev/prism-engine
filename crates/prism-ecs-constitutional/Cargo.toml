@@ -14,3 +14,4 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 strum = { workspace = true }
+parking_lot = { workspace = true }

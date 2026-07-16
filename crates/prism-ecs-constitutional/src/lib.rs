@@ -14,6 +14,7 @@ pub mod driver;
 pub mod envelope;
 pub mod event_store;
 pub mod execution;
+pub mod ffi;
 pub mod ingress;
 pub mod lifecycle;
 pub mod migration;

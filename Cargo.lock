@@ -3020,6 +3020,7 @@ name = "prism-ecs-constitutional"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "parking_lot",
  "prism-ecs-core",
  "serde",
  "serde_json",
@@ -3380,6 +3381,7 @@ dependencies = [
  "rand 0.8.6",
  "serde",
  "serde_json",
+ "tokenizers",
 ]
 
 [[package]]

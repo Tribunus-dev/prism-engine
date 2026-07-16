@@ -8,10 +8,12 @@
 //! from evolution search instead of uniform k-means palettization.
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 
 use crate::cimage::{CImageWriter, TensorType};
 use crate::palette::palettize_matrix;
+use prism_ecs_ir::evolution::assembly::AssemblySpec;
 use prism_ecs_ir::evolution::compile_plan::FormatPlan;
 use prism_ecs_ir::evolution::mutation_table::TensorFormat;
 use prism_ecs_ir::{generate_plan, ModelGraph, TensorBlueprint};
@@ -500,4 +502,113 @@ fn dequantize_mlx_block(
         }
     }
     Ok(decoded)
+}
+
+/// Compile multiple models into a single unified .cimage.
+///
+/// Each model is compiled independently (via `compile_to_cimage` when the
+/// model file is a `.gguf` weight file) or read directly when already in
+/// `.cimage` format. All compiled outputs are then interleaved into one
+/// `.cimage` file with a model index for runtime dispatch.
+///
+/// The `model_files` map must contain a path to each model's weight file
+/// (`.gguf`) or pre-compiled `.cimage` file. For `.gguf` files, an adjacent
+/// `config.json` is required to build the `ModelGraph` for compilation.
+pub fn compile_assembly(
+    spec: &AssemblySpec,
+    output_dir: &Path,
+    model_files: &HashMap<String, std::path::PathBuf>,
+) -> Result<std::path::PathBuf, String> {
+    let output_path = output_dir.join("assembled.cimage");
+
+    // 1. Compile each model independently
+    let mut all_tensors: Vec<(String, std::path::PathBuf)> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for model in &spec.models {
+        let model_file = model_files
+            .get(&model.name)
+            .ok_or_else(|| format!("model file not found for '{}'", model.name))?;
+
+        let model_dir = output_dir.join(&model.name);
+        std::fs::create_dir_all(&model_dir).map_err(|e| format!("create dir: {e}"))?;
+
+        let model_output = model_dir.join("model.cimage");
+
+        // Determine whether the model needs compilation or is pre-compiled.
+        let is_cimage = model_file.extension().map_or(false, |e| e == "cimage");
+
+        if !is_cimage {
+            // Attempt full compilation: load config.json adjacent to the model file.
+            let config_path = model_file
+                .parent()
+                .map(|p| p.join("config.json"))
+                .ok_or_else(|| format!("cannot determine directory for model '{}'", model.name))?;
+
+            let safetensors_dir = model_file
+                .parent()
+                .ok_or_else(|| format!("no parent directory for model '{}'", model.name))?;
+
+            let config = prism_ecs_ir::UnifiedConfig::from_file(&config_path).map_err(|e| {
+                format!(
+                    "load config.json for '{}' (needed for .gguf compilation): {e}",
+                    model.name
+                )
+            })?;
+            let graph = ModelGraph::build(&config);
+
+            compile_to_cimage(
+                &graph,
+                safetensors_dir,
+                &model_output,
+                false,
+                |_, _, _, _, _| {},
+                model.format_plan.as_ref(),
+            )?;
+        } else {
+            // Pre-compiled .cimage — copy directly (v1 concatenation).
+            std::fs::copy(model_file, &model_output)
+                .map_err(|e| format!("copy .cimage for '{}': {e}", model.name))?;
+        }
+
+        total_size += std::fs::metadata(&model_output)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        all_tensors.push((model.name.clone(), model_output));
+    }
+
+    // 2. Check memory budget
+    let ram_gb = total_size as f64 / (1024.0 * 1024.0 * 1024.0);
+    if ram_gb > spec.total_ram_budget_gb {
+        return Err(format!(
+            "assembly {:.2} GB exceeds RAM budget {:.1} GB",
+            ram_gb, spec.total_ram_budget_gb
+        ));
+    }
+
+    // 3. Interleave tensors and write model index header
+    let mut output =
+        std::fs::File::create(&output_path).map_err(|e| format!("create output: {e}"))?;
+
+    let mut model_index = serde_json::Map::new();
+    for (name, compiled_path) in &all_tensors {
+        let data = std::fs::read(compiled_path).map_err(|e| format!("read compiled: {e}"))?;
+        output
+            .write_all(&data)
+            .map_err(|e| format!("write assembly: {e}"))?;
+        model_index.insert(
+            name.clone(),
+            serde_json::json!({
+                "cimage_path": compiled_path.to_string_lossy(),
+                "size_bytes": data.len(),
+            }),
+        );
+    }
+
+    eprintln!(
+        "assembly: {} models, {:.2} GB total",
+        all_tensors.len(),
+        ram_gb
+    );
+    Ok(output_path)
 }

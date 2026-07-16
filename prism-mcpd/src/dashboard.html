@@ -58,6 +58,9 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9
 .kv-bar-pct{width:36px;text-align:right;color:#8b949e;font-size:.65rem}
 
 /* Compilation progress */
+.assembly-model-row:hover{background:#21262d;border-radius:4px}
+ 
+/* Compilation progress */
 .progress-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0d1117ee;z-index:100;align-items:center;justify-content:center}
 .progress-overlay.active{display:flex}
 .progress-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px 32px;max-width:560px;width:90%;max-height:80vh;overflow-y:auto}
@@ -92,8 +95,45 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9
       <input type="text" id="hf-repo" placeholder="HF repo e.g. prism-ml/Bonsai-27B" spellcheck="false">
       <button class="btn btn-hf" id="pull-btn" onclick="pullModel()">&#x2B06; Pull &amp; Compile from HF</button>
     </div>
-  </div>
+    <h2>Assembly</h2>
+    <div class="assembly-section" style="padding:0 16px 12px;border-top:1px solid #30363d">
+      <div style="font-size:.75rem;color:#8b949e;margin-bottom:6px">Select models for a unified .cimage</div>
 
+      <div class="assembly-model-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:.8rem">
+        <input type="checkbox" id="asm-llm" data-model="llm" style="accent-color:#58a6ff">
+        <label for="asm-llm" style="flex:1;color:#c9d1d9">LLM</label>
+        <input type="text" class="asm-repo" id="asm-llm-repo" placeholder="prism-ml/Bonsai-27B" style="width:160px;padding:2px 6px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:.75rem">
+      </div>
+
+      <div class="assembly-model-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:.8rem">
+        <input type="checkbox" id="asm-tts" data-model="tts" style="accent-color:#3fb950">
+        <label for="asm-tts" style="flex:1;color:#c9d1d9">TTS</label>
+        <input type="text" class="asm-repo" id="asm-tts-repo" placeholder="prism-ml/bonsai-speech" style="width:160px;padding:2px 6px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:.75rem">
+      </div>
+
+      <div class="assembly-model-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:.8rem">
+        <input type="checkbox" id="asm-vision" data-model="vision" style="accent-color:#d29922">
+        <label for="asm-vision" style="flex:1;color:#c9d1d9">Vision</label>
+        <input type="text" class="asm-repo" id="asm-vision-repo" placeholder="prism-ml/bonsai-vision" style="width:160px;padding:2px 6px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:.75rem">
+      </div>
+
+      <!-- Memory budget bar -->
+      <div style="margin-top:8px">
+        <div style="display:flex;justify-content:space-between;font-size:.65rem;color:#8b949e;margin-bottom:2px">
+          <span>RAM budget: <span id="asm-ram-used">0</span> GB / <span id="asm-ram-total">16</span> GB</span>
+          <span id="asm-ram-pct">0%</span>
+        </div>
+        <div class="kv-bar-track" style="height:8px">
+          <div id="asm-ram-bar" class="kv-bar-fill" style="width:0%;background:linear-gradient(90deg,#58a6ff,#3fb950)"></div>
+        </div>
+      </div>
+
+      <button id="asm-assemble-btn" class="btn btn-primary" style="width:100%;margin-top:8px;font-size:.8rem" onclick="assembleModels()">
+        &#x1F527; Assemble &amp; Compile
+      </button>
+      <div id="asm-status" style="font-size:.7rem;color:#8b949e;margin-top:4px"></div>
+    </div>
+  </div>
   <div class="content">
     <div class="chat-area">
       <div class="token-stream" id="token-stream">
@@ -444,6 +484,96 @@ document.getElementById('prompt-input').addEventListener('keydown', (e) => {
 document.getElementById('hf-repo').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); pullModel(); }
 });
+
+// ── Assembly ────────────────────────────────────────────────────
+
+// Estimate model sizes for RAM budget bar
+const MODEL_SIZES = {
+  'prism-ml/Bonsai-27B': 6.0,
+  'prism-ml/Bonsai-8B': 2.5,
+  'prism-ml/bonsai-speech': 1.2,
+  'prism-ml/bonsai-vision': 2.0,
+};
+
+function estimateModelSize(repo) {
+  if (MODEL_SIZES[repo]) return MODEL_SIZES[repo];
+  // Fallback: parse params from repo name
+  const m = repo.match(/(\d+)B/);
+  return m ? parseInt(m[1]) * 0.8 : 1.0;
+}
+
+function updateRamBudget() {
+  let total = 0;
+  document.querySelectorAll('.asm-repo').forEach(input => {
+    const cb = input.closest('.assembly-model-row').querySelector('input[type=checkbox]');
+    if (cb.checked && input.value.trim()) {
+      total += estimateModelSize(input.value.trim());
+    }
+  });
+  const ramTotal = parseFloat(document.getElementById('asm-ram-total').textContent);
+  const pct = Math.min(total / ramTotal * 100, 100);
+  document.getElementById('asm-ram-used').textContent = total.toFixed(1);
+  document.getElementById('asm-ram-pct').textContent = pct.toFixed(0) + '%';
+  const bar = document.getElementById('asm-ram-bar');
+  bar.style.width = pct + '%';
+  bar.style.background = pct > 90 ? 'linear-gradient(90deg,#d29922,#f85149)' : pct > 70 ? 'linear-gradient(90deg,#58a6ff,#d29922)' : 'linear-gradient(90deg,#58a6ff,#3fb950)';
+  document.getElementById('asm-assemble-btn').disabled = total === 0;
+}
+
+// Wire checkbox and input changes to budget bar
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.assembly-model-row input').forEach(el => {
+    el.addEventListener('change', updateRamBudget);
+    el.addEventListener('input', updateRamBudget);
+  });
+  updateRamBudget();
+});
+
+function assembleModels() {
+  const btn = document.getElementById('asm-assemble-btn');
+  btn.disabled = true;
+  btn.textContent = 'Assembling...';
+  document.getElementById('asm-status').textContent = 'Starting evolution search...';
+
+  // Collect selected models
+  const models = [];
+  document.querySelectorAll('.asm-repo').forEach(input => {
+    const cb = input.closest('.assembly-model-row').querySelector('input[type=checkbox]');
+    if (cb.checked && input.value.trim()) {
+      models.push({
+        name: cb.dataset.model,
+        repo: input.value.trim(),
+        size_gb: estimateModelSize(input.value.trim()),
+      });
+    }
+  });
+
+  // POST to /api/assemble
+  fetch('/api/assemble', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({models}),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      document.getElementById('asm-status').textContent = 'Error: ' + data.error;
+      document.getElementById('asm-status').style.color = '#f85149';
+    } else {
+      document.getElementById('asm-status').textContent = 'Assembled: ' + data.path;
+      document.getElementById('asm-status').style.color = '#3fb950';
+      if (data.model_name) selectModel(data.model_name);
+    }
+  })
+  .catch(e => {
+    document.getElementById('asm-status').textContent = 'Error: ' + e.message;
+    document.getElementById('asm-status').style.color = '#f85149';
+  })
+  .finally(() => {
+    btn.disabled = false;
+    btn.textContent = '\u{1F527} Assemble & Compile';
+  });
+}
 
 // Set KV bars placeholder
 renderKvBars();
