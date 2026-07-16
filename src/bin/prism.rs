@@ -15,8 +15,6 @@
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "gguf-compile")]
-use tribunus_compute_core::lut::compiler::compile_gguf_to_cimage;
 /// Detect if Metal GPU is available.
 fn has_metal() -> bool {
     #[cfg(feature = "metal-dispatch")]

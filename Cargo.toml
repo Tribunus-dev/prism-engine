@@ -127,6 +127,10 @@ coreml-proto = { version = "0.1.0", optional = true }
 anyhow = "1.0.102"
 libc = { workspace = true }
 blake3 = "1"
+prism-ecs-ir = { path = "crates/prism-ecs-ir" }
+prism-ecs-quantization = { path = "crates/prism-ecs-quantization" }
+prism-ecs-server = { path = "crates/prism-ecs-server" }
+prism-runtime = { path = "crates/prism-runtime" }
 [features]
 default = []
 server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]
