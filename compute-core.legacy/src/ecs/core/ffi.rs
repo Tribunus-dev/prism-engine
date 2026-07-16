@@ -165,7 +165,7 @@ pub unsafe fn prism_compile_and_pack(
 ))]
 /// Initialize the runtime multiplexer from a compiled .cimage.
 /// Returns a pointer to an OpaqueMultiplexer, or null on failure.
-pub unsafe fn prism_runtime_init(cimage_path: *const c_char) -> *mut OpaqueMultiplexer {
+pub unsafe fn prism_engine_init(cimage_path: *const c_char) -> *mut OpaqueMultiplexer {
     if cimage_path.is_null() {
         return std::ptr::null_mut();
     }
@@ -197,7 +197,7 @@ pub unsafe fn prism_runtime_init(cimage_path: *const c_char) -> *mut OpaqueMulti
     feature = "prism-backend-ios"
 ))]
 /// Free a previously initialized OpaqueMultiplexer.
-pub unsafe fn prism_runtime_free(multiplexer: *mut OpaqueMultiplexer) {
+pub unsafe fn prism_engine_free(multiplexer: *mut OpaqueMultiplexer) {
     if !multiplexer.is_null() {
         let _ = Box::from_raw(multiplexer);
     }

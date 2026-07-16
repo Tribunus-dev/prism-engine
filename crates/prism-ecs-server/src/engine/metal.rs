@@ -58,5 +58,5 @@ pub fn dispatch_matmul(
     dim_n: u32,
     format: &prism_ecs_ir::evolution::mutation_table::TensorFormat,
 ) -> Result<Vec<f32>, String> {
-    crate::cpu::matmul(input, weight_data, dim_m, dim_n, format)
+    crate::engine::cpu::matmul(input, weight_data, dim_m, dim_n, format)
 }

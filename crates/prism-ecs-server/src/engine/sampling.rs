@@ -3,7 +3,7 @@
 //! After the model produces logits (vocab-sized float vector), sampling
 //! selects the next token.
 
-use crate::inference::SamplingConfig;
+use crate::engine::inference::SamplingConfig;
 use rand::Rng;
 
 /// Sample the next token from logits given a sampling configuration.

@@ -5,8 +5,8 @@
 //! dispatch in [crate::metal] (when `metal-dispatch` is active) or
 //! [crate::cpu] as a fallback.
 
-use crate::model::Model;
-use crate::streaming::StreamingLayerLoader;
+use crate::engine::model::Model;
+use crate::engine::streaming::StreamingLayerLoader;
 use prism_ecs_ir::evolution::mutation_table::TensorFormat;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -345,20 +345,18 @@ impl InferenceEngine {
         // Try Metal first (feature-gated), fall back to CPU
         #[cfg(feature = "metal-dispatch")]
         {
-            let result = crate::metal::dispatch_matmul(
-                tensor_name,
-                input,
-                &weight_data,
-                dim_m,
-                dim_n,
-                &format,
-            );
+            let result = crate::engine::metal::dispatch_matmul(tensor_name,
+            input,
+            &weight_data,
+            dim_m,
+            dim_n,
+            &format,);
             if result.is_ok() {
                 return result;
             }
         }
 
-        crate::cpu::matmul(input, &weight_data, dim_m, dim_n, &format)
+        crate::engine::cpu::matmul(input, &weight_data, dim_m, dim_n, &format)
     }
 
     // ── Embedding ────────────────────────────────────────────────────────
@@ -634,7 +632,7 @@ impl InferenceEngine {
             )?;
 
             // SiLU activation on gate
-            let gate_silu = crate::cpu::silu(&gate);
+            let gate_silu = crate::engine::cpu::silu(&gate);
 
             // Elementwise multiply gate_silu * up
             let mut gated = Vec::with_capacity(intermediate_size);
@@ -707,31 +705,31 @@ impl InferenceEngine {
             // Input norm (RMSNorm before attention)
             let attn_norm_name = self.layer_tensor_name(layer_idx, "input_layernorm.weight");
             let attn_weights = self.read_norm_weights(&attn_norm_name)?;
-            let normed = crate::cpu::rms_norm(&hidden, &attn_weights)?;
+            let normed = crate::engine::cpu::rms_norm(&hidden, &attn_weights)?;
 
             // Self-attention
             let attn_out = self.attention_layer(layer_idx, &normed, kv_cache)?;
 
             // Residual connection
-            hidden = crate::cpu::vec_add(&hidden, &attn_out)?;
+            hidden = crate::engine::cpu::vec_add(&hidden, &attn_out)?;
 
             // Post-attention norm (RMSNorm before MLP)
             let ffn_norm_name =
                 self.layer_tensor_name(layer_idx, "post_attention_layernorm.weight");
             let ffn_weights = self.read_norm_weights(&ffn_norm_name)?;
-            let normed = crate::cpu::rms_norm(&hidden, &ffn_weights)?;
+            let normed = crate::engine::cpu::rms_norm(&hidden, &ffn_weights)?;
 
             // MLP
             let mlp_out = self.mlp_layer(layer_idx, &normed)?;
 
             // Residual connection
-            hidden = crate::cpu::vec_add(&hidden, &mlp_out)?;
+            hidden = crate::engine::cpu::vec_add(&hidden, &mlp_out)?;
         }
 
         // Phase 3: final norm + lm_head
         let final_norm_name = self.tensor_name("norm.weight");
         let final_weights = self.read_norm_weights(&final_norm_name)?;
-        let hidden = crate::cpu::rms_norm(&hidden, &final_weights)?;
+        let hidden = crate::engine::cpu::rms_norm(&hidden, &final_weights)?;
 
         // LM head: only need logits for the last token
         let hidden_size = self.config.hidden_size as usize;

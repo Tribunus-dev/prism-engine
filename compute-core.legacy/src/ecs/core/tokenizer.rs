@@ -1,8 +1,8 @@
 //! Real tokenizer for encoding text to token IDs using pure Rust BPE.
 //!
-//! Delegates to prism_runtime::bpe_tokenizer::Tokenizer.
+//! Delegates to prism_ecs_server::engine::bpe_tokenizer::Tokenizer.
 
-use prism_runtime::bpe_tokenizer::Tokenizer;
+use prism_ecs_server::engine::bpe_tokenizer::Tokenizer;
 use std::path::Path;
 
 /// A HuggingFace-compatible tokenizer loaded from tokenizer.json.

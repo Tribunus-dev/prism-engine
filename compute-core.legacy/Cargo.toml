@@ -19,7 +19,6 @@ prism-ecs-constitutional = { path = "../crates/prism-ecs-constitutional" }
 prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
 prism-kv-cache = { path = "../crates/prism-kv-cache" }
 prism-ecs-backend = { path = "../crates/prism-ecs-backend" }
-prism-runtime = { path = "../crates/prism-runtime" }
 block = { version = "0.1", optional = true }
 mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"
@@ -78,7 +77,6 @@ anyhow = "1.0.102"
 tracing = "0.1"
 sqlx = { version = "0.7", optional = true, default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
 sqlx-postgres = { version = "0.7", optional = true, default-features = false, features = ["uuid", "json"] }
-duckdb = { version = "1.1", optional = true }
 fred = { version = "10", optional = true, features = ["i-client", "i-keys", "i-scripts"] }
 image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
 melior = { version = "0.27.2", optional = true }

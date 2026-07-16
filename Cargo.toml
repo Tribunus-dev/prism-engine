@@ -26,9 +26,8 @@ members = [
     "crates/prism-audio",
     "crates/prism-image",
     "crates/prism-multimodal",
-    "crates/prism-runtime",
     "crates/prism-video",
-    "crates/prism-memory-store",
+    "crates/prism-ecs-duckdb",
 ]
 [workspace.package]
 
@@ -129,8 +128,6 @@ blake3 = "1"
 prism-ecs-ir = { path = "crates/prism-ecs-ir" }
 prism-ecs-quantization = { path = "crates/prism-ecs-quantization" }
 prism-ecs-server = { path = "crates/prism-ecs-server" }
-prism-runtime = { path = "crates/prism-runtime" }
-prism-memory-store = { path = "crates/prism-memory-store" }
 [features]
 default = []
 server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]

@@ -7,7 +7,7 @@
 //!
 //! # Quick Start
 //! ```
-//! use prism_runtime::bpe_tokenizer::Tokenizer;
+//! use prism_ecs_server::engine::bpe_tokenizer::Tokenizer;
 //!
 //! let tok = Tokenizer::from_file("model/tokenizer.json")?;
 //! let enc = tok.encode("Hello, world!", true)?;

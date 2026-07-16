@@ -1,7 +1,7 @@
 //! Axum route handlers for the evidence dashboard API.
 //!
 //! All endpoints are gated behind `cfg(feature = "server-dashboard")`.
-//! Uses `sqlx` (PostgreSQL) for persistence and `duckdb` for analytical views.
+//! Uses `sqlx` (PostgreSQL) for persistence.
 
 use axum::{
     extract::{Path, Query, State},
@@ -23,7 +23,7 @@ use crate::ecs::server::dashboard::models::*;
 /// Shared application state injected into every dashboard handler via
 /// `axum::extract::State`.
 pub struct DashboardState {
-    /// Evidence indexer — holds the PostgreSQL pool, DuckDB connection, and
+    /// Evidence indexer — holds the PostgreSQL pool and
     /// optional Valkey client.
     pub indexer: EvidenceIndexer,
     /// High-level Valkey-backed cache facade.

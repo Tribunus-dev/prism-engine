@@ -164,17 +164,16 @@ impl From<serde_json::Error> for DashboardError {
 // EvidenceIndexer
 // ---------------------------------------------------------------------------
 
-/// The evidence indexer ties together PostgreSQL (persistence), DuckDB
-/// (analytical queries), and Valkey (caching) for the dashboard backend.
+/// The evidence indexer ties together PostgreSQL (persistence) and Valkey
+/// (caching) for the dashboard backend.
 pub struct EvidenceIndexer {
     pub pool: sqlx::PgPool,
-    pub duckdb: duckdb::Connection,
     pub valkey: Option<Client>,
 }
 
 impl EvidenceIndexer {
     /// Create a new `EvidenceIndexer`, connecting to PostgreSQL and (optionally)
-    /// Valkey, opening an in-memory DuckDB connection, and ensuring tables exist.
+    /// Valkey, and ensuring tables exist.
     pub async fn create_indexer(
         pg_conn_str: &str,
         valkey_url: Option<&str>,
@@ -185,10 +184,6 @@ impl EvidenceIndexer {
         ensure_tables(&pool)
             .await
             .map_err(|e| DashboardError::Db(e.to_string()))?;
-
-        // In-memory DuckDB for analytical views.
-        let duckdb = duckdb::Connection::open_in_memory()
-            .map_err(|e| DashboardError::Db(format!("duckdb connect: {e}")))?;
 
         // Optional Valkey connection.
         let valkey = if let Some(url) = valkey_url {
@@ -206,11 +201,7 @@ impl EvidenceIndexer {
             None
         };
 
-        Ok(EvidenceIndexer {
-            pool,
-            duckdb,
-            valkey,
-        })
+        Ok(EvidenceIndexer { pool, valkey })
     }
 
     /// Recursively scan `dir` for `*.cimage` files, load each one, extract its

@@ -96,7 +96,7 @@ impl McpHandler for InferenceHandler {
                 })?;
                 // Runtime generate is not yet implemented — return status
                 Ok(ToolResult::text(format!(
-                    "[prism-runtime:generate] model={model_name} prompt='{prompt}' max_tokens={max_tokens}\n\
+                    "[engine:generate] model={model_name} prompt='{prompt}' max_tokens={max_tokens}\n\
                      Inference engine not yet implemented — staged for wire-up."
                 )))
             }

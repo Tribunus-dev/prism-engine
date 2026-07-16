@@ -161,17 +161,7 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
         } else {
             Arc::new(ArtifactStore::open(Path::new(artifact_dir))?)
         };
-    let artifact_db_path = if backend_config.profile == "trifecta" {
-        Path::new(
-            backend_config
-                .duckdb_path
-                .as_deref()
-                .expect("validated DuckDB path"),
-        )
-        .to_path_buf()
-    } else {
-        Path::new(artifact_dir).join("metadata.db")
-    };
+    let artifact_db_path = Path::new(artifact_dir).join("metadata.db");
     let evidence_ledger: Arc<dyn prism_mcp_core::EvidenceStore> =
         if backend_config.profile == "trifecta" {
             #[cfg(feature = "trifecta")]
@@ -197,28 +187,14 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     let process_cache = ProcessCache::new(32);
 
     // ── MeasuredEvaluator (hardware-backed evolution evaluator) ─────
-    // Opens a separate DuckDB connection for benchmark projections.
-    // Gated behind the `measure` feature (requires `trifecta`).
+    // Uses prism-ecs-duckdb columnar table (pure Rust, zero C++ deps).
     #[cfg(feature = "measure")]
     let measured_evaluator = {
-        if let Some(duckdb_path) = &backend_config.duckdb_path {
-            match duckdb::Connection::open(duckdb_path) {
-                Ok(conn) => {
-                    let eval =
-                        prism_runtime::measured::MeasuredEvaluator::new(0.1).with_duckdb(conn);
-                    Some(eval)
-                }
-                Err(e) => {
-                    eprintln!("prism-mcpd: failed to open DuckDB for MeasuredEvaluator: {e}");
-                    None
-                }
-            }
-        } else {
-            None
-        }
+        let eval = prism_ecs_server::engine::MeasuredEvaluator::new(0.1);
+        Some(eval)
     };
     #[cfg(not(feature = "measure"))]
-    let measured_evaluator: Option<()> = None;
+    let measured_evaluator: Option<prism_ecs_server::engine::MeasuredEvaluator> = None;
     let _measured_evaluator = measured_evaluator;
 
     // Global work queue: reader threads push, scheduler pulls
@@ -295,12 +271,7 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
         if backend_config.profile == "trifecta" {
             #[cfg(feature = "trifecta")]
             {
-                crate::trifecta_store::DuckDbProjectionStore::open(
-                    backend_config
-                        .duckdb_path
-                        .as_deref()
-                        .expect("validated DuckDB path"),
-                )?
+                crate::trifecta_store::DuckDbProjectionStore::open("in-memory")?
             }
             #[cfg(not(feature = "trifecta"))]
             {

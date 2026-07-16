@@ -402,7 +402,7 @@ async fn generate(
     if reg.get_model(&req.model).is_some() {
         Json(GenerateResponse {
             text: format!(
-                "[prism-runtime] inference engine not yet implemented.\n\nPrompt: {}\nModel: {}\nMax tokens: {:?}",
+                "[engine] inference engine not yet implemented.\n\nPrompt: {}\nModel: {}\nMax tokens: {:?}",
                 req.prompt, req.model, req.max_tokens.unwrap_or(256)
             ),
         })

@@ -1,6 +1,6 @@
 //! Inference model lifecycle management.
 //!
-//! Wraps the [`prism_runtime`] inference engine for the server, providing
+//! Wraps the inference engine for the server, providing
 //! a thread-safe model registry and active session tracking.
 
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 pub struct ModelInstance {
     pub name: String,
     pub model_path: PathBuf,
-    // runtime: Arc<prism_runtime::inference::InferenceEngine>,
+    // runtime: Arc<prism_ecs_server::engine::InferenceEngine>,
 }
 
 impl ModelInstance {

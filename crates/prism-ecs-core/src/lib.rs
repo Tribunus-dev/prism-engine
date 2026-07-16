@@ -32,5 +32,5 @@ pub use error::WorldError;
 pub use mutation::MutationPolicy;
 pub use query::{Query, Query2, Query3, QueryMut};
 pub use resource::{Resource, ResourceMut, ResourceRef};
-pub use store::{ComponentStore, ResourceStore};
+pub use store::{ComponentStore, MemoryStore, MemoryStoreError, ResourceStore};
 pub use world::{EntityRef, World};

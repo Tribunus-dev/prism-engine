@@ -4,10 +4,10 @@
 //! be ported here over subsequent milestones. Currently a minimal loader that
 //! opens the `.cimage` via Model::load and stores the graph for later use.
 
-use crate::inference::{InferenceEngine, KvCache};
-use crate::model::Model;
-use crate::multimodal::{MultimodalCallback, MultimodalInput, StreamEvent, TokenMetrics};
-use crate::streaming::StreamingLayerLoader;
+use crate::engine::inference::{InferenceEngine, KvCache};
+use crate::engine::model::Model;
+use crate::engine::multimodal::{MultimodalCallback, MultimodalInput, StreamEvent, TokenMetrics};
+use crate::engine::streaming::StreamingLayerLoader;
 use prism_ecs_ir::model_graph::ModelGraph;
 use prism_multimodal::multimodal::vision_encoder::{
     self, MatmulProvider, VisionArch, VisionEncoderConfig,
@@ -170,7 +170,7 @@ impl PrismEngine {
         // Autoregressive generation loop
         let mut generated: Vec<u32> = Vec::with_capacity(max_tokens);
         for _ in 0..max_tokens {
-            let next_token = crate::sampling::sample(&logits, &Default::default());
+            let next_token = crate::engine::sampling::sample(&logits, &Default::default());
             generated.push(next_token);
 
             // EOS token (typically 0, but models vary; 0 is the most common pad/EOS)
@@ -219,7 +219,7 @@ impl PrismEngine {
         // Autoregressive generation
         let mut generated: Vec<u32> = Vec::with_capacity(max_tokens);
         for _ in 0..max_tokens {
-            let next_token = crate::sampling::sample(&logits, &Default::default());
+            let next_token = crate::engine::sampling::sample(&logits, &Default::default());
             generated.push(next_token);
             if next_token == 0 {
                 break;
@@ -270,7 +270,7 @@ impl PrismEngine {
             // Fallback: simple whitespace split for testing
             return Ok(text.split_whitespace().map(|_| 1u32).collect());
         }
-        let tokenizer = crate::bpe_tokenizer::Tokenizer::from_file(tokenizer_path)
+        let tokenizer = crate::engine::bpe_tokenizer::Tokenizer::from_file(tokenizer_path)
             .map_err(|e| format!("load tokenizer: {e}"))?;
         let encoding = tokenizer
             .encode(text, true)
@@ -284,7 +284,7 @@ impl PrismEngine {
         if tokenizer_path.is_empty() {
             return Ok(format!("<token {}>", ids.first().copied().unwrap_or(0)));
         }
-        let tokenizer = crate::bpe_tokenizer::Tokenizer::from_file(tokenizer_path)
+        let tokenizer = crate::engine::bpe_tokenizer::Tokenizer::from_file(tokenizer_path)
             .map_err(|e| format!("load tokenizer: {e}"))?;
         tokenizer
             .decode(ids, true)

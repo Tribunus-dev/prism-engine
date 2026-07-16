@@ -10,6 +10,9 @@
 //! * `workgroup` — SPU-style workgroup scheduling with work-unit lifecycle,
 //!   adapted from lv2_spu_group.
 
+/// Prism inference engine — model loading, inference dispatch, streaming,
+/// multimodal, tokenization, and measured evaluation.
+pub mod engine;
 pub mod mailbox;
 pub mod ntb_dma;
 pub mod workgroup;

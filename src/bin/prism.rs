@@ -192,7 +192,7 @@ fn run_chat(model: Option<String>) {
         });
     let graph = prism_ecs_ir::model_graph::ModelGraph::build(&cfg);
     let mut engine =
-        prism_runtime::engine::PrismEngine::load(&model_path.join("model.cimage"), graph)
+        prism_ecs_server::engine::PrismEngine::load(&model_path.join("model.cimage"), graph)
             .unwrap_or_else(|e| {
                 eprintln!("load: {e}");
                 std::process::exit(1);

@@ -74,7 +74,6 @@ pub mod decode_attribution;
 pub mod device;
 pub mod diffusion;
 pub mod diffusion_provider;
-pub mod duckdb_projection;
 pub mod editing;
 pub mod engine;
 pub mod engine_error;

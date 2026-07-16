@@ -26,7 +26,6 @@ prism-ecs-ir = { path = "../crates/prism-ecs-ir" }
 prism-ecs-constitutional = { path = "../crates/prism-ecs-constitutional" }
 prism-ecs-core = { path = "../crates/prism-ecs-core" }
 prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
-prism-runtime = { path = "../crates/prism-runtime", optional = true }
 hf-hub = "0.4"
 serde_json = "1"
 serde.workspace = true
@@ -50,13 +49,12 @@ dirs = "6"
 tower-http = { version = "0.6", features = ["cors"] }
 tokio-postgres = { version = "0.7", optional = true, features = ["with-serde_json-1", "with-chrono-0_4"] }
 redis = { version = "0.27", optional = true }
-duckdb = { version = "1.1", optional = true, features = ["bundled"] }
 
 [features]
 default = ["trifecta"]
-trifecta = ["dep:tokio-postgres", "dep:redis", "dep:duckdb"]
+trifecta = ["dep:tokio-postgres", "dep:redis"]
 live-trifecta = ["trifecta"]
-measure = ["prism-runtime", "trifecta"]
+measure = ["trifecta"]
 live-browser = []
 
 [dev-dependencies]

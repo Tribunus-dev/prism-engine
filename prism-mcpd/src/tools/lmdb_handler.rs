@@ -1,5 +1,6 @@
 use anyhow::Result;
 use parking_lot::Mutex;
+use prism_ecs_core::store::{MemoryStore, MemoryStoreError};
 use prism_mcp_core::{DaemonState, McpHandler, RequestContext, ToolRequest, ToolResult};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -7,12 +8,12 @@ use std::sync::Arc;
 
 /// LMDB memory store MCP handler.
 pub struct LmdbHandler {
-    store: Arc<Mutex<prism_memory_store::LmdbMemoryStore>>,
+    store: Arc<Mutex<MemoryStore>>,
 }
 
 impl LmdbHandler {
     pub fn new(path: PathBuf, map_size: usize) -> Result<Self> {
-        let store = prism_memory_store::LmdbMemoryStore::open(path, map_size)
+        let store = MemoryStore::open_lmdb(path, map_size)
             .map_err(|e| anyhow::anyhow!("open LMDB: {e}"))?;
         Ok(Self {
             store: Arc::new(Mutex::new(store)),
@@ -35,11 +36,21 @@ impl McpHandler for LmdbHandler {
             "properties": {
                 "command": {
                     "type": "string",
-                    "enum": ["put", "get", "query", "delete"]
+                    "enum": ["put", "get", "query", "delete"],
+                    "description": "Store operation"
                 },
-                "key": { "type": "string", "description": "Storage key" },
-                "value": { "type": "string", "description": "Value to store (for put)" },
-                "prefix": { "type": "string", "description": "Key prefix to query" }
+                "key": {
+                    "type": "string",
+                    "description": "Key for put/get/delete"
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Value for put"
+                },
+                "prefix": {
+                    "type": "string",
+                    "description": "Prefix for query"
+                }
             },
             "required": ["command"]
         })
@@ -52,7 +63,7 @@ impl McpHandler for LmdbHandler {
         _state: &DaemonState,
     ) -> Result<ToolResult> {
         let command = request.args["command"].as_str().unwrap_or("");
-        let store = self.store.lock();
+        let mut store = self.store.lock();
 
         match command {
             "put" => {
@@ -83,11 +94,9 @@ impl McpHandler for LmdbHandler {
                             json!({"ok": true, "key": key_str, "value": value}).to_string(),
                         ))
                     }
-                    Err(prism_memory_store::MemoryStoreError::KeyNotFound(_)) => {
-                        Ok(ToolResult::text(
-                            json!({"ok": false, "key": key_str, "error": "not_found"}).to_string(),
-                        ))
-                    }
+                    Err(MemoryStoreError::KeyNotFound(_)) => Ok(ToolResult::text(
+                        json!({"ok": false, "key": key_str, "error": "not_found"}).to_string(),
+                    )),
                     Err(e) => Err(anyhow::anyhow!("get: {e}")),
                 }
             }

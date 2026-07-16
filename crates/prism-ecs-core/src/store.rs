@@ -1,5 +1,11 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+#[cfg(feature = "lmdb")]
+use std::path::Path;
+#[cfg(feature = "lmdb")]
+use std::sync::Arc;
+#[cfg(feature = "lmdb")]
+use lmdb::{Cursor, Transaction};
 
 use crate::column::Column;
 use crate::component::Component;
@@ -135,5 +141,192 @@ impl ResourceStore {
         self.data
             .get_mut(&TypeId::of::<T>())
             .and_then(|b| b.downcast_mut::<T>())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MemoryStore: an ECS Resource for key-value storage backed by in-memory
+// HashMap or optionally LMDB (feature = "lmdb").
+// ---------------------------------------------------------------------------
+
+/// Errors from memory store operations.
+#[derive(Debug)]
+pub enum MemoryStoreError {
+    /// Key not found in store.
+    KeyNotFound(Vec<u8>),
+    /// Backend error from the storage layer (LMDB or in-memory).
+    Backend(String),
+}
+
+impl std::fmt::Display for MemoryStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemoryStoreError::KeyNotFound(key) => {
+                write!(f, "key not found: {}", String::from_utf8_lossy(key))
+            }
+            MemoryStoreError::Backend(msg) => write!(f, "backend error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for MemoryStoreError {}
+
+/// LMDB backend handle (only compiled when the `lmdb` feature is active).
+#[cfg(feature = "lmdb")]
+#[derive(Debug)]
+struct LmdbBackend {
+    env: Arc<lmdb::Environment>,
+    db: lmdb::Database,
+}
+
+/// In-memory key-value store (ECS Resource).
+///
+/// Default storage is a `HashMap<Vec<u8>, Vec<u8>>`. When the `lmdb` feature
+/// is enabled, `open_lmdb` opens a persistent LMDB environment instead. All
+/// operations are available regardless of the backend.
+#[derive(Debug)]
+pub struct MemoryStore {
+    inner: HashMap<Vec<u8>, Vec<u8>>,
+    #[cfg(feature = "lmdb")]
+    lmdb: Option<LmdbBackend>,
+}
+
+impl MemoryStore {
+    /// Create a new in-memory store (no persistence).
+    pub fn new() -> Self {
+        MemoryStore {
+            inner: HashMap::new(),
+            #[cfg(feature = "lmdb")]
+            lmdb: None,
+        }
+    }
+
+    /// Open or create an LMDB-backed store at the given directory path.
+    ///
+    /// `map_size` is the maximum size of the database file in bytes.
+    #[cfg(feature = "lmdb")]
+    pub fn open_lmdb(path: impl AsRef<Path>, map_size: usize) -> Result<Self, MemoryStoreError> {
+        use lmdb::DatabaseFlags;
+
+        std::fs::create_dir_all(path.as_ref())
+            .map_err(|e| MemoryStoreError::Backend(format!("create dir: {e}")))?;
+
+        let env = lmdb::Environment::new()
+            .set_max_dbs(16)
+            .set_map_size(map_size)
+            .open(path.as_ref())
+            .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+
+        let db = env
+            .create_db(None, DatabaseFlags::default())
+            .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+
+        Ok(MemoryStore {
+            inner: HashMap::new(),
+            lmdb: Some(LmdbBackend {
+                env: Arc::new(env),
+                db,
+            }),
+        })
+    }
+
+    /// Write a key-value pair to the store.
+    pub fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), MemoryStoreError> {
+        #[cfg(feature = "lmdb")]
+        if let Some(backend) = &self.lmdb {
+            let mut txn = backend
+                .env
+                .begin_rw_txn()
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            txn.put(backend.db, &key, &value, lmdb::WriteFlags::default())
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            txn.commit()
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            return Ok(());
+        }
+
+        self.inner.insert(key.to_vec(), value.to_vec());
+        Ok(())
+    }
+
+    /// Read a value by key.
+    pub fn get(&self, key: &[u8]) -> Result<Vec<u8>, MemoryStoreError> {
+        #[cfg(feature = "lmdb")]
+        if let Some(backend) = &self.lmdb {
+            let txn = backend
+                .env
+                .begin_ro_txn()
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            match txn.get(backend.db, &key) {
+                Ok(val) => return Ok(val.to_vec()),
+                Err(lmdb::Error::NotFound) => {
+                    return Err(MemoryStoreError::KeyNotFound(key.to_vec()))
+                }
+                Err(e) => return Err(MemoryStoreError::Backend(e.to_string())),
+            }
+        }
+
+        self.inner
+            .get(key)
+            .cloned()
+            .ok_or_else(|| MemoryStoreError::KeyNotFound(key.to_vec()))
+    }
+
+    /// Delete a key-value pair.
+    pub fn delete(&mut self, key: &[u8]) -> Result<(), MemoryStoreError> {
+        #[cfg(feature = "lmdb")]
+        if let Some(backend) = &self.lmdb {
+            let mut txn = backend
+                .env
+                .begin_rw_txn()
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            txn.del(backend.db, &key, None)
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            txn.commit()
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            return Ok(());
+        }
+
+        self.inner.remove(key);
+        Ok(())
+    }
+
+    /// Query entries with a key prefix. Returns matching keys and their values.
+    pub fn query_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, MemoryStoreError> {
+        #[cfg(feature = "lmdb")]
+        if let Some(backend) = &self.lmdb {
+            let txn = backend
+                .env
+                .begin_ro_txn()
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            let mut cursor = txn
+                .open_ro_cursor(backend.db)
+                .map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+            let mut results = Vec::new();
+            let iter = cursor.iter_from(prefix);
+            for result in iter {
+                let (key_bytes, val) =
+                    result.map_err(|e| MemoryStoreError::Backend(e.to_string()))?;
+                if key_bytes.starts_with(prefix) {
+                    results.push((key_bytes.to_vec(), val.to_vec()));
+                } else {
+                    break;
+                }
+            }
+            return Ok(results);
+        }
+
+        Ok(self
+            .inner
+            .iter()
+            .filter(|(k, _)| k.starts_with(prefix))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
+    }
+}
+
+impl Default for MemoryStore {
+    fn default() -> Self {
+        Self::new()
     }
 }

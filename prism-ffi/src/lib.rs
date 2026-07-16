@@ -37,13 +37,13 @@ pub unsafe extern "C" fn prism_compile_and_pack(
 /// Initialize the runtime multiplexer from a compiled .cimage.
 /// Returns null on failure.
 #[no_mangle]
-pub unsafe extern "C" fn prism_runtime_init(_cimage_path: *const c_char) -> *mut OpaqueMultiplexer {
+pub unsafe extern "C" fn prism_engine_init(_cimage_path: *const c_char) -> *mut OpaqueMultiplexer {
     std::ptr::null_mut()
 }
 
 /// Free a previously initialized OpaqueMultiplexer.
 #[no_mangle]
-pub unsafe extern "C" fn prism_runtime_free(_multiplexer: *mut OpaqueMultiplexer) {}
+pub unsafe extern "C" fn prism_engine_free(_multiplexer: *mut OpaqueMultiplexer) {}
 
 /// Extended multimodal execution with priority and lane pinning.
 #[no_mangle]

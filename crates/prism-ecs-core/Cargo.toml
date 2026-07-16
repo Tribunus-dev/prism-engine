@@ -8,3 +8,7 @@ license.workspace = true
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 bincode = "1"
+lmdb-rkv = { version = "0.14", optional = true }
+
+[features]
+lmdb = ["dep:lmdb-rkv"]

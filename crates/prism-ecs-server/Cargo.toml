@@ -13,8 +13,15 @@ tokio = { workspace = true, features = ["sync", "macros", "time"] }
 tempfile = { workspace = true }
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-ir = { path = "../prism-ecs-ir" }
-prism-runtime = { path = "../prism-runtime" }
 serde = { workspace = true, features = ["derive"] }
+prism-video = { path = "../prism-video" }
+prism-kv-cache = { path = "../prism-kv-cache" }
+prism-multimodal = { path = "../prism-multimodal" }
+prism-ecs-duckdb = { path = "../prism-ecs-duckdb" }
+prism-ecs-quantization = { path = "../prism-ecs-quantization" }
+half = { workspace = true }
+rand = { workspace = true }
+memmap2 = "0.9"
 axum = { version = "0.8", optional = true }
 tokio-stream = { version = "0.1", optional = true }
 futures = "0.3"
@@ -28,3 +35,4 @@ generation-image = []
 generation-audio = []
 generation-video = []
 generation-diffusion = []
+metal-dispatch = []

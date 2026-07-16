@@ -57,8 +57,20 @@ pub struct ValkeyLeaseStore {
 }
 
 #[cfg(feature = "trifecta")]
+use std::collections::HashMap;
+
+#[cfg(feature = "trifecta")]
 pub struct DuckDbProjectionStore {
-    connection: Mutex<duckdb::Connection>,
+    /// In-memory projection store (pure Rust, no C++ duckdb dependency).
+    /// PostgreSQL remains the durable authority; this provides in-memory
+    /// analytical projection for the trifecta profile.
+    benchmarks: Mutex<HashMap<String, (String, f64, i32, String)>>, // report_id -> (plan_id, elapsed_ms, exit_code, output)
+    traces: Mutex<HashMap<String, serde_json::Value>>,
+    kernels: Mutex<HashMap<String, (String, String, u64, String)>>, // name -> (backend, hash, byte_len, target)
+    replays: Mutex<HashMap<String, (String, serde_json::Value)>>,
+    experiments: Mutex<HashMap<String, serde_json::Value>>,
+    plans: Mutex<HashMap<String, (String, serde_json::Value)>>, // plan_id -> (name, spec)
+    baselines: Mutex<HashMap<String, String>>,                  // baseline_name -> report_id
 }
 
 #[cfg(feature = "trifecta")]
@@ -555,9 +567,15 @@ impl ValkeyLeaseStore {
 
 #[cfg(feature = "trifecta")]
 impl DuckDbProjectionStore {
-    pub fn open(path: &str) -> Result<Arc<Self>> {
+    pub fn open(_path: &str) -> Result<Arc<Self>> {
         Ok(Arc::new(Self {
-            connection: Mutex::new(duckdb::Connection::open(path)?),
+            benchmarks: Mutex::new(HashMap::new()),
+            traces: Mutex::new(HashMap::new()),
+            kernels: Mutex::new(HashMap::new()),
+            replays: Mutex::new(HashMap::new()),
+            experiments: Mutex::new(HashMap::new()),
+            plans: Mutex::new(HashMap::new()),
+            baselines: Mutex::new(HashMap::new()),
         }))
     }
 }
@@ -694,63 +712,6 @@ impl ArtifactRepository for PostgresArtifactRepository {
     }
 }
 
-/* DuckDB does not own artifact metadata in the trifecta profile. */
-#[cfg(any())]
-impl ArtifactRepository for DuckDbArtifactRepository {
-    fn put(
-        &self,
-        data: &[u8],
-        kind: ArtifactKind,
-        producer: &ToolInvocationId,
-    ) -> Result<ArtifactId> {
-        let id = ArtifactId::from_data(data);
-        let hex = id.hex();
-        let directory = self.base.join(Self::kind_name(&kind)).join(&hex[..2]);
-        let path = directory.join(&hex[2..]);
-        if !path.exists() {
-            std::fs::create_dir_all(&directory)?;
-            std::fs::write(&path, data)?;
-        }
-        let connection = self.connection.lock();
-        connection.execute("INSERT OR IGNORE INTO artifact_projection (id_hash,kind,byte_len,media_type,producer,target) VALUES (?,?,?,?,?,?)", duckdb::params![hex, Self::kind_name(&kind), data.len() as i64, "application/octet-stream", producer.0.to_string(), Option::<String>::None])?;
-        Ok(id)
-    }
-    fn list(&self, kind: Option<&ArtifactKind>) -> Result<Vec<ArtifactRecord>> {
-        let connection = self.connection.lock();
-        let mut statement = if kind.is_some() {
-            connection.prepare("SELECT id_hash,kind,byte_len,media_type,producer,target,created_at FROM artifact_projection WHERE kind=? ORDER BY created_at DESC")?
-        } else {
-            connection.prepare("SELECT id_hash,kind,byte_len,media_type,producer,target,created_at FROM artifact_projection ORDER BY created_at DESC")?
-        };
-        let rows = if let Some(kind) = kind {
-            statement.query(duckdb::params![Self::kind_name(kind)])?
-        } else {
-            statement.query([])?
-        };
-        let mut rows = rows;
-        let mut result = Vec::new();
-        while let Some(row) = rows.next()? {
-            let hex: String = row.get(0)?;
-            let bytes = hex::decode(hex)?;
-            let mut digest = [0u8; 32];
-            digest.copy_from_slice(&bytes);
-            result.push(ArtifactRecord {
-                id: ArtifactId { digest },
-                kind: Self::kind(&row.get::<_, String>(1)?),
-                byte_len: row.get::<_, i64>(2)? as u64,
-                media_type: row.get(3)?,
-                producer: ToolInvocationId(row.get::<_, String>(4)?.parse().unwrap_or_default()),
-                target: row.get(5)?,
-                created_at: row
-                    .get::<_, String>(6)?
-                    .parse()
-                    .unwrap_or_else(|_| chrono::Utc::now()),
-            });
-        }
-        Ok(result)
-    }
-}
-
 #[cfg(feature = "trifecta")]
 impl prism_mcp_core::ProjectionStore for DuckDbProjectionStore {
     fn record_benchmark(
@@ -761,27 +722,27 @@ impl prism_mcp_core::ProjectionStore for DuckDbProjectionStore {
         exit_code: i32,
         output: &str,
     ) -> Result<()> {
-        let connection = self.connection.lock();
-        connection.execute("INSERT INTO benchmark_projection (report_id,plan_id,elapsed_ms,exit_code,output) VALUES (?,?,?,?,?)", duckdb::params![report_id, plan_id, elapsed_ms, exit_code, output])?;
+        self.benchmarks.lock().insert(
+            report_id.to_string(),
+            (
+                plan_id.to_string(),
+                elapsed_ms,
+                exit_code,
+                output.to_string(),
+            ),
+        );
         Ok(())
     }
 
     fn put_trace(&self, trace_id: &str, snapshot: &serde_json::Value) -> Result<()> {
-        let connection = self.connection.lock();
-        connection.execute("INSERT INTO trace_projection (trace_id,event_index,operation,duration_ms,payload) VALUES (?, -1, 'trace_snapshot', NULL, ?)", duckdb::params![trace_id, snapshot.to_string()])?;
+        self.traces
+            .lock()
+            .insert(trace_id.to_string(), snapshot.clone());
         Ok(())
     }
 
     fn get_trace(&self, trace_id: &str) -> Result<Option<serde_json::Value>> {
-        let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT payload FROM trace_projection WHERE trace_id=? AND event_index=-1 ORDER BY observed_at DESC LIMIT 1")?;
-        let mut rows = statement.query(duckdb::params![trace_id])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(serde_json::from_str::<serde_json::Value>(
-                &row.get::<_, String>(0)?,
-            )?)),
-            None => Ok(None),
-        }
+        Ok(self.traces.lock().get(trace_id).cloned())
     }
 
     fn record_kernel(
@@ -792,112 +753,78 @@ impl prism_mcp_core::ProjectionStore for DuckDbProjectionStore {
         byte_len: u64,
         target: &str,
     ) -> Result<()> {
-        let connection = self.connection.lock();
-        connection.execute("INSERT OR REPLACE INTO kernel_projection (name,backend,artifact_hash,byte_len,target) VALUES (?,?,?,?,?)", duckdb::params![name, backend, artifact_hash, byte_len as i64, target])?;
+        self.kernels.lock().insert(
+            name.to_string(),
+            (
+                backend.to_string(),
+                artifact_hash.to_string(),
+                byte_len,
+                target.to_string(),
+            ),
+        );
         Ok(())
     }
 
     fn put_replay(&self, replay_id: &str, status: &str, payload: &serde_json::Value) -> Result<()> {
-        let connection = self.connection.lock();
-        connection.execute(
-            "INSERT INTO replay_projection (replay_id,status,payload) VALUES (?,?,?)",
-            duckdb::params![replay_id, status, payload.to_string()],
-        )?;
+        self.replays
+            .lock()
+            .insert(replay_id.to_string(), (status.to_string(), payload.clone()));
         Ok(())
     }
 
     fn get_replay(&self, replay_id: &str) -> Result<Option<(String, serde_json::Value)>> {
-        let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT status,payload FROM replay_projection WHERE replay_id=? ORDER BY observed_at DESC LIMIT 1")?;
-        let mut rows = statement.query(duckdb::params![replay_id])?;
-        match rows.next()? {
-            Some(row) => Ok(Some((
-                row.get(0)?,
-                serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(1)?)?,
-            ))),
-            None => Ok(None),
-        }
+        Ok(self.replays.lock().get(replay_id).cloned())
     }
 }
 
 #[cfg(feature = "trifecta")]
 impl prism_mcp_core::ExperimentStore for DuckDbProjectionStore {
     fn put_experiment(&self, experiment_id: &str, document: &serde_json::Value) -> Result<()> {
-        let connection = self.connection.lock();
-        connection.execute("INSERT INTO experiment_projection (experiment_id,document) VALUES (?,?) ON CONFLICT (experiment_id) DO UPDATE SET document=excluded.document, observed_at=CURRENT_TIMESTAMP", duckdb::params![experiment_id, document.to_string()])?;
+        self.experiments
+            .lock()
+            .insert(experiment_id.to_string(), document.clone());
         Ok(())
     }
 
     fn get_experiment(&self, experiment_id: &str) -> Result<Option<serde_json::Value>> {
-        let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT document FROM experiment_projection WHERE experiment_id=? ORDER BY observed_at DESC LIMIT 1")?;
-        let mut rows = statement.query(duckdb::params![experiment_id])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(serde_json::from_str::<serde_json::Value>(
-                &row.get::<_, String>(0)?,
-            )?)),
-            None => Ok(None),
-        }
+        Ok(self.experiments.lock().get(experiment_id).cloned())
     }
 
     fn list_experiments(&self) -> Result<Vec<(String, serde_json::Value)>> {
-        let connection = self.connection.lock();
-        let mut statement = connection.prepare(
-            "SELECT experiment_id,document FROM experiment_projection ORDER BY observed_at DESC",
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.map(|row| {
-            let (id, value) = row?;
-            Ok((id, serde_json::from_str(&value)?))
-        })
-        .collect()
+        Ok(self
+            .experiments
+            .lock()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
     }
 }
 
 #[cfg(feature = "trifecta")]
 impl prism_mcp_core::BenchmarkStore for DuckDbProjectionStore {
     fn put_plan(&self, plan_id: &str, name: &str, spec: &serde_json::Value) -> Result<()> {
-        let connection = self.connection.lock();
-        connection.execute(
-            "INSERT OR REPLACE INTO benchmark_plan_projection(plan_id,name,spec) VALUES (?,?,?)",
-            duckdb::params![plan_id, name, spec.to_string()],
-        )?;
+        self.plans
+            .lock()
+            .insert(plan_id.to_string(), (name.to_string(), spec.clone()));
         Ok(())
     }
     fn get_plan(&self, plan_id: &str) -> Result<Option<serde_json::Value>> {
-        let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT spec FROM benchmark_plan_projection WHERE plan_id=? ORDER BY observed_at DESC LIMIT 1")?;
-        let mut rows = statement.query(duckdb::params![plan_id])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(serde_json::from_str::<serde_json::Value>(
-                &row.get::<_, String>(0)?,
-            )?)),
-            None => Ok(None),
-        }
+        Ok(self.plans.lock().get(plan_id).map(|(_, spec)| spec.clone()))
     }
     fn get_report(&self, report_id: &str) -> Result<Option<(f64, i32)>> {
-        let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT elapsed_ms,exit_code FROM benchmark_projection WHERE report_id=? ORDER BY observed_at DESC LIMIT 1")?;
-        let mut rows = statement.query(duckdb::params![report_id])?;
-        match rows.next()? {
-            Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
-            None => Ok(None),
-        }
+        Ok(self
+            .benchmarks
+            .lock()
+            .get(report_id)
+            .map(|(_, elapsed_ms, exit_code, _)| (*elapsed_ms, *exit_code)))
     }
     fn get_baseline(&self, name: &str) -> Result<Option<String>> {
-        let connection = self.connection.lock();
-        let mut statement = connection.prepare("SELECT report_id FROM benchmark_baseline_projection WHERE baseline_name=? ORDER BY observed_at DESC LIMIT 1")?;
-        let mut rows = statement.query(duckdb::params![name])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(row.get(0)?)),
-            None => Ok(None),
-        }
+        Ok(self.baselines.lock().get(name).cloned())
     }
     fn put_baseline(&self, name: &str, report_id: &str) -> Result<()> {
-        let connection = self.connection.lock();
-        connection.execute("INSERT OR REPLACE INTO benchmark_baseline_projection(baseline_name,report_id) VALUES (?,?)", duckdb::params![name,report_id])?;
+        self.baselines
+            .lock()
+            .insert(name.to_string(), report_id.to_string());
         Ok(())
     }
 }
