@@ -127,7 +127,7 @@ impl ResidencyLifecycle {
 
 // ── Typed Relationship Components ──────────────────────────────────────────
 //
-// Replace Vec<CompEntity> stored on parent entities with typed components.
+// Replace raw u64 entity-ids stored on parent entities with typed components.
 // A maintained reverse-index gives the parent's children without mutable vectors.
 
 /// Declares that a session entity uses a model entity.

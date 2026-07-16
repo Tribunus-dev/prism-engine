@@ -1,0 +1,28 @@
+[package]
+name = "prism-rocm-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ROCm runtime — AMDGCN compilation via amdllvm and kernel dispatch via HSA runtime"
+repository = "https://github.com/Tribunus-dev/prism-engine"
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+tempfile = { workspace = true }
+libc = { workspace = true }
+serde = { workspace = true }
+
+# HSA runtime bindings — optional, Linux-only.
+# Enabled by the "rocm-runtime" feature which also requires target_os = "linux".
+# hsa-sys = { version = "0.3", optional = true }
+
+[features]
+default = []
+# Enables ROCm runtime support: amdllvm compilation + HSA dispatch.
+# Only compiles on Linux. On other platforms all operations return a clear error.
+rocm-runtime = []
+
+[package.metadata.docs.rs]
+features = ["rocm-runtime"]
+targets = ["x86_64-unknown-linux-gnu"]

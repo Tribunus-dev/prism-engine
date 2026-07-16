@@ -19,6 +19,8 @@
 
 pub mod admission;
 pub mod calibration;
+/// Quantization algorithm codec families — AWQ, GPTQ, SmoothQuant.
+pub mod families;
 pub mod contract;
 /// Generalized substitution pipeline — tries ranked codec candidates against
 /// evidence gates and uses the most aggressive one that passes.

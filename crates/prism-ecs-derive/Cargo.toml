@@ -1,0 +1,13 @@
+[package]
+name = "prism-ecs-derive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Derive macros for Prism ECS — SchemaGoverned, Component, and other trait implementations"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true, features = ["full"] }
+quote = { workspace = true }

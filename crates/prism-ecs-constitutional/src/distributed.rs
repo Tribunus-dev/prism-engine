@@ -1,12 +1,12 @@
 use crate::command::DomainEvent;
 use crate::schema::SchemaRegistry;
 use crate::types::*;
+use crate::world_txn::WorldTransitExt;
 use crate::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
-use prism_ecs_core::{CompEntity, Entity, EntityKind, World};
+use prism_ecs_core::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
-use crate::world_txn::WorldTransitExt;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Component Schema IDs (55–62)
@@ -261,12 +261,12 @@ pub fn replay_peer_registered(
 
     let mut txn = WorldTxn::new(world);
 
-    if !world.has_entity(Entity(node_id, 0)) {
-        txn.stage_spawn(Entity(node_id, 0), EntityKind::Node);
+    if !world.has_entity(Entity::new(node_id, 0)) {
+        txn.stage_spawn(Entity::new(node_id, 0), EntityKind::Node);
     }
 
     txn.add_component_entity(
-        Entity(node_id, 0),
+        Entity::new(node_id, 0),
         ComponentSchemaId(SCHEMA_PEER_IDENTITY),
         SchemaVersion(1),
         PeerIdentity {
@@ -276,7 +276,7 @@ pub fn replay_peer_registered(
         },
     );
     txn.add_component_entity(
-        Entity(node_id, 0),
+        Entity::new(node_id, 0),
         ComponentSchemaId(SCHEMA_NODE_MEMBERSHIP),
         SchemaVersion(1),
         NodeMembership {
@@ -287,7 +287,7 @@ pub fn replay_peer_registered(
         },
     );
     txn.add_component_entity(
-        Entity(node_id, 0),
+        Entity::new(node_id, 0),
         ComponentSchemaId(SCHEMA_TRUST_STATE),
         SchemaVersion(1),
         TrustState::Observed,
@@ -416,7 +416,7 @@ impl ObserveWorkerCapabilityCommand {
     ) -> Result<(), DistributedError> {
         Self::validate_schemas(schema_registry)?;
 
-        let entity = CompEntity(self.worker_entity);
+        let entity = Entity::new(self.worker_entity, 0);
         if !world.has_entity(entity) {
             return Err(DistributedError::WorkerNotFound(self.worker_entity));
         }

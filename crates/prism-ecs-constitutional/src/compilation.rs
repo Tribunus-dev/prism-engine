@@ -4,10 +4,11 @@ use crate::schema::SchemaRegistry;
 use crate::types::*;
 use crate::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::world_txn::{CommittedEpoch, WorldTxn, WorldTxnError};
+use prism_ecs_core::Entity;
 use prism_ecs_core::World;
 
-use serde::{Deserialize, Serialize};
 use crate::world_txn::WorldTransitExt;
+use serde::{Deserialize, Serialize};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Component Schema IDs (31–38)
@@ -289,7 +290,7 @@ impl CreateCompilationJobCommand {
             .map_err(|e| CompilationError::SchemaError(e))?;
 
         // Validate model artifact entity exists
-        let model_entity = prism_ecs_core::CompEntity(self.model_artifact);
+        let model_entity = Entity::new(self.model_artifact, 0);
         if !world.has_entity(model_entity) {
             return Err(CompilationError::ModelArtifactNotFound(self.model_artifact));
         }
@@ -381,7 +382,7 @@ impl SubmitValidationReceiptCommand {
         validate_compilation_schemas(schema_registry)
             .map_err(|e| CompilationError::SchemaError(e))?;
 
-        let entity = prism_ecs_core::CompEntity(self.job_entity);
+        let entity = Entity::new(self.job_entity, 0);
         if !world.has_entity(entity) {
             return Err(CompilationError::JobNotFound(self.job_entity));
         }
@@ -409,7 +410,7 @@ impl SubmitValidationReceiptCommand {
     ) -> Result<(CommittedEpoch, DomainEvent), CompilationError> {
         self.preflight(world, schema_registry)?;
 
-        let entity = prism_ecs_core::Entity(self.job_entity, 0);
+        let entity = prism_ecs_core::Entity::new(self.job_entity, 0);
         let mut txn = WorldTxn::new(world);
 
         txn.put_durable(entity, self.receipt.clone());
@@ -456,7 +457,7 @@ impl PromoteCimageCommand {
         validate_compilation_schemas(schema_registry)
             .map_err(|e| CompilationError::SchemaError(e))?;
 
-        let cimage = prism_ecs_core::CompEntity(self.cimage_entity.id());
+        let cimage = Entity::new(self.cimage_entity.id(), 0);
         if !world.has_entity(cimage) {
             return Err(CompilationError::JobNotFound(self.cimage_entity.id()));
         }
@@ -475,7 +476,7 @@ impl PromoteCimageCommand {
 
         // All receipt IDs must have been submitted
         for rid in &self.receipt_ids {
-            let receipt_entity = prism_ecs_core::CompEntity(*rid);
+            let receipt_entity = Entity::new(*rid, 0);
             if world
                 .get_component::<ValidationReceipt>(receipt_entity)
                 .is_none()
@@ -599,10 +600,10 @@ pub fn replay_compilation_job_created(
         .to_string();
 
     let now = Timestamp::now();
-    let entity = prism_ecs_core::Entity(job_id, 0);
+    let entity = prism_ecs_core::Entity::new(job_id, 0);
     let mut txn = WorldTxn::new(world);
 
-    if !world.has_entity(prism_ecs_core::CompEntity(job_id)) {
+    if !world.has_entity(Entity::new(job_id, 0)) {
         txn.stage_spawn(entity, prism_ecs_core::EntityKind::Executable);
     }
 
@@ -864,7 +865,7 @@ mod tests {
         let artifact_id = 2u64;
         let mut txn = WorldTxn::new(&world);
         txn.stage_spawn(
-            prism_ecs_core::Entity(artifact_id, 0),
+            prism_ecs_core::Entity::new(artifact_id, 0),
             prism_ecs_core::EntityKind::Artifact,
         );
         world.transit(txn).unwrap();
@@ -892,7 +893,7 @@ mod tests {
 
         // Verify the job entity was created
         let job_entity = event.entity_id.unwrap().0;
-        let entity = prism_ecs_core::CompEntity(job_entity);
+        let entity = Entity::new(job_entity, 0);
         assert!(world.has_entity(entity));
 
         let job = world

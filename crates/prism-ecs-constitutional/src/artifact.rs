@@ -7,8 +7,8 @@ use crate::world_txn::{
 };
 use prism_ecs_core::{Entity, World};
 
-use serde::{Deserialize, Serialize};
 use crate::world_txn::WorldTransitExt;
+use serde::{Deserialize, Serialize};
 
 // ── Component Types ───────────────────────────────────────────────────────
 
@@ -181,9 +181,7 @@ impl LoadArtifactCommand {
 
         // 4. Validate all schemas are registered for the correct types
         schema_registry
-            .verify_type::<ArtifactLifecycle>(crate::types::ComponentSchemaId(
-                1,
-            ))
+            .verify_type::<ArtifactLifecycle>(crate::types::ComponentSchemaId(1))
             .map_err(|e| ArtifactError::SchemaError(e))?;
         schema_registry
             .verify_type::<ArtifactPath>(crate::types::ComponentSchemaId(2))
@@ -192,9 +190,7 @@ impl LoadArtifactCommand {
             .verify_type::<ArtifactDigest>(crate::types::ComponentSchemaId(3))
             .map_err(|e| ArtifactError::SchemaError(e))?;
         schema_registry
-            .verify_type::<ArtifactMetadata>(crate::types::ComponentSchemaId(
-                4,
-            ))
+            .verify_type::<ArtifactMetadata>(crate::types::ComponentSchemaId(4))
             .map_err(|e| ArtifactError::SchemaError(e))?;
 
         // 5. Build transaction with spawn + components + event
@@ -222,9 +218,7 @@ impl LoadArtifactCommand {
         let event = DomainEvent {
             id: self.id,
             kind: "artifact_loaded".to_string(),
-            entity_id: Some(crate::types::EntityKindId(
-                entity_id.id(),
-            )),
+            entity_id: Some(crate::types::EntityKindId(entity_id.id())),
             payload: serde_json::json!({
                 "artifact_path": self.artifact_path,
                 "expected_digest": hex_str(&self.expected_digest.unwrap_or([0u8; 32])),
@@ -248,9 +242,8 @@ impl LoadArtifactCommand {
 
 /// Replay an `artifact_loaded` event to reconstruct an artifact entity.
 ///
-/// This function uses `CompEntity` for entity identity internally.
 /// The canonical entity type [`Entity`](prism_ecs_core::Entity) `(u64, u32)`
-/// is preferred for new code outside this module.
+/// is used for entity identity.
 pub fn replay_artifact_loaded(
     world: &mut World,
     event: &DomainEvent,
@@ -262,8 +255,8 @@ pub fn replay_artifact_loaded(
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let mut txn = WorldTxn::new(world);
-    if !world.has_entity(prism_ecs_core::CompEntity(entity_id)) {
-        txn.stage_spawn(Entity(entity_id, 0), prism_ecs_core::EntityKind::Artifact);
+    if !world.has_entity(Entity::new(entity_id, 0)) {
+        txn.stage_spawn(Entity::new(entity_id, 0), prism_ecs_core::EntityKind::Artifact);
     }
     let file_length = event
         .payload
@@ -271,19 +264,19 @@ pub fn replay_artifact_loaded(
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     txn.add_component(
-        Entity(entity_id, 0),
+        Entity::new(entity_id, 0),
         ComponentSchemaId(2),
         SchemaVersion(1),
         crate::artifact::ArtifactPath(path.to_string()),
     );
     txn.add_component(
-        Entity(entity_id, 0),
+        Entity::new(entity_id, 0),
         ComponentSchemaId(1),
         SchemaVersion(1),
         crate::artifact::ArtifactLifecycle::Loaded,
     );
     txn.add_component(
-        Entity(entity_id, 0),
+        Entity::new(entity_id, 0),
         ComponentSchemaId(4),
         SchemaVersion(1),
         crate::artifact::ArtifactMetadata {
@@ -329,9 +322,7 @@ fn hex_char(c: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::persistence::{
-        EventLogEntry, EventStore, InMemoryEventStore, ReplayEngine,
-    };
+    use crate::persistence::{EventLogEntry, EventStore, InMemoryEventStore, ReplayEngine};
     use crate::schema::ComponentDurability;
     use prism_ecs_core::EntityKind;
 
@@ -414,7 +405,7 @@ mod tests {
 
         // Entity exists after commit
         let entity_id = event.entity_id.unwrap().0;
-        let entity = prism_ecs_core::CompEntity(entity_id);
+        let entity = Entity::new(entity_id, 0);
         assert!(world.has_entity(entity));
         assert_eq!(world.entity_kind(entity), Some(EntityKind::Artifact));
 

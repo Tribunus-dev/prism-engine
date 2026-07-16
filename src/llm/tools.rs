@@ -148,8 +148,7 @@ impl ToolEngine {
     /// unescape+parse, validation+type-coercion, fuzzy name correction).
     ///
     /// On non-`prism-backend` builds it falls back to a simple JSON parse.
-    #[cfg(not(feature = "mlx-backend"))]
-    pub fn parse_call(&self, raw: &str, tool_name: &str) -> Result<ToolCallOutcome, ToolError> {
+        pub fn parse_call(&self, raw: &str, tool_name: &str) -> Result<ToolCallOutcome, ToolError> {
         let _tool = self
             .tools
             .get(tool_name)
@@ -180,57 +179,13 @@ impl ToolEngine {
     }
 
     /// Parse raw model-generated text into a tool call.
-    #[cfg(feature = "mlx-backend")]
-    pub fn parse_call(&self, raw: &str, tool_name: &str) -> Result<ToolCallOutcome, ToolError> {
-        use tribunus_compute_core::tools::parse_and_repair;
-        use tribunus_compute_core::tools::ToolDefinition;
-
-        let tool = self
-            .tools
-            .get(tool_name)
-            .ok_or_else(|| ToolError::NotRegistered(tool_name.to_string()))?;
-
-        let def = ToolDefinition {
-            name: tool.name.clone(),
-            description: tool.description.clone(),
-            parameters: tool.parameters.clone(),
-            required: tool.required.clone(),
-        };
-        match parse_and_repair(raw, &def) {
-            tribunus_compute_core::tools::ToolCallResult::Valid(name, arguments) => {
-                // Unwrap OpenAI-format wrapper: extract inner "arguments" sub-object.
-                let args = arguments.get("arguments").cloned().unwrap_or(arguments);
-                Ok(ToolCallOutcome::Valid(ParsedCall {
-                    name,
-                    arguments: args,
-                    raw: raw.to_string(),
-                }))
-            }
-            tribunus_compute_core::tools::ToolCallResult::Repaired(name, arguments, fixes) => {
-                let args = arguments.get("arguments").cloned().unwrap_or(arguments);
-                Ok(ToolCallOutcome::Repaired(
-                    ParsedCall {
-                        name,
-                        arguments: args,
-                        raw: raw.to_string(),
-                    },
-                    fixes,
-                ))
-            }
-            tribunus_compute_core::tools::ToolCallResult::Unrepairable(msg) => {
-                Ok(ToolCallOutcome::Unrepairable(msg))
-            }
-        }
-    }
-
     /// Execute a parsed tool call through a caller-provided dispatcher or
     /// the default built-in implementation.
     ///
     /// The `dispatcher` is an optional closure `Fn(&str, &serde_json::Value)
     /// -> Result<serde_json::Value, String>` that receives the tool name
     /// and parsed arguments. When `None`, a simple acknowledgment is returned.
-    #[cfg(not(feature = "mlx-backend"))]
-    pub fn execute_tool<F>(
+        pub fn execute_tool<F>(
         &self,
         call: &ParsedCall,
         dispatcher: Option<&F>,
@@ -250,37 +205,12 @@ impl ToolEngine {
     }
 
     /// Execute a parsed tool call.
-    #[cfg(feature = "mlx-backend")]
-    pub fn execute_tool<F>(
-        &self,
-        call: &ParsedCall,
-        dispatcher: Option<&F>,
-    ) -> Result<serde_json::Value, ToolError>
-    where
-        F: Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>,
-    {
-        use tribunus_compute_core::tools::execute_tool_call;
-        use tribunus_compute_core::tools::FunctionCall;
-
-        let fc = FunctionCall {
-            name: call.name.clone(),
-            arguments: call.arguments.clone(),
-        };
-
-        if let Some(d) = dispatcher {
-            d(&fc.name, &fc.arguments).map_err(|e| ToolError::ExecutionError(e))
-        } else {
-            execute_tool_call(&fc).map_err(|e| ToolError::ExecutionError(e))
-        }
-    }
-
     /// Build a GBNF grammar string from a JSON Schema for structured output.
     ///
     /// The returned GBNF grammar constrains generation so the model can only
     /// produce valid JSON matching the schema. On `prism-backend` builds this
     /// delegates to `tribunus_compute_core::grammar::Grammar::from_json_schema`.
-    #[cfg(not(feature = "mlx-backend"))]
-    pub fn json_schema_to_grammar(
+        pub fn json_schema_to_grammar(
         _name: &str,
         _schema: &serde_json::Value,
     ) -> Result<String, ToolError> {
@@ -289,179 +219,12 @@ impl ToolEngine {
     }
 
     /// Build a GBNF grammar string from a JSON Schema for structured output.
-    #[cfg(feature = "mlx-backend")]
-    pub fn json_schema_to_grammar(
-        name: &str,
-        schema: &serde_json::Value,
-    ) -> Result<String, ToolError> {
-        use tribunus_compute_core::ecs::parsing::Grammar;
-
-        // Attempt validation via compute-core's GBNF pipeline (best-effort).
-        // The internal json_schema_to_gbnf may produce GBNF that Grammar::parse
-        // rejects; in that case fall through and return the hand-crafted GBNF.
-        let _ = Grammar::from_json_schema(name, schema);
-
-        // Build GBNF text directly from the schema structure, avoiding the
-        // AST roundtrip that produced invalid GBNF.
-        Self::schema_to_gbnf(name, schema)
-    }
-
     /// Build valid GBNF text directly from a JSON Schema Value.
     ///
     /// The output is a self-consistent GBNF grammar that constrains generation
     /// to valid JSON matching the schema. This function is the "hand-crafted"
     /// replacement for reconstructing GBNF from the compile-core Grammar AST.
-    #[cfg(feature = "mlx-backend")]
-    fn schema_to_gbnf(name: &str, schema: &serde_json::Value) -> Result<String, ToolError> {
-        let mut out = String::new();
-        out.push_str(&format!("root ::= {}\n", name));
-        Self::emit_schema_rule(name, schema, &mut out, 0)?;
-        if !out.contains("ws ::=") {
-            out.push_str("ws ::= [ \t\n]*\n");
-        }
-        Ok(out)
-    }
-
     /// Recursively emit a single named GBNF rule for a JSON Schema sub-schema.
-    #[cfg(feature = "mlx-backend")]
-    fn emit_schema_rule(
-        name: &str,
-        schema: &serde_json::Value,
-        out: &mut String,
-        depth: usize,
-    ) -> Result<(), ToolError> {
-        if depth > 20 {
-            return Err(ToolError::GrammarError(
-                "JSON schema nesting too deep (>20)".to_string(),
-            ));
-        }
-
-        let schema_type = schema.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-        match schema_type {
-            "object" => {
-                let properties = match schema.get("properties").and_then(|v| v.as_object()) {
-                    Some(p) => p,
-                    None => {
-                        out.push_str(&format!("{} ::= \"{{\" ws \"}}\"\n", name));
-                        return Ok(());
-                    }
-                };
-
-                let required: Vec<&str> = schema
-                    .get("required")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-                    .unwrap_or_default();
-
-                let mut pair_parts: Vec<String> = Vec::new();
-
-                for (prop_name, prop_schema) in properties {
-                    let prop_rule = format!("_{}_v", prop_name);
-                    Self::emit_schema_rule(&prop_rule, prop_schema, out, depth + 1)?;
-
-                    // Build GBNF literal that matches "prop_name" (including JSON quotes).
-                    // The GBNF text "\"name\"" matches the JSON text "name" (with quotes).
-                    let pair = format!(" \"\\\"{}\\\"\" ws \":\" ws {} ", prop_name, prop_rule);
-
-                    if required.contains(&prop_name.as_str()) {
-                        pair_parts.push(pair.trim().to_string());
-                    } else {
-                        let opt_name = format!("_{}_opt", prop_name);
-                        out.push_str(&format!("{} ::= {} | \"\"\n", opt_name, pair.trim()));
-                        pair_parts.push(opt_name);
-                    }
-                }
-
-                if pair_parts.is_empty() {
-                    out.push_str(&format!("{} ::= \"{{\" ws \"}}\"\n", name));
-                } else {
-                    let props_seq = pair_parts.join(" \",\" ws ");
-                    out.push_str(&format!("{} ::= \"{{\" ws {} \"}}\"\n", name, props_seq));
-                }
-            }
-
-            "array" => match schema.get("items") {
-                Some(item_schema) => {
-                    let item_rule = format!("{}_item", name);
-                    Self::emit_schema_rule(&item_rule, item_schema, out, depth + 1)?;
-                    out.push_str(&format!(
-                        "{} ::= \"[\" ws ({} (\",\" ws {})*) ws \"]\"\n",
-                        name, item_rule, item_rule
-                    ));
-                }
-                None => {
-                    out.push_str(&format!("{} ::= \"[\" ws \"]\"\n", name));
-                }
-            },
-
-            "string" => {
-                out.push_str(&format!("{} ::= string\n", name));
-                if !out.contains("string ::=") {
-                    // Simple JSON string: "<any chars except double-quote>"
-                    out.push_str("string ::= \"\\\"\" ([^\"]*) \"\\\"\"\n");
-                }
-            }
-
-            "integer" => {
-                out.push_str(&format!("{} ::= integer\n", name));
-                if !out.contains("integer ::=") {
-                    out.push_str("integer ::= (\"-\" | \"\") [0-9]+\n");
-                }
-            }
-
-            "number" => {
-                out.push_str(&format!("{} ::= number\n", name));
-                if !out.contains("number ::=") {
-                    out.push_str("number ::= (\"-\" | \"\") [0-9]+ (\".\" [0-9]+)?\n");
-                }
-            }
-
-            "boolean" => {
-                out.push_str(&format!("{} ::= \"true\" | \"false\"\n", name));
-            }
-
-            "null" => {
-                out.push_str(&format!("{} ::= \"null\"\n", name));
-            }
-
-            _ => {
-                if let Some(enum_values) = schema.get("enum").and_then(|v| v.as_array()) {
-                    let alts: Vec<String> = enum_values
-                        .iter()
-                        .map(|v| {
-                            match v {
-                                serde_json::Value::String(s) => {
-                                    // GBNF literal matching "s" (JSON string with quotes)
-                                    format!("\"\\\"{}\\\"\"", s)
-                                }
-                                _ => {
-                                    // Non-string enum value: use JSON repr, wrap in GBNF quotes
-                                    let text = serde_json::to_string(v)
-                                        .unwrap_or_else(|_| "null".to_string());
-                                    format!("\"{}\"", text)
-                                }
-                            }
-                        })
-                        .collect();
-                    out.push_str(&format!("{} ::= {}\n", name, alts.join(" | ")));
-                } else if schema.get("$ref").is_some() {
-                    out.push_str(&format!("{} ::= string\n", name));
-                } else {
-                    // Fallback: accept any JSON value
-                    out.push_str(&format!("{} ::= value\n", name));
-                    if !out.contains("value ::=") {
-                        out.push_str(
-                        "value ::= string | integer | \"true\" | \"false\" | \"null\" | \"[\" ws \"]\" | \"{\" ws \"}\"\n",
-                    );
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     /// Return the number of registered tools.
     pub fn tool_count(&self) -> usize {
         self.tools.len()
@@ -478,88 +241,11 @@ impl Default for ToolEngine {
 
 /// Format a `GrammarNode` back into GBNF text.
 #[allow(dead_code)]
-#[cfg(feature = "mlx-backend")]
-fn format_node(node: &tribunus_compute_core::ecs::parsing::GrammarNode) -> String {
-    format_node_ctx(node, false)
-}
-
 /// Format with parent-context awareness for correct GBNF grouping.
 ///
 /// - `parent_is_seq`: true when the parent is a Seq, so `Alt` children
 ///   need wrapping in `( ... )` for correct GBNF precedence.
 #[allow(dead_code)]
-#[cfg(feature = "mlx-backend")]
-fn format_node_ctx(
-    node: &tribunus_compute_core::ecs::parsing::GrammarNode,
-    parent_is_seq: bool,
-) -> String {
-    use tribunus_compute_core::ecs::parsing::GrammarNode;
-
-    match node {
-        GrammarNode::Lit(s) => format!("\"{}\"", s),
-        GrammarNode::CharClass { chars, negated } => {
-            let prefix = if *negated { "^" } else { "" };
-            let mut cls = String::new();
-            for (start, end) in chars {
-                if cls.len() > 0
-                    && !cls
-                        .chars()
-                        .last()
-                        .map(|c| c.is_whitespace())
-                        .unwrap_or(false)
-                {
-                    // Already emitted at least one char range — no separator needed
-                    // in GBNF; ranges are adjacent.
-                }
-                if start == end {
-                    cls.push(*start);
-                } else {
-                    cls.push(*start);
-                    cls.push('-');
-                    cls.push(*end);
-                }
-            }
-            format!("[{}{}]", prefix, cls)
-        }
-        GrammarNode::Any => ".".to_string(),
-        GrammarNode::Seq(seq) => {
-            let parts: Vec<String> = seq.iter().map(|n| format_node_ctx(n, true)).collect();
-            parts.join(" ")
-        }
-        GrammarNode::Alt(alts) => {
-            let parts: Vec<String> = alts.iter().map(|n| format_node_ctx(n, false)).collect();
-            let inner = parts.join(" | ");
-            if parent_is_seq {
-                format!("({})", inner)
-            } else {
-                inner
-            }
-        }
-        GrammarNode::Star(inner) => {
-            let s = format_node(inner);
-            if s.contains(' ') || s.contains('|') {
-                format!("({})*", s)
-            } else {
-                format!("{}*", s)
-            }
-        }
-        GrammarNode::Plus(inner) => {
-            let s = format_node(inner);
-            if s.contains(' ') || s.contains('|') {
-                format!("({})+", s)
-            } else {
-                format!("{}+", s)
-            }
-        }
-        GrammarNode::Opt(inner) => {
-            let inner_str = format_node(inner);
-            format!("({})?", inner_str)
-        }
-        GrammarNode::Ref(r) => r.clone(),
-        GrammarNode::HexByte(b) => format!("\\x{:02x}", b),
-    }
-}
-
 // ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -1,0 +1,18 @@
+[package]
+name = "prism-tt-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tenstorrent AI accelerator runtime — compile TT-Metalium kernels and dispatch to Wormhole/Grayskull cores"
+authors = ["Tribunus Dev"]
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+serde = { workspace = true, features = ["derive"] }
+bytemuck = { workspace = true, features = ["derive"] }
+
+[features]
+default = []
+tt-runtime = []
+tt-linux = []

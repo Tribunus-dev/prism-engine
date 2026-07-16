@@ -13,7 +13,7 @@ use crate::error::WorldError;
 /// access on top of columnar storage.
 #[derive(Debug)]
 pub struct ComponentStore {
-    pub data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    pub(crate) data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
 impl Default for ComponentStore {
@@ -74,6 +74,11 @@ impl ComponentStore {
         self.contains::<T>(entity)
     }
 
+    /// Check whether a column exists for the given TypeId.
+    pub fn has_column_type(&self, type_id: TypeId) -> bool {
+        self.data.contains_key(&type_id)
+    }
+
     pub fn insert<T: Component>(&mut self, entity: Entity, value: T) {
         self.column_mut::<T>().insert(entity, value);
     }
@@ -94,7 +99,7 @@ impl ComponentStore {
 /// Type-erased storage for global resources (not per-entity).
 #[derive(Debug)]
 pub struct ResourceStore {
-    pub data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    pub(crate) data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
 impl Default for ResourceStore {

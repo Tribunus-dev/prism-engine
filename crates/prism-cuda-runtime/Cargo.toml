@@ -1,0 +1,26 @@
+[package]
+name = "prism-cuda-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CUDA runtime — PTX compilation via ptxas and kernel dispatch via CUDA driver API"
+repository = "https://github.com/Tribunus-dev/prism-engine"
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+serde = { workspace = true }
+tempfile = { workspace = true }
+
+# CUDA Driver API bindings — optional, Linux-only.
+# Enabled by the "cuda-runtime" feature which also requires target_os = "linux".
+cuda-driver-sys = { version = "0.3", optional = true }
+
+[features]
+default = []
+# Enables CUDA runtime support: ptxas compilation + CUDA driver API dispatch.
+# Only compiles on Linux. On other platforms all operations return a clear error.
+cuda-runtime = ["cuda-driver-sys"]
+
+[package.metadata.docs.rs]
+features = ["cuda-runtime"]
+targets = ["x86_64-unknown-linux-gnu"]

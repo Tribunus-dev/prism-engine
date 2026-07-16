@@ -12,11 +12,12 @@
 //!
 //! The `OpaqueOp` trait allows dyn-safe trait-object access to typed ops.
 
-use prism_ecs_core::{Component, Entity};
+use prism_ecs_core::{Component, Entity, EntityKind, World, WorldError};
 use serde::{Deserialize, Serialize};
 
 use crate::ir_attrs::Attribute;
 use crate::ir_types::Type;
+use crate::value::{Uses, ValueDef, ValueType};
 
 // ── Core components ─────────────────────────────────────────────────────────
 
@@ -156,6 +157,112 @@ pub fn results(world: &prism_ecs_core::World, entity: Entity) -> Vec<Entity> {
         .get_component::<Results>(entity)
         .map(|r| r.0.clone())
         .unwrap_or_default()
+}
+
+// ── FlatOpBuilder: Melior-style operation builder ───────────────────────
+
+/// A flat, operation-scoped builder mirroring Melior's `OperationBuilder`.
+///
+/// Unlike the world-scoped [`OpBuilder`] in `builder.rs`, this builder
+/// is a one-shot convenience for constructing a single operation entity:
+///
+/// ```ignore
+/// let addf = FlatOpBuilder::new("arith.addf")
+///     .add_operands(&[lhs, rhs])
+///     .add_attributes(&[Attribute::Float(1.0)])
+///     .add_result_types(&[Type::Float(32)])
+///     .build(&mut world)?;
+/// ```
+///
+/// The builder returns the entity of the newly created operation (and its
+/// implicit result values). All result Values are wired into the world with
+/// the appropriate [`ValueDef`] and [`ValueType`] components.
+pub struct FlatOpBuilder {
+    name: &'static str,
+    operands: Vec<Entity>,
+    attributes: Vec<Attribute>,
+    result_types: Vec<Type>,
+}
+
+impl FlatOpBuilder {
+    /// Create a new builder for an operation with the given name.
+    ///
+    /// The `name` must be a fully qualified operation name
+    /// (e.g. `"arith.addf"`, `"func.return"`).
+    pub fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            operands: Vec::new(),
+            attributes: Vec::new(),
+            result_types: Vec::new(),
+        }
+    }
+
+    /// Add operand value entities.
+    pub fn add_operands(mut self, operands: &[Entity]) -> Self {
+        self.operands.extend_from_slice(operands);
+        self
+    }
+
+    /// Add attributes.
+    pub fn add_attributes(mut self, attributes: &[Attribute]) -> Self {
+        self.attributes.extend_from_slice(attributes);
+        self
+    }
+
+    /// Add result types. For each type, a Value entity is created on build.
+    pub fn add_result_types(mut self, types: &[Type]) -> Self {
+        self.result_types.extend_from_slice(types);
+        self
+    }
+
+    /// Build the operation in the given world.
+    ///
+    /// Returns the entity of the newly created operation. Result values
+    /// are automatically created and wired.
+    pub fn build(self, world: &mut World) -> Result<Entity, WorldError> {
+        let Self {
+            name,
+            operands,
+            attributes,
+            result_types,
+        } = self;
+
+        let entity: Entity = world
+            .spawn(EntityKind::Node, Some(format!("op_{}", name)))?
+            .into();
+
+        world.add_component(entity, OpMarker)?;
+        world.add_component(entity, OpName(name.to_string()))?;
+        world.add_component(entity, Operands(operands.clone()))?;
+        world.add_component(entity, OpAttributes(attributes))?;
+
+        // Create result Value entities.
+        let result_entities: Vec<Entity> = result_types
+            .into_iter()
+            .enumerate()
+            .map(|(i, ty)| -> Result<Entity, WorldError> {
+                let val: Entity = world
+                    .spawn(EntityKind::Node, Some(format!("{}.r{}", name, i)))?
+                    .into();
+                world.add_component(val, ValueDef::op_result(entity, i as u32))?;
+                world.add_component(val, ValueType(ty))?;
+                world.add_component(val, Uses(vec![]))?;
+                Ok(val)
+            })
+            .collect::<Result<Vec<_>, WorldError>>()?;
+
+        world.add_component(entity, Results(result_entities))?;
+
+        // Wire operand uses.
+        for &opnd in &operands {
+            if let Some(uses) = world.get_component_mut::<Uses>(opnd) {
+                uses.0.push(entity);
+            }
+        }
+
+        Ok(entity)
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

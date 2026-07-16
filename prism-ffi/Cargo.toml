@@ -8,12 +8,10 @@ license.workspace = true
 crate-type = ["staticlib"]
 
 [dependencies]
-tribunus-compute-core = { path = "../compute-core", optional = true }
 
 [features]
 default = []
-compute-core = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "tribunus-compute-core/ffi"]
-ios = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend-ios"]
+ios = []
 
 [package.metadata]
-docs = "C ABI bridge for the Prism Engine Swift menu bar app"
+docs = "C ABI bridge for the Prism Engine Swift menu bar app (stub only)"

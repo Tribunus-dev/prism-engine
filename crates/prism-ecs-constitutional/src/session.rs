@@ -5,12 +5,12 @@ use crate::residency::ModelLifecycle;
 use crate::residency::ResidencyDeviceRef;
 use crate::schema::SchemaRegistry;
 use crate::types::*;
+use crate::world_txn::WorldTransitExt;
 use crate::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
 use prism_ecs_core::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
-use crate::world_txn::WorldTransitExt;
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
 // Artifact: 1-4, Model/Residency: 5-12, Session: 13+
@@ -115,7 +115,7 @@ impl CreateSessionCommand {
 
         // Validate every model entity
         for &model in &self.model_entities {
-            let entity = prism_ecs_core::CompEntity(model);
+            let entity = Entity::new(model, 0);
             if !world.has_entity(entity) {
                 return Err(SessionError::ModelNotFound(model));
             }
@@ -137,7 +137,7 @@ impl CreateSessionCommand {
 
         // Validate every device entity
         for &device in &self.device_entities {
-            let entity = prism_ecs_core::CompEntity(device);
+            let entity = Entity::new(device, 0);
             if !world.has_entity(entity) {
                 return Err(SessionError::DeviceNotFound(device));
             }
@@ -193,7 +193,7 @@ impl CreateSessionCommand {
             // Verify this residency belongs to this model via ResidencyModelRef
             if let Some(model_ref) = world.get_component::<ResidencyModelRef>(entity) {
                 if model_ref.model_id == model {
-                    return Some(entity.0);
+                    return Some(entity.id());
                 }
             }
         }
@@ -205,7 +205,7 @@ impl CreateSessionCommand {
     fn find_existing_session(world: &World, models: &[u64], devices: &[u64]) -> Option<u64> {
         for entity in world.entities_of_kind(EntityKind::Session) {
             if let Some(session_models) =
-                world.get_component::<SessionModels>(prism_ecs_core::CompEntity(entity.0))
+                world.get_component::<SessionModels>(Entity::new(entity.id(), 0))
             {
                 if session_models.0.len() != models.len() {
                     continue;
@@ -217,7 +217,7 @@ impl CreateSessionCommand {
                 continue;
             }
             if let Some(session_devices) =
-                world.get_component::<SessionDevices>(prism_ecs_core::CompEntity(entity.0))
+                world.get_component::<SessionDevices>(Entity::new(entity.id(), 0))
             {
                 if session_devices.0.len() != devices.len() {
                     continue;
@@ -228,7 +228,7 @@ impl CreateSessionCommand {
             } else {
                 continue;
             }
-            return Some(entity.0);
+            return Some(entity.id());
         }
         None
     }
@@ -249,7 +249,7 @@ impl CreateSessionCommand {
         {
             // Update components on existing session
             let mut txn = WorldTxn::new(world);
-            txn.put_durable(Entity(existing, 0), self.config.clone());
+            txn.put_durable(Entity::new(existing, 0), self.config.clone());
 
             let event = DomainEvent {
                 id: self.id,
@@ -416,7 +416,7 @@ pub fn replay_session_admitted(
         .or_else(|| event.payload.get("session_id").and_then(|v| v.as_u64()))
         .ok_or_else(|| SessionError::SchemaError("missing session_id in event".into()))?;
 
-    let entity = Entity(session_id, 0);
+    let entity = Entity::new(session_id, 0);
 
     let models: Vec<u64> = event
         .payload
@@ -486,13 +486,12 @@ impl prism_ecs_core::Component for ResidencyModelRef {}
 
 /// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
 ///
-/// Uses generation `0` for backward compatibility with the legacy
-/// `World`/`CompEntity` storage. Callers migrating to the new
-/// `World`+`Entity(u64, u32)` API should replace this with proper
-/// generation-aware entity construction.
+/// Uses generation `0` for backward compatibility. Callers migrating to the
+/// `Entity(u64, u32)` API should replace this with proper generation-aware
+/// entity construction.
 #[allow(dead_code)]
 pub(crate) fn as_entity(id: u64) -> Entity {
-    Entity(id, 0)
+    Entity::new(id, 0)
 }
 
 // ── Constitutional classification ────────────────────────────────────────

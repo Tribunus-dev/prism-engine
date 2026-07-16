@@ -47,10 +47,11 @@ impl Default for EntitySlot {
 /// Generation-safe entity reference for accessing entity components.
 /// Created by [`World::entity_ref()`], which performs a generation check
 /// to ensure the handle is still valid.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct EntityRef<'w> {
-    pub entity: Entity,
-    pub generation: u32,
+    pub(crate) entity: Entity,
+    pub(crate) generation: u32,
     pub world: &'w World,
 }
 
@@ -65,21 +66,21 @@ pub struct EntityRef<'w> {
 /// stored via type-erased [`extensions`] so that this crate has no dependency
 /// on [`tribunus_compute_core`](crate).
 pub struct World {
-    pub component_store: ComponentStore,
-    pub resource_store: ResourceStore,
-    pub entity_meta: Vec<Option<EntitySlot>>,
-    pub next_id: u64,
-    pub free_list: Vec<u64>,
-    pub staging: Vec<Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>>,
-    pub component_versions: HashMap<u64, u64>,
+    pub(crate) component_store: ComponentStore,
+    pub(crate) resource_store: ResourceStore,
+    pub(crate) entity_meta: Vec<Option<EntitySlot>>,
+    pub(crate) next_id: u64,
+    pub(crate) free_list: Vec<u64>,
+    pub(crate) staging: Vec<Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>>,
+    pub(crate) component_versions: HashMap<u64, u64>,
     /// Mutation access policy. Controls whether direct mutations are allowed
     /// or must go through WorldTxn. Defaults to Bootstrap for backward
     /// compatibility during migration.
-    pub mutation_policy: MutationPolicy,
+    pub(crate) mutation_policy: MutationPolicy,
     /// Type-erased extension map — used by [`tribunus_compute_core`] to store
     /// `SystemStage`, `WorldEpoch`, `Vec<ComponentChange>`, `Vec<DomainEvent>`,
     /// and any other compute-core-specific state without coupling this crate.
-    pub extensions: HashMap<TypeId, Box<dyn Any>>,
+    pub(crate) extensions: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl std::fmt::Debug for World {
@@ -134,6 +135,23 @@ impl World {
             mutation_policy: MutationPolicy::Bootstrap,
             extensions: HashMap::new(),
         }
+    }
+
+    // ── Component store accessors ───────────────────────────────────────────
+
+    /// Access the component store (shared reference).
+    pub fn component_store(&self) -> &ComponentStore {
+        &self.component_store
+    }
+
+    /// Access the component store (mutable reference).
+    pub fn component_store_mut(&mut self) -> &mut ComponentStore {
+        &mut self.component_store
+    }
+
+    /// Access the component versions map (mutable reference).
+    pub fn component_versions_mut(&mut self) -> &mut HashMap<u64, u64> {
+        &mut self.component_versions
     }
 
     // ── Extension accessors ───────────────────────────────────────────────────
@@ -195,7 +213,7 @@ impl World {
                         slot.occupant.as_mut().unwrap().name = Some(n);
                     }
                     (
-                        Entity(free, prev_gen + 1),
+                        Entity::new(free, prev_gen + 1),
                         EntityAllocation::ReusedSlot {
                             previous_generation: prev_gen,
                         },
@@ -214,7 +232,7 @@ impl World {
                             .unwrap()
                             .name = Some(n);
                     }
-                    (Entity(free, 0), EntityAllocation::NewSlot)
+                    (Entity::new(free, 0), EntityAllocation::NewSlot)
                 }
             } else {
                 self.entity_meta.push(Some(EntitySlot {
@@ -232,7 +250,7 @@ impl World {
                         .unwrap()
                         .name = Some(n);
                 }
-                (Entity(free, 0), EntityAllocation::NewSlot)
+                (Entity::new(free, 0), EntityAllocation::NewSlot)
             }
         } else {
             let id = self.next_id;
@@ -252,7 +270,7 @@ impl World {
                     .unwrap()
                     .name = Some(n);
             }
-            (Entity(id, 0), EntityAllocation::NewSlot)
+            (Entity::new(id, 0), EntityAllocation::NewSlot)
         };
         Ok(SpawnedEntity { entity, allocation })
     }
@@ -280,7 +298,7 @@ impl World {
             })
             .map(|(i, slot)| {
                 let gen = slot.as_ref().map(|s| s.generation).unwrap_or(0);
-                Entity((i + 1) as u64, gen)
+                Entity::new((i + 1) as u64, gen)
             })
             .collect()
     }
@@ -536,7 +554,7 @@ impl World {
                 .as_ref()
                 .map(|s| s.generation)
                 .unwrap_or(0);
-            return Entity(id, gen);
+            return Entity::new(id, gen);
         }
         // Grow the metadata vector to fit the requested id.
         while self.entity_meta.len() < idx + 1 {
@@ -547,7 +565,11 @@ impl World {
             generation: gen,
             occupant: Some(Occupant { kind, name: None }),
         });
-        Entity(id, gen)
+        // Advance the auto-allocator so next_entity_id() returns valid values.
+        if id >= self.next_id {
+            self.next_id = id + 1;
+        }
+        Entity::new(id, gen)
     }
 
     pub fn spawn_entity(&mut self, kind: EntityKind) -> Entity {
@@ -586,7 +608,7 @@ impl World {
             }));
             (id, 0)
         };
-        Entity(id, generation)
+        Entity::new(id, generation)
     }
 
     pub fn entity_kind(&self, entity: impl Into<Entity>) -> Option<EntityKind> {

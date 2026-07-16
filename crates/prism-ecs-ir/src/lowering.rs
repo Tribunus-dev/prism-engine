@@ -8,9 +8,7 @@
 use prism_ecs_core::{Entity, World};
 
 use crate::builder::OpBuilder;
-use crate::ir_types::Type;
-use crate::op::{OpName, Operands, Results};
-use crate::value::Uses;
+use crate::op::{Operands, Results};
 
 /// Lower a linalg.matmul to scf.for loops.
 ///
@@ -64,7 +62,7 @@ pub fn lower_matmul(world: &mut World, matmul_op: Entity) -> Result<Entity, Stri
         .map_err(|e| format!("failed to create scf.for: {:?}", e))?;
 
     // Create a region with blocks inside the loop
-    let region = builder
+    let _region = builder
         .create_region(crate::region::RegionKind::SSACFG)
         .map_err(|e| format!("failed to create region: {:?}", e))?;
 
@@ -81,6 +79,7 @@ pub fn lower_matmul(world: &mut World, matmul_op: Entity) -> Result<Entity, Stri
 
 #[cfg(test)]
 mod tests {
+    use crate::ir_types::Type;
     use prism_ecs_core::{EntityKind, World};
 
     use super::*;

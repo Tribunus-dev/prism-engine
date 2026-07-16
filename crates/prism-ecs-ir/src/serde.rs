@@ -444,7 +444,7 @@ pub fn from_json(json: &str, world: &mut World) -> Result<Entity, SerdeError> {
             kind,
             defining_entity: *entity_map
                 .get(&entry.defining_entity)
-                .unwrap_or(&Entity(entry.defining_entity, 0)),
+                .unwrap_or(&Entity::new(entry.defining_entity, 0)),
             index: entry.def_index,
         };
         world
@@ -462,7 +462,7 @@ pub fn from_json(json: &str, world: &mut World) -> Result<Entity, SerdeError> {
         let use_entities: Vec<Entity> = entry
             .uses
             .iter()
-            .map(|&id| *entity_map.get(&id).unwrap_or(&Entity(id, 0)))
+            .map(|&id| *entity_map.get(&id).unwrap_or(&Entity::new(id, 0)))
             .collect();
         world
             .add_component(val_entity, Uses(use_entities))
@@ -492,7 +492,7 @@ pub fn from_json(json: &str, world: &mut World) -> Result<Entity, SerdeError> {
         let mut operands: Vec<Entity> = Vec::new();
         for v in &snapshot.values {
             if v.uses.contains(&entry.id) {
-                operands.push(*entity_map.get(&v.id).unwrap_or(&Entity(v.id, 0)));
+                operands.push(*entity_map.get(&v.id).unwrap_or(&Entity::new(v.id, 0)));
             }
         }
         world
@@ -503,7 +503,7 @@ pub fn from_json(json: &str, world: &mut World) -> Result<Entity, SerdeError> {
         let mut results: Vec<Entity> = Vec::new();
         for v in &snapshot.values {
             if v.defining_entity == entry.id {
-                results.push(*entity_map.get(&v.id).unwrap_or(&Entity(v.id, 0)));
+                results.push(*entity_map.get(&v.id).unwrap_or(&Entity::new(v.id, 0)));
             }
         }
         // Sort results by def_index for consistent ordering.
@@ -625,11 +625,11 @@ fn rebuild_region_block_hierarchy(
     for (op_id, reg_ids) in merged_op_regions {
         let region_entities: Vec<Entity> = reg_ids
             .iter()
-            .map(|&id| *entity_map.get(&id).unwrap_or(&Entity(id, 0)))
+            .map(|&id| *entity_map.get(&id).unwrap_or(&Entity::new(id, 0)))
             .collect();
         world
             .add_component(
-                *entity_map.get(&op_id).unwrap_or(&Entity(op_id, 0)),
+                *entity_map.get(&op_id).unwrap_or(&Entity::new(op_id, 0)),
                 RegionRef(region_entities),
             )
             .ok();
@@ -646,11 +646,11 @@ fn rebuild_region_block_hierarchy(
     for (rid, block_ids) in merged_region_blocks {
         let block_entities: Vec<Entity> = block_ids
             .iter()
-            .map(|&id| *entity_map.get(&id).unwrap_or(&Entity(id, 0)))
+            .map(|&id| *entity_map.get(&id).unwrap_or(&Entity::new(id, 0)))
             .collect();
         world
             .add_component(
-                *entity_map.get(&rid).unwrap_or(&Entity(rid, 0)),
+                *entity_map.get(&rid).unwrap_or(&Entity::new(rid, 0)),
                 RegionBlocks(block_entities),
             )
             .ok();
@@ -664,11 +664,11 @@ fn rebuild_region_block_hierarchy(
     for (bid, op_ids) in merged_block_ops {
         let op_entities: Vec<Entity> = op_ids
             .iter()
-            .map(|&id| *entity_map.get(&id).unwrap_or(&Entity(id, 0)))
+            .map(|&id| *entity_map.get(&id).unwrap_or(&Entity::new(id, 0)))
             .collect();
         world
             .add_component(
-                *entity_map.get(&bid).unwrap_or(&Entity(bid, 0)),
+                *entity_map.get(&bid).unwrap_or(&Entity::new(bid, 0)),
                 BlockOps(op_entities),
             )
             .ok();
@@ -908,7 +908,7 @@ mod tests {
     #[test]
     fn to_json_errors_on_bad_root() {
         let world = World::new();
-        let dead_entity = Entity(999, 1);
+        let dead_entity = Entity::new(999, 1);
 
         let err = to_json(dead_entity, &world).unwrap_err();
         assert!(matches!(err, SerdeError::RootEntityNotAlive(_)));

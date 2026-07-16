@@ -1,18 +1,18 @@
 //! Work item subsystem — work items, leases, prerequisites, and output.
 //!
-//! Uses `World`/`CompEntity` from the legacy ECS store internally.
+//! Uses `World` from the legacy ECS store internally.
 //! The canonical [`Entity`](prism_ecs_core::Entity) type is available for new
-//! consumer code that prefers generation-safe handles over the legacy
-//! `CompEntity(u64)`.
+//! consumer code that prefers generation-safe handles.
 use crate::command::DomainEvent;
 use crate::types::*;
 use crate::world_txn::{
     ClassifiedComponent, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
 
+#[cfg(test)]
+use crate::world_txn::WorldTransitExt;
 use prism_ecs_core::{Component, Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
-use crate::world_txn::WorldTransitExt;
 
 // ── Schema IDs ───────────────────────────────────────────────────────────────
 //
@@ -326,7 +326,7 @@ pub struct LeaseWorkCommand {
 impl LeaseWorkCommand {
     /// Validate preconditions: entity exists, state is Ready, no conflicting lease.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        let entity = prism_ecs_core::CompEntity(self.work_entity.id());
+        let entity = Entity::new(self.work_entity.id(), 0);
         if !world.has_entity(entity) {
             return Err(WorkError::EntityNotFound(self.work_entity.id()));
         }
@@ -348,7 +348,7 @@ impl LeaseWorkCommand {
 
     /// Execute the lease: set state to Leased, add WorkLeaseComponent, emit event.
     pub fn execute(self, _world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
-        let _entity = prism_ecs_core::CompEntity(self.work_entity.id());
+        let _entity = Entity::new(self.work_entity.id(), 0);
 
         // Update state to Leased
         txn.put_durable::<WorkState>(self.work_entity, WorkState::Leased(self.lease_generation));
@@ -395,7 +395,7 @@ pub struct CompleteWorkCommand {
 impl CompleteWorkCommand {
     /// Validate: entity exists, state is Leased with matching generation.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        let entity = prism_ecs_core::CompEntity(self.work_entity.id());
+        let entity = Entity::new(self.work_entity.id(), 0);
         if !world.has_entity(entity) {
             return Err(WorkError::EntityNotFound(self.work_entity.id()));
         }
@@ -468,7 +468,7 @@ pub struct FailWorkCommand {
 impl FailWorkCommand {
     /// Validate: entity exists, state is Leased with matching generation.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        let entity = prism_ecs_core::CompEntity(self.work_entity.id());
+        let entity = Entity::new(self.work_entity.id(), 0);
         if !world.has_entity(entity) {
             return Err(WorkError::EntityNotFound(self.work_entity.id()));
         }
@@ -500,7 +500,7 @@ impl FailWorkCommand {
 
     /// Execute: check retry eligibility, transition to Failed or Ready, emit event.
     pub fn execute(self, world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
-        let entity = prism_ecs_core::CompEntity(self.work_entity.id());
+        let entity = Entity::new(self.work_entity.id(), 0);
 
         // Read current work item to check retry eligibility
         let should_retry = world
@@ -564,7 +564,7 @@ pub struct CancelWorkCommand {
 impl CancelWorkCommand {
     /// Validate: entity exists, state is not terminal.
     pub fn preflight(&self, world: &World) -> Result<(), WorkError> {
-        let entity = prism_ecs_core::CompEntity(self.work_entity.id());
+        let entity = Entity::new(self.work_entity.id(), 0);
         if !world.has_entity(entity) {
             return Err(WorkError::EntityNotFound(self.work_entity.id()));
         }
@@ -586,7 +586,7 @@ impl CancelWorkCommand {
 
     /// Execute: set state to Cancelled, remove lease if present, emit event.
     pub fn execute(self, world: &World, txn: &mut WorldTxn) -> Result<DomainEvent, WorkError> {
-        let entity = prism_ecs_core::CompEntity(self.work_entity.id());
+        let entity = Entity::new(self.work_entity.id(), 0);
 
         // Remove lease if present
         if world.get_component::<WorkLeaseComponent>(entity).is_some() {
@@ -656,7 +656,7 @@ pub fn replay_work_created(world: &mut World, event: &DomainEvent) -> Result<(),
             ce,
             WorkItemComponent {
                 kind,
-                target_entity: Entity(target_entity, 0),
+                target_entity: Entity::new(target_entity, 0),
                 retry_count: 0,
                 max_retries: 0,
             },
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn test_create_work_item() {
         let mut world = setup_world();
-        let target = Entity(1, 0); // the model entity we spawned
+        let target = Entity::new(1, 0); // the model entity we spawned
         let cmd = CreateWorkCommand {
             id: make_id(b"create-test"),
             kind: WorkKind::CompileGraph,
@@ -786,7 +786,7 @@ mod tests {
     #[test]
     fn test_work_state_transitions() {
         let mut world = setup_world();
-        let target = Entity(1, 0);
+        let target = Entity::new(1, 0);
 
         // Create work item
         let create_cmd = CreateWorkCommand {
@@ -868,7 +868,7 @@ mod tests {
     #[test]
     fn test_lease_then_complete() {
         let mut world = setup_world();
-        let target = Entity(1, 0);
+        let target = Entity::new(1, 0);
 
         // Create item in Pending, transition to Ready manually
         {
@@ -935,7 +935,7 @@ mod tests {
     #[test]
     fn test_fail_retry() {
         let mut world = setup_world();
-        let target = Entity(1, 0);
+        let target = Entity::new(1, 0);
 
         // Create work item with retry configured
         {
@@ -1020,7 +1020,7 @@ mod tests {
         let cmd = CreateWorkCommand {
             id: make_id(b"preflight-fail"),
             kind: WorkKind::Validate,
-            target_entity: Entity(999, 0),
+            target_entity: Entity::new(999, 0),
             prerequisites: vec![],
             resource_claim: make_resource_claim(),
         };
@@ -1035,7 +1035,7 @@ mod tests {
     #[test]
     fn test_lease_preflight_fails_when_not_ready() {
         let mut world = setup_world();
-        let target = Entity(1, 0);
+        let target = Entity::new(1, 0);
 
         // Create work item (stays Pending)
         let create_cmd = CreateWorkCommand {

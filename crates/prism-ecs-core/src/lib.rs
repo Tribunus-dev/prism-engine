@@ -12,10 +12,13 @@ pub mod component;
 pub mod entity;
 pub mod epoch;
 pub mod error;
+pub mod identity;
+pub mod memory_model;
 pub mod mutation;
 pub mod nf4tile640;
 pub mod query;
 pub mod resource;
+pub mod scheduling;
 pub mod store;
 pub mod ternary;
 pub mod world;
@@ -23,9 +26,7 @@ pub mod world;
 pub use capacity::{ComponentStoreCapacity, WorldCapacity};
 pub use column::{Column, ColumnStore, ErasedColumn};
 pub use component::Component;
-pub use entity::{
-    CompEntity, Entity, EntityAllocation, EntityId, EntityKind, PendingEntity, SpawnedEntity,
-};
+pub use entity::{Entity, EntityAllocation, EntityKind, PendingEntity, SpawnedEntity};
 pub use epoch::WorldEpoch;
 pub use error::WorldError;
 pub use mutation::MutationPolicy;

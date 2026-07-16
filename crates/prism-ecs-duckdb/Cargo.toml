@@ -1,0 +1,11 @@
+[package]
+name = "prism-ecs-duckdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+chrono = "0.4"

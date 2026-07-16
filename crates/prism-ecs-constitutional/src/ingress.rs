@@ -282,7 +282,7 @@ impl ResolveIngressCommand {
     ) -> Result<(), IngressError> {
         Self::validate_schemas(schema_registry).map_err(|e| IngressError::SchemaError(e))?;
 
-        let entity = prism_ecs_core::CompEntity(self.ingress_entity);
+        let entity = Entity::new(self.ingress_entity, 0);
         if !world.has_entity(entity) {
             return Err(IngressError::EntityNotFound(self.ingress_entity));
         }
@@ -314,17 +314,17 @@ impl ResolveIngressCommand {
         let mut txn = WorldTxn::new(world);
 
         // Update lifecycle
-        txn.put_durable(Entity(self.ingress_entity, 0), IngressLifecycle::Resolved);
+        txn.put_durable(Entity::new(self.ingress_entity, 0), IngressLifecycle::Resolved);
 
         // Update the resolved_command field by replacing IngressRequest
         if let Some(ingress_req) =
-            world.get_component::<IngressRequest>(prism_ecs_core::CompEntity(self.ingress_entity))
+            world.get_component::<IngressRequest>(Entity::new(self.ingress_entity, 0))
         {
             let updated = IngressRequest {
                 resolved_command: Some(self.resolved_command_id.to_string()),
                 ..ingress_req.clone()
             };
-            txn.put_durable(Entity(self.ingress_entity, 0), updated);
+            txn.put_durable(Entity::new(self.ingress_entity, 0), updated);
         }
 
         let event = DomainEvent {
@@ -372,7 +372,7 @@ impl IngressLifecycleTransitionCommand {
     ) -> Result<(), IngressError> {
         Self::validate_schemas(schema_registry).map_err(|e| IngressError::SchemaError(e))?;
 
-        let entity = prism_ecs_core::CompEntity(self.ingress_entity);
+        let entity = Entity::new(self.ingress_entity, 0);
         if !world.has_entity(entity) {
             return Err(IngressError::EntityNotFound(self.ingress_entity));
         }
@@ -401,7 +401,7 @@ impl IngressLifecycleTransitionCommand {
 
         let mut txn = WorldTxn::new(world);
 
-        txn.put_durable(Entity(self.ingress_entity, 0), self.target);
+        txn.put_durable(Entity::new(self.ingress_entity, 0), self.target);
 
         let event = DomainEvent {
             id: self.id,
@@ -451,13 +451,12 @@ impl prism_ecs_core::Component for IngressLifecycle {}
 
 /// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
 ///
-/// Uses generation `0` for backward compatibility with the legacy
-/// `World`/`CompEntity` storage. Callers migrating to the new
-/// `World`+`Entity(u64, u32)` API should replace this with proper
-/// generation-aware entity construction.
+/// Uses generation `0` for entities created outside the ECS lifecycle
+/// (e.g., replay, test fixtures). Prefer receiving entities from
+/// `World::spawn()` over constructing them directly.
 #[allow(dead_code)]
 pub(crate) fn as_entity(id: u64) -> Entity {
-    Entity(id, 0)
+    Entity::new(id, 0)
 }
 
 impl ClassifiedComponent for IngressRequest {
@@ -555,11 +554,11 @@ pub fn replay_ingress_request_submitted(
         .to_string();
 
     let mut txn = WorldTxn::new(world);
-    if !world.has_entity(prism_ecs_core::CompEntity(entity_id)) {
-        txn.stage_spawn(Entity(entity_id, 0), EntityKind::Session);
+    if !world.has_entity(Entity::new(entity_id, 0)) {
+        txn.stage_spawn(Entity::new(entity_id, 0), EntityKind::Session);
     }
     txn.add_component(
-        Entity(entity_id, 0),
+        Entity::new(entity_id, 0),
         ComponentSchemaId(SCHEMA_INGRESS_REQUEST),
         SchemaVersion(1),
         IngressRequest {
@@ -573,7 +572,7 @@ pub fn replay_ingress_request_submitted(
         },
     );
     txn.add_component(
-        Entity(entity_id, 0),
+        Entity::new(entity_id, 0),
         ComponentSchemaId(SCHEMA_INGRESS_LIFECYCLE),
         SchemaVersion(1),
         IngressLifecycle::Received,

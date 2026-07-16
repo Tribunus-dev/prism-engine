@@ -1,0 +1,15 @@
+[package]
+name = "prism-igc-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+blake3 = "1"
+
+[features]
+intel-gpu-runtime = []

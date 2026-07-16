@@ -5,11 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+smallvec = { workspace = true }
+bitflags = { version = "2" }
 thiserror = { workspace = true }
 prism-ecs-core = { path = "../prism-ecs-core" }
 fxhash = "0.2"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+rand = { workspace = true }
 
 [features]
 default = []

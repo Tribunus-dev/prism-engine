@@ -1,9 +1,8 @@
 //! Agent execution subsystem — agent runs, tasks, phases, and tool invocations.
 //!
-//! Uses `World`/`CompEntity` from the legacy ECS store internally.
-//! The canonical [`Entity`](prism_ecs_core::Entity) type is available for new
-//! consumer code that prefers generation-safe handles over the legacy
-//! `CompEntity(u64)`.
+//! Uses `World`/`Entity` from the ECS store internally.
+//! The canonical [`Entity`](prism_ecs_core::Entity) type provides
+//! generation-safe handles for consumer code.
 use crate::command::DomainEvent;
 use crate::lifecycle::SessionLifecycle;
 use crate::schema::SchemaRegistry;
@@ -13,7 +12,7 @@ use crate::world_txn::{
 };
 
 use crate::world_txn::WorldTransitExt;
-use prism_ecs_core::{CompEntity, Entity, EntityKind, World};
+use prism_ecs_core::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs (39-46) ──────────────────────────────────────────
@@ -199,7 +198,7 @@ impl CreateAgentRunCommand {
     ) -> Result<(), AgentExecError> {
         Self::validate_schemas(schema_registry).map_err(AgentExecError::SchemaError)?;
 
-        let session = CompEntity(self.session_entity);
+        let session = Entity::new(self.session_entity, 0);
         if !world.has_entity(session) {
             return Err(AgentExecError::SessionNotFound(self.session_entity));
         }
@@ -287,7 +286,7 @@ impl SubmitToolOutcomeCommand {
         world: &World,
         _schema_registry: &SchemaRegistry,
     ) -> Result<(), AgentExecError> {
-        let agent = CompEntity(self.agent_entity.id());
+        let agent = Entity::new(self.agent_entity.id(), 0);
         if !world.has_entity(agent) {
             return Err(AgentExecError::AgentNotFound(self.agent_entity.id()));
         }
@@ -512,11 +511,11 @@ pub fn replay_agent_run_created(
         .to_string();
 
     let mut txn = WorldTxn::new(world);
-    if !world.has_entity(prism_ecs_core::CompEntity(agent_id)) {
-        txn.stage_spawn(Entity(agent_id, 0), EntityKind::Agent);
+    if !world.has_entity(Entity::new(agent_id, 0)) {
+        txn.stage_spawn(Entity::new(agent_id, 0), EntityKind::Agent);
     }
     txn.add_component(
-        Entity(agent_id, 0),
+        Entity::new(agent_id, 0),
         ComponentSchemaId(SCHEMA_AGENT_RUN),
         SchemaVersion(1),
         AgentRun {
@@ -527,7 +526,7 @@ pub fn replay_agent_run_created(
         },
     );
     txn.add_component(
-        Entity(agent_id, 0),
+        Entity::new(agent_id, 0),
         ComponentSchemaId(SCHEMA_AGENT_CONFIG),
         SchemaVersion(1),
         AgentConfig {
@@ -539,7 +538,7 @@ pub fn replay_agent_run_created(
         },
     );
     txn.add_component(
-        Entity(agent_id, 0),
+        Entity::new(agent_id, 0),
         ComponentSchemaId(SCHEMA_AGENT_LIFECYCLE),
         SchemaVersion(1),
         AgentLifecycle::Active,

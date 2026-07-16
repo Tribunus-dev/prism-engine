@@ -1,0 +1,236 @@
+[package]
+name = "tribunus-compute-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autobins = false
+description = "Tribunus transactional compute kernel, compiler, and hardware runtime"
+
+[lib]
+name = "tribunus_compute_core"
+crate-type = ["rlib"]
+
+[dependencies]
+metal = { version = "0.32", optional = true }
+objc = { version = "0.2", optional = true }
+prism-ecs-core = { path = "../crates/prism-ecs-core" }
+prism-ecs-ir = { path = "../crates/prism-ecs-ir" }
+prism-ecs-constitutional = { path = "../crates/prism-ecs-constitutional" }
+prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
+prism-kv-cache = { path = "../crates/prism-kv-cache" }
+prism-ecs-backend = { path = "../crates/prism-ecs-backend" }
+block = { version = "0.1", optional = true }
+mpsgraph = { version = "0.2", optional = true }
+hf-hub = "0.4"
+tribunus-evidence-schema = { path = "../evidence-schema" }
+mlx-rs = { path = "../mlx-rs-fork/mlx-rs", optional = true }
+mlx-sys = { path = "../mlx-rs-fork/mlx-sys", optional = true }
+safetensors = "0.5"
+sha2 = { version = "0.10", features = ["asm"] }
+p256 = { version = "0.13", features = ["ecdsa", "digest"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+strum = { workspace = true }
+serde_json = "1"
+bincode = { version = "1.3" }
+base64 = "0.22"
+toml = "0.8"
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+parking_lot = "0.12"
+rand = { workspace = true }
+notify = "6"
+libc = "0.2"
+lol_html = "2"
+lazy_static = "1.5"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "signal"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+axum = { version = "0.8", optional = true }
+futures = "0.3"
+tower-http = { version = "0.6", optional = true, features = ["cors"] }
+async-trait = "0.1"
+thiserror = "2"
+coreml-proto = { version = "0.1.0", optional = true }
+prost = "0.14.4"
+prost-types = "0.14.4"
+swc_common = { version = "23", default-features = false, features = [] }
+swc_ecma_ast = { version = "25", default-features = false, features = [] }
+swc_ecma_parser = { version = "41", default-features = false, features = [] }
+tempfile = { version = "3" }
+png = "0.17"
+blake3 = "1"
+serde_json_canonicalizer = "0.3"
+memmap2 = { workspace = true }
+bytemuck = { version = "1", features = ["derive"] }
+half = "2"
+clap = { version = "4", features = ["derive"] }
+tar = "0.4"
+walkdir = "2"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+content_inspector = "0.2"
+encoding_rs = "0.8"
+deno_core = { version = "0.405", optional = true }
+deno_core_icudata = { version = "0.77", optional = true }
+anyhow = "1.0.102"
+tracing = "0.1"
+sqlx = { version = "0.7", optional = true, default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
+sqlx-postgres = { version = "0.7", optional = true, default-features = false, features = ["uuid", "json"] }
+duckdb = { version = "1.1", optional = true }
+fred = { version = "10", optional = true, features = ["i-client", "i-keys", "i-scripts"] }
+image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
+melior = { version = "0.27.2", optional = true }
+
+[features]
+default = []
+prism-backend = [
+    "dep:coreml-proto",
+    "server",
+    "metal-dispatch",
+    "backend-metal",
+    "dep:image",
+]
+# Explicit production/compiler bundle. Keep LLVM/MLIR out of ordinary backend
+# tests unless the caller is qualifying the compiler path itself.
+prism-backend-full = ["prism-backend", "mlir-runtime"]
+# Named test lanes make the intended dependency surface visible to developers,
+# CI, and prism-mcpd. `test-core` intentionally enables no native backend.
+test-core = []
+test-hardware = ["prism-backend"]
+test-compiler = ["prism-backend-full"]
+prism-backend-ios = ["prism-backend", "metal-dispatch", "backend-metal", "dep:image"]
+mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
+research = ["prism-backend", "mlx-backend"]
+ffi = ["prism-backend"]
+ane = []
+ane-executor = ["prism-backend"]
+metal-dispatch = ["dep:metal", "dep:objc", "dep:block"]
+server = ["dep:axum", "dep:tower-http"]
+server-dashboard = ["server"]
+rocm-probe = []
+amd-rocm = []
+level-zero-probe = []
+candle-cpu = []
+intel = []
+tensix = []
+storage-adapters = []
+backend-cpu = []
+napi = []
+legacy_mutations = []
+private-development = []
+image = []
+msgpack = []
+coreai-backend = []
+apple-coreml = []
+flux-klein-mlx = []
+backend-metal = ["dep:mpsgraph"]
+mlir-runtime = ["dep:melior"]
+generation-features-moved-to-separate-crates = []
+external-checkpoint = ["prism-backend"]
+unfinished-gates = []
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("generation-image", "generation-diffusion", "generation-video", "generation-audio-core", "generation-asr", "generation-tts", "generation-audio"))'] }
+
+[[bin]]
+name = "prism"
+path = "src/bin/prism.rs"
+test = false
+
+[[bin]]
+name = "prism-server"
+path = "src/bin/prism_server.rs"
+required-features = ["prism-backend", "server-dashboard"]
+test = false
+
+[[bin]]
+name = "prism-alpha"
+path = "src/bin/prism_alpha.rs"
+required-features = ["legacy_mutations"]
+test = false
+
+[[bin]]
+name = "check-gguf-meta"
+path = "src/bin/check_gguf_meta.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bin]]
+name = "prism-bench-ab"
+path = "src/bin/prism_bench_ab.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bin]]
+name = "prism-compile"
+path = "src/bin/prism_compile.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bench]]
+name = "benchmark_placement"
+path = "benches/benchmark_placement.rs"
+required-features = ["mlx-backend"]
+
+[build-dependencies]
+cc = "1.2"
+tar = "0.4"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bin]]
+name = "verify-ternary"
+path = "src/bin/verify_ternary.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bin]]
+name = "q8-scale-dump"
+path = "src/bin/q8_scale_dump.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bin]]
+name = "tribunus-pack-nf4tile640"
+path = "src/bin/tribunus_pack_nf4tile640.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bin]]
+name = "gemma4-inspect"
+path = "src/bin/gemma4_inspect.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bin]]
+name = "diagnose-nf4-roundtrip"
+path = "src/bin/diagnose_nf4_roundtrip.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bin]]
+name = "qwen25-omni-ingest"
+path = "src/bin/qwen25_omni_ingest.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bin]]
+name = "tribunus-compute-image"
+path = "src/bin/tribunus-compute-image.rs"
+required-features = ["research"]
+test = false
+[[bin]]
+name = "tribunus-ecs-compile"
+path = "src/bin/tribunus_ecs_compile.rs"
+test = false
+[[bin]]
+name = "bitnet-ecs-test"
+path = "src/bin/bitnet_ecs_test.rs"
+required-features = ["prism-backend"]
+test = false
+
+[[bench]]
+ name = "ir_representation"
+ harness = false

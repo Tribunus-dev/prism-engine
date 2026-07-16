@@ -241,7 +241,7 @@ pub fn pack_nf4_weights(
     use rayon::prelude::*;
 
     let tiles_per_row = cols.div_ceil(TILE_ELEMENTS);
-    let tile_cols = tiles_per_row * TILE_ELEMENTS;
+    let _tile_cols = tiles_per_row * TILE_ELEMENTS;
     let total_tiles = rows * tiles_per_row;
 
     let mut packed_codes = vec![0u8; total_tiles * PACKED_BYTES_PER_TILE];
@@ -275,7 +275,7 @@ pub fn pack_nf4_weights(
         .collect();
 
     for (r, codes, sc, bias) in results {
-        let src_start = r * tiles_per_row * PACKED_BYTES_PER_TILE;
+        let _src_start = r * tiles_per_row * PACKED_BYTES_PER_TILE;
         let dst_start = r * tiles_per_row * PACKED_BYTES_PER_TILE;
         packed_codes[dst_start..dst_start + codes.len()].copy_from_slice(&codes);
         scales[r * tiles_per_row * SCALES_F32_PER_TILE..][..sc.len()].copy_from_slice(&sc);
@@ -330,8 +330,10 @@ pub fn unpack_nf4_weights(
                 let byte = packed_codes[group_code_base + i];
                 let idx0 = byte & 0x0F;
                 let idx1 = byte >> 4;
-                result[out_base + 2 * i] = nf4_dequantize_with_codebook(idx0, &NF4_CODEBOOK) * scale + bias;
-                result[out_base + 2 * i + 1] = nf4_dequantize_with_codebook(idx1, &NF4_CODEBOOK) * scale + bias;
+                result[out_base + 2 * i] =
+                    nf4_dequantize_with_codebook(idx0, &NF4_CODEBOOK) * scale + bias;
+                result[out_base + 2 * i + 1] =
+                    nf4_dequantize_with_codebook(idx1, &NF4_CODEBOOK) * scale + bias;
             }
         }
     }
@@ -454,7 +456,7 @@ pub fn pack_int8_weights(
     let tile_cols = num_tiles * TILE_ELEMENTS;
     let mut codes = vec![0u8; rows * tile_cols];
     let mut scales = Vec::with_capacity(rows * num_tiles);
-    let mut biases = vec![0.0f32; rows * num_tiles];
+    let biases = vec![0.0f32; rows * num_tiles];
 
     let results: Vec<(usize, Vec<u8>, Vec<f32>)> = (0..rows)
         .into_par_iter()
@@ -476,7 +478,11 @@ pub fn pack_int8_weights(
                         max_abs = abs_v;
                     }
                 }
-                let scale = if max_abs > 1e-12 { max_abs / 127.0 } else { 1.0 };
+                let scale = if max_abs > 1e-12 {
+                    max_abs / 127.0
+                } else {
+                    1.0
+                };
                 row_scales.push(scale);
                 for c in 0..TILE_ELEMENTS {
                     let src_col = col_start + c;
@@ -596,11 +602,7 @@ pub fn dequant_matmul_reference(
         ));
     }
     if output.len() < m * n {
-        return Err(format!(
-            "output too short: {} < {}",
-            output.len(),
-            m * n
-        ));
+        return Err(format!("output too short: {} < {}", output.len(), m * n));
     }
 
     let weights = unpack_nf4_weights(packed_codes, scales, biases, k, n);
@@ -639,14 +641,17 @@ pub mod accelerate {
                     result_stride: i32,
                     n: i32,
                 );
-                fn vDSP_svesq(
-                    a: *const f32,
-                    a_stride: i32,
-                    result: *mut f32,
-                    n: i32,
-                );
+                fn vDSP_svesq(a: *const f32, a_stride: i32, result: *mut f32, n: i32);
             }
-            vDSP_vsub(a.as_ptr(), 1, b.as_ptr(), 1, diff.as_mut_ptr(), 1, a.len() as i32);
+            vDSP_vsub(
+                a.as_ptr(),
+                1,
+                b.as_ptr(),
+                1,
+                diff.as_mut_ptr(),
+                1,
+                a.len() as i32,
+            );
             let mut sum_sq = 0.0f32;
             vDSP_svesq(diff.as_ptr(), 1, &mut sum_sq, a.len() as i32);
             sum_sq
@@ -675,12 +680,7 @@ pub mod accelerate {
                     result_stride: i32,
                     n: i32,
                 );
-                fn vDSP_maxmgv(
-                    a: *const f32,
-                    a_stride: i32,
-                    result: *mut f32,
-                    n: i32,
-                );
+                fn vDSP_maxmgv(a: *const f32, a_stride: i32, result: *mut f32, n: i32);
             }
             vDSP_vsub(a.as_ptr(), 1, b.as_ptr(), 1, diff.as_mut_ptr(), 1, n);
             let mut max_val = 0.0f32;
@@ -691,7 +691,10 @@ pub mod accelerate {
 
     #[cfg(not(target_os = "macos"))]
     pub fn max_abs_error(a: &[f32], b: &[f32]) -> f32 {
-        a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max)
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max)
     }
 }
 
@@ -705,7 +708,7 @@ pub fn pack_symmetric_int4_tile(
     let packed_codes_len = num_groups * bytes_per_group;
     let mut packed_codes = vec![0u8; packed_codes_len];
     let mut scales = vec![0.0f32; num_groups];
-    let mut biases = vec![0.0f32; num_groups];
+    let biases = vec![0.0f32; num_groups];
     let max_code = 7.0f32;
 
     for g in 0..num_groups {
@@ -717,12 +720,20 @@ pub fn pack_symmetric_int4_tile(
                 max_abs = v;
             }
         }
-        let scale = if max_abs > 1e-12 { max_abs / max_code } else { 1.0 };
+        let scale = if max_abs > 1e-12 {
+            max_abs / max_code
+        } else {
+            1.0
+        };
         scales[g] = scale;
 
         for i in 0..(group_size / 2) {
-            let v0 = (values[base + 2 * i] / scale).round().clamp(-max_code, max_code) as i8;
-            let v1 = (values[base + 2 * i + 1] / scale).round().clamp(-max_code, max_code) as i8;
+            let v0 = (values[base + 2 * i] / scale)
+                .round()
+                .clamp(-max_code, max_code) as i8;
+            let v1 = (values[base + 2 * i + 1] / scale)
+                .round()
+                .clamp(-max_code, max_code) as i8;
             let c0 = (v0 as u8) & 0x0F;
             let c1 = ((v1 as u8) & 0x0F) << 4;
             packed_codes[g * bytes_per_group + i] = c0 | c1;

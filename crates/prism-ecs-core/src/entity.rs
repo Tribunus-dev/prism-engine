@@ -1,14 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 /// Legacy entity identifier (no generation tracking).
-#[deprecated(note = "use Entity(u64, u32) for generation safety")]
-pub type EntityId = u64;
-
-/// Legacy ID-only entity handle.
-#[deprecated(note = "use Entity(u64, u32) for generation safety")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct CompEntity(pub EntityId);
-
 /// Generational entity handle.
 ///
 /// Each entity carries a generation counter that is incremented on despawn,
@@ -28,17 +20,19 @@ pub struct CompEntity(pub EntityId);
 pub struct Entity(pub u64, pub u32);
 
 impl Entity {
+    /// Construct a new entity handle with the given ID and generation.
+    ///
+    /// Prefer receiving entities from `World::spawn()` over constructing them
+    /// directly. Use generation `0` for entities created outside the ECS
+    /// lifecycle (e.g., replay, test fixtures).
+    pub fn new(id: u64, generation: u32) -> Self {
+        Self(id, generation)
+    }
     pub fn id(&self) -> u64 {
         self.0
     }
     pub fn generation(&self) -> u32 {
         self.1
-    }
-}
-
-impl From<CompEntity> for Entity {
-    fn from(ce: CompEntity) -> Self {
-        Entity(ce.0, 0)
     }
 }
 
@@ -89,4 +83,8 @@ pub enum EntityKind {
     Device,
     Residency,
     Agent,
+    /// A work group for scheduling SPU-style work units across execution lanes.
+    WorkGroup,
+    /// A single work unit within a work group.
+    WorkUnit,
 }

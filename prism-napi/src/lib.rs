@@ -11,10 +11,12 @@ use std::sync::Mutex;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-use tribunus_compute_core::config::ServerConfig;
-use tribunus_compute_core::device;
-use tribunus_compute_core::engine::ComputeEngine as CoreComputeEngine;
-use tribunus_compute_core::streaming::GenerationHandle;
+use prism_ecs_server::config::ServerConfig;
+use prism_ecs_server::device;
+use prism_ecs_server::engine::ComputeEngine as CoreComputeEngine;
+use prism_ecs_server::engine::EngineCapabilities;
+use prism_ecs_server::streaming::GenerationEvent;
+use prism_ecs_server::streaming::GenerationHandle;
 
 // ── Device Enumeration ───────────────────────────────────────────────────
 
@@ -100,8 +102,8 @@ pub struct NapiEngineCapabilities {
     pub mlx_version: String,
 }
 
-impl From<tribunus_compute_core::engine::EngineCapabilities> for NapiEngineCapabilities {
-    fn from(c: tribunus_compute_core::engine::EngineCapabilities) -> Self {
+impl From<EngineCapabilities> for NapiEngineCapabilities {
+    fn from(c: EngineCapabilities) -> Self {
         NapiEngineCapabilities {
             supports_gpu: c.supports_gpu,
             supports_coreml: c.supports_coreml,
@@ -415,18 +417,17 @@ fn collect_generation(mut handle: GenerationHandle) -> Result<CollectedResult> {
         };
 
         match event {
-            tribunus_compute_core::streaming::GenerationEvent::Token(id) => {
+            GenerationEvent::Token(id) => {
                 token_ids.push(id as i32);
                 token_count += 1;
             }
-            tribunus_compute_core::streaming::GenerationEvent::Chunk(text) => {
+            GenerationEvent::Chunk(text) => {
                 output.push_str(&text);
             }
-            tribunus_compute_core::streaming::GenerationEvent::Done
-            | tribunus_compute_core::streaming::GenerationEvent::Cancelled => {
+            GenerationEvent::Done | GenerationEvent::Cancelled => {
                 break;
             }
-            tribunus_compute_core::streaming::GenerationEvent::Error(e) => {
+            GenerationEvent::Error(e) => {
                 return Err(Error::from_reason(format!("generation error: {}", e)));
             }
             _ => {}

@@ -1,0 +1,104 @@
+    #[test]
+    fn test_bitflag_constants() {
+        let commutative = OpTraits::COMMUTATIVE;
+        let pure = OpTraits::PURE;
+        let combined = commutative | pure;
+
+        assert!(combined.contains(OpTraits::COMMUTATIVE));
+        assert!(combined.contains(OpTraits::PURE));
+        assert!(!combined.contains(OpTraits::TERMINATOR));
+        assert_eq!(combined.bits(), 0b11);
+    }
+
+    #[test]
+    fn test_set_and_get_traits() {
+        let mut world = World::default();
+        let op: Entity = world
+            .spawn(EntityKind::Node, Some("test_op".into()))
+            .expect("spawn")
+            .into();
+        world.add_component(op, OpMarker).expect("add OpMarker");
+
+        let traits = OpTraits::COMMUTATIVE | OpTraits::PURE;
+        set_traits(&mut world, op, traits);
+
+        assert_eq!(get_traits(&world, op), Some(traits));
+        assert!(has_trait(&world, op, OpTraits::COMMUTATIVE));
+        assert!(has_trait(&world, op, OpTraits::PURE));
+        assert!(!has_trait(&world, op, OpTraits::TERMINATOR));
+    }
+
+    #[test]
+    fn test_add_traits() {
+        let mut world = World::default();
+        let op: Entity = world
+            .spawn(EntityKind::Node, Some("test_op".into()))
+            .expect("spawn")
+            .into();
+        world.add_component(op, OpMarker).expect("add OpMarker");
+
+        set_traits(&mut world, op, OpTraits::COMMUTATIVE);
+        add_traits(&mut world, op, OpTraits::PURE);
+
+        let bits = get_traits(&world, op).unwrap();
+        assert!(bits.contains(OpTraits::COMMUTATIVE));
+        assert!(bits.contains(OpTraits::PURE));
+    }
+
+    #[test]
+    fn test_no_traits_on_untagged_op() {
+        let mut world = World::default();
+        let op: Entity = world
+            .spawn(EntityKind::Node, Some("untagged".into()))
+            .expect("spawn")
+            .into();
+        // Entity exists but has no Traits component.
+        assert_eq!(get_traits(&world, op), None);
+        assert!(!has_trait(&world, op, OpTraits::PURE));
+    }
+
+    #[test]
+    fn test_register_standard_traits() {
+        let infos = register_standard_traits();
+        assert_eq!(infos.len(), 7);
+
+        // Every predefined trait must appear in the registry.
+        let all_bits: OpTraits = infos.iter().fold(OpTraits::empty(), |acc, ti| acc | ti.bit);
+        assert!(all_bits.contains(OpTraits::COMMUTATIVE));
+        assert!(all_bits.contains(OpTraits::PURE));
+        assert!(all_bits.contains(OpTraits::SAME_OPERANDS_AND_RESULT_TYPE));
+        assert!(all_bits.contains(OpTraits::TERMINATOR));
+        assert!(all_bits.contains(OpTraits::NO_SIDE_EFFECTS));
+        assert!(all_bits.contains(OpTraits::CONSTANT_LIKE));
+        assert!(all_bits.contains(OpTraits::ISOLATED_FROM_ABOVE));
+    }
+
+    #[test]
+    fn test_op_traits_component_on_op() {
+        // Create an op with Commutative|Pure traits and verify bitflags match.
+        let mut world = World::default();
+        let op: Entity = world
+            .spawn(EntityKind::Node, Some("test_op".into()))
+            .expect("spawn")
+            .into();
+        world.add_component(op, OpMarker).expect("add OpMarker");
+
+        let expected = OpTraits::COMMUTATIVE | OpTraits::PURE;
+        set_traits(&mut world, op, expected);
+
+        let stored = world.get_component::<Traits>(op).unwrap().0;
+        assert_eq!(stored, expected);
+        assert_eq!(stored.bits(), 0b11);
+    }
+
+    #[test]
+    fn test_traitinfo_name_description() {
+        let infos = register_standard_traits();
+        let commutative = infos
+            .iter()
+            .find(|ti| ti.bit == OpTraits::COMMUTATIVE)
+            .unwrap();
+        assert_eq!(commutative.name, "COMMUTATIVE");
+        assert!(!commutative.description.is_empty());
+    }
+}

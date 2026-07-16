@@ -163,7 +163,7 @@ impl PipelineBridge {
 
         // Extract the pipeline entity from the event payload.
         if let Some(pipeline_id) = event.payload.get("pipeline_id").and_then(|v| v.as_u64()) {
-            self.pipeline_entity = Some(Entity(pipeline_id, 0));
+            self.pipeline_entity = Some(Entity::new(pipeline_id, 0));
         }
 
         Ok((epoch, event))

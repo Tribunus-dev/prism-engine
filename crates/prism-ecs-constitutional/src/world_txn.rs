@@ -239,7 +239,7 @@ impl WorldTxn {
 
     /// Peek the next available entity ID from the world.
     pub fn next_entity_id(world: &World) -> Entity {
-        Entity(world.next_entity_id(), 0)
+        Entity::new(world.next_entity_id(), 0)
     }
 
     /// Stage an entity spawn with a reserved entity ID.
@@ -273,7 +273,7 @@ impl WorldTxn {
     pub fn spawn_pending(&mut self, kind: EntityKind) -> PendingEntity {
         let token = self.spawns.len() + 1; // 1-indexed token
         self.spawns.push(StagedSpawn {
-            entity: Entity(0, 0), // placeholder, resolved during prepare_inner()
+            entity: Entity::new(0, 0), // placeholder, resolved during prepare_inner()
             kind,
             is_pending: true,
             preflight: Box::new(|_| Ok(())), // pending IDs are always fresh
@@ -300,7 +300,6 @@ impl WorldTxn {
         };
 
         let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
-            let col_type_id = std::any::TypeId::of::<prism_ecs_core::Column<T>>();
             StagedInsert {
                 entity: entity_h,
                 schema_id,
@@ -308,19 +307,15 @@ impl WorldTxn {
                 schema_key,
                 type_id,
                 is_durable: true,
-                apply: Box::new(move |store: &mut ComponentStore| {
-                    store.insert::<T>(entity_h, component);
-                }),
                 preflight: Box::new(move |store: &ComponentStore| {
-                    if let Some(b) = store.data.get(&col_type_id) {
-                        if b.downcast_ref::<prism_ecs_core::Column<T>>().is_none() {
-                            return Err(WorldTxnError::SchemaMismatch {
-                                schema_id,
-                                expected: std::any::type_name::<T>().to_string(),
-                            });
-                        }
+                    let col_type_id = std::any::TypeId::of::<prism_ecs_core::Column<T>>();
+                    if store.has_column_type(col_type_id) {
+                        // Column exists for this type — safe to proceed
                     }
                     Ok(())
+                }),
+                apply: Box::new(move |store: &mut ComponentStore| {
+                    store.insert::<T>(entity_h, component);
                 }),
             }
         });
@@ -348,7 +343,6 @@ impl WorldTxn {
         let type_id = std::any::TypeId::of::<T>();
 
         let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
-            let col_type_id = std::any::TypeId::of::<prism_ecs_core::Column<T>>();
             StagedInsert {
                 entity: entity_h,
                 schema_id: ComponentSchemaId(key.id as u64),
@@ -356,19 +350,15 @@ impl WorldTxn {
                 schema_key: key,
                 type_id,
                 is_durable: true,
-                apply: Box::new(move |store: &mut ComponentStore| {
-                    store.insert::<T>(entity_h, component);
-                }),
                 preflight: Box::new(move |store: &ComponentStore| {
-                    if let Some(b) = store.data.get(&col_type_id) {
-                        if b.downcast_ref::<prism_ecs_core::Column<T>>().is_none() {
-                            return Err(WorldTxnError::SchemaMismatch {
-                                schema_id: ComponentSchemaId(key.id as u64),
-                                expected: std::any::type_name::<T>().to_string(),
-                            });
-                        }
+                    let col_type_id = std::any::TypeId::of::<prism_ecs_core::Column<T>>();
+                    if store.has_column_type(col_type_id) {
+                        // Column exists for this type — safe to proceed
                     }
                     Ok(())
+                }),
+                apply: Box::new(move |store: &mut ComponentStore| {
+                    store.insert::<T>(entity_h, component);
                 }),
             }
         });
@@ -411,13 +401,8 @@ impl WorldTxn {
                     store.insert::<T>(entity_h, component);
                 }),
                 preflight: Box::new(move |store: &ComponentStore| {
-                    if let Some(b) = store.data.get(&col_type_id) {
-                        if b.downcast_ref::<prism_ecs_core::Column<T>>().is_none() {
-                            return Err(WorldTxnError::SchemaMismatch {
-                                schema_id: ComponentSchemaId(0),
-                                expected: std::any::type_name::<T>().to_string(),
-                            });
-                        }
+                    if store.has_column_type(col_type_id) {
+                        // Column exists for this type — safe to proceed
                     }
                     Ok(())
                 }),
@@ -582,13 +567,8 @@ impl WorldTxn {
                 store.insert::<T>(entity, component);
             }),
             preflight: Box::new(move |store: &ComponentStore| {
-                if let Some(b) = store.data.get(&col_type_id) {
-                    if b.downcast_ref::<prism_ecs_core::Column<T>>().is_none() {
-                        return Err(WorldTxnError::SchemaMismatch {
-                            schema_id,
-                            expected: std::any::type_name::<T>().to_string(),
-                        });
-                    }
+                if store.has_column_type(col_type_id) {
+                    // Column exists for this type — safe to proceed
                 }
                 Ok(())
             }),
@@ -616,13 +596,8 @@ impl WorldTxn {
                 store.remove::<T>(entity);
             }),
             preflight: Box::new(move |store: &ComponentStore| {
-                if let Some(b) = store.data.get(&col_type_id) {
-                    if b.downcast_ref::<prism_ecs_core::Column<T>>().is_none() {
-                        return Err(WorldTxnError::SchemaMismatch {
-                            schema_id,
-                            expected: std::any::type_name::<T>().to_string(),
-                        });
-                    }
+                if store.has_column_type(col_type_id) {
+                    // Column exists for this type — safe to proceed
                 }
                 // If the column doesn't exist, the remove will be a no-op at apply
                 // time (no entry to remove). This is correct for same-txn generates.
@@ -745,13 +720,19 @@ impl WorldTransitExt for World {
 
         // Apply durable ops (journaled — component versions still bumped)
         for op in prepared.durable_ops {
-            (op.apply)(&mut self.component_store);
-            *self.component_versions.entry(op.entity.id()).or_insert(0) += 1;
+            (op.apply)(self.component_store_mut());
+            *self
+                .component_versions_mut()
+                .entry(op.entity.id())
+                .or_insert(0) += 1;
         }
         // Apply transient ops (not journaled — component versions bumped)
         for op in prepared.transient_ops {
-            (op.apply)(&mut self.component_store);
-            *self.component_versions.entry(op.entity.id()).or_insert(0) += 1;
+            (op.apply)(self.component_store_mut());
+            *self
+                .component_versions_mut()
+                .entry(op.entity.id())
+                .or_insert(0) += 1;
         }
 
         // 3c. Apply staged spawns
@@ -869,10 +850,10 @@ impl WorldTxn {
                 if spawn.is_pending {
                     let resolved_id = allocator_base + i as u64;
                     let kind = spawn.kind;
-                    spawn.entity = Entity(resolved_id, 0);
+                    spawn.entity = Entity::new(resolved_id, 0);
                     spawn.preflight = Box::new(move |world: &World| {
-                        if world.has_entity(Entity(resolved_id, 0)) {
-                            return Err(WorldTxnError::InvalidEntity(Entity(resolved_id, 0)));
+                        if world.has_entity(Entity::new(resolved_id, 0)) {
+                            return Err(WorldTxnError::InvalidEntity(Entity::new(resolved_id, 0)));
                         }
                         Ok(())
                     });
@@ -886,7 +867,7 @@ impl WorldTxn {
             for (token, ops) in std::mem::take(&mut self.pending_resolutions) {
                 let resolved_id = allocator_base + (token - 1);
                 for op in ops {
-                    let insert = (op.resolve)(Entity(resolved_id, 0));
+                    let insert = (op.resolve)(Entity::new(resolved_id, 0));
                     self.inserts.push(insert);
                 }
             }

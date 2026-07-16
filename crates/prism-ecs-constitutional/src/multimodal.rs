@@ -2,11 +2,11 @@ use crate::command::DomainEvent;
 use crate::lifecycle::{LifecycleError, SessionLifecycle};
 use crate::schema::SchemaRegistry;
 use crate::types::*;
+use crate::world_txn::WorldTransitExt;
 use crate::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use crate::world_txn::{CommittedEpoch, WorldTxn};
 use prism_ecs_core::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
-use crate::world_txn::WorldTransitExt;
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
 // Session: 13-17, Work: 18-23, Execution: 24-29, Agent: 30-38,
@@ -88,12 +88,11 @@ pub enum PipelineModality {
 /// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
 ///
 /// Uses generation `0` for backward compatibility with the legacy
-/// `World`/`CompEntity` storage. Callers migrating to the new
-/// `World`+`Entity(u64, u32)` API should replace this with proper
-/// generation-aware entity construction.
+/// entity storage. Callers migrating to proper
+/// generation-aware entity construction should use `Entity::new(id, gen)`.
 #[allow(dead_code)]
 pub(crate) fn as_entity(id: u64) -> Entity {
-    Entity(id, 0)
+    Entity::new(id, 0)
 }
 
 impl prism_ecs_core::Component for PipelineModality {}
@@ -295,7 +294,7 @@ impl CreatePipelineCommand {
         }
 
         // Validate session exists and is Active
-        let session_entity = prism_ecs_core::CompEntity(self.session_entity);
+        let session_entity = Entity::new(self.session_entity, 0);
         if !world.has_entity(session_entity) {
             return Err(MultimodalError::SessionNotFound(self.session_entity));
         }
@@ -312,7 +311,7 @@ impl CreatePipelineCommand {
 
         // Validate stages reference valid model entities
         for stage in &self.stages {
-            let model_entity = prism_ecs_core::CompEntity(stage.model_entity);
+            let model_entity = Entity::new(stage.model_entity, 0);
             if !world.has_entity(model_entity) {
                 return Err(MultimodalError::ModelNotFound(stage.model_entity));
             }
@@ -364,8 +363,8 @@ impl CreatePipelineCommand {
         let stage_entities: Vec<Entity> = (0..self.stages.len())
             .map(|i| {
                 let stage_id = pipeline_id.id() + 1 + i as u64;
-                txn.stage_spawn(Entity(stage_id, 0), EntityKind::Pipeline);
-                Entity(stage_id, 0)
+                txn.stage_spawn(Entity::new(stage_id, 0), EntityKind::Pipeline);
+                Entity::new(stage_id, 0)
             })
             .collect();
 
@@ -553,11 +552,11 @@ pub fn replay_pipeline_created(
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     let mut txn = WorldTxn::new(world);
-    if !world.has_entity(prism_ecs_core::CompEntity(pipeline_id)) {
-        txn.stage_spawn(Entity(pipeline_id, 0), EntityKind::Pipeline);
+    if !world.has_entity(Entity::new(pipeline_id, 0)) {
+        txn.stage_spawn(Entity::new(pipeline_id, 0), EntityKind::Pipeline);
     }
     txn.add_component(
-        Entity(pipeline_id, 0),
+        Entity::new(pipeline_id, 0),
         ComponentSchemaId(SCHEMA_PIPELINE),
         SchemaVersion(1),
         Pipeline {
@@ -568,7 +567,7 @@ pub fn replay_pipeline_created(
         },
     );
     txn.add_component(
-        Entity(pipeline_id, 0),
+        Entity::new(pipeline_id, 0),
         ComponentSchemaId(SCHEMA_PIPELINE_LIFECYCLE),
         SchemaVersion(1),
         PipelineLifecycle::Created,
@@ -897,9 +896,9 @@ mod tests {
         // conflict with session_entity (entity 1 from make_session).
         // Entity 100: Model with Deployable lifecycle
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(Entity(100, 0), EntityKind::Model);
+        txn.stage_spawn(Entity::new(100, 0), EntityKind::Model);
         txn.add_component(
-            Entity(100, 0),
+            Entity::new(100, 0),
             ComponentSchemaId(7), // SCHEMA_MODEL_LIFECYCLE
             SchemaVersion(1),
             crate::residency::ModelLifecycle::Deployable,
@@ -908,7 +907,7 @@ mod tests {
 
         // Entity 200: Artifact (no components)
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(Entity(200, 0), EntityKind::Artifact);
+        txn.stage_spawn(Entity::new(200, 0), EntityKind::Artifact);
         world.transit(txn).unwrap();
 
         let cmd = CreatePipelineCommand {

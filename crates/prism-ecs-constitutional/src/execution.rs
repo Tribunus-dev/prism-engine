@@ -1,22 +1,19 @@
 //! Execution subsystem — execution leases, KV cache slots, and tokens.
 //!
 //! Uses `World` from the legacy ECS store internally.
-//! The canonical [`Entity`](prism_ecs_core::Entity) type is available for new
-//! consumer code that prefers generation-safe handles over the legacy
-//! `CompEntity(u64)`.
+//! The canonical [`Entity`](prism_ecs_core::Entity) type provides
+//! generation-safe handles constructed via [`Entity::new`].
 use crate::command::DomainEvent;
-use crate::lifecycle::{
-    DeviceLifecycle, ResidencyLifecycle, SessionLifecycle,
-};
+use crate::lifecycle::{DeviceLifecycle, ResidencyLifecycle, SessionLifecycle};
 use crate::schema::SchemaRegistry;
 use crate::types::*;
 use crate::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn,
 };
 
+use crate::world_txn::WorldTransitExt;
 use prism_ecs_core::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
-use crate::world_txn::WorldTransitExt;
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
 // Artifact: 1-4, Model/Residency: 5-12, Session: 13-17, Execution: 24-29
@@ -176,30 +173,18 @@ impl DurableComponent for ExecutionOutput {
 
 /// Validate all execution component schemas are registered for the correct types.
 pub fn validate_execution_schemas(reg: &SchemaRegistry) -> Result<(), String> {
-    reg.verify_type::<ExecutionLease>(crate::types::ComponentSchemaId(
-        SCHEMA_EXECUTION_LEASE,
-    ))
-    .map_err(|e| format!("ExecutionLease schema: {e}"))?;
-    reg.verify_type::<LeaseOwner>(crate::types::ComponentSchemaId(
-        SCHEMA_LEASE_OWNER,
-    ))
-    .map_err(|e| format!("LeaseOwner schema: {e}"))?;
-    reg.verify_type::<LeaseTokenRange>(crate::types::ComponentSchemaId(
-        SCHEMA_LEASE_RANGE,
-    ))
-    .map_err(|e| format!("LeaseTokenRange schema: {e}"))?;
-    reg.verify_type::<KvSlot>(crate::types::ComponentSchemaId(
-        SCHEMA_KV_SLOT,
-    ))
-    .map_err(|e| format!("KvSlot schema: {e}"))?;
-    reg.verify_type::<KvOwnership>(crate::types::ComponentSchemaId(
-        SCHEMA_KV_OWNERSHIP,
-    ))
-    .map_err(|e| format!("KvOwnership schema: {e}"))?;
-    reg.verify_type::<ExecutionOutput>(crate::types::ComponentSchemaId(
-        SCHEMA_EXECUTION_OUTPUT,
-    ))
-    .map_err(|e| format!("ExecutionOutput schema: {e}"))?;
+    reg.verify_type::<ExecutionLease>(crate::types::ComponentSchemaId(SCHEMA_EXECUTION_LEASE))
+        .map_err(|e| format!("ExecutionLease schema: {e}"))?;
+    reg.verify_type::<LeaseOwner>(crate::types::ComponentSchemaId(SCHEMA_LEASE_OWNER))
+        .map_err(|e| format!("LeaseOwner schema: {e}"))?;
+    reg.verify_type::<LeaseTokenRange>(crate::types::ComponentSchemaId(SCHEMA_LEASE_RANGE))
+        .map_err(|e| format!("LeaseTokenRange schema: {e}"))?;
+    reg.verify_type::<KvSlot>(crate::types::ComponentSchemaId(SCHEMA_KV_SLOT))
+        .map_err(|e| format!("KvSlot schema: {e}"))?;
+    reg.verify_type::<KvOwnership>(crate::types::ComponentSchemaId(SCHEMA_KV_OWNERSHIP))
+        .map_err(|e| format!("KvOwnership schema: {e}"))?;
+    reg.verify_type::<ExecutionOutput>(crate::types::ComponentSchemaId(SCHEMA_EXECUTION_OUTPUT))
+        .map_err(|e| format!("ExecutionOutput schema: {e}"))?;
     Ok(())
 }
 
@@ -232,7 +217,7 @@ impl AcquireExecutionLeaseCommand {
         validate_execution_schemas(schema_registry)?;
 
         // Validate session entity
-        let session = prism_ecs_core::CompEntity(self.session_entity);
+        let session = Entity::new(self.session_entity, 0);
         if !world.has_entity(session) {
             return Err(ExecutionError::SessionNotFound(self.session_entity));
         }
@@ -248,7 +233,7 @@ impl AcquireExecutionLeaseCommand {
         }
 
         // Validate deployment (residency) entity
-        let deployment = prism_ecs_core::CompEntity(self.deployment_entity);
+        let deployment = Entity::new(self.deployment_entity, 0);
         if !world.has_entity(deployment) {
             return Err(ExecutionError::DeploymentNotFound(self.deployment_entity));
         }
@@ -268,7 +253,7 @@ impl AcquireExecutionLeaseCommand {
         }
 
         // Validate device entity
-        let device = prism_ecs_core::CompEntity(self.device_entity);
+        let device = Entity::new(self.device_entity, 0);
         if !world.has_entity(device) {
             return Err(ExecutionError::DeviceNotFound(self.device_entity));
         }
@@ -484,9 +469,9 @@ pub fn replay_lease_acquired(
     let deadline_ts = event.payload["deadline"].as_u64().unwrap_or(0);
 
     let mut txn = WorldTxn::new(world);
-    let lease_entity = Entity(lease_id, 0);
+    let lease_entity = Entity::new(lease_id, 0);
 
-    if !world.has_entity(prism_ecs_core::CompEntity(lease_id)) {
+    if !world.has_entity(Entity::new(lease_id, 0)) {
         txn.stage_spawn(lease_entity, EntityKind::Session);
     }
 
@@ -542,7 +527,7 @@ pub fn replay_lease_completed(
     let finish_reason = event.payload["finish_reason"].as_u64().unwrap_or(0) as u8;
 
     let mut txn = WorldTxn::new(world);
-    let lease_entity = Entity(lease_id, 0);
+    let lease_entity = Entity::new(lease_id, 0);
 
     txn.add_component(
         lease_entity,
@@ -564,9 +549,7 @@ pub fn replay_lease_completed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lifecycle::{
-        DeviceLifecycle, ResidencyLifecycle, SessionLifecycle,
-    };
+    use crate::lifecycle::{DeviceLifecycle, ResidencyLifecycle, SessionLifecycle};
     use prism_ecs_core::World;
 
     // ── test_execution_lease_types_serde ────────────────────────────────
@@ -575,7 +558,7 @@ mod tests {
     fn test_execution_lease_types_serde() {
         // ExecutionLease
         let lease = ExecutionLease {
-            lease_id: Entity(42, 0),
+            lease_id: Entity::new(42, 0),
             session_entity: 1,
             deployment_entity: 3,
             device_entity: 2,
@@ -690,9 +673,9 @@ mod tests {
 
         // Spawn session entity (1) — must be Active
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(Entity(1, 0), EntityKind::Session);
+        txn.stage_spawn(Entity::new(1, 0), EntityKind::Session);
         txn.add_component(
-            Entity(1, 0),
+            Entity::new(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             SessionLifecycle::Active,
@@ -701,9 +684,9 @@ mod tests {
 
         // Spawn device entity (2) — must be Ready
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
+        txn.stage_spawn(Entity::new(2, 0), EntityKind::Device);
         txn.add_component(
-            Entity(2, 0),
+            Entity::new(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Ready,
@@ -712,9 +695,9 @@ mod tests {
 
         // Spawn residency entity (3) — must be Resident
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(Entity(3, 0), EntityKind::Residency);
+        txn.stage_spawn(Entity::new(3, 0), EntityKind::Residency);
         txn.add_component(
-            Entity(3, 0),
+            Entity::new(3, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             ResidencyLifecycle::Resident,
@@ -794,9 +777,9 @@ mod tests {
 
         // Spawn entities but with wrong lifecycle states
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(Entity(1, 0), EntityKind::Session);
+        txn.stage_spawn(Entity::new(1, 0), EntityKind::Session);
         txn.add_component(
-            Entity(1, 0),
+            Entity::new(1, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             SessionLifecycle::Created,
@@ -804,9 +787,9 @@ mod tests {
         world.transit(txn).unwrap();
 
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(Entity(2, 0), EntityKind::Device);
+        txn.stage_spawn(Entity::new(2, 0), EntityKind::Device);
         txn.add_component(
-            Entity(2, 0),
+            Entity::new(2, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             DeviceLifecycle::Discovered,
@@ -814,9 +797,9 @@ mod tests {
         world.transit(txn).unwrap();
 
         let mut txn = WorldTxn::new(&world);
-        txn.stage_spawn(Entity(3, 0), EntityKind::Residency);
+        txn.stage_spawn(Entity::new(3, 0), EntityKind::Residency);
         txn.add_component(
-            Entity(3, 0),
+            Entity::new(3, 0),
             ComponentSchemaId(1),
             SchemaVersion(1),
             ResidencyLifecycle::Binding,
@@ -842,7 +825,7 @@ mod tests {
 
         // Fix session to Active, should now fail on DeploymentNotResident
         world.set_direct_mutation_allowed(true);
-        let _ = world.add_component(prism_ecs_core::CompEntity(1), SessionLifecycle::Active);;
+        let _ = world.add_component(Entity::new(1, 0), SessionLifecycle::Active);
         assert!(
             matches!(
                 cmd.preflight(&world, &reg),
@@ -852,7 +835,7 @@ mod tests {
         );
 
         // Fix deployment to Resident, should now fail on DeviceNotReady
-        let _ = world.add_component(prism_ecs_core::CompEntity(3), ResidencyLifecycle::Resident);;
+        let _ = world.add_component(Entity::new(3, 0), ResidencyLifecycle::Resident);
         assert!(
             matches!(
                 cmd.preflight(&world, &reg),

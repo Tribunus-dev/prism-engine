@@ -1,0 +1,9 @@
+[package]
+name = "prism-intel-npu-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }

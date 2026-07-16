@@ -1,0 +1,10 @@
+[package]
+name = "prism-ecs-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Prism ECS server — RPCS3-absorbed cell SPU mailbox, DMA, and workgroup patterns"
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+serde = { workspace = true, features = ["derive"] }

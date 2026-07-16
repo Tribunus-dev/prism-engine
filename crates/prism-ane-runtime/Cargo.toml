@@ -1,0 +1,22 @@
+[package]
+name = "prism-ane-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Apple Neural Engine runtime — MIL codegen, CoreML compilation, and ANE dispatch"
+repository = "https://github.com/Tribunus-dev/prism-engine"
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+# CoreML protobuf bindings — optional, macOS-only.
+# Enabled by the "coreml" feature for compiling MIL programs via CoreML.
+coreml-proto = { version = "0.1.0", optional = true }
+
+[features]
+default = []
+# Enables CoreML compilation pathway (requires macOS + Xcode).
+coreml = ["dep:coreml-proto"]

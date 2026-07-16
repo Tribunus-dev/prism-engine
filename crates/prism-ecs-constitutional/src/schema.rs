@@ -97,9 +97,7 @@ impl SchemaRegistry {
 
 /// Registration for a single durable schema, provided at startup.
 ///
-/// The `replay_apply` callback uses `CompEntity` for entity identity internally.
-/// The canonical entity type [`Entity`](prism_ecs_core::Entity) `(u64, u32)` is
-/// preferred for new code outside the constitutional domain.
+/// The `replay_apply` callback uses [`Entity`](prism_ecs_core::Entity) for entity identity.
 #[derive(Clone)]
 pub struct DurableSchemaRegistration {
     pub key: SchemaKey,
@@ -107,7 +105,7 @@ pub struct DurableSchemaRegistration {
     pub type_name: &'static str,
     pub encode: fn(&dyn std::any::Any) -> Vec<u8>,
     pub decode: fn(&[u8]) -> Box<dyn std::any::Any>,
-    pub replay_apply: fn(&mut prism_ecs_core::World, prism_ecs_core::CompEntity, &[u8]),
+    pub replay_apply: fn(&mut prism_ecs_core::World, prism_ecs_core::Entity, &[u8]),
 }
 
 impl std::fmt::Debug for DurableSchemaRegistration {
@@ -206,13 +204,11 @@ impl SchemaCatalogue {
     /// Look up a replay applier for the given schema key.
     ///
     /// Returns a function that applies a persisted component value to an
-    /// entity in the world. Internally uses `CompEntity`; the canonical
-    /// [`Entity`](prism_ecs_core::Entity) `(u64, u32)` type is preferred for
-    /// new code outside the constitutional domain.
+    /// entity in the world.
     pub fn replay_applier(
         &self,
         key: &SchemaKey,
-    ) -> Option<fn(&mut prism_ecs_core::World, prism_ecs_core::CompEntity, &[u8])> {
+    ) -> Option<fn(&mut prism_ecs_core::World, prism_ecs_core::Entity, &[u8])> {
         self.schemas.get(key).map(|reg| reg.replay_apply)
     }
 

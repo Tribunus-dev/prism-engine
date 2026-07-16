@@ -93,8 +93,7 @@ pub type ReplayApplier = fn(&mut World, &DomainEvent) -> Result<(), String>;
 /// Registry mapping event kind strings to replay applier functions.
 ///
 /// Internally dispatches to `ReplayApplier` functions that operate on
-/// `CompEntity` handles. For new code, prefer the canonical
-/// [`Entity`](prism_ecs_core::Entity) type.
+/// [`Entity`](prism_ecs_core::Entity) handles.
 pub struct ReplayRegistry {
     appliers: HashMap<String, ReplayApplier>,
 }

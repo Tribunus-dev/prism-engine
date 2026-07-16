@@ -3,15 +3,8 @@ resolver = "2"
 
 members = [
     ".",
-    "compute-core",
     "evidence-schema",
     "prism-ffi",
-    "prism-bridge",
-    "prism-napi",
-    "mlx-rs-fork/mlx-rs",
-    "mlx-rs-fork/mlx-sys",
-    "mlx-rs-fork/mlx-macros",
-    "mlx-rs-fork/mlx-internal-macros",
     "prism-mcp-model",
     "prism-mcp-build",
     "prism-mcp-kernel",
@@ -25,11 +18,10 @@ members = [
     "prism-mcpd",
     "crates/prism-ecs-core",
     "crates/prism-ecs-constitutional",
-    "crates/prism-ecs-backend",
     "crates/prism-ecs-quantization",
     "crates/prism-kv-cache",
-    "crates/prism-metal-runtime",
     "crates/prism-ecs-ir",
+    "crates/prism-ecs-server",
 ]
 [workspace.package]
 
@@ -43,10 +35,6 @@ keywords = ["inference", "apple-silicon", "metal", "machine-learning"]
 categories = ["science"]
 
 [workspace.dependencies]
-mlx-internal-macros = { path = "mlx-rs-fork/mlx-internal-macros" }
-mlx-macros = { path = "mlx-rs-fork/mlx-macros" }
-mlx-sys = { path = "mlx-rs-fork/mlx-sys" }
-mlx-rs = { path = "mlx-rs-fork/mlx-rs" }
 bytemuck = "1"
 float_eq = "1"
 pretty_assertions = "1.4.0"
@@ -80,6 +68,7 @@ libc = "0.2"
 parking_lot = "0.12"
 rayon = "1"
 clap = { version = "4", features = ["derive"] }
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 
 [package]
 name = "prism-engine"
@@ -98,11 +87,6 @@ name = "prism"
 path = "src/bin/prism.rs"
 test = false
 
-[[bin]]
-name = "prism-server"
-path = "compute-core/src/bin/prism_server.rs"
-required-features = ["prism-backend"]
-test = false
 
 [dependencies]
 metal = { version = "0.32", optional = true }
@@ -137,9 +121,6 @@ coreml-proto = { version = "0.1.0", optional = true }
 anyhow = "1.0.102"
 libc = { workspace = true }
 blake3 = "1"
-tribunus-compute-core = { path = "compute-core", optional = true }
-mlx-rs = { workspace = true, optional = true }
-
 [features]
 default = []
 server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]
@@ -149,14 +130,11 @@ ane = ["dep:coreml-proto"]
 # will not compile; use `prism-backend` for the compute-core execution path.
 metal-dispatch = ["dep:metal", "dep:objc"]
 full = ["server", "ane"]
-prism-backend = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend", "dep:image", "server", "metal-dispatch"]
-prism-backend-full = ["prism-backend", "tribunus-compute-core/prism-backend-full"]
-test-core = ["dep:tribunus-compute-core", "tribunus-compute-core/test-core"]
-test-hardware = ["prism-backend", "tribunus-compute-core/test-hardware"]
-test-compiler = ["prism-backend-full", "tribunus-compute-core/test-compiler"]
-gguf-compile = ["dep:tribunus-compute-core", "tribunus-compute-core/prism-backend"]
-full-apple = ["prism-backend", "ane", "server"]
-mlx-backend = ["dep:mlx-rs"]
+# No-op feature stubs — the prism-backend feature was removed along with the
+# optional `tribunus-compute-core` dependency. These stubs prevent `unexpected_cfg`
+# warnings in source code that still references these feature names.
+prism-backend = []
+gguf-compile = []
 generation-audio = []
 generation-diffusion = []
 generation-image = []

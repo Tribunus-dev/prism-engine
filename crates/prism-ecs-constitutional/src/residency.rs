@@ -5,13 +5,13 @@ use crate::lifecycle::DeviceLifecycle;
 use crate::lifecycle::ResidencyLifecycle;
 use crate::schema::{ComponentDurability, SchemaRegistry};
 use crate::types::*;
+use crate::world_txn::WorldTransitExt;
 use crate::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, TransientClass,
     TransientComponent, WorldTxn, WorldTxnError,
 };
 use prism_ecs_core::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
-use crate::world_txn::WorldTransitExt;
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
 // Artifact occupies IDs 1-4, model/residency use 5-12.
@@ -174,7 +174,7 @@ impl DeployModelCommand {
         validate_residency_schemas(schema_registry).map_err(|e| DeploymentError::SchemaError(e))?;
 
         // 2. Validate artifact entity exists and has required components
-        let artifact = prism_ecs_core::CompEntity(self.artifact_entity);
+        let artifact = Entity::new(self.artifact_entity, 0);
         if !world.has_entity(artifact) {
             return Err(DeploymentError::ArtifactNotFound(self.artifact_entity));
         }
@@ -187,7 +187,7 @@ impl DeployModelCommand {
             .ok_or(DeploymentError::ArtifactNotFound(self.artifact_entity))?;
 
         // 3. Validate device entity exists, is canonical, and is Ready
-        let device = prism_ecs_core::CompEntity(self.device_entity);
+        let device = Entity::new(self.device_entity, 0);
         if !world.has_entity(device) {
             return Err(DeploymentError::DeviceNotFound(self.device_entity));
         }
@@ -292,13 +292,14 @@ impl DeployModelCommand {
         if let Some(existing_model) = Self::find_model_by_artifact(world, self.artifact_entity) {
             // Model exists — update the associated residency rather than creating new
             let residency = Self::find_residency_for_model(world, existing_model)
-                .map(|id| Entity(id, 0))
+                .map(|id| Entity::new(id, 0))
                 .unwrap_or_else(|| WorldTxn::next_entity_id(world));
 
             let artifact_digest = world
-                .get_component::<crate::artifact::ArtifactDigest>(
-                    prism_ecs_core::CompEntity(self.artifact_entity),
-                )
+                .get_component::<crate::artifact::ArtifactDigest>(Entity::new(
+                    self.artifact_entity,
+                    0,
+                ))
                 .ok_or(DeploymentError::ArtifactNotFound(self.artifact_entity))?;
 
             let mut txn = WorldTxn::new(world);
@@ -309,7 +310,7 @@ impl DeployModelCommand {
             }
 
             txn.put_durable(
-                Entity(existing_model, 0),
+                Entity::new(existing_model, 0),
                 ModelArtifactRef {
                     artifact_id: self.artifact_entity,
                     digest: *artifact_digest,
@@ -355,12 +356,10 @@ impl DeployModelCommand {
 
         // 4. Fresh deployment: reserve entity IDs for model + residency
         let model_id = WorldTxn::next_entity_id(world);
-        let residency_id = Entity(model_id.id() + 1, 0); // next_entity_id doesn't advance, so offset by 1
+        let residency_id = Entity::new(model_id.id() + 1, 0); // next_entity_id doesn't advance, so offset by 1
 
         let artifact_digest = world
-            .get_component::<crate::artifact::ArtifactDigest>(
-                prism_ecs_core::CompEntity(self.artifact_entity),
-            )
+            .get_component::<crate::artifact::ArtifactDigest>(Entity::new(self.artifact_entity, 0))
             .ok_or(DeploymentError::ArtifactNotFound(self.artifact_entity))?;
 
         let mut txn = WorldTxn::new(world);
@@ -433,25 +432,24 @@ impl DeployModelCommand {
                 // Match by device — the most recent residency on this device for this model
                 // is the one we want. In a production system, add a ResidencyModelRef component.
                 if world
-                    .get_component::<ModelArtifactRef>(prism_ecs_core::CompEntity(model_entity))
+                    .get_component::<ModelArtifactRef>(Entity::new(model_entity, 0))
                     .map(|r| r.artifact_id == dev_ref.device_id)
                     .unwrap_or(false)
                 {
                     // Wrong heuristic — needs a ResidencyModelRef. For now this only matches
                     // idempotent redeployments that reach this code.
                     // Known limitation: needs ResidencyModelRef component.
-                    return Some(entity.0);
+                    return Some(entity.id());
                 }
             }
         }
         // Fallback: assume residency follows model in entity ID sequence
         if let Some(_artifact_ref) =
-            world.get_component::<ModelArtifactRef>(prism_ecs_core::CompEntity(model_entity))
+            world.get_component::<ModelArtifactRef>(Entity::new(model_entity, 0))
         {
             let candidate = model_entity + 1;
-            if world.has_entity(prism_ecs_core::CompEntity(candidate))
-                && world.entity_kind(prism_ecs_core::CompEntity(candidate))
-                    == Some(EntityKind::Residency)
+            if world.has_entity(Entity::new(candidate, 0))
+                && world.entity_kind(Entity::new(candidate, 0)) == Some(EntityKind::Residency)
             {
                 return Some(candidate);
             }
@@ -526,23 +524,23 @@ pub fn replay_model_deployed(
     let mut txn = WorldTxn::new(world);
 
     // Only spawn if not already present (idempotent replay)
-    if !world.has_entity(prism_ecs_core::CompEntity(model_id)) {
-        txn.stage_spawn(Entity(model_id, 0), EntityKind::Model);
+    if !world.has_entity(Entity::new(model_id, 0)) {
+        txn.stage_spawn(Entity::new(model_id, 0), EntityKind::Model);
     }
-    if !world.has_entity(prism_ecs_core::CompEntity(residency_id)) {
-        txn.stage_spawn(Entity(residency_id, 0), EntityKind::Residency);
+    if !world.has_entity(Entity::new(residency_id, 0)) {
+        txn.stage_spawn(Entity::new(residency_id, 0), EntityKind::Residency);
     }
 
     // Attach durable components (omit AllocationToken — ephemeral)
     txn.add_component(
-        Entity(model_id, 0),
+        Entity::new(model_id, 0),
         ComponentSchemaId(SCHEMA_MODEL_LIFECYCLE),
         SchemaVersion(1),
         ModelLifecycle::Created,
     );
     if let Some(artifact) = artifact_id {
         txn.add_component(
-            Entity(model_id, 0),
+            Entity::new(model_id, 0),
             ComponentSchemaId(SCHEMA_MODEL_ARTIFACT_REF),
             SchemaVersion(1),
             ModelArtifactRef {
@@ -571,7 +569,7 @@ pub fn replay_model_deployed(
         .unwrap_or(0);
 
     txn.add_component(
-        Entity(residency_id, 0),
+        Entity::new(residency_id, 0),
         ComponentSchemaId(SCHEMA_RESIDENCY_DEVICE_REF),
         SchemaVersion(1),
         ResidencyDeviceRef {
@@ -580,7 +578,7 @@ pub fn replay_model_deployed(
         },
     );
     txn.add_component(
-        Entity(residency_id, 0),
+        Entity::new(residency_id, 0),
         ComponentSchemaId(SCHEMA_RESIDENCY_MEMORY_CLAIM),
         SchemaVersion(1),
         ResidencyMemoryClaim {
@@ -589,7 +587,7 @@ pub fn replay_model_deployed(
         },
     );
     txn.add_component(
-        Entity(residency_id, 0),
+        Entity::new(residency_id, 0),
         ComponentSchemaId(SCHEMA_RESIDENCY_FORMAT),
         SchemaVersion(1),
         format,
@@ -597,7 +595,7 @@ pub fn replay_model_deployed(
     // Replay starts residency at Binding — NOT Resident — because the
     // allocation token was ephemeral and did not survive restart.
     txn.add_component(
-        Entity(residency_id, 0),
+        Entity::new(residency_id, 0),
         ComponentSchemaId(SCHEMA_RESIDENCY_LIFECYCLE),
         SchemaVersion(1),
         ResidencyLifecycle::Binding,
@@ -627,13 +625,12 @@ impl prism_ecs_core::Component for AllocationToken {}
 
 /// Convert a legacy `u64` entity identifier to the canonical `Entity` type.
 ///
-/// Uses generation `0` for backward compatibility with the legacy
-/// `World`/`CompEntity` storage. Callers migrating to the new
-/// `World`+`Entity(u64, u32)` API should replace this with proper
+/// Uses generation `0` for backward compatibility. Callers migrating to the new
+/// `Entity(u64, u32)` API should replace this with proper
 /// generation-aware entity construction.
 #[allow(dead_code)]
 pub(crate) fn as_entity(id: u64) -> Entity {
-    Entity(id, 0)
+    Entity::new(id, 0)
 }
 
 impl ClassifiedComponent for ModelId {
