@@ -21,12 +21,12 @@ const PRISM_PAGES = [
   },
   {
     eyebrow: 'The product surface',
-    title: 'One engine, two connected systems.',
+    title: 'One engine, three connected surfaces.',
     body: `<div class="split-block"><h3>Local runtime</h3><p>The <code>prism</code> CLI pulls, compiles, lists, and runs supported models. It offers interactive chat and an OpenAI-compatible HTTP endpoint.</p></div>
       <div class="split-block"><h3>Compute kernel</h3><p>The Tribunus compute core governs artifacts, devices, residency, sessions, work, compilation, ingress, and execution evidence.</p></div>
-      <div class="split-block"><h3>Integration</h3><p>Rust libraries, a C ABI, Swift bridge, Node-API bindings, CLI binaries, and server surfaces share the workspace.</p></div>
-      <p class="note">The focused runtime is usable today. The wider constitutional kernel is an active migration with explicit canonical, shadow, and development states.</p>`,
-    footer: 'Runtime + authority substrate'
+      <div class="split-block"><h3>PrismAgent</h3><p>The native SwiftUI desktop app connects chat, voice, the menu bar, hardware diagnostics, and the Compiler Lab to the local daemon.</p></div>
+      <p class="note">The focused runtime, native desktop shell, and dashboard are usable development surfaces. The wider constitutional kernel remains an active migration with explicit canonical, shadow, and development states.</p>`,
+    footer: 'Runtime · desktop · authority substrate'
   },
   {
     eyebrow: 'Compute images',
@@ -79,7 +79,7 @@ const PRISM_PAGES = [
     title: 'The strongest path is native and explicit.',
     body: `<div class="hardware-map"><div class="chip">Unified memory fabric</div><div class="hardware-row"><div><b>CPU</b><span>Control, fallback, validation</span></div><div><b>GPU / Metal</b><span>Primary accelerated dispatch</span></div><div><b>ANE / Core ML</b><span>Integrated, still qualifying</span></div></div><div class="memory-bar">Residency · layouts · synchronization · completion evidence</div></div>
       <p>Prism is optimized first for Apple Silicon, where Metal is the primary accelerated route. Accelerate and Core ML integrations serve distinct execution cells rather than interchangeable labels.</p>
-      <p class="note">A successful Metal build does not prove ANE execution, numerical admission, or every declared binary.</p>`,
+      <p class="note">Apple exposes ANE activity to Instruments, but not a stable public runtime utilization API. SLC utilization is not publicly exposed. Prism therefore reports ANE and SLC as best-effort diagnostics or unavailable; a successful Metal build does not prove ANE execution.</p>`,
     footer: 'Metal first, hardware honest'
   },
   {
@@ -87,7 +87,7 @@ const PRISM_PAGES = [
     title: 'Hardware differences stay visible.',
     body: `<table class="zine-table backend-status"><thead><tr><th>Target</th><th>Current claim</th></tr></thead><tbody>
       <tr><td>Apple Metal</td><td>Primary accelerated path</td></tr>
-      <tr><td>Core ML / ANE</td><td>Integrated; qualifying</td></tr>
+      <tr><td>Core ML / ANE</td><td>Supported route; placement qualifying</td></tr>
       <tr><td>CPU / Linux</td><td>Build checked; runtime hardening</td></tr>
       <tr><td>AMD ROCm</td><td>Development surface</td></tr>
       <tr><td>Intel / Level Zero</td><td>Development surface</td></tr>
@@ -127,8 +127,8 @@ const PRISM_PAGES = [
   {
     eyebrow: 'Work ahead',
     title: 'The next wins are narrow and executable.',
-    body: `<div class="work-item"><b>Authority cutover</b><p>Move remaining model, cache, trust, routing, and server registries onto transactional ECS paths.</p></div><div class="work-item"><b>Backend qualification</b><p>Attach numerical and performance claims to reproducible hardware evidence.</p></div><div class="work-item"><b>Portable execution</b><p>Harden CPU execution and make non-Apple memory, launch, and completion contracts explicit.</p></div><div class="work-item"><b>Adversarial recovery</b><p>Stress replay determinism, stale rejection, failure atomicity, privacy-preserving receipts, and projection rebuilding.</p></div>
-      <p class="collaboration">Challenge the architecture with executable counterexamples.</p>`,
+    body: `<div class="work-item"><b>Compiler Lab depth</b><p>Stream per-tensor compiler events, measured Pareto frontiers, verification gates, and reproducible search receipts into the native UI.</p></div><div class="work-item"><b>Authority cutover</b><p>Move remaining model, cache, trust, routing, and server registries onto transactional ECS paths.</p></div><div class="work-item"><b>Backend qualification</b><p>Attach numerical and performance claims to reproducible hardware evidence while keeping ANE and SLC telemetry honest.</p></div><div class="work-item"><b>Portable execution</b><p>Harden CPU execution and make non-Apple memory, launch, and completion contracts explicit.</p></div>
+      <p class="collaboration">The current UI is a live development surface, not a claim that every backend or telemetry counter is production-qualified.</p>`,
     footer: 'Contribute with evidence'
   },
   {
