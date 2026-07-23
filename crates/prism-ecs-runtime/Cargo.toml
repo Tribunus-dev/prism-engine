@@ -10,6 +10,7 @@ blake3 = "1"
 bincode = "1"
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-constitutional = { path = "../prism-ecs-constitutional" }
+prism-ecs-kernel = { path = "../prism-ecs-kernel" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

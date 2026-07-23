@@ -9,6 +9,7 @@ use crate::ports::{
     ProviderSelectionRequest, ProviderSelector, RecoveryReport, RuntimeError, SnapshotPayload,
     SnapshotStore, StaticProviderSelector, TickReceiptStore, WorldSnapshot,
 };
+use crate::backend::{BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher};
 use crate::schedule::{RuntimeSchedule, TickReceipt};
 
 use prism_ecs_constitutional::lifecycle_command::{
@@ -178,6 +179,7 @@ struct RuntimeKernelInner {
     lease_coordinator: Box<dyn LeaseCoordinator>,
     _clock: Box<dyn KernelClock>,
     provider_selector: Arc<dyn ProviderSelector>,
+    backend_resources: BackendExecutionRegistry,
     sequence: AtomicU64,
 }
 
@@ -188,6 +190,45 @@ pub struct KernelHandle {
 }
 
 impl KernelHandle {
+    /// Persistent compiled-artifact/backend resources for kernel dispatch.
+    pub fn backend_resources(&self) -> BackendExecutionRegistry {
+        self.inner.backend_resources.clone()
+    }
+
+    /// Register a compiled kernel artifact and return the ECS binding that can
+    /// be attached to a work entity before it enters the schedule.
+    pub fn register_kernel_artifact(
+        &self,
+        artifact: prism_ecs_kernel::KernelArtifact,
+    ) -> Result<KernelArtifactBinding, RuntimeError> {
+        self.inner.backend_resources.register_artifact(artifact)
+    }
+
+    /// Attach an already-registered artifact reference to a work entity in
+    /// the authoritative world.
+    pub fn bind_kernel_artifact(
+        &self,
+        work_entity: u64,
+        binding: KernelArtifactBinding,
+    ) -> Result<(), RuntimeError> {
+        let entity = Entity::new(work_entity, 0);
+        let mut world = self.inner.world.write().unwrap();
+        if !world.has_entity(entity) {
+            return Err(RuntimeError::Entity(format!(
+                "work entity {work_entity} does not exist"
+            )));
+        }
+        world
+            .add_component(entity, binding)
+            .map_err(|error| RuntimeError::Entity(format!("bind kernel artifact: {error}")))
+    }
+
+    /// Build the provider-neutral dispatcher backed by this kernel's
+    /// persistent backend resources.
+    pub fn kernel_dispatcher(&self) -> Arc<KernelBackendDispatcher> {
+        Arc::new(KernelBackendDispatcher::new(self.backend_resources()))
+    }
+
     /// Select the provider for an operation through the kernel-owned
     /// provider authority. The returned receipt records every attempted
     /// provider and the reason a fallback was used.
@@ -680,6 +721,7 @@ impl RuntimeKernel {
                 lease_coordinator,
                 _clock: clock,
                 provider_selector,
+                backend_resources: crate::backend::BackendExecutionRegistry::new(),
                 sequence: AtomicU64::new(0),
             }),
             schedule: parking_lot::Mutex::new(None),
@@ -741,6 +783,7 @@ impl RuntimeKernel {
                 lease_coordinator,
                 _clock: clock,
                 provider_selector,
+                backend_resources: crate::backend::BackendExecutionRegistry::new(),
                 sequence: AtomicU64::new(0),
             }),
             schedule: parking_lot::Mutex::new(None),
@@ -1105,9 +1148,15 @@ fn execute_complete_work(
 }
 
 fn execute_fail_work(
-    _world: &mut World,
+    world: &mut World,
     cmd: &FailWorkCommand,
 ) -> Result<CommandResult, RuntimeError> {
+    let e = Entity::new(cmd.work_entity, 0);
+    if world.has_entity(e) {
+        world
+            .add_component(e, WorkState::Failed)
+            .map_err(|error| RuntimeError::Entity(format!("fail work transition: {error}")))?;
+    }
     Ok(CommandResult::Lifecycle(LifecycleCommandResult::Failed {
         work_entity: cmd.work_entity,
         error: cmd.error.clone(),

@@ -2702,6 +2702,7 @@ dependencies = [
  "parking_lot",
  "prism-ecs-constitutional",
  "prism-ecs-core",
+ "prism-ecs-kernel",
  "serde",
  "serde_json",
  "thiserror",

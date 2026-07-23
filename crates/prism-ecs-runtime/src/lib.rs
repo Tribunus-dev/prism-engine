@@ -1,4 +1,5 @@
 pub mod fault;
+pub mod backend;
 pub mod inference;
 mod kernel;
 mod ports;
@@ -9,6 +10,10 @@ pub mod world_view;
 pub use fault::{
     FaultMode, FaultPlan, FaultPoint, FaultingCommandStore, FaultingLeaseCoordinator,
     FaultingSnapshotStore,
+};
+pub use backend::{
+    BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher,
+    KernelDispatchSpec,
 };
 pub use inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata};
 pub use kernel::{

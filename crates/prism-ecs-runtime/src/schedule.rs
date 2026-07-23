@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata};
+use crate::backend::KernelArtifactBinding;
 use crate::kernel::{
     AdmittedMarker, Command, CommandEnvelope, KernelHandle, PlannedMarker, PublishedMarker,
 };
@@ -72,6 +73,9 @@ pub struct SystemContext<'w> {
     pub kernel: &'w KernelHandle,
     /// Optional dispatcher for invoking external work.
     pub dispatcher: Option<&'w dyn WorkDispatcher>,
+    /// Kernel-owned dispatcher for work items carrying a compiled artifact
+    /// binding. Its resource state remains persistent in the KernelHandle.
+    pub kernel_dispatcher: Option<&'w dyn WorkDispatcher>,
     /// Active dispatch handles to poll.
     pub active_dispatches: &'w std::sync::Mutex<Vec<DispatchHandle>>,
     /// Selection receipts produced during this tick.
@@ -509,6 +513,7 @@ impl RuntimeSchedule {
             .as_ref()
             .ok_or_else(|| RuntimeError::Entity("schedule not bound to kernel".into()))?;
         let stage_topological = self.topological_order()?;
+        let kernel_dispatcher = kernel.kernel_dispatcher();
         let mut system_order = Vec::new();
         let mut emitted_commands = Vec::new();
         for stage in &self.stages {
@@ -537,6 +542,7 @@ impl RuntimeSchedule {
                             world_view: &world_view,
                             kernel,
                             dispatcher: self.dispatcher.as_deref(),
+                            kernel_dispatcher: Some(kernel_dispatcher.as_ref()),
                             active_dispatches: &self.active_dispatches,
                             provider_receipts: &self.provider_receipts,
                         };
@@ -1063,17 +1069,36 @@ impl System for DispatchSystem {
                 continue;
             };
 
-            let deadline_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64
-                + 30000;
-            let backend = selection.selected_backend().map(str::to_owned).unwrap_or_else(|| "auto".into());
             let effective_config = if config == "{}" {
                 serde_json::to_string(&selection).unwrap_or_else(|_| "{}".into())
             } else {
                 config.clone()
             };
+            let artifact_binding = ctx.world_view.get::<KernelArtifactBinding>(*entity).cloned();
+            if let Some(binding) = &artifact_binding {
+                if let Err(error) = ctx
+                    .kernel
+                    .backend_resources()
+                    .validate_dispatch(&backend, &binding.dispatch_spec())
+                {
+                    ctx.command_buffer
+                        .emit(CommandEnvelope::new(Command::Lifecycle(
+                            LifecycleCommand::FailWork(
+                                prism_ecs_constitutional::lifecycle_command::FailWorkCommand {
+                                    work_entity: entity.id(),
+                                    error: format!("artifact dispatch validation failed: {error}"),
+                                    lease_generation: 1,
+                                    retryable: false,
+                                },
+                            ),
+                        )));
+                    continue;
+                }
+            }
+            let effective_config = artifact_binding
+                .as_ref()
+                .map(|binding| binding.dispatch_config(&selection))
+                .unwrap_or(effective_config);
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::RecordDispatchIntent(RecordDispatchIntentCommand {
@@ -1083,7 +1108,12 @@ impl System for DispatchSystem {
                         deadline_ms,
                     }),
                 )));
-            if let Some(dispatcher) = ctx.dispatcher {
+            let dispatcher = if artifact_binding.is_some() {
+                ctx.dispatcher.or(ctx.kernel_dispatcher)
+            } else {
+                ctx.dispatcher
+            };
+            if let Some(dispatcher) = dispatcher {
                 let output_path = ctx
                     .world_view
                     .get::<WorkOutputPath>(*entity)
@@ -1099,7 +1129,6 @@ impl System for DispatchSystem {
                     attempt: 1,
                     plan_generation: 0,
                     lease_token: format!("work-lease:{}", entity.id()),
-                    deadline_ms,
                     deadline_ms,
                     backend,
                     config: effective_config,
@@ -1160,42 +1189,13 @@ impl System for CollectSystem {
         }
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
-        const MAX_COLLECT: usize = 32;
         if ctx.should_stop() {
             return Ok(());
         }
-        let mut dispatched: Vec<Entity> = ctx
-            .world_view
-            .query::<WorkState>()
-            .filter(|(entity, state)| {
-                matches!(**state, WorkState::Leased(_))
-                    && ctx.world_view.get::<PublishedMarker>(*entity).is_none()
-                    && ctx
-                        .world_view
-                        .get::<InferenceWorkMetadata>(*entity)
-                        .is_none()
-            })
-            .map(|(entity, _)| entity)
-            .collect();
-        dispatched.sort_by_key(|entity| entity.id());
-        dispatched.truncate(MAX_COLLECT);
-        for entity in dispatched {
-            if ctx.should_stop() {
-                break;
-            }
-            ctx.command_buffer
-                .emit(CommandEnvelope::new(Command::Lifecycle(
-                    LifecycleCommand::CompleteWork(
-                        prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
-                            work_entity: entity.id(),
-                            output: vec![],
-                            output_path: String::new(),
-                            lease_generation: 1,
-                        },
-                    ),
-                )));
-        }
-        if let Some(dispatcher) = ctx.dispatcher {
+        if let Some(dispatcher) = ctx
+            .dispatcher
+            .or(ctx.kernel_dispatcher)
+        {
             if let Ok(mut active) = ctx.active_dispatches.lock() {
                 let mut i = 0;
                 while i < active.len() {
@@ -1504,6 +1504,32 @@ mod tests {
         LifecycleCommandResult, MarkObservedCommand, RecordDispatchIntentCommand,
         RecordWorkPlanCommand, RequestCancellationCommand,
     };
+    use prism_ecs_kernel::{
+        BackendKind, CpuBackend, DispatchGeometry, KernelBackend, KernelCompileRequest,
+        KernelDescriptor, KernelVariant,
+    };
+
+    fn test_cpu_artifact() -> prism_ecs_kernel::KernelArtifact {
+        CpuBackend
+            .compile(&KernelCompileRequest {
+                source: b"schedule-uop".to_vec(),
+                descriptor: KernelDescriptor {
+                    name: "schedule_uop".into(),
+                    variant: KernelVariant::FP16GEMV,
+                    backend: BackendKind::CPU,
+                    source_digest: String::new(),
+                    binary_digest: String::new(),
+                    binding_signature: Vec::new(),
+                    dispatch_geometry: DispatchGeometry {
+                        threads_per_threadgroup: [1, 1, 1],
+                        threadgroups_per_grid: [1, 1, 1],
+                        threads_per_grid: [1, 1, 1],
+                    },
+                },
+                source_path: None,
+            })
+            .unwrap()
+    }
 
     #[test]
     fn test_lifecycle_pipeline_create_observe_plan_admit() {
@@ -1543,7 +1569,7 @@ mod tests {
         let tick0 = kernel.run_tick().expect("tick 0");
         assert_eq!(tick0.tick_number, 0);
         let total: usize = tick0.emitted_commands.iter().map(|c| c.len()).sum();
-        assert_eq!(total, 9, "tick 0: 9 commands across 8 stages");
+        assert_eq!(total, 5, "tick 0: lifecycle commands across 8 stages");
         for i in 1..=5 {
             let tick = kernel.run_tick().unwrap_or_else(|_| panic!("tick {i}"));
             let repeated_observation = tick
@@ -1553,6 +1579,72 @@ mod tests {
                 .any(|command| command.command_type.contains("MarkObserved"));
             assert!(!repeated_observation, "tick {i} must not re-observe work");
         }
+    }
+
+    #[test]
+    fn compiled_artifact_propagates_through_dispatch_collect_and_completion() {
+        let kernel = crate::kernel::RuntimeKernel::new();
+        let handle = kernel.handle();
+        let mut binding = handle
+            .register_kernel_artifact(test_cpu_artifact())
+            .expect("register compiled artifact");
+        binding.inputs = vec![vec![0x00, 0x3c], 2.0f32.to_ne_bytes().to_vec()];
+
+        let mut sched = RuntimeSchedule::new();
+        sched.register_system(Box::new(ObserveSystem)).unwrap();
+        sched.register_system(Box::new(PlanSystem)).unwrap();
+        sched.register_system(Box::new(AdmitSystem)).unwrap();
+        sched.register_system(Box::new(LeaseSystem)).unwrap();
+        sched.register_system(Box::new(DispatchSystem)).unwrap();
+        sched.register_system(Box::new(CollectSystem)).unwrap();
+        sched.register_system(Box::new(PublishSystem)).unwrap();
+        sched.bind(&handle);
+        sched.validate().unwrap();
+        kernel.set_schedule(sched);
+
+        let create = handle
+            .submit(CommandEnvelope::new(Command::Lifecycle(
+                LifecycleCommand::CreateWork(CreateWorkCommand {
+                    entity: 0,
+                    target_entity: 0,
+                    kind: "compile".into(),
+                    resource_claim: "{}".into(),
+                    output_path: String::new(),
+                    input_path: String::new(),
+                }),
+            )))
+            .expect("create work");
+        let work_entity = match create.result {
+            CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
+                work_entity, ..
+            }) => work_entity,
+            other => panic!("expected work creation, got {other:?}"),
+        };
+        handle
+            .bind_kernel_artifact(work_entity, binding)
+            .expect("bind artifact to work");
+
+        for _ in 0..5 {
+            kernel.run_tick().expect("run ECS tick");
+            if handle
+                .lock_world()
+                .get_component::<WorkState>(Entity::new(work_entity, 0))
+                .is_some_and(|state| state.is_terminal())
+            {
+                break;
+            }
+        }
+        let world = handle.lock_world();
+        assert_eq!(
+            world
+                .get_component::<WorkState>(Entity::new(work_entity, 0)),
+            Some(&WorkState::Completed)
+        );
+        let payload = world
+            .get_component::<crate::ports::ResultPayload>(Entity::new(work_entity, 0))
+            .expect("backend output receipt");
+        eprintln!("result bytes {:?}", payload.result.as_bytes());
+        assert!(!payload.result.is_empty(), "backend output receipt should contain bytes");
     }
 
     #[test]
