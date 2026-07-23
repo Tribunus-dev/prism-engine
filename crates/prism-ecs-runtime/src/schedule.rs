@@ -3,7 +3,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::kernel::{AdmittedMarker, Command, CommandEnvelope, KernelHandle, PlannedMarker, PublishedMarker};
+use crate::kernel::{
+    AdmittedMarker, Command, CommandEnvelope, KernelHandle, PlannedMarker, PublishedMarker,
+};
 use crate::ports::RuntimeError;
 use crate::ports::{DispatchHandle, DispatchRequest, DispatchStatus, WorkDispatcher};
 use prism_ecs_constitutional::lifecycle_command::{
@@ -56,6 +58,9 @@ pub struct SystemContext<'w> {
     pub stage: SystemStage,
     pub deadline: std::time::Instant,
     pub cancellation: AtomicBool,
+    /// Maximum number of non-terminal work items that may be admitted at once.
+    /// The committed decision still goes through the bound [`KernelHandle`].
+    pub admission_capacity: usize,
     pub command_buffer: CommandBuffer,
     pub world_view: &'w crate::world_view::WorldViewImpl<'w>,
     /// Optional dispatcher for invoking external work.
@@ -144,6 +149,8 @@ pub struct RuntimeSchedule {
     pub tick_count: AtomicU64,
     /// Per-stage timeout in milliseconds.
     pub stage_timeout_ms: u64,
+    /// Bounded active-work admission policy owned by this schedule.
+    pub admission_capacity: usize,
     /// Kernel handle for submitting emitted commands.
     pub kernel: Option<KernelHandle>,
     /// Provider-neutral dispatcher for adapter execution.
@@ -159,6 +166,7 @@ pub enum ScheduleError {
     CycleDetected(Vec<SystemId>),
     ConflictingParallelWrite(Vec<(SystemId, SystemId, String)>),
     InvalidStageDependency(SystemId, SystemId),
+    InvalidAdmissionCapacity,
 }
 
 impl RuntimeSchedule {
@@ -181,6 +189,7 @@ impl RuntimeSchedule {
             system_map: HashMap::new(),
             tick_count: AtomicU64::new(0),
             stage_timeout_ms: 5000,
+            admission_capacity: 32,
             kernel: None,
             dispatcher: None,
             active_dispatches: std::sync::Mutex::new(vec![]),
@@ -217,6 +226,17 @@ impl RuntimeSchedule {
     /// Register a provider-neutral dispatcher for adapter execution.
     pub fn set_dispatcher(&mut self, dispatcher: std::sync::Arc<dyn WorkDispatcher>) {
         self.dispatcher = Some(dispatcher);
+    }
+
+    /// Set the maximum number of non-terminal work items that can be admitted
+    /// concurrently. Zero would permanently strand work, so reject it before
+    /// the schedule is installed on a kernel.
+    pub fn set_admission_capacity(&mut self, capacity: usize) -> Result<(), ScheduleError> {
+        if capacity == 0 {
+            return Err(ScheduleError::InvalidAdmissionCapacity);
+        }
+        self.admission_capacity = capacity;
+        Ok(())
     }
 
     /// Validate the schedule: cycles, missing deps, duplicate IDs,
@@ -452,6 +472,7 @@ impl RuntimeSchedule {
                             stage: *stage,
                             deadline,
                             cancellation: AtomicBool::new(false),
+                            admission_capacity: self.admission_capacity,
                             command_buffer: buffer.clone(),
                             world_view: &world_view,
                             dispatcher: self.dispatcher.as_deref(),
@@ -555,7 +576,10 @@ impl System for ObserveSystem {
         let pending: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
-            .filter(|(entity, state)| **state == WorkState::Pending && ctx.world_view.get::<PlannedMarker>(*entity).is_none())
+            .filter(|(entity, state)| {
+                **state == WorkState::Pending
+                    && ctx.world_view.get::<PlannedMarker>(*entity).is_none()
+            })
             .take(MAX_OBSERVE)
             .map(|(entity, _)| entity)
             .collect();
@@ -604,7 +628,11 @@ impl System for PlanSystem {
         let observed: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
-            .filter(|(entity, state)| **state == WorkState::Ready && ctx.world_view.get::<PlannedMarker>(*entity).is_some() && ctx.world_view.get::<AdmittedMarker>(*entity).is_none())
+            .filter(|(entity, state)| {
+                **state == WorkState::Ready
+                    && ctx.world_view.get::<PlannedMarker>(*entity).is_some()
+                    && ctx.world_view.get::<AdmittedMarker>(*entity).is_none()
+            })
             .take(MAX_PLAN)
             .map(|(entity, _)| entity)
             .collect();
@@ -657,14 +685,32 @@ impl System for AdmitSystem {
         }
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
-        const MAX_ADMIT: usize = 64;
-        let planned: Vec<Entity> = ctx
+        const MAX_ADMIT_PER_TICK: usize = 64;
+        let active = ctx
             .world_view
             .query::<WorkState>()
-            .filter(|(entity, state)| **state == WorkState::Ready && ctx.world_view.get::<PlannedMarker>(*entity).is_some() && ctx.world_view.get::<AdmittedMarker>(*entity).is_none())
-            .take(MAX_ADMIT)
+            .filter(|(entity, state)| {
+                matches!(**state, WorkState::Ready | WorkState::Leased(_))
+                    && ctx.world_view.get::<AdmittedMarker>(*entity).is_some()
+            })
+            .count();
+        let available = ctx.admission_capacity.saturating_sub(active);
+        if available == 0 {
+            return Ok(());
+        }
+
+        let mut planned: Vec<Entity> = ctx
+            .world_view
+            .query::<WorkState>()
+            .filter(|(entity, state)| {
+                **state == WorkState::Ready
+                    && ctx.world_view.get::<PlannedMarker>(*entity).is_some()
+                    && ctx.world_view.get::<AdmittedMarker>(*entity).is_none()
+            })
             .map(|(entity, _)| entity)
             .collect();
+        planned.sort_by_key(|entity| entity.id());
+        planned.truncate(available.min(MAX_ADMIT_PER_TICK));
         for entity in planned {
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
@@ -709,7 +755,10 @@ impl System for LeaseSystem {
         let admitted: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
-            .filter(|(entity, state)| **state == WorkState::Ready && ctx.world_view.get::<AdmittedMarker>(*entity).is_some())
+            .filter(|(entity, state)| {
+                **state == WorkState::Ready
+                    && ctx.world_view.get::<AdmittedMarker>(*entity).is_some()
+            })
             .take(MAX_LEASE)
             .map(|(entity, _)| entity)
             .collect();
@@ -863,7 +912,10 @@ impl System for CollectSystem {
         let dispatched: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
-            .filter(|(entity, state)| matches!(**state, WorkState::Leased(_)) && ctx.world_view.get::<PublishedMarker>(*entity).is_none())
+            .filter(|(entity, state)| {
+                matches!(**state, WorkState::Leased(_))
+                    && ctx.world_view.get::<PublishedMarker>(*entity).is_none()
+            })
             .take(MAX_COLLECT)
             .map(|(entity, _)| entity)
             .collect();
@@ -954,7 +1006,10 @@ impl System for PublishSystem {
         let completed: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
-            .filter(|(entity, state)| **state == WorkState::Completed && ctx.world_view.get::<PublishedMarker>(*entity).is_none())
+            .filter(|(entity, state)| {
+                **state == WorkState::Completed
+                    && ctx.world_view.get::<PublishedMarker>(*entity).is_none()
+            })
             .take(MAX_PUBLISH)
             .map(|(entity, _)| entity)
             .collect();
@@ -1106,7 +1161,8 @@ mod tests {
         let outcome = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0, target_entity: 0,
+                    entity: 0,
+                    target_entity: 0,
                     kind: "compile".to_string(),
                     resource_claim: "{}".to_string(),
                     output_path: "".to_string(),
@@ -1137,13 +1193,160 @@ mod tests {
     }
 
     #[test]
+    fn test_admission_capacity_is_canonical_and_retries_queued_work() {
+        let kernel = crate::kernel::RuntimeKernel::new();
+        let handle = kernel.handle();
+        let mut sched = RuntimeSchedule::new();
+        sched
+            .set_admission_capacity(2)
+            .expect("positive admission capacity");
+        sched.register_system(Box::new(ObserveSystem)).unwrap();
+        sched.register_system(Box::new(PlanSystem)).unwrap();
+        sched.register_system(Box::new(AdmitSystem)).unwrap();
+        sched.bind(&handle);
+        sched.validate().unwrap();
+        kernel.set_schedule(sched);
+
+        for _ in 0..3 {
+            handle
+                .submit(CommandEnvelope::new(Command::Lifecycle(
+                    LifecycleCommand::CreateWork(CreateWorkCommand {
+                        entity: 0,
+                        target_entity: 0,
+                        kind: "inference".to_string(),
+                        resource_claim: "{\"max_tokens\":32}".to_string(),
+                        output_path: String::new(),
+                        input_path: String::new(),
+                    }),
+                )))
+                .expect("create inference work");
+        }
+
+        let first_tick = kernel.run_tick().expect("first admission tick");
+        let admitted_first_tick = first_tick
+            .emitted_commands
+            .iter()
+            .flatten()
+            .filter(|command| command.command_type.contains("AdmitWork"))
+            .count();
+        assert_eq!(
+            admitted_first_tick, 2,
+            "capacity must bound first admission"
+        );
+
+        let second_tick = kernel.run_tick().expect("second admission tick");
+        let admitted_second_tick = second_tick
+            .emitted_commands
+            .iter()
+            .flatten()
+            .filter(|command| command.command_type.contains("AdmitWork"))
+            .count();
+        assert_eq!(
+            admitted_second_tick, 0,
+            "queued work must remain unadmitted while the canonical active set is full"
+        );
+        assert!(
+            second_tick
+                .emitted_commands
+                .iter()
+                .flatten()
+                .all(|command| !command.command_type.contains("DeferWork")),
+            "capacity backpressure is represented by canonical queued state, not a second queue"
+        );
+    }
+
+    #[test]
+    fn test_cancelled_work_is_not_admitted() {
+        let kernel = crate::kernel::RuntimeKernel::new();
+        let handle = kernel.handle();
+        let mut sched = RuntimeSchedule::new();
+        sched.register_system(Box::new(ObserveSystem)).unwrap();
+        sched.register_system(Box::new(PlanSystem)).unwrap();
+        sched.register_system(Box::new(AdmitSystem)).unwrap();
+        sched.bind(&handle);
+        sched.validate().unwrap();
+        kernel.set_schedule(sched);
+
+        let work_entity = match handle
+            .submit(CommandEnvelope::new(Command::Lifecycle(
+                LifecycleCommand::CreateWork(CreateWorkCommand {
+                    entity: 0,
+                    target_entity: 0,
+                    kind: "inference".to_string(),
+                    resource_claim: "{}".to_string(),
+                    output_path: String::new(),
+                    input_path: String::new(),
+                }),
+            )))
+            .expect("create inference work")
+            .result
+        {
+            CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
+                work_entity, ..
+            }) => work_entity,
+            other => panic!("expected work creation, got {other:?}"),
+        };
+
+        handle
+            .submit(CommandEnvelope::new(Command::Lifecycle(
+                LifecycleCommand::MarkObserved(MarkObservedCommand {
+                    entity: work_entity,
+                    observed_epoch: 0,
+                }),
+            )))
+            .expect("observe work");
+        handle
+            .submit(CommandEnvelope::new(Command::Lifecycle(
+                LifecycleCommand::RecordWorkPlan(RecordWorkPlanCommand {
+                    entity: work_entity,
+                    backend: "auto".to_string(),
+                    output_format: "tokens".to_string(),
+                    resource_estimate_bytes: 1024,
+                    timeout_ms: 30000,
+                }),
+            )))
+            .expect("plan work");
+        let cancelled = handle
+            .submit(CommandEnvelope::new(Command::Lifecycle(
+                LifecycleCommand::RequestCancellation(RequestCancellationCommand {
+                    entity: work_entity,
+                    reason: "client disconnected".to_string(),
+                }),
+            )))
+            .expect("cancel work");
+        assert!(matches!(
+            cancelled.result,
+            CommandResult::Lifecycle(LifecycleCommandResult::RequestCancelled { .. })
+        ));
+
+        let tick = kernel.run_tick().expect("cancellation admission tick");
+        assert!(
+            tick.emitted_commands
+                .iter()
+                .flatten()
+                .all(|command| !command.command_type.contains("AdmitWork")),
+            "cancellation must win before admission"
+        );
+    }
+
+    #[test]
+    fn test_zero_admission_capacity_is_rejected() {
+        let mut schedule = RuntimeSchedule::new();
+        assert!(matches!(
+            schedule.set_admission_capacity(0),
+            Err(ScheduleError::InvalidAdmissionCapacity)
+        ));
+    }
+
+    #[test]
     fn test_direct_command_chain_to_completed() {
         let kernel = crate::kernel::RuntimeKernel::new();
         let handle = kernel.handle();
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0, target_entity: 0,
+                    entity: 0,
+                    target_entity: 0,
                     kind: "test".to_string(),
                     resource_claim: "{}".to_string(),
                     output_path: "".to_string(),
@@ -1187,7 +1390,8 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::AcquireWorkLease(AcquireWorkLeaseCommand {
                     work_entity,
-                    ttl_ms: 60000, lease_generation: 1,
+                    ttl_ms: 60000,
+                    lease_generation: 1,
                 }),
             )))
             .expect("lease");
@@ -1206,7 +1410,8 @@ mod tests {
                 LifecycleCommand::CompleteWork(
                     prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
                         work_entity,
-                        output: vec![], output_path: String::new(),
+                        output: vec![],
+                        output_path: String::new(),
                         lease_generation: 1,
                     },
                 ),
@@ -1247,7 +1452,8 @@ mod tests {
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0, target_entity: 0,
+                    entity: 0,
+                    target_entity: 0,
                     kind: "compile".to_string(),
                     resource_claim: "{}".to_string(),
                     output_path: output_str.clone(),
@@ -1294,7 +1500,8 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::AcquireWorkLease(AcquireWorkLeaseCommand {
                     work_entity,
-                    ttl_ms: 60000, lease_generation: 1,
+                    ttl_ms: 60000,
+                    lease_generation: 1,
                 }),
             )))
             .expect("lease");
@@ -1313,7 +1520,8 @@ mod tests {
                 LifecycleCommand::CompleteWork(
                     prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
                         work_entity,
-                        output: vec![], output_path: String::new(),
+                        output: vec![],
+                        output_path: String::new(),
                         lease_generation: 1,
                     },
                 ),
@@ -1417,14 +1625,17 @@ mod tests {
         sched.bind(&handle);
         sched.validate().unwrap();
         // Use FakeWorkDispatcher — immediately completes so CollectSystem can reconcile
-        sched.set_dispatcher(std::sync::Arc::new(crate::test_adapters::FakeWorkDispatcher));
+        sched.set_dispatcher(std::sync::Arc::new(
+            crate::test_adapters::FakeWorkDispatcher,
+        ));
         kernel.set_schedule(sched);
 
         // Submit CreateWork with output_path (the "command ingress")
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0, target_entity: 0,
+                    entity: 0,
+                    target_entity: 0,
                     kind: "compile".to_string(),
                     resource_claim: "{}".to_string(),
                     output_path: output_str.clone(),
@@ -1514,7 +1725,8 @@ mod tests {
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0, target_entity: 0,
+                    entity: 0,
+                    target_entity: 0,
                     kind: "compile".to_string(),
                     resource_claim: "{}".to_string(),
                     output_path: "".to_string(),
@@ -1537,7 +1749,8 @@ mod tests {
         let cancel = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::RequestCancellation(RequestCancellationCommand {
-                    entity: work_entity, reason: String::new(),
+                    entity: work_entity,
+                    reason: String::new(),
                 }),
             )))
             .expect("cancel");
@@ -1578,7 +1791,8 @@ mod tests {
         let _create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0, target_entity: 0,
+                    entity: 0,
+                    target_entity: 0,
                     kind: "compile".to_string(),
                     resource_claim: "{}".to_string(),
                     output_path: "/tmp/recovery-test.cimage".to_string(),
@@ -1632,14 +1846,17 @@ mod tests {
         sched.register_system(Box::new(CleanupSystem)).unwrap();
         sched.bind(&handle);
         sched.validate().unwrap();
-        sched.set_dispatcher(std::sync::Arc::new(crate::test_adapters::FakeWorkDispatcher));
+        sched.set_dispatcher(std::sync::Arc::new(
+            crate::test_adapters::FakeWorkDispatcher,
+        ));
         kernel.set_schedule(sched);
 
         // ── 3. Submit CreateWork with output path ──
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0, target_entity: 0,
+                    entity: 0,
+                    target_entity: 0,
                     kind: "compile".to_string(),
                     resource_claim: "{}".to_string(),
                     output_path: output_str.clone(),

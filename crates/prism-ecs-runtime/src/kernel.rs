@@ -1,7 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use prism_ecs_core::{Entity, EntityKind, World, WorldEpoch};
 
 use crate::ports::{
@@ -17,9 +16,15 @@ use prism_ecs_constitutional::lifecycle_command::{
     RequestCancellationCommand, ENVELOPE_SCHEMA_VERSION,
 };
 use prism_ecs_constitutional::work::WorkState;
-#[derive(Debug, Clone, Copy)] pub struct PlannedMarker; impl prism_ecs_core::Component for PlannedMarker {}
-#[derive(Debug, Clone, Copy)] pub struct AdmittedMarker; impl prism_ecs_core::Component for AdmittedMarker {}
-#[derive(Debug, Clone, Copy)] pub struct PublishedMarker; impl prism_ecs_core::Component for PublishedMarker {}
+#[derive(Debug, Clone, Copy)]
+pub struct PlannedMarker;
+impl prism_ecs_core::Component for PlannedMarker {}
+#[derive(Debug, Clone, Copy)]
+pub struct AdmittedMarker;
+impl prism_ecs_core::Component for AdmittedMarker {}
+#[derive(Debug, Clone, Copy)]
+pub struct PublishedMarker;
+impl prism_ecs_core::Component for PublishedMarker {}
 
 // ── Command / CommandResult / AgentSnapshot / KernelHealth ─────────────────
 
@@ -217,7 +222,8 @@ impl KernelHandle {
                     let cmd_result =
                         CommandResult::Lifecycle(LifecycleCommandResult::LeaseAcquired {
                             work_entity: cmd.work_entity,
-                            token: resource_key.clone(), lease_generation: cmd.lease_generation,
+                            token: resource_key.clone(),
+                            lease_generation: cmd.lease_generation,
                         });
                     let json = serde_json::to_string(&cmd_result).unwrap_or_default();
                     let epoch = self.inner.world.read().unwrap().current_epoch().0;
@@ -356,7 +362,9 @@ impl KernelHandle {
 
     /// Lock the world and return a mutex guard for read-only access.
     /// Used by the schedule to create a `WorldViewImpl` for each tick.
-    pub fn lock_world(&self) -> std::sync::RwLockReadGuard<'_, prism_ecs_core::World> { self.inner.world.read().unwrap() }
+    pub fn lock_world(&self) -> std::sync::RwLockReadGuard<'_, prism_ecs_core::World> {
+        self.inner.world.read().unwrap()
+    }
 
     /// Query kernel health.
     pub fn health(&self) -> KernelHealth {
@@ -588,7 +596,9 @@ impl RuntimeKernel {
     }
     /// Create a kernel with an existing world and default in-memory ports.
     /// This is used by the daemon to integrate the kernel with the authoritative PrismWorld.
-    pub fn with_existing_world(world: std::sync::Arc<std::sync::RwLock<prism_ecs_core::World>>) -> Self {
+    pub fn with_existing_world(
+        world: std::sync::Arc<std::sync::RwLock<prism_ecs_core::World>>,
+    ) -> Self {
         Self::with_existing_world_and_ports(
             world,
             Box::new(crate::test_adapters::InMemoryCommandStore::new()),
@@ -622,8 +632,6 @@ impl RuntimeKernel {
             schedule: parking_lot::Mutex::new(None),
         }
     }
-
-    
 
     pub fn handle(&self) -> KernelHandle {
         KernelHandle {
@@ -848,11 +856,19 @@ fn execute_create_work(
     world
         .add_component(spawned.entity, WorkState::Pending)
         .map_err(|e| RuntimeError::Entity(format!("failed to set state: {e}")))?;
+    let kind = match cmd.kind.trim().to_ascii_lowercase().as_str() {
+        "inference" | "run_inference" => prism_ecs_constitutional::work::WorkKind::RunInference,
+        "load_model" => prism_ecs_constitutional::work::WorkKind::LoadModel,
+        "validate" => prism_ecs_constitutional::work::WorkKind::Validate,
+        "package" => prism_ecs_constitutional::work::WorkKind::Package,
+        "teardown" => prism_ecs_constitutional::work::WorkKind::Teardown,
+        _ => prism_ecs_constitutional::work::WorkKind::CompileGraph,
+    };
     world
         .add_component(
             spawned.entity,
             prism_ecs_constitutional::work::WorkItemComponent {
-                kind: prism_ecs_constitutional::work::WorkKind::CompileGraph,
+                kind,
                 target_entity: prism_ecs_core::Entity::new(cmd.target_entity, 0),
                 retry_count: 0,
                 max_retries: 3,
@@ -913,7 +929,9 @@ fn execute_admit_work(
                 .map_err(|e| RuntimeError::Entity(format!("admit transition failed: {e}")))?;
         }
     }
-    world.add_component(e, AdmittedMarker).map_err(|e| RuntimeError::Entity(e.to_string()))?;
+    world
+        .add_component(e, AdmittedMarker)
+        .map_err(|e| RuntimeError::Entity(e.to_string()))?;
     Ok(CommandResult::Lifecycle(LifecycleCommandResult::Admitted {
         entity: cmd.entity,
     }))
@@ -1022,7 +1040,9 @@ fn execute_publish_result_cmd(
     world
         .add_component(e, payload)
         .map_err(|e| RuntimeError::Entity(format!("publish result failed: {e}")))?;
-    world.add_component(e, PublishedMarker).map_err(|e| RuntimeError::Entity(e.to_string()))?;
+    world
+        .add_component(e, PublishedMarker)
+        .map_err(|e| RuntimeError::Entity(e.to_string()))?;
     Ok(CommandResult::Lifecycle(
         LifecycleCommandResult::Published {
             entity: cmd.entity,
@@ -1045,7 +1065,9 @@ fn execute_mark_observed(
                 .map_err(|e| RuntimeError::Entity(format!("observe transition failed: {e}")))?;
         }
     }
-    world.add_component(e, PlannedMarker).map_err(|e| RuntimeError::Entity(e.to_string()))?;
+    world
+        .add_component(e, PlannedMarker)
+        .map_err(|e| RuntimeError::Entity(e.to_string()))?;
     Ok(CommandResult::Lifecycle(
         LifecycleCommandResult::MarkedObserved { entity: cmd.entity },
     ))
@@ -1122,4 +1144,43 @@ fn execute_register_model(
     // TODO: Wire ModelRegistration component from prism-ecs-constitutional
     // once model registration types are available.
     Ok(entity_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inference_work_command_preserves_request_kind_in_ecs() {
+        let mut world = World::new();
+        let result = execute_create_work(
+            &mut world,
+            &CreateWorkCommand {
+                entity: 0,
+                target_entity: 0,
+                kind: "inference".to_string(),
+                resource_claim: "{\"max_tokens\":32}".to_string(),
+                output_path: String::new(),
+                input_path: String::new(),
+            },
+        )
+        .expect("create inference work");
+        let work_entity = match result {
+            CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
+                work_entity, ..
+            }) => work_entity,
+            other => panic!("expected work creation, got {other:?}"),
+        };
+
+        let item = world
+            .get_component::<prism_ecs_constitutional::work::WorkItemComponent>(Entity::new(
+                work_entity,
+                0,
+            ))
+            .expect("work item component");
+        assert_eq!(
+            item.kind,
+            prism_ecs_constitutional::work::WorkKind::RunInference
+        );
+    }
 }
