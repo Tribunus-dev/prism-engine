@@ -37,6 +37,14 @@ body { font-family: var(--sans); }
     --dim: #91a99d;
   }
   .button.primary { background: #b8d9b7; color: #102017; }
+  .surface-card, .reality-bands article, .journey-guide-card,
+  .path-stage, .signature-inspector, .working-path-note, .figure-link,
+  .machine, .instrument-card, .pipeline-node, .receipt-diagram > div,
+  .memory-segment { background: #17231d; color: #eef7f0; border-color: #3a5047; }
+  .surface-main, .journey-guide-card-primary { background: #294332; color: #eef7f0; border-color: #5a8065; }
+  .surface-card p, .reality-bands p, .journey-guide-card p,
+  .surface-card code, .path-stage code { color: #b4c4bc; }
+  .surface-card code { background: #20352a; }
   .hero h1 span, h2 span { color: #b8d9b7; }
   .pulse, .window-live i { background: #83c29a; box-shadow: 0 0 0 4px #83c29a2e; }
   .hero-visual { background: #17231d; border-color: #3a5047; }
