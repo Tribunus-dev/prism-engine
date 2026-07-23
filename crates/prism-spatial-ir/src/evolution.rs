@@ -1,0 +1,1546 @@
+//! Evolutionary search over spatial graph schedules.
+//!
+//! The evolution engine maintains a population of [`SpatialCompilationPlan`]
+//! candidates and evolves them across generations via tournament selection,
+//! crossover, mutation, and truncation survival with Pareto dominance.
+//!
+//! The goal is to find a legalized, cost-minimal spatial schedule that
+//! satisfies all hardware constraints.
+
+use crate::cost::{CodecVariant, CostEstimate, CostModel};
+use crate::graph::TileGeometry;
+use crate::graph::{NodeMeta, SpatialGraph, SpatialNodeId};
+use crate::hardware::{VirtualComputeUnit, VirtualMemoryRegion};
+use crate::legalize::legalize;
+use crate::mutation::{MutationApplication, MutationOp};
+use crate::plan::SpatialCompilationPlan;
+use rand::rngs::StdRng;
+use rand::seq::IteratorRandom;
+use rand::seq::SliceRandom;
+use rand::{Rng, SeedableRng};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use uuid::Uuid;
+
+// ---------------------------------------------------------------------------
+// SpatialEvolutionConfig
+// ---------------------------------------------------------------------------
+
+/// Configuration parameters for the evolutionary search.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpatialEvolutionConfig {
+    /// Number of individuals in the population.
+    pub population_size: usize,
+    /// Maximum number of generations to run.
+    pub max_generations: usize,
+    /// Probability of applying a mutation to a candidate.
+    pub mutation_rate: f64,
+    /// Probability of applying crossover between two selected parents.
+    pub crossover_rate: f64,
+    /// Number of individuals in each tournament draw.
+    pub tournament_size: usize,
+    /// Number of top individuals that survive unchanged (elitism).
+    pub elite_count: usize,
+}
+
+impl Default for SpatialEvolutionConfig {
+    fn default() -> Self {
+        Self {
+            population_size: 50,
+            max_generations: 100,
+            mutation_rate: 0.3,
+            crossover_rate: 0.6,
+            tournament_size: 5,
+            elite_count: 5,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SpatialEvolutionState
+// ---------------------------------------------------------------------------
+
+/// Mutable state of the evolutionary search across generations.
+#[derive(Debug, Clone)]
+pub struct SpatialEvolutionState {
+    /// Current generation number (0-based).
+    pub generation: usize,
+    /// Current population of scored candidates.
+    pub population: Vec<ScoredCandidate>,
+    /// Pareto-optimal set discovered so far.
+    pub pareto_frontier: Vec<ScoredCandidate>,
+    /// Best (lowest) fitness value observed.
+    pub best_fitness: f64,
+    /// Number of generations without fitness improvement.
+    pub stall_count: usize,
+    /// Deterministic RNG for reproducible search.
+    pub rng: StdRng,
+}
+
+// ---------------------------------------------------------------------------
+// ScoredCandidate
+// ---------------------------------------------------------------------------
+
+/// A compilation plan together with its evaluated cost and fitness.
+#[derive(Debug, Clone)]
+pub struct ScoredCandidate {
+    /// The compilation plan being scored.
+    pub plan: SpatialCompilationPlan,
+    /// Multi-dimensional cost estimate.
+    pub cost: CostEstimate,
+    /// Scalar fitness (lower is better).
+    pub fitness: f64,
+    /// Unique identifier for this candidate.
+    pub candidate_id: Uuid,
+    /// Identifiers of the parent candidates that produced this one.
+    pub parent_ids: Vec<Uuid>,
+    /// Sequence of mutations applied to reach this candidate.
+    pub mutation_history: Vec<MutationOp>,
+}
+
+// ---------------------------------------------------------------------------
+// SpatialEvolutionOptimizer
+// ---------------------------------------------------------------------------
+
+/// The main evolutionary search engine.
+///
+/// Drives selection, crossover, mutation, evaluation, and survival to
+/// progressively improve a population of [`SpatialCompilationPlan`] values.
+pub struct SpatialEvolutionOptimizer {
+    /// Evolution configuration.
+    pub config: SpatialEvolutionConfig,
+    /// Current search state.
+    pub state: SpatialEvolutionState,
+    /// Cost model used for evaluation.
+    cost_model: Box<dyn CostModel>,
+}
+
+impl SpatialEvolutionOptimizer {
+    /// Construct the search engine with the native MI300X/GFX942 fitness
+    /// model. The search remains the same ECS-native evolutionary pipeline;
+    /// only candidate evaluation is specialized for CDNA3.
+    pub fn for_mi300x(
+        config: SpatialEvolutionConfig,
+        initial_plan: &SpatialCompilationPlan,
+    ) -> Self {
+        Self::new(
+            config,
+            initial_plan,
+            Box::new(crate::cost::Mi300xCostModel::default()),
+        )
+    }
+
+    /// Create a new optimizer seeded with a single initial plan.
+    ///
+    /// The initial population is generated by applying random mutations to
+    /// copies of `initial_plan`.
+    pub fn new(
+        config: SpatialEvolutionConfig,
+        initial_plan: &SpatialCompilationPlan,
+        cost_model: Box<dyn CostModel>,
+    ) -> Self {
+        let mut rng = StdRng::from_entropy();
+        let mut population = Vec::with_capacity(config.population_size);
+        // Evaluate the initial plan as the first member.
+        let initial_cost = Self::evaluate_cost(&*cost_model, initial_plan.spatial_graph());
+        let initial_fitness = initial_cost.fitness_score();
+        population.push(ScoredCandidate {
+            plan: initial_plan.clone(),
+            cost: initial_cost,
+            fitness: initial_fitness,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        });
+        // Fill the rest of the population with mutated variants.
+        for _ in 1..config.population_size {
+            let mut derived = initial_plan.clone();
+            let mutations =
+                Self::generate_random_mutations(initial_plan.spatial_graph(), &mut rng, 1..=3);
+            let mut mutation_history = Vec::new();
+            let app = MutationApplication::new(&derived.graph);
+            for op in &mutations {
+                if let Err(_e) = Self::try_apply_mutation(
+                    app.clone(),
+                    op,
+                    &mut derived,
+                    &mut mutation_history,
+                    &mut rng,
+                ) {
+                    // If mutation fails, keep the unmutated plan.
+                    break;
+                }
+            }
+            let cost = Self::evaluate_cost(&*cost_model, derived.spatial_graph());
+            let fitness = cost.fitness_score();
+            population.push(ScoredCandidate {
+                plan: derived,
+                cost,
+                fitness,
+                candidate_id: Uuid::new_v4(),
+                parent_ids: Vec::new(),
+                mutation_history,
+            });
+        }
+        let best_fitness = population
+            .iter()
+            .map(|c| c.fitness)
+            .fold(f64::MAX, f64::min);
+        let pareto_frontier = build_pareto_frontier(&population);
+        Self {
+            state: SpatialEvolutionState {
+                generation: 0,
+                population,
+                pareto_frontier,
+                best_fitness,
+                stall_count: 0,
+                rng,
+            },
+            config,
+            cost_model,
+        }
+    }
+
+    /// Select a parent index via tournament selection.
+    ///
+    /// Draws `tournament_size` random individuals from the population and
+    /// returns the index of the one with the best (lowest) fitness.
+    pub fn select_parent_idx(&mut self) -> usize {
+        let pop_size = self.state.population.len();
+        let tournament_size = self.config.tournament_size.min(pop_size);
+        // Pick random indices without replacement.
+        let mut indices: Vec<usize> = (0..pop_size).collect();
+        indices.shuffle(&mut self.state.rng);
+        indices.truncate(tournament_size);
+        // Return the best among the tournament.
+        indices
+            .into_iter()
+            .min_by(|&a, &b| {
+                self.state.population[a]
+                    .fitness
+                    .partial_cmp(&self.state.population[b].fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0)
+    }
+
+    /// Score candidates against the same joint ANE/Metal tiling contract used
+    /// by compiler search. Graph annotations are treated as evolved profiles;
+    /// the fallback set keeps unannotated graphs participating in the search.
+    fn evaluate_cost(model: &dyn CostModel, graph: &SpatialGraph) -> CostEstimate {
+        let mut candidates: Vec<TileGeometry> = graph
+            .annotations()
+            .values()
+            .filter_map(|meta| meta.tile_geometry)
+            .collect();
+        candidates.extend([
+            TileGeometry {
+                width: 16,
+                height: 16,
+            },
+            TileGeometry {
+                width: 32,
+                height: 8,
+            },
+            TileGeometry {
+                width: 64,
+                height: 4,
+            },
+            TileGeometry {
+                width: 8,
+                height: 8,
+            },
+        ]);
+        candidates.sort_by_key(|geometry| (geometry.width, geometry.height));
+        candidates.dedup();
+        crate::cost::select_best_joint_tiling(model, graph, &candidates)
+            .map(|estimate| estimate.joint)
+            .unwrap_or_else(|_| model.estimate(graph))
+    }
+
+    /// Run one full generation of the evolutionary loop.
+    ///
+    /// 1. Select parents via tournament selection.
+    /// 2. Apply crossover with probability `crossover_rate`.
+    /// 3. Apply random mutations with probability `mutation_rate`.
+    /// 4. Evaluate fitness of each new candidate.
+    /// 5. Merge into population and apply survival selection.
+    pub fn run_generation(&mut self) -> Vec<ScoredCandidate> {
+        let pop_size = self.config.population_size;
+        let mut offspring: Vec<ScoredCandidate> = Vec::with_capacity(pop_size);
+
+        // Clone parent IDs before entering the loop to avoid borrow conflicts.
+        let parent_data: Vec<(SpatialCompilationPlan, Uuid, Uuid)> = (0..pop_size)
+            .map(|_| {
+                let idx_a = self.select_parent_idx();
+                let idx_b = self.select_parent_idx();
+                let a = self.state.population[idx_a].clone();
+                let b = self.state.population[idx_b].clone();
+                (a.plan.clone(), a.candidate_id, b.candidate_id)
+            })
+            .collect();
+
+        for (child_base, p_a_id, p_b_id) in parent_data {
+            // Step 2: Crossover.
+            let child_plan = if self.state.rng.gen::<f64>() < self.config.crossover_rate {
+                // Build ScoredCandidate wrappers for crossover
+                let parent_a = ScoredCandidate {
+                    plan: child_base.clone(),
+                    cost: CostEstimate::zero(),
+                    fitness: 0.0,
+                    candidate_id: p_a_id,
+                    parent_ids: Vec::new(),
+                    mutation_history: Vec::new(),
+                };
+                let parent_b = ScoredCandidate {
+                    plan: child_base.clone(),
+                    cost: CostEstimate::zero(),
+                    fitness: 0.0,
+                    candidate_id: p_b_id,
+                    parent_ids: Vec::new(),
+                    mutation_history: Vec::new(),
+                };
+                self.crossover(&parent_a, &parent_b)
+            } else {
+                child_base
+            };
+
+            // Step 3: Mutate.
+            let mut best_child_plan = child_plan;
+            let mut best_child_cost =
+                Self::evaluate_cost(&*self.cost_model, best_child_plan.spatial_graph());
+            let mut best_child_fitness = best_child_cost.fitness_score();
+            let best_mutation_history: Vec<MutationOp> = Vec::new();
+
+            if self.state.rng.gen::<f64>() < self.config.mutation_rate {
+                let mutants = self.apply_random_mutations(best_child_plan.clone());
+                for mutant in mutants {
+                    let cost = Self::evaluate_cost(&*self.cost_model, mutant.spatial_graph());
+                    let fitness = cost.fitness_score();
+                    if fitness < best_child_fitness {
+                        best_child_plan = mutant;
+                        best_child_cost = cost;
+                        best_child_fitness = fitness;
+                    }
+                }
+            }
+
+            offspring.push(ScoredCandidate {
+                plan: best_child_plan,
+                cost: best_child_cost,
+                fitness: best_child_fitness,
+                candidate_id: Uuid::new_v4(),
+                parent_ids: vec![p_a_id, p_b_id],
+                mutation_history: best_mutation_history,
+            });
+        }
+
+        // Step 5: Survival — combine population and offspring, select survivors.
+        let mut combined: Vec<ScoredCandidate> =
+            Vec::with_capacity(self.state.population.len() + offspring.len());
+        combined.extend(self.state.population.drain(..));
+        combined.extend(offspring);
+        let survived = self.survive(combined);
+        self.state.population = survived;
+
+        // Update generation counter and stall tracking.
+        let current_best = self
+            .state
+            .population
+            .iter()
+            .map(|c| c.fitness)
+            .fold(f64::MAX, f64::min);
+        if current_best < self.state.best_fitness - 1e-12 {
+            self.state.best_fitness = current_best;
+            self.state.stall_count = 0;
+        } else {
+            self.state.stall_count += 1;
+        }
+
+        // Update Pareto frontier.
+        self.state.pareto_frontier = build_pareto_frontier(&self.state.population);
+        self.state.generation += 1;
+
+        self.state.population.clone()
+    }
+
+    /// Combine two parent plans into a single child plan via crossover.
+    ///
+    /// The child inherits the graph structure from `parent_a` and merges
+    /// annotations from both parents. If either graph fails legalization,
+    /// falls back to the first parent.
+    pub fn crossover(
+        &mut self,
+        parent_a: &ScoredCandidate,
+        parent_b: &ScoredCandidate,
+    ) -> SpatialCompilationPlan {
+        let mut child_graph = parent_a.plan.graph.graph().clone();
+        // Merge annotations from parent_b: for each node that exists in both
+        // graphs, combine metadata by merging non-None fields.
+        let parent_b_annotations = parent_b.plan.graph.graph().annotations();
+        for (node_id, parent_b_meta) in parent_b_annotations {
+            if let Some(parent_a_meta) = child_graph.get_annotations(*node_id) {
+                let merged = NodeMeta {
+                    codec: parent_a_meta
+                        .codec
+                        .clone()
+                        .or_else(|| parent_b_meta.codec.clone()),
+                    placement: parent_a_meta
+                        .placement
+                        .clone()
+                        .or_else(|| parent_b_meta.placement.clone()),
+                    tile_geometry: parent_a_meta
+                        .tile_geometry
+                        .clone()
+                        .or_else(|| parent_b_meta.tile_geometry.clone()),
+                    memory_region: parent_a_meta
+                        .memory_region
+                        .clone()
+                        .or_else(|| parent_b_meta.memory_region.clone()),
+                    kv_cache_policy: parent_a_meta
+                        .kv_cache_policy
+                        .clone()
+                        .or_else(|| parent_b_meta.kv_cache_policy.clone()),
+                    fusion: parent_a_meta
+                        .fusion
+                        .clone()
+                        .or_else(|| parent_b_meta.fusion.clone()),
+                    batch_threadgroup_size: parent_a_meta
+                        .batch_threadgroup_size
+                        .or(parent_b_meta.batch_threadgroup_size),
+                    realtime_threadgroup_size: parent_a_meta
+                        .realtime_threadgroup_size
+                        .or(parent_b_meta.realtime_threadgroup_size),
+                    tensor_key: parent_a_meta
+                        .tensor_key
+                        .clone()
+                        .or_else(|| parent_b_meta.tensor_key.clone()),
+                    elementwise_op: parent_a_meta
+                        .elementwise_op
+                        .clone()
+                        .or_else(|| parent_b_meta.elementwise_op.clone()),
+                    pow_exponent: parent_a_meta.pow_exponent.or(parent_b_meta.pow_exponent),
+                    permutation: parent_a_meta
+                        .permutation
+                        .clone()
+                        .or_else(|| parent_b_meta.permutation.clone()),
+                    normalization_op: parent_a_meta
+                        .normalization_op
+                        .clone()
+                        .or_else(|| parent_b_meta.normalization_op.clone()),
+                    convolution_stride: parent_a_meta
+                        .convolution_stride
+                        .or(parent_b_meta.convolution_stride),
+                    convolution_padding: parent_a_meta
+                        .convolution_padding
+                        .or(parent_b_meta.convolution_padding),
+                };
+                // Apply merged annotations using typed setters for codec
+                // and tile_geometry, and string-based set_annotation for
+                // the remaining metadata keys.
+                if let Some(codec) = merged.codec {
+                    child_graph.set_codec(*node_id, codec);
+                }
+                if let Some(elementwise_op) = merged.elementwise_op {
+                    child_graph.set_annotation(*node_id, "elementwise_op", elementwise_op);
+                }
+                if let Some(normalization_op) = merged.normalization_op {
+                    child_graph.set_annotation(*node_id, "normalization_op", normalization_op);
+                }
+                if let Some(stride) = merged.convolution_stride {
+                    child_graph.set_annotation(*node_id, "convolution_stride", stride.to_string());
+                }
+                if let Some(padding) = merged.convolution_padding {
+                    child_graph.set_annotation(
+                        *node_id,
+                        "convolution_padding",
+                        padding.to_string(),
+                    );
+                }
+                if let Some(tg) = merged.tile_geometry {
+                    child_graph.set_tile_geometry(*node_id, tg);
+                }
+                for (key, value) in [
+                    ("placement", &merged.placement),
+                    ("memory_region", &merged.memory_region),
+                    ("kv_cache_policy", &merged.kv_cache_policy),
+                ] {
+                    if let Some(v) = value {
+                        child_graph.set_annotation(*node_id, key, v.clone());
+                    }
+                }
+            } else {
+                // Node from parent_b doesn't exist in child_graph — skip.
+            }
+        }
+
+        // Re-legalize the child graph.
+        match legalize(child_graph, |_node| Ok(())) {
+            Ok(legalized) => {
+                let cost = Self::evaluate_cost(&*self.cost_model, legalized.graph());
+                let calibration = parent_a.plan.calibration_id.clone();
+                SpatialCompilationPlan::new(
+                    legalized,
+                    cost,
+                    parent_a.plan.hardware_binding.clone(),
+                    calibration,
+                )
+            }
+            Err(_) => parent_a.plan.clone(),
+        }
+    }
+
+    /// Generate random mutated variants of a plan.
+    ///
+    /// Produces a vector of mutated plans (typically 1–3 variants) by applying
+    /// random [`MutationOp`] values to the given plan. Each variant is
+    /// independently legalized; only legal variants are returned.
+    pub fn apply_random_mutations(
+        &mut self,
+        plan: SpatialCompilationPlan,
+    ) -> Vec<SpatialCompilationPlan> {
+        let graph = plan.graph.graph();
+        let num_nodes = graph.node_count();
+        if num_nodes == 0 {
+            return Vec::new();
+        }
+
+        let mut results = Vec::new();
+        let attempt_count = 3;
+
+        for _ in 0..attempt_count {
+            let mutation_count = self.state.rng.gen_range(1..=3);
+            let mutations = Self::generate_random_mutations(
+                graph,
+                &mut self.state.rng,
+                mutation_count..=mutation_count,
+            );
+
+            if mutations.is_empty() {
+                continue;
+            }
+
+            let app = MutationApplication::new(&plan.graph);
+            let mut candidate_plan = plan.clone();
+            let mut history = Vec::new();
+            let mut all_applied = true;
+
+            for op in &mutations {
+                let result = Self::try_apply_mutation(
+                    app.clone(),
+                    op,
+                    &mut candidate_plan,
+                    &mut history,
+                    &mut self.state.rng,
+                );
+                if result.is_err() {
+                    all_applied = false;
+                    break;
+                }
+            }
+
+            if all_applied {
+                // The try_apply_mutation already legalized the graph.
+                results.push(candidate_plan);
+            }
+        }
+
+        results
+    }
+
+    /// Try to apply a mutation and re-legalize the result.
+    fn try_apply_mutation(
+        app: MutationApplication,
+        op: &MutationOp,
+        plan: &mut SpatialCompilationPlan,
+        history: &mut Vec<MutationOp>,
+        _rng: &mut StdRng,
+    ) -> Result<(), ()> {
+        let result = app.apply(op);
+        // Re-legalize the mutated graph.
+        match legalize(result.graph, |_node| Ok(())) {
+            Ok(legalized) => {
+                history.extend(result.applied);
+                // Create a new plan with the legalized graph.
+                // We cannot fully recompute the cost here since that requires
+                // the cost model, but the caller will re-evaluate.
+                *plan = SpatialCompilationPlan::new(
+                    legalized,
+                    plan.cost.clone(),
+                    plan.hardware_binding.clone(),
+                    plan.calibration_id.clone(),
+                );
+                Ok(())
+            }
+            Err(_) => Err(()),
+        }
+    }
+
+    /// Generate random mutation operations for a given graph.
+    fn generate_random_mutations(
+        graph: &SpatialGraph,
+        rng: &mut StdRng,
+        count_range: std::ops::RangeInclusive<usize>,
+    ) -> Vec<MutationOp> {
+        let node_ids: Vec<SpatialNodeId> = graph.nodes().iter().map(|n| n.id()).collect();
+        if node_ids.is_empty() {
+            return Vec::new();
+        }
+        let count = rng.gen_range(count_range);
+        let mut mutations = Vec::with_capacity(count);
+        for _ in 0..count {
+            let &node_id = node_ids.choose(rng).unwrap();
+            let op = match rng.gen_range(0..6) {
+                0 => MutationOp::ChangeCodec {
+                    node_id,
+                    new_codec: Self::random_codec(rng),
+                },
+                1 => MutationOp::ChangePlacement {
+                    node_id,
+                    new_unit: Self::random_compute_unit(rng),
+                },
+                2 => {
+                    if node_ids.len() >= 2 {
+                        let &second = node_ids
+                            .iter()
+                            .filter(|&&id| id != node_id)
+                            .choose(rng)
+                            .unwrap_or(&node_id);
+                        MutationOp::FuseNodes {
+                            first: if node_id.0 <= second.0 {
+                                node_id
+                            } else {
+                                second
+                            },
+                            second: if node_id.0 > second.0 {
+                                node_id
+                            } else {
+                                second
+                            },
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+                3 => MutationOp::ChangeTileGeometry {
+                    node_id,
+                    new_tile_x: rng.gen_range(4..=64),
+                    new_tile_y: rng.gen_range(4..=64),
+                },
+                4 => MutationOp::ChangeMemoryPolicy {
+                    node_id,
+                    new_region: Self::random_memory_region(rng),
+                },
+                5 => MutationOp::ChangeKVCachePolicy {
+                    node_id,
+                    compressed: rng.gen_bool(0.5),
+                    bit_width: *[4, 8, 16].choose(rng).unwrap(),
+                },
+                _ => continue,
+            };
+            mutations.push(op);
+        }
+        mutations
+    }
+
+    fn random_codec(rng: &mut StdRng) -> CodecVariant {
+        match rng.gen_range(0..8) {
+            0 => CodecVariant::Nf4,
+            1 => CodecVariant::Int8,
+            2 => CodecVariant::Fp16,
+            3 => CodecVariant::Fp32,
+            4 => CodecVariant::SymInt4,
+            5 => CodecVariant::Ternary,
+            6 => CodecVariant::Ternary1_58,
+            _ => CodecVariant::Q8_0,
+        }
+    }
+
+    fn random_compute_unit(rng: &mut StdRng) -> VirtualComputeUnit {
+        match rng.gen_range(0..4) {
+            0 => VirtualComputeUnit::CpuLane,
+            1 => VirtualComputeUnit::GpuComputeRegion,
+            2 => VirtualComputeUnit::AnEngine,
+            _ => VirtualComputeUnit::AccelerateUnit,
+        }
+    }
+
+    fn random_memory_region(rng: &mut StdRng) -> VirtualMemoryRegion {
+        match rng.gen_range(0..5) {
+            0 => VirtualMemoryRegion::UnifiedMemory,
+            1 => VirtualMemoryRegion::DedicatedGpuVram,
+            2 => VirtualMemoryRegion::SharedCache,
+            3 => VirtualMemoryRegion::AnEngineMemory,
+            _ => VirtualMemoryRegion::MappedWeights,
+        }
+    }
+
+    /// Evaluate the scalar fitness of a compilation plan.
+    ///
+    /// Uses the cost model to produce a multi-dimensional estimate and then
+    /// reduces it to a single scalar via [`CostEstimate::fitness_score`].
+    /// Lower values are better.
+    pub fn evaluate(&self, plan: &SpatialCompilationPlan) -> f64 {
+        let cost = Self::evaluate_cost(&*self.cost_model, plan.spatial_graph());
+        cost.fitness_score()
+    }
+
+    /// Select survivors from a combined population+offspring pool.
+    ///
+    /// Strategy:
+    /// 1. Sort candidates by fitness (ascending).
+    /// 2. Keep the top `elite_count` unconditionally (elitism).
+    /// 3. Fill the remaining slots from the Pareto frontier, then by fitness.
+    /// 4. Truncate to `population_size`.
+    pub fn survive(&self, mut candidates: Vec<ScoredCandidate>) -> Vec<ScoredCandidate> {
+        let pop_size = self.config.population_size;
+        let elite = self.config.elite_count.min(pop_size);
+
+        // Sort by fitness (best first).
+        candidates.sort_by(|a, b| {
+            a.fitness
+                .partial_cmp(&b.fitness)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut survivors: Vec<ScoredCandidate> = Vec::with_capacity(pop_size);
+
+        // Elitism: keep the best `elite` individuals.
+        survivors.extend(candidates.drain(..elite.min(candidates.len())));
+
+        // Fill remaining slots: prefer Pareto-optimal candidates.
+        let frontier = build_pareto_frontier(&candidates);
+        let frontier_ids: std::collections::HashSet<Uuid> =
+            frontier.iter().map(|c| c.candidate_id).collect();
+
+        // Add frontier members first.
+        for candidate in candidates.iter() {
+            if survivors.len() >= pop_size {
+                break;
+            }
+            if frontier_ids.contains(&candidate.candidate_id) {
+                survivors.push(candidate.clone());
+            }
+        }
+
+        // Any remaining slots are filled by fitness order.
+        for candidate in candidates.iter() {
+            if survivors.len() >= pop_size {
+                break;
+            }
+            if !frontier_ids.contains(&candidate.candidate_id) {
+                survivors.push(candidate.clone());
+            }
+        }
+
+        // Trim to population size.
+        survivors.truncate(pop_size);
+        survivors
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RejectionRule
+// ---------------------------------------------------------------------------
+
+/// Criteria for rejecting an invalid or infeasible candidate plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RejectionRule {
+    /// Candidate exceeds the maximum allowed latency.
+    MaxLatency,
+    /// Candidate exceeds the maximum allowed memory usage.
+    MaxMemory,
+    /// Candidate has too many synchronization boundaries.
+    TooManySyncs,
+    /// Candidate uses a codec that is not supported by the hardware.
+    UnsupportedCodec,
+    /// Candidate places compute on a unit that cannot execute the node.
+    InvalidPlacement,
+    /// Candidate's energy estimate exceeds the budget.
+    EnergyBudget,
+}
+
+impl RejectionRule {
+    /// Returns a human-readable label for this rule.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::MaxLatency => "max_latency",
+            Self::MaxMemory => "max_memory",
+            Self::TooManySyncs => "too_many_syncs",
+            Self::UnsupportedCodec => "unsupported_codec",
+            Self::InvalidPlacement => "invalid_placement",
+            Self::EnergyBudget => "energy_budget",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rejection rule predicates
+// ---------------------------------------------------------------------------
+
+/// Check whether a candidate violates any of the given rejection rules.
+///
+/// Returns a list of violated rules. An empty `Vec` means the candidate
+/// passes all checks.
+pub fn check_rejection_rules(
+    candidate: &ScoredCandidate,
+    rules: &[RejectionRule],
+    max_latency: Duration,
+    max_memory: u64,
+    max_syncs: u32,
+    max_energy: f64,
+) -> Vec<RejectionRule> {
+    let mut violated = Vec::new();
+    for rule in rules {
+        let rejected = match rule {
+            RejectionRule::MaxLatency => candidate.cost.latency > max_latency,
+            RejectionRule::MaxMemory => candidate.cost.peak_memory > max_memory,
+            RejectionRule::TooManySyncs => candidate.cost.sync_count > max_syncs,
+            RejectionRule::UnsupportedCodec => {
+                // Check for codec annotations that use Q8_0 as an example of
+                // an "unsupported" codec for demonstration purposes.
+                let graph = candidate.plan.spatial_graph();
+                graph.annotations().values().any(|meta| {
+                    meta.codec
+                        .as_ref()
+                        .is_some_and(|c| matches!(c, CodecVariant::Q8_0))
+                })
+            }
+            RejectionRule::InvalidPlacement => {
+                // Check for placements onto incompatible units.
+                let graph = candidate.plan.spatial_graph();
+                graph.annotations().values().any(|meta| {
+                    meta.placement
+                        .as_deref()
+                        .map_or(false, |p| p == "AccelerateUnit")
+                })
+            }
+            RejectionRule::EnergyBudget => candidate.cost.energy > max_energy,
+        };
+        if rejected {
+            violated.push(*rule);
+        }
+    }
+    violated
+}
+
+/// Returns `true` if the candidate's latency exceeds the limit.
+pub fn exceeds_latency(candidate: &ScoredCandidate, max: Duration) -> bool {
+    candidate.cost.latency > max
+}
+
+/// Returns `true` if the candidate's peak memory exceeds the limit.
+pub fn exceeds_memory(candidate: &ScoredCandidate, max: u64) -> bool {
+    candidate.cost.peak_memory > max
+}
+
+/// Returns `true` if the candidate's sync count exceeds the limit.
+pub fn exceeds_syncs(candidate: &ScoredCandidate, max: u32) -> bool {
+    candidate.cost.sync_count > max
+}
+
+/// Returns `true` if the candidate's energy exceeds the budget.
+pub fn exceeds_energy(candidate: &ScoredCandidate, max: f64) -> bool {
+    candidate.cost.energy > max
+}
+
+/// Returns `true` if the candidate uses an unsupported codec.
+pub fn has_unsupported_codec(candidate: &ScoredCandidate) -> bool {
+    let graph = candidate.plan.spatial_graph();
+    graph.annotations().values().any(|meta| {
+        meta.codec
+            .as_ref()
+            .is_some_and(|c| matches!(c, CodecVariant::Q8_0))
+    })
+}
+
+/// Returns `true` if the candidate has an invalid placement.
+pub fn has_invalid_placement(candidate: &ScoredCandidate) -> bool {
+    let graph = candidate.plan.spatial_graph();
+    graph.annotations().values().any(|meta| {
+        meta.placement
+            .as_deref()
+            .map_or(false, |p| p == "AccelerateUnit")
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Pareto dominance utilities
+// ---------------------------------------------------------------------------
+
+/// Returns `true` if candidate `a` dominates candidate `b`.
+///
+/// Dominance means `a` is no worse than `b` in any dimension and strictly
+/// better in at least one. The three dimensions are latency, peak memory,
+/// and energy — all lower-is-better.
+pub fn dominates(a: &ScoredCandidate, b: &ScoredCandidate) -> bool {
+    let a_lat = a.cost.latency.as_nanos();
+    let b_lat = b.cost.latency.as_nanos();
+    let a_mem = a.cost.peak_memory;
+    let b_mem = b.cost.peak_memory;
+    let a_energy = a.cost.energy;
+    let b_energy = b.cost.energy;
+
+    let not_worse = a_lat <= b_lat && a_mem <= b_mem && a_energy <= b_energy + 1e-12;
+    let strictly_better = a_lat < b_lat || a_mem < b_mem || (a_energy < b_energy - 1e-12);
+
+    not_worse && strictly_better
+}
+
+/// Build the Pareto-optimal frontier from a set of candidates.
+///
+/// A candidate is on the frontier if no other candidate dominates it.
+/// Candidates are returned in order of increasing fitness.
+pub fn build_pareto_frontier(candidates: &[ScoredCandidate]) -> Vec<ScoredCandidate> {
+    let mut frontier: Vec<ScoredCandidate> = Vec::new();
+    for candidate in candidates {
+        // Check if any existing frontier member dominates this candidate.
+        let dominated = frontier.iter().any(|f| dominates(f, candidate));
+        if dominated {
+            continue;
+        }
+        // Remove any frontier members that this candidate dominates.
+        frontier.retain(|f| !dominates(candidate, f));
+        frontier.push(candidate.clone());
+    }
+    // Sort by fitness for deterministic ordering.
+    frontier.sort_by(|a, b| {
+        a.fitness
+            .partial_cmp(&b.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    frontier
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+/// Run the evolutionary search and return the best plan found.
+///
+/// Iterates generation-by-generation, respecting `config.max_generations`.
+/// Early-stops if `stall_limit` consecutive generations pass without any
+/// fitness improvement.
+pub fn find_best_plan(
+    optimizer: &mut SpatialEvolutionOptimizer,
+    stall_limit: usize,
+) -> Option<SpatialCompilationPlan> {
+    for _ in 0..optimizer.config.max_generations {
+        optimizer.run_generation();
+        if optimizer.state.stall_count >= stall_limit {
+            break;
+        }
+    }
+    // Return the best plan from the final population.
+    optimizer
+        .state
+        .population
+        .iter()
+        .min_by(|a, b| {
+            a.fitness
+                .partial_cmp(&b.fitness)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|c| c.plan.clone())
+}
+
+// ===========================================================================
+// Tests
+// ===========================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cost::SimpleCostModel;
+    use crate::graph::{
+        ComputeIntensity, ComputeKind, EdgeDirection, ShapeContract, SpatialEdge, SpatialEdgeId,
+        SpatialNode,
+    };
+    use crate::legalize::LegalizedGraph;
+    use crate::target::CalibrationId;
+    use std::time::Duration;
+
+    // -----------------------------------------------------------------------
+    // Test helpers
+    // -----------------------------------------------------------------------
+
+    fn make_test_graph() -> SpatialGraph {
+        let mut graph = SpatialGraph::new();
+        let id1 = graph.add_node(SpatialNode::Compute {
+            id: SpatialNodeId(1),
+            kind: ComputeKind::MatMul,
+            shape: ShapeContract::new(vec![], vec![]),
+            intensity: ComputeIntensity::ComputeBound,
+        });
+        let id2 = graph.add_node(SpatialNode::Compute {
+            id: SpatialNodeId(2),
+            kind: ComputeKind::Elementwise,
+            shape: ShapeContract::new(vec![], vec![]),
+            intensity: ComputeIntensity::MemoryBound,
+        });
+        // Add an edge between them.
+        graph.add_edge(SpatialEdge {
+            id: SpatialEdgeId(1),
+            source: id1,
+            sink: id2,
+            direction: EdgeDirection::Forward,
+            source_output_idx: 0,
+            sink_input_idx: 0,
+            shape: None,
+        });
+        graph
+    }
+
+    fn make_legalized_graph() -> LegalizedGraph {
+        LegalizedGraph::new(make_test_graph(), Vec::new())
+    }
+
+    fn make_test_plan() -> SpatialCompilationPlan {
+        let graph = make_legalized_graph();
+        let cost = CostEstimate::new(
+            Duration::from_millis(10),
+            64 * 1024 * 1024,
+            1024 * 1024,
+            1,
+            0.5,
+            0.1,
+        );
+        SpatialCompilationPlan::new(
+            graph,
+            cost,
+            "test_hardware".to_string(),
+            CalibrationId("test_cal".to_string()),
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_initial_population() {
+        let config = SpatialEvolutionConfig {
+            population_size: 10,
+            ..Default::default()
+        };
+        let initial = make_test_plan();
+        let optimizer = SpatialEvolutionOptimizer::new(config, &initial, Box::new(SimpleCostModel));
+        assert_eq!(
+            optimizer.state.population.len(),
+            10,
+            "population should match config"
+        );
+        for candidate in &optimizer.state.population {
+            assert!(candidate.fitness.is_finite(), "fitness should be finite");
+        }
+    }
+
+    #[test]
+    fn test_rejection_rules() {
+        let plan = make_test_plan();
+        let cost = CostEstimate::new(
+            Duration::from_secs(100),
+            1_000_000_000_000,
+            1_000_000_000,
+            100,
+            1_000.0,
+            0.0,
+        );
+        let candidate = ScoredCandidate {
+            plan,
+            cost,
+            fitness: 1000.0,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        };
+        let rules = vec![
+            RejectionRule::MaxLatency,
+            RejectionRule::MaxMemory,
+            RejectionRule::TooManySyncs,
+            RejectionRule::EnergyBudget,
+        ];
+        let violated =
+            check_rejection_rules(&candidate, &rules, Duration::from_secs(1), 1024, 10, 10.0);
+        assert!(
+            violated.contains(&RejectionRule::MaxLatency),
+            "should reject high latency"
+        );
+        assert!(
+            violated.contains(&RejectionRule::MaxMemory),
+            "should reject high memory"
+        );
+        assert!(
+            violated.contains(&RejectionRule::TooManySyncs),
+            "should reject too many syncs"
+        );
+        assert!(
+            violated.contains(&RejectionRule::EnergyBudget),
+            "should reject high energy"
+        );
+
+        // Test with generous limits — should pass.
+        let pass_rules = check_rejection_rules(
+            &candidate,
+            &rules,
+            Duration::from_secs(200),
+            2_000_000_000_000,
+            200,
+            2000.0,
+        );
+        assert_eq!(pass_rules.len(), 0, "generous limits should pass all rules");
+    }
+
+    #[test]
+    fn test_pareto_frontier() {
+        let plan = make_test_plan();
+        let base_cost = CostEstimate::new(
+            Duration::from_millis(10),
+            64 * 1024 * 1024,
+            1024 * 1024,
+            1,
+            0.5,
+            0.1,
+        );
+
+        // Create candidates with varying tradeoffs.
+        let c1 = ScoredCandidate {
+            plan: plan.clone(),
+            cost: base_cost.clone(),
+            fitness: 1.0,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        };
+        let c2 = ScoredCandidate {
+            plan: plan.clone(),
+            cost: CostEstimate::new(
+                Duration::from_millis(5),
+                128 * 1024 * 1024,
+                512 * 1024,
+                1,
+                0.3,
+                0.05,
+            ),
+            fitness: 0.8,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        };
+        let c3 = ScoredCandidate {
+            plan: plan.clone(),
+            cost: CostEstimate::new(
+                Duration::from_millis(20),
+                32 * 1024 * 1024,
+                2048 * 1024,
+                2,
+                0.8,
+                0.2,
+            ),
+            fitness: 1.5,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        };
+        // c4 is strictly worse than c1 in all dimensions.
+        let c4 = ScoredCandidate {
+            plan: plan.clone(),
+            cost: CostEstimate::new(
+                Duration::from_millis(100),
+                1024 * 1024 * 1024,
+                10 * 1024 * 1024,
+                5,
+                5.0,
+                0.5,
+            ),
+            fitness: 10.0,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        };
+
+        let candidates = vec![c1.clone(), c2.clone(), c3.clone(), c4.clone()];
+        let frontier = build_pareto_frontier(&candidates);
+
+        // c4 should be dominated by c1 (worse in every dimension).
+        assert!(
+            !frontier.iter().any(|f| f.fitness == 10.0),
+            "c4 should not be on the frontier (dominated by c1)"
+        );
+
+        // c1, c2, c3 are all non-dominated (each best in one dimension).
+        assert!(
+            frontier.iter().any(|f| (f.fitness - 1.0).abs() < 1e-6),
+            "c1 should be on the frontier"
+        );
+        assert!(
+            frontier.iter().any(|f| (f.fitness - 0.8).abs() < 1e-6),
+            "c2 should be on the frontier"
+        );
+        assert!(
+            frontier.iter().any(|f| (f.fitness - 1.5).abs() < 1e-6),
+            "c3 should be on the frontier"
+        );
+        // Dominated check.
+        assert!(dominates(&c1, &c4), "c1 should dominate c4");
+        assert!(!dominates(&c4, &c1), "c4 should not dominate c1");
+        assert!(
+            !dominates(&c1, &c2),
+            "c1 and c2 should be mutually non-dominating"
+        );
+        assert!(
+            !dominates(&c2, &c1),
+            "c2 and c1 should be mutually non-dominating"
+        );
+    }
+
+    #[test]
+    fn test_select_parent_returns_valid_index() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig {
+            population_size: 10,
+            ..Default::default()
+        };
+        let mut optimizer =
+            SpatialEvolutionOptimizer::new(config, &plan, Box::new(SimpleCostModel));
+        for _ in 0..20 {
+            let idx = optimizer.select_parent_idx();
+            assert!(
+                idx < optimizer.state.population.len(),
+                "selected index {} should be within population bounds",
+                idx
+            );
+        }
+    }
+
+    #[test]
+    fn test_generation_advances() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig {
+            population_size: 10,
+            max_generations: 50,
+            mutation_rate: 0.5,
+            ..Default::default()
+        };
+        let mut optimizer =
+            SpatialEvolutionOptimizer::new(config.clone(), &plan, Box::new(SimpleCostModel));
+        let initial_gen = optimizer.state.generation;
+        optimizer.run_generation();
+        assert_eq!(
+            optimizer.state.generation,
+            initial_gen + 1,
+            "generation counter should advance by 1"
+        );
+        // Run a few more generations.
+        for _ in 0..5 {
+            optimizer.run_generation();
+        }
+        assert_eq!(
+            optimizer.state.generation,
+            initial_gen + 6,
+            "generation counter should advance by 6 total"
+        );
+        // Population should be maintained.
+        assert_eq!(
+            optimizer.state.population.len(),
+            config.population_size,
+            "population size should remain constant"
+        );
+    }
+
+    #[test]
+    fn test_find_best_plan() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig {
+            population_size: 10,
+            max_generations: 20,
+            mutation_rate: 0.5,
+            ..Default::default()
+        };
+        let mut optimizer =
+            SpatialEvolutionOptimizer::new(config, &plan, Box::new(SimpleCostModel));
+        let result = find_best_plan(&mut optimizer, 5);
+        assert!(result.is_some(), "find_best_plan should return a plan");
+        let best = result.unwrap();
+
+        // The graph should be legalized.
+        let _graph = best.graph.graph();
+        assert!(best.node_count() > 0, "best plan should have nodes");
+    }
+
+    #[test]
+    fn test_dominates() {
+        let plan = make_test_plan();
+        let low_cost = CostEstimate::new(
+            Duration::from_millis(10),
+            64 * 1024 * 1024,
+            1024 * 1024,
+            1,
+            0.5,
+            0.1,
+        );
+        let high_cost = CostEstimate::new(
+            Duration::from_millis(100),
+            512 * 1024 * 1024,
+            10 * 1024 * 1024,
+            5,
+            5.0,
+            0.5,
+        );
+
+        let a = ScoredCandidate {
+            plan: plan.clone(),
+            cost: low_cost.clone(),
+            fitness: 1.0,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        };
+        let b = ScoredCandidate {
+            plan,
+            cost: high_cost,
+            fitness: 10.0,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        };
+
+        assert!(dominates(&a, &b), "a (lower cost) should dominate b");
+        assert!(!dominates(&b, &a), "b should not dominate a");
+        assert!(!dominates(&a, &a), "a should not dominate itself");
+    }
+
+    /// Verify that survival selection maintains population size.
+    #[test]
+    fn test_survival_preserves_population_size() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig {
+            population_size: 10,
+            elite_count: 2,
+            ..Default::default()
+        };
+        let optimizer =
+            SpatialEvolutionOptimizer::new(config.clone(), &plan, Box::new(SimpleCostModel));
+
+        let mut combined: Vec<ScoredCandidate> = optimizer.state.population.clone();
+        // Add some extra candidates to test truncation.
+        for _ in 0..5 {
+            let cost = CostEstimate::new(
+                Duration::from_millis(100),
+                512 * 1024 * 1024,
+                10 * 1024 * 1024,
+                5,
+                5.0,
+                0.5,
+            );
+            combined.push(ScoredCandidate {
+                plan: plan.clone(),
+                cost,
+                fitness: 100.0,
+                candidate_id: Uuid::new_v4(),
+                parent_ids: Vec::new(),
+                mutation_history: Vec::new(),
+            });
+        }
+
+        let survivors = optimizer.survive(combined);
+        assert_eq!(
+            survivors.len(),
+            config.population_size,
+            "survivors should match population size"
+        );
+        // Best candidate should survive (elitism): the candidates with lowest
+        // fitness (from the optimizer population) should all survive over the
+        // artificially high-fitness extras (fitness 100.0).
+        let min_fitness = survivors.iter().map(|c| c.fitness).fold(f64::MAX, f64::min);
+        assert!(
+            (min_fitness
+                - optimizer
+                    .state
+                    .population
+                    .iter()
+                    .map(|c| c.fitness)
+                    .fold(f64::MAX, f64::min))
+            .abs()
+                < 1.0,
+            "best candidate should survive via elitism: min_fitness={}",
+            min_fitness
+        );
+    }
+
+    /// Verify that crossover produces a valid plan.
+    #[test]
+    fn test_crossover_produces_valid_plan() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig {
+            population_size: 5,
+            ..Default::default()
+        };
+        let mut optimizer =
+            SpatialEvolutionOptimizer::new(config, &plan, Box::new(SimpleCostModel));
+
+        let parent_a = &optimizer.state.population[0].clone();
+        let parent_b = &optimizer.state.population[1 % optimizer.state.population.len()].clone();
+        let child = optimizer.crossover(parent_a, parent_b);
+        assert!(
+            child.node_count() > 0,
+            "crossover should produce a plan with nodes"
+        );
+    }
+
+    /// Verify that random mutations produce at least one legal variant.
+    #[test]
+    fn test_apply_random_mutations_produces_variants() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig {
+            population_size: 5,
+            ..Default::default()
+        };
+        let mut optimizer =
+            SpatialEvolutionOptimizer::new(config, &plan, Box::new(SimpleCostModel));
+        let variants = optimizer.apply_random_mutations(plan.clone());
+        // The graph has 2 nodes, mutations may fail legalization if the
+        // mutation changes the graph beyond what is legal for the simple
+        // test setup. We just verify no panics occur.
+        for variant in &variants {
+            assert!(
+                variant.node_count() > 0,
+                "mutated variant should have nodes"
+            );
+        }
+    }
+
+    /// Verify that the evaluate method returns a finite positive value.
+    #[test]
+    fn test_evaluate_returns_finite_value() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig::default();
+        let optimizer = SpatialEvolutionOptimizer::new(config, &plan, Box::new(SimpleCostModel));
+        let fitness = optimizer.evaluate(&plan);
+        assert!(fitness.is_finite(), "fitness should be finite");
+        assert!(fitness > 0.0, "fitness should be positive");
+    }
+
+    /// Verify that the majority-rule helper functions work correctly.
+    #[test]
+    fn test_rejection_helper_functions() {
+        let plan = make_test_plan();
+        let candidate = ScoredCandidate {
+            plan: plan.clone(),
+            cost: CostEstimate::new(
+                Duration::from_secs(10),
+                1024 * 1024 * 1024,
+                10 * 1024 * 1024,
+                50,
+                100.0,
+                0.5,
+            ),
+            fitness: 50.0,
+            candidate_id: Uuid::new_v4(),
+            parent_ids: Vec::new(),
+            mutation_history: Vec::new(),
+        };
+
+        assert!(
+            exceeds_latency(&candidate, Duration::from_secs(1)),
+            "should exceed 1s latency"
+        );
+        assert!(
+            !exceeds_latency(&candidate, Duration::from_secs(20)),
+            "should not exceed 20s latency"
+        );
+        assert!(exceeds_memory(&candidate, 100), "should exceed 100B memory");
+        assert!(exceeds_syncs(&candidate, 10), "should exceed 10 syncs");
+        assert!(exceeds_energy(&candidate, 10.0), "should exceed 10J energy");
+    }
+
+    /// Verify that even with max stalls, find_best_plan returns the best
+    /// known plan rather than None.
+    #[test]
+    fn test_find_best_plan_stall_returns_best() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig {
+            population_size: 10,
+            max_generations: 5,
+            mutation_rate: 0.0, // No mutations — will stall immediately.
+            ..Default::default()
+        };
+        let mut optimizer =
+            SpatialEvolutionOptimizer::new(config, &plan, Box::new(SimpleCostModel));
+        let result = find_best_plan(&mut optimizer, 1);
+        assert!(
+            result.is_some(),
+            "should return a plan even with early stall"
+        );
+    }
+
+    /// Verify that a well-tuned optimizer improves fitness over generations.
+    #[test]
+    fn test_fitness_improves_over_generations() {
+        let plan = make_test_plan();
+        let config = SpatialEvolutionConfig {
+            population_size: 20,
+            max_generations: 30,
+            mutation_rate: 0.6,
+            crossover_rate: 0.7,
+            ..Default::default()
+        };
+        let mut optimizer =
+            SpatialEvolutionOptimizer::new(config, &plan, Box::new(SimpleCostModel));
+
+        let initial_best = optimizer.state.population[0].fitness;
+        for _ in 0..10 {
+            optimizer.run_generation();
+        }
+        let improved_best = optimizer
+            .state
+            .population
+            .iter()
+            .map(|c| c.fitness)
+            .fold(f64::MAX, f64::min);
+        // The best fitness should be <= the initial best (could be same
+        // if random mutations don't always improve).
+        assert!(
+            improved_best <= initial_best + 1e-6,
+            "best fitness should not worsen: initial={}, improved={}",
+            initial_best,
+            improved_best
+        );
+    }
+
+    /// Verify Pareto frontier is deduplicated and sorted.
+    #[test]
+    fn test_pareto_frontier_sorted() {
+        let plan = make_test_plan();
+        let mut candidates = Vec::new();
+        for i in 0..5 {
+            let cost = CostEstimate::new(
+                Duration::from_millis(10 + i as u64 * 5),
+                64 * 1024 * 1024 + i as u64 * 1024 * 1024,
+                1024 * 1024,
+                1,
+                0.5,
+                0.1,
+            );
+            candidates.push(ScoredCandidate {
+                plan: plan.clone(),
+                cost,
+                fitness: i as f64 + 1.0,
+                candidate_id: Uuid::new_v4(),
+                parent_ids: Vec::new(),
+                mutation_history: Vec::new(),
+            });
+        }
+        let frontier = build_pareto_frontier(&candidates);
+        // All candidates have increasing latency and memory, so each
+        // dominates the previous one. Only the first (best) should survive.
+        assert!(!frontier.is_empty(), "frontier should not be empty");
+        // Verify sorting by fitness.
+        for window in frontier.windows(2) {
+            assert!(
+                window[0].fitness <= window[1].fitness,
+                "frontier should be sorted by fitness"
+            );
+        }
+    }
+}

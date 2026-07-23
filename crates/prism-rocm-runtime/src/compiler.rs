@@ -11,11 +11,11 @@ use std::process::Command;
 
 /// Default GPU architecture target passed to `amdllvm`.
 ///
-/// `gfx1100` (RDNA 3 / RX 7000 series) is a modern widely-supported baseline.
+/// `gfx942` is the CDNA 3 target used by MI300X.
 /// Users targeting older or newer hardware can pass a different architecture
 /// via the `PRISM_ROCM_GPU` environment variable.
 #[cfg(feature = "rocm-runtime")]
-const DEFAULT_GPU: &str = "gfx1100";
+const DEFAULT_GPU: &str = "gfx942";
 
 /// Default kernel entry point name.
 #[cfg(feature = "rocm-runtime")]
@@ -103,7 +103,7 @@ fn compile_amdgcn_inner(source: &str) -> Result<AmdBinary, String> {
     } else {
         // hipcc fallback
         Command::new(&assembler)
-            .args(["--amdgpu-target=", &gpu, "-c", "-o"])
+            .args(["--offload-arch", &gpu, "-c", "-o"])
             .arg(&out_path)
             .arg(&src_path)
             .output()

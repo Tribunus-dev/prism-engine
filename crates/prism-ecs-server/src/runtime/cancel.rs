@@ -68,6 +68,14 @@ impl CancellationManager {
             .map(|set| set.contains(session_id))
             .unwrap_or(false)
     }
+
+    /// Clears a completed request's cancellation state so a later generation
+    /// on the same session can proceed.
+    pub fn clear(&self, session_id: &SessionId) {
+        if let Ok(mut set) = self.cancelled.lock() {
+            set.remove(session_id);
+        }
+    }
 }
 
 impl Default for CancellationManager {
@@ -158,6 +166,17 @@ mod tests {
     fn test_default_creates_empty() {
         let mgr = CancellationManager::default();
         let sid = SessionId(uuid::Uuid::new_v4());
+        assert!(!mgr.is_cancelled(&sid));
+    }
+
+    #[test]
+    fn test_clear_allows_session_reuse() {
+        let mgr = CancellationManager::new();
+        let sid = SessionId(uuid::Uuid::new_v4());
+        let handle = mgr.register_handle(sid);
+        mgr.cancel(&handle).unwrap();
+        assert!(mgr.is_cancelled(&sid));
+        mgr.clear(&sid);
         assert!(!mgr.is_cancelled(&sid));
     }
 }

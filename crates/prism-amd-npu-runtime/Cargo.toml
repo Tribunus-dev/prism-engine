@@ -7,13 +7,13 @@ license = "AGPL-3.0-only"
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-ir = { path = "../prism-ecs-ir" }
+prism-spatial-ir = { path = "../prism-spatial-ir" }
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+libc = "0.2"
 
 [features]
 default = []
 # Enables AMD XDNA NPU runtime support.
 # No-op on non-Linux platforms.
 amd-npu-runtime = []
-
-# Standalone workspace (not part of the top-level workspace due to
-# potential cyclic dependency with prism-ecs-ir).
-[workspace]

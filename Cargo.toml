@@ -1,3 +1,148 @@
+[package]
+name = "prism-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native compute-image runtime and governed inference kernel for Apple Silicon"
+autobins = false
+
+[lib]
+name = "prism_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "prism"
+path = "src/bin/prism.rs"
+test = false
+
+[[bin]]
+name = "prism-validate"
+path = "src/bin/prism-validate.rs"
+
+[[bin]]
+name = "prism-probe"
+path = "src/bin/prism-probe.rs"
+
+[[bin]]
+name = "prism-plan"
+path = "src/bin/prism-plan.rs"
+
+[[bin]]
+name = "prism-render"
+path = "src/bin/prism-render.rs"
+
+[[bin]]
+name = "prism-inspect"
+path = "src/bin/prism-inspect.rs"
+
+[[bin]]
+name = "prism-simulate-sn40l"
+path = "src/bin/prism-simulate-sn40l.rs"
+
+[[bin]]
+name = "prism-explain-plan"
+path = "src/bin/prism-explain-plan.rs"
+
+[[bin]]
+name = "prism-model-manifest"
+path = "src/bin/prism-model-manifest.rs"
+
+[[bin]]
+name = "prism-compare"
+path = "src/bin/prism-compare.rs"
+
+[[bin]]
+name = "prism-workload-manifest"
+path = "src/bin/prism-workload-manifest.rs"
+
+[[bin]]
+name = "prism-diff"
+path = "src/bin/prism-diff.rs"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+bincode = "1"
+blake3 = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+coreml-proto = "0.1.0"
+crossbeam-channel = "0.5"
+dirs = "6"
+futures = "0.3"
+futures-util = "0.3"
+hf-hub = "0.4"
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+libc = { workspace = true }
+libloading = "0.8"
+nix = { version = "0.29", features = ["fs"] }
+parking_lot = "0.12"
+prost = "0.14"
+prost-types = "0.14"
+rand = "0.8"
+rayon = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+safetensors = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = { version = "0.10", features = ["asm"] }
+signal-hook = "0.3"
+smallvec = "1"
+sysinfo = "0.32"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1", "with-chrono-0_4", "with-uuid-1"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+toml = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+redis = "0.27"
+url = "2"
+metal = "0.32"
+objc = "0.2"
+half = "2"
+tempfile = "3"
+prism-ecs-ir = { path = "crates/prism-ecs-ir" }
+prism-ecs-core = { path = "crates/prism-ecs-core" }
+prism-spatial-ir = { path = "crates/prism-spatial-ir" }
+prism-ecs-quantization = { path = "crates/prism-ecs-quantization" }
+prism-ecs-server = { path = "crates/prism-ecs-server" }
+prism-ecs-duckdb = { path = "crates/prism-ecs-duckdb" }
+prism-ecs-compile = { path = "crates/prism-ecs-compile" }
+prism-ecs-constitutional = { path = "crates/prism-ecs-constitutional" }
+prism-ecs-runtime = { path = "crates/prism-ecs-runtime" }
+prism-audio = { path = "crates/prism-audio" }
+prism-video = { path = "crates/prism-video" }
+prism-kv-cache = { path = "crates/prism-kv-cache" }
+prism-gguf = { path = "crates/prism-gguf" }
+prism-mcp-core = { path = "prism-mcp-core" }
+prism-mcp-model = { path = "prism-mcp-model" }
+prism-mcp-build = { path = "prism-mcp-build" }
+prism-mcp-kernel = { path = "prism-mcp-kernel" }
+prism-mcp-admission = { path = "prism-mcp-admission" }
+prism-mcp-bench = { path = "prism-mcp-bench" }
+prism-mcp-replay = { path = "prism-mcp-replay" }
+prism-mcp-trace = { path = "prism-mcp-trace" }
+prism-mcp-lab = { path = "prism-mcp-lab" }
+prism-mcp-browser = { path = "prism-mcp-browser" }
+prism-multimodal = { path = "crates/prism-multimodal" }
+
+[features]
+default = ["daemon", "trifecta"]
+daemon = ["trifecta"]
+trifecta = []
+live-trifecta = ["trifecta"]
+measure = ["trifecta", "prism-ecs-server/measure", "prism-ecs-server/gguf-compile"]
+metal-dispatch = ["prism-ecs-server/metal-dispatch"]
+ane = ["prism-ecs-server/metal-dispatch"]
+gguf-compile = ["prism-ecs-quantization/gguf-compile", "prism-ecs-ir/gguf-compile", "prism-ecs-server/gguf-compile"]
+server = ["daemon"]
+
 [workspace]
 resolver = "2"
 
@@ -15,22 +160,41 @@ members = [
     "prism-mcp-lab",
     "prism-mcp-browser",
     "prism-mcp-core",
-    "prism-mcpd",
+    "crates/prism-ecs-backend",
     "crates/prism-ecs-core",
     "crates/prism-ecs-constitutional",
     "crates/prism-ecs-quantization",
+    "crates/prism-ecs-runtime",
     "crates/prism-kv-cache",
     "crates/prism-ecs-ir",
     "crates/prism-ecs-server",
     "crates/prism-ane",
+    "crates/prism-ane-runtime",
     "crates/prism-audio",
     "crates/prism-image",
     "crates/prism-multimodal",
     "crates/prism-video",
     "crates/prism-ecs-duckdb",
+    "crates/prism-gguf",
+    "crates/prism-ecs-agent",
+    "crates/prism-ecs-artifact",
+    "crates/prism-onnx-ingest",
+    "crates/prism-ecs-daemon",
+    "crates/prism-spatial-ir",
+    "crates/prism-pytorch-ingest",
+    "crates/prism-plugin",
+    "prism-mcp-handlers",
+    "crates/prism-ecs-compile",
+    "crates/prism-ecs-codec",
+    "crates/prism-ecs-kernel",
+    "crates/prism-ecs-search",
+    "crates/prism-ecs-data",
+    "crates/prism-rocm-runtime",
+    "crates/prism-cuda-runtime",
+    "crates/prism-amd-npu-runtime",
 ]
-[workspace.package]
 
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-only"
@@ -41,25 +205,20 @@ keywords = ["inference", "apple-silicon", "metal", "machine-learning"]
 categories = ["science"]
 
 [workspace.dependencies]
+# Core
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 bytemuck = "1"
 float_eq = "1"
 pretty_assertions = "1.4.0"
 dyn-clone = "1"
-half = "2"
 mach-sys = "0.5"
 num-complex = "0.4"
 num_enum = "0.7"
-num-traits = "0.2"
 paste = "1"
-smallvec = "1"
-strum = { version = "0.27", features = ["derive"] }
 itertools = "0.14"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-uuid = { version = "1", features = ["v4", "serde"] }
-safetensors = "0.6"
-tempfile = "3"
 bindgen = "0.72"
 cmake = "0.1"
 cc = "1"
@@ -68,124 +227,142 @@ syn = { version = "2", features = ["full"] }
 quote = "1"
 darling = "0.21"
 proc-macro2 = "1"
-tokio = { version = "1", features = ["full"] }
-rand = "0.8"
 libc = "0.2"
-parking_lot = "0.12"
-rayon = "1"
-clap = { version = "4", features = ["derive"] }
+qwen3-tts-mlx = { path = "models/qwen3-tts-mlx" }
 
-[package]
-name = "prism-engine"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "Native compute-image runtime and governed inference kernel for Apple Silicon"
-repository = "https://github.com/Tribunus-dev/prism-engine"
+# Async
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+rand = "0.8"
 
-[lib]
-name = "prism_engine"
-path = "src/lib.rs"
-
-[[bin]]
-name = "prism"
-path = "src/bin/prism.rs"
-test = false
-
-
-[dependencies]
-metal = { version = "0.32", optional = true }
-objc = { version = "0.2", optional = true }
-half = "2"
-safetensors = "0.5"
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-clap = { version = "4", features = ["derive"] }
-axum = { version = "0.8", optional = true }
-futures = "0.3"
-base64 = "0.22"
-tokio-util = { version = "0.7", features = ["rt"] }
-tower-http = { version = "0.6", optional = true, features = ["cors"] }
-tokio-stream = { version = "0.1", optional = true }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "signal"] }
-hf-hub = "0.4"
-image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
-toml = "0.8"
-rayon = "1"
-rand = "0.8"
-sha2 = { version = "0.10", features = ["asm"] }
-uuid = { version = "1", features = ["v4", "serde"] }
-prost = "0.14"
-prost-types = "0.14"
-thiserror = "2"
-bytemuck = { version = "1", features = ["derive"] }
+bincode = "1"
+
+# Data structures
+hashbrown = "0.14"
+indexmap = "2"
+dashmap = "5"
+smallvec = "1"
+
+# Concurrency
 parking_lot = "0.12"
-tempfile = "3"
-coreml-proto = { version = "0.1.0", optional = true }
-anyhow = "1.0.102"
-libc = { workspace = true }
+rayon = "1"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Math
+num-traits = "0.2"
+num-derive = "0.4"
+
+# Crypto
 blake3 = "1"
-prism-ecs-ir = { path = "crates/prism-ecs-ir" }
-prism-ecs-quantization = { path = "crates/prism-ecs-quantization" }
+sha2 = "0.10"
+hex = "0.4"
+
+# Compression
+half = { version = "2", features = ["serde"] }
+safetensors = "0.8"
+md5 = "0.7"
+flate2 = "1"
+
+# Filesystem
+tempfile = "3"
+
+# Network
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Testing
+rstest = "0.18"
+
+# Utilities
+strum = { version = "0.25", features = ["derive"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+url = "2"
+
+# Apple
+core-foundation = "0.9"
+core-graphics = "0.23"
+foreign-types = "0.3"
+block = "0.1"
+
+# ML
+ndarray = "0.15"
+
+# Database
+rusqlite = { version = "0.30", features = ["bundled"] }
+
+# Workspace-local path dependencies (not published)
+prism-ecs-core = { path = "crates/prism-ecs-core" }
+prism-ecs-runtime = { path = "crates/prism-ecs-runtime" }
+prism-ecs-constitutional = { path = "crates/prism-ecs-constitutional" }
+prism-ecs-source = { path = "crates/prism-ecs-source" }
+prism-ecs-compile = { path = "crates/prism-ecs-compile" }
+prism-ecs-codec = { path = "crates/prism-ecs-codec" }
+prism-ecs-kernel = { path = "crates/prism-ecs-kernel" }
 prism-ecs-server = { path = "crates/prism-ecs-server" }
-[features]
-default = []
-server = ["dep:axum", "dep:tower-http", "dep:tokio-stream"]
-ane = ["dep:coreml-proto"]
-# Metal GPU GEMV acceleration for the root-crate LUT engine. macOS only —
-# requires the Xcode toolchain (xcrun) at build time. Off macOS this feature
-# will not compile; use `prism-backend` for the compute-core execution path.
-metal-dispatch = ["dep:metal", "dep:objc"]
-full = ["server", "ane"]
-# No-op feature stubs — the prism-backend feature was removed along with the
-# optional `tribunus-compute-core` dependency. These stubs prevent `unexpected_cfg`
-# warnings in source code that still references these feature names.
-prism-backend = []
-gguf-compile = []
-generation-audio = []
-generation-diffusion = []
-generation-image = []
-generation-video = []
-server-dashboard = ["server"]
+prism-ecs-duckdb = { path = "crates/prism-ecs-duckdb" }
+prism-ecs-ir = { path = "crates/prism-ecs-ir" }
+prism-spatial-ir = { path = "crates/prism-spatial-ir" }
+prism-ecs-backend = { path = "crates/prism-ecs-backend" }
+prism-ecs-quantization = { path = "crates/prism-ecs-quantization" }
+prism-ane = { path = "crates/prism-ane" }
+prism-audio = { path = "crates/prism-audio" }
+prism-image = { path = "crates/prism-image" }
+prism-multimodal = { path = "crates/prism-multimodal" }
+prism-video = { path = "crates/prism-video" }
+prism-onnx-ingest = { path = "crates/prism-onnx-ingest" }
+prism-pytorch-ingest = { path = "crates/prism-pytorch-ingest" }
+prism-plugin = { path = "crates/prism-plugin" }
+prism-kv-cache = { path = "crates/prism-kv-cache" }
+prism-gguf = { path = "crates/prism-gguf" }
+prism-ecs-daemon = { path = "crates/prism-ecs-daemon" }
+prism-ecs-artifact = { path = "crates/prism-ecs-artifact" }
+prism-ecs-agent = { path = "crates/prism-ecs-agent" }
+prism-ecs-search = { path = "crates/prism-ecs-search" }
+prism-ecs-data = { path = "crates/prism-ecs-data" }
 
-[build-dependencies]
-cc = "1.2"
+[workspace.lints.rust]
+unused = "warn"
+unused_imports = "warn"
+unused_variables = "warn"
+unused_mut = "warn"
+unused_parens = "warn"
+unused_unsafe = "warn"
+unused_extern_crates = "warn"
+unused_qualifications = "warn"
+unused_results = "warn"
 
-# Cargo requires distinct built-in `dev`, `test`, and `release` profile names.
-# Dev and test prioritize parallel, incremental builds while keeping Prism's
-# workspace code optimized; release retains cross-crate optimization.
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+module-name-repetitions = "allow"
+missing-errors-doc = "allow"
+missing-panics-doc = "allow"
+must-use-candidate = "allow"
+similar-names = "allow"
+too-many-lines = "allow"
+type-complexity = "allow"
+unnecessary-wraps = "allow"
+unused-self = "allow"
+
 [profile.dev]
-lto = false
-codegen-units = 8
-opt-level = 3
-incremental = true
-debug = "line-tables-only"
-debug-assertions = false
-overflow-checks = true
-
-[profile.dev.package."*"]
 opt-level = 1
-debug = false
-
-[profile.test]
-lto = false
-codegen-units = 16
-opt-level = 1
-incremental = true
-debug = "line-tables-only"
-debug-assertions = false
-overflow-checks = true
-
-[profile.test.package."*"]
-opt-level = 1
-debug = false
 
 [profile.release]
-strip = "symbols"
-lto = "fat"
-codegen-units = 1
 opt-level = 3
-incremental = false
-debug = "line-tables-only"
-debug-assertions = false
-overflow-checks = false
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+opt-level = 3
+lto = true
+codegen-units = 1

@@ -1,0 +1,57 @@
+[package]
+name = "prism-ecs-compile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Canonical compiler orchestration — format-independent compilation pipeline"
+autotests = false
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-source = { path = "../prism-ecs-source" }
+prism-ecs-kernel = { path = "../prism-ecs-kernel" }
+prism-ecs-codec = { path = "../prism-ecs-codec" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+prism-ecs-quantization = { path = "../prism-ecs-quantization" }
+prism-spatial-ir = { path = "../prism-spatial-ir" }
+prism-rocm-runtime = { path = "../prism-rocm-runtime" }
+prism-amd-npu-runtime = { path = "../prism-amd-npu-runtime" }
+prism-ane = { path = "../prism-ane", optional = true }
+prism-ane-runtime = { path = "../prism-ane-runtime", optional = true, features = ["coreml"] }
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+hex.workspace = true
+uuid = { workspace = true }
+memmap2.workspace = true
+chrono = { workspace = true }
+tracing = { workspace = true }
+half = { workspace = true }
+libc.workspace = true
+[features]
+# Phase 4 activates this feature and creates EvaluationStrategy in prism-spatial-ir.
+phase4_evaluation = []
+metal-dispatch = ["prism-ecs-kernel/metal-dispatch"]
+ane = [
+    "dep:prism-ane",
+    "prism-ane/ane",
+    "dep:prism-ane-runtime",
+    "prism-ane-runtime/coreml",
+]
+
+[[test]]
+name = "verification_tests"
+path = "tests/verification_tests.rs"
+
+[[test]]
+name = "verification_gates"
+path = "tests/verification_gates.rs"
+
+[[test]]
+name = "comprehensive_verification_tests"
+path = "tests/comprehensive_verification_tests.rs"
+
+[[test]]
+name = "assembly_production_contract"
+path = "tests/assembly_production_contract.rs"

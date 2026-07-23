@@ -18,9 +18,41 @@ public actor InferenceProvider: InferenceProviderProtocol {
     }
 
     private func mcpInference(prompt: String, context: [String: Any]) async throws -> String {
-        // TODO: Wire to prism-mcpd inference handler
-        throw PrismAgentError.featureNotImplemented("MCP inference bridge")
+        let daemonURL = ProcessInfo.processInfo.environment["PRISM_DAEMON_HTTP"] ?? "http://127.0.0.1:8080"
+        let model = (context["model"] as? String)
+            ?? ProcessInfo.processInfo.environment["PRISM_MODEL"]
+            ?? "Gemma4_Unified"
+        guard let url = URL(string: daemonURL + "/api/generate") else {
+            throw PrismAgentError.agentFailed("Invalid Prism daemon URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(GenerateRequest(model: model, prompt: prompt, maxTokens: 256))
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw PrismAgentError.agentFailed("Prism daemon returned an invalid response")
+        }
+        let payload = try JSONDecoder().decode(GenerateResponse.self, from: data)
+        return payload.text
     }
+}
+
+private struct GenerateRequest: Encodable {
+    let model: String
+    let prompt: String
+    let maxTokens: Int
+
+    enum CodingKeys: String, CodingKey {
+        case model, prompt
+        case maxTokens = "max_tokens"
+    }
+}
+
+private struct GenerateResponse: Decodable {
+    let text: String
 }
 
 public enum PrismAgentError: Error, LocalizedError {

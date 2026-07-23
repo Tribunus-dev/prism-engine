@@ -1,245 +1,390 @@
-//
-//  ConversationSettingsSheet.swift
-//  PrismAgent
-//
-//  Created by PrismAgent on 7/1/26.
-//
-
 import SwiftUI
+import PrismCore
+import CryptoKit
+
+// MARK: - Conversation Settings Sheet
 
 struct ConversationSettingsSheet: View {
-    @Binding var selectedModel: String
-    @Binding var systemPrompt: String
-    @Binding var temperature: Double
-    @Binding var topP: Double
-    @Binding var maxTokens: Int
-    @Binding var streamingEnabled: Bool
-    @Binding var conversationMemoryEnabled: Bool
-    @Binding var toolUseEnabled: Bool
-    @Binding var showAuth: Bool
-    @Binding var apiEndpoint: String
-    @Binding var apiKey: String
-    @Environment(\.dismiss) var dismiss
-    
-    var modelOptions: [String]
-    var onDownloadModel: (() -> Void)?
-    var onClearConversation: (() -> Void)?
-    var onResetSettings: (() -> Void)?
-    var memoryUsage: String?
-    var inferenceSpeed: String?
-    var deviceName: String?
-    var computeUnits: String?
-    var engineVersion: String?
-    var modelLoaded: Bool = false
-    
+    @Binding var activeModel: String
+    let engineController: PrismEngineController
+    let downloader: ModelDownloader
+    let voice: VoiceCaptureService
+    let audioMatrix: PrismAudioMatrix
+    let accessibilityEngine: AccessibilityEngine
+    let screenSlayer: PrismScreenSlayer
+    let homeKit: PrismHomeKitController
+    let status: PanelStatus
+    let auth: PanelAuth
+    let hardware: PanelHardware
+
+    private var models: [String] {
+        engineController.daemonModels.isEmpty
+            ? ["Gemma 4 12B", "Gemma 4 12B Unified"]
+            : engineController.daemonModels
+    }
+
+    private var orbState: OrbView.OrbState {
+        switch voice.state {
+        case .idle, .listening: break
+        case .transcribing: return .processing(0.5)
+        case .responding: return .speaking(voice.acousticPower)
+        }
+        if engineController.isRunning { return .processing(0.5) }
+        else if engineController.isCompiling { return .loading }
+        else { return .idle }
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                GroupBox {
-                    Toggle(isOn: $showAuth) {
-                        Text("Require Authentication")
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Header with Orb
+                    HStack {
+                        OrbView(state: orbState, size: 32)
+                        Text("Prism Agent")
+                            .font(.system(.title3, design: .rounded))
+                        Spacer()
                     }
-                    
-                    if showAuth {
-                        TextField("API Endpoint", text: $apiEndpoint)
-                            .textFieldStyle(.roundedBorder)
-                        SecureField("API Key", text: $apiKey)
-                            .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal)
+
+                    // Auth
+                    HuggingFaceLoginView(hfToken: Binding(
+                        get: { auth.hfToken },
+                        set: { auth.hfToken = $0 }
+                    ), isAuthenticated: Binding(
+                        get: { auth.isAuthenticated },
+                        set: { auth.isAuthenticated = $0 }
+                    ))
+
+                    if auth.isAuthenticated {
+                        // Model picker
+                        modelPickerSection
+
+                        // Download
+                        if downloader.status != "Idle" {
+                            downloadProgressSection
+                        } else {
+                            downloadButtonSection
+                        }
+
+                        // Runtime stats
+                        runtimeStatsSection
+
+                        // Hardware utilization bars
+                        hardwareUtilSection
                     }
-                } label: {
-                    Label("Account", systemImage: "person.crop.circle")
+
+                    // Feature toggles
+                    settingsSection
+
+                    progressiveModelSection
+
+                    voiceSection
+
+                    // Action buttons
+                    actionButtonsSection
                 }
-                
-                GroupBox {
-                    Picker("Model", selection: $selectedModel) {
-                        ForEach(modelOptions, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-                    
-                    if modelLoaded {
-                        Label("Model loaded", systemImage: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                    }
-                    
-                    if let onDownloadModel {
-                        Button(action: onDownloadModel) {
-                            Label("Download Model", systemImage: "icloud.and.arrow.down")
-                        }
-                    }
-                } label: {
-                    Label("Model", systemImage: "cpu")
-                }
-                
-                GroupBox {
-                    if let memoryUsage {
-                        HStack {
-                            Text("Memory")
-                            Spacer()
-                            Text(memoryUsage)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    if let inferenceSpeed {
-                        HStack {
-                            Text("Inference")
-                            Spacer()
-                            Text(inferenceSpeed)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    TextField("System Prompt", text: $systemPrompt, axis: .vertical)
-                        .lineLimit(3...6)
-                        .textFieldStyle(.roundedBorder)
-                    
-                    VStack(spacing: 8) {
-                        HStack {
-                            Text("Temperature")
-                            Spacer()
-                            Text(String(format: "%.2f", temperature))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(value: $temperature, in: 0...2, step: 0.05)
-                    }
-                    
-                    VStack(spacing: 8) {
-                        HStack {
-                            Text("Top-P")
-                            Spacer()
-                            Text(String(format: "%.2f", topP))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(value: $topP, in: 0...1, step: 0.05)
-                    }
-                    
-                    VStack(spacing: 8) {
-                        HStack {
-                            Text("Max Tokens")
-                            Spacer()
-                            Text("\(maxTokens)")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(
-                            value: Binding(
-                                get: { Double(maxTokens) },
-                                set: { maxTokens = Int($0) }
-                            ),
-                            in: 64...4096,
-                            step: 64
-                        )
-                    }
-                } label: {
-                    Label("Runtime", systemImage: "chart.bar.xaxis")
-                }
-                
-                GroupBox {
-                    if let deviceName {
-                        HStack {
-                            Text("Device")
-                            Spacer()
-                            Text(deviceName)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    if let computeUnits {
-                        HStack {
-                            Text("Compute Units")
-                            Spacer()
-                            Text(computeUnits)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } label: {
-                    Label("Hardware", systemImage: "memorychip")
-                }
-                
-                GroupBox {
-                    Toggle(isOn: $streamingEnabled) {
-                        Text("Streaming Output")
-                    }
-                    
-                    Toggle(isOn: $conversationMemoryEnabled) {
-                        Text("Conversation Memory")
-                    }
-                    
-                    Toggle(isOn: $toolUseEnabled) {
-                        Text("Tool Use")
-                    }
-                } label: {
-                    Label("Features", systemImage: "switch.2")
-                }
-                
-                GroupBox {
-                    if let engineVersion {
-                        HStack {
-                            Text("Version")
-                            Spacer()
-                            Text(engineVersion)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } label: {
-                    Label("Engine", systemImage: "gearshape.2")
-                }
-                
-                GroupBox {
-                    if let onClearConversation {
-                        Button(role: .destructive, action: onClearConversation) {
-                            Label("Clear Conversation", systemImage: "trash")
-                        }
-                    }
-                    
-                    if let onResetSettings {
-                        Button(role: .destructive, action: onResetSettings) {
-                            Label("Reset Settings", systemImage: "arrow.counterclockwise")
-                        }
-                    }
-                } label: {
-                    Label("Actions", systemImage: "bolt")
-                }
+                .padding(.horizontal)
+                .padding(.vertical)
             }
-            .formStyle(.grouped)
-            .navigationTitle("Settings")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
+            .navigationDestination(for: TTSDestination.self) { _ in
+                TTSSettingsView()
             }
+            .task { await engineController.refreshDaemonModels() }
         }
+    }
+
+    // MARK: - Model Picker
+
+    @ViewBuilder
+    private var modelPickerSection: some View {
+        HStack {
+            Text("Model").foregroundColor(.secondary)
+            Spacer()
+            Picker("", selection: $activeModel) {
+                ForEach(models, id: \.self) { model in Text(model).tag(model) }
+            }
+            .labelsHidden().frame(width: 180)
+        }
+        .padding(.horizontal)
+.background(PrismTheme.prismGlass(cornerRadius: 12))
+.clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Download Progress
+
+    @ViewBuilder
+    private var downloadProgressSection: some View {
+        GroupBox(label: Text("Download").font(.caption)) {
+            VStack(spacing: 4) {
+                ProgressView(value: downloader.progress)
+                HStack {
+                    Text(downloader.status).font(.caption)
+                    Spacer()
+                    Text("\(Int(downloader.progress * 100))%").font(.caption.monospaced())
+                }
+            }
+            .padding(4)
+        }
+.background(PrismTheme.prismGlass(cornerRadius: 12))
+.clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    // MARK: - Download Button
+
+    @ViewBuilder
+    private var downloadButtonSection: some View {
+        HStack {
+            Button("Download 12B Weights") {
+                downloader.setToken(auth.hfToken)
+                let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                let destination = appSupport
+                    .appendingPathComponent("downloads/google--gemma-4-12b-unified/model.safetensors")
+                downloader.downloadModel(
+                    repo: "google/gemma-4-12b-unified",
+                    filename: "model.safetensors",
+                    to: destination
+                )
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!auth.isAuthenticated)
+        }
+        .padding(.horizontal)
+.background(PrismTheme.prismGlass(cornerRadius: 12))
+.clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Runtime Stats
+
+    @ViewBuilder
+    private var runtimeStatsSection: some View {
+        GroupBox(label: Text("Runtime").font(.caption)) {
+            VStack(spacing: 6) {
+                StatRow(label: "Status", value: status.statusText)
+                StatRow(label: "Tokens", value: "\(status.tokensProcessed)")
+                StatRow(label: "Agents", value: "\(status.activeAgents)/32")
+            }
+            .padding(4)
+        }
+.background(PrismTheme.prismGlass(cornerRadius: 12))
+.clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    // MARK: - Hardware Utilization
+
+    @ViewBuilder
+    private var hardwareUtilSection: some View {
+        GroupBox(label: Text("Hardware").font(.caption)) {
+            VStack(spacing: 6) {
+                UtilRow(label: "SLC Cache", value: hardware.slcUtilization)
+                UtilRow(label: "ANE", value: hardware.aneUtilization)
+                StatRow(label: "CPU", value: "\(Int(hardware.cpuUtilization))%")
+                StatRow(label: "Thermal", value: hardware.thermalState)
+            }
+            .padding(4)
+        }
+.background(PrismTheme.prismGlass(cornerRadius: 12))
+.clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    // MARK: - Feature Toggles
+
+    @ViewBuilder
+    private var settingsSection: some View {
+        GroupBox(label: Text("Settings").font(.caption)) {
+            VStack(spacing: 6) {
+                Toggle("HomeKit Automation", isOn: Binding(
+                    get: { homeKit.isReady },
+                    set: { _ in }
+                ))
+                .toggleStyle(.switch)
+                .font(.caption)
+.prismBorder(cornerRadius: 8)
+
+                Toggle("Screen Monitor", isOn: Binding(
+                    get: { screenSlayer.isCapturing },
+                    set: { enabled in
+                        Task {
+                            if enabled {
+                                try? await screenSlayer.startCapture()
+                            } else {
+                                await screenSlayer.stopCapture()
+                            }
+                        }
+                    }
+                ))
+                .toggleStyle(.switch)
+                .font(.caption)
+.prismBorder(cornerRadius: 8)
+
+                Toggle("Accessibility Scan", isOn: Binding(
+                    get: { accessibilityEngine.elements.count > 0 },
+                    set: { enabled in
+                        if enabled { accessibilityEngine.scanActiveApplication() }
+                    }
+                ))
+                .toggleStyle(.switch)
+                .font(.caption)
+.prismBorder(cornerRadius: 8)
+
+                Toggle("Spatial Audio", isOn: Binding(
+                    get: { audioMatrix.isActive },
+                    set: { enabled in
+                        if enabled {
+                            try? audioMatrix.start()
+                        } else {
+                            audioMatrix.stop()
+                        }
+                    }
+                ))
+                .toggleStyle(.switch)
+                .font(.caption)
+.prismBorder(cornerRadius: 8)
+            }
+            .padding(4)
+        }
+.background(PrismTheme.prismGlass(cornerRadius: 12))
+.clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    // MARK: - Voice
+
+    @ViewBuilder
+    private var voiceSection: some View {
+        GroupBox(label: Text("Voice").font(.caption)) {
+            VStack(spacing: 8) {
+                HStack {
+                    OrbView(state: orbState, size: 40)
+                    VStack(alignment: .leading) {
+                        Text("Voice Input")
+                            .font(.caption)
+                        Text(voiceStateLabel)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Toggle(isOn: Binding(
+                        get: { voice.isListening },
+                        set: { enabled in
+                            if enabled { voice.startListening() }
+                            else { voice.stopListening() }
+                        }
+                    )) { EmptyView() }
+                    .toggleStyle(.switch)
+                }
+
+                if voice.isListening || voice.state == .transcribing {
+                    VoiceWaveformView(waveform: voice.waveformBuffer)
+                        .frame(height: 32)
+                }
+
+                Divider()
+                NavigationLink(value: TTSDestination()) {
+                    HStack {
+                        Image(systemName: "speaker.wave.2")
+                        Text("Voice & Speech")
+                        Spacer()
+                    }
+                    .font(.caption)
+                }
+                .buttonStyle(.plain)
+.accessibilityHint("Opens voice settings")
+            }
+            .padding(4)
+        }
+.background(PrismTheme.prismGlass(cornerRadius: 12))
+.clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    private var voiceStateLabel: String {
+        switch voice.state {
+        case .idle: return "Tap mic to start"
+        case .listening: return "Listening..."
+        case .transcribing: return "Transcribing..."
+        case .responding: return "Speaking"
+        }
+    }
+
+    // MARK: - Progressive Model
+
+    @ViewBuilder
+    private var progressiveModelSection: some View {
+        GroupBox(label: Text("Progressive Model").font(.caption)) {
+            VStack(spacing: 8) {
+                NavigationLink(destination: ContributionSettingsView()) {
+                    HStack {
+                        Image(systemName: "sparkles.rectangle.stack")
+                        Text("Contribution Settings")
+                        Spacer()
+                    }
+                    .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens contribution settings")
+
+                Divider()
+
+                NavigationLink(destination: ContributionActivityView()) {
+                    HStack {
+                        Image(systemName: "chart.bar.fill")
+                        Text("Contribution Activity")
+                        Spacer()
+                    }
+                    .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens contribution activity")
+            }
+            .padding(4)
+        }
+.background(PrismTheme.prismGlass(cornerRadius: 12))
+.clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+    }
+
+    // MARK: - Action Buttons
+
+    @ViewBuilder
+    private var actionButtonsSection: some View {
+        HStack {
+            if auth.isAuthenticated {
+                Button("Compile") {
+                    Task { try? await engineController.compileDownloadedWeights() }
+                    status.statusText = "Compiling\u{2026}"
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(engineController.isCompiling)
+
+                Button("Boot") {
+                    do {
+                        try engineController.bootEngineRuntime()
+                        status.statusText = "Running"
+                    } catch {
+                        status.statusText = "Boot failed"
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(engineController.isRunning)
+
+                Button("Stop") {
+                    status.statusText = "Idle"
+                }
+                .buttonStyle(.bordered)
+            }
+            Spacer()
+            Button("Quit") { NSApp.terminate(nil) }
+                .foregroundColor(.red)
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
     }
 }
 
-#Preview {
-    ConversationSettingsSheet(
-        selectedModel: .constant("llama-3.2-3b"),
-        systemPrompt: .constant("You are a helpful assistant."),
-        temperature: .constant(0.7),
-        topP: .constant(0.9),
-        maxTokens: .constant(2048),
-        streamingEnabled: .constant(true),
-        conversationMemoryEnabled: .constant(true),
-        toolUseEnabled: .constant(true),
-        showAuth: .constant(false),
-        apiEndpoint: .constant("http://localhost:8080"),
-        apiKey: .constant(""),
-        modelOptions: ["llama-3.2-3b", "llama-3.1-8b", "mistral-7b"],
-        onDownloadModel: {},
-        onClearConversation: {},
-        onResetSettings: {},
-        memoryUsage: "2.4 GB / 8.0 GB",
-        inferenceSpeed: "24.5 tok/s",
-        deviceName: "Apple M1",
-        computeUnits: "8 GPU / 16 Neural",
-        engineVersion: "0.1.0",
-        modelLoaded: true
-    )
-}
+// MARK: - Navigation Destination
+
+struct TTSDestination: Hashable {}

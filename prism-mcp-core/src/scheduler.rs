@@ -7,6 +7,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::protocol::{
     DaemonState, McpHandler, RequestContext, RequestEnvelope, ResponseFrame, ToolRequest,
 };
+use crate::{
+    validate_typed_arguments, ActionContract, ProvenanceDomain, ProvenanceKind, ProvenanceNode,
+};
 
 /// Per-tool concurrency limit.
 #[derive(Debug, Clone, Copy)]
@@ -45,6 +48,12 @@ impl ToolConcurrencyPolicy {
         limits.insert("scan_directory", ToolLimit::new(1, 2, 120));
         limits.insert("register_kernel", ToolLimit::new(1, 4, 60));
         limits.insert("cargo_build", ToolLimit::new(1, 4, 300));
+        limits.insert("build_component", ToolLimit::new(1, 4, 600));
+        limits.insert("check_component", ToolLimit::new(1, 4, 600));
+        limits.insert("test_scope", ToolLimit::new(1, 4, 900));
+        limits.insert("swift_verify", ToolLimit::new(1, 4, 900));
+        limits.insert("prism_cli", ToolLimit::new(2, 8, 600));
+        limits.insert("run_job", ToolLimit::new(4, 32, 600));
         limits.insert("quant_sweep", ToolLimit::new(2, 4, 600));
         limits.insert("cimage_read", ToolLimit::new(8, 32, 10));
         Self {
@@ -204,6 +213,65 @@ impl Scheduler {
                 }
             };
 
+            // Semantic admission is the deterministic boundary between an
+            // agent proposal and a side-effecting tool. The handler remains
+            // responsible for domain execution; the scheduler prevents
+            // malformed or explicitly invalid actions from reaching it.
+            let annotations = handler.annotations();
+            let side_effects = !annotations
+                .get("readOnlyHint")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let action = ActionContract {
+                tool: tool_name.clone(),
+                arguments: args_value.clone(),
+                idempotency_key: args_value
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
+                expected_state: args_value
+                    .get("expected_state")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
+                side_effects,
+            };
+            let mut receipt = self.state.semantic_admission.validate(&action);
+            let typed_violations = validate_typed_arguments(&handler.input_schema(), &args_value);
+            if !typed_violations.is_empty() {
+                receipt.accepted = false;
+                receipt.side_effects_permitted = false;
+                receipt.violations.extend(typed_violations);
+            }
+            let receipt_json = serde_json::to_value(&receipt)
+                .unwrap_or_else(|_| serde_json::json!({"accepted":false}));
+            let _ = self.state.provenance_store.upsert_node(&ProvenanceNode {
+                id: format!("semantic:action:{}", receipt.action_id),
+                domain: ProvenanceDomain::Evidence,
+                kind: if receipt.accepted {
+                    ProvenanceKind::Authoritative
+                } else {
+                    ProvenanceKind::Ambiguous
+                },
+                namespace: "prism.semantic".into(),
+                external_id: receipt.action_id.clone(),
+                label: Some(format!("semantic admission: {}", receipt.tool)),
+                attributes: receipt_json.clone(),
+            });
+            if !receipt.accepted {
+                self.send(
+                    response_tx,
+                    envelope.connection_id,
+                    crate::McpResponse::tool_error_structured(
+                        id,
+                        "SEMANTIC_VALIDATION_FAILED",
+                        "tool action rejected by semantic admission",
+                        receipt.violations.iter().any(|v| v.retryable),
+                        receipt_json,
+                    ),
+                );
+                continue;
+            }
+
             let limit = self.policy.get(&tool_name);
             {
                 let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
@@ -253,7 +321,7 @@ impl Scheduler {
                     }
                 });
                 let resp = match result_rx.recv_timeout(limit.timeout) {
-                    Ok(Ok(crate::ToolResult::Text(t))) => crate::McpResponse::success(id, &t),
+                    Ok(Ok(tool_result)) => crate::McpResponse::success(id, &tool_result),
                     Ok(Err(e)) => {
                         crate::McpResponse::tool_error(id, "TOOL_FAILED", &format!("{e:#}"), false)
                     }

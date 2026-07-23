@@ -8,6 +8,12 @@ pub struct ConnectionId(u64);
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
 
+impl Default for ConnectionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConnectionId {
     pub fn new() -> Self {
         Self(NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed))
@@ -60,14 +66,20 @@ pub struct McpResponse {
 }
 
 impl McpResponse {
-    pub fn success(id: serde_json::Value, text: &str) -> Self {
-        let structured = serde_json::from_str::<serde_json::Value>(text).ok();
-        let mut result = serde_json::json!({
+    pub fn success(id: serde_json::Value, output: &ToolResult) -> Self {
+        let (text, structured) = match output {
+            ToolResult::Json(v) => (serde_json::to_string(v).unwrap_or_default(), v.clone()),
+            ToolResult::Text(t) => {
+                let parsed = serde_json::from_str::<serde_json::Value>(t).ok();
+                let structured = parsed.unwrap_or_else(|| serde_json::json!({"ok":true,"text":t}));
+                (t.clone(), structured)
+            }
+        };
+        let result = serde_json::json!({
             "content": [{"type": "text", "text": text}],
+            "structuredContent": structured,
             "isError": false,
         });
-        result["structuredContent"] =
-            structured.unwrap_or_else(|| serde_json::json!({"ok":true,"text":text}));
         Self {
             jsonrpc: "2.0".into(),
             id,
@@ -77,12 +89,31 @@ impl McpResponse {
     }
 
     pub fn tool_error(id: serde_json::Value, code: &str, message: &str, retryable: bool) -> Self {
+        Self::tool_error_structured(id, code, message, retryable, serde_json::Value::Null)
+    }
+
+    pub fn tool_error_structured(
+        id: serde_json::Value,
+        code: &str,
+        message: &str,
+        retryable: bool,
+        data: serde_json::Value,
+    ) -> Self {
+        let err = serde_json::json!({
+            "code": code,
+            "message": message,
+            "retryable": retryable,
+        });
+        let mut structured = serde_json::json!({"ok":false,"error": err});
+        if !data.is_null() {
+            structured["data"] = data;
+        }
         Self {
             jsonrpc: "2.0".into(),
             id,
             result: Some(serde_json::json!({
                 "content": [{"type":"text","text":message}],
-                "structuredContent": {"ok":false,"error":{"code":code,"message":message,"retryable":retryable}},
+                "structuredContent": structured,
                 "isError": true
             })),
             error: None,
@@ -141,7 +172,19 @@ pub struct ToolRequest<'a> {
 
 /// Structured result from a tool handler.
 pub enum ToolResult {
+    /// Raw text response (will be wrapped in content[0].text).
     Text(String),
+    /// Structured JSON response (used as-is for structuredContent).
+    Json(serde_json::Value),
+}
+
+impl ToolResult {
+    pub fn text(s: impl Into<String>) -> Self {
+        Self::Text(s.into())
+    }
+    pub fn json(v: serde_json::Value) -> Self {
+        Self::Json(v)
+    }
 }
 
 /// Output contracts advertised to agents.  These are centralized because the
@@ -234,16 +277,11 @@ pub fn output_schema_for_tool(name: &str) -> serde_json::Value {
         "register_kernel" => object(
             serde_json::json!({"name":{"type":"string"},"backend":{"type":"string"},"registered":{"type":"boolean"},"artifact_hash":{"type":"string"},"persistent":{"type":"boolean"}}),
         ),
-        _ => object(serde_json::json!({"ok":{"type":"boolean"},"text":{"type":"string"}})),
+        _ => object(
+            serde_json::json!({"ok":{"type":"boolean"},"text":{"type":"string"},"data":{"type":"object"}}),
+        ),
     }
 }
-
-impl ToolResult {
-    pub fn text(s: impl Into<String>) -> Self {
-        Self::Text(s.into())
-    }
-}
-
 /// Context for a single tool invocation.
 pub struct RequestContext {
     pub connection_id: ConnectionId,
@@ -259,18 +297,20 @@ use crate::coordination::CoordinationStore;
 use crate::file_lock::FileLock;
 use crate::scheduler::SchedulerHandle;
 use crate::storage::{
-    ArtifactRepository, BenchmarkStore, EvidenceStore, ExperimentStore, JobStore, KnowledgeStore,
-    LeaseStore, ProjectionStore,
+    ArtifactRepository, BenchmarkStore, ConversationStore, EvidenceStore, ExperimentStore,
+    JobStore, KnowledgeStore, LeaseStore, ProjectionStore,
 };
 use crate::subprocess::ProcessCache;
 use crate::work_journal::WorkJournal;
 
 /// Shared state accessible to every tool handler.
 pub struct DaemonState {
+    pub semantic_admission: Arc<crate::SemanticAdmission>,
     pub coordination_store: Option<Arc<dyn CoordinationStore>>,
     pub tools: Arc<HashMap<&'static str, Arc<dyn McpHandler + Sync + Send>>>,
     pub artifact_store: Arc<dyn ArtifactRepository>,
     pub evidence_ledger: Arc<dyn EvidenceStore>,
+    pub conversation_store: Arc<dyn ConversationStore>,
     pub file_lock: FileLock,
     pub work_journal: WorkJournal,
     pub process_cache: ProcessCache,
@@ -278,6 +318,7 @@ pub struct DaemonState {
     pub job_manager: Arc<dyn JobStore>,
     pub resource_leases: Arc<dyn LeaseStore>,
     pub projection_store: Arc<dyn ProjectionStore>,
+    pub provenance_store: Arc<dyn crate::ProvenanceGraphStore>,
     pub experiment_store: Arc<dyn ExperimentStore>,
     pub benchmark_store: Arc<dyn BenchmarkStore>,
     pub knowledge_store: Arc<dyn KnowledgeStore>,
