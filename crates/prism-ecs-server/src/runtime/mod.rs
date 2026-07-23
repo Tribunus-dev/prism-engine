@@ -56,8 +56,9 @@ pub use lanes::LaneRouter;
 pub use memory::MemoryPressureMonitor;
 pub use modality::{ModalityCapabilities, ModalityProvider};
 pub use mori::{
-    MoriCapabilityKey, MoriEcs, MoriResidency, MoriResidencyStage, MoriRouteDescriptor,
-    MoriRouteStage,
+    MoriCapabilityKey, MoriCopyPin, MoriEcs, MoriRecoveryMetadata, MoriResidency,
+    MoriResidencyStage, MoriRouteDescriptor, MoriRouteStage, MoriTransferId, MoriTransferReceipt,
+    MoriTransferSession, MoriTransferState,
 };
 pub use receipt::ReceiptStore;
 pub use residency::WeightResidencyManager;
