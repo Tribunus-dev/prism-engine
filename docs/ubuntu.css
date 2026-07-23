@@ -26,6 +26,30 @@ body { font-family: var(--sans); }
 .annotation-body { fill: #c7d7cd; }
 
 @media (prefers-color-scheme: dark) {
+  :root {
+    --trib-green: #83c29a;
+    --trib-green-soft: #b8d9b7;
+    --green: #83c29a;
+    --lime: #b8d9b7;
+    --blue: #9bc7ca;
+    --line: #3a5047;
+    --muted: #b4c4bc;
+    --dim: #91a99d;
+  }
+  .button.primary { background: #b8d9b7; color: #102017; }
+  .hero h1 span, h2 span { color: #b8d9b7; }
+  .pulse, .window-live i { background: #83c29a; box-shadow: 0 0 0 4px #83c29a2e; }
+  .hero-visual { background: #17231d; border-color: #3a5047; }
+  .visual-grid { background-image: linear-gradient(#3a5047 1px, transparent 1px), linear-gradient(90deg, #3a5047 1px, transparent 1px); }
+  .visual-card, .hero-route, .hero-proof { background: #17231df2; border-color: #597363; color: #eef7f0; }
+  .hero-proof span { color: #b4c4bc; }
+  .hero-proof b, .hero-route strong, .hero-route b { color: #b8d9b7; }
+  .journey-guide-card-primary { background: #b8d9b7; border-color: #b8d9b7; }
+  .journey-guide-card-primary p, .journey-guide-card-primary .tiny-label { color: #244332; }
+  .reality-bands article:nth-child(2), .reality-bands article:nth-child(3) { background: #17231d; }
+  .path-stage-proof, .signature-track .signature-final { background: #293d31; border-color: #83c29a; color: #eef7f0; }
+  .signature-final span, .signature-final small, .signature-final b { color: #b8d9b7; }
+  .closing { background: #1b3527; color: #eef7f0; }
   .hero-lede, .section-heading > p, .working-path-note p, .reality-bands p,
   .journey-guide-card p, .figure-link, .caption-row, .hero-qualifier { color: #c7d7cd; }
   .eyebrow, .tiny-label { color: #a9c4b4; }
